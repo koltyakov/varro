@@ -17,7 +17,6 @@ for (const history of [false, true]) {
         'Continued after subagent task',
         'Started approved plan',
         'Resumed after interruption',
-        'Loaded agent instructions',
         'Background command finished',
         'Added automatic context',
       ]);
@@ -54,6 +53,21 @@ for (const history of [false, true]) {
       expect(geometry.border).toBe('0px');
       await actions.nth(2).click();
       await expect(page.locator('.inline-edit-composer-slot')).toHaveCount(0);
+      const instructions = page.locator('[data-msg-id="automatic-4"]');
+      const explored = page.locator('.assistant-activity-summary');
+      await expect(explored).toHaveCount(1);
+      await expect(explored).toContainText('Explored: 1 file, 1 tool call');
+      await expect(instructions).toHaveClass(/interactive-item-render-empty/);
+      await expect(instructions).not.toContainText('Loaded agent instructions');
+      await explored.click();
+      await expect(instructions).not.toHaveClass(/interactive-item-render-empty/);
+      const instructionTool = instructions.locator('.assistant-activity-detail');
+      await expect(instructionTool).toContainText('Loaded agent instructions: /repo/AGENTS.md');
+      await instructionTool.locator('.tool-invocation-header').click();
+      await expect(instructionTool).toContainText('Long project instructions');
+      await explored.click();
+      await expect(instructions).toHaveClass(/interactive-item-render-empty/);
+      await expect(instructions).not.toContainText('Loaded agent instructions');
       if (history) {
         const list = page.locator('.interactive-list');
         await list.evaluate((element) => {
@@ -72,6 +86,11 @@ for (const history of [false, true]) {
         await expect(page.locator('[data-msg-id="automatic-0"]')).not.toHaveClass(
           /interactive-item-render-empty/
         );
+        await expect(explored).toContainText('Explored: 1 file, 1 tool call');
+        await explored.click();
+        await expect(instructionTool).toContainText('Loaded agent instructions: /repo/AGENTS.md');
+        await expect(instructions).not.toHaveClass(/interactive-item-render-empty/);
+        await explored.click();
       }
       await page.screenshot({ path: testInfo.outputPath('automatic-action-notices.png') });
     });

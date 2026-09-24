@@ -1348,6 +1348,35 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'Unknown internal instructions that must not be rendered as a user prompt.',
     ];
     for (const [index, text] of automaticTexts.entries()) {
+      if (index === 4) {
+        const read = makeAssistantMessage(
+          session.id,
+          'before-instructions',
+          mixed.info.id,
+          '',
+          BASE_TIME - 9_000 + index
+        );
+        read.info.finish = 'tool-calls';
+        read.parts = [
+          {
+            id: 'before-instructions-read',
+            sessionID: session.id,
+            messageID: read.info.id,
+            type: 'tool',
+            callID: 'before-instructions-call',
+            tool: 'read',
+            state: {
+              status: 'completed',
+              input: { filePath: '/repo/README.md' },
+              title: 'Read README.md',
+              output: 'Project overview',
+              metadata: {},
+              time: { start: 1, end: 2 },
+            },
+          },
+        ];
+        messages.push(read);
+      }
       const entry = makeUserMessage(
         session.id,
         `automatic-${index}`,

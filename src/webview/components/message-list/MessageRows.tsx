@@ -9,6 +9,7 @@ import {
 import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import type { AssistantActivityGroupInfo } from '../../lib/assistant-activity';
+import { isAgentInstructionMessage } from '../../lib/agent-instructions';
 import { formatNumber, formatTurnDuration, isAssistantMessage } from '../../lib/message-metrics';
 import { formatMessageSentTime } from '../../lib/message-time';
 import { checkIcon, copyIcon } from '../../lib/ui-icons';
@@ -215,7 +216,9 @@ export function MessageRow(
       data-msg-id={props.msg.info.id}
       style={{ height: isVirtualPlaceholder() ? `${props.virtualHeight ?? 0}px` : undefined }}
       class={`interactive-item-container ${
-        props.msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
+        props.msg.info.role === 'user' && !isAgentInstructionMessage(props.msg)
+          ? 'interactive-request'
+          : 'interactive-response'
       } ${entrancePending() ? 'interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
       }${props.followsVisibleUserRequest ? ' interactive-response-follows-request' : ''}${props.followsVisibleAssistantResponse ? ' interactive-response-follows-response' : ''}${props.followsBorderedBlock ? ' interactive-item-follows-bordered-block' : ''}${props.continuesVisibleActivityGroup ? ' interactive-response-continues-activity-group' : ''}${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}

@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import type { MessageEntry } from '../../types';
+import { isAgentInstructionMessage } from '../../lib/agent-instructions';
 import type { VirtualMetrics, VisibleRange } from './virtualization';
 import type { MessageBlockBoundary } from './row-layout';
 import { MessageRow, getUserMessageSeriesEndId, type MessageRowSharedProps } from './MessageRows';
@@ -207,17 +208,19 @@ export function VirtualizedContent(
     const followsVisibleAssistantResponse = createMemo(() => {
       const previousIndex = previousVisibleIndex();
       return (
-        message().info.role === 'assistant' &&
+        (message().info.role === 'assistant' || isAgentInstructionMessage(message())) &&
         previousIndex >= 0 &&
-        props.messages[previousIndex]!.info.role === 'assistant'
+        (props.messages[previousIndex]!.info.role === 'assistant' ||
+          isAgentInstructionMessage(props.messages[previousIndex]!))
       );
     });
     const followsVisibleUserRequest = createMemo(() => {
       const previousIndex = previousVisibleIndex();
       return (
-        message().info.role === 'assistant' &&
+        (message().info.role === 'assistant' || isAgentInstructionMessage(message())) &&
         previousIndex >= 0 &&
-        props.messages[previousIndex]!.info.role === 'user'
+        props.messages[previousIndex]!.info.role === 'user' &&
+        !isAgentInstructionMessage(props.messages[previousIndex]!)
       );
     });
     const followsBorderedBlock = createMemo(() => {
@@ -231,9 +234,8 @@ export function VirtualizedContent(
     });
     const continuesVisibleActivityGroup = createMemo(() => {
       const previousIndex = previousVisibleIndex();
-      if (message().info.role !== 'assistant' || previousIndex < 0) return false;
+      if (previousIndex < 0) return false;
       const previousMessage = props.messages[previousIndex]!;
-      if (previousMessage.info.role !== 'assistant') return false;
       const currentGroups = props.assistantActivityGroupMap?.get(messageId);
       const previousGroups = props.assistantActivityGroupMap?.get(previousMessage.info.id);
       if (!currentGroups || !previousGroups) return false;

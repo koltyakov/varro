@@ -2,7 +2,8 @@ import {
   isAbortedToolError,
   isPermissionRejectedToolError,
 } from '../../shared/error-classification';
-import type { AssistantMessage, MessageEntry, Part } from '../types';
+import type { MessageEntry, Part } from '../types';
+import { getAgentInstructionTool, isAgentInstructionMessage } from './agent-instructions';
 import { hasExpandableReasoningContent, isFileEditPart, isFileReadPart } from './part-utils';
 import { getToolFileChanges } from './tool-file-change';
 import { getToolKind, isApplyPatchTool } from './tool-normalization';
@@ -180,26 +181,31 @@ export function getAssistantActivityGroupMap(
   };
 
   for (const entry of messages) {
+    let parts = entry.parts;
     if (entry.info.role === 'user') {
-      flush();
-      turnUserMessageId = entry.info.id;
-      continue;
+      if (!isAgentInstructionMessage(entry)) {
+        flush();
+        turnUserMessageId = entry.info.id;
+      }
+      parts = entry.parts.flatMap((part) => {
+        const instruction = getAgentInstructionTool(part);
+        return instruction ? [instruction] : [];
+      });
     }
 
-    // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
-    if ((entry.info as AssistantMessage).mode === 'subagent') {
+    if (entry.info.role === 'assistant' && entry.info.mode === 'subagent') {
       flush();
       continue;
     }
-    for (const part of entry.parts) {
+    for (const part of parts) {
       if (isAssistantActivityPart(part) && includePart(part)) {
         const previous = groupEntries.at(-1);
         if (previous?.messageId === entry.info.id) previous.parts.push(part);
         else {
           groupEntries.push({
             messageId: entry.info.id,
-            // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
-            parentId: (entry.info as AssistantMessage).parentID,
+            parentId:
+              entry.info.role === 'assistant' ? entry.info.parentID : (turnUserMessageId ?? ''),
             parts: [part],
           });
         }

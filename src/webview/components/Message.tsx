@@ -463,7 +463,13 @@ export function Message(props: {
   });
   const shouldRender = () => {
     if (compactionDivider()) return true;
-    if (isUser()) return hasUserContent() || automaticActions().length > 0 || hasOmittedDiffs();
+    if (isUser())
+      return (
+        hasUserContent() ||
+        automaticActions().length > 0 ||
+        hasVisibleInstructions() ||
+        hasOmittedDiffs()
+      );
     return !!assistantErrorMessage() || hasVisibleAssistantOutput() || visibleDiffs().length > 0;
   };
   createEffect(() => {
@@ -520,6 +526,12 @@ export function Message(props: {
     isUser() ? parseUserMessageContent(normalizedParts()) : null
   );
   const automaticActions = () => parsedUserContent()?.automaticActions ?? [];
+  const instructionParts = () => parsedUserContent()?.instructionParts ?? [];
+  const hasVisibleInstructions = () =>
+    instructionParts().some((part) => {
+      const group = compactActivityPartKeys().get(getAssistantActivityPartKey(part));
+      return !group || group.ownerMessageId === props.info.id || isCompactActivityExpanded(group);
+    });
   const hasImageTextBubble = createMemo(() => {
     const parsed = parsedUserContent();
     return (
@@ -671,6 +683,18 @@ export function Message(props: {
               </div>
             )}
           </For>
+          <Show when={hasVisibleInstructions()}>
+            <div class="assistant-turn-content assistant-turn-content-plain">
+              <AssistantMessageContent
+                info={props.info}
+                parts={instructionParts()}
+                textForPart={() => null}
+                nearViewport={props.nearViewport}
+                outerListVirtualized={props.outerListVirtualized}
+                compactActivityGroups={props.compactActivityGroups}
+              />
+            </div>
+          </Show>
           <Show when={isUser() && hasUserContent()}>
             <time
               class={`message-sent-time${timestampVisible() ? ' is-visible' : ''}${timestampTransitionActive() ? ' is-transition-active' : ''}${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}

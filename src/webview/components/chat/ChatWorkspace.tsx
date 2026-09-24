@@ -239,7 +239,9 @@ export function ChatWorkspace(props: {
     >
       <Show when={props.showSessionHeader}>
         <div class="chat-header chat-header-chat-desktop">
-          <div class="chat-header-inner">{activeChatHeader(props.showDesktopBackButton)}</div>
+          <div class="chat-header-inner">
+            {activeChatHeader(props.showDesktopBackButton, !props.showDesktopSessionPane)}
+          </div>
         </div>
       </Show>
       <div class="chat-main-column-shell">
