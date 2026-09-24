@@ -73,7 +73,11 @@ import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import { getSessionPauseMap } from '../lib/session-pauses';
 import { isSessionResumeMessage, readSessionPauses } from '../../shared/session-pauses';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
-import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
+import {
+  hasUserMessageContent,
+  parseUserMessageContent,
+  projectAutomaticActionMessage,
+} from './message/UserMessageContent';
 import { editingMessage } from '../lib/message-edit-state';
 import { hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import {
@@ -7201,7 +7205,7 @@ export function MessageList() {
               )
             ),
           }
-        : message
+        : projectAutomaticActionMessage(message)
     );
   });
   const trailingActivityTurnState = createMemo<{

@@ -28,7 +28,15 @@ import { rememberDirectSessionReturn } from '../../lib/session-navigation';
 import { state } from '../../lib/state';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { selectSession } from '../../hooks/useOpenCode';
-import type { AgentPart, FilePart, Part, TextPart } from '../../types';
+import type {
+  AgentPart,
+  AssistantMessage,
+  FilePart,
+  MessageEntry,
+  Part,
+  TextPart,
+  ToolPart,
+} from '../../types';
 import {
   formatContextLineRanges,
   formatSelectionReference,
@@ -115,6 +123,7 @@ export type UserMessageMarkupSuffix = {
 export type ParsedUserMessageContent = {
   messageTexts: string[];
   automaticActions: string[];
+  automaticParts: ToolPart[];
   attachments: MessageAttachment[];
   fileParts: FilePart[];
   agentParts: AgentPart[];
@@ -269,6 +278,7 @@ export function getUserMessageMarkupSuffix(text: string): UserMessageMarkupSuffi
 export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent {
   const messageTexts: string[] = [];
   const automaticActions = new Set<string>();
+  const automaticParts: ToolPart[] = [];
   const attachments: MessageAttachment[] = [];
   const fileParts: FilePart[] = [];
   const agentParts: AgentPart[] = [];
@@ -310,6 +320,7 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
     if (part.synthetic) {
       if (parsedText.messageTexts.some((value) => value.trim())) {
         automaticActions.add(getAutomaticAction(part));
+        automaticParts.push(automaticActionPart(part));
       }
       continue;
     }
@@ -326,6 +337,7 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
   return {
     messageTexts,
     automaticActions: [...automaticActions],
+    automaticParts,
     attachments: attachments.filter(
       (attachment, index) =>
         attachments.findIndex(
@@ -341,6 +353,75 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
     fileParts,
     agentParts,
   };
+}
+
+const SHELL_HEADER_RE = /^<shell\s+((?:"[^"]*"|'[^']*'|[^'">])*)>/;
+
+function automaticActionPart(part: TextPart): ToolPart {
+  const title = getAutomaticAction(part);
+  const text = part.text.trim();
+  const shell = text.startsWith('<shell ') ? SHELL_HEADER_RE.exec(text) : null;
+  const input: Record<string, string> = {};
+  if (shell) {
+    for (const match of shell[1]!.matchAll(/([\w-]+)=(?:"([^"]*)"|'([^']*)')/g)) {
+      input[match[1]!] = match[2] ?? match[3]!;
+    }
+  }
+  const output = shell
+    ? text
+        .slice(shell[0].length)
+        .replace(/<\/shell>\s*$/, '')
+        .trim()
+    : part.text;
+  const time = { start: part.time?.start ?? 0, end: part.time?.end ?? part.time?.start ?? 0 };
+  return {
+    id: part.id,
+    messageID: part.messageID,
+    sessionID: part.sessionID,
+    type: 'tool',
+    tool: 'automatic_action',
+    callID: `automatic:${part.id}`,
+    state:
+      input.state === 'failed'
+        ? {
+            status: 'error',
+            input: { ...input, description: title },
+            error: output || title,
+            metadata: {},
+            time,
+          }
+        : { status: 'completed', input, output, title, metadata: {}, time },
+  };
+}
+
+// Presentation only: retain server message/part identities without changing canonical history.
+export function getAutomaticActionInfo(info: MessageEntry['info']): AssistantMessage {
+  return {
+    id: info.id,
+    sessionID: info.sessionID,
+    role: 'assistant',
+    time: { created: info.time.created, completed: info.time.created },
+    parentID: '',
+    modelID: '',
+    providerID: '',
+    mode: 'automatic',
+    path: { cwd: '', root: '' },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  };
+}
+
+export function projectAutomaticActionMessage(message: MessageEntry): MessageEntry {
+  if (message.info.role !== 'user') return message;
+  const parsed = parseUserMessageContent(message.parts);
+  if (
+    !parsed.automaticParts.length ||
+    hasUserMessageContent(parsed) ||
+    message.info.summary?.diffsOmitted ||
+    message.parts.some((part) => part.type === 'compaction')
+  )
+    return message;
+  return { info: getAutomaticActionInfo(message.info), parts: parsed.automaticParts };
 }
 
 function getAutomaticAction(part: TextPart): string {
@@ -367,8 +448,8 @@ function getAutomaticAction(part: TextPart): string {
   }
   if (text.startsWith('Instructions from:')) return 'Loaded agent instructions';
   if (text.startsWith('<shell ')) {
-    const header = text.slice(0, text.indexOf('>'));
-    if (header.includes('state="failed"')) return 'Background command failed';
+    const header = SHELL_HEADER_RE.exec(text)?.[1] ?? '';
+    if (/\bstate=(?:"failed"|'failed')/.test(header)) return 'Background command failed';
     return 'Background command finished';
   }
   if (/^The plan at .+ has been approved, you can now edit files\. Execute the plan$/s.test(text)) {

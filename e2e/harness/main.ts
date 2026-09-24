@@ -1364,6 +1364,35 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           : part
       );
       messages.push(entry);
+      if (index === 1 || index === 5) {
+        const activity = makeAssistantMessage(
+          session.id,
+          `automatic-tool-${index}`,
+          mixed.info.id,
+          '',
+          BASE_TIME - 8_990 + index
+        );
+        if (activity.info.role === 'assistant') activity.info.finish = 'tool-calls';
+        activity.parts = [
+          {
+            id: `automatic-tool-part-${index}`,
+            sessionID: session.id,
+            messageID: activity.info.id,
+            type: 'tool',
+            callID: `automatic-call-${index}`,
+            tool: 'bash',
+            state: {
+              status: 'completed',
+              input: { command: 'npm test' },
+              output: 'Tests passed',
+              title: 'npm test',
+              metadata: {},
+              time: { start: BASE_TIME - 8_990, end: BASE_TIME - 8_989 },
+            },
+          },
+        ];
+        messages.push(activity);
+      }
     }
     messages.push(
       makeAssistantMessage(

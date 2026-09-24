@@ -1594,6 +1594,7 @@ function AssistantActivityKindIcon(props: { kind: AssistantActivityKind; measure
         return helpCircleIcon;
       case 'skills':
         return sparksIcon;
+      case 'actions':
       case 'tools':
         return wrenchIcon;
     }

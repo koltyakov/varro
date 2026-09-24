@@ -883,15 +883,6 @@ input:focus-visible {
   border-color: color-mix(in srgb, var(--color-vscode-accent) 50%, transparent);
 }
 
-.automated-message {
-  align-self: flex-start;
-  max-width: 100%;
-  padding: 4px 0;
-  color: var(--color-vscode-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
 .composer-edit-banner {
   display: flex;
   align-items: center;

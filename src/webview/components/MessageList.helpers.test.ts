@@ -55,6 +55,49 @@ installMessageListTestEnvironment({
 });
 
 describe('MessageList prompt numbers', () => {
+  it('groups automatic completions with tools and restores their details on expansion', async () => {
+    setState('activeSessionId', 'session-1');
+    const command = toolPart('command', 'assistant-1');
+    command.state = {
+      status: 'completed',
+      input: { command: 'npm test' },
+      output: 'Started in background',
+      title: 'npm test',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    const completion = {
+      ...textPart(
+        'completion',
+        '<shell id="sh_1" state="failed" command="npm test">Test failure details</shell>',
+        { synthetic: true }
+      ),
+      messageID: 'automatic',
+    };
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt', 'Run tests')] },
+      { info: assistantMessage('assistant-1'), parts: [command] },
+      { info: userMessage('automatic'), parts: [completion] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    const summary = container!.querySelector<HTMLButtonElement>('.assistant-activity-summary')!;
+    expect(container!.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
+    expect(summary.textContent).toContain('1 command');
+    expect(summary.textContent).toContain('1 automatic action');
+    const automatic = () => container!.querySelector('[data-msg-id="automatic"]')!;
+    expect(automatic().classList.contains('interactive-item-render-empty')).toBe(true);
+    summary.click();
+    expect(automatic().classList.contains('interactive-item-render-empty')).toBe(false);
+    const header = automatic().querySelector<HTMLButtonElement>('.tool-invocation-header')!;
+    expect(header.textContent).toContain('Background command failed: npm test');
+    header.click();
+    expect(automatic().textContent).toContain('Test failure details');
+    summary.click();
+    expect(automatic().classList.contains('interactive-item-render-empty')).toBe(true);
+    expect(completion.type).toBe('text');
+  });
+
   it('excludes automatic actions from prompt numbers and navigation', () => {
     const messages = [
       { info: userMessage('user-1'), parts: [textPart('first', 'First prompt')] },

@@ -1728,12 +1728,15 @@ describe('Message user editing', () => {
     const parts: Part[] = [{ ...textPart('continuation', text), synthetic: true }];
     cleanup = render(() => Message({ info: userMessage('continuation'), parts }), container!);
 
-    const notice = container?.querySelector<HTMLElement>('.automated-message');
-    expect(notice?.textContent).toBe('Continued after context compaction');
+    const notice = container?.querySelector<HTMLElement>('.assistant-activity-summary');
+    expect(notice?.textContent).toContain('1 automatic action');
     expect(container?.textContent).not.toContain(text);
     expect(container?.querySelector('.user-message-card')).toBeNull();
     expect(container?.querySelector('.user-message-card-editable')).toBeNull();
     notice?.click();
+    expect(container?.textContent).toContain('Continued after context compaction');
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    expect(container?.textContent).toContain(text);
     expect(editingMessage()).toBeNull();
     expect(getUserMessagePreviewText(parts)).toBe('(no content)');
   });
@@ -1766,7 +1769,10 @@ describe('Message user editing', () => {
     ];
     cleanup = render(() => Message({ info: userMessage('mixed'), parts }), container!);
     expect(container?.querySelector('.user-message-card')?.textContent).toBe('Test message');
-    expect(container?.querySelectorAll('.automated-message')).toHaveLength(2);
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      '3 automatic actions'
+    );
+    container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
     expect(container?.textContent).toContain('Added file context');
     expect(container?.textContent).toContain('Added skill instructions');
     expect(container?.textContent).not.toContain('private file contents');
@@ -1790,6 +1796,10 @@ describe('Message user editing', () => {
     [
       '<shell id="sh_1" state="completed" command="npm test">\nLong test output\n</shell>',
       'Background command finished',
+    ],
+    [
+      '<shell command="npm test > results.txt" state="failed">Long test output</shell>',
+      'Background command failed: npm test > results.txt',
     ],
     ['The following tool was executed by the user', 'Ran a shell command'],
     [
@@ -1815,9 +1825,17 @@ describe('Message user editing', () => {
         }),
       container!
     );
-    expect(container?.querySelector('.automated-message')?.textContent).toBe(label);
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      '1 automatic action'
+    );
     expect(container?.querySelector('.user-message-card')).toBeNull();
     expect(container?.textContent).not.toContain(text);
+    container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
+    expect(container?.querySelector('.tool-invocation-header')?.textContent).toContain(label);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    expect(container?.querySelector('.tool-invocation-detail')?.textContent).toContain(
+      text.startsWith('<shell ') ? 'Long test output' : text
+    );
   });
 
   it('keeps a user-authored continuation prompt editable even with synthetic context', () => {
@@ -1843,7 +1861,7 @@ describe('Message user editing', () => {
       container!
     );
 
-    expect(container?.querySelector('.automated-message')).toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.user-message-card-editable')).not.toBeNull();
   });
 
