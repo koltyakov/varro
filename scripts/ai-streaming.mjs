@@ -45,6 +45,7 @@ const schemas = {
     'start-timeout-ms',
     'replay-timeout-ms',
     'checkpoints',
+    'observer',
   ],
   inspect: ['capture', 'short-gap-ms', 'max-gap-ms'],
   start: ['control'],
@@ -112,6 +113,8 @@ export function parseArgs(args) {
       throw new Error('--checkpoints must be increasing event counts');
     }
   }
+  if (options.observer !== undefined && !['on', 'off'].includes(options.observer))
+    throw new Error('--observer must be on or off');
   return { command, options };
 }
 
@@ -530,6 +533,7 @@ export async function connectFrameTarget(target, signal) {
     signal.throwIfAborted();
     return {
       evaluate,
+      call: requests.call,
       close,
       url: () => target.url,
       targetID: target.id,
@@ -986,12 +990,10 @@ export async function runCapture(options) {
       'Selected session route',
       setupSignal
     );
-    metadata.observer = await bounded(
-      frame.evaluate(installObserver),
-      5_000,
-      'Install observer',
-      setupSignal
-    );
+    metadata.observer =
+      options.observer === 'off'
+        ? { installed: false }
+        : await bounded(frame.evaluate(installObserver), 5_000, 'Install observer', setupSignal);
     metadata.frame = {
       url: frame.url(),
       targetID: frame.targetID,
@@ -1010,12 +1012,13 @@ export async function runCapture(options) {
     const routeSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)]);
     routeSearch = waitForSessionRoute(frame, metadata.sessionID, routeSignal);
     metadata.routeAtStart = await bounded(routeSearch, 5_000, 'Replay route at start', routeSignal);
-    await bounded(
-      frame.evaluate(() => globalThis.varroAiStreamingObserver.start()),
-      5_000,
-      'Start observer',
-      controller.signal
-    );
+    if (metadata.observer.installed)
+      await bounded(
+        frame.evaluate(() => globalThis.varroAiStreamingObserver.start()),
+        5_000,
+        'Start observer',
+        controller.signal
+      );
     metadata.phase = 'running';
     const result = await bounded(replay.start(), replayTimeout, 'Replay', controller.signal);
     await sleep(1_000, undefined, { signal: controller.signal });

@@ -15,6 +15,28 @@ delivery and canonical transcript comparison. Missing editor access or incomplet
 makes the overall result `FAIL`, with affected scenarios recorded as `BLOCKED`. Browser-harness tests,
 host startup assertions, or a final screenshot cannot substitute for watching the stream.
 
+## Performance captures
+
+For an uninstrumented process-CPU baseline, launch `run` with `--observer off`.
+While that isolated host is armed or running, use:
+
+```sh
+node scripts/ai-performance.mjs --control <run>/control.json --output <run>/idle.json --duration 10000 --scenario visible-idle
+```
+
+The report contains target-scoped main-thread counters, heap slope, DOM/listener
+growth, and browser process CPU when Electron exposes it. Missing metrics remain
+unavailable. Extension-host and OpenCode attribution is not inferred from process
+names. Scenario labels describe controller actions, not automated navigation.
+Use settled history for idle measurements; an unfinished assistant still renders
+working animations even when no events arrive.
+
+Add `--diagnostic true` for bounded attribution of callbacks scheduled after probe
+installation and long-task collection. Existing timers are outside its coverage.
+The probe restores scheduling functions when it stops. Compare repeated ordinary
+runs of the same build/capture to calibrate variance before assigning budgets;
+diagnostic timings include instrumentation overhead.
+
 ## Default scope
 
 1. Record the tested commit, existing worktree changes, run seed, active-session status evidence, and source
