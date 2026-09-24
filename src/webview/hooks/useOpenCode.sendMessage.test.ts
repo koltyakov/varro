@@ -671,7 +671,7 @@ describe('sendMessage', () => {
         messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
         parts: [
           { type: 'text', text: 'Review active file' },
-          { type: 'text', text: 'src/a.ts' },
+          { type: 'text', text: '[Attached file: src/a.ts]' },
         ],
         model: { providerID: 'openai', modelID: 'gpt-4o' },
       },
@@ -729,7 +729,7 @@ describe('sendMessage', () => {
         parts: [
           { type: 'text', text: 'Review this image' },
           { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
-          { type: 'text', text: 'src/extra.ts' },
+          { type: 'text', text: '[Attached file: src/extra.ts]' },
         ],
         model: { providerID: 'openai', modelID: 'gpt-4o' },
       },
