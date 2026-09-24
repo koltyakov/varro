@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { createPastedText, readPastedTextDataUrl } from '../../../shared/pasted-text';
+import { SESSION_RESUME_PROMPT } from '../../../shared/session-pauses';
 import type {
   DatabaseContext,
   DatabaseAttachment,
@@ -286,7 +287,7 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
     if (part.type !== 'text') continue;
     // SAFETY: The surrounding shape or discriminator check establishes the TextPart contract used below.
     const text = (part as TextPart).text;
-    if (!text || isVisionDelegationContextText(text)) continue;
+    if (!text || text === SESSION_RESUME_PROMPT || isVisionDelegationContextText(text)) continue;
     const problemReference = parseInlineProblem(text);
     if (problemReference) {
       attachments.push({ type: 'problem-reference', reference: problemReference });

@@ -1199,24 +1199,26 @@ describe('getUserMessagePreviewText', () => {
 });
 
 describe('parseUserMessageContent', () => {
-  it.each(['@agentclientprotocol/claude-agent-acp', '@src/index.ts', 'Yes\\', 'Yes'])(
-    'keeps ordinary prompt text %j out of file attachments',
-    (text) => {
-      const parsed = parseUserMessageContent([textPart('text-1', text)]);
+  it.each([
+    '@agentclientprotocol/claude-agent-acp',
+    '@src/index.ts',
+    'Yes\\',
+    'Yes',
+    'Continue where you left off. Do not repeat completed work.',
+  ])('keeps ordinary prompt text %j out of file attachments', (text) => {
+    const parsed = parseUserMessageContent([textPart('text-1', text)]);
 
-      expect(parsed.messageTexts).toEqual([text]);
-      expect(parsed.attachments).toEqual([]);
+    expect(parsed.messageTexts).toEqual([text]);
+    expect(parsed.attachments).toEqual([]);
 
-      cleanup = render(
-        () =>
-          Message({ info: userMessage('message-plain-text'), parts: [textPart('text-1', text)] }),
-        container!
-      );
+    cleanup = render(
+      () => Message({ info: userMessage('message-plain-text'), parts: [textPart('text-1', text)] }),
+      container!
+    );
 
-      expect(container?.querySelector('.message-attachments')).toBeNull();
-      expect(container?.querySelector('.user-message-text')?.textContent).toBe(text);
-    }
-  );
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe(text);
+  });
 
   it.each(['src/', 'src\\components\\', 'C:\\repo\\', '[Attached file: Yes\\]'])(
     'preserves directory paths and explicit attachments %j',

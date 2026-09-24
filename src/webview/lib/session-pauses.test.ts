@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SESSION_RESUME_PROMPT } from '../../shared/session-pauses';
 import {
   assistantMessage,
   session,
@@ -21,36 +22,39 @@ describe('session pause markers', () => {
   });
   const boundary = { info: assistantMessage('boundary'), parts: [] };
 
-  it('resumes only when later conversation work arrives in the same session', () => {
-    const messages: MessageEntry[] = [
-      boundary,
-      { info: assistantMessage('child-answer', { sessionID: 'child' }), parts: [] },
-      {
-        info: userMessage('notice'),
-        parts: [
-          {
-            id: 'notice-part',
-            sessionID: 'session-1',
-            messageID: 'notice',
-            type: 'text',
-            text: '<shell id="one" state="completed">Done</shell>',
-            synthetic: true,
-          },
-        ],
-      },
-      {
-        info: { ...userMessage('queued'), pendingDelivery: 'steer' as const },
-        parts: [textPart('queued-part', 'Later')],
-      },
-    ];
-    expect(getSessionPauseMap([pausedSession], messages).get('boundary')?.resumed).toBe(false);
-    messages.push({
-      info: userMessage('continue'),
-      parts: [textPart('continue-part', 'Continue')],
-    });
-    // Message order, rather than client/server clock agreement, determines continuation.
-    expect(getSessionPauseMap([pausedSession], messages).get('boundary')?.resumed).toBe(true);
-  });
+  it.each(['Continue', SESSION_RESUME_PROMPT])(
+    'resumes only on later conversation work: %s',
+    (prompt) => {
+      const messages: MessageEntry[] = [
+        boundary,
+        { info: assistantMessage('child-answer', { sessionID: 'child' }), parts: [] },
+        {
+          info: userMessage('notice'),
+          parts: [
+            {
+              id: 'notice-part',
+              sessionID: 'session-1',
+              messageID: 'notice',
+              type: 'text',
+              text: '<shell id="one" state="completed">Done</shell>',
+              synthetic: true,
+            },
+          ],
+        },
+        {
+          info: { ...userMessage('queued'), pendingDelivery: 'steer' as const },
+          parts: [textPart('queued-part', 'Later')],
+        },
+      ];
+      expect(getSessionPauseMap([pausedSession], messages).get('boundary')?.resumed).toBe(false);
+      messages.push({
+        info: userMessage('continue'),
+        parts: [textPart('continue-part', prompt)],
+      });
+      // Message order, rather than client/server clock agreement, determines continuation.
+      expect(getSessionPauseMap([pausedSession], messages).get('boundary')?.resumed).toBe(true);
+    }
+  );
 
   it('persists the canonical boundary while preserving other session metadata', async () => {
     const current = session('session-1', {

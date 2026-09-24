@@ -70,7 +70,7 @@ import {
 } from '../lib/part-utils';
 import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import { getSessionPauseMap } from '../lib/session-pauses';
-import { readSessionPauses } from '../../shared/session-pauses';
+import { isSessionResumeMessage, readSessionPauses } from '../../shared/session-pauses';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
 import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
 import { editingMessage } from '../lib/message-edit-state';
@@ -308,6 +308,7 @@ export function getPromptNumberMap(messages: readonly MessageEntry[]) {
   let promptNumber = 0;
   for (const message of messages) {
     if (message.info.role !== 'user') continue;
+    if (isSessionResumeMessage(message.parts)) continue;
     const parsed = parseUserMessageContent(message.parts);
     if (parsed.automaticActions.length > 0 && !hasUserMessageContent(parsed)) continue;
     promptNumber += 1;
@@ -6928,7 +6929,12 @@ export function MessageList() {
       if (info.role === 'user') {
         // Compaction dividers do not start a new turn. Switching away and back would
         // discard presentation state and replay already-visible assistant content.
-        if (parts.length > 0 && parts.every((part) => part.type === 'compaction')) continue;
+        if (
+          !isSessionResumeMessage(parts) &&
+          parts.length > 0 &&
+          parts.every((part) => part.type === 'compaction')
+        )
+          continue;
         userMessageId = info.id;
         break;
       }

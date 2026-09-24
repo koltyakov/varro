@@ -1,4 +1,5 @@
 import { Show, createSignal } from 'solid-js';
+import { SESSION_RESUME_PROMPT } from '../../../shared/session-pauses';
 import { sendMessage } from '../../hooks/useOpenCode';
 import { setError, state } from '../../lib/state';
 import type { SessionPause } from '../../lib/session-pauses';
@@ -17,10 +18,20 @@ export function SessionResumeButton(props: { pause: SessionPause }) {
     if (!canResume() || resuming()) return;
     setResuming(true);
     try {
-      await sendMessage('Continue where you left off. Do not repeat completed work.', {
+      await sendMessage(SESSION_RESUME_PROMPT, {
         targetSessionId: props.pause.sessionId,
         preserveComposer: true,
         queuedAttachments: {},
+        queuedContext: {
+          editorContext: {
+            ...state.editorContext,
+            activeFile: null,
+            selection: null,
+            diagnostics: [],
+          },
+          currentDocumentEnabled: false,
+          issuesEnabled: false,
+        },
       });
     } catch (error) {
       setError(

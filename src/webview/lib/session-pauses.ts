@@ -1,5 +1,5 @@
 import { asRecord } from '../../shared/type-utils';
-import { readSessionPauses } from '../../shared/session-pauses';
+import { isSessionResumeMessage, readSessionPauses } from '../../shared/session-pauses';
 import type { MessageEntry, Session } from '../types';
 import { client } from './client';
 import { setState, state } from './app-state';
@@ -26,7 +26,8 @@ export function getSessionPauseMap(
     if (
       message.info.role === 'user' &&
       (message.info.pendingDelivery ||
-        !hasUserMessageContent(parseUserMessageContent(message.parts)))
+        (!isSessionResumeMessage(message.parts) &&
+          !hasUserMessageContent(parseUserMessageContent(message.parts))))
     ) {
       continue;
     }

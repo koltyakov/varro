@@ -52,6 +52,10 @@ for (const width of [486, 900]) {
     await divider.hover();
     await resume.click();
     await expect(divider.locator('.model-change-label')).toHaveText('Paused and resumed');
+    await expect(page.getByText('Continue where you left off.', { exact: false })).toHaveCount(0);
+    await expect(
+      page.locator('.user-message-card').filter({ hasText: 'Varro session resume' })
+    ).toHaveCount(0);
     await expect(divider.getByRole('button', { name: 'Resume', exact: true })).toHaveCount(0);
     await expect(divider.getByRole('button', { name: 'Fork chat from here' })).toHaveCount(1);
     await expect(composer).toHaveText('Keep this draft');

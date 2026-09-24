@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { batch } from 'solid-js';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
+import { SESSION_RESUME_PROMPT } from '../../shared/session-pauses';
 import {
   composerFocusKey,
   replaceMessages,
@@ -20,7 +21,7 @@ import {
 } from '../lib/state';
 import type { MessageEntry, Part, Permission, QuestionRequest, TextPart, ToolPart } from '../types';
 import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
-import { MessageList, getNewlyAppendedMessageIds } from './MessageList';
+import { MessageList, getNewlyAppendedMessageIds, getPromptNumberMap } from './MessageList';
 import { getRenderEmptyMessageIds } from './message-list/row-layout';
 import { getVisibleThreadMessages } from './message-list/thread-visibility';
 import { markSessionHistoryLoadFailed, setSessionHistoryCursor } from '../lib/message-window';
@@ -97,7 +98,7 @@ describe('session pause dividers', () => {
     frames.restore();
   });
 
-  it('combines the interrupted summary and pause marker through the trailing-to-history handoff', () => {
+  it('hides the resume prompt through the trailing-to-history handoff and history reload', () => {
     const frames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
     setState('serverStatus', { state: 'running', url: 'mock://opencode', apiVersion: 2 });
@@ -130,7 +131,7 @@ describe('session pause dividers', () => {
 
     upsertMessage({
       info: userMessage('continue'),
-      parts: [textPart('continue-text', 'Continue')],
+      parts: [textPart('continue-text', SESSION_RESUME_PROMPT)],
     });
     expect(container!.querySelectorAll('.session-pause-divider')).toHaveLength(1);
     const historical = container!.querySelector('[data-msg-id="paused"] .session-pause-divider');
@@ -138,6 +139,20 @@ describe('session pause dividers', () => {
       'Paused and resumed'
     );
     expect(historical?.querySelector('[aria-label="Resume"]')).toBeNull();
+    const expectHiddenResume = () => {
+      expect(container!.textContent).not.toContain('Continue where you left off');
+      expect(container!.querySelectorAll('.user-message-card')).toHaveLength(1);
+      expect(container!.querySelector('[data-msg-id="continue"]')?.classList).toContain(
+        'interactive-item-render-empty'
+      );
+      expect(getPromptNumberMap(state.messages).has('continue')).toBe(false);
+    };
+    expectHiddenResume();
+    const history: MessageEntry[] = JSON.parse(JSON.stringify(state.messages));
+    cleanup();
+    replaceMessages(history);
+    cleanup = render(() => MessageList(), container!);
+    expectHiddenResume();
     frames.restore();
   });
 });
