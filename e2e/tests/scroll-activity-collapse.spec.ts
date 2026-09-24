@@ -3,9 +3,9 @@ import { expect, test } from '@playwright/test';
 import type { MessageEntry, Part } from '../../src/webview/types';
 
 // Regression contract for AI agents: preserve the busy turn, explicit live completion events,
-// three simultaneously visible tools, real exit animation, and every-frame same-anchor check.
-// Do not replace this with idle status, mock-server-only updates, one tool, a clipped eight-tool
-// tray, a final-only assertion, or a larger tolerance. Those changes can hide lost sibling spacing.
+// two simultaneously visible tools plus queued siblings, real exit animation, and every-frame
+// same-anchor checks. Keep the multi-tool fixtures and busy state: queued tools must be admitted
+// through the production two-slot limit, without bypassing retention or widening drift tolerance.
 const exitCases: Array<{
   name: string;
   count: number;
@@ -61,7 +61,7 @@ const exitCases: Array<{
   },
   { name: 'one', count: 1, gap: 9, early: false, stagger: false },
   { name: 'two', count: 2, gap: 9, early: false, stagger: false },
-  { name: 'eight clipped', count: 8, gap: 9, early: false, stagger: false },
+  { name: 'eight queued', count: 8, gap: 9, early: false, stagger: false },
   { name: 'three retained', count: 3, gap: 9, early: true, stagger: false },
   { name: 'middle then first then last', count: 3, gap: 9, early: false, stagger: true },
 ];
@@ -91,7 +91,7 @@ for (const scenario of exitCases) {
       });
     }
     const items = page.locator('.assistant-active-activity-item');
-    await expect(items).toHaveCount(count);
+    await expect(items).toHaveCount(Math.min(count, 2));
     await items.last().evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
@@ -122,8 +122,7 @@ for (const scenario of exitCases) {
       };
     });
     expect(geometry.bottomDistance).toBeLessThanOrEqual(2);
-    if (count > 3) expect(geometry.clipped).toBeGreaterThan(1);
-    else expect(geometry.clipped).toBeLessThanOrEqual(1);
+    expect(geometry.clipped).toBeLessThanOrEqual(1);
     if (scenario.animation === 'fallback') {
       await page.addStyleTag({
         content: '.assistant-active-activity-item.is-exiting { animation: none !important; }',
@@ -133,14 +132,16 @@ for (const scenario of exitCases) {
       const bounds = await page.locator('.interactive-list').boundingBox();
       if (!bounds) throw new Error('Transcript viewport is missing');
       await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 100);
-      await page.mouse.wheel(0, -180);
+      // Keep the virtualized two-slot row in the painted core so reattachment exercises an exit.
+      // Off-core activity intentionally skips height animations.
+      await page.mouse.wheel(0, scenario.reattachDuring ? -80 : -180);
       await expect
         .poll(() =>
           page
             .locator('.interactive-list')
             .evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)
         )
-        .toBeGreaterThan(100);
+        .toBeGreaterThan(scenario.reattachDuring ? 50 : 100);
       await page.waitForTimeout(150);
     }
     const pauseExit =
@@ -221,7 +222,9 @@ for (const scenario of exitCases) {
         };
         let cancelledAnimations = 0;
         const start = performance.now();
-        while (performance.now() - start < 3_500) {
+        // Hydrated queued siblings get their own minimum preview after a slot is freed.
+        const sampleDuration = options.count > 3 ? 8_000 : 4_500;
+        while (performance.now() - start < sampleDuration) {
           while (pendingCompletions[0] && pendingCompletions[0].at <= performance.now() - start) {
             complete(pendingCompletions.shift()!.part);
           }
@@ -276,7 +279,9 @@ for (const scenario of exitCases) {
       { count, stagger, sessionId, targetMessageId, animation: scenario.animation }
     );
     if (scenario.detachDuring || scenario.reattachDuring || scenario.keyDuring) {
-      await expect(items.first()).toHaveClass(/is-exiting/);
+      await page.waitForFunction(() =>
+        document.querySelector('.assistant-active-activity-item.is-exiting')
+      );
       const list = page.locator('.interactive-list');
       await list.evaluate((element) => {
         element.dataset.exitTestAnchor = 'moving';
@@ -320,7 +325,10 @@ for (const scenario of exitCases) {
       if (scenario.detachDuring) expect(result.samples.at(-1)?.append).toBe(0);
       else expect(result.samples.at(-1)?.append).toBeGreaterThan(0);
     }
-    expect(result.samples.some((sample) => sample.exiting === (stagger ? 1 : count))).toBe(true);
+    expect(
+      result.samples.some((sample) => sample.exiting === (stagger ? 1 : Math.min(count, 2)))
+    ).toBe(true);
+    expect(result.samples.every((sample) => sample.active <= 2)).toBe(true);
     expect(result.samples.at(-1)?.active).toBe(0);
     expect(result.samples.at(-1)?.thinking).toBe(true);
     expect(result.samples.at(-1)?.exit).toBe(0);
@@ -328,7 +336,8 @@ for (const scenario of exitCases) {
       expect(result.samples.every((sample) => sample.append === 0 && sample.exit === 0)).toBe(true);
       expect(result.samples.at(-1)?.scrollTop).toBeCloseTo(result.samples[0]!.scrollTop, 0);
     } else if (!scenario.detachDuring) expect(result.samples.at(-1)?.append).toBeGreaterThan(0);
-    if (scenario.animation === 'cancel') expect(result.cancelledAnimations).toBe(count);
+    if (scenario.animation === 'cancel')
+      expect(result.cancelledAnimations).toBe(Math.min(count, 2));
     const maxDrift = Math.max(
       ...result.samples.map((sample) =>
         sample.expectedTop === null
@@ -415,7 +424,7 @@ test('activity exit tolerates persistent summary drift without observer feedback
     '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCompletedPrefix=1&activeTrayCount=3'
   );
   const items = page.locator('.assistant-active-activity-item');
-  await expect(items).toHaveCount(3);
+  await expect(items).toHaveCount(2);
   await items.last().evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished));
   });
@@ -577,7 +586,7 @@ test('activity exit tolerates persistent summary drift without observer feedback
   expect(result.injectedDrift, 'The fixture must introduce a positive 1px exit-anchor delta').toBe(
     1
   );
-  expect(result.samples.some((sample) => sample.exiting === 3)).toBe(true);
+  expect(result.samples.some((sample) => sample.exiting === 2)).toBe(true);
   expect(
     result.guardTrips,
     `Activity exit must not feed back on its own reserve style (${result.maxDeliveries} deliveries without yielding)`

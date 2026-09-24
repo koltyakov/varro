@@ -7253,6 +7253,22 @@ export function MessageList() {
     const ids = trailingAssistantTurn()?.assistantMessageIds;
     return compactActivityMessages().filter((message) => ids?.has(message.info.id));
   });
+  const presentationActivityGroups = createMemo(() =>
+    getAssistantActivityGroupMap(presentationMessages(), canCompactActivityPart, (part) =>
+      part.type === 'text' ? part.text.trim() !== '' : shouldShowAssistantPartInline(part)
+    )
+  );
+  const expandedPresentationActivityKeys = createMemo(() => {
+    trackMessageBlockExpansionState();
+    const keys = new Set<string>();
+    for (const group of new Set([...presentationActivityGroups().values()].flat())) {
+      if (!getMessageBlockExpanded(group.key)) continue;
+      for (const part of group.parts) {
+        if (!isAssistantActivityPartRunning(part)) keys.add(getPresentationPartKey(part));
+      }
+    }
+    return keys;
+  });
   let previousPresentationLayout: Map<string, readonly string[]> | null = null;
   let previousPresentationStructureVersion = -1;
   createEffect(() => {
@@ -7319,7 +7335,7 @@ export function MessageList() {
     const sessionId = state.activeSessionId;
     const entries = presentationMessages();
     const items: PresentationItem[] = [];
-    trackMessageBlockExpansionState();
+    const expandedActivityKeys = expandedPresentationActivityKeys();
     for (const message of entries) {
       for (const part of message.parts) {
         const key = getPresentationPartKey(part);
@@ -7328,7 +7344,6 @@ export function MessageList() {
             part.id === state.streamingPartId ? state.streamingText || part.text : part.text;
           items.push({ key, partId: part.id, kind: 'text', text });
         } else if (isAssistantActivityPart(part) && canCompactActivityPart(part)) {
-          const groupKey = `activity-segment\u0000${part.sessionID}\u0000${turn.userMessageId || message.info.id}\u0000${part.id}`;
           items.push({
             key,
             partId: part.id,
@@ -7338,7 +7353,7 @@ export function MessageList() {
               ? activeActivityMessageIds()
               : activeToolActivityMessageIds()
             ).has(part.messageID),
-            expanded: getMessageBlockExpanded(groupKey) ?? false,
+            expanded: expandedActivityKeys.has(key),
           });
         } else if (shouldShowAssistantPartInline(part)) {
           items.push({ key, partId: part.id, kind: 'instant' });

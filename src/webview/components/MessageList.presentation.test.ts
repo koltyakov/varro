@@ -77,6 +77,31 @@ function openChat(parts: Part[] = []) {
 }
 
 describe('streaming presentation handoff', () => {
+  it('groups queued siblings when their disclosure opens and never replays them on collapse', async () => {
+    const parts = Array.from({ length: 3 }, (_, index) => ({
+      ...searchPart(),
+      id: `search-${index}`,
+      callID: `search-call-${index}`,
+    }));
+    openChat([completeSearch(searchPart()), ...parts]);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(2);
+    batch(() => parts.forEach((part) => upsertPart(completeSearch(part))));
+    const summary = container!.querySelector<HTMLButtonElement>(
+      'button.assistant-activity-summary'
+    )!;
+    summary.click();
+    await vi.advanceTimersByTimeAsync(16);
+    expect(summary.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
+    expect(container?.textContent).toContain('4 searches');
+    summary.click();
+    for (let frame = 0; frame < 200; frame += 1) {
+      await vi.advanceTimersByTimeAsync(16);
+      expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
+    }
+  });
+
   it.each([false, true])(
     'keeps presented content through a background notice and continuation with splitDelivery=%s',
     async (splitDelivery) => {

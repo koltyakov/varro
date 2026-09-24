@@ -6,10 +6,7 @@ import { getE2EState } from './helpers';
 
 async function openRalphForm(page: Page) {
   await expect(page.locator('.chat-workspace')).toBeVisible();
-  await page
-    .locator('.chat-header-chat-layout:visible, .chat-header-chat-desktop:visible')
-    .getByRole('button', { name: 'New chat', exact: true })
-    .click();
+  await page.getByRole('button', { name: 'New chat', exact: true }).click();
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/ralph');
@@ -208,7 +205,9 @@ test('iteration cards show verification verdicts for passed iteration', async ({
   await expect(pendingCard.locator('.ralph-iter-index')).toContainText('#3');
 });
 
-test('verification distinguishes skipped checks and command discrepancies after reload', async ({ page }) => {
+test('verification distinguishes skipped checks and command discrepancies after reload', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 600, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=ralph-dashboard');
   await page.evaluate(() => {
@@ -221,10 +220,16 @@ test('verification distinguishes skipped checks and command discrepancies after 
     run.iterations[1].status = 'failed';
     run.iterations[1].endedAt = run.updatedAt;
     run.iterations[1].verification = { test: 'fail' };
-    run.iterations[1].verificationEvidence = { test: {
-      sessionId: 'session-ralph-child-2', messageId: 'msg-test', partId: 'part-test',
-      command: 'npm test', exitCode: 1, reportedVerdict: 'pass',
-    } };
+    run.iterations[1].verificationEvidence = {
+      test: {
+        sessionId: 'session-ralph-child-2',
+        messageId: 'msg-test',
+        partId: 'part-test',
+        command: 'npm test',
+        exitCode: 1,
+        reportedVerdict: 'pass',
+      },
+    };
     localStorage.setItem('varro.ralph.runs', JSON.stringify(runs));
   });
   await page.reload();
@@ -232,7 +237,9 @@ test('verification distinguishes skipped checks and command discrepancies after 
   await expect(page.locator('.ralph-iter-verdict-skipped')).toHaveText('lint:skipped (reported)');
   await expect(page.locator('.ralph-iter-verdict-fail')).toHaveText('test:fail (command)');
   await page.getByText('Verification command evidence', { exact: true }).click();
-  await expect(page.getByRole('button', { name: /npm test - exit 1/ })).toContainText('model reported PASS; command failed');
+  await expect(page.getByRole('button', { name: /npm test - exit 1/ })).toContainText(
+    'model reported PASS; command failed'
+  );
 });
 
 test('stop button transitions run to stopped with manual_stop reason', async ({ page }) => {

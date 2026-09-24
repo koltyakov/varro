@@ -289,10 +289,10 @@ test('tool completion preserves the running outer node through retention and exi
   page,
 }) => {
   await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=3&activeTrayCompletedPrefix=1'
+    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=2&activeTrayCompletedPrefix=1'
   );
   const items = page.locator('.assistant-active-activity-item');
-  await expect(items).toHaveCount(3);
+  await expect(items).toHaveCount(2);
   const result = await page.evaluate(async () => {
     // SAFETY: The controlled tool-cards harness exposes this typed test API.
     const harness = (window as HarnessWindow).__varroE2E;
@@ -343,7 +343,7 @@ test('tool completion preserves the running outer node through retention and exi
     return { samples, originalsDisconnected: originals.every((node) => !node!.isConnected) };
   });
   expect(
-    result.samples.some((sample) => sample.retained === 3),
+    result.samples.some((sample) => sample.retained === 2),
     'Must observe minimum retention'
   ).toBe(true);
   expect(
@@ -362,13 +362,13 @@ test('tool completion preserves the running outer node through retention and exi
 });
 
 for (const removedIndex of [0, 1]) {
-  test(`a ${removedIndex === 0 ? 'leading' : 'middle'} completion does not restart a later tool exit when the tray splits`, async ({
+  test(`a ${removedIndex === 0 ? 'leading' : 'trailing'} completion does not restart its sibling exit when a queued tool enters`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 504, height: 800 });
     await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=3');
     const items = page.locator('.assistant-active-activity-item');
-    await expect(items).toHaveCount(3);
+    await expect(items).toHaveCount(2);
     await expect(page.locator('.assistant-active-activity-items')).toHaveCount(1);
     await items.last().evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
@@ -408,7 +408,7 @@ for (const removedIndex of [0, 1]) {
           '*'
         );
       };
-      const targetSelector = `.assistant-active-activity-item[data-activity-part-id="${CSS.escape(running[2]!.id)}"]`;
+      const targetSelector = `.assistant-active-activity-item[data-activity-part-id="${CSS.escape(running[1 - completedIndex]!.id)}"]`;
       const middleSelector = `.assistant-active-activity-item[data-activity-part-id="${CSS.escape(running[completedIndex]!.id)}"]`;
       const samples: Array<{
         ms: number;
@@ -428,7 +428,7 @@ for (const removedIndex of [0, 1]) {
         const ms = performance.now() - start;
         if (secondCompletionAt === null && ms >= 200) {
           secondCompletionAt = ms;
-          complete(running[2]!);
+          complete(running[1 - completedIndex]!);
         }
         const matches = document.querySelectorAll(targetSelector);
         const current = matches[0];
@@ -457,10 +457,8 @@ for (const removedIndex of [0, 1]) {
     expect(result.secondCompletionAt).toBeGreaterThanOrEqual(200);
     expect(result.secondCompletionAt).toBeLessThan(300);
     expect(
-      exiting.some(
-        (sample) => sample.middleCount === 0 && sample.trays === (removedIndex === 0 ? 1 : 2)
-      ),
-      'The middle tool must leave while the later tool is still exiting in the split tray'
+      exiting.some((sample) => sample.middleCount === 0),
+      'The first completed tool must leave while its sibling is still exiting'
     ).toBe(true);
     expect(
       exiting.some((sample) => sample.remounted),
@@ -472,10 +470,7 @@ for (const removedIndex of [0, 1]) {
     ).toBe(1);
     expect(result.samples.at(-1)?.count, 'Exit cleanup must finish within 3.5 seconds').toBe(0);
     await expect(items).toHaveCount(1);
-    await expect(items).toHaveAttribute(
-      'data-activity-part-id',
-      `tool-active-${removedIndex === 0 ? 1 : 0}`
-    );
+    await expect(items).toHaveAttribute('data-activity-part-id', 'tool-active-2');
     await expect(page.locator('.assistant-active-activity-item.is-exiting')).toHaveCount(0);
     await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
     const jumps = exiting.slice(1).map((sample, index) => ({

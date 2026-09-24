@@ -496,6 +496,8 @@ Direct input acquires ownership only when it can affect the transcript:
   `ses_f6c4e6120ffehkoebwhpaN9ye6`.
 - Opening an active tool's details takes scroll ownership and keeps that tool visible until closed.
   It releases the answer gate and does not run a retention timer indefinitely.
+- Opening an activity group applies expansion to every completed canonical member, including queued siblings.
+  Closing it must not replay those siblings as new previews or move the group's painted summary.
 - Bottom growth uses the existing bottom-follow owner, which eases toward the measured destination
   even without a recent paced text release. Standalone blocks and delayed layout must not snap the
   preceding content upward. Initial positioning, browser clamp corrections, and reduced motion remain

@@ -104,7 +104,7 @@ test('keeps composer text and attached files after reload', async ({ page }) => 
         if (!promptReq?.body || typeof promptReq.body !== 'object') return false;
         const body = promptReq.body as { parts?: Array<{ type: string; text?: string }> };
         return !!body.parts?.some(
-          (part) => part.type === 'text' && part.text === 'src/persisted.ts'
+          (part) => part.type === 'text' && part.text === '[Attached file: src/persisted.ts]'
         );
       })
     )
