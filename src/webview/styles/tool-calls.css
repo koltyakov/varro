@@ -428,6 +428,30 @@
   min-width: 0;
 }
 
+.session-pause-divider:not(.assistant-dialog-summary) {
+  position: relative;
+  height: 28px;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.session-pause-divider:not(.assistant-dialog-summary) .session-pause-resume {
+  position: absolute;
+  right: 8px;
+}
+
+.session-pause-divider:not(.assistant-dialog-summary):hover .session-pause-resume,
+.session-pause-resume:disabled {
+  opacity: 1;
+  filter: blur(0);
+  pointer-events: auto;
+}
+
+.session-pause-divider:not(.assistant-dialog-summary):hover
+  .session-pause-resume:not(:focus-visible) {
+  transition-delay: 300ms;
+}
+
 .model-change-narrow {
   display: none;
 }

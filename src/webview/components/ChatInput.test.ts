@@ -137,6 +137,7 @@ vi.mock('../lib/client', () => ({
       }),
       list: vi.fn(async () => ({ items: [], hasMore: false })),
       messages: vi.fn(async () => []),
+      update: vi.fn<typeof client.session.update>(),
       status: vi.fn(async () => ({})),
     },
     varro: {
@@ -7003,6 +7004,102 @@ describe('ChatInput', () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('/abort');
     expect(state.droppedFiles).toEqual([expect.objectContaining({ path: '/repo/question.ts' })]);
+  });
+
+  it('runs /pause immediately on V2 and parks owned session-tree queues before interrupting', async () => {
+    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 1_000),
+      { ...session('child', 1_000), parentID: 'session-1' },
+    ]);
+    setState('sessionStatus', { 'session-1': { type: 'busy' }, child: { type: 'busy' } });
+    setIsLoading(true);
+    setState('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
+    setState('droppedFiles', [{ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' }]);
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'next' },
+      { id: 'q2', sessionId: 'child', text: 'child next' },
+      { id: 'q3', sessionId: 'session-2', text: 'other session' },
+      { id: 'q4', sessionId: 'session-1', text: 'other view', ownerViewId: 'editor-other' },
+    ]);
+    abortSessionMock.mockImplementationOnce(async () => {
+      expect(state.queuedMessages.filter((item) => item.paused).map((item) => item.id)).toEqual([
+        'q1',
+        'q2',
+      ]);
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      setIsLoading(false);
+    });
+    const pausedSession = session('session-1', 1_000);
+    const pausedMetadata = {
+      varro: { pauses: [{ messageId: 'paused-message', pausedAt: 2_000 }] },
+    };
+    vi.mocked(client.session.get).mockResolvedValueOnce(pausedSession);
+    vi.mocked(client.session.messages).mockResolvedValueOnce([
+      {
+        info: fixture<AssistantMessage>({
+          id: 'paused-message',
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { created: 1_000 },
+        }),
+        parts: [],
+      },
+    ]);
+    vi.mocked(client.session.update).mockResolvedValueOnce({
+      ...pausedSession,
+      metadata: pausedMetadata,
+    });
+    setInputText('/pause');
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLDivElement>('.rich-composer')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    expect(state.queuedMessages).toHaveLength(4);
+    expect(inputText()).toBe('');
+    expect(state.droppedFiles).toEqual([expect.objectContaining({ path: '/repo/a.ts' })]);
+    expect(client.session.update).toHaveBeenCalledWith(
+      'session-1',
+      {
+        metadata: {
+          varro: { pauses: [{ messageId: 'paused-message', pausedAt: expect.any(Number) }] },
+        },
+      },
+      { directory: pausedSession.directory }
+    );
+    expect(state.sessions.find((entry) => entry.id === 'session-1')?.metadata).toEqual(
+      pausedMetadata
+    );
+  });
+
+  it('keeps /pause and its queue available for retry when interruption fails', async () => {
+    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1_000)]);
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    setIsLoading(true);
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'next' }]);
+    abortSessionMock.mockRejectedValueOnce(new Error('Connection lost'));
+    setInputText('/pause');
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLDivElement>('.rich-composer')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(inputText()).toBe('/pause');
+    expect(state.queuedMessages[0]?.paused).toBe(true);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(showSessionActionFeedbackMock).not.toHaveBeenCalled();
   });
 
   it('runs /stop with attachments while a permission blocks normal sends', async () => {

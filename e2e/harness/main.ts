@@ -5953,6 +5953,9 @@ async function handleApiRequest(
     if (typeof payload.title === 'string') {
       session.title = payload.title;
     }
+    if (payload.metadata && typeof payload.metadata === 'object') {
+      session.metadata = asRecord(payload.metadata);
+    }
     if (Array.isArray(payload.permission)) {
       session.permission = payload.permission as Session['permission'];
     }

@@ -64,6 +64,84 @@ describe('message entrance detection', () => {
   });
 });
 
+describe('session pause dividers', () => {
+  it('keeps an otherwise empty pause row measured and updates it in place on continuation', () => {
+    const frames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    setState('serverStatus', { state: 'running', url: 'mock://opencode', apiVersion: 2 });
+    setState('sessions', [
+      session('session-1', {
+        metadata: { varro: { pauses: [{ messageId: 'paused', pausedAt: 100 }] } },
+      }),
+    ]);
+    replaceMessages([
+      { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Work on this')] },
+      { info: assistantMessage('paused', { time: { created: 1 } }), parts: [] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    const row = container!.querySelector('[data-msg-id="paused"]');
+    const divider = row?.querySelector('.session-pause-divider');
+    expect(divider?.textContent).toContain('Paused');
+    expect(row?.classList.contains('interactive-item-render-empty')).toBe(false);
+    expect(divider?.querySelector('[aria-label="Resume"]')?.textContent).toBe('');
+    expect(divider?.querySelector('[aria-label="Resume"] .ui-icon')).not.toBeNull();
+    expect(container!.querySelectorAll('.session-pause-divider')).toHaveLength(1);
+
+    upsertMessage({
+      info: userMessage('continue'),
+      parts: [textPart('continue-text', 'Continue')],
+    });
+    expect(row?.querySelector('.session-pause-divider')).toBe(divider);
+    expect(divider?.querySelector('.model-change-label')?.textContent).toBe('Paused and resumed');
+    expect(divider?.querySelector('[aria-label="Resume"]')).toBeNull();
+    frames.restore();
+  });
+
+  it('combines the interrupted summary and pause marker through the trailing-to-history handoff', () => {
+    const frames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    setState('serverStatus', { state: 'running', url: 'mock://opencode', apiVersion: 2 });
+    setState('sessions', [
+      session('session-1', {
+        metadata: { varro: { pauses: [{ messageId: 'paused', pausedAt: 100 }] } },
+      }),
+    ]);
+    replaceMessages([
+      { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Review the code')] },
+      {
+        info: assistantMessage('paused', {
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        }),
+        parts: [textPart('partial-text', 'Review in progress')],
+      },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    const divider = container!.querySelector(
+      '.trailing-assistant-summary-row .session-pause-divider'
+    );
+    expect(divider).not.toBeNull();
+    expect(container!.querySelectorAll('.session-pause-divider')).toHaveLength(1);
+    expect(container!.querySelectorAll('.assistant-dialog-summary')).toHaveLength(1);
+    expect(divider?.querySelector('.model-change-label')?.textContent).toBe('Paused');
+    expect(divider?.querySelector('[aria-label="Resume"] .ui-icon')).not.toBeNull();
+    expect(divider?.querySelector('[aria-label="Copy final response"]')).toBeNull();
+    expect(divider?.querySelector('[aria-label="Fork chat from here"]')).not.toBeNull();
+    expect(divider?.querySelector('time')).not.toBeNull();
+
+    upsertMessage({
+      info: userMessage('continue'),
+      parts: [textPart('continue-text', 'Continue')],
+    });
+    expect(container!.querySelectorAll('.session-pause-divider')).toHaveLength(1);
+    const historical = container!.querySelector('[data-msg-id="paused"] .session-pause-divider');
+    expect(historical?.querySelector('.model-change-label')?.textContent).toBe(
+      'Paused and resumed'
+    );
+    expect(historical?.querySelector('[aria-label="Resume"]')).toBeNull();
+    frames.restore();
+  });
+});
+
 describe('automatic retry notices', () => {
   it.each(['busy', 'retry'] as const)(
     'keeps partial failed attempts out of Worked while %s',

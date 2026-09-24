@@ -807,7 +807,7 @@ export class OpenCodeV2Adapter {
           );
           this.backgroundWork.clearSession(sessionID);
         }
-        await raw('POST', `${endpoint}/interrupt`, {});
+        await raw('POST', `${endpoint}/interrupt?resume=false`, {});
         return true;
       }
       if (action === 'summarize') {

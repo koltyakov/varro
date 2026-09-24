@@ -69,6 +69,8 @@ import {
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
 import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
+import { getSessionPauseMap } from '../lib/session-pauses';
+import { readSessionPauses } from '../../shared/session-pauses';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
 import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
 import { editingMessage } from '../lib/message-edit-state';
@@ -7422,12 +7424,16 @@ export function MessageList() {
     }));
     const dialogMessages = assistantDialogMessages();
     const collectLeadingSummaryStats = collectingLeadingDialogStats();
+    const pauses = readSessionPauses(
+      state.sessions.find((session) => session.id === state.activeSessionId)?.metadata
+    );
     return untrack(() =>
       getAssistantDialogSummaryMap(dialogMessages, undefined, {
         sessions,
         primarySessionId: state.activeSessionId ?? undefined,
         suppressTrailingSummary,
         collectLeadingSummaryStats,
+        pauses,
       })
     );
   });
@@ -7443,6 +7449,27 @@ export function MessageList() {
     return previous?.message.info.id === messageId && message
       ? { message, summary: previous.summary }
       : null;
+  });
+  const sessionPauseMap = createMemo(() => getSessionPauseMap(state.sessions, messages()));
+  const rowSessionPauseMap = createMemo(() => {
+    const pauses = sessionPauseMap();
+    if (editingMessage()) return pauses;
+    const trailingId = trailingAssistantDialogSummary()?.message.info.id;
+    if (!trailingId || !pauses.has(trailingId)) return pauses;
+    const rowPauses = new Map(pauses);
+    rowPauses.delete(trailingId);
+    return rowPauses;
+  });
+  let previousPauseLayoutSignatures = new Map<string, string>();
+  createEffect(() => {
+    const current = new Map(
+      [...rowSessionPauseMap()].map(([messageId, pause]) => [
+        messageId,
+        `${pause.pausedAt}:${pause.resumed}`,
+      ])
+    );
+    scheduleChangedLayoutRowMeasurements(previousPauseLayoutSignatures, current);
+    previousPauseLayoutSignatures = current;
   });
   const rowAssistantDialogSummaryMap = createMemo(() => {
     const summaries = assistantDialogSummaryMap();
@@ -7473,6 +7500,7 @@ export function MessageList() {
     );
     const modelChanges = modelChangeMap();
     const dialogSummaries = rowAssistantDialogSummaryMap();
+    const pauses = rowSessionPauseMap();
     for (const messageId of assistantDiffContentMessageIds) {
       const index = messageIndexById().get(messageId);
       const message = index === undefined ? undefined : messages()[index];
@@ -7485,6 +7513,7 @@ export function MessageList() {
         (messageId) =>
           !modelChanges.has(messageId) &&
           !dialogSummaries.has(messageId) &&
+          !pauses.has(messageId) &&
           !assistantDiffContentMessageIds.has(messageId)
       )
     );
@@ -8336,6 +8365,7 @@ export function MessageList() {
               presentation={presentation}
               messages={messages()}
               modelChangeMap={modelChangeMap()}
+              sessionPauseMap={rowSessionPauseMap()}
               promptNumberMap={promptNumberMap()}
               showPromptNumbers={promptNumbersVisible()}
               showSentTimestamps={showPromptNumbers()}
@@ -8420,6 +8450,7 @@ export function MessageList() {
               <div class="interactive-item-container interactive-response interactive-loading-row trailing-assistant-summary-row">
                 <AssistantDialogSummaryForMessage
                   summary={trailing().summary}
+                  pause={sessionPauseMap().get(trailing().message.info.id)}
                   msg={trailing().message}
                   hasBuildAgent={hasBuildAgent()}
                   latestPlanImplementationMessageId={latestPlanImplementationMessageId()}

@@ -9,6 +9,8 @@ import type {
   ContextMessageEntry,
 } from '../shared/context-breakdown';
 import type { Message, Part } from '../shared/opencode-types';
+import { pauseCompletedAt, readSessionPauses } from '../shared/session-pauses';
+import type { SessionPauseBoundary } from '../shared/session-pauses';
 import type {
   SessionDiffSummary,
   SessionTokenBreakdown,
@@ -26,7 +28,8 @@ async function summarizeRemoteSession(
   diffs: unknown,
   messages: unknown,
   descendants: Array<{ id: string; tokens?: unknown }>,
-  loadDescendantMessages: () => Promise<unknown[]>
+  loadDescendantMessages: () => Promise<unknown[]>,
+  metadata?: unknown
 ): Promise<SessionDiffSummary> {
   const diffStats = summarizeSessionDiff(diffs);
   const historyStatsUnavailable = hasOmittedMessageHistory(messages);
@@ -57,7 +60,7 @@ async function summarizeRemoteSession(
     tokens:
       getSessionTokensExcludingCacheReads(tokenBreakdown.session) +
       getSessionTokensExcludingCacheReads(tokenBreakdown.subagents),
-    ...summarizeSessionDuration(messages),
+    ...summarizeSessionDuration(messages, readSessionPauses(metadata)),
   };
   if (historyStatsUnavailable) result.historyStatsUnavailable = true;
   if (model) result.model = model;
@@ -299,7 +302,10 @@ function summarizeSessionTokenUsage(value: unknown): SessionTokenUsage {
   return usage;
 }
 
-function summarizeLocalSession(data: LocalSessionSummaryData): SessionDiffSummary {
+function summarizeLocalSession(
+  data: LocalSessionSummaryData,
+  metadata?: unknown
+): SessionDiffSummary {
   const messages = projectMessageHistory(data.messages);
   const editStats = summarizeSessionMessageEdits(messages);
   const session = summarizeSessionTokenUsage(messages);
@@ -336,7 +342,7 @@ function summarizeLocalSession(data: LocalSessionSummaryData): SessionDiffSummar
     tokens:
       getSessionTokensExcludingCacheReads(session) + getSessionTokensExcludingCacheReads(subagents),
     tokenBreakdown,
-    ...summarizeSessionDuration(messages),
+    ...summarizeSessionDuration(messages, readSessionPauses(metadata)),
   };
   const model = summarizeSessionModel(messages);
   const nestedContextBreakdown = estimateLocalContextBreakdown(contextSessions);
@@ -460,7 +466,8 @@ function summarizeSessionModel(value: unknown): SessionDiffSummary['model'] {
 }
 
 function summarizeSessionDuration(
-  value: unknown
+  value: unknown,
+  pauses: readonly SessionPauseBoundary[]
 ): Pick<SessionDiffSummary, 'durationMs' | 'activeStartedAt'> {
   if (!Array.isArray(value)) return { durationMs: 0, activeStartedAt: null };
 
@@ -469,6 +476,7 @@ function summarizeSessionDuration(
   let firstAssistantCreatedAt: number | null = null;
   let latestCompletedAt: number | null = null;
   let lastAssistantCompleted = false;
+  const pauseTimes = new Map(pauses.map((pause) => [pause.messageId, pause.pausedAt]));
 
   const flush = () => {
     if (lastAssistantCompleted && latestCompletedAt !== null) {
@@ -483,9 +491,14 @@ function summarizeSessionDuration(
 
   for (const entry of value) {
     const info = asRecord(asRecord(entry)?.info);
+    const pausedAt = typeof info?.id === 'string' ? pauseTimes.get(info.id) : undefined;
     if (info?.role !== 'assistant') {
       flush();
       if (info?.role === 'user') promptStartedAt = readTimestamp(asRecord(info.time)?.created);
+      if (pausedAt !== undefined && promptStartedAt !== null) {
+        total += Math.max(0, pausedAt - promptStartedAt);
+        flush();
+      }
       continue;
     }
     if (info.mode === 'subagent') continue;
@@ -496,6 +509,15 @@ function summarizeSessionDuration(
     lastAssistantCompleted = completedAt !== null;
     if (completedAt !== null) {
       latestCompletedAt = Math.max(latestCompletedAt ?? completedAt, completedAt);
+    }
+    if (pausedAt !== undefined) {
+      latestCompletedAt = pauseCompletedAt(
+        promptStartedAt ?? firstAssistantCreatedAt ?? pausedAt,
+        lastAssistantCompleted ? (latestCompletedAt ?? undefined) : undefined,
+        pausedAt
+      );
+      lastAssistantCompleted = true;
+      flush();
     }
   }
 

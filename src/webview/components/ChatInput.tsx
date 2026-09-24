@@ -208,6 +208,8 @@ import {
   type ComposerSnapshot,
 } from '../lib/composer-history';
 import { getSessionHistoryPrompts } from '../lib/message-window';
+import { recordSessionPause } from '../lib/session-pauses';
+import { setError } from '../lib/app-state';
 import {
   detachDiscardableActiveBlankSession,
   getDiscardableActiveBlankSessionId,
@@ -1754,6 +1756,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     getSlashCommands({
       hasCurrentSession: !!composerSessionId(),
       canInit: !composerSessionId() || state.messages.length === 0,
+      onPauseSession: requestPauseSession,
       onConnectProvider: () => requestProviderConnection(),
       onOpenSettings: () =>
         postMessage({ type: 'vscode/open-settings', payload: { query: 'Varro >' } }),
@@ -2483,11 +2486,52 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     });
   }
 
+  function isPauseSlashCommand(text: string) {
+    const command = getLeadingSlashCommand(text);
+    return (
+      !!composerSessionId() &&
+      state.serverStatus.state === 'running' &&
+      state.serverStatus.apiVersion === 2 &&
+      command?.name === 'pause' &&
+      !command.args
+    );
+  }
+
+  async function requestPauseSession() {
+    const sessionId = composerSessionId();
+    if (!sessionId) return;
+    const sessionIds = new Set(getSessionTreeIdsForSession(sessionId));
+    // Park the queue before abort publishes idle and triggers automatic dispatch.
+    for (const item of state.queuedMessages) {
+      if (sessionIds.has(item.sessionId) && ownsQueuedMessage(item)) {
+        setQueuedMessagePaused(item.id, true);
+      }
+    }
+    try {
+      await abortSession();
+    } catch {
+      // abortSession reports the failure; keep queued messages parked for an explicit retry.
+      return;
+    }
+    if (composerSessionId() === sessionId && isPauseSlashCommand(inputText())) setInputText('');
+    try {
+      await recordSessionPause(sessionId);
+    } catch (error) {
+      setError(
+        `The session stopped, but its pause marker could not be saved: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   async function runSlashCommand(raw: string) {
     const parsed = getLeadingSlashCommand(raw);
     if (!parsed) return false;
 
     const { name, args } = parsed;
+    if (isPauseSlashCommand(raw)) {
+      await requestPauseSession();
+      return true;
+    }
     if ((name === PROBLEMS_COMMAND_NAME || name === 'promlems') && state.enableProblemsContext) {
       setComposerValue(`/${PROBLEMS_COMMAND_NAME} ${args}`);
       return true;
@@ -2579,6 +2623,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
     const text = inputText();
+    if (isPauseSlashCommand(text)) {
+      await requestPauseSession();
+      return;
+    }
     if (isAbortSlashCommand(text)) {
       requestAbortSession();
       return;
@@ -4554,6 +4602,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     connectionInitialized() &&
     !state.messagesLoading &&
     (isAbortSlashCommand(inputText()) ||
+      isPauseSlashCommand(inputText()) ||
       (!state.workspaceCatalogReloadPending &&
         !pendingWorkspacePath() &&
         !hasPendingPdfFallback() &&

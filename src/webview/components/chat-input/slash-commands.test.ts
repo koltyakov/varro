@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getSlashCommands } from './slash-commands';
+import { resetDefaultAppState, setState } from '../../lib/state';
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise slash-command integration with useOpenCode actions. */
 vi.mock('../../hooks/useOpenCode', () => ({
@@ -12,6 +13,8 @@ vi.mock('../../hooks/useOpenCode', () => ({
 }));
 
 describe('getSlashCommands', () => {
+  beforeEach(() => resetDefaultAppState());
+
   it('includes init but hides session actions in new chats', () => {
     const onGenerateStats = vi.fn();
     const commands = getSlashCommands({
@@ -20,6 +23,7 @@ describe('getSlashCommands', () => {
       onConnectProvider: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
+      onPauseSession: vi.fn(async () => {}),
       onGenerateStats,
       customCommands: [
         {
@@ -76,6 +80,7 @@ describe('getSlashCommands', () => {
       onConnectProvider: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
+      onPauseSession: vi.fn(async () => {}),
       onGenerateStats: () => {},
       customCommands: [],
     });
@@ -94,6 +99,7 @@ describe('getSlashCommands', () => {
       onConnectProvider: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
+      onPauseSession: vi.fn(async () => {}),
       onGenerateStats: () => {},
       customCommands: [
         {
@@ -106,4 +112,27 @@ describe('getSlashCommands', () => {
 
     expect(commands.some((command) => command.name === 'init')).toBe(false);
   });
+
+  it.each([
+    [2, true, true],
+    [1, true, false],
+    [undefined, true, false],
+    [2, false, false],
+  ] as const)(
+    'gates /pause on API %s and current session %s',
+    (apiVersion, hasCurrentSession, visible) => {
+      setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion });
+      const commands = getSlashCommands({
+        hasCurrentSession,
+        canInit: false,
+        onConnectProvider: () => {},
+        onOpenSettings: () => {},
+        onExportSession: () => {},
+        onPauseSession: vi.fn(async () => {}),
+        onGenerateStats: () => {},
+        customCommands: [{ name: 'pause', template: 'Do not send pause to the model' }],
+      });
+      expect(commands.some((command) => command.name === 'pause')).toBe(visible);
+    }
+  );
 });

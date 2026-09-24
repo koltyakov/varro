@@ -3,7 +3,7 @@ import { cableTagIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
-import type { WebviewMessage } from '../../../shared/protocol';
+import type { SessionDiffSummary, WebviewMessage } from '../../../shared/protocol';
 import { client } from '../../lib/client';
 import {
   setManualWorkspaceSelection,
@@ -545,5 +545,39 @@ describe('ActiveChatHeader', () => {
     expect(subagentIcon?.classList).toContain('ui-icon');
     expect(subagentIcon?.style.getPropertyValue('--ui-icon-width')).toBe('16px');
     expect(subagentIcon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(cableTagIcon));
+  });
+
+  it('refreshes paused timing, holds it while idle, and counts only the resumed work period', async () => {
+    const summary: SessionDiffSummary = {
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 10_000,
+      activeStartedAt: null,
+    };
+    const request = vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue(summary);
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    renderHeader();
+    await vi.waitFor(() =>
+      expect(container.querySelector('.chat-header-session-duration')?.textContent).toBe('10s')
+    );
+    vi.useFakeTimers();
+    try {
+      const pausedAt = Date.now();
+      setState('sessions', 0, 'metadata', {
+        varro: { pauses: [{ messageId: 'paused', pausedAt }] },
+      });
+      await vi.advanceTimersByTimeAsync(3_600_000);
+      expect(request).toHaveBeenLastCalledWith('session-1', pausedAt, { directory: '/repo' });
+      expect(container.querySelector('.chat-header-session-duration')?.textContent).toBe('10s');
+      request.mockResolvedValue({ ...summary, activeStartedAt: Date.now() });
+      setState('sessionStatus', 'session-1', { type: 'busy' });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(container.querySelector('.chat-header-session-duration')?.textContent).toBe('15s');
+    } finally {
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      vi.useRealTimers();
+    }
   });
 });

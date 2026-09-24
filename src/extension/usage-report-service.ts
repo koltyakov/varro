@@ -6,7 +6,10 @@ import * as vscode from 'vscode';
 
 import { resolveOpenCodeDataDirectory } from '../shared/opencode-data-directory';
 import { asRecord } from '../shared/type-utils';
+import { pauseCompletedAt, readSessionPauses } from '../shared/session-pauses';
+import type { SessionPauseBoundary } from '../shared/session-pauses';
 import type { OpenCodeServer } from './server';
+import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'request'> &
   Partial<Pick<OpenCodeServer, 'isAttachOnly'>>;
@@ -15,6 +18,7 @@ type Session = {
   id: string;
   directory: string;
   updated: number | null;
+  pauses?: SessionPauseBoundary[];
 };
 
 type Tokens = {
@@ -51,6 +55,7 @@ type CachedSessionUsage = {
   directory: string;
   updated: number;
   usage: Usage[];
+  pauseRevision: string;
 };
 
 type LocalUsageSnapshot =
@@ -211,6 +216,7 @@ export class UsageReportService {
             id,
             directory,
             updated: numberValue(asRecord(record?.time)?.updated),
+            pauses: readSessionPauses(record?.metadata),
           });
           if (sessions.size > SESSION_FALLBACK_MAX_SESSIONS) return [...sessions.values()];
         }
@@ -232,6 +238,7 @@ export class UsageReportService {
     if (
       session.updated !== null &&
       cached?.updated === session.updated &&
+      cached.pauseRevision === JSON.stringify(session.pauses ?? []) &&
       cached.directory === session.directory
     ) {
       this.sessionUsageCache.delete(session.id);
@@ -285,6 +292,7 @@ export class UsageReportService {
     this.sessionUsageCache.set(session.id, {
       directory: session.directory,
       updated: session.updated,
+      pauseRevision: JSON.stringify(session.pauses ?? []),
       usage,
     });
     this.sessionUsageCacheEntries += usage.length;
@@ -324,6 +332,7 @@ async function readLocalUsageDatabase(
       eval: true,
       workerData: {
         databasePath,
+        annotationsDirectory: new OpenCodeV2SessionState().directory,
         maxAssistantRows: LOCAL_USAGE_MAX_ASSISTANT_ROWS,
         maxMessageDataBytes: LOCAL_USAGE_MAX_MESSAGE_DATA_BYTES,
         maxRoutes: LOCAL_USAGE_MAX_ROUTES,
@@ -385,8 +394,27 @@ async function readLocalUsageDatabase(
 
 const LOCAL_USAGE_WORKER = String.raw`
 const { DatabaseSync } = require('node:sqlite');
-const { existsSync } = require('node:fs');
+const { existsSync, readFileSync } = require('node:fs');
+const { join } = require('node:path');
 const { parentPort, workerData } = require('node:worker_threads');
+
+const sessionPauses = new Map();
+const readPauseTime = (sessionID, messageID) => {
+  if (!sessionPauses.has(sessionID)) {
+    let entries = [];
+    if (/^[a-zA-Z0-9_-]{1,256}$/.test(sessionID)) {
+      try {
+        const metadata = JSON.parse(readFileSync(join(workerData.annotationsDirectory, sessionID + '.json'), 'utf8')).metadata;
+        const pauses = metadata?.varro?.pauses;
+        if (Array.isArray(pauses)) entries = pauses.filter((pause) => typeof pause?.messageId === 'string' && Number.isFinite(pause.pausedAt));
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
+    sessionPauses.set(sessionID, new Map(entries.map((pause) => [pause.messageId, pause.pausedAt])));
+  }
+  return sessionPauses.get(sessionID).get(messageID);
+};
 
 const optionalNonnegativeNumber = (value) =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
@@ -431,7 +459,7 @@ try {
       // Keep selected sessions as the outer loop. Otherwise SQLite can scan and decode
       // every message in both versions before checking whether its session was selected.
       if (tables.has('session') && tables.has('message')) {
-        messages.push("SELECT m.session_id, m.data, NULL AS originalCompleted, json_extract(m.data, '$.parentID') AS parentID FROM selected s CROSS JOIN message m ON s.id = m.session_id WHERE s.version = 1 AND length(m.data) <= ? AND json_extract(m.data, '$.role') = 'assistant'");
+        messages.push("SELECT m.id, 1 AS version, m.session_id, m.data, NULL AS originalCompleted, json_extract(m.data, '$.parentID') AS parentID FROM selected s CROSS JOIN message m ON s.id = m.session_id WHERE s.version = 1 AND length(m.data) <= ? AND json_extract(m.data, '$.role') = 'assistant'");
       }
       if (tables.has('session_v2') && tables.has('session_message')) {
         // Migration can replace completion times with the import time. Recover timing only
@@ -439,11 +467,12 @@ try {
         const originalCompleted = tables.has('message')
           ? "(SELECT CASE WHEN json_valid(original.data) THEN CASE WHEN json_extract(original.data, '$.role') = 'assistant' AND json_extract(original.data, '$.time.created') = json_extract(m.data, '$.time.created') AND json_extract(original.data, '$.providerID') = coalesce(json_extract(m.data, '$.providerID'), json_extract(m.data, '$.model.providerID')) AND json_extract(original.data, '$.modelID') = coalesce(json_extract(m.data, '$.modelID'), json_extract(m.data, '$.model.id'), json_extract(m.data, '$.model.modelID')) AND json_type(original.data, '$.time.completed') IN ('integer', 'real') AND json_extract(original.data, '$.time.completed') >= json_extract(original.data, '$.time.created') THEN json_extract(original.data, '$.time.completed') END END FROM message original WHERE original.id = m.id AND original.session_id = s.identity)"
           : 'NULL';
-        messages.push("SELECT m.session_id, m.data, " + originalCompleted + " AS originalCompleted, coalesce(json_extract(m.data, '$.parentID'), (SELECT u.id FROM session_message u WHERE u.session_id = m.session_id AND u.type = 'user' AND u.seq < m.seq ORDER BY u.seq DESC LIMIT 1)) AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.version = 2 AND m.type = 'assistant' AND length(m.data) <= ?");
+        messages.push("SELECT m.id, 2 AS version, m.session_id, m.data, " + originalCompleted + " AS originalCompleted, coalesce(json_extract(m.data, '$.parentID'), (SELECT u.id FROM session_message u WHERE u.session_id = m.session_id AND u.type = 'user' AND u.seq < m.seq ORDER BY u.seq DESC LIMIT 1)) AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.version = 2 AND m.type = 'assistant' AND length(m.data) <= ?");
       }
       const query = [
         selected,
         'SELECT m.session_id AS sessionID,',
+        'm.id AS messageID, m.version AS version,',
         "json_extract(m.data, '$.providerID') AS providerID,",
         "json_extract(m.data, '$.model.providerID') AS nestedProviderID,",
         "json_extract(m.data, '$.modelID') AS modelID,",
@@ -479,13 +508,19 @@ try {
         if (scannedAssistantRows > workerData.maxScannedAssistantRows) {
           throw new Error('Usage report exceeds the ' + workerData.maxScannedAssistantRows.toLocaleString() + '-message local scan limit.');
         }
-        const created = numberValue(row.created);
+        const sessionID = stringValue(row.sessionID);
+        const timeCreated = numberValue(row.timeCreated);
+        const pausedAt = row.version === 2 && sessionID ? readPauseTime(sessionID, row.messageID) : undefined;
+        const recordedCompleted = numberValue(row.timeCompleted);
+        const timeCompleted = pausedAt !== undefined && timeCreated !== null
+          ? Math.max(timeCreated, Math.min(recordedCompleted ?? pausedAt, pausedAt))
+          : recordedCompleted;
+        const created = timeCompleted ?? numberValue(row.created);
         if (created === null || (oldestWindowStart !== null && created < oldestWindowStart)) continue;
         assistantRows += 1;
         if (assistantRows > workerData.maxAssistantRows) {
           throw new Error('Usage report exceeds the ' + workerData.maxAssistantRows.toLocaleString() + '-message local aggregation limit.');
         }
-        const sessionID = stringValue(row.sessionID);
         const providerID = stringValue(row.providerID) || stringValue(row.nestedProviderID);
         const modelID = stringValue(row.modelID) || stringValue(row.nestedModelID);
         const parentID = stringValue(row.parentID);
@@ -499,8 +534,6 @@ try {
         const total = optionalNonnegativeNumber(row.total) ??
           input + output + reasoning + cacheRead + cacheWrite;
         if (total <= 0) continue;
-        const timeCreated = numberValue(row.timeCreated);
-        const timeCompleted = numberValue(row.timeCompleted);
         const duration = timeCreated !== null && timeCompleted !== null && timeCompleted >= timeCreated
           ? timeCompleted - timeCreated
           : null;
@@ -630,7 +663,13 @@ function normalizeUsage(
   const modelID = stringValue(info.modelID) || stringValue(asRecord(info.model)?.modelID);
   const parentID = stringValue(info.parentID);
   const time = asRecord(info.time);
-  const created = numberValue(time?.completed) ?? numberValue(time?.created);
+  const startedAt = numberValue(time?.created);
+  const pausedAt = session.pauses?.find((pause) => pause.messageId === id)?.pausedAt;
+  const completedAt =
+    pausedAt !== undefined && startedAt !== null
+      ? pauseCompletedAt(startedAt, numberValue(time?.completed) ?? undefined, pausedAt)
+      : numberValue(time?.completed);
+  const created = completedAt ?? startedAt;
   if (!id || !providerID || !modelID || created === null) {
     warnings.push(`Ignored malformed assistant usage in session ${session.id}.`);
     return null;
@@ -652,7 +691,7 @@ function normalizeUsage(
       modelID,
       promptID: parentID ? `${session.id}\u0000${parentID}` : null,
       created,
-      durationMs: assistantDuration(time?.created, time?.completed),
+      durationMs: assistantDuration(startedAt, completedAt),
       tokens: {
         input,
         output,

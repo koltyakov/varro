@@ -93,6 +93,10 @@ Commands stream their output. Failures, questions, approvals, file edits, and th
 
 Other chat workflows include rendered Mermaid previews, transcript turn navigation, changed-file links, Source Control handoff, reconnecting sessions after reload, and commands such as `/review`, `/compact`, `/export`, `/stats`, `/skills`, `/diagnostics`, `/fork`, and `/ralph`. Ralph runs support iteration, verification, repair, pause, and resume, and use `Full access`.
 
+With OpenCode V2, `/pause` interrupts the current session run and pauses its queued messages in the current view. A `Paused` divider marks the transcript. Hover over it or focus its Resume button to continue; sending a new message or playing a queued message also continues the session. The divider then reads `Paused and resumed`. Pause markers survive reopening the session. This preserves the conversation but does not suspend an in-flight model response or tool operation for exact resumption.
+
+Paused time is excluded from worked-duration summaries and usage statistics. Resuming starts a new work period, so returning hours later does not inflate the previous run's duration.
+
 ## Permissions
 
 Permission requests provide `Reject`, `Once`, and `Always` actions. Each session has one of three modes:

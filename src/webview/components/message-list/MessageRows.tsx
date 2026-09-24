@@ -17,6 +17,8 @@ import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type { MessageEntry, QuestionRequest, ToolPart } from '../../types';
 import { ForkIcon } from '../ForkIcon';
 import { Message as MessageComponent } from '../Message';
+import { SessionPauseDivider, SessionResumeButton } from '../message/SessionPauseDivider';
+import type { SessionPause } from '../../lib/session-pauses';
 import { Tooltip } from '../Tooltip';
 import { UiIcon } from '../UiIcon';
 import {
@@ -32,6 +34,7 @@ import type { AssistantRetryState } from './assistant-retry';
 const HOVER_INTENT_DELAY_MS = 300;
 
 export type MessageRowSharedProps = {
+  sessionPauseMap?: ReadonlyMap<string, SessionPause>;
   presentation?: StreamingPresentation;
   modelChangeMap: Map<string, ModelChangeInfo>;
   promptNumberMap: ReadonlyMap<string, number>;
@@ -287,6 +290,7 @@ export function MessageRow(
           {(assistantSummary) => (
             <AssistantDialogSummaryForMessage
               summary={assistantSummary()}
+              pause={props.sessionPauseMap?.get(props.msg.info.id)}
               msg={props.msg}
               hasBuildAgent={props.hasBuildAgent}
               latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
@@ -299,6 +303,9 @@ export function MessageRow(
             />
           )}
         </Show>
+        <Show when={!summary() && props.sessionPauseMap?.get(props.msg.info.id)}>
+          {(pause) => <SessionPauseDivider pause={pause()} />}
+        </Show>
       </Show>
     </div>
   );
@@ -307,6 +314,7 @@ export function MessageRow(
 export function AssistantDialogSummaryForMessage(
   props: {
     summary: AssistantDialogSummaryInfo;
+    pause?: SessionPause;
     msg: MessageEntry;
     showCompletedTime?: boolean;
     suppressTimestampAnimation?: boolean;
@@ -318,6 +326,7 @@ export function AssistantDialogSummaryForMessage(
   return (
     <AssistantDialogSummary
       summary={props.summary}
+      pause={props.pause}
       messageId={props.msg.info.id}
       showImplementPlanAction={shouldShowPlanImplementationAction({
         hasBuildAgent: props.hasBuildAgent,
@@ -368,6 +377,7 @@ export function getForkBoundaryMessageId(
 
 function AssistantDialogSummary(props: {
   summary: AssistantDialogSummaryInfo;
+  pause?: SessionPause;
   messageId: string;
   showImplementPlanAction?: boolean;
   onOpenPlan?: () => void;
@@ -480,8 +490,9 @@ function AssistantDialogSummary(props: {
       ref={(element) => {
         summaryRef = element;
       }}
-      class={`model-change-indicator assistant-dialog-summary${props.showCompletedTime || isHoverIntentActive() ? ' is-completion-time-visible' : ''}${isHoverIntentActive() ? ' is-hover-intent-active' : ''}`}
+      class={`model-change-indicator assistant-dialog-summary${props.pause ? ' session-pause-divider' : ''}${props.showCompletedTime || isHoverIntentActive() ? ' is-completion-time-visible' : ''}${isHoverIntentActive() ? ' is-hover-intent-active' : ''}`}
       data-prompt-msg-id={props.summary.promptMessageId}
+      data-resumed={props.pause?.resumed}
     >
       <div class="assistant-dialog-summary-content">
         <Show when={completedTime()}>
@@ -496,35 +507,42 @@ function AssistantDialogSummary(props: {
         </Show>
         <span class="model-change-label">
           <Show
-            when={!props.summary.interrupted && !props.summary.collectingStats}
-            fallback={props.summary.interrupted ? 'Interrupted' : 'Collecting stats...'}
+            when={!props.pause}
+            fallback={props.pause?.resumed ? 'Paused and resumed' : 'Paused'}
           >
-            Worked for {formatTurnDuration(props.summary.durationMs)}
-            {statusSuffix()}
-            <Show when={tokenSuffix()}>
-              {(tokens) => <span class="assistant-dialog-summary-token-budget">{tokens()}</span>}
+            <Show
+              when={!props.summary.interrupted && !props.summary.collectingStats}
+              fallback={props.summary.interrupted ? 'Interrupted' : 'Collecting stats...'}
+            >
+              Worked for {formatTurnDuration(props.summary.durationMs)}
+              {statusSuffix()}
+              <Show when={tokenSuffix()}>
+                {(tokens) => <span class="assistant-dialog-summary-token-budget">{tokens()}</span>}
+              </Show>
+              {agentSuffix()}
             </Show>
-            {agentSuffix()}
           </Show>
         </span>
         <div class="assistant-dialog-summary-turn-actions">
-          <Tooltip content={copied() ? 'Copied' : 'Copy final response'} delay={500}>
-            <button
-              type="button"
-              class="assistant-dialog-summary-turn-action assistant-dialog-summary-copy"
-              classList={{ 'is-copied': copied() }}
-              aria-label={copied() ? 'Copied final response' : 'Copy final response'}
-              disabled={isLoading() || !props.copyText}
-              onClick={() => void copyFinalResponse()}
-            >
-              <UiIcon
-                source={copied() ? checkIcon : copyIcon}
-                width="16"
-                height="16"
-                aria-hidden="true"
-              />
-            </button>
-          </Tooltip>
+          <Show when={props.pause}>{(pause) => <SessionResumeButton pause={pause()} />}</Show>
+          <Show when={!props.summary.interrupted && !props.pause && props.copyText}>
+            <Tooltip content={copied() ? 'Copied' : 'Copy final response'} delay={500}>
+              <button
+                type="button"
+                class="assistant-dialog-summary-turn-action assistant-dialog-summary-copy"
+                classList={{ 'is-copied': copied() }}
+                aria-label={copied() ? 'Copied final response' : 'Copy final response'}
+                onClick={() => void copyFinalResponse()}
+              >
+                <UiIcon
+                  source={copied() ? checkIcon : copyIcon}
+                  width="16"
+                  height="16"
+                  aria-hidden="true"
+                />
+              </button>
+            </Tooltip>
+          </Show>
           <Tooltip content="Fork chat from here" delay={500}>
             <button
               type="button"

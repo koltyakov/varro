@@ -262,6 +262,7 @@ export function VirtualizedContent(
         followsBorderedBlock={followsBorderedBlock()}
         continuesVisibleActivityGroup={continuesVisibleActivityGroup()}
         modelChangeMap={props.modelChangeMap}
+        sessionPauseMap={props.sessionPauseMap}
         promptNumberMap={props.promptNumberMap}
         showPromptNumbers={props.showPromptNumbers}
         showSentTimestamps={props.showSentTimestamps}
