@@ -91,8 +91,6 @@ export function getMessageBlockBoundaryMap(
       continue;
     }
 
-    let parts = message.parts;
-    const blocks: boolean[] = [];
     if (message.info.role === 'user') {
       const parsed = parseUserMessageContent(message.parts);
       const hasContent =
@@ -101,17 +99,12 @@ export function getMessageBlockBoundaryMap(
       const interruptedEnd =
         (options.dialogSummaryMessageIds?.has(messageId) ?? false) ||
         parsed.automaticActions.length > 0;
-      if (parsed.instructionParts.length === 0) {
-        boundaries.set(messageId, {
-          startsBordered: hasContent && !interruptedStart,
-          endsBordered: hasContent && !interruptedEnd,
-          signature: `user:${hasContent ? 'content' : 'empty'}:${hasContent && !interruptedStart ? 'b' : 'u'}:${hasContent && !interruptedEnd ? 'b' : 'u'}${parsed.automaticActions.length ? `:${parsed.automaticActions.join('|')}` : ''}`,
-        });
-        continue;
-      }
-      if (hasContent) blocks.push(true);
-      if (parsed.automaticActions.length > 0) blocks.push(false);
-      parts = parsed.instructionParts;
+      boundaries.set(messageId, {
+        startsBordered: hasContent && !interruptedStart,
+        endsBordered: hasContent && !interruptedEnd,
+        signature: `user:${hasContent ? 'content' : 'empty'}:${hasContent && !interruptedStart ? 'b' : 'u'}:${hasContent && !interruptedEnd ? 'b' : 'u'}${parsed.automaticActions.length ? `:${parsed.automaticActions.join('|')}` : ''}`,
+      });
+      continue;
     }
 
     const messageGroups = groups.get(messageId) ?? [];
@@ -120,10 +113,11 @@ export function getMessageBlockBoundaryMap(
         group.parts.map((part) => [getAssistantActivityPartKey(part), group] as const)
       )
     );
+    const blocks: boolean[] = [];
     const renderedGroupKeys = new Set<string>();
     const renderedActiveSummaryKeys = new Set<string>();
 
-    for (const part of orderBoundaryParts(parts, options.waitingActivityPartKeys)) {
+    for (const part of orderBoundaryParts(message.parts, options.waitingActivityPartKeys)) {
       if (options.streaming?.hiddenPartKeys?.has(getPresentationPartKey(part))) continue;
       if (part.type === 'text') {
         if (hasVisibleProjectedText(part, options.streaming)) blocks.push(false);
@@ -167,12 +161,7 @@ export function getMessageBlockBoundaryMap(
       if (options.expandedActivityGroup(group.key)) blocks.push(true);
     }
 
-    if (
-      message.info.role === 'assistant' &&
-      message.info.error &&
-      !isAbortedAssistantError(message.info.error)
-    )
-      blocks.push(true);
+    if (message.info.error && !isAbortedAssistantError(message.info.error)) blocks.push(true);
     if (options.trailingPermissionMessageIds?.has(messageId)) blocks.push(true);
     if (options.modelChangeMessageIds?.has(messageId)) blocks.unshift(false);
     if (options.dialogSummaryMessageIds?.has(messageId)) blocks.push(false);
@@ -390,30 +379,28 @@ export function getRenderEmptyMessageIds(
   }
 
   for (const message of messages) {
-    let parts = message.parts;
     if (message.info.role === 'user') {
       const parsed = parseUserMessageContent(message.parts);
       if (
-        hasUserMessageContent(parsed) ||
-        parsed.automaticActions.length > 0 ||
-        message.parts.some((part) => part.type === 'compaction') ||
-        message.info.summary?.diffsOmitted === true
+        !hasUserMessageContent(parsed) &&
+        parsed.automaticActions.length === 0 &&
+        !message.parts.some((part) => part.type === 'compaction') &&
+        message.info.summary?.diffsOmitted !== true
       ) {
-        continue;
+        result.add(message.info.id);
       }
-      parts = parsed.instructionParts;
+      continue;
     }
     if (
-      isAssistantMessage(message.info) &&
-      message.info.error &&
-      !isAbortedAssistantError(message.info.error)
+      !isAssistantMessage(message.info) ||
+      (message.info.error && !isAbortedAssistantError(message.info.error))
     ) {
       continue;
     }
     const messageGroups = groups.get(message.info.id) ?? [];
     let hasVisibleRowContent = false;
 
-    for (const part of parts) {
+    for (const part of message.parts) {
       if (streaming?.hiddenPartKeys?.has(getPresentationPartKey(part))) continue;
       const visible =
         part.type === 'text'

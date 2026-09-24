@@ -1782,6 +1782,10 @@ describe('Message user editing', () => {
       'Resumed after interruption',
     ],
     [
+      'Instructions from: /repo/AGENTS.md\nVery long repository instructions',
+      'Loaded agent instructions',
+    ],
+    [
       '<shell id="sh_1" state="completed" command="npm test">\nLong test output\n</shell>',
       'Background command finished',
     ],
@@ -1813,36 +1817,6 @@ describe('Message user editing', () => {
     expect(container?.querySelector('.user-message-card')).toBeNull();
     expect(container?.textContent).not.toContain(text);
   });
-
-  it.each([false, true])(
-    'groups loaded instructions outside the user card with mixed=%s',
-    (mixed) => {
-      const parts: Part[] = [
-        ...(mixed ? [textPart('prompt', 'Check the project')] : []),
-        {
-          ...textPart('instructions', 'Instructions from: /repo/AGENTS.md\nProject rules'),
-          synthetic: true,
-        },
-      ];
-      cleanup = render(
-        () => Message({ info: userMessage('instructions-user'), parts }),
-        container!
-      );
-      expect(container?.querySelector('.automated-message')).toBeNull();
-      expect(container?.querySelector('.user-message-card')?.textContent ?? '').toBe(
-        mixed ? 'Check the project' : ''
-      );
-      expect(getUserMessageEditText(parts)).toBe(mixed ? 'Check the project' : '');
-      expect(getUserMessagePreviewText(parts)).toBe(mixed ? 'Check the project' : '(no content)');
-      const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
-      expect(summary?.textContent).toContain('Explored: 1 tool call');
-      expect(container?.textContent).not.toContain('Loaded agent instructions');
-      summary?.click();
-      expect(container?.querySelector('.assistant-activity-detail')?.textContent).toContain(
-        'Loaded agent instructions: /repo/AGENTS.md'
-      );
-    }
-  );
 
   it('keeps a user-authored continuation prompt editable even with synthetic context', () => {
     setAppState('activeSessionId', 'session-1');

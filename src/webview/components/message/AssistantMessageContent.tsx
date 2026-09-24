@@ -53,7 +53,7 @@ import {
   setMessageBlockExpanded,
   trackMessageBlockExpansionState,
 } from '../../lib/tool-call-expansion-state';
-import type { Message, Part, QuestionRequest, TextPart, ToolPart } from '../../types';
+import type { AssistantMessage, Part, QuestionRequest, TextPart, ToolPart } from '../../types';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
 import { PermissionPrompt } from '../PermissionPrompt';
@@ -439,7 +439,7 @@ export function getFileEditStackRenderKey(
 }
 
 export function AssistantMessageContent(props: {
-  info: Message;
+  info: AssistantMessage;
   parts: Part[];
   errorMessage?: string | null;
   errorDetails?: string | null;
@@ -466,7 +466,6 @@ export function AssistantMessageContent(props: {
   keepReasoningInline?: boolean;
   expandReasoning?: boolean;
 }) {
-  const assistant = () => (props.info.role === 'assistant' ? props.info : undefined);
   const partEntries = createMemo(() => getDeduplicatedPartEntries(props.parts));
   const dedupedParts = createMemo(() => partEntries().map((entry) => entry.part));
   const partRenderKeys = createMemo(
@@ -541,10 +540,7 @@ export function AssistantMessageContent(props: {
   const isLocallyCompactActivityCandidate = (part: Part): part is AssistantActivityPart =>
     isAssistantActivityPart(part) &&
     shouldCompactAssistantActivityPart(part, {
-      keepEditInline:
-        props.info.role === 'assistant' &&
-        props.info.time.completed === undefined &&
-        !props.info.error,
+      keepEditInline: props.info.time.completed === undefined && !props.info.error,
       keepReasoningInline: !!props.keepReasoningInline,
     }) &&
     (part.type !== 'tool' ||
@@ -568,7 +564,7 @@ export function AssistantMessageContent(props: {
   const effectiveCompactActivityGroups = createMemo<readonly AssistantActivityGroupInfo[] | null>(
     () => {
       if (props.compactActivityGroups !== undefined) return props.compactActivityGroups;
-      if (assistant()?.mode === 'subagent') return null;
+      if (props.info.mode === 'subagent') return null;
 
       const groups: AssistantActivityGroupInfo[] = [];
       let activityParts: AssistantActivityPart[] = [];
@@ -805,7 +801,7 @@ export function AssistantMessageContent(props: {
   };
 
   const getRevealClass = (item: AssistantRenderItem) => {
-    if (assistant()?.time.completed !== undefined && item.kind !== 'activity-group') return '';
+    if (props.info.time.completed !== undefined && item.kind !== 'activity-group') return '';
     return claimReveal(getRevealTrackingKey(item)) ? ' assistant-message-flow-item-streamed' : '';
   };
 
@@ -850,7 +846,7 @@ export function AssistantMessageContent(props: {
           <div class="assistant-active-activity-item-content">
             <MessagePart
               part={part()}
-              messageInfo={assistant()}
+              messageInfo={props.info}
               streamedText={props.textForPart(part())}
               streaming={props.isPartStreaming?.(part())}
               expandReasoning={props.expandReasoning}
@@ -1089,7 +1085,7 @@ export function AssistantMessageContent(props: {
                   <MessagePart
                     part={part()}
                     diffPreviewStateKey={`${props.info.sessionID}:${props.info.id}:file-edit:${id}`}
-                    messageInfo={assistant()}
+                    messageInfo={props.info}
                     streamedText={props.textForPart(part())}
                     streaming={props.isPartStreaming?.(part())}
                     lightweight={isLightweight()}
@@ -1151,7 +1147,7 @@ export function AssistantMessageContent(props: {
         </Show>
         <MessagePart
           part={item().part}
-          messageInfo={assistant()}
+          messageInfo={props.info}
           streamedText={props.textForPart(item().part)}
           streaming={props.isPartStreaming?.(item().part)}
           expandReasoning={props.expandReasoning}
@@ -1275,7 +1271,7 @@ export function AssistantMessageContent(props: {
                   <MarkdownRenderer
                     content={finalTextContent()}
                     cacheByContent={
-                      !!assistant()?.time.completed &&
+                      !!props.info.time.completed &&
                       !(finalTextPart() && props.isPartStreaming?.(finalTextPart()!))
                     }
                     forceStreaming={
@@ -1301,7 +1297,7 @@ function activateButtonOnPrimaryMouseDown(
 }
 
 function AssistantActivityGroup(props: {
-  info: Message;
+  info: AssistantMessage;
   parts: AssistantActivityPart[];
   summaryParts: AssistantActivityPart[];
   expansionKey: string;
@@ -1367,7 +1363,7 @@ function AssistantActivityGroup(props: {
               >
                 <MessagePart
                   part={part}
-                  messageInfo={props.info.role === 'assistant' ? props.info : undefined}
+                  messageInfo={props.info}
                   streamedText={props.textForPart(part)}
                   streaming={props.isPartStreaming?.(part)}
                   lightweight={props.lightweight}

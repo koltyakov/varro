@@ -26,8 +26,7 @@ import { rememberDirectSessionReturn } from '../../lib/session-navigation';
 import { state } from '../../lib/state';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { selectSession } from '../../hooks/useOpenCode';
-import type { AgentPart, FilePart, Part, TextPart, ToolPart } from '../../types';
-import { getAgentInstructionTool } from '../../lib/agent-instructions';
+import type { AgentPart, FilePart, Part, TextPart } from '../../types';
 import {
   formatContextLineRanges,
   formatSelectionReference,
@@ -114,7 +113,6 @@ export type UserMessageMarkupSuffix = {
 export type ParsedUserMessageContent = {
   messageTexts: string[];
   automaticActions: string[];
-  instructionParts: ToolPart[];
   attachments: MessageAttachment[];
   fileParts: FilePart[];
   agentParts: AgentPart[];
@@ -268,17 +266,11 @@ export function getUserMessageMarkupSuffix(text: string): UserMessageMarkupSuffi
 export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent {
   const messageTexts: string[] = [];
   const automaticActions = new Set<string>();
-  const instructionParts: ToolPart[] = [];
   const attachments: MessageAttachment[] = [];
   const fileParts: FilePart[] = [];
   const agentParts: AgentPart[] = [];
 
   for (const part of parts) {
-    const instruction = getAgentInstructionTool(part);
-    if (instruction) {
-      instructionParts.push(instruction);
-      continue;
-    }
     if (part.type === 'file') {
       // SAFETY: The surrounding shape or discriminator check establishes the FilePart contract used below.
       fileParts.push(part as FilePart);
@@ -330,7 +322,6 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
   return {
     messageTexts,
     automaticActions: [...automaticActions],
-    instructionParts,
     attachments,
     fileParts,
     agentParts,
@@ -359,6 +350,7 @@ function getAutomaticAction(part: TextPart): string {
   ) {
     return 'Resumed after interruption';
   }
+  if (text.startsWith('Instructions from:')) return 'Loaded agent instructions';
   if (text.startsWith('<shell ')) {
     const header = text.slice(0, text.indexOf('>'));
     if (header.includes('state="failed"')) return 'Background command failed';

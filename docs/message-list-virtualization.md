@@ -98,10 +98,6 @@ the shared invariants below remain true.
   and their labels participate in layout invalidation. They do not receive prompt numbers or sticky
   navigation entries. Preserve explicit attachment chips while keeping generated prompt text out of
   user previews and edit drafts.
-- Loaded `Instructions from:` parts render as completed tool activity inside Explored. Keep their
-  original message/part identities, merge instruction-only rows with adjacent activity, and derive
-  their zero height and disclosure invalidation from the same group as ordinary tools. Mixed user
-  prompts retain their card and keep the instruction activity outside it.
 - `virtualMetrics.prefix[index]` must describe the same ordered ID list used by the renderer.
 - Cached prefix entries may only be reused while both the ID order and all earlier effective heights
   remain valid.
