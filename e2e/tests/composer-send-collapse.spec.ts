@@ -9,6 +9,7 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
     }) => {
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(String(error)));
+      await page.clock.install({ time: new Date('2030-01-01T00:00:00Z') });
       await page.emulateMedia({ reducedMotion: reducedMotion ? 'reduce' : 'no-preference' });
       await page.goto(`/e2e/harness/index.html?scenario=${scenario}`);
       const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
@@ -35,6 +36,8 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
         ).join('\n')
       );
 
+      // Assert easing at a fixed frame cadence rather than the CI runner's available CPU time.
+      await page.clock.pauseAt(new Date('2030-01-01T00:01:00Z'));
       await frame.evaluate((element) => {
         const toolbar = element.querySelector('.toolbar-main')!;
         const measure = () => {
@@ -56,6 +59,7 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
         });
       });
       await composer.press('Enter');
+      for (let index = 0; index < 40; index += 1) await page.clock.runFor(16);
       await expect(frame).toHaveAttribute('data-collapse-samples');
       const samples: Array<{ height: number; toolbarBottomGap: number }> = JSON.parse(
         (await frame.getAttribute('data-collapse-samples'))!

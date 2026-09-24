@@ -133,6 +133,7 @@ type DisplayMessageAttachment =
 
 type InlineRenderableAttachment =
   | { type: 'message-attachment'; attachment: MessageAttachment }
+  | { type: 'file-part'; part: FilePart; marker: string }
   | { type: 'image-file'; part: FilePart; index: number; marker?: string; label?: string }
   | { type: 'agent'; part: AgentPart; marker: string };
 
@@ -274,8 +275,9 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
 
   for (const part of parts) {
     if (part.type === 'file') {
-      // SAFETY: The surrounding shape or discriminator check establishes the FilePart contract used below.
-      fileParts.push(part as FilePart);
+      if (!fileParts.some((file) => file.url === part.url && file.mime === part.mime)) {
+        fileParts.push(part);
+      }
       continue;
     }
 
@@ -324,7 +326,18 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
   return {
     messageTexts,
     automaticActions: [...automaticActions],
-    attachments,
+    attachments: attachments.filter(
+      (attachment, index) =>
+        attachments.findIndex(
+          (candidate) => JSON.stringify(candidate) === JSON.stringify(attachment)
+        ) === index &&
+        !(
+          attachment.type === 'file-reference' &&
+          fileParts.some(
+            (part) => part.filename === attachment.path || part.source?.path === attachment.path
+          )
+        )
+    ),
     fileParts,
     agentParts,
   };
@@ -419,7 +432,8 @@ export function isWrapperlessUserMessageContent(parsed: ParsedUserMessageContent
     parsed.messageTexts[0]!,
     indexedAttachments,
     parsed.fileParts.filter((part) => part.mime.startsWith('image/')),
-    parsed.agentParts
+    parsed.agentParts,
+    parsed.fileParts
   ).filter((segment) => segment.type !== 'text' || segment.content.trim().length > 0);
 
   return segments.length === 1 && segments[0]?.type === 'attachment';
@@ -886,7 +900,14 @@ export function UserMessageContent(props: {
     parsed().fileParts.filter((part) => part.mime.startsWith('image/'))
   );
   const otherFileParts = createMemo(() =>
-    parsed().fileParts.filter((part) => !part.mime.startsWith('image/'))
+    parsed().fileParts.filter(
+      (part) =>
+        !part.mime.startsWith('image/') &&
+        !parsed().messageTexts.some((text) => {
+          const marker = getInlineFileMarker(part);
+          return marker && text.includes(marker);
+        })
+    )
   );
   const displayAttachments = createMemo<DisplayMessageAttachment[]>(() => [
     ...(leadingAgentPart() ? [{ type: 'agent' as const, part: leadingAgentPart()! }] : []),
@@ -1044,6 +1065,7 @@ export function UserMessageContent(props: {
               messageTexts={parsed().messageTexts}
               attachments={indexedAttachments()}
               imageParts={imageParts()}
+              fileParts={parsed().fileParts}
               agentParts={inlineAgentParts()}
               onOpenImagePreview={openImagePreview}
             />
@@ -1064,6 +1086,7 @@ export function UserMessageContent(props: {
               messageTexts={parsed().messageTexts}
               attachments={indexedAttachments()}
               imageParts={imageParts()}
+              fileParts={parsed().fileParts}
               agentParts={inlineAgentParts()}
               onOpenImagePreview={openImagePreview}
             />
@@ -1104,6 +1127,7 @@ export function UserMessageContent(props: {
 function UserMessageTextList(props: {
   messageTexts: string[];
   attachments: IndexedMessageAttachment[];
+  fileParts: FilePart[];
   imageParts: FilePart[];
   agentParts: AgentPart[];
   onOpenImagePreview: (index: number) => void;
@@ -1118,6 +1142,7 @@ function UserMessageTextList(props: {
           <UserMessageTextContent
             text={text}
             attachments={props.attachments}
+            fileParts={props.fileParts}
             imageParts={props.imageParts}
             agentParts={props.agentParts}
             onOpenImagePreview={props.onOpenImagePreview}
@@ -1154,6 +1179,7 @@ export function UserMessagePreviewContent(props: {
           <InlineAttachmentText
             content={value()}
             attachments={attachments()}
+            fileParts={parsed().fileParts}
             imageParts={imageParts()}
             agentParts={agentParts()}
             onOpenImagePreview={(index) => props.onOpenImagePreview?.(index)}
@@ -1192,6 +1218,7 @@ function getDisplayAgentParts(parsed: ParsedUserMessageContent): AgentPart[] {
 function UserMessageTextContent(props: {
   text: string;
   attachments: IndexedMessageAttachment[];
+  fileParts: FilePart[];
   imageParts: FilePart[];
   agentParts: AgentPart[];
   onOpenImagePreview: (index: number) => void;
@@ -1203,7 +1230,8 @@ function UserMessageTextContent(props: {
       props.text,
       props.attachments,
       props.imageParts,
-      props.agentParts
+      props.agentParts,
+      props.fileParts
     )) {
       if (segment.type === 'session' || segment.type === 'text') continue;
       if (segment.type === 'external-link') {
@@ -1217,7 +1245,7 @@ function UserMessageTextContent(props: {
 
       const attachment = segment.attachment;
       const marker =
-        attachment.type === 'agent'
+        attachment.type === 'agent' || attachment.type === 'file-part'
           ? attachment.marker
           : attachment.type === 'image-file'
             ? attachment.marker || attachment.label || getInlineImageLabel(attachment.part)
@@ -1225,7 +1253,9 @@ function UserMessageTextContent(props: {
       slots.set(marker, {
         marker,
         render: () =>
-          attachment.type === 'agent' ? (
+          attachment.type === 'file-part' ? (
+            <MessageFileAttachment part={attachment.part} inline marker={attachment.marker} />
+          ) : attachment.type === 'agent' ? (
             <InlineAgentChip part={attachment.part} marker={attachment.marker} />
           ) : attachment.type === 'image-file' ? (
             <InlineImageAttachmentChip
@@ -1269,6 +1299,7 @@ function UserMessageTextContent(props: {
               <InlineAttachmentText
                 content={segment.content}
                 attachments={props.attachments}
+                fileParts={props.fileParts}
                 imageParts={props.imageParts}
                 agentParts={props.agentParts}
                 onOpenImagePreview={props.onOpenImagePreview}
@@ -1296,12 +1327,19 @@ function UserMessageCodeBlock(props: { content: string; language?: string }) {
 function InlineAttachmentText(props: {
   content: string;
   attachments: IndexedMessageAttachment[];
+  fileParts: FilePart[];
   imageParts: FilePart[];
   agentParts: AgentPart[];
   onOpenImagePreview: (index: number) => void;
 }) {
   const segments = createMemo(() =>
-    buildInlineTextSegments(props.content, props.attachments, props.imageParts, props.agentParts)
+    buildInlineTextSegments(
+      props.content,
+      props.attachments,
+      props.imageParts,
+      props.agentParts,
+      props.fileParts
+    )
   );
 
   return (
@@ -1317,6 +1355,15 @@ function InlineAttachmentText(props: {
         if (segment.attachment.type === 'agent') {
           return (
             <InlineAgentChip part={segment.attachment.part} marker={segment.attachment.marker} />
+          );
+        }
+        if (segment.attachment.type === 'file-part') {
+          return (
+            <MessageFileAttachment
+              part={segment.attachment.part}
+              inline
+              marker={segment.attachment.marker}
+            />
           );
         }
         if (segment.attachment.type === 'image-file') {
@@ -1564,9 +1611,15 @@ function buildInlineTextSegments(
   content: string,
   attachments: IndexedMessageAttachment[],
   imageParts: FilePart[],
-  agentParts: AgentPart[]
+  agentParts: AgentPart[],
+  fileParts: FilePart[] = []
 ): InlineTextSegment[] {
   const attachmentByMarker = new Map<string, InlineRenderableAttachment>();
+
+  for (const part of fileParts) {
+    const marker = getInlineFileMarker(part);
+    if (marker) attachmentByMarker.set(marker, { type: 'file-part', part, marker });
+  }
 
   for (const attachment of attachments) {
     if (!attachment.marker) continue;
@@ -2441,14 +2494,24 @@ function getDisplayMessageAttachmentPath(attachment: DisplayMessageAttachment): 
   return attachment.part.source?.path || attachment.part.filename;
 }
 
-function MessageFileAttachment(props: { part: FilePart }) {
+function getInlineFileMarker(part: FilePart): string | null {
+  if (part.mime.startsWith('image/')) return null;
+  return part.filename ? `@${part.filename}` : null;
+}
+
+function MessageFileAttachment(props: { part: FilePart; inline?: boolean; marker?: string }) {
   const label = () => getMessageFileAttachmentLabel(props.part);
   const path = () => props.part.source?.path || props.part.filename;
   const text = () => readPastedTextDataUrl(props.part.url);
 
   return (
     <span
-      class="chat-attachment-chip message-attachment-chip"
+      class={
+        props.inline
+          ? 'inline-chip inline-chip-clickable'
+          : 'chat-attachment-chip message-attachment-chip'
+      }
+      data-copy-marker={props.marker}
       title={label()}
       role={text() !== null ? 'button' : undefined}
       tabIndex={text() !== null ? 0 : undefined}

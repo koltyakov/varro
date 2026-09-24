@@ -20,6 +20,7 @@ import { clearDirectSessionReturn, getDirectSessionReturnId } from '../../lib/se
 import { formatSkillAttachment } from '../../lib/skill-reference';
 import { formatDatabaseAttachmentReference } from '../../../shared/database-context';
 import { formatInlineProblem, problemReferenceMarker } from '../../lib/editor-problems';
+import { pastedTextDataUrl } from '../../../shared/pasted-text';
 
 const selectSessionMock = vi.hoisted(() => vi.fn());
 const retryMessageMock = vi.hoisted(() => vi.fn());
@@ -323,6 +324,56 @@ afterEach(() => {
 });
 
 describe('UserMessageContent', () => {
+  it.each(['In CI', '**In CI**'])(
+    'renders pasted text once inline after %s and opens its content',
+    (prefix) => {
+      const send = installSendToExtension();
+      const filename = 'pasted-text-a530137f.txt';
+      const content = 'Long pasted content\n'.repeat(100);
+      const file: FilePart = {
+        id: 'paste',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'file',
+        mime: 'text/plain',
+        filename,
+        url: pastedTextDataUrl(content),
+      };
+      const parts: Part[] = [
+        textPart('prompt', `${prefix} @${filename}`),
+        file,
+        { ...file, id: 'duplicate' },
+        textPart('attachment', `[Attached file: ${filename}]`),
+      ];
+      renderUserContent(parts);
+      const chips = container!.querySelectorAll<HTMLElement>('.inline-chip');
+      expect(chips).toHaveLength(1);
+      expect(chips[0]!.textContent).toBe(filename);
+      expect(container!.querySelector('.message-attachments')).toBeNull();
+      chips[0]!.click();
+      expect(send).toHaveBeenCalledWith({
+        type: 'vscode/open-text',
+        payload: { content, title: filename, language: 'plaintext' },
+      });
+      expect(getUserMessageEditContext(parts).files).toHaveLength(1);
+      expect(getUserMessageEditContext(parts).files[0]!.pastedText).toBe(content);
+    }
+  );
+
+  it('shows duplicate unreferenced pasted files as a single attachment', () => {
+    const file: FilePart = {
+      id: 'paste',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'file',
+      mime: 'text/plain',
+      filename: 'pasted-text.txt',
+      url: pastedTextDataUrl('content'),
+    };
+    renderUserContent([textPart('prompt', 'Review this'), file, { ...file, id: 'duplicate' }]);
+    expect(container!.querySelectorAll('.message-attachment-chip')).toHaveLength(1);
+  });
+
   it.each(['separate', 'joined', 'joined-crlf', 'explicit'])(
     'renders %s plan attachments above the prompt and restores them for editing',
     (layout) => {

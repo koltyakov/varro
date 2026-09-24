@@ -25,7 +25,8 @@ import type {
   ProviderAuthPromptCondition,
   ProviderAuthPromptText,
 } from '../shared/opencode-types';
-import { OpenCodeResponseTooLargeError, type OpenCodeRequestOptions } from './open-code-transport';
+import type { OpenCodeRequestOptions } from './open-code-transport';
+import { OpenCodeResponseTooLargeError } from './opencode-response-error';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { OpenCodeV2BackgroundWork } from './opencode-v2-background-work';
 import {

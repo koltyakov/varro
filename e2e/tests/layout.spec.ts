@@ -968,7 +968,8 @@ test('keeps inline edits separated from a following Explored summary', async ({ 
 
   const editStack = row.locator('.assistant-file-edit-stack').last();
   const edits = editStack.locator('.file-change-card');
-  const summary = row.locator('.assistant-activity-summary').last();
+  // The active tray also has a temporary summary before the read joins its final flow item.
+  const summary = row.locator('.assistant-message-flow-item .assistant-activity-summary').last();
   await expect(edits).toHaveCount(2);
   await expect(edits.locator('.file-edit-path-link')).toHaveText(['src/first.ts', 'src/second.ts']);
   await expect(row.locator('[data-activity-part-id="tool-read-after-edits"]')).toHaveCount(0);

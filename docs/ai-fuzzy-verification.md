@@ -219,11 +219,19 @@ Use `VARRO_AI_SERVER_URL=http://127.0.0.1:49001` for both
 transport to that verified origin, isolates CLI storage, and disables automatic server startup and
 updates. Record the dedicated server PID and stop it during cleanup along with the test editor.
 
-For OpenCode versions whose `/path` response omits `data`, also set
+The controller detects v1 and v2 from their health endpoints and records the backend version in
+isolation evidence. V2 operations use the extension's protocol adapter, including history, prompts,
+status, pending inputs, forks, and cleanup. The same commands work for either backend.
+For an authenticated dedicated server, set `OPENCODE_SERVER_PASSWORD` and, if needed,
+`OPENCODE_SERVER_USERNAME` in the server and controller environments. The launcher forwards them to
+the isolated editor without storing them in launch metadata.
+
+For OpenCode v2, and v1 versions whose `/path` response omits `data`, also set
 `VARRO_AI_DATA_DIR="$PWD/artifacts/ai-test-data/data/opencode"` on preparation, verification,
 live-controller, cleanup, and editor-launch commands. This explicit directory is subject to the same
 test-root, symlink/hard-link, and listener-owned database checks. When the server reports a data
-directory, it must agree with the configured directory.
+directory, it must agree with the configured directory. V2's native location endpoint does not
+report the database directory, so the explicit directory is required for v2.
 
 Production session metadata, including permissions and timestamps, must remain unchanged. A request
 to run tests does not authorize a migration or repair. Such changes require an explicit user request

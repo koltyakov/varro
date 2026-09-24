@@ -17,6 +17,9 @@ import { OpenCodeV2Adapter } from './opencode-v2-adapter';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { projectV2Event } from './opencode-v2-events';
 import { openCodeApiVersion, type OpenCodeApiVersion } from './opencode-connection';
+import { OpenCodeResponseTooLargeError } from './opencode-response-error';
+
+export { OpenCodeResponseTooLargeError } from './opencode-response-error';
 
 type EventStreamState = 'healthy' | 'degraded';
 
@@ -41,13 +44,6 @@ export type OpenCodeRequestOptions = {
   directory?: string;
   signal?: AbortSignal;
 };
-
-export class OpenCodeResponseTooLargeError extends Error {
-  constructor(readonly maxBytes: number) {
-    super(`OpenCode response exceeded the ${maxBytes}-byte safety limit`);
-    this.name = 'OpenCodeResponseTooLargeError';
-  }
-}
 
 export type OpenCodeRescopeResult = {
   state: 'connected' | 'degraded' | 'unchanged' | 'inactive' | 'cancelled' | 'superseded';
