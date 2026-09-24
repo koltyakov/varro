@@ -425,6 +425,11 @@ Direct input acquires ownership only when it can affect the transcript:
 - Compaction-only user records paint dividers but do not replace the active prompt identity. Keep
   presentation and active-turn activity attached to the real prompt through compaction and continuation,
   so already-visible assistant content never re-enters the streaming queue.
+- Automatic user-role notices, including background command completion, also retain the real prompt
+  identity. A metadata-only arrival cannot establish a new prompt before its content arrives. Switching
+  to a notice and back when the next assistant arrives clears presentation, hides already-painted
+  content, and can turn several thousand pixels of disappearing rows into blank bottom reserve.
+  `MessageList.presentation.test.ts` covers complete and split notification delivery.
 - Text uses a target string and displayed prefix. Release readable chunks every 32 ms and adapt their
   size to catch up within 256 ms after admission. A shorter or divergent canonical correction discards
   the queued suffix. Keep Markdown's streaming parser active while displayed text is behind.

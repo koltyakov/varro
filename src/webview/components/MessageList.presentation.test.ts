@@ -77,6 +77,48 @@ function openChat(parts: Part[] = []) {
 }
 
 describe('streaming presentation handoff', () => {
+  it.each([false, true])(
+    'keeps presented content through a background notice and continuation with splitDelivery=%s',
+    async (splitDelivery) => {
+      const answer = 'Keep this already-presented answer visible while background work finishes.';
+      openChat([
+        completeSearch(searchPart()),
+        { ...textPart('answer-text', answer), messageID: 'answer' },
+      ]);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(container?.textContent).toContain(answer);
+
+      const noticePart: Part = {
+        id: 'background-notice-text',
+        sessionID: 'session-1',
+        type: 'text',
+        messageID: 'background-notice',
+        synthetic: true,
+        text: '<shell id="test" state="completed">Done</shell>',
+      };
+      setMessagesIncremental([
+        ...state.messages,
+        { info: userMessage('background-notice'), parts: splitDelivery ? [] : [noticePart] },
+      ]);
+      if (splitDelivery) {
+        await vi.advanceTimersByTimeAsync(16);
+        upsertPart(noticePart);
+      }
+      await vi.advanceTimersByTimeAsync(16);
+      setMessagesIncremental([
+        ...state.messages,
+        {
+          info: assistantMessage('continuation', { parentID: 'prompt', time: { created: 5 } }),
+          parts: [],
+        },
+      ]);
+      for (let frame = 0; frame < 150; frame += 1) {
+        expect(container?.textContent).toContain(answer);
+        await vi.advanceTimersByTimeAsync(16);
+      }
+    }
+  );
+
   it.each([true, false])(
     'keeps presented content visible through compaction and continuation with auto=%s',
     async (auto) => {

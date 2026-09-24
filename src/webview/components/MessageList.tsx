@@ -6927,12 +6927,11 @@ export function MessageList() {
     for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
       const { info, parts } = visibleMessages[index]!;
       if (info.role === 'user') {
-        // Compaction dividers do not start a new turn. Switching away and back would
-        // discard presentation state and replay already-visible assistant content.
+        // Automatic notices and metadata-only arrivals do not start a new turn.
+        // Switching away and back would requeue already-visible assistant content.
         if (
           !isSessionResumeMessage(parts) &&
-          parts.length > 0 &&
-          parts.every((part) => part.type === 'compaction')
+          !hasUserMessageContent(parseUserMessageContent(parts))
         )
           continue;
         userMessageId = info.id;
