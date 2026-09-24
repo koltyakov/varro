@@ -43,6 +43,7 @@ describe('readExtensionConfigState', () => {
       expandThinking: false,
       showTurnTimer: true,
       enableProblemsContext: true,
+      largePasteMode: 'ask',
       chatFontSize: 13,
       chatEditorFontSize: 12,
       chatFontFamily: 'default',

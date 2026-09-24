@@ -310,6 +310,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (isBoolean(payload.showTurnTimer)) config.showTurnTimer = payload.showTurnTimer;
       if (isBoolean(payload.enableProblemsContext))
         config.enableProblemsContext = payload.enableProblemsContext;
+      if (isLargePasteMode(payload.largePasteMode)) config.largePasteMode = payload.largePasteMode;
       return { type, payload: config };
     }
 
@@ -969,6 +970,13 @@ function isDroppedFile<T>(value: T): value is T & DroppedFile {
   if (!isString(record.path) || !isString(record.relativePath)) return false;
   if (record.type !== 'file' && record.type !== 'directory') return false;
   if (
+    record.pastedText !== undefined &&
+    (record.type !== 'file' ||
+      !isString(record.pastedText) ||
+      pastedTextBytes(record.pastedText) > MAX_PASTED_TEXT_BYTES)
+  )
+    return false;
+  if (
     record.attachmentSequence !== undefined &&
     (!isNumber(record.attachmentSequence) || !Number.isFinite(record.attachmentSequence))
   ) {
@@ -1003,3 +1011,4 @@ function isClipboardImage<T>(value: T): value is T & ClipboardImageSnapshot {
 function isKnownExtensionMessageType<T>(value: T): value is T & ExtensionMessage['type'] {
   return isString(value) && KNOWN_TYPES.has(value);
 }
+import { isLargePasteMode, MAX_PASTED_TEXT_BYTES, pastedTextBytes } from './pasted-text';

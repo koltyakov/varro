@@ -122,6 +122,7 @@ export interface AppState {
   currentDocumentEnabled: boolean;
   issuesEnabled: boolean;
   enableProblemsContext: boolean;
+  largePasteMode: LargePasteMode;
   draftCurrentDocumentEnabled: boolean | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
@@ -375,6 +376,7 @@ export function createAppState(): AppStateInstance {
         ? storedInlineProblems.filter(isInlineProblem)
         : [],
     enableProblemsContext: initialWebviewState.enableProblemsContext ?? true,
+    largePasteMode: initialWebviewState.largePasteMode ?? 'ask',
     emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
     currentDocumentEnabled: currentDocumentWorkspace
       ? (projectCurrentDocumentEnabled[currentDocumentWorkspace] ?? true)
@@ -794,3 +796,4 @@ export function getPermissionWorkspaceValue() {
 export function setPermissionWorkspaceValue(value: string | null) {
   defaultAppState.permissionWorkspace = value;
 }
+import type { LargePasteMode } from '../../shared/pasted-text';

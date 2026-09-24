@@ -2766,3 +2766,39 @@
 .chat-attachment-chip .chip-remove:hover {
   color: var(--color-vscode-fg);
 }
+.large-paste-choice {
+  margin: 8px 10px;
+  padding: 10px;
+  border: 1px solid var(--vscode-widget-border, #80808040);
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-foreground);
+  font-size: 12px;
+}
+
+.large-paste-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.large-paste-actions button {
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-widget-border, #80808040);
+  border-radius: 5px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  cursor: pointer;
+}
+
+.large-paste-actions button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+.large-paste-actions button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+.large-paste-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

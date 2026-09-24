@@ -438,6 +438,15 @@ export function buildSessionSendBody(
 
   for (const attachment of orderedAttachments) {
     if (attachment.kind === 'file') {
+      if (attachment.file.pastedText !== undefined) {
+        parts.push({
+          type: 'file',
+          mime: 'text/plain',
+          filename: attachment.file.relativePath,
+          url: pastedTextDataUrl(attachment.file.pastedText),
+        });
+        continue;
+      }
       if (attachment.file.database) {
         parts.push({
           type: 'text',
@@ -553,6 +562,7 @@ export function getQueuedAttachmentSnapshot(composerState: {
       relativePath: file.relativePath,
       type: file.type,
       database: file.database ? { ...file.database } : undefined,
+      pastedText: file.pastedText,
       attachmentSequence: file.attachmentSequence ?? getContextFileAttachmentSequence(file.path),
       lineRanges: file.lineRanges?.map((range) => ({
         startLine: range.startLine,
@@ -1599,3 +1609,4 @@ export function revalidateProviderAuthWithDependencies(deps: {
 
   return false;
 }
+import { pastedTextDataUrl } from '../../../shared/pasted-text';

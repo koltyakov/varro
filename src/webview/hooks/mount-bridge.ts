@@ -90,6 +90,8 @@ export function createMountBridgeOperations(deps: {
           if (payload.enableProblemsContext !== undefined) {
             appStore.setState('enableProblemsContext', payload.enableProblemsContext);
           }
+          if (payload.largePasteMode !== undefined)
+            appStore.setState('largePasteMode', payload.largePasteMode);
           if (payload.showFileDiffs !== undefined) {
             uiStore.setShowFileDiffs(payload.showFileDiffs);
           }

@@ -8,6 +8,7 @@ export type ExtensionConfigState = {
   showChangedFiles?: boolean;
   showTurnTimer?: boolean;
   enableProblemsContext?: boolean;
+  largePasteMode?: LargePasteMode;
   desktopSessionPaneSide: DesktopSessionPaneSide;
   defaultPermissionMode: PermissionMode;
   chatFontSize: number;
@@ -22,9 +23,11 @@ export type WebviewConfigUpdatePayload = Pick<
   | 'showChangedFiles'
   | 'showTurnTimer'
   | 'enableProblemsContext'
+  | 'largePasteMode'
   | 'desktopSessionPaneSide'
   | 'defaultPermissionMode'
 >;
 
 export type ExtensionConfigSnapshot = WebviewConfigUpdatePayload &
   Pick<ExtensionConfigState, 'chatFontSize' | 'chatEditorFontSize' | 'chatFontFamily'>;
+import type { LargePasteMode } from './pasted-text';

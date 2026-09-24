@@ -7720,6 +7720,59 @@ describe('ChatInput', () => {
     expect(editor.textContent).toBe('pasted typed');
   });
 
+  it('turns a large paste into one undoable immutable attachment', async () => {
+    setState('largePasteMode', 'ask');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor, 0);
+    const text = 'Unicode 雪\r\n'.repeat(30);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: () => text, items: [], types: ['text/plain'] },
+    });
+    editor.dispatchEvent(event);
+    await flushAsyncWork();
+    const attach = [...container!.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Attach text'
+    );
+    expect(attach).toBeDefined();
+    attach!.click();
+    await flushAsyncWork();
+    expect(inputText()).toBe('');
+    expect(state.droppedFiles[0]?.pastedText).toBe(text);
+    const path = state.droppedFiles[0]?.path;
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true }));
+    await flushAsyncWork();
+    expect(state.droppedFiles).toHaveLength(0);
+    expect(inputText()).toBe('');
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'z', metaKey: true, shiftKey: true, bubbles: true })
+    );
+    await flushAsyncWork();
+    expect(state.droppedFiles[0]).toMatchObject({ path, pastedText: text });
+  });
+
+  it('dismisses a large-paste choice when the destination session changes', async () => {
+    setState('largePasteMode', 'ask');
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor, 0);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: () => 'x'.repeat(2100), items: [], types: ['text/plain'] },
+    });
+    editor.dispatchEvent(event);
+    await flushAsyncWork();
+    expect(container!.querySelector('.large-paste-choice')).not.toBeNull();
+    setState('activeSessionId', 'session-2');
+    await flushAsyncWork();
+    expect(container!.querySelector('.large-paste-choice')).toBeNull();
+    expect(state.droppedFiles).toHaveLength(0);
+  });
+
   it('includes a pending paste in Send without inserting it into the next draft', async () => {
     let resolveMatch!: (
       value: Awaited<ReturnType<typeof client.varro.matchCopiedSelection>>

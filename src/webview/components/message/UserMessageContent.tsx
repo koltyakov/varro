@@ -705,6 +705,12 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
     filesByPath.set(key, mergeContextFile(filesByPath.get(key), file));
   }
   const files = [...filesByPath.values()];
+  for (const part of parsed.fileParts) {
+    if (part.mime !== 'text/plain') continue;
+    const text = readPastedTextDataUrl(part.url);
+    if (text === null) continue;
+    files.push({ ...createPastedText(text), relativePath: part.filename || 'pasted-text.txt' });
+  }
   const images = parsed.fileParts
     .filter((part) => part.mime.startsWith('image/'))
     .map((part, index) => ({
@@ -2444,9 +2450,29 @@ function getDisplayMessageAttachmentPath(attachment: DisplayMessageAttachment): 
 function MessageFileAttachment(props: { part: FilePart }) {
   const label = () => getMessageFileAttachmentLabel(props.part);
   const path = () => props.part.source?.path || props.part.filename;
+  const text = () => readPastedTextDataUrl(props.part.url);
 
   return (
-    <span class="chat-attachment-chip message-attachment-chip" title={label()}>
+    <span
+      class="chat-attachment-chip message-attachment-chip"
+      title={label()}
+      role={text() !== null ? 'button' : undefined}
+      tabIndex={text() !== null ? 0 : undefined}
+      onClick={() => {
+        const content = text();
+        if (content !== null)
+          postMessage({
+            type: 'vscode/open-text',
+            payload: { content, title: label(), language: 'plaintext' },
+          });
+      }}
+      onKeyDown={(event) => {
+        if (text() !== null && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          event.currentTarget.click();
+        }
+      }}
+    >
       <FileTypeIcon path={path()} class="chip-icon" />
       <AttachmentLabel label={label()} preserveExtension />
     </span>
@@ -2644,3 +2670,4 @@ function normalizeCopiedSelectionText(text: string): string {
     .replace(/\n{3,}/g, '\n\n')
     .replace(/\n+$/g, '');
 }
+import { createPastedText, readPastedTextDataUrl } from '../../../shared/pasted-text';

@@ -84,6 +84,21 @@ beforeEach(() => {
 });
 
 describe('state helpers', () => {
+  it('restores full text attachments from a saved draft', async () => {
+    const { readStoredDroppedFiles } = await import('./state-stored-values');
+    const file = {
+      path: 'varro-paste:one',
+      relativePath: 'paste.txt',
+      type: 'file',
+      pastedText: '雪\r\n  text  ',
+    };
+    window.localStorage.setItem('test.paste-files', JSON.stringify([file]));
+    try {
+      expect(readStoredDroppedFiles('test.paste-files')[0]).toMatchObject(file);
+    } finally {
+      window.localStorage.removeItem('test.paste-files');
+    }
+  });
   it('restores database attachment labels from saved draft files', async () => {
     const { readStoredDroppedFiles } = await import('./state-stored-values');
     const database = {

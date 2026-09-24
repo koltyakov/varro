@@ -1,4 +1,5 @@
 import { createComputed, createRoot, createSignal } from 'solid-js';
+import { createPastedText, readPastedTextDataUrl } from '../../shared/pasted-text';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   DatabaseContext,
@@ -123,6 +124,37 @@ function createState(overrides?: {
 }
 
 describe('session-send helpers', () => {
+  it('sends text snapshots once and restores their exact contents for queueing and inline edits', () => {
+    const text = '  Unicode 雪\r\n'.repeat(25);
+    const file = createPastedText(text);
+    const composer = createState({ droppedFiles: [file] });
+    const body = buildSessionSendBody(composer, 'session-1', 'Review this', () => false);
+    const parts = body!.body.parts;
+    const attachment = parts.find((part) => part.type === 'file');
+    expect(attachment).toMatchObject({
+      type: 'file',
+      mime: 'text/plain',
+      filename: file.relativePath,
+    });
+    expect(parts.filter((part) => part.type === 'file')).toHaveLength(1);
+    if (attachment?.type !== 'file' || !attachment.url || !attachment.mime)
+      throw new Error('Missing text attachment');
+    expect(readPastedTextDataUrl(attachment.url)).toBe(text);
+    expect(getQueuedAttachmentSnapshot(composer).droppedFiles?.[0]?.pastedText).toBe(text);
+    const edit = getUserMessageEditContext([
+      {
+        type: 'file',
+        url: attachment.url,
+        mime: attachment.mime,
+        filename: attachment.filename,
+        id: 'part-1',
+        messageID: 'msg-1',
+        sessionID: 'session-1',
+      },
+    ]);
+    expect(edit.files[0]?.pastedText).toBe(text);
+    expect(edit.files[0]?.relativePath).toBe(file.relativePath);
+  });
   it('does not repeat explicitly selected problems in automatic or bulb context', () => {
     const diagnostic = {
       path: '/repo/a.ts',

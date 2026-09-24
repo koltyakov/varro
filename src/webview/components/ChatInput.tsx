@@ -442,6 +442,13 @@ function activeContextEnabled(sessionId?: string | null) {
 }
 
 function openContextFileInEditor(file: DroppedFile) {
+  if (file.pastedText !== undefined) {
+    postMessage({
+      type: 'vscode/open-text',
+      payload: { content: file.pastedText, title: file.relativePath, language: 'plaintext' },
+    });
+    return;
+  }
   postMessage({
     type: 'vscode/open',
     payload: { path: file.path, kind: file.type, line: file.lineRanges?.[0]?.startLine },
@@ -1124,6 +1131,66 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       ? pending.insertion
       : undefined;
   };
+
+  const [largePaste, setLargePaste] = createSignal<{
+    text: string;
+    insertion: RichComposerPasteInsertion;
+    sessionId: string | null;
+    version: number;
+  } | null>(null);
+  const currentLargePaste = () => {
+    const pending = largePaste();
+    return pending &&
+      pending.sessionId === composerSessionId() &&
+      pending.version === inputTextMutationVersion() &&
+      pending.insertion.value === inputText()
+      ? pending
+      : null;
+  };
+  const largePasteLimit = () => {
+    const pending = currentLargePaste();
+    if (!pending) return null;
+    const size = pastedTextBytes(pending.text);
+    if (size > MAX_PASTED_TEXT_BYTES)
+      return 'This paste exceeds the 64 KB attachment limit. It remains inline.';
+    if (
+      size +
+        composerFiles().reduce((sum, file) => sum + pastedTextBytes(file.pastedText ?? ''), 0) >
+      MAX_PASTED_TEXT_TOTAL_BYTES
+    )
+      return 'Text attachments exceed 256 KB in this draft. This paste remains inline.';
+    return null;
+  };
+  function attachLargePaste() {
+    const pending = currentLargePaste();
+    if (!pending || largePasteLimit()) return;
+    const file = createPastedText(pending.text);
+    applyingComposerHistory = true;
+    try {
+      batch(() => {
+        addContextFile(file);
+        setInputText(
+          pending.insertion.value.slice(0, pending.insertion.start) +
+            pending.insertion.value.slice(pending.insertion.end)
+        );
+        setCaretPosition(pending.insertion.start);
+        setLargePaste(null);
+      });
+      composerHistory.replaceCurrent(captureComposerSnapshot());
+    } finally {
+      applyingComposerHistory = false;
+    }
+  }
+  function offerLargePaste(text: string, insertion: RichComposerPasteInsertion) {
+    if (state.largePasteMode === 'inline' || !isLargeTextPaste(text)) return;
+    setLargePaste({
+      text,
+      insertion,
+      sessionId: composerSessionId(),
+      version: inputTextMutationVersion(),
+    });
+    if (state.largePasteMode === 'attach') attachLargePaste();
+  }
 
   function captureComposerSnapshot(): ComposerSnapshot {
     return {
@@ -3914,6 +3981,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         if (pendingCopiedSelectionPaste() === owner) setPendingCopiedSelectionPaste(null);
       }
       resolvePastedMentions(pastedText, insertion);
+      if (!match) offerLargePaste(pastedText, insertion);
     };
     const timeout = setTimeout(() => settle(null), COPIED_SELECTION_MATCH_TIMEOUT_MS);
     void client.varro.matchCopiedSelection(pastedText, plainTextOnly).then(settle, (err) => {
@@ -5330,6 +5398,30 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             />
           </Show>
 
+          <Show when={currentLargePaste()}>
+            <div class="large-paste-choice" role="status">
+              <span>{largePasteLimit() ?? 'Attach this large paste as a text file?'}</span>
+              <div class="large-paste-actions">
+                <button type="button" disabled={!!largePasteLimit()} onClick={attachLargePaste}>
+                  Attach text
+                </button>
+                <button type="button" onClick={() => setLargePaste(null)}>
+                  Keep inline
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    postMessage({
+                      type: 'vscode/open-settings',
+                      payload: { query: 'varro.chat.largePasteMode' },
+                    })
+                  }
+                >
+                  Paste settings
+                </button>
+              </div>
+            </div>
+          </Show>
           <RichComposerArea
             editorRef={(el) => {
               richEditorRef = el;
@@ -5970,3 +6062,10 @@ function createAttachmentID() {
   }
   return `img-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
+import {
+  createPastedText,
+  isLargeTextPaste,
+  pastedTextBytes,
+  MAX_PASTED_TEXT_BYTES,
+  MAX_PASTED_TEXT_TOTAL_BYTES,
+} from '../../shared/pasted-text';
