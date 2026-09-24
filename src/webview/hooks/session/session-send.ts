@@ -1,4 +1,5 @@
 import { batch } from 'solid-js';
+import { pastedTextDataUrl } from '../../../shared/pasted-text';
 import {
   cloneDatabaseContext,
   formatDatabaseAttachmentReference,
@@ -1609,4 +1610,3 @@ export function revalidateProviderAuthWithDependencies(deps: {
 
   return false;
 }
-import { pastedTextDataUrl } from '../../../shared/pasted-text';

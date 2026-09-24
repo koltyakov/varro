@@ -862,7 +862,6 @@ export type InitialWebviewState = {
   showChangedFiles?: boolean;
   showTurnTimer?: boolean;
   enableProblemsContext?: boolean;
-  largePasteMode?: LargePasteMode;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;
   chatFontSize: number;
@@ -1202,4 +1201,3 @@ export type WebviewMessage =
       type: 'log';
       payload: { msg: string; data?: string; error?: string; level?: 'info' | 'warn' | 'error' };
     };
-import type { LargePasteMode } from './pasted-text';

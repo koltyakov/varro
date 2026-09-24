@@ -1,3 +1,4 @@
+import { MAX_PASTED_TEXT_BYTES, pastedTextBytes } from './pasted-text';
 import {
   isDatabaseAttachment,
   isDatabaseContext,
@@ -310,7 +311,6 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (isBoolean(payload.showTurnTimer)) config.showTurnTimer = payload.showTurnTimer;
       if (isBoolean(payload.enableProblemsContext))
         config.enableProblemsContext = payload.enableProblemsContext;
-      if (isLargePasteMode(payload.largePasteMode)) config.largePasteMode = payload.largePasteMode;
       return { type, payload: config };
     }
 
@@ -1011,4 +1011,3 @@ function isClipboardImage<T>(value: T): value is T & ClipboardImageSnapshot {
 function isKnownExtensionMessageType<T>(value: T): value is T & ExtensionMessage['type'] {
   return isString(value) && KNOWN_TYPES.has(value);
 }
-import { isLargePasteMode, MAX_PASTED_TEXT_BYTES, pastedTextBytes } from './pasted-text';

@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import type { ExtensionConfigState } from '../shared/provider-limit-config';
 import { isPermissionMode } from '../shared/protocol';
 import { isNumber, isString } from '../shared/type-utils';
-import { isLargePasteMode } from '../shared/pasted-text';
 
 const DEFAULT_CHAT_FONT_SIZE = 13;
 const DEFAULT_CHAT_EDITOR_FONT_SIZE = 12;
@@ -12,9 +11,7 @@ export function readExtensionConfigState(
   config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro'),
   chatConfig: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('chat')
 ): ExtensionConfigState {
-  const largePasteMode = config.get<unknown>('chat.largePasteMode');
   return {
-    largePasteMode: isLargePasteMode(largePasteMode) ? largePasteMode : 'ask',
     showFileDiffs: config.get<boolean>('chat.showFileDiffs', false),
     expandThinking: config.get<boolean>('chat.expandThinking', false),
     showChangedFiles: config.get<boolean>('chat.showChangedFiles', false),

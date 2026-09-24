@@ -7721,7 +7721,6 @@ describe('ChatInput', () => {
   });
 
   it('turns a large paste into one undoable immutable attachment', async () => {
-    setState('largePasteMode', 'ask');
     cleanup = render(() => ChatInput(), container!);
     const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
     editor.focus();
@@ -7733,13 +7732,7 @@ describe('ChatInput', () => {
     });
     editor.dispatchEvent(event);
     await flushAsyncWork();
-    const attach = [...container!.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Attach text'
-    );
-    expect(attach).toBeDefined();
-    attach!.click();
-    await flushAsyncWork();
-    expect(inputText()).toBe('');
+    expect(inputText()).toBe(`@${state.droppedFiles[0]?.relativePath}`);
     expect(state.droppedFiles[0]?.pastedText).toBe(text);
     const path = state.droppedFiles[0]?.path;
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true }));
@@ -7751,10 +7744,21 @@ describe('ChatInput', () => {
     );
     await flushAsyncWork();
     expect(state.droppedFiles[0]).toMatchObject({ path, pastedText: text });
+    openChipMenu(editor, 'mention-file');
+    clickExpandToText();
+    await flushAsyncWork();
+    expect(inputText()).toBe(text);
+    expect(state.droppedFiles).toHaveLength(0);
   });
 
-  it('dismisses a large-paste choice when the destination session changes', async () => {
-    setState('largePasteMode', 'ask');
+  it('does not convert a pending paste after the destination session changes', async () => {
+    let resolveMatch!: (value: null) => void;
+    vi.mocked(client.varro.matchCopiedSelection).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMatch = resolve;
+        })
+    );
     setState('activeSessionId', 'session-1');
     cleanup = render(() => ChatInput(), container!);
     const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
@@ -7765,11 +7769,9 @@ describe('ChatInput', () => {
       value: { getData: () => 'x'.repeat(2100), items: [], types: ['text/plain'] },
     });
     editor.dispatchEvent(event);
-    await flushAsyncWork();
-    expect(container!.querySelector('.large-paste-choice')).not.toBeNull();
     setState('activeSessionId', 'session-2');
+    resolveMatch(null);
     await flushAsyncWork();
-    expect(container!.querySelector('.large-paste-choice')).toBeNull();
     expect(state.droppedFiles).toHaveLength(0);
   });
 

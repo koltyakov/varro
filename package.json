@@ -429,12 +429,6 @@
           "default": true,
           "description": "Enable VS Code Problems context in chat. Disable to hide the Problems attachment chip and exclude diagnostics from prompts, including queued messages."
         },
-        "varro.chat.largePasteMode": {
-          "type": "string",
-          "enum": ["ask", "attach", "inline"],
-          "default": "ask",
-          "description": "How to handle plain-text pastes of at least 2,000 characters or 25 lines. Text attachments preserve up to 64 KB per paste."
-        },
         "varro.chat.showTurnTimer": {
           "type": "boolean",
           "default": true,

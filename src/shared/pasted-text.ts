@@ -1,13 +1,8 @@
 import type { DroppedFile } from './protocol';
 
-export type LargePasteMode = 'ask' | 'attach' | 'inline';
 export const MAX_PASTED_TEXT_BYTES = 64 * 1024;
 export const MAX_PASTED_TEXT_TOTAL_BYTES = 256 * 1024;
 const DATA_PREFIX = 'data:text/plain;charset=utf-8,';
-
-export function isLargePasteMode<T>(value: T): value is T & LargePasteMode {
-  return value === 'ask' || value === 'attach' || value === 'inline';
-}
 
 export function isLargeTextPaste(text: string): boolean {
   return text.length >= 2000 || text.split(/\r\n|\r|\n/).length >= 25;

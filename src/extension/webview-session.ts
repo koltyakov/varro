@@ -513,7 +513,6 @@ export class WebviewSession {
       showChangedFiles: config.showChangedFiles,
       showTurnTimer: config.showTurnTimer,
       enableProblemsContext: config.enableProblemsContext,
-      largePasteMode: config.largePasteMode,
       desktopSessionPaneSide: config.desktopSessionPaneSide,
       defaultPermissionMode: config.defaultPermissionMode,
       chatFontSize: config.chatFontSize,

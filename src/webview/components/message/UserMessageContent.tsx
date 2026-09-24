@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import { createPastedText, readPastedTextDataUrl } from '../../../shared/pasted-text';
 import type {
   DatabaseContext,
   DatabaseAttachment,
@@ -2662,4 +2663,3 @@ function normalizeCopiedSelectionText(text: string): string {
     .replace(/\n{3,}/g, '\n\n')
     .replace(/\n+$/g, '');
 }
-import { createPastedText, readPastedTextDataUrl } from '../../../shared/pasted-text';

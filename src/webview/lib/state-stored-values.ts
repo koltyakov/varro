@@ -1,3 +1,4 @@
+import { MAX_PASTED_TEXT_BYTES, pastedTextBytes } from '../../shared/pasted-text';
 import type {
   QueuedMessage,
   SelectedModel,
@@ -395,4 +396,3 @@ export function readInitialWebviewState(): Partial<InitialWebviewState> {
 export function readWebviewInstanceContext(): WebviewInstanceContext | null {
   return readInitialWebviewState().webviewContext ?? null;
 }
-import { MAX_PASTED_TEXT_BYTES, pastedTextBytes } from '../../shared/pasted-text';
