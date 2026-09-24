@@ -327,6 +327,29 @@ afterEach(() => {
 });
 
 describe('CommitMessageService', () => {
+  it('uses v2 stateless generation and retains commit-draft validation', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const hidden = createHiddenSessions();
+    const request = vi.fn(async (_method: string, path: string) => {
+      if (path.startsWith('/config')) return {};
+      if (path === '/openapi.json')
+        return { paths: { '/api/experimental/generate': { post: {} } } };
+      if (path === '/api/experimental/generate')
+        return { data: { text: '{"subject":"fix: validate order totals"}' } };
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const service = new CommitMessageService(
+      { request, apiVersion: 2 },
+      hidden,
+      async () => {},
+      () => '/repo'
+    );
+    await service.generate();
+    expect(repository.inputBox.value).toBe('fix: validate order totals');
+    expect(hidden.registerPendingTitle).not.toHaveBeenCalled();
+    expect(mocks.window.showErrorMessage).not.toHaveBeenCalled();
+  });
   it('generates a scoped staged-only message with the VS Code model setting', async () => {
     const patch = `${'x'.repeat(60_005)}SECRET_TAIL`;
     const repository = createRepository('/repo with spaces', patch);

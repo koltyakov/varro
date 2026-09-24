@@ -11,6 +11,7 @@ import { parseServerEvent } from '../shared/protocol';
 import { parseHealthResponse } from '../shared/health';
 import { OpenCodeTransport } from './open-code-transport';
 import { basicAuthorization, OpenCodeStartupOutput } from './opencode-connection';
+import { tryGenerateOneShot } from './one-shot-generation';
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
@@ -126,6 +127,19 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     const output = new OpenCodeStartupOutput((password) => {
       authorization = basicAuthorization(password);
     });
+    await mkdir(join(root, 'config/opencode'), { recursive: true });
+    await writeFile(
+      join(root, 'config/opencode/opencode.json'),
+      JSON.stringify({
+        providers: {
+          fixture: {
+            package: '@opencode/ai/providers/openai-compatible',
+            settings: { baseURL: `http://127.0.0.1:${address.port}/v1`, apiKey: 'fixture-only' },
+            models: { fixture: { name: 'Fixture', limit: { context: 32000, output: 1000 } } },
+          },
+        },
+      })
+    );
     let logs = '';
     child = crossSpawn(binary!, ['serve', '--hostname', '127.0.0.1', '--port', '0'], {
       cwd: join(root, 'workspace'),
@@ -185,6 +199,63 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     modelServer?.closeAllConnections();
     await new Promise<void>((done) => (modelServer ? modelServer.close(() => done()) : done()));
     if (root) await writeFile(join(root, 'events.json'), JSON.stringify(events, null, 2));
+  });
+
+  it('falls back for a configured custom model without admitting duplicate generation', async () => {
+    if (transport.version !== 2) return;
+    expect(
+      JSON.stringify(await transport.request('GET', '/api/config', undefined, { unscoped: true }))
+    ).toContain('fixture');
+    const before = await transport.request('GET', '/session');
+    const requestCount = modelRequests.length;
+    const result = await tryGenerateOneShot(
+      { apiVersion: 2, request: transport.request.bind(transport) },
+      {
+        prompt: 'Return the fixture response.',
+        model: { providerID: 'fixture', modelID: 'fixture' },
+        directory: join(root, 'workspace'),
+        signal: AbortSignal.timeout(20000),
+      }
+    );
+    // The released base runner does not resolve this configured provider, even
+    // though location-scoped catalogs and helper sessions can use it.
+    expect(result).toBeNull();
+    expect(modelRequests).toHaveLength(requestCount);
+    expect(await transport.request('GET', '/session')).toEqual(before);
+    const session = asRecord(
+      await transport.request('POST', '/session', { title: 'Fixture helper fallback' })
+    );
+    const id = session?.id;
+    if (!isString(id)) throw new Error('Missing fallback fixture session');
+    try {
+      const generated = asRecord(
+        await transport.request('POST', `/session/${id}/message`, {
+          model: { providerID: 'fixture', modelID: 'fixture' },
+          parts: [{ type: 'text', text: 'Return the fixture response.' }],
+          format: { type: 'json_schema', schema: { type: 'object' } },
+        })
+      );
+      expect(generated?.parts).toEqual([{ type: 'text', text: 'Adapter stream verified.' }]);
+      expect(modelRequests).toHaveLength(requestCount + 1);
+    } finally {
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  });
+
+  it('identifies an unavailable base model before any provider request', async () => {
+    if (transport.version !== 2) return;
+    const before = modelRequests.length;
+    const result = await tryGenerateOneShot(
+      { apiVersion: 2, request: transport.request.bind(transport) },
+      {
+        prompt: 'Do not call a provider for this unavailable model.',
+        model: { providerID: 'not-in-base-config', modelID: 'unavailable' },
+        directory: join(root, 'workspace'),
+        signal: AbortSignal.timeout(20000),
+      }
+    );
+    expect(result).toBeNull();
+    expect(modelRequests).toHaveLength(before);
   });
 
   it('loads bootstrap catalogs', async () => {

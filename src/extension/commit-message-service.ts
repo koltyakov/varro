@@ -5,6 +5,7 @@ import { constants } from 'node:fs';
 import { open, realpath, stat as fileStat } from 'node:fs/promises';
 import { isAbsolute, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
+import { tryGenerateOneShot } from './one-shot-generation';
 
 import type { PermissionRule } from '../shared/opencode-types';
 import type { ChatModelSelection } from '../shared/protocol';
@@ -18,7 +19,8 @@ import { resolveHelperModel } from './helper-model-selection';
 import { logger } from './logger';
 import type { OpenCodeServer } from './server';
 
-type OpenCodeRequest = Pick<OpenCodeServer, 'request'>;
+type OpenCodeRequest = Pick<OpenCodeServer, 'request'> &
+  Partial<Pick<OpenCodeServer, 'apiVersion'>>;
 
 interface CommitMessageRequest {
   model?: { providerID: string; modelID: string };
@@ -379,6 +381,21 @@ export class CommitMessageService {
     throwIfCancelled(attempt);
     await this.ensureServerStarted();
     throwIfCancelled(attempt);
+
+    if (this.server.apiVersion === 2) {
+      const model = await this.resolveCommitModel(attempt.directory);
+      throwIfCancelled(attempt);
+      const generated = await tryGenerateOneShot(this.server, {
+        prompt: `${buildSystemPrompt()}\nReturn exactly one JSON object with a required string "subject" (at most 72 characters) and optional string "body" (at most 4000 characters). No other properties.\n\n${buildUserPrompt(changePatch, changePaths, scope, history)}`,
+        model,
+        directory: attempt.directory,
+        signal: attempt.controller.signal,
+      });
+      if (generated) {
+        throwIfCancelled(attempt);
+        return normalizeGeneratedMessage({ parts: [{ type: 'text', text: generated.text }] });
+      }
+    }
 
     const title = `${COMMIT_MESSAGE_SESSION_TITLE_PREFIX}${++this.helperSequence}`;
     attempt.pendingTitle = title;

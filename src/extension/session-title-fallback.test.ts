@@ -41,6 +41,32 @@ function resolveToolAction(rules: PermissionRule[], tool: string) {
 }
 
 describe('SessionTitleFallback', () => {
+  it('uses advertised v2 stateless generation without creating a title session', async () => {
+    const hidden = createHiddenSessions();
+    const request = vi.fn(async (method: string, path: string) => {
+      if (path === '/session/session-1')
+        return { id: 'session-1', title: method === 'PATCH' ? 'Fix Build Errors' : 'New session' };
+      if (path.endsWith('/message?limit=20'))
+        return [{ info: { role: 'user' }, parts: [{ type: 'text', text: 'Fix build errors' }] }];
+      if (path === '/config') return { small_model: 'test/small' };
+      if (path === '/openapi.json')
+        return { paths: { '/api/experimental/generate': { post: {} } } };
+      if (path === '/api/experimental/generate')
+        return { data: { text: '{"title":"Fix Build Errors"}' } };
+      throw new Error(`Unexpected request ${method} ${path}`);
+    });
+    const fallback = new SessionTitleFallback({ request, apiVersion: 2 }, hidden, () => true);
+    expect(await fallback.renameIfUntitled('session-1')).toEqual({
+      id: 'session-1',
+      title: 'Fix Build Errors',
+    });
+    expect(hidden.registerPendingTitle).not.toHaveBeenCalled();
+    expect(
+      request.mock.calls
+        .filter(([method]) => method === 'POST')
+        .map(([method, path]) => [method, path])
+    ).toEqual([['POST', '/api/experimental/generate']]);
+  });
   it('scopes the rename and helper flow to the session workspace', async () => {
     const request = vi.fn(
       async (method: string, path: string, _body?: unknown, _options?: unknown) => {

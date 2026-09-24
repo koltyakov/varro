@@ -316,6 +316,7 @@ export class OpenCodeV2Adapter {
       return response.data as T;
     };
     const input = asRecord(body) ?? {};
+    if (method === 'GET' && route === '/openapi.json') return raw('GET', '/openapi.json');
 
     // Internal callers already use a few native permission endpoints.
     if (route.startsWith('/api/')) return raw(method, query(path, true), body);
