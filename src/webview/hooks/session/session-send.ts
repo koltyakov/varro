@@ -369,7 +369,7 @@ export function buildSessionSendBody(
         text:
           explicitSelectionRanges && explicitSelectionRanges.length > 0
             ? formatSelectionReference(activeFilePath, explicitSelectionRanges)
-            : activeFilePath,
+            : `[Attached file: ${activeFilePath}]`,
       });
     } else {
       parts.push({
@@ -447,17 +447,11 @@ export function buildSessionSendBody(
       }
       if (currentDocumentEnabled && isSamePath(attachment.file.path, activeFile?.path)) continue;
       const fileReference = getAttachmentReference(attachment.file, workspacePath);
-      const isExternalFile =
-        attachment.file.type === 'file' &&
-        !!workspacePath &&
-        getWorkspaceRelativePath(attachment.file.path, workspacePath) === null;
       parts.push({
         type: 'text',
         text: attachment.file.lineRanges?.length
           ? formatSelectionReference(fileReference, attachment.file.lineRanges)
-          : isExternalFile
-            ? `[Attached file: ${fileReference}]`
-            : fileReference,
+          : `[Attached file: ${fileReference}]`,
       });
       continue;
     }

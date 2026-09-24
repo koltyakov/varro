@@ -323,6 +323,56 @@ afterEach(() => {
 });
 
 describe('UserMessageContent', () => {
+  it.each(['separate', 'joined', 'joined-crlf', 'explicit'])(
+    'renders %s plan attachments above the prompt and restores them for editing',
+    (layout) => {
+      const send = installSendToExtension();
+      const path = '/Users/andrew/.opencode/plan/project-adoption.md';
+      const prompt = 'Use the project name in commits and docs.';
+      const parts =
+        layout === 'separate'
+          ? [textPart('prompt', prompt), textPart('attachment', path)]
+          : [
+              textPart(
+                'prompt',
+                layout === 'explicit'
+                  ? `${prompt}\n[Attached file: ${path}]`
+                  : `${prompt}\n${path}\n`.replaceAll(
+                      '\n',
+                      layout === 'joined-crlf' ? '\r\n' : '\n'
+                    )
+              ),
+            ];
+      renderUserContent(parts);
+
+      const chip = container?.querySelector<HTMLButtonElement>(
+        '.message-attachments-leading .message-attachment-chip'
+      );
+      expect(chip?.querySelector('.chip-label')?.textContent).toBe('project-adoption.md');
+      expect(container?.querySelector('.user-message-text-scroll')?.textContent).toBe(prompt);
+      expect(getUserMessageEditText(parts)).toBe(prompt);
+      expect(getUserMessageEditContext(parts).files).toMatchObject([{ path, type: 'file' }]);
+      chip?.click();
+      expect(send).toHaveBeenCalledWith({
+        type: 'vscode/open',
+        payload: { path, line: undefined, kind: 'file' },
+      });
+    }
+  );
+
+  it.each([
+    'Read /Users/andrew/plan.md',
+    'Example:\n```text\n/Users/andrew/plan.md\n```',
+    'Example:\n```text\n/Users/andrew/plan.md',
+    'Use this route:\n/service/v2/resources',
+    'See this link:\nhttps://example.test/plan.md',
+    'Keep this path in the explanation:\n/Users/andrew/plan.md\nIt is an example.',
+  ])('keeps path-like prose and code as prompt text: %s', (prompt) => {
+    const parts = [textPart('prompt', prompt)];
+    expect(getUserMessageEditText(parts)).toBe(prompt);
+    expect(getUserMessageEditContext(parts).files).toEqual([]);
+  });
+
   it('renders skill chips inline and above the message alongside file attachments', () => {
     renderUserContent([
       textPart('prompt', 'Use $[browser-bridge] and $[unslop].'),

@@ -1321,7 +1321,7 @@ describe('parseUserMessageContent', () => {
     expect(parsed.attachments).toEqual([]);
   });
 
-  it('does not extract attachment lines from mixed user text', () => {
+  it('renders legacy trailing absolute file references as attachment chips', () => {
     cleanup = render(
       () =>
         Message({
@@ -1336,10 +1336,10 @@ describe('parseUserMessageContent', () => {
       container!
     );
 
-    expect(container?.querySelector('.message-attachments')).toBeNull();
-    expect(container?.querySelector('.user-message-text')?.textContent).toBe(
-      'Test\n\n/Users/andrew/Downloads/ПД Оккервиль ЛСТ Квартплата 5397.pdf'
+    expect(container?.querySelector('.message-attachments-leading .chip-label')?.textContent).toBe(
+      'ПД Оккервиль ЛСТ Квартплата 5397.pdf'
     );
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe('Test');
   });
 
   it('extracts explicit attached files from merged user text', () => {

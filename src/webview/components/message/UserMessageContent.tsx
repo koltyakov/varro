@@ -447,6 +447,14 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
   const attachments: MessageAttachment[] = [];
   const textBuffer: string[] = [];
   const standaloneReference = isStandaloneFileReference(normalized.trim());
+  // Older sends could append bare absolute attachment paths before V2 joined the parts.
+  // Recover only a trailing path block; inline prose and fenced examples stay text.
+  let trailingPathStart = lines.length;
+  while (trailingPathStart > 0) {
+    const line = lines[trailingPathStart - 1]!.trim();
+    if (line && !(isAbsolutePath(normalizePath(line)) && isStandaloneFileReference(line))) break;
+    trailingPathStart -= 1;
+  }
   let inCodeFence = false;
 
   const flushTextBuffer = () => {
@@ -575,7 +583,7 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
 
       const attachment = parseUserMessageAttachmentLine(
         trimmedLine,
-        standaloneReference && trimmedLine === normalized.trim()
+        (standaloneReference && trimmedLine === normalized.trim()) || index >= trailingPathStart
       );
       if (attachment) {
         flushTextBuffer();
@@ -637,7 +645,7 @@ function parseUserMessageAttachmentLine(
       return {
         type: 'file-reference',
         path: match[1]!,
-        isDirectory: false,
+        isDirectory: /[/\\]$/.test(match[1]!),
       };
     }
   }
