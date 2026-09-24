@@ -1596,7 +1596,7 @@ export function SessionListView(props: {
           return (
             <SessionListItem
               session={session()}
-              summaryUpdated={getSessionTreeUpdated(sessionId)}
+              summaryUpdated={sessionDiffSummaries.getRevision(sessionId)}
               onRequestSummary={(updated) => enqueueDiffSummaryRequest(session(), updated)}
               diffSummary={diffSummary()?.stats ?? null}
               isSummaryLoading={

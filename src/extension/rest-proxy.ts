@@ -2769,13 +2769,18 @@ export class RestProxy {
   }
 
   private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {
+    const metadata =
+      this.callbacks.server.apiVersion === 2
+        ? asRecord(await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`))
+            ?.metadata
+        : undefined;
     let local: LocalSessionSummaryData | null | undefined;
     try {
       local = await this.callbacks.readLocalSessionSummary?.(sessionID);
     } catch {
       local = null;
     }
-    if (local) return sessionSummary.fromLocal(local);
+    if (local) return sessionSummary.fromLocal(local, metadata);
 
     const encodedSessionID = encodeURIComponent(sessionID);
     const [diffs, messages, sessions] = await Promise.all([
@@ -2784,12 +2789,17 @@ export class RestProxy {
       this.readSessionListForSummary(),
     ]);
     const descendants = collectDescendantSessions(sessions, sessionID);
-    return sessionSummary.fromRemote(diffs, messages, descendants, () =>
-      mapWithConcurrency(descendants, SESSION_SUMMARY_DESCENDANT_CONCURRENCY, (descendant) =>
-        this.withSessionSummaryDescendantSlot(() =>
-          this.requestServer('GET', `/session/${encodeURIComponent(descendant.id)}/message`)
-        )
-      )
+    return sessionSummary.fromRemote(
+      diffs,
+      messages,
+      descendants,
+      () =>
+        mapWithConcurrency(descendants, SESSION_SUMMARY_DESCENDANT_CONCURRENCY, (descendant) =>
+          this.withSessionSummaryDescendantSlot(() =>
+            this.requestServer('GET', `/session/${encodeURIComponent(descendant.id)}/message`)
+          )
+        ),
+      metadata
     );
   }
 

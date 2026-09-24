@@ -1,4 +1,5 @@
 import { createComputed, createRoot, createSignal } from 'solid-js';
+import { createPastedText, readPastedTextDataUrl } from '../../shared/pasted-text';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   DatabaseContext,
@@ -123,6 +124,37 @@ function createState(overrides?: {
 }
 
 describe('session-send helpers', () => {
+  it('sends text snapshots once and restores their exact contents for queueing and inline edits', () => {
+    const text = '  Unicode 雪\r\n'.repeat(25);
+    const file = createPastedText(text);
+    const composer = createState({ droppedFiles: [file] });
+    const body = buildSessionSendBody(composer, 'session-1', 'Review this', () => false);
+    const parts = body!.body.parts;
+    const attachment = parts.find((part) => part.type === 'file');
+    expect(attachment).toMatchObject({
+      type: 'file',
+      mime: 'text/plain',
+      filename: file.relativePath,
+    });
+    expect(parts.filter((part) => part.type === 'file')).toHaveLength(1);
+    if (attachment?.type !== 'file' || !attachment.url || !attachment.mime)
+      throw new Error('Missing text attachment');
+    expect(readPastedTextDataUrl(attachment.url)).toBe(text);
+    expect(getQueuedAttachmentSnapshot(composer).droppedFiles?.[0]?.pastedText).toBe(text);
+    const edit = getUserMessageEditContext([
+      {
+        type: 'file',
+        url: attachment.url,
+        mime: attachment.mime,
+        filename: attachment.filename,
+        id: 'part-1',
+        messageID: 'msg-1',
+        sessionID: 'session-1',
+      },
+    ]);
+    expect(edit.files[0]?.pastedText).toBe(text);
+    expect(edit.files[0]?.relativePath).toBe(file.relativePath);
+  });
   it('does not repeat explicitly selected problems in automatic or bulb context', () => {
     const diagnostic = {
       path: '/repo/a.ts',
@@ -373,7 +405,7 @@ describe('session-send helpers', () => {
       { type: 'text', text },
       { type: 'text', text: formatSkillAttachment('browser-bridge') },
       { type: 'text', text: formatSkillAttachment('unslop') },
-      { type: 'text', text: 'README.md' },
+      { type: 'text', text: '[Attached file: README.md]' },
     ]);
     const persistedParts: Part[] = (result?.body.parts ?? []).map((part, index) => ({
       id: `part-${index}`,
@@ -754,7 +786,7 @@ describe('session-send helpers', () => {
         model: { providerID: 'openai', modelID: 'gpt-4o' },
         parts: [
           { type: 'text', text: 'Review this image' },
-          { type: 'text', text: 'src/extra.ts' },
+          { type: 'text', text: '[Attached file: src/extra.ts]' },
           { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
         ],
       },
@@ -820,7 +852,7 @@ describe('session-send helpers', () => {
     expect(result?.body.parts).toEqual([
       { type: 'text', text: 'Review this image' },
       { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
-      { type: 'text', text: 'src/' },
+      { type: 'text', text: '[Attached file: src/]' },
     ]);
   });
 
@@ -861,7 +893,7 @@ describe('session-send helpers', () => {
     );
     expect(supported?.body.parts).toEqual([
       { type: 'text', text: 'Review' },
-      { type: 'text', text: '/repo/a.ts' },
+      { type: 'text', text: '[Attached file: /repo/a.ts]' },
       { type: 'file', mime: 'application/pdf', filename: 'spec.pdf', url: pdf.url },
     ]);
 
@@ -1119,6 +1151,56 @@ describe('session-send helpers', () => {
       parts: [{ type: 'text', text: 'Change direction' }],
     });
   });
+
+  it.each([undefined, 'steer', 'queue'] as const)(
+    'preserves attachments after V2 joins text parts with delivery %s',
+    (delivery) => {
+      const plan = '/Users/andrew/.opencode/plan/project-adoption.md';
+      const prompt = 'Use the project name in commits and docs.';
+      const result = buildSessionSendBody(
+        createState({
+          editorContext: createEditorContext({
+            activeFile: { path: plan, relativePath: 'project-adoption.md', language: 'markdown' },
+          }),
+          droppedFiles: [
+            { path: plan, relativePath: 'project-adoption.md', type: 'file' },
+            { path: '/repo/README.md', relativePath: 'README.md', type: 'file' },
+            { path: '/repo/src', relativePath: 'src', type: 'directory' },
+          ],
+        }),
+        'session-1',
+        prompt,
+        () => true,
+        { delivery }
+      );
+      const parts: Part[] = [
+        {
+          id: 'part-1',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          type: 'text',
+          text: result!.body.parts.map((part) => part.text ?? '').join('\n'),
+        },
+      ];
+
+      expect(parseUserMessageContent(parts)).toMatchObject({
+        messageTexts: [prompt],
+        attachments: [
+          { type: 'file-reference', path: plan, isDirectory: false },
+          { type: 'file-reference', path: 'README.md', isDirectory: false },
+          { type: 'file-reference', path: 'src/', isDirectory: true },
+        ],
+      });
+      expect(getUserMessageEditText(parts)).toBe(prompt);
+      expect(
+        getUserMessageEditContext(parts).files.map(({ path, type }) => ({ path, type }))
+      ).toEqual([
+        { path: plan, type: 'file' },
+        { path: 'README.md', type: 'file' },
+        { path: 'src/', type: 'directory' },
+      ]);
+    }
+  );
 
   it('returns null when there is no text or attachment content to send', () => {
     const result = buildSessionSendBody(

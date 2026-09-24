@@ -1,3 +1,4 @@
+import { MAX_PASTED_TEXT_BYTES, pastedTextBytes } from './pasted-text';
 import {
   isDatabaseAttachment,
   isDatabaseContext,
@@ -968,6 +969,13 @@ function isDroppedFile<T>(value: T): value is T & DroppedFile {
   if (!record) return false;
   if (!isString(record.path) || !isString(record.relativePath)) return false;
   if (record.type !== 'file' && record.type !== 'directory') return false;
+  if (
+    record.pastedText !== undefined &&
+    (record.type !== 'file' ||
+      !isString(record.pastedText) ||
+      pastedTextBytes(record.pastedText) > MAX_PASTED_TEXT_BYTES)
+  )
+    return false;
   if (
     record.attachmentSequence !== undefined &&
     (!isNumber(record.attachmentSequence) || !Number.isFinite(record.attachmentSequence))

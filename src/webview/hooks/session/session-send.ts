@@ -1,4 +1,5 @@
 import { batch } from 'solid-js';
+import { pastedTextDataUrl } from '../../../shared/pasted-text';
 import {
   cloneDatabaseContext,
   formatDatabaseAttachmentReference,
@@ -369,7 +370,7 @@ export function buildSessionSendBody(
         text:
           explicitSelectionRanges && explicitSelectionRanges.length > 0
             ? formatSelectionReference(activeFilePath, explicitSelectionRanges)
-            : activeFilePath,
+            : `[Attached file: ${activeFilePath}]`,
       });
     } else {
       parts.push({
@@ -438,6 +439,15 @@ export function buildSessionSendBody(
 
   for (const attachment of orderedAttachments) {
     if (attachment.kind === 'file') {
+      if (attachment.file.pastedText !== undefined) {
+        parts.push({
+          type: 'file',
+          mime: 'text/plain',
+          filename: attachment.file.relativePath,
+          url: pastedTextDataUrl(attachment.file.pastedText),
+        });
+        continue;
+      }
       if (attachment.file.database) {
         parts.push({
           type: 'text',
@@ -447,17 +457,11 @@ export function buildSessionSendBody(
       }
       if (currentDocumentEnabled && isSamePath(attachment.file.path, activeFile?.path)) continue;
       const fileReference = getAttachmentReference(attachment.file, workspacePath);
-      const isExternalFile =
-        attachment.file.type === 'file' &&
-        !!workspacePath &&
-        getWorkspaceRelativePath(attachment.file.path, workspacePath) === null;
       parts.push({
         type: 'text',
         text: attachment.file.lineRanges?.length
           ? formatSelectionReference(fileReference, attachment.file.lineRanges)
-          : isExternalFile
-            ? `[Attached file: ${fileReference}]`
-            : fileReference,
+          : `[Attached file: ${fileReference}]`,
       });
       continue;
     }
@@ -559,6 +563,7 @@ export function getQueuedAttachmentSnapshot(composerState: {
       relativePath: file.relativePath,
       type: file.type,
       database: file.database ? { ...file.database } : undefined,
+      pastedText: file.pastedText,
       attachmentSequence: file.attachmentSequence ?? getContextFileAttachmentSequence(file.path),
       lineRanges: file.lineRanges?.map((range) => ({
         startLine: range.startLine,
@@ -1432,7 +1437,6 @@ function createOptimisticUserMessage(
           messageID: messageId,
           type: 'text',
           text: part.text ?? '',
-          synthetic: true,
         },
       ];
     }

@@ -10,7 +10,7 @@ test('opening and closing Explored during an activity exit preserves its painted
   await page.goto(
     '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCount=3'
   );
-  await expect(page.locator('.assistant-active-activity-item')).toHaveCount(3);
+  await expect(page.locator('.assistant-active-activity-item')).toHaveCount(2);
   await page.waitForTimeout(2100);
   await expect
     .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
@@ -125,7 +125,7 @@ test('fast read completion does not reverse an easing mixed-content viewport', a
     '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69&activeTrayCount=3'
   );
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-  await expect(page.locator('.assistant-active-activity-item')).toHaveCount(3);
+  await expect(page.locator('.assistant-active-activity-item')).toHaveCount(2);
   // Complete immediately after admission, without waiting for entrance or bottom-follow settlement.
   const samples = await page.locator('.interactive-list').evaluate(async (list) => {
     const viewport = list.getBoundingClientRect();
@@ -186,7 +186,7 @@ test('fast read completion does not reverse an easing mixed-content viewport', a
     }
     return result;
   });
-  expect(samples[0]!.active).toBe(3);
+  expect(samples[0]!.active).toBe(2);
   expect(samples.at(-1)!.active).toBe(0);
   expect(samples.every((sample) => sample.connected)).toBe(true);
   const reversals = samples.flatMap((sample, index) => {

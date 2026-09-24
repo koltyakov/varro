@@ -25,7 +25,8 @@ import type {
   ProviderAuthPromptCondition,
   ProviderAuthPromptText,
 } from '../shared/opencode-types';
-import { OpenCodeResponseTooLargeError, type OpenCodeRequestOptions } from './open-code-transport';
+import type { OpenCodeRequestOptions } from './open-code-transport';
+import { OpenCodeResponseTooLargeError } from './opencode-response-error';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { OpenCodeV2BackgroundWork } from './opencode-v2-background-work';
 import {
@@ -316,6 +317,7 @@ export class OpenCodeV2Adapter {
       return response.data as T;
     };
     const input = asRecord(body) ?? {};
+    if (method === 'GET' && route === '/openapi.json') return raw('GET', '/openapi.json');
 
     // Internal callers already use a few native permission endpoints.
     if (route.startsWith('/api/')) return raw(method, query(path, true), body);
@@ -806,7 +808,7 @@ export class OpenCodeV2Adapter {
           );
           this.backgroundWork.clearSession(sessionID);
         }
-        await raw('POST', `${endpoint}/interrupt`, {});
+        await raw('POST', `${endpoint}/interrupt?resume=false`, {});
         return true;
       }
       if (action === 'summarize') {

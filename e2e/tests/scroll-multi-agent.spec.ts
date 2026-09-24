@@ -2,6 +2,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access message hooks installed by the controlled E2E harness. */
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import type { MessageEntry, Part } from '../../src/webview/types';
 import {
   getScrollMetrics,
   getVisibleMessageAnchor,
@@ -286,11 +287,75 @@ test.describe('multi-agent large virtualized scroll stability', () => {
       }
     });
 
-    await expect(page.getByText('npm run burst-39', { exact: true })).toBeVisible();
+    await expect(page.getByText('npm run burst-0', { exact: true })).toBeVisible();
+    await expect(page.locator('.assistant-active-activity-item')).toHaveCount(2);
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
     await expect(composer).toBeFocused();
+    await page.evaluate(() => {
+      const harness = (
+        window as Window & {
+          __varroE2E?: {
+            getSessionMessages: (id: string) => MessageEntry[];
+            replayServerEvent: (event: {
+              type: 'message.part.updated';
+              properties: { part: Part };
+            }) => void;
+          };
+        }
+      ).__varroE2E;
+      if (!harness) throw new Error('Missing E2E harness');
+      const parts = harness
+        .getSessionMessages('session-multi-agent-large-streaming')
+        .flatMap((message) => message.parts)
+        .filter((part) => part.id.startsWith('message-mla-assistant-streaming-burst-tool-'));
+      if (parts.length !== 40) throw new Error('Expected the complete forty-tool burst');
+      for (const part of parts) {
+        if (part.type !== 'tool' || part.state.status !== 'running')
+          throw new Error('Expected a running burst tool');
+        harness.replayServerEvent({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              ...part,
+              state: {
+                ...part.state,
+                status: 'completed',
+                title: part.state.title ?? part.tool,
+                output: 'Done',
+                metadata: {},
+                time: { start: part.state.time.start, end: Date.now() },
+              },
+            },
+          },
+        });
+      }
+      harness.replayServerEvent({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            type: 'text',
+            id: 'burst-result',
+            sessionID: 'session-multi-agent-large-streaming',
+            messageID: 'message-mla-assistant-streaming',
+            text: 'All forty burst commands finished.',
+          },
+        },
+      });
+    });
+    await expect(
+      page.getByText('All forty burst commands finished.', { exact: true })
+    ).toBeVisible();
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(15);
+    await expect(composer).toBeFocused();
+    await page
+      .locator('[data-msg-id="message-mla-assistant-streaming"] button.assistant-activity-summary')
+      .last()
+      .click();
+    await expect(page.getByText(/^npm run burst-\d+$/, { exact: true })).toHaveCount(40);
   });
 
   test('slow upward scrolling stays anchored while new content streams', async ({ page }) => {
@@ -321,9 +386,7 @@ test.describe('multi-agent large virtualized scroll stability', () => {
   });
 
   test('offscreen activity completion does not move a detached viewport', async ({ page }) => {
-    await page.goto(
-      '/e2e/harness/index.html?scenario=multi-agent-large-streaming'
-    );
+    await page.goto('/e2e/harness/index.html?scenario=multi-agent-large-streaming');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);

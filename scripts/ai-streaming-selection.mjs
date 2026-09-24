@@ -6,6 +6,7 @@ import { mkdir, open, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { AiOpenCodeClient, aiServerHeaders } from './ai-opencode-client.mjs';
 
 import {
   buildReplayTimeline,
@@ -35,7 +36,14 @@ function hasForeignSessionReference(value, sessionId) {
 }
 
 export async function readActiveSessions(
-  { serverUrl, sourceDatabase, directory, pid = process.env.OPENCODE_PID, platform = process.platform },
+  {
+    serverUrl,
+    sourceDatabase,
+    directory,
+    client,
+    pid = process.env.OPENCODE_PID,
+    platform = process.platform,
+  },
   execute = promisify(execFile)
 ) {
   let explicit;
@@ -56,29 +64,51 @@ export async function readActiveSessions(
       throw new Error('Active-session status requires --server-url or OPENCODE_PID');
   }
   const canonicalDatabase = await realpath(sourceDatabase);
-  const windows = platform === 'win32'
-    ? JSON.parse((await execute('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-File',
-      fileURLToPath(new URL('./windows-database-ownership.ps1', import.meta.url)),
-      '-Database', canonicalDatabase,
-    ], { timeout: 30_000 })).stdout)
-    : undefined;
-  const { stdout } = windows ? { stdout: '' } : await execute(
-    'lsof',
-    explicit
-      ? ['-nP', '-a', `-iTCP:${explicit.port || 80}`, '-sTCP:LISTEN', '-Fpn']
-      : ['-nP', '-a', '-p', String(pid), '-iTCP', '-sTCP:LISTEN', '-Fpn'],
-    { timeout: 5_000 }
-  );
+  const windows =
+    platform === 'win32'
+      ? JSON.parse(
+          (
+            await execute(
+              'powershell.exe',
+              [
+                '-NoProfile',
+                '-NonInteractive',
+                '-File',
+                fileURLToPath(new URL('./windows-database-ownership.ps1', import.meta.url)),
+                '-Database',
+                canonicalDatabase,
+              ],
+              { timeout: 30_000 }
+            )
+          ).stdout
+        )
+      : undefined;
+  const { stdout } = windows
+    ? { stdout: '' }
+    : await execute(
+        'lsof',
+        explicit
+          ? ['-nP', '-a', `-iTCP:${explicit.port || 80}`, '-sTCP:LISTEN', '-Fpn']
+          : ['-nP', '-a', '-p', String(pid), '-iTCP', '-sTCP:LISTEN', '-Fpn'],
+        { timeout: 5_000 }
+      );
   const listeners = new Map();
   if (windows) {
-    if (!Array.isArray(windows.listeners) || !Array.isArray(windows.databaseOwners) ||
-        windows.databaseOwners.some((owner) => !Number.isSafeInteger(owner) || owner <= 0)) {
+    if (
+      !Array.isArray(windows.listeners) ||
+      !Array.isArray(windows.databaseOwners) ||
+      windows.databaseOwners.some((owner) => !Number.isSafeInteger(owner) || owner <= 0)
+    ) {
       throw new Error('Invalid Windows database ownership evidence');
     }
     for (const listener of windows.listeners) {
-      if (!Number.isSafeInteger(listener.pid) || listener.pid <= 0 ||
-          !Number.isInteger(listener.port) || listener.port < 1 || listener.port > 65535) {
+      if (
+        !Number.isSafeInteger(listener.pid) ||
+        listener.pid <= 0 ||
+        !Number.isInteger(listener.port) ||
+        listener.port < 1 ||
+        listener.port > 65535
+      ) {
         throw new Error('Invalid Windows listener ownership evidence');
       }
       if (!['127.0.0.1', '::1', '0.0.0.0', '::'].includes(listener.address)) continue;
@@ -109,28 +139,42 @@ export async function readActiveSessions(
     if (owners.size !== 1) throw new Error('Ambiguous status listener ownership');
     const serverPid = [...owners][0];
     // lsof's path selection uses file identity, including symlink and hard-link aliases.
-    const held = windows ? undefined : await execute(
-      'lsof',
-      ['-nP', '-a', '-p', serverPid, '-Fpf', '--', canonicalDatabase],
-      { timeout: 5_000 }
-    ).catch((error) => {
-      throw new Error(
-        `Cannot verify status server PID ${serverPid} holds source database: ${error.message}`
-      );
-    });
-    if (windows ? !windows.databaseOwners.includes(Number(serverPid)) :
-        !held.stdout.split('\n').includes(`p${serverPid}`) || !/^f\d+/m.test(held.stdout))
+    const held = windows
+      ? undefined
+      : await execute('lsof', ['-nP', '-a', '-p', serverPid, '-Fpf', '--', canonicalDatabase], {
+          timeout: 5_000,
+        }).catch((error) => {
+          throw new Error(
+            `Cannot verify status server PID ${serverPid} holds source database: ${error.message}`
+          );
+        });
+    if (
+      windows
+        ? !windows.databaseOwners.includes(Number(serverPid))
+        : !held.stdout.split('\n').includes(`p${serverPid}`) || !/^f\d+/m.test(held.stdout)
+    )
       throw new Error(`Status server PID ${serverPid} does not hold source database`);
     try {
       const url = new URL(value);
       const endpoint = new URL('/session/status', url);
       endpoint.searchParams.set('directory', directory);
-      const response = await fetch(endpoint, {
-        redirect: 'error',
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (!response.ok) throw new Error(`Session status HTTP ${response.status}`);
-      const status = await response.json();
+      const response = client
+        ? null
+        : await fetch(endpoint, {
+            redirect: 'error',
+            headers: aiServerHeaders(),
+            signal: AbortSignal.timeout(5_000),
+          });
+      if (response && !response.ok && response.status !== 404)
+        throw new Error(`Session status HTTP ${response.status}`);
+      const statusClient =
+        client ??
+        (response?.status === 404 || response?.headers.get('content-type')?.includes('text/html')
+          ? new AiOpenCodeClient(url.origin, directory)
+          : null);
+      const status = statusClient
+        ? await statusClient.request('GET', '/session/status')
+        : await response.json();
       if (
         !status ||
         Array.isArray(status) ||

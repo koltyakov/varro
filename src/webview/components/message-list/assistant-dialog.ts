@@ -12,6 +12,8 @@ import {
 import { resolveTaskSessionId } from '../../lib/task-session';
 import type { TaskSessionInfo, TaskSessionLookup } from '../../lib/task-session';
 import type { AssistantMessage, MessageEntry } from '../../types';
+import { pauseCompletedAt } from '../../../shared/session-pauses';
+import type { SessionPauseBoundary } from '../../../shared/session-pauses';
 
 export type AssistantDialogSummaryInfo = {
   durationMs: number;
@@ -27,6 +29,7 @@ export type AssistantDialogSummaryInfo = {
 };
 
 type AssistantDialogOptions = {
+  pauses?: readonly SessionPauseBoundary[];
   sessions?: readonly TaskSessionInfo[];
   primarySessionId?: string;
   suppressTrailingSummary?: boolean;
@@ -39,6 +42,7 @@ export function getAssistantDialogSummaryMap(
   options?: AssistantDialogOptions
 ) {
   const result = new Map<string, AssistantDialogSummaryInfo>();
+  const pauseTimes = new Map(options?.pauses?.map((pause) => [pause.messageId, pause.pausedAt]));
   const entriesById = new Map<string, MessageEntry>();
   for (const entry of messages) {
     // Preserve Array.find's first-match behavior if malformed history contains duplicate IDs.
@@ -73,7 +77,11 @@ export function getAssistantDialogSummaryMap(
     currentUserRequestId = null;
   };
 
-  const flush = (args?: { nextUserRequestCreated?: number; trailing?: boolean }) => {
+  const flush = (args?: {
+    nextUserRequestCreated?: number;
+    trailing?: boolean;
+    pausedAt?: number;
+  }) => {
     if (currentMessages.length === 0) {
       resetCurrentDialog();
       return;
@@ -81,7 +89,10 @@ export function getAssistantDialogSummaryMap(
 
     const lastMessage = currentMessages[currentMessages.length - 1];
     const interrupted = isAbortedAssistantError(lastMessage?.error);
-    if (!lastMessage || (!lastMessage.time.completed && !interrupted)) {
+    if (
+      !lastMessage ||
+      (!lastMessage.time.completed && !interrupted && args?.pausedAt === undefined)
+    ) {
       resetCurrentDialog();
       return;
     }
@@ -98,6 +109,7 @@ export function getAssistantDialogSummaryMap(
     if (
       isContinuationAssistantFinish(lastMessage.finish) &&
       !interrupted &&
+      args?.pausedAt === undefined &&
       !permissionRejected &&
       !questionSkipped
     ) {
@@ -115,7 +127,10 @@ export function getAssistantDialogSummaryMap(
       return;
     }
 
-    if (lastEntry?.parts.some((part) => part.type === 'tool' && part.state.status === 'running')) {
+    if (
+      args?.pausedAt === undefined &&
+      lastEntry?.parts.some((part) => part.type === 'tool' && part.state.status === 'running')
+    ) {
       resetCurrentDialog();
       return;
     }
@@ -131,10 +146,18 @@ export function getAssistantDialogSummaryMap(
       args?.nextUserRequestCreated
     );
     const completedMessages = aggregateMessages.filter((message) => !!message.time.completed);
-    const end =
+    const completedEnd =
       completedMessages.length > 0
         ? Math.max(...completedMessages.map((message) => message.time.completed || 0))
         : lastMessage.time.created;
+    const end =
+      args?.pausedAt === undefined
+        ? completedEnd
+        : pauseCompletedAt(
+            dialogStartedAt,
+            lastMessage.time.completed ? completedEnd : undefined,
+            args.pausedAt
+          );
     const tokens = sumAssistantDialogTokens(
       aggregateMessages,
       currentMessages,
@@ -204,6 +227,8 @@ export function getAssistantDialogSummaryMap(
         currentSubagentHandoffCount++;
       }
     }
+    const pausedAt = pauseTimes.get(assistant.id);
+    if (pausedAt !== undefined) flush({ pausedAt, nextUserRequestCreated: pausedAt });
   }
 
   flush({ trailing: true });

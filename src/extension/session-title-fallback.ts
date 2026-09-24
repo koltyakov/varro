@@ -6,8 +6,10 @@ import type { OpenCodeServer } from './server';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import { logger } from './logger';
 import { parseModelRoute } from './sidebar-provider-utils';
+import { tryGenerateOneShot } from './one-shot-generation';
 
-type OpenCodeRequest = Pick<OpenCodeServer, 'request'>;
+type OpenCodeRequest = Pick<OpenCodeServer, 'request'> &
+  Partial<Pick<OpenCodeServer, 'apiVersion'>>;
 
 type SessionRecord = {
   id: string;
@@ -160,6 +162,28 @@ export class SessionTitleFallback {
     messages: MessageEntry[],
     attempt: RenameAttempt
   ) {
+    if (this.server.apiVersion === 2) {
+      const model = await this.resolveTitleModel(messages, attempt.workspaceDirectory);
+      if (!this.isCurrentAttempt(sessionID, attempt)) return null;
+      const generated = await tryGenerateOneShot(this.server, {
+        prompt: `${buildTitleSystemPrompt()}\nReturn exactly one JSON object with a single string property "title".\n\n${buildTitleUserPrompt(transcript)}`,
+        model,
+        directory: attempt.workspaceDirectory,
+        signal: attempt.controller.signal,
+      });
+      if (generated) {
+        if (!this.isCurrentAttempt(sessionID, attempt)) return null;
+        const value = asRecord(parseJsonObject(generated.text));
+        if (
+          !value ||
+          Object.keys(value).some((key) => key !== 'title') ||
+          typeof value.title !== 'string' ||
+          value.title.length > 80
+        )
+          return null;
+        return parseTitle(value);
+      }
+    }
     const title = `${TITLE_SESSION_PREFIX}: ${sessionID}`;
     attempt.pendingTitle = title;
     this.hiddenSessions.registerPendingTitle(title);

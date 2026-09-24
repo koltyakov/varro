@@ -128,7 +128,11 @@ const launchArgs =
           'XDG_CONFIG_HOME',
           'OPENCODE_DB',
           'OPENCODE_PID',
-        ].flatMap((key) => ['--env', `${key}=${environment[key]}`]),
+          'OPENCODE_SERVER_USERNAME',
+          'OPENCODE_SERVER_PASSWORD',
+        ]
+          .filter((key) => environment[key] !== undefined)
+          .flatMap((key) => ['--env', `${key}=${environment[key]}`]),
         '--args',
         ...vscodeArgs,
       ]

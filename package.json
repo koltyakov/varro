@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.29.12",
+  "version": "0.30.0",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -72,9 +72,9 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.18.32",
-    "@opencode/client": "^2.0.14",
+    "@opencode/client": "^2.0.15",
     "cross-spawn": "7.0.6",
-    "dompurify": "3.4.15",
+    "dompurify": "3.4.16",
     "highlight.js": "11.12.0",
     "jsonc-parser": "3.3.1",
     "marked": "18.0.14",
@@ -97,7 +97,7 @@
     "oxfmt": "0.70.0",
     "oxlint": "1.85.0",
     "oxlint-plugin-anti-slop": "github:dmmulroy/anti-slop#c44ef22",
-    "rolldown": "1.2.9",
+    "rolldown": "1.2.10",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.0",
@@ -376,7 +376,7 @@
         "command": "varro.chat.addTerminalSelectionToContext",
         "key": "ctrl+shift+k",
         "mac": "cmd+shift+k",
-        "when": "terminalFocus"
+        "when": "terminalFocus && terminalTextSelected"
       }
     ],
     "configuration": {

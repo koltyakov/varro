@@ -235,6 +235,7 @@ export function normalizeV2Error(value: unknown): SessionStructuredError | undef
 export function isV2TranscriptMessage(message: SessionMessageInfo): boolean {
   return (
     message.type === 'user' ||
+    message.type === 'synthetic' ||
     message.type === 'assistant' ||
     message.type === 'compaction' ||
     message.type === 'skill' ||
@@ -422,6 +423,9 @@ export function projectV2Message(
         ),
       ],
     };
+  }
+  if (message.type === 'synthetic') {
+    return { info, parts: [part(0, 'text', { text: message.text, synthetic: true })] };
   }
   if (message.type === 'compaction')
     return {

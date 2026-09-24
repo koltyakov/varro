@@ -151,7 +151,7 @@ describe('v2 background completion', () => {
     await adapter.request('POST', '/session/ses_one/abort', {}, { directory: '/repo' });
     expect(wire.mock.calls.map(([method, path]) => [method, path])).toEqual([
       ['DELETE', '/api/shell/sh_test?location%5Bdirectory%5D=%2Frepo'],
-      ['POST', '/api/session/ses_one/interrupt'],
+      ['POST', '/api/session/ses_one/interrupt?resume=false'],
     ]);
     expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(false);
   });

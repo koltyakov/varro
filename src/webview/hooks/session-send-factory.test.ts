@@ -224,7 +224,7 @@ describe('SessionSendOperations', () => {
           type: 'text',
           text: '[Selection from terminal zsh]\n```text\nnpm test\n```',
         },
-        { type: 'text', text: '/repo/src/file.ts' },
+        { type: 'text', text: '[Attached file: /repo/src/file.ts]' },
         {
           type: 'file',
           mime: 'image/png',

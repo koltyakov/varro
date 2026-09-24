@@ -9,7 +9,7 @@ export class OpenCodeV2SessionState {
   private readonly operations = new Map<string, Promise<unknown>>();
 
   constructor(
-    private readonly directory = join(
+    readonly directory = join(
       process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
       'varro',
       'opencode-v2'

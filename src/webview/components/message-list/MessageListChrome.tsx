@@ -378,7 +378,7 @@ export function LoadingRow(props: {
               when={!props.compacting && isStale()}
               fallback={
                 <span class="shimmer-progress loading-verb">
-                  {props.compacting ? 'Compacting context' : verb()}
+                  {props.compacting ? 'Compacting' : verb()}
                   <span class="chat-animated-ellipsis" />
                 </span>
               }

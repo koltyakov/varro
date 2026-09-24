@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { requireIsolatedTestServer } from './ai-test-isolation.mjs';
+import { AiOpenCodeClient } from './ai-opencode-client.mjs';
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -17,9 +18,14 @@ export async function requireFixtureWorkspace(workspace) {
   if (resolved !== expected) {
     throw new Error(`AI fuzzy workspace must be exactly ${expected}, not ${resolved}`);
   }
-  const [actualRealPath, expectedRealPath] = await Promise.all([realpath(resolved), realpath(expected)]);
+  const [actualRealPath, expectedRealPath] = await Promise.all([
+    realpath(resolved),
+    realpath(expected),
+  ]);
   if (actualRealPath !== expectedRealPath) {
-    throw new Error(`AI fuzzy workspace must resolve to ${expectedRealPath}, not ${actualRealPath}`);
+    throw new Error(
+      `AI fuzzy workspace must resolve to ${expectedRealPath}, not ${actualRealPath}`
+    );
   }
   return expected;
 }
@@ -113,7 +119,9 @@ export function buildPreconditionReport(summary, requiredTurns = DEFAULT_TURNS) 
 }
 
 function seededChoice(seed, scenario, step, options) {
-  const hash = createHash('sha256').update(`${seed}:${scenario}:${String(step)}`).digest();
+  const hash = createHash('sha256')
+    .update(`${seed}:${scenario}:${String(step)}`)
+    .digest();
   return options[hash[0] % options.length];
 }
 
@@ -121,7 +129,16 @@ export function buildActionPlan(seed) {
   const wheel = [-32, -96, -180, 96, 180, 420];
   const pause = [0, 1, 2, 4, 12];
   const width = [360, 430, 486, 720];
-  const keys = ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Space', 'Shift+Space', 'Home', 'End'];
+  const keys = [
+    'ArrowUp',
+    'ArrowDown',
+    'PageUp',
+    'PageDown',
+    'Space',
+    'Shift+Space',
+    'Home',
+    'End',
+  ];
   const required = [
     'switch session away and back',
     'PageDown on transcript',
@@ -150,36 +167,21 @@ export function buildActionPlan(seed) {
       };
     }
     if (kind === 'key') {
-      return { step, action: 'key on transcript', key: seededChoice(seed, 'AI-08-key', step, keys) };
+      return {
+        step,
+        action: 'key on transcript',
+        key: seededChoice(seed, 'AI-08-key', step, keys),
+      };
     }
-    return { step, action: 'resize sidebar', width: seededChoice(seed, 'AI-08-width', step, width) };
+    return {
+      step,
+      action: 'resize sidebar',
+      width: seededChoice(seed, 'AI-08-width', step, width),
+    };
   });
 }
 
-class OpenCodeClient {
-  constructor(server, workspace) {
-    this.server = server.replace(/\/$/, '');
-    this.workspace = workspace;
-  }
-
-  async request(method, route, body) {
-    const url = new URL(`${this.server}${route}`);
-    url.searchParams.set('directory', this.workspace);
-    const init = {
-      method,
-      redirect: 'error',
-      headers: {
-        'content-type': 'application/json',
-        'x-opencode-directory': this.workspace,
-      },
-    };
-    if (body !== undefined) init.body = JSON.stringify(body);
-    const response = await fetch(url, init);
-    const text = await response.text();
-    if (!response.ok) throw new Error(`${method} ${route} failed (${String(response.status)}): ${text}`);
-    return text ? JSON.parse(text) : null;
-  }
-
+class OpenCodeClient extends AiOpenCodeClient {
   getSession(id) {
     return this.request('GET', `/session/${encodeURIComponent(id)}`);
   }
@@ -235,7 +237,9 @@ async function waitForTurn(client, sessionId, turn, timeoutMs) {
     if (summary.completeMarkedTurnCount >= turn) return;
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
-  throw new Error(`Golden session ${sessionId} did not complete turn ${String(turn)} within ${String(timeoutMs)}ms`);
+  throw new Error(
+    `Golden session ${sessionId} did not complete turn ${String(turn)} within ${String(timeoutMs)}ms`
+  );
 }
 
 async function createGolden(client, { seed, turns, model, timeoutMs, baseline }) {
@@ -251,7 +255,7 @@ async function createGolden(client, { seed, turns, model, timeoutMs, baseline })
       await waitForTurn(client, session.id, turn, timeoutMs);
       process.stdout.write(`Prepared golden turn ${String(turn)}/${String(turns)}\n`);
     }
-    const title = `VFZ GOLDEN ${String(turns)}T v1 ${baseline.slice(0, 12)}`;
+    const title = `VFZ GOLDEN ${String(turns)}T v${client.backend.apiVersion} ${baseline.slice(0, 12)}`;
     await client.request('PATCH', `/session/${encodeURIComponent(session.id)}`, { title });
     return { id: session.id, title, generated: true };
   } catch (error) {
@@ -263,7 +267,9 @@ async function createGolden(client, { seed, turns, model, timeoutMs, baseline })
 async function validateGolden(client, sessionId, requiredTurns) {
   const session = await client.getSession(sessionId);
   if (path.resolve(session.directory) !== path.resolve(client.workspace)) {
-    throw new Error(`Session ${sessionId} belongs to ${session.directory}, not ${client.workspace}`);
+    throw new Error(
+      `Session ${sessionId} belongs to ${session.directory}, not ${client.workspace}`
+    );
   }
   const messages = await client.listMessages(sessionId);
   const summary = inspectGoldenMessages(messages);
@@ -302,11 +308,16 @@ async function prepareRun(options) {
     options.workspace ?? path.join(projectRoot, 'tmp/opencode')
   );
   const turns = Number(options.turns ?? DEFAULT_TURNS);
-  if (!Number.isInteger(turns) || turns < 110) throw new Error('--turns must be an integer of at least 110');
-  const isolation = await requireIsolatedTestServer(options.server ?? process.env.VARRO_AI_SERVER_URL, workspace);
+  if (!Number.isInteger(turns) || turns < 110)
+    throw new Error('--turns must be an integer of at least 110');
+  const isolation = await requireIsolatedTestServer(
+    options.server ?? process.env.VARRO_AI_SERVER_URL,
+    workspace
+  );
   const client = new OpenCodeClient(isolation.serverUrl, workspace);
   const fixture = await fixtureStatus(workspace);
-  if (fixture.status) throw new Error(`Fixture must be clean before preparation:\n${fixture.status}`);
+  if (fixture.status)
+    throw new Error(`Fixture must be clean before preparation:\n${fixture.status}`);
 
   let validated;
   if (options.golden) validated = await validateGolden(client, options.golden, turns);
@@ -327,11 +338,18 @@ async function prepareRun(options) {
 
   const fork = await client.request('POST', `/session/${encodeURIComponent(source.id)}/fork`);
   const title = `VFZ ${seed} golden-fork`;
-  const renamed = await client.request('PATCH', `/session/${encodeURIComponent(fork.id)}`, { title });
+  const renamed = await client.request('PATCH', `/session/${encodeURIComponent(fork.id)}`, {
+    title,
+  });
   const validatedFork = await validateGolden(client, renamed.id, turns);
-  const timestamp = new Date().toISOString().replaceAll(':', '').replaceAll('-', '').replace(/\.\d{3}Z$/, 'Z');
+  const timestamp = new Date()
+    .toISOString()
+    .replaceAll(':', '')
+    .replaceAll('-', '')
+    .replace(/\.\d{3}Z$/, 'Z');
   const manifestPath = path.resolve(
-    options.output ?? path.join(projectRoot, 'artifacts/ai-fuzzy', `${timestamp}-${seed}-preconditions.json`)
+    options.output ??
+      path.join(projectRoot, 'artifacts/ai-fuzzy', `${timestamp}-${seed}-preconditions.json`)
   );
   const manifest = {
     version: 1,
@@ -341,7 +359,7 @@ async function prepareRun(options) {
     isolation,
     workspace,
     fixture,
-    modelForGoldenGeneration: source.generated ? options.model ?? DEFAULT_MODEL : null,
+    modelForGoldenGeneration: source.generated ? (options.model ?? DEFAULT_MODEL) : null,
     golden: source,
     runSessions: [{ id: renamed.id, title, deleted: false }],
     hostPersistenceVerifiedAt: null,
@@ -358,7 +376,10 @@ async function inspect(options) {
   const workspace = await requireFixtureWorkspace(
     options.workspace ?? path.join(projectRoot, 'tmp/opencode')
   );
-  const isolation = await requireIsolatedTestServer(options.server ?? process.env.VARRO_AI_SERVER_URL, workspace);
+  const isolation = await requireIsolatedTestServer(
+    options.server ?? process.env.VARRO_AI_SERVER_URL,
+    workspace
+  );
   const client = new OpenCodeClient(isolation.serverUrl, workspace);
   const result = await validateGolden(client, sessionId, Number(options.turns ?? DEFAULT_TURNS));
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -371,7 +392,8 @@ async function verifyRun(options) {
   manifest.isolation = await requireIsolatedTestServer(manifest.server, manifest.workspace);
   const client = new OpenCodeClient(manifest.server, manifest.workspace);
   const fixture = await fixtureStatus(manifest.workspace);
-  if (fixture.status) throw new Error(`Fixture must be clean before the timed run:\n${fixture.status}`);
+  if (fixture.status)
+    throw new Error(`Fixture must be clean before the timed run:\n${fixture.status}`);
   if (fixture.commit !== manifest.fixture.commit) {
     throw new Error(
       `Fixture commit changed from ${manifest.fixture.commit} to ${fixture.commit}; prepare a new run fork`
@@ -435,10 +457,13 @@ async function cleanup(options) {
       const visited = new Set();
       while (ancestor?.parentID && !visited.has(ancestor.parentID)) {
         visited.add(ancestor.parentID);
-        ancestor = sessionsById.get(ancestor.parentID) ?? (await client.getSession(ancestor.parentID));
+        ancestor =
+          sessionsById.get(ancestor.parentID) ?? (await client.getSession(ancestor.parentID));
       }
       if (!ancestor || !trackedRootIds.has(ancestor.id) || !ancestor.title?.startsWith(prefix)) {
-        throw new Error(`Refusing to delete ${tracked.id}: recorded run root ancestry was not verified`);
+        throw new Error(
+          `Refusing to delete ${tracked.id}: recorded run root ancestry was not verified`
+        );
       }
     } else if (!session.title?.startsWith(prefix)) {
       throw new Error(`Refusing to delete ${tracked.id}: title does not start with ${prefix}`);
@@ -449,9 +474,14 @@ async function cleanup(options) {
   }
   const finalActiveIds = new Set((await client.listAllSessions()).map((session) => session.id));
   const remaining = manifest.runSessions.filter((session) => finalActiveIds.has(session.id));
-  if (remaining.length > 0) throw new Error(`Cleanup verification failed for ${remaining.map((item) => item.id).join(', ')}`);
+  if (remaining.length > 0)
+    throw new Error(
+      `Cleanup verification failed for ${remaining.map((item) => item.id).join(', ')}`
+    );
   await writeJsonAtomic(manifestPath, manifest);
-  process.stdout.write(`Deleted and verified ${String(manifest.runSessions.length)} run session(s)\n`);
+  process.stdout.write(
+    `Deleted and verified ${String(manifest.runSessions.length)} run session(s)\n`
+  );
 }
 
 async function main() {

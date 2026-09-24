@@ -103,6 +103,7 @@ export interface DroppedFile {
   lineRanges?: ContextLineRange[];
   attachmentSequence?: number;
   database?: DatabaseAttachment;
+  pastedText?: string;
 }
 
 /** Display metadata for a durable database snapshot attachment. */
@@ -385,7 +386,7 @@ export type ServerErrorDetail = {
 
 export type ServerStatus =
   | { state: 'starting' }
-  | { state: 'running'; url: string; eventStream?: 'healthy' | 'degraded' }
+  | { state: 'running'; url: string; apiVersion?: 1 | 2; eventStream?: 'healthy' | 'degraded' }
   | { state: 'stopped' }
   | { state: 'error'; message: string; detail?: ServerErrorDetail };
 

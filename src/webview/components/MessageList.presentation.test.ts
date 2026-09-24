@@ -77,6 +77,73 @@ function openChat(parts: Part[] = []) {
 }
 
 describe('streaming presentation handoff', () => {
+  it('groups queued siblings when their disclosure opens and never replays them on collapse', async () => {
+    const parts = Array.from({ length: 3 }, (_, index) => ({
+      ...searchPart(),
+      id: `search-${index}`,
+      callID: `search-call-${index}`,
+    }));
+    openChat([completeSearch(searchPart()), ...parts]);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(2);
+    batch(() => parts.forEach((part) => upsertPart(completeSearch(part))));
+    const summary = container!.querySelector<HTMLButtonElement>(
+      'button.assistant-activity-summary'
+    )!;
+    summary.click();
+    await vi.advanceTimersByTimeAsync(16);
+    expect(summary.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
+    expect(container?.textContent).toContain('4 searches');
+    summary.click();
+    for (let frame = 0; frame < 200; frame += 1) {
+      await vi.advanceTimersByTimeAsync(16);
+      expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
+    }
+  });
+
+  it.each([false, true])(
+    'keeps presented content through a background notice and continuation with splitDelivery=%s',
+    async (splitDelivery) => {
+      const answer = 'Keep this already-presented answer visible while background work finishes.';
+      openChat([
+        completeSearch(searchPart()),
+        { ...textPart('answer-text', answer), messageID: 'answer' },
+      ]);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(container?.textContent).toContain(answer);
+
+      const noticePart: Part = {
+        id: 'background-notice-text',
+        sessionID: 'session-1',
+        type: 'text',
+        messageID: 'background-notice',
+        synthetic: true,
+        text: '<shell id="test" state="completed">Done</shell>',
+      };
+      setMessagesIncremental([
+        ...state.messages,
+        { info: userMessage('background-notice'), parts: splitDelivery ? [] : [noticePart] },
+      ]);
+      if (splitDelivery) {
+        await vi.advanceTimersByTimeAsync(16);
+        upsertPart(noticePart);
+      }
+      await vi.advanceTimersByTimeAsync(16);
+      setMessagesIncremental([
+        ...state.messages,
+        {
+          info: assistantMessage('continuation', { parentID: 'prompt', time: { created: 5 } }),
+          parts: [],
+        },
+      ]);
+      for (let frame = 0; frame < 150; frame += 1) {
+        expect(container?.textContent).toContain(answer);
+        await vi.advanceTimersByTimeAsync(16);
+      }
+    }
+  );
+
   it.each([true, false])(
     'keeps presented content visible through compaction and continuation with auto=%s',
     async (auto) => {
@@ -228,8 +295,9 @@ describe('streaming presentation handoff', () => {
   it('flushes available text when Stop interrupts an activity preview', async () => {
     openChat();
     upsertPart(completeSearch(searchPart()));
-    upsertPart({ ...textPart('answer-text', 'Available before stopping.'), messageID: 'answer' });
     await vi.advanceTimersByTimeAsync(100);
+    expect(container?.querySelector('[data-activity-part-id="search"]')).not.toBeNull();
+    upsertPart({ ...textPart('answer-text', 'Available before stopping.'), messageID: 'answer' });
     expect(container?.textContent).not.toContain('Available before stopping.');
     flushMessagePresentation('session-1');
     await Promise.resolve();
@@ -280,7 +348,7 @@ describe('streaming presentation handoff', () => {
     expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
   });
 
-  it('gives a fast completed tool a preview before releasing the available answer', async () => {
+  it('groups a fast completed tool immediately when the answer arrives', async () => {
     openChat();
     await Promise.resolve();
     const search = searchPart();
@@ -295,8 +363,8 @@ describe('streaming presentation handoff', () => {
     });
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(container?.querySelector('[data-activity-part-id="search"]')).not.toBeNull();
-    expect(container?.textContent).not.toContain('The queue is ready.');
+    expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
+    expect(container?.textContent).toContain('The queue is ready.');
     expect(state.messages.at(-1)?.parts.at(-1)).toMatchObject({ text: 'The queue is ready.' });
 
     await vi.advanceTimersByTimeAsync(2_300);
@@ -308,7 +376,7 @@ describe('streaming presentation handoff', () => {
     );
   });
 
-  it('retains an already visible activity when text arrives in the completion batch', async () => {
+  it('groups an already visible activity when text arrives in the completion batch', async () => {
     const search = searchPart();
     openChat([search]);
     await vi.advanceTimersByTimeAsync(500);
@@ -324,10 +392,11 @@ describe('streaming presentation handoff', () => {
       setState('streamingText', 'A readable handoff.');
     });
     await Promise.resolve();
-    expect(container?.querySelector('[data-activity-part-id="search"]')).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
+    expect(container?.textContent).toContain('Explored: 1 search');
     expect(container?.textContent).not.toContain('A readable handoff.');
 
-    await vi.advanceTimersByTimeAsync(2_400);
+    await vi.advanceTimersByTimeAsync(32);
     expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
     expect(container?.textContent).toContain('A readable handoff.');
   });

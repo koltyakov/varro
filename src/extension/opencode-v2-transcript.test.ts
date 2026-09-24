@@ -195,17 +195,36 @@ describe('V2 generated transcript records', () => {
     }
   );
 
-  it.each(['system', 'synthetic'] as const)(
-    'does not expose %s text on direct message reads',
-    async (type) => {
-      const adapter = new OpenCodeV2Adapter(async () => ({
-        data: { ...base, type, text: 'Internal instructions' },
-      }));
-      expect(
-        await adapter.request('GET', '/session/ses_one/message/msg_generated', undefined)
-      ).toMatchObject({ parts: [] });
-    }
-  );
+  it.each(['system'] as const)('does not expose %s text on direct message reads', async (type) => {
+    const adapter = new OpenCodeV2Adapter(async () => ({
+      data: { ...base, type, text: 'Internal instructions' },
+    }));
+    expect(
+      await adapter.request('GET', '/session/ses_one/message/msg_generated', undefined)
+    ).toMatchObject({ parts: [] });
+  });
+
+  it('preserves synthetic provenance on history and direct reads for action notices', async () => {
+    const record: SessionMessageInfo = {
+      ...base,
+      type: 'synthetic',
+      text: 'The server restarted while you were working.',
+    };
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => ({
+      data: path.endsWith('/inbox') ? [] : path.includes('/message/') ? record : [record],
+      cursor: {},
+    }));
+    const expected = {
+      info: { id: base.id, role: 'user' },
+      parts: [{ type: 'text', text: record.text, synthetic: true }],
+    };
+    expect(await adapter.request('GET', '/session/ses_one/message', undefined)).toMatchObject([
+      expected,
+    ]);
+    expect(
+      await adapter.request('GET', '/session/ses_one/message/msg_generated', undefined)
+    ).toMatchObject(expected);
+  });
 
   it.each(['skill', 'shell'] as const)(
     'keeps a paginated %s activity attached to the original prompt',

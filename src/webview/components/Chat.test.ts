@@ -1365,7 +1365,7 @@ describe('header status badges', () => {
     ).toBeNull();
   });
 
-  it('shows status badges in the desktop chat header', () => {
+  it('keeps desktop session controls in the sessions sidebar instead of duplicating them', () => {
     setState('sessions', [session('session-1', 500), session('session-2', 400)]);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', {
@@ -1376,22 +1376,27 @@ describe('header status badges', () => {
 
     const desktopHeader = container?.querySelector('.chat-header-chat-desktop');
     const desktopActions = desktopHeader?.querySelector('.chat-header-actions');
+    const sidebarHeader = container?.querySelector('.chat-session-sidebar-header');
+    const compactHeader = container?.querySelector('.interactive-session > .chat-header');
 
     expect(desktopHeader).toBeInstanceOf(HTMLDivElement);
     expect(desktopHeader?.querySelector('.chat-header-title-text')?.textContent).toBe('session-1');
-    expect(desktopActions).toBeInstanceOf(HTMLDivElement);
-    expect(desktopHeader?.querySelector('.chat-header-running-badge')).toBeInstanceOf(
+    expect(desktopActions).toBeNull();
+    expect(desktopHeader?.querySelector('.chat-header-running-badge')).toBeNull();
+    expect(desktopHeader?.querySelector('.chat-header-btn[aria-label="New chat"]')).toBeNull();
+    expect(sidebarHeader?.querySelector('.chat-header-running-badge')).toBeInstanceOf(
       HTMLButtonElement
     );
-    expect(desktopHeader?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
-    expect(desktopHeader?.querySelector('.chat-header-failed-badge')).toBeNull();
-    expect(desktopHeader?.querySelector('.chat-header-attention-badge')).toBeNull();
-    expect(desktopHeader?.querySelector('.chat-header-plan-badge')).toBeNull();
-    expect(desktopHeader?.querySelector('.chat-header-completed-badge')).toBeNull();
-    expect(desktopHeader?.querySelector('.chat-header-btn[aria-label="New chat"]')).toBeInstanceOf(
+    expect(sidebarHeader?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
+    expect(sidebarHeader?.querySelector('.chat-header-btn[aria-label="New chat"]')).toBeInstanceOf(
       HTMLButtonElement
     );
-    expect(desktopHeader?.querySelector('.chat-header-btn[aria-label="Fork session"]')).toBeNull();
+    expect(compactHeader?.querySelector('.chat-header-running-badge')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(compactHeader?.querySelector('.chat-header-btn[aria-label="New chat"]')).toBeInstanceOf(
+      HTMLButtonElement
+    );
   });
 
   it('omits the session header in editor panels', () => {

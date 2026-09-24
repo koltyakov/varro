@@ -242,48 +242,64 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(forkSessionMock).toHaveBeenCalledWith('session-1');
   });
 
-  it('copies the final assistant response', async () => {
-    const writeText = vi.fn(async () => undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText },
-    });
-    cleanup = render(
-      () => (
-        <AssistantDialogSummaryForMessage
-          summary={{ durationMs: 1_000, inputTokens: 0, outputTokens: 0, agentCount: 0 }}
-          msg={{
-            info: assistantMessage('assistant-1', { sessionID: 'session-1' }),
-            parts: [
-              textPart('text-1', 'First paragraph'),
-              textPart('synthetic', 'Internal text', { synthetic: true }),
-              textPart('text-2', 'Second paragraph'),
-            ],
-          }}
-          hasBuildAgent={false}
-          latestPlanImplementationMessageId={null}
-        />
-      ),
-      container
-    );
+  it.each([false, true])(
+    'only copies a completed response (interrupted: %s)',
+    async (interrupted) => {
+      const writeText = vi.fn(async () => undefined);
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText },
+      });
+      cleanup = render(
+        () => (
+          <AssistantDialogSummaryForMessage
+            summary={{
+              durationMs: 1_000,
+              inputTokens: 0,
+              outputTokens: 0,
+              agentCount: 0,
+              interrupted,
+            }}
+            msg={{
+              info: assistantMessage('assistant-1', { sessionID: 'session-1' }),
+              parts: [
+                textPart('text-1', 'First paragraph'),
+                textPart('synthetic', 'Internal text', { synthetic: true }),
+                textPart('text-2', 'Second paragraph'),
+              ],
+            }}
+            hasBuildAgent={false}
+            latestPlanImplementationMessageId={null}
+          />
+        ),
+        container
+      );
 
-    const button = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Copy final response"]'
-    );
-    expect(
-      button?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
-    ).toBe(toCssUrl(copyIcon));
-    expect(
-      Array.from(
-        container.querySelectorAll<HTMLButtonElement>('.assistant-dialog-summary-turn-action')
-      ).map((action) => action.getAttribute('aria-label'))
-    ).toEqual(['Copy final response', 'Fork chat from here']);
+      const button = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Copy final response"]'
+      );
+      if (interrupted) {
+        expect(button).toBeNull();
+        expect(container.querySelector('[aria-label="Fork chat from here"]')).not.toBeNull();
+        return;
+      }
+      expect(
+        button?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(copyIcon));
+      expect(
+        Array.from(
+          container.querySelectorAll<HTMLButtonElement>('.assistant-dialog-summary-turn-action')
+        ).map((action) => action.getAttribute('aria-label'))
+      ).toEqual(['Copy final response', 'Fork chat from here']);
 
-    button?.click();
-    await vi.waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith('First paragraph\n\nSecond paragraph')
-    );
-  });
+      startLoading();
+      expect(button?.disabled).toBe(false);
+      button?.click();
+      await vi.waitFor(() =>
+        expect(writeText).toHaveBeenCalledWith('First paragraph\n\nSecond paragraph')
+      );
+    }
+  );
 
   it('shows the custom fork tooltip after 500ms', async () => {
     vi.useFakeTimers();

@@ -93,6 +93,10 @@ Commands stream their output. Failures, questions, approvals, file edits, and th
 
 Other chat workflows include rendered Mermaid previews, transcript turn navigation, changed-file links, Source Control handoff, reconnecting sessions after reload, and commands such as `/review`, `/compact`, `/export`, `/stats`, `/skills`, `/diagnostics`, `/fork`, and `/ralph`. Ralph runs support iteration, verification, repair, pause, and resume, and use `Full access`.
 
+With OpenCode V2, `/pause` interrupts the current session run and pauses its queued messages in the current view. A `Paused` divider marks the transcript. Hover over it or focus its Resume button to continue; sending a new message or playing a queued message also continues the session. The divider then reads `Paused and resumed`. Pause markers survive reopening the session. This preserves the conversation but does not suspend an in-flight model response or tool operation for exact resumption.
+
+Paused time is excluded from worked-duration summaries and usage statistics. Resuming starts a new work period, so returning hours later does not inflate the previous run's duration.
+
 ## Permissions
 
 Permission requests provide `Reject`, `Once`, and `Always` actions. Each session has one of three modes:
@@ -153,7 +157,7 @@ Varro reloads global OpenCode configuration when OpenCode is idle. Changes to pr
 
 - [VS Code](https://code.visualstudio.com/) or [VSCodium](https://vscodium.com/) 1.120 or newer
 - [Node.js](https://nodejs.org/) 22.22.2+ on Node 22, or Node 24.15.0+
-- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or [v1 CLI](https://opencode.ai/docs/) 1.16.0+, on `PATH` or configured through `varro.server.command`. Tested with v2 2.0.14 and v1 1.18.32
+- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or [v1 CLI](https://opencode.ai/docs/) 1.16.0+, on `PATH` or configured through `varro.server.command`. Tested with v2 2.0.15 and v1 1.18.32
 - A trusted, non-virtual workspace. Remote workspaces run Varro and OpenCode on the remote extension host
 
 ## Documentation

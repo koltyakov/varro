@@ -1,4 +1,11 @@
 import {
+  createPastedText,
+  isLargeTextPaste,
+  pastedTextBytes,
+  MAX_PASTED_TEXT_BYTES,
+  MAX_PASTED_TEXT_TOTAL_BYTES,
+} from '../../shared/pasted-text';
+import {
   cloneDatabaseContext,
   databaseContextDetail,
   databaseAttachmentDetail,
@@ -10,6 +17,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  on,
   onCleanup,
   onMount,
   untrack,
@@ -17,6 +25,7 @@ import {
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import { requestWorkspaceSelection } from '../lib/workspace-selection';
 import { toggleIssuesEnabled } from '../lib/state-attachments';
+import { prepareForComposerCollapse } from '../lib/message-list-layout';
 import { STORAGE_KEYS, writeStored } from '../lib/state-storage';
 import type {
   EditorDiagnostic,
@@ -201,6 +210,8 @@ import {
   type ComposerSnapshot,
 } from '../lib/composer-history';
 import { getSessionHistoryPrompts } from '../lib/message-window';
+import { recordSessionPause } from '../lib/session-pauses';
+import { setError } from '../lib/app-state';
 import {
   detachDiscardableActiveBlankSession,
   getDiscardableActiveBlankSessionId,
@@ -442,6 +453,13 @@ function activeContextEnabled(sessionId?: string | null) {
 }
 
 function openContextFileInEditor(file: DroppedFile) {
+  if (file.pastedText !== undefined) {
+    postMessage({
+      type: 'vscode/open-text',
+      payload: { content: file.pastedText, title: file.relativePath, language: 'plaintext' },
+    });
+    return;
+  }
   postMessage({
     type: 'vscode/open',
     payload: { path: file.path, kind: file.type, line: file.lineRanges?.[0]?.startLine },
@@ -1082,19 +1100,80 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
   let heldComposerSessionId: string | null = null;
   let heldComposerMessageCount = 0;
+  let composerCollapseFrame = 0;
 
   function holdComposerHeightUntilMessageAppend(sessionId: string | null) {
-    if (!sessionId || !inputFrameRef) return;
+    if (!inputFrameRef) return;
+    const height = inputFrameRef.getBoundingClientRect().height;
+    releaseHeldComposerHeight();
     heldComposerSessionId = sessionId;
     heldComposerMessageCount = state.messages.length;
-    setSendComposerMinHeight(inputFrameRef.getBoundingClientRect().height);
+    setSendComposerMinHeight(height);
   }
 
-  function releaseHeldComposerHeight() {
+  function releaseHeldComposerHeight(animate = false) {
     heldComposerSessionId = null;
     heldComposerMessageCount = 0;
+    if (animate && sendComposerMinHeight() > 0) {
+      if (composerCollapseFrame) return;
+      // Wait for both the text and attachment clears to reach the DOM before measuring.
+      composerCollapseFrame = requestAnimationFrame((startedAt) => {
+        composerCollapseFrame = 0;
+        const frame = inputFrameRef;
+        const divider = frame?.querySelector('.chat-input-toolbar-divider');
+        if (
+          !frame?.isConnected ||
+          !divider ||
+          window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+        ) {
+          setSendComposerMinHeight(0);
+          return;
+        }
+        const bounds = frame.getBoundingClientRect();
+        // The divider's auto margin keeps the toolbar at the bottom. Subtract that
+        // free space to measure natural height without briefly releasing the hold.
+        const toHeight = bounds.height - parseFloat(getComputedStyle(divider).marginTop);
+        if (bounds.height <= toHeight + 1) {
+          setSendComposerMinHeight(0);
+          return;
+        }
+        const step = (now: number) => {
+          const progress = Math.min(1, (now - startedAt) / 220);
+          const eased = progress * progress * (3 - 2 * progress);
+          const nextHeight = bounds.height + (toHeight - bounds.height) * eased;
+          const currentBounds = frame.getBoundingClientRect();
+          const naturalHeight =
+            currentBounds.height - parseFloat(getComputedStyle(divider).marginTop);
+          // Reserve each disappearing slice before layout can clamp the transcript.
+          prepareForComposerCollapse(
+            frame,
+            currentBounds.height - Math.max(naturalHeight, nextHeight)
+          );
+          // A minimum height lets a newly typed draft grow freely during the collapse.
+          setSendComposerMinHeight(progress < 1 ? nextHeight : 0);
+          composerCollapseFrame = progress < 1 ? requestAnimationFrame(step) : 0;
+        };
+        composerCollapseFrame = requestAnimationFrame(step);
+      });
+      return;
+    }
+    if (animate) return;
+    cancelAnimationFrame(composerCollapseFrame);
+    composerCollapseFrame = 0;
     setSendComposerMinHeight(0);
   }
+
+  createEffect(
+    on(
+      composerSessionId,
+      (sessionId, previousSessionId) => {
+        // Creating the first session keeps this composer mounted through the send.
+        releaseHeldComposerHeight(!previousSessionId && !!sessionId);
+      },
+      { defer: true }
+    )
+  );
+  onCleanup(() => releaseHeldComposerHeight());
 
   createEffect(() => {
     if (sendComposerMinHeight() <= 0) return;
@@ -1103,7 +1182,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const activeSessionId = state.activeSessionId;
     const messageCount = state.messages.length;
     if (activeSessionId !== heldSessionId || messageCount > heldComposerMessageCount) {
-      releaseHeldComposerHeight();
+      releaseHeldComposerHeight(activeSessionId === heldSessionId);
     }
   });
 
@@ -1124,6 +1203,40 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       ? pending.insertion
       : undefined;
   };
+
+  function attachLargePaste(text: string, insertion: RichComposerPasteInsertion) {
+    if (!isLargeTextPaste(text)) return;
+    const size = pastedTextBytes(text);
+    if (
+      size > MAX_PASTED_TEXT_BYTES ||
+      size +
+        composerFiles().reduce((sum, file) => sum + pastedTextBytes(file.pastedText ?? ''), 0) >
+        MAX_PASTED_TEXT_TOTAL_BYTES
+    ) {
+      showSessionActionFeedback(
+        'This paste remains inline. Text attachments support 64 KB per paste and 256 KB per draft.',
+        'warning'
+      );
+      return;
+    }
+    const file = createPastedText(text);
+    const before = insertion.value.slice(0, insertion.start);
+    const after = insertion.value.slice(insertion.end);
+    const prefix = shouldPadInlineInsertion(before.at(-1)) ? ' ' : '';
+    const suffix = after ? getInlineInsertionSuffix(`${before}${after}`, before.length) : '';
+    const replacement = `${prefix}@${file.relativePath}${suffix}`;
+    applyingComposerHistory = true;
+    try {
+      batch(() => {
+        addContextFile(file);
+        setInputText(`${before}${replacement}${after}`);
+        setCaretPosition(before.length + replacement.length);
+      });
+      composerHistory.replaceCurrent(captureComposerSnapshot());
+    } finally {
+      applyingComposerHistory = false;
+    }
+  }
 
   function captureComposerSnapshot(): ComposerSnapshot {
     return {
@@ -1706,6 +1819,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     getSlashCommands({
       hasCurrentSession: !!composerSessionId(),
       canInit: !composerSessionId() || state.messages.length === 0,
+      onPauseSession: requestPauseSession,
       onConnectProvider: () => requestProviderConnection(),
       onOpenSettings: () =>
         postMessage({ type: 'vscode/open-settings', payload: { query: 'Varro >' } }),
@@ -2435,11 +2549,52 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     });
   }
 
+  function isPauseSlashCommand(text: string) {
+    const command = getLeadingSlashCommand(text);
+    return (
+      !!composerSessionId() &&
+      state.serverStatus.state === 'running' &&
+      state.serverStatus.apiVersion === 2 &&
+      command?.name === 'pause' &&
+      !command.args
+    );
+  }
+
+  async function requestPauseSession() {
+    const sessionId = composerSessionId();
+    if (!sessionId) return;
+    const sessionIds = new Set(getSessionTreeIdsForSession(sessionId));
+    // Park the queue before abort publishes idle and triggers automatic dispatch.
+    for (const item of state.queuedMessages) {
+      if (sessionIds.has(item.sessionId) && ownsQueuedMessage(item)) {
+        setQueuedMessagePaused(item.id, true);
+      }
+    }
+    try {
+      await abortSession();
+    } catch {
+      // abortSession reports the failure; keep queued messages parked for an explicit retry.
+      return;
+    }
+    if (composerSessionId() === sessionId && isPauseSlashCommand(inputText())) setInputText('');
+    try {
+      await recordSessionPause(sessionId);
+    } catch (error) {
+      setError(
+        `The session stopped, but its pause marker could not be saved: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   async function runSlashCommand(raw: string) {
     const parsed = getLeadingSlashCommand(raw);
     if (!parsed) return false;
 
     const { name, args } = parsed;
+    if (isPauseSlashCommand(raw)) {
+      await requestPauseSession();
+      return true;
+    }
     if ((name === PROBLEMS_COMMAND_NAME || name === 'promlems') && state.enableProblemsContext) {
       setComposerValue(`/${PROBLEMS_COMMAND_NAME} ${args}`);
       return true;
@@ -2531,6 +2686,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
     const text = inputText();
+    if (isPauseSlashCommand(text)) {
+      await requestPauseSession();
+      return;
+    }
     if (isAbortSlashCommand(text)) {
       requestAbortSession();
       return;
@@ -2768,6 +2927,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       };
       const replaced =
         queuedEdit?.sessionId === sessionId && replaceQueuedMessage(queuedEdit.id, message);
+      holdComposerHeightUntilMessageAppend(sessionId);
       if (!replaced) enqueueMessage(message);
       setQueuedMessageEdit(null);
       setHistoryIndex(null);
@@ -2782,6 +2942,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       clearClipboardImages();
       clearNativePdfs();
       resetPastedImageIndex();
+      releaseHeldComposerHeight(true);
       postMessage({ type: 'files/clear', payload: { sentSessionId: sessionId } });
       postMessage({ type: 'terminal-selection/clear' });
       return;
@@ -2822,7 +2983,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (queuedEdit) removeQueuedMessage(queuedEdit.id);
       setQueuedMessageEdit(null);
     }
-    if (!sent) releaseHeldComposerHeight();
+    releaseHeldComposerHeight(sent);
     const shouldRestoreFailedInput =
       !sent &&
       composerSessionId() === sendSessionId &&
@@ -3914,6 +4075,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         if (pendingCopiedSelectionPaste() === owner) setPendingCopiedSelectionPaste(null);
       }
       resolvePastedMentions(pastedText, insertion);
+      if (!match) attachLargePaste(pastedText, insertion);
     };
     const timeout = setTimeout(() => settle(null), COPIED_SELECTION_MATCH_TIMEOUT_MS);
     void client.varro.matchCopiedSelection(pastedText, plainTextOnly).then(settle, (err) => {
@@ -3987,7 +4149,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (!chipId.startsWith('file:')) return null;
     const path = chipId.slice(5);
     const file = composerFiles().find((item) => isSamePath(item.path, path));
-    return file?.type === 'file' && file.lineRanges?.length ? file : null;
+    return file?.type === 'file' && (file.pastedText !== undefined || file.lineRanges?.length)
+      ? file
+      : null;
   }
 
   function isChipExpandable(chipId: string) {
@@ -4028,9 +4192,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       const pasted = pastedFileChipText.get(file.path);
       try {
         text =
-          pasted?.ranges === formatContextLineRanges(file.lineRanges)
+          file.pastedText ??
+          (pasted?.ranges === formatContextLineRanges(file.lineRanges)
             ? pasted.text
-            : await readContextLines(file);
+            : await readContextLines(file));
       } catch (err) {
         logError('chat-input:expandChip', err);
         return;
@@ -4502,6 +4667,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     connectionInitialized() &&
     !state.messagesLoading &&
     (isAbortSlashCommand(inputText()) ||
+      isPauseSlashCommand(inputText()) ||
       (!state.workspaceCatalogReloadPending &&
         !pendingWorkspacePath() &&
         !hasPendingPdfFallback() &&

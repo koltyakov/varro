@@ -1,3 +1,4 @@
+import { MAX_PASTED_TEXT_BYTES, pastedTextBytes } from '../../shared/pasted-text';
 import type {
   QueuedMessage,
   SelectedModel,
@@ -197,6 +198,15 @@ function normalizeStoredDroppedFile<T>(value: T): DroppedFile | null {
   }
 
   const file: DroppedFile = { path, relativePath, type: record.type };
+  if (record.pastedText !== undefined) {
+    if (
+      file.type !== 'file' ||
+      !isString(record.pastedText) ||
+      pastedTextBytes(record.pastedText) > MAX_PASTED_TEXT_BYTES
+    )
+      return null;
+    file.pastedText = record.pastedText;
+  }
   if (file.type === 'file' && isDatabaseAttachment(record.database))
     file.database = { ...record.database };
   if (Array.isArray(record.lineRanges)) {

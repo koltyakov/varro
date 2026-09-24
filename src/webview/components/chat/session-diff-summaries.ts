@@ -2,7 +2,8 @@ import { createSignal, untrack } from 'solid-js';
 import type { SessionDiffSummary } from '../../../shared/protocol';
 import type { Session } from '../../types';
 import { client } from '../../lib/client';
-import { getSessionTreeUpdated } from '../../lib/state';
+import { getSessionTreeUpdated, state } from '../../lib/state';
+import { readSessionPauses } from '../../../shared/session-pauses';
 
 type SessionDiffSummaryCacheEntry = {
   status: 'loading' | 'ready' | 'error';
@@ -119,11 +120,18 @@ function updateRelevantSessions(owner: symbol, sessionIds: Set<string> | null) {
 function isCurrentDiffSummaryRequest(request: SessionDiffSummaryRequest) {
   return (
     relevantDiffSummarySessionIds.has(request.sessionId) &&
-    getSessionTreeUpdated(request.sessionId) === request.updated
+    getRevision(request.sessionId) === request.updated
   );
 }
 
-function enqueue(session: Session, updated = getSessionTreeUpdated(session.id)) {
+function getRevision(sessionId: string): number {
+  const pauses = readSessionPauses(
+    state.sessions.find((session) => session.id === sessionId)?.metadata
+  );
+  return Math.max(getSessionTreeUpdated(sessionId), ...pauses.map((pause) => pause.pausedAt));
+}
+
+function enqueue(session: Session, updated = getRevision(session.id)) {
   const cached = untrack(cache)[session.id];
   // A matching failure is settled for this revision. Retrying from this reactive
   // effect would otherwise form a tight request loop until the server recovers.
@@ -206,6 +214,7 @@ function resetForTests() {
 }
 
 export const sessionDiffSummaries = {
+  getRevision,
   cache,
   enqueue,
   observe,

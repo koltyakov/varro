@@ -117,6 +117,35 @@ afterEach(() => {
 });
 
 describe('UsageReportService', () => {
+  it('excludes paused time from API usage and invalidates timing when a pause annotation arrives', async () => {
+    const now = NOW.getTime();
+    let pauses: Array<{ messageId: string; pausedAt: number }> = [];
+    const history = [
+      assistant('paused', now - 3_610_000, { time: { created: now - 3_610_000, completed: now } }),
+      assistant('resumed', now - 5_000, { time: { created: now - 5_000, completed: now } }),
+    ];
+    const request = vi.fn<Request>(async (_method, path) =>
+      path.startsWith('/experimental/session')
+        ? [
+            {
+              id: 'session-1',
+              directory: '/repo',
+              time: { updated: now },
+              metadata: { varro: { pauses } },
+            },
+          ]
+        : history
+    );
+    const { service } = createService(request);
+    await service.openReport();
+    pauses = [{ messageId: 'paused', pausedAt: now - 3_600_000 }];
+    await service.openReport();
+    expect(reportSection(reportContent(), 'Today')).toContain(
+      '| provider-a | model-a | 2 | 380 | 15s |'
+    );
+    expect(request.mock.calls.filter(([, path]) => path.includes('/message'))).toHaveLength(2);
+  });
+
   it('uses external API history even when an unrelated local database is available', async () => {
     const request = vi.fn<Request>().mockResolvedValue([]);
     const readLocalUsage = vi.fn(async () => ({ sessionCount: 99, usage: [] }));

@@ -19,6 +19,16 @@ delivery against the real webview, saves snapshots, and verifies host shutdown. 
 credentials or production database. Evidence stays in `artifacts/ai-streaming/runner-smoke-<timestamp>/`.
 Use it to diagnose runner setup; it is not a visual or live-model suite verdict.
 
+Verify the controller against each installed v1/v2 executable with:
+
+```sh
+VARRO_OPENCODE_TEST_BINARY=/absolute/path/to/opencode node --test scripts/ai-opencode-client.integration.test.mjs
+```
+
+Build first and add `VARRO_AI_TEST_EDITOR=1` to also verify the authenticated editor launcher and a
+native composer follow-up. This test uses a local fixture provider and separate database; it verifies
+runner compatibility without consuming provider credentials. It does not replace Luna/Terra scenarios.
+
 ## Choose the input that exercises the behavior
 
 | Behavior | Input in the isolated VS Code host |
@@ -40,9 +50,10 @@ recreate a rendering boundary already available in a capture.
    the editor actually loaded and run focused checks for the later changes.
 2. Prepare inputs before starting timed scenarios. Inspect capture boundaries with `ai:streaming inspect`.
    Verify the isolated server, fixture, host identity, and actual model request for live work. Check the
-   backend version explicitly. The current `ai:live` and preconditions REST clients use v1 routes; a v2
-   `/path` failure is a controller compatibility limitation, not missing user authentication. Never
-   silently substitute a v1 run for requested v2 coverage.
+   backend version explicitly. The live and precondition clients detect v1/v2 and use the extension's
+   v2 adapter for native v2 requests. Isolation records the exact backend version. V2 requires
+   `VARRO_AI_DATA_DIR` because its location endpoint does not expose the database path; native listener
+   and database ownership checks still apply. Never substitute a different backend for requested coverage.
 3. Start the isolated host using the existing launcher. Use its CDP target for native mouse and keyboard
    events. The controller can use this without asking the user to manipulate the editor. Bind by surface,
    viewId, and session route. Re-read geometry when a target changes; do not keep retrying stale selectors.

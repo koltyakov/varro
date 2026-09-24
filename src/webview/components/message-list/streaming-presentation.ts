@@ -5,6 +5,7 @@ import type { Part } from '../../types';
 
 const COLLECT_MS = 100;
 const ACTIVITY_ADMISSION_MS = 120;
+const MAX_VISIBLE_ACTIVITY = 2;
 const ACTIVITY_PAINT_FALLBACK_MS = 250;
 const MIN_ACTIVITY_PREVIEW_MS = 600;
 const INITIAL_ACTIVITY_DELAY_MS = 500;
@@ -237,9 +238,10 @@ export class StreamingPresentation {
               entry.phase = 'grouped';
             }
             if (item.kind === 'activity' && this.promotedActivities.delete(item.key)) {
-              entry.phase = 'visible';
+              entry.phase = 'delayed';
               entry.admitted = true;
-              entry.visibleAt = now;
+              entry.showAt = now;
+              entry.queuedActivity = false;
               entry.burst = {
                 showAt: now,
                 visibleAt: now,
@@ -250,9 +252,6 @@ export class StreamingPresentation {
               };
             }
             if (item.kind === 'text') {
-              if (!initial && previousBurst && item.text && entry.text() !== item.text) {
-                previousBurst.duration = Math.min(previousBurst.duration, PREVIEW_MS);
-              }
               if (!item.text.startsWith(entry.target)) {
                 // Canonical corrections supersede any queued suffix, including shorter snapshots.
                 entry.setText(item.text);
@@ -292,16 +291,17 @@ export class StreamingPresentation {
     }
   }
 
-  /** Permission removal hands an already painted tool to the tray without another entrance. */
+  /** Permission removal hands an already painted tool to the next available tray slot. */
   showActivity(key: string): void {
     const entry = this.entries.get(key);
     if (!entry || entry.item.kind !== 'activity') {
       this.promotedActivities.add(key);
       return;
     }
-    entry.phase = 'visible';
+    if (entry.phase !== 'visible') entry.phase = 'delayed';
     entry.admitted = true;
-    entry.visibleAt = Date.now();
+    entry.showAt = Date.now();
+    entry.queuedActivity = false;
     entry.burst = {
       showAt: Date.now(),
       visibleAt: Date.now(),
@@ -395,11 +395,39 @@ export class StreamingPresentation {
         const afterShow: Array<() => void> = [];
         const beginningExits = new Set<string>();
         const directlyGrouped = new Set<string>();
+        const lastContentIndex = this.ordered.findLastIndex(
+          ({ item }) => item.kind === 'instant' || (item.kind === 'text' && item.text.trim() !== '')
+        );
+        let activitySlots = 0;
+        // Settle the previous group before admitting content or another queued tool. Count exiting
+        // cards too: their slot stays occupied until the animation actually removes them.
+        for (const [index, entry] of this.ordered.entries()) {
+          const { item } = entry;
+          if (item.kind !== 'activity') continue;
+          if (item.running && entry.phase === 'exiting') {
+            entry.phase = 'visible';
+            entry.exitGeneration += 1;
+          }
+          if (
+            entry.phase !== 'grouped' &&
+            (item.expanded ||
+              (!item.active && item.running) ||
+              (this.immediate && (!item.running || !this.keepRunningVisible)) ||
+              (index < lastContentIndex &&
+                !item.running &&
+                !this.inspectedActivities.has(item.key)))
+          ) {
+            directlyGrouped.add(item.key);
+            entry.phase = 'grouped';
+          }
+          if (entry.phase === 'exiting' && now >= entry.exitDeadline) entry.phase = 'grouped';
+          if (entry.phase === 'visible' || entry.phase === 'exiting') activitySlots += 1;
+        }
         let blocked = false;
         let blockingBurst: Burst | null = null;
         let pending = false;
         let nextAt = Number.POSITIVE_INFINITY;
-        for (const entry of this.ordered) {
+        for (const [index, entry] of this.ordered.entries()) {
           const { item } = entry;
           const expired = now >= entry.arrivedAt + MAX_WAIT_MS;
           const sharesBurst =
@@ -415,24 +443,13 @@ export class StreamingPresentation {
               this.keepRunningVisible &&
               item.running &&
               item.active &&
-              entry.phase === 'delayed'
+              entry.phase === 'delayed' &&
+              activitySlots < MAX_VISIBLE_ACTIVITY
             ) {
               entry.phase = 'visible';
+              activitySlots += 1;
               entry.visibleAt = now;
               if (entry.burst) entry.burst.visibleAt ??= now;
-            }
-            if (item.running && entry.phase === 'exiting') {
-              entry.phase = 'visible';
-              entry.exitGeneration += 1;
-            }
-            if (
-              entry.phase !== 'grouped' &&
-              (item.expanded ||
-                (!item.active && item.running) ||
-                (this.immediate && (!item.running || !this.keepRunningVisible)))
-            ) {
-              directlyGrouped.add(item.key);
-              entry.phase = 'grouped';
             }
             if (entry.phase === 'delayed') {
               const admissionAt = Math.max(
@@ -444,23 +461,16 @@ export class StreamingPresentation {
                     )
                   : 0
               );
-              const previewEnds =
-                entry.burst?.visibleAt === null || !entry.burst
-                  ? null
-                  : entry.burst.visibleAt + entry.burst.duration;
               if (
-                entry.queuedActivity &&
-                !item.running &&
-                previewEnds !== null &&
-                previewEnds - Math.max(now, admissionAt) < MIN_ACTIVITY_PREVIEW_MS
+                !wait &&
+                activitySlots < MAX_VISIBLE_ACTIVITY &&
+                entry.burst &&
+                now >= admissionAt
               ) {
-                // A large completed burst gets a readable sample; overflow joins the disclosure
-                // without mounting dozens of clipped cards or extending the answer's deadline.
-                entry.phase = 'grouped';
-              } else if (!wait && entry.burst && now >= admissionAt) {
                 const burst = entry.burst;
                 const firstInBurst = burst.visibleAt === null;
                 entry.phase = 'visible';
+                activitySlots += 1;
                 entry.visibleAt = now;
                 burst.visibleAt ??= now;
                 if (entry.queuedActivity) {
@@ -489,7 +499,8 @@ export class StreamingPresentation {
                 }
               } else {
                 hidden.add(item.key);
-                if (!wait) nextAt = Math.min(nextAt, Math.max(now + 1, admissionAt));
+                if (!wait && activitySlots < MAX_VISIBLE_ACTIVITY)
+                  nextAt = Math.min(nextAt, Math.max(now + 1, admissionAt));
               }
             }
             if (entry.phase === 'visible') {
@@ -532,8 +543,9 @@ export class StreamingPresentation {
                       (entry.burst?.visibleAt ?? now) + (entry.burst?.duration ?? PREVIEW_MS),
                       (entry.visibleAt ?? now) + MIN_ACTIVITY_PREVIEW_MS
                     )));
-            if (needsMoment && !blocked) blockingBurst = entry.burst;
-            blocked ||= needsMoment;
+            const blocksContent = needsMoment && index > lastContentIndex;
+            if (blocksContent && !blocked) blockingBurst = entry.burst;
+            blocked ||= blocksContent;
             pending ||= needsMoment && (!item.running || entry.phase === 'delayed');
             continue;
           }

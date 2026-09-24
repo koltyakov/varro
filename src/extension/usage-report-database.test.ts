@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProgressOptions } from 'vscode';
 import { UsageReportService } from './usage-report-service';
+import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 
 const mocks = vi.hoisted(() => ({ content: '' }));
 vi.mock('vscode', () => ({
@@ -38,6 +39,7 @@ async function fixture(versions: number[]) {
   directories.push(directory);
   const path = join(directory, 'opencode.db');
   vi.stubEnv('OPENCODE_DB', path);
+  vi.stubEnv('XDG_STATE_HOME', directory);
   const database = new DatabaseSync(path);
   if (versions.includes(1)) {
     database.exec(`CREATE TABLE session (id TEXT PRIMARY KEY, time_updated INTEGER);
@@ -98,6 +100,37 @@ async function fixture(versions: number[]) {
 }
 
 describe('local usage database versions', () => {
+  it('caps an interrupted response at its pause marker and excludes the gap before a new prompt', async () => {
+    const { add, report, now, database } = await fixture([2]);
+    add(2, 'paused-session', now, 'luna');
+    database.prepare("DELETE FROM session_message WHERE id = 'paused-session-reply-2'").run();
+    database
+      .prepare(
+        "UPDATE session_message SET data = json_set(data, '$.time.created', ?, '$.time.completed', ?) WHERE id = 'paused-session-reply'"
+      )
+      .run(now - 3_610_000, now);
+    await new OpenCodeV2SessionState().update('paused-session', {
+      metadata: {
+        varro: { pauses: [{ messageId: 'paused-session-reply', pausedAt: now - 3_600_000 }] },
+      },
+    });
+    const insert = database.prepare('INSERT INTO session_message VALUES (?, ?, ?, ?, ?)');
+    insert.run('resume-prompt', 'paused-session', 'user', 3, '{}');
+    insert.run(
+      'resumed-answer',
+      'paused-session',
+      'assistant',
+      4,
+      JSON.stringify({
+        model: { providerID: 'provider', id: 'luna' },
+        time: { created: now - 5_000, completed: now },
+        tokens: { input: 10, output: 5 },
+      })
+    );
+    const content = await report();
+    expect(content).toContain('| provider | luna | 2 | 36 | 15s |');
+  });
+
   it('recovers migrated completion timing without reverting token usage', async () => {
     const { add, report, now, database } = await fixture([1, 2]);
     add(1, 'migrated', now - 1, 'luna');

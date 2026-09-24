@@ -148,7 +148,7 @@ export const client = {
     },
     async update(
       id: string,
-      body: { title?: string; permission?: PermissionRule[] },
+      body: { title?: string; permission?: PermissionRule[]; metadata?: UnknownRecord },
       options?: { directory?: string }
     ): Promise<Session> {
       return apiCall(

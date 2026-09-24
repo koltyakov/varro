@@ -5,6 +5,7 @@ let queuedMessageRemovalHandler: QueuedMessageRemovalHandler | null = null;
 let permissionRemovalHandler: PermissionRemovalHandler | null = null;
 let presentationFlushHandler: ((sessionId: string) => void) | null = null;
 let todoCollapseHandler: ((element: HTMLElement) => void) | null = null;
+let composerCollapseHandler: ((element: HTMLElement, height: number) => void) | null = null;
 let messageBlockRemovalHandler: ((element: HTMLElement) => void) | null = null;
 const permissionRemovalIntents = new Map<string, { removeGroup: boolean; token: object }>();
 
@@ -17,6 +18,19 @@ export function registerTodoCollapseHandler(handler: (element: HTMLElement) => v
 
 export function prepareForTodoCollapse(element: HTMLElement) {
   todoCollapseHandler?.(element);
+}
+
+export function registerComposerCollapseHandler(
+  handler: (element: HTMLElement, height: number) => void
+) {
+  composerCollapseHandler = handler;
+  return () => {
+    if (composerCollapseHandler === handler) composerCollapseHandler = null;
+  };
+}
+
+export function prepareForComposerCollapse(element: HTMLElement, height: number) {
+  composerCollapseHandler?.(element, height);
 }
 
 export function registerMessageBlockRemovalHandler(handler: (element: HTMLElement) => void) {

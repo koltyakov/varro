@@ -1,6 +1,7 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import type { SessionDiffSummary, SiblingWorkspaceAlertKind } from '../../../shared/protocol';
+import { readSessionPauses } from '../../../shared/session-pauses';
 import { deleteSession } from '../../hooks/useOpenCode';
 import { postMessage } from '../../lib/bridge';
 import { requestWorkspaceSelection } from '../../lib/workspace-selection';
@@ -521,9 +522,15 @@ export function ActiveChatHeader(props: {
     }
     isActiveSessionRunning();
     let cancelled = false;
-    const directory = state.sessions.find((session) => session.id === sessionId)?.directory;
+    const session = state.sessions.find((entry) => entry.id === sessionId);
+    const directory = session?.directory;
+    const pausedAt = readSessionPauses(session?.metadata).at(-1)?.pausedAt;
     client.varro.session
-      .diffSummary(sessionId, undefined, { directory })
+      .diffSummary(
+        sessionId,
+        pausedAt === undefined ? undefined : Math.max(pausedAt, session?.time.updated ?? 0),
+        { directory }
+      )
       .then((summary) => {
         if (cancelled) return;
         setWorkNow(Date.now());

@@ -259,11 +259,11 @@ test('turns a terminal paste into a chip without painting the raw output first',
   expect(Math.max(...samples.map((sample) => sample.height)) - samples[0]!.height).toBeLessThan(8);
 });
 
-test('scrolls a large paste to keep the caret visible', async ({ page }) => {
+test('scrolls a multiline inline paste to keep the caret visible', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
   const composer = page.locator('.rich-composer').first();
-  const pastedText = Array.from({ length: 80 }, (_, index) => `Pasted line ${index + 1}`).join(
+  const pastedText = Array.from({ length: 24 }, (_, index) => `Pasted line ${index + 1}`).join(
     '\n'
   );
   await composer.focus();
@@ -275,8 +275,8 @@ test('scrolls a large paste to keep the caret visible', async ({ page }) => {
     );
   }, pastedText);
 
-  await expect(composer).toContainText('Pasted line 80');
-  await expect(composer.locator('br')).toHaveCount(79);
+  await expect(composer).toContainText('Pasted line 24');
+  await expect(composer.locator('br')).toHaveCount(23);
   await expect
     .poll(() =>
       composer.evaluate((editor) => {

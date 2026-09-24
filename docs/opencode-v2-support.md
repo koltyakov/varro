@@ -10,7 +10,7 @@ V2 is recommended for new installations; v1 remains supported. See the [usage gu
 - `open-code-process.ts` retains credentials in the private ownership lease for window handoff and reads registered local service credentials. CLI update lookup and recovery commands select the matching package family.
 - `open-code-transport.ts` authenticates health, REST, and SSE requests and selects the adapter from validated server responses.
 - `opencode-v2-adapter.ts`, `opencode-v2-projection.ts`, and `opencode-v2-events.ts` translate requests, transcript records, catalogs, permissions, forms, and events into the existing Varro contracts.
-- `opencode-v2-session-state.ts` persists Varro-owned metadata and timestamp overrides that the released v2 API cannot patch. These annotations live under the user's XDG state directory in `varro/opencode-v2/`.
+- `opencode-v2-session-state.ts` persists Varro-owned metadata and timestamp overrides across the supported v2 range. Native metadata updates are available from 2.0.15, but Varro still uses local annotations under the user's XDG state directory in `varro/opencode-v2/`.
 - Native v2 agent and permission configuration keys are preserved when Varro edits a file already using them. V1-format files retain their format.
 
 Annotation updates and deletions share a per-session queue within each store instance. A failed
@@ -18,7 +18,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 54 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.32`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.14`, with ten platform- or family-specific skips. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 54 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.32`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.15`, with ten platform- or family-specific skips. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -76,6 +76,26 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.15 compatibility review
+
+Reviewed v2.0.14 to v2.0.15, `8864eb507e` through `a25d304201`.
+The API adds optional metadata to session updates, the `session.metadata.updated`
+event, and project `time.active`. These additions require no adapter change.
+Varro continues to store its metadata overrides locally across the supported v2 range;
+adopting native metadata updates is separate compatibility work for older servers.
+
+The Promise client now preserves base URL path prefixes and throws declared API
+errors as `Error` instances. Varro uses its own HTTP transport and the unchanged
+client service-discovery API. Existing HTTP routes, SSE envelopes, transcript records,
+configuration, model catalogs, and permission/form contracts remain compatible.
+
+Runtime changes normalize AI SDK text and reasoning boundaries, fix Kimi reasoning
+replay and bare-null provider SSE frames, simplify shell output notices, and improve
+Windows CLI upgrades. The AI package's media and video-generation APIs, CodeMode
+language additions, and upstream app/TUI changes require no Varro adaptation.
+V1's latest published CLI and SDK remain `1.18.32`; support floors remain v2 `2.0.5`
+and v1 `1.16.0`.
 
 ### 2.0.14 and 1.18.32 compatibility review
 

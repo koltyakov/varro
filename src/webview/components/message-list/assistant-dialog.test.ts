@@ -60,6 +60,33 @@ function incompleteAssistantMessage(
 }
 
 describe('getAssistantDialogSummaryMap', () => {
+  it.each([true, false])(
+    'closes paused work and excludes the gap before continuation with a prompt: %s',
+    (newPrompt) => {
+      const paused = incompleteAssistantMessage('paused', 'session-parent', 'prompt', 2_000);
+      paused.info.finish = 'tool-calls';
+      const messages: MessageEntry[] = [
+        userMessage('prompt', 'session-parent', 1_000),
+        paused,
+        ...(newPrompt ? [userMessage('resume', 'session-parent', 3_611_000)] : []),
+        assistantMessage(
+          'resumed',
+          'session-parent',
+          newPrompt ? 'resume' : 'prompt',
+          3_611_000,
+          3_616_000
+        ),
+      ];
+      const summaries = getAssistantDialogSummaryMap(messages, undefined, {
+        primarySessionId: 'session-parent',
+        pauses: [{ messageId: 'paused', pausedAt: 11_000 }],
+      });
+      expect(summaries.get('paused')).toMatchObject({ durationMs: 10_000, completedAt: 11_000 });
+      expect(summaries.get('resumed')).toMatchObject({ durationMs: 5_000, completedAt: 3_616_000 });
+      expect(paused.info.time.completed).toBeUndefined();
+    }
+  );
+
   it('waits for a terminal assistant step before adding the worked summary', () => {
     const intermediate = assistantMessage(
       'assistant-tool-call',

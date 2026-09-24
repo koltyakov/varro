@@ -25,6 +25,7 @@ export function getSlashCommands(props: {
   onConnectProvider: () => void;
   onOpenSettings: () => void;
   onExportSession: () => void;
+  onPauseSession: () => Promise<void>;
   onGenerateStats: (includeAllTime: boolean) => void;
   customCommands: Command[];
 }): SlashCommand[] {
@@ -58,6 +59,7 @@ export function getSlashCommands(props: {
     'review',
     'abort',
     'stop',
+    'pause',
     'ralph',
   ]);
 
@@ -176,6 +178,14 @@ export function getSlashCommands(props: {
   ];
 
   if (props.hasCurrentSession) {
+    if (state.serverStatus.state === 'running' && state.serverStatus.apiVersion === 2) {
+      commands.push({
+        name: 'pause',
+        aliases: [],
+        description: 'Interrupt the current run and pause queued messages',
+        action: () => props.onPauseSession(),
+      });
+    }
     commands.push({
       name: 'export',
       aliases: [],

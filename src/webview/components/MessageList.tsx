@@ -60,6 +60,7 @@ import {
   registerPermissionRemovalHandler,
   registerQueuedMessageRemovalHandler,
   registerTodoCollapseHandler,
+  registerComposerCollapseHandler,
   registerMessageBlockRemovalHandler,
   registerPresentationFlushHandler,
 } from '../lib/message-list-layout';
@@ -69,7 +70,10 @@ import {
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
 import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
+import { getSessionPauseMap } from '../lib/session-pauses';
+import { isSessionResumeMessage, readSessionPauses } from '../../shared/session-pauses';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
+import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
 import { editingMessage } from '../lib/message-edit-state';
 import { hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import {
@@ -305,6 +309,9 @@ export function getPromptNumberMap(messages: readonly MessageEntry[]) {
   let promptNumber = 0;
   for (const message of messages) {
     if (message.info.role !== 'user') continue;
+    if (isSessionResumeMessage(message.parts)) continue;
+    const parsed = parseUserMessageContent(message.parts);
+    if (parsed.automaticActions.length > 0 && !hasUserMessageContent(parsed)) continue;
     promptNumber += 1;
     result.set(message.info.id, promptNumber);
   }
@@ -4557,8 +4564,19 @@ export function MessageList() {
 
     // A short transcript also needs reserve for the space below its natural content.
     // Clamping this to zero drops that space before an entering block has grown into it.
-    const unreservedBottom = containerRef.scrollHeight - reserve - containerRef.clientHeight;
-    const nextReserve = Math.max(0, appendBottomReserveTarget - unreservedBottom);
+    // Deferred row rounding can still remove height from an entering replacement tool. Keep that
+    // space until the correction lands so consuming the final reserve cannot clamp the viewport.
+    let pendingHeightReduction = 0;
+    for (const [element, correction] of pendingRowHeightCorrections) {
+      if (element.isConnected)
+        pendingHeightReduction += Math.max(
+          0,
+          (appliedRowHeightCorrections.get(element) ?? 0) - correction
+        );
+    }
+    const unreservedBottom =
+      containerRef.scrollHeight - reserve - containerRef.clientHeight - pendingHeightReduction;
+    const nextReserve = Math.max(0, Math.ceil(appendBottomReserveTarget - unreservedBottom));
     if (Math.abs(nextReserve - reserve) <= 0.5) return;
     setAppendBottomReserve(nextReserve);
     if (nextReserve <= 0.5) {
@@ -6049,6 +6067,27 @@ export function MessageList() {
     );
     onCleanup(unregisterQueuedMessageRemoval);
     onCleanup(
+      registerComposerCollapseHandler((element, height) =>
+        untrack(() => {
+          if (
+            !containerRef?.isConnected ||
+            state.messagesLoading ||
+            editingMessage() ||
+            diffFocusPauseActive ||
+            element.closest('.chat-main-column-shell') !==
+              containerRef.closest('.chat-main-column-shell')
+          )
+            return;
+          if (height <= 0 || !autoScroll() || !pinnedToBottom || stickyNavigationOwnsScroll())
+            return;
+          const shortfall = containerRef.scrollTop - (bottomScrollTop() - height);
+          if (shortfall <= 0) return;
+          appendBottomReserveTarget = containerRef.scrollTop;
+          setAppendBottomReserve((reserve) => reserve + Math.ceil(shortfall));
+        })
+      )
+    );
+    onCleanup(
       registerMessageBlockRemovalHandler((element) =>
         untrack(() => {
           if (
@@ -6921,9 +6960,13 @@ export function MessageList() {
     for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
       const { info, parts } = visibleMessages[index]!;
       if (info.role === 'user') {
-        // Compaction dividers do not start a new turn. Switching away and back would
-        // discard presentation state and replay already-visible assistant content.
-        if (parts.length > 0 && parts.every((part) => part.type === 'compaction')) continue;
+        // Automatic notices and metadata-only arrivals do not start a new turn.
+        // Switching away and back would requeue already-visible assistant content.
+        if (
+          !isSessionResumeMessage(parts) &&
+          !hasUserMessageContent(parseUserMessageContent(parts))
+        )
+          continue;
         userMessageId = info.id;
         break;
       }
@@ -7210,6 +7253,22 @@ export function MessageList() {
     const ids = trailingAssistantTurn()?.assistantMessageIds;
     return compactActivityMessages().filter((message) => ids?.has(message.info.id));
   });
+  const presentationActivityGroups = createMemo(() =>
+    getAssistantActivityGroupMap(presentationMessages(), canCompactActivityPart, (part) =>
+      part.type === 'text' ? part.text.trim() !== '' : shouldShowAssistantPartInline(part)
+    )
+  );
+  const expandedPresentationActivityKeys = createMemo(() => {
+    trackMessageBlockExpansionState();
+    const keys = new Set<string>();
+    for (const group of new Set([...presentationActivityGroups().values()].flat())) {
+      if (!getMessageBlockExpanded(group.key)) continue;
+      for (const part of group.parts) {
+        if (!isAssistantActivityPartRunning(part)) keys.add(getPresentationPartKey(part));
+      }
+    }
+    return keys;
+  });
   let previousPresentationLayout: Map<string, readonly string[]> | null = null;
   let previousPresentationStructureVersion = -1;
   createEffect(() => {
@@ -7276,7 +7335,7 @@ export function MessageList() {
     const sessionId = state.activeSessionId;
     const entries = presentationMessages();
     const items: PresentationItem[] = [];
-    trackMessageBlockExpansionState();
+    const expandedActivityKeys = expandedPresentationActivityKeys();
     for (const message of entries) {
       for (const part of message.parts) {
         const key = getPresentationPartKey(part);
@@ -7285,7 +7344,6 @@ export function MessageList() {
             part.id === state.streamingPartId ? state.streamingText || part.text : part.text;
           items.push({ key, partId: part.id, kind: 'text', text });
         } else if (isAssistantActivityPart(part) && canCompactActivityPart(part)) {
-          const groupKey = `activity-segment\u0000${part.sessionID}\u0000${turn.userMessageId || message.info.id}\u0000${part.id}`;
           items.push({
             key,
             partId: part.id,
@@ -7295,7 +7353,7 @@ export function MessageList() {
               ? activeActivityMessageIds()
               : activeToolActivityMessageIds()
             ).has(part.messageID),
-            expanded: getMessageBlockExpanded(groupKey) ?? false,
+            expanded: expandedActivityKeys.has(key),
           });
         } else if (shouldShowAssistantPartInline(part)) {
           items.push({ key, partId: part.id, kind: 'instant' });
@@ -7419,12 +7477,16 @@ export function MessageList() {
     }));
     const dialogMessages = assistantDialogMessages();
     const collectLeadingSummaryStats = collectingLeadingDialogStats();
+    const pauses = readSessionPauses(
+      state.sessions.find((session) => session.id === state.activeSessionId)?.metadata
+    );
     return untrack(() =>
       getAssistantDialogSummaryMap(dialogMessages, undefined, {
         sessions,
         primarySessionId: state.activeSessionId ?? undefined,
         suppressTrailingSummary,
         collectLeadingSummaryStats,
+        pauses,
       })
     );
   });
@@ -7440,6 +7502,27 @@ export function MessageList() {
     return previous?.message.info.id === messageId && message
       ? { message, summary: previous.summary }
       : null;
+  });
+  const sessionPauseMap = createMemo(() => getSessionPauseMap(state.sessions, messages()));
+  const rowSessionPauseMap = createMemo(() => {
+    const pauses = sessionPauseMap();
+    if (editingMessage()) return pauses;
+    const trailingId = trailingAssistantDialogSummary()?.message.info.id;
+    if (!trailingId || !pauses.has(trailingId)) return pauses;
+    const rowPauses = new Map(pauses);
+    rowPauses.delete(trailingId);
+    return rowPauses;
+  });
+  let previousPauseLayoutSignatures = new Map<string, string>();
+  createEffect(() => {
+    const current = new Map(
+      [...rowSessionPauseMap()].map(([messageId, pause]) => [
+        messageId,
+        `${pause.pausedAt}:${pause.resumed}`,
+      ])
+    );
+    scheduleChangedLayoutRowMeasurements(previousPauseLayoutSignatures, current);
+    previousPauseLayoutSignatures = current;
   });
   const rowAssistantDialogSummaryMap = createMemo(() => {
     const summaries = assistantDialogSummaryMap();
@@ -7470,6 +7553,7 @@ export function MessageList() {
     );
     const modelChanges = modelChangeMap();
     const dialogSummaries = rowAssistantDialogSummaryMap();
+    const pauses = rowSessionPauseMap();
     for (const messageId of assistantDiffContentMessageIds) {
       const index = messageIndexById().get(messageId);
       const message = index === undefined ? undefined : messages()[index];
@@ -7482,6 +7566,7 @@ export function MessageList() {
         (messageId) =>
           !modelChanges.has(messageId) &&
           !dialogSummaries.has(messageId) &&
+          !pauses.has(messageId) &&
           !assistantDiffContentMessageIds.has(messageId)
       )
     );
@@ -8333,6 +8418,7 @@ export function MessageList() {
               presentation={presentation}
               messages={messages()}
               modelChangeMap={modelChangeMap()}
+              sessionPauseMap={rowSessionPauseMap()}
               promptNumberMap={promptNumberMap()}
               showPromptNumbers={promptNumbersVisible()}
               showSentTimestamps={showPromptNumbers()}
@@ -8417,6 +8503,7 @@ export function MessageList() {
               <div class="interactive-item-container interactive-response interactive-loading-row trailing-assistant-summary-row">
                 <AssistantDialogSummaryForMessage
                   summary={trailing().summary}
+                  pause={sessionPauseMap().get(trailing().message.info.id)}
                   msg={trailing().message}
                   hasBuildAgent={hasBuildAgent()}
                   latestPlanImplementationMessageId={latestPlanImplementationMessageId()}

@@ -14,6 +14,7 @@ import {
 } from './vscode-launch-process.mjs';
 import { requireFixtureWorkspace } from './ai-fuzzy-preconditions.mjs';
 import { requireIsolatedTestServer } from './ai-test-isolation.mjs';
+import { AiOpenCodeClient } from './ai-opencode-client.mjs';
 import { normalizeCapturedEvents, savePlaybackCapture } from './ai-session-playback.mjs';
 import { installObserver } from './ai-streaming.mjs';
 
@@ -403,30 +404,7 @@ export function buildDuplicateDeliveryObserverExpression(marker, tokens) {
   })()`;
 }
 
-class OpenCodeClient {
-  constructor(server, workspace) {
-    this.server = server.replace(/\/$/, '');
-    this.workspace = workspace;
-  }
-
-  async request(method, route, body) {
-    const url = new URL(`${this.server}${route}`);
-    url.searchParams.set('directory', this.workspace);
-    const init = {
-      method,
-      headers: {
-        'content-type': 'application/json',
-        'x-opencode-directory': this.workspace,
-      },
-    };
-    if (body !== undefined) init.body = JSON.stringify(body);
-    const response = await fetch(url, { ...init, redirect: 'error' });
-    const text = await response.text();
-    if (!response.ok)
-      throw new Error(`${method} ${route} failed (${String(response.status)}): ${text}`);
-    return text ? JSON.parse(text) : null;
-  }
-
+class OpenCodeClient extends AiOpenCodeClient {
   async isBusy(sessionId) {
     const statuses = await this.request('GET', '/session/status');
     return statuses?.[sessionId]?.type === 'busy';

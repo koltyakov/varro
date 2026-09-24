@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { batch } from 'solid-js';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
+import { SESSION_RESUME_PROMPT } from '../../shared/session-pauses';
 import {
   composerFocusKey,
   replaceMessages,
@@ -20,7 +21,7 @@ import {
 } from '../lib/state';
 import type { MessageEntry, Part, Permission, QuestionRequest, TextPart, ToolPart } from '../types';
 import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
-import { MessageList, getNewlyAppendedMessageIds } from './MessageList';
+import { MessageList, getNewlyAppendedMessageIds, getPromptNumberMap } from './MessageList';
 import { getRenderEmptyMessageIds } from './message-list/row-layout';
 import { getVisibleThreadMessages } from './message-list/thread-visibility';
 import { markSessionHistoryLoadFailed, setSessionHistoryCursor } from '../lib/message-window';
@@ -61,6 +62,98 @@ describe('message entrance detection', () => {
   it('does not treat prepended history or a replaced transcript as new messages', () => {
     expect(getNewlyAppendedMessageIds(['message-2'], ['message-1', 'message-2'])).toEqual([]);
     expect(getNewlyAppendedMessageIds(['message-1'], ['other-message'])).toEqual([]);
+  });
+});
+
+describe('session pause dividers', () => {
+  it('keeps an otherwise empty pause row measured and updates it in place on continuation', () => {
+    const frames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    setState('serverStatus', { state: 'running', url: 'mock://opencode', apiVersion: 2 });
+    setState('sessions', [
+      session('session-1', {
+        metadata: { varro: { pauses: [{ messageId: 'paused', pausedAt: 100 }] } },
+      }),
+    ]);
+    replaceMessages([
+      { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Work on this')] },
+      { info: assistantMessage('paused', { time: { created: 1 } }), parts: [] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    const row = container!.querySelector('[data-msg-id="paused"]');
+    const divider = row?.querySelector('.session-pause-divider');
+    expect(divider?.textContent).toContain('Paused');
+    expect(row?.classList.contains('interactive-item-render-empty')).toBe(false);
+    expect(divider?.querySelector('[aria-label="Resume"]')?.textContent).toBe('');
+    expect(divider?.querySelector('[aria-label="Resume"] .ui-icon')).not.toBeNull();
+    expect(container!.querySelectorAll('.session-pause-divider')).toHaveLength(1);
+
+    upsertMessage({
+      info: userMessage('continue'),
+      parts: [textPart('continue-text', 'Continue')],
+    });
+    expect(row?.querySelector('.session-pause-divider')).toBe(divider);
+    expect(divider?.querySelector('.model-change-label')?.textContent).toBe('Paused and resumed');
+    expect(divider?.querySelector('[aria-label="Resume"]')).toBeNull();
+    frames.restore();
+  });
+
+  it('hides the resume prompt through the trailing-to-history handoff and history reload', () => {
+    const frames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    setState('serverStatus', { state: 'running', url: 'mock://opencode', apiVersion: 2 });
+    setState('sessions', [
+      session('session-1', {
+        metadata: { varro: { pauses: [{ messageId: 'paused', pausedAt: 100 }] } },
+      }),
+    ]);
+    replaceMessages([
+      { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Review the code')] },
+      {
+        info: assistantMessage('paused', {
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        }),
+        parts: [textPart('partial-text', 'Review in progress')],
+      },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    const divider = container!.querySelector(
+      '.trailing-assistant-summary-row .session-pause-divider'
+    );
+    expect(divider).not.toBeNull();
+    expect(container!.querySelectorAll('.session-pause-divider')).toHaveLength(1);
+    expect(container!.querySelectorAll('.assistant-dialog-summary')).toHaveLength(1);
+    expect(divider?.querySelector('.model-change-label')?.textContent).toBe('Paused');
+    expect(divider?.querySelector('[aria-label="Resume"] .ui-icon')).not.toBeNull();
+    expect(divider?.querySelector('[aria-label="Copy final response"]')).toBeNull();
+    expect(divider?.querySelector('[aria-label="Fork chat from here"]')).not.toBeNull();
+    expect(divider?.querySelector('time')).not.toBeNull();
+
+    upsertMessage({
+      info: userMessage('continue'),
+      parts: [textPart('continue-text', SESSION_RESUME_PROMPT)],
+    });
+    expect(container!.querySelectorAll('.session-pause-divider')).toHaveLength(1);
+    const historical = container!.querySelector('[data-msg-id="paused"] .session-pause-divider');
+    expect(historical?.querySelector('.model-change-label')?.textContent).toBe(
+      'Paused and resumed'
+    );
+    expect(historical?.querySelector('[aria-label="Resume"]')).toBeNull();
+    const expectHiddenResume = () => {
+      expect(container!.textContent).not.toContain('Continue where you left off');
+      expect(container!.querySelectorAll('.user-message-card')).toHaveLength(1);
+      expect(container!.querySelector('[data-msg-id="continue"]')?.classList).toContain(
+        'interactive-item-render-empty'
+      );
+      expect(getPromptNumberMap(state.messages).has('continue')).toBe(false);
+    };
+    expectHiddenResume();
+    const history: MessageEntry[] = JSON.parse(JSON.stringify(state.messages));
+    cleanup();
+    replaceMessages(history);
+    cleanup = render(() => MessageList(), container!);
+    expectHiddenResume();
+    frames.restore();
   });
 });
 
@@ -1293,7 +1386,7 @@ describe('MessageList compact activity', () => {
     );
   });
 
-  it('retains completed activity before releasing response text that is already available', async () => {
+  it('groups completed activity immediately when response text is available', async () => {
     const search = toolPart('search-streaming', 'assistant-1', 'call-search-streaming');
     search.tool = 'grep';
     search.state = {
@@ -1335,9 +1428,9 @@ describe('MessageList compact activity', () => {
     });
     await Promise.resolve();
 
-    expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).toBeNull();
     expect(container?.textContent).not.toContain('Streaming response');
-    await vi.advanceTimersByTimeAsync(2_200);
+    await vi.advanceTimersByTimeAsync(32);
     expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).toBeNull();
     expect(container?.textContent).toContain('Streaming response');
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -1641,14 +1734,14 @@ describe('MessageList compact activity', () => {
     };
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
-    replaceMessages([user, first, { info: secondInfo, parts: [running] }, response]);
+    replaceMessages([user, first, { info: secondInfo, parts: [running] }]);
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
     await vi.advanceTimersByTimeAsync(500);
     expect(container?.querySelector('[data-activity-part-id="command-running"]')).not.toBeNull();
 
-    replaceMessages([user, first, { info: secondInfo, parts: [completedRunning] }, response]);
+    replaceMessages([user, first, { info: secondInfo, parts: [completedRunning] }]);
     await Promise.resolve();
 
     const followerRow = container?.querySelector('[data-msg-id="assistant-2"]');
@@ -1673,6 +1766,9 @@ describe('MessageList compact activity', () => {
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 2 commands'
     );
+    replaceMessages([user, first, { info: secondInfo, parts: [completedRunning] }, response]);
+    await vi.advanceTimersByTimeAsync(32);
+    expect(container?.textContent).toContain('Checks passed.');
   });
 
   it('previews tools that complete inside the collection interval before grouping them', async () => {
@@ -2009,15 +2105,9 @@ describe('MessageList compact activity', () => {
       },
     ]);
     await Promise.resolve();
-    expect(
-      container?.querySelector('[data-activity-part-id="command-1"].is-exiting')
-    ).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="command-1"].is-exiting')).toBeNull();
 
-    await vi.advanceTimersByTimeAsync(420);
-    expect(
-      container?.querySelector('[data-activity-part-id="command-1"].is-exiting')
-    ).not.toBeNull();
-    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(32);
 
     expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(

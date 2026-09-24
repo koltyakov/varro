@@ -354,7 +354,11 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private setRunningStatus(url = this.url, eventStream?: 'healthy' | 'degraded') {
-    const status: Extract<ServerStatus, { state: 'running' }> = { state: 'running', url };
+    const status: Extract<ServerStatus, { state: 'running' }> = {
+      state: 'running',
+      url,
+      apiVersion: this.apiVersion,
+    };
     if (eventStream) status.eventStream = eventStream;
     this.setStatus(status);
   }

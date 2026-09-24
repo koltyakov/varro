@@ -4,7 +4,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
-ARG OPENCODE_VERSION=2.0.14
+ARG OPENCODE_VERSION=2.0.15
 RUN npm install --global "@opencode/cli@${OPENCODE_VERSION}"
 
 EXPOSE 4096

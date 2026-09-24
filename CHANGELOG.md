@@ -2,9 +2,18 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.30.x - September 2026
+
+- Added persistent session pause and resume for OpenCode v2, with `/pause`, parked queued messages, and a Resume action in the transcript. Paused time is excluded from worked-duration summaries and usage reports.
+- Turned large text pastes into compact inline chips with previews and an **Expand to text** action. Pasted text survives draft and queue restoration, and joined user messages retain file attachment chips and editable context.
+- Displayed generated context, continuations, and loaded agent instructions as compact automatic action notices. Resume prompts stay hidden from conversation history.
+- Limited streaming activity previews to two cards and grouped completed tools sooner so answers appear promptly. Kept streamed answers visible through background notices and stabilized scrolling as activity cards collapse.
+- Added project-specific file and folder icons to tool calls and removed duplicate session controls when the sessions sidebar is visible.
+- Used stateless title and commit-message generation when supported by the connected v2 server, with helper-session fallback for older servers and unsupported models.
+
 ## 0.29.x - September 2026
 
-- Added OpenCode v2 support alongside v1, with automatic API detection and v2 client updates through 2.0.14. Install v2 with `npm install -g @opencode/cli`, then run `Varro: Restart Server`. See [restart recovery steps](docs/usage.md#if-restart-does-not-switch-to-v2) if needed.
+- Added OpenCode v2 support alongside v1, with automatic API detection and v2 client updates. Install v2 with `npm install -g @opencode/cli`, then run `Varro: Restart Server`. See [restart recovery steps](docs/usage.md#if-restart-does-not-switch-to-v2) if needed.
 - Imported copies of v1 conversations that v2 cannot open, including child sessions. Usage reports include both versions without double-counting.
 - Added attach-only connections to externally managed servers, Docker setup guides, and saved credentials for authenticated connections.
 - Added opt-in TypeSafe Jev decisions for Auto-mode approvals, provider disabling, and v2 authentication. Model refreshes now show progress and discover new models without restoring removed ones.

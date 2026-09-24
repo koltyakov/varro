@@ -2503,6 +2503,8 @@ body.vscode-light
 
 .interactive-session .chat-input-container {
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   cursor: text;
   background: linear-gradient(
     to bottom,
@@ -2527,6 +2529,10 @@ body.vscode-light
     background-color 0.15s,
     border-color 0.15s,
     box-shadow 0.15s;
+}
+
+.interactive-session .chat-input-container > * {
+  flex-shrink: 0;
 }
 
 body:is(.vscode-light, .vscode-high-contrast-light) .interactive-session .chat-input-container {
@@ -2737,7 +2743,7 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
 .interactive-session .chat-input-toolbar-divider {
   height: 1px;
   background: var(--color-vscode-border-default);
-  margin: 0 -8px;
+  margin: auto -8px 0;
 }
 
 .interactive-session .chat-input-toolbars.toolbar-main {

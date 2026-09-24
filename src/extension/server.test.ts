@@ -2084,6 +2084,7 @@ describe('OpenCodeServer compatibility gate', () => {
     expect(server.status).toEqual({
       state: 'running',
       url: server.url,
+      apiVersion: server.apiVersion,
       eventStream: 'degraded',
     });
     expect(prepareForHealthyExistingServer).toHaveBeenCalledOnce();
@@ -2884,6 +2885,7 @@ describe('OpenCodeServer adopted process recovery', () => {
     expect(server.status).toEqual({
       state: 'running',
       url: server.url,
+      apiVersion: server.apiVersion,
       eventStream: 'degraded',
     });
     expect(startOperation).not.toHaveBeenCalled();
@@ -2938,6 +2940,7 @@ describe('OpenCodeServer adopted process recovery', () => {
     expect(server.status).toEqual({
       state: 'running',
       url: server.url,
+      apiVersion: server.apiVersion,
       eventStream: 'degraded',
     });
   });

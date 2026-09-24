@@ -1291,7 +1291,7 @@ describe('v2 transcript and permission projection', () => {
     expect(events.filter((event) => event?.seq !== undefined)).toHaveLength(1);
   });
 
-  it('paginates past internal instructions without exposing user bubbles', async () => {
+  it('retains synthetic notices while paginating past internal instructions', async () => {
     const wire = vi.fn(async (_method: string, path: string) => {
       if (path.endsWith('/inbox')) return { data: [] };
       const cursor = new URL(path, 'http://localhost').searchParams.get('cursor');
@@ -1324,10 +1324,16 @@ describe('v2 transcript and permission projection', () => {
       captureNextCursor: true,
     });
     expect(page).toMatchObject({
-      data: [{ info: { id: 'msg_user', role: 'user' }, parts: [{ text: 'Continue' }] }],
+      data: [
+        { info: { id: 'msg_user', role: 'user' }, parts: [{ text: 'Continue' }] },
+        {
+          info: { id: 'msg_restart', role: 'user' },
+          parts: [{ synthetic: true, text: 'The server restarted while you were working.' }],
+        },
+      ],
       nextCursor: undefined,
     });
-    expect(asRecord(page)?.data).toHaveLength(1);
+    expect(asRecord(page)?.data).toHaveLength(2);
     expect(wire).toHaveBeenCalledTimes(3);
   });
 
