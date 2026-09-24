@@ -628,6 +628,73 @@ test('viewport narrowing preserves the first fully visible row after a clipped w
   expect(await getRenderedMessageRowCount(page)).toBeLessThan(90);
 });
 
+test('narrowing after PageDown preserves a short response below a clipped prompt', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 808 });
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript&wrappingBoundary=1');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  const list = page.locator('.interactive-list');
+  const shell = page.locator('.chat-main-column-shell');
+  await shell.evaluate((element) => {
+    element.style.maxWidth = 'none';
+    element.style.width = '486px';
+  });
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+    element.scrollTop = Math.floor(element.scrollHeight / 2);
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.waitForTimeout(300);
+  const target = await list.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const user = [...element.querySelectorAll<HTMLElement>('.interactive-request')].find(
+      (row) => row.getBoundingClientRect().top > bounds.bottom
+    );
+    const assistant = user?.nextElementSibling as HTMLElement | null;
+    if (!user || !assistant?.dataset.msgId) throw new Error('Missing PageDown target');
+    element.scrollTop += user.getBoundingClientRect().top - bounds.top + 46 - element.clientHeight;
+    element.dispatchEvent(new Event('scroll'));
+    return assistant.dataset.msgId;
+  });
+  await page.waitForTimeout(300);
+  await list.focus();
+  await page.keyboard.press('PageDown');
+  await page.waitForTimeout(150);
+  const sample = () =>
+    list.evaluate((element, id) => {
+      const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
+      const paragraph = row?.querySelector('p');
+      const bounds = element.getBoundingClientRect();
+      const userBounds = row?.previousElementSibling?.getBoundingClientRect();
+      return {
+        top: paragraph ? paragraph.getBoundingClientRect().top - bounds.top : null,
+        userTop: userBounds ? userBounds.top - bounds.top : null,
+        userHeight: userBounds?.height,
+        scrollTop: element.scrollTop,
+      };
+    }, target);
+  const before = await sample();
+  expect(before.top).not.toBeNull();
+  expect(before.userTop).toBeLessThan(0);
+  expect(before.userTop).toBeCloseTo(-46, 0);
+  const samples = [];
+  await shell.evaluate((element) => {
+    element.style.width = '430px';
+  });
+  for (let frame = 0; frame < 16; frame++) {
+    await waitForAnimationFrame(page);
+    samples.push(await sample());
+  }
+  expect(samples.at(-1)?.userHeight, JSON.stringify({ before, samples })).toBeGreaterThan(
+    before.userHeight!
+  );
+  expect(
+    Math.max(...samples.map((entry) => Math.abs(entry.top! - before.top!))),
+    JSON.stringify({ before, samples })
+  ).toBeLessThanOrEqual(3);
+});
+
 test('viewport narrowing preserves an inner block in a viewport-tall markdown item', async ({
   page,
 }) => {

@@ -5652,20 +5652,9 @@ export function MessageList() {
       keydownDestinationRafId = requestAnimationFrame(() => {
         keydownDestinationRafId = 0;
         if (disposed || !containerRef || state.activeSessionId !== sessionId) return;
-        const destinationMetrics = shouldVirtualize() ? virtualMetrics() : null;
-        const destinationIndex = destinationMetrics
-          ? getFirstVisibleMessageIndexFromVirtualMetrics({
-              metrics: destinationMetrics,
-              scrollTop: getVirtualScrollTop(containerRef.scrollTop),
-            })
-          : null;
-        const anchor = refineTallRenderItemScrollAnchor(
-          destinationIndex === null
-            ? captureVisibleScrollAnchor({ preferStableRenderItem: true })
-            : capturePaintedVisibleScrollAnchorFromIndex(destinationIndex),
-          0,
-          { includeCompact: true }
-        );
+        // Keep the same exact painted-anchor policy after the destination mounts.
+        // A clipped prompt above it can wrap without moving the visible response.
+        const anchor = captureWidthResizeVisibleScrollAnchor();
         if (!anchor) return;
         directMovementAnchor = {
           anchor,
