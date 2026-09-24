@@ -1386,7 +1386,7 @@ describe('MessageList compact activity', () => {
     );
   });
 
-  it('retains completed activity before releasing response text that is already available', async () => {
+  it('groups completed activity immediately when response text is available', async () => {
     const search = toolPart('search-streaming', 'assistant-1', 'call-search-streaming');
     search.tool = 'grep';
     search.state = {
@@ -1428,9 +1428,9 @@ describe('MessageList compact activity', () => {
     });
     await Promise.resolve();
 
-    expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).toBeNull();
     expect(container?.textContent).not.toContain('Streaming response');
-    await vi.advanceTimersByTimeAsync(2_200);
+    await vi.advanceTimersByTimeAsync(32);
     expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).toBeNull();
     expect(container?.textContent).toContain('Streaming response');
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -1734,14 +1734,14 @@ describe('MessageList compact activity', () => {
     };
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
-    replaceMessages([user, first, { info: secondInfo, parts: [running] }, response]);
+    replaceMessages([user, first, { info: secondInfo, parts: [running] }]);
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
     await vi.advanceTimersByTimeAsync(500);
     expect(container?.querySelector('[data-activity-part-id="command-running"]')).not.toBeNull();
 
-    replaceMessages([user, first, { info: secondInfo, parts: [completedRunning] }, response]);
+    replaceMessages([user, first, { info: secondInfo, parts: [completedRunning] }]);
     await Promise.resolve();
 
     const followerRow = container?.querySelector('[data-msg-id="assistant-2"]');
@@ -1766,6 +1766,9 @@ describe('MessageList compact activity', () => {
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 2 commands'
     );
+    replaceMessages([user, first, { info: secondInfo, parts: [completedRunning] }, response]);
+    await vi.advanceTimersByTimeAsync(32);
+    expect(container?.textContent).toContain('Checks passed.');
   });
 
   it('previews tools that complete inside the collection interval before grouping them', async () => {
@@ -2102,15 +2105,9 @@ describe('MessageList compact activity', () => {
       },
     ]);
     await Promise.resolve();
-    expect(
-      container?.querySelector('[data-activity-part-id="command-1"].is-exiting')
-    ).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="command-1"].is-exiting')).toBeNull();
 
-    await vi.advanceTimersByTimeAsync(420);
-    expect(
-      container?.querySelector('[data-activity-part-id="command-1"].is-exiting')
-    ).not.toBeNull();
-    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(32);
 
     expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(

@@ -56,6 +56,7 @@ for (const { width, toolCount } of [
             `Readable paragraph ${index}. This answer arrives in one burst and should grow in paced chunks while the viewport follows.`
         ).join('\n\n');
         const started = performance.now();
+        let contentAt = 0;
         const result = [];
         // A speed-limited follow can take longer than the text queue. Record its full
         // settling path, including every frame after the answer stops growing.
@@ -83,6 +84,9 @@ for (const { width, toolCount } of [
                 },
               });
             }
+          }
+          if (frame === 45) {
+            contentAt = performance.now() - started;
             harness.replayServerEvent({
               type: 'message.part.updated',
               properties: {
@@ -129,6 +133,7 @@ for (const { width, toolCount } of [
             innerTop: items[0]?.closest('.assistant-active-activity-items')?.scrollTop ?? null,
             exiting: items.some((item) => item.classList.contains('is-exiting')),
             textLength: answer?.textContent?.length ?? 0,
+            contentAt,
             distance: list.scrollHeight - list.clientHeight - list.scrollTop,
           });
           if (
@@ -142,7 +147,7 @@ for (const { width, toolCount } of [
       },
       { sessionID: SESSION, messageID: MESSAGE, count: toolCount }
     );
-    await expect(page.locator('[data-activity-part-id="preview-tool-2"]')).toBeVisible();
+    await expect(page.locator('[data-activity-part-id="preview-tool-1"]')).toBeVisible();
     await page
       .locator('[data-activity-part-id^="preview-tool-"]')
       .first()
@@ -163,7 +168,8 @@ for (const { width, toolCount } of [
 
     const preview = samples.filter((sample) => sample.preview > 0 && !sample.exiting);
     expect(preview.length).toBeGreaterThan(20);
-    expect(preview.at(-1)!.at - preview[0]!.at).toBeGreaterThan(1_000);
+    expect(preview.at(-1)!.at - preview[0]!.at).toBeGreaterThan(400);
+    expect(samples.every((sample) => sample.preview <= 2)).toBe(true);
     const seen = new Map<string, number>();
     for (const sample of samples) {
       const entering = sample.previewIds.filter((id) => !seen.has(id));
@@ -171,8 +177,7 @@ for (const { width, toolCount } of [
       for (const id of entering) seen.set(id, sample.at);
     }
     const admissions = [...seen.values()];
-    expect(admissions.length).toBeGreaterThanOrEqual(3);
-    expect(admissions.length).toBeLessThanOrEqual(6);
+    expect(admissions.length).toBe(2);
     expect(
       admissions.every((at, index) => index === 0 || at - admissions[index - 1]! >= 90),
       JSON.stringify(admissions)
@@ -192,7 +197,7 @@ for (const { width, toolCount } of [
     expect(innerJumps).toEqual([]);
     expect(samples.some((sample) => sample.preview > 0 && sample.textLength > 0)).toBe(false);
     const firstText = samples.find((sample) => sample.textLength > 0)!;
-    expect(firstText.at).toBeLessThan(2_200);
+    expect(firstText.at - firstText.contentAt).toBeLessThan(300);
     expect(
       new Set(samples.filter((sample) => sample.textLength > 0).map((sample) => sample.textLength))
         .size

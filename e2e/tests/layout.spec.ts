@@ -53,7 +53,7 @@ test('resets padding injected by legacy webview hosts', async ({ page }) => {
 test('bounds active tools and eases completed tools into Explored', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1');
   const tray = page.locator('.assistant-active-activity-tray');
-  await expect(tray.locator('.assistant-active-activity-item')).toHaveCount(12);
+  await expect(tray.locator('.assistant-active-activity-item')).toHaveCount(2);
   const trayItems = tray.locator('.assistant-active-activity-items');
   await trayItems.evaluate(async (element) => {
     await Promise.all(
@@ -87,8 +87,8 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
       visibleItems,
     };
   });
-  expect(trayGeometry.visibleItems).toHaveLength(3);
-  expect(trayGeometry.scrollHeight).toBeGreaterThan(trayGeometry.clientHeight);
+  expect(trayGeometry.visibleItems).toHaveLength(2);
+  expect(trayGeometry.scrollHeight).toBe(trayGeometry.clientHeight);
   expect(trayGeometry.scrollbarWidth).toBe('none');
 
   const activeSpacing = await tray.evaluate(async (element) => {
@@ -100,24 +100,26 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     const firstBoxBeforeExit = items[0]!
       .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
       .getBoundingClientRect();
+    const secondBoxBeforeExit = items[1]!
+      .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
+      .getBoundingClientRect();
     items[1]!.classList.add('is-exiting');
     element.classList.add('is-exiting');
     await new Promise((resolve) => setTimeout(resolve, 450));
     const firstBox = items[0]!
       .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
       .getBoundingClientRect();
-    const thirdBox = items[2]!
-      .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
-      .getBoundingClientRect();
     return {
       summaryToFirst: firstBoxBeforeExit.top - summaryBox.bottom,
-      firstToThird: thirdBox.top - firstBox.bottom,
+      itemGap: secondBoxBeforeExit.top - firstBoxBeforeExit.bottom,
+      firstMovement: firstBox.top - firstBoxBeforeExit.top,
     };
   });
   expect(activeSpacing.summaryToFirst).toBeGreaterThanOrEqual(10);
   expect(activeSpacing.summaryToFirst).toBeLessThanOrEqual(14);
-  expect(activeSpacing.firstToThird).toBeGreaterThanOrEqual(8);
-  expect(activeSpacing.firstToThird).toBeLessThanOrEqual(10);
+  expect(activeSpacing.itemGap).toBeGreaterThanOrEqual(8);
+  expect(activeSpacing.itemGap).toBeLessThanOrEqual(10);
+  expect(Math.abs(activeSpacing.firstMovement)).toBeLessThanOrEqual(1);
 
   await page.goto(
     '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1&activeTrayPrefix=1'
@@ -302,9 +304,11 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
 test('keeps active-tray wheel input local before outer transcript movement', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 320 });
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1');
+  // A constrained host can still make the two-item tray scroll internally.
+  await page.addStyleTag({ content: '.assistant-active-activity-items { max-height: 40px; }' });
   const list = page.locator('.interactive-list');
   const trayItems = page.locator('.assistant-active-activity-items');
-  await expect(trayItems.locator('.assistant-active-activity-item')).toHaveCount(12);
+  await expect(trayItems.locator('.assistant-active-activity-item')).toHaveCount(2);
   await trayItems.evaluate(async (element) => {
     await Promise.all(
       [...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item')].flatMap(
@@ -653,7 +657,7 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
 test('hides sibling active tools while one tool is expanded', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=3');
   const items = page.locator('.assistant-active-activity-item');
-  await expect(items).toHaveCount(3);
+  await expect(items).toHaveCount(2);
   const firstItem = items.first();
   const firstHeader = firstItem.locator('.tool-invocation-header');
   await firstHeader.click();
@@ -669,7 +673,7 @@ test('hides sibling active tools while one tool is expanded', async ({ page }) =
 
   await firstHeader.click();
   await expect(firstItem.locator('.tool-invocation-chevron')).not.toHaveClass(/expanded/);
-  await expect.poll(visiblePartIds).toEqual(['tool-active-0', 'tool-active-1', 'tool-active-2']);
+  await expect.poll(visiblePartIds).toEqual(['tool-active-0', 'tool-active-1']);
 });
 
 for (const delayedDelivery of [false, true]) {

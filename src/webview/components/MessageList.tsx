@@ -4563,8 +4563,19 @@ export function MessageList() {
 
     // A short transcript also needs reserve for the space below its natural content.
     // Clamping this to zero drops that space before an entering block has grown into it.
-    const unreservedBottom = containerRef.scrollHeight - reserve - containerRef.clientHeight;
-    const nextReserve = Math.max(0, appendBottomReserveTarget - unreservedBottom);
+    // Deferred row rounding can still remove height from an entering replacement tool. Keep that
+    // space until the correction lands so consuming the final reserve cannot clamp the viewport.
+    let pendingHeightReduction = 0;
+    for (const [element, correction] of pendingRowHeightCorrections) {
+      if (element.isConnected)
+        pendingHeightReduction += Math.max(
+          0,
+          (appliedRowHeightCorrections.get(element) ?? 0) - correction
+        );
+    }
+    const unreservedBottom =
+      containerRef.scrollHeight - reserve - containerRef.clientHeight - pendingHeightReduction;
+    const nextReserve = Math.max(0, Math.ceil(appendBottomReserveTarget - unreservedBottom));
     if (Math.abs(nextReserve - reserve) <= 0.5) return;
     setAppendBottomReserve(nextReserve);
     if (nextReserve <= 0.5) {

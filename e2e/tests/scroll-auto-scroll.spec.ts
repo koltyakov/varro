@@ -83,7 +83,7 @@ test.describe('auto-scroll', () => {
       JSON.stringify(samples)
     ).toBe(true);
     await expect(page.locator('.permission-prompt')).toHaveCount(0);
-    await expect(page.locator('.assistant-active-activity-item')).toHaveCount(8);
+    await expect(page.locator('.assistant-active-activity-item')).toHaveCount(2);
     await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
   });
 
@@ -1847,7 +1847,7 @@ test.describe('auto-scroll', () => {
       '[data-activity-part-id^="message-first-turn-activity-command-"]'
     );
     await expect(summary).toContainText('Explored: 1 file');
-    await expect(activeItems).toHaveCount(3);
+    await expect(activeItems).toHaveCount(2);
     await activeItems.last().evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
@@ -1959,7 +1959,7 @@ test.describe('auto-scroll', () => {
       }
     });
 
-    await expect(activeItems).toHaveCount(3);
+    await expect(activeItems).toHaveCount(2);
     await activeItems.last().evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
@@ -2081,7 +2081,7 @@ test.describe('auto-scroll', () => {
       }
     });
     const activeItems = page.locator('.assistant-active-activity-item');
-    await expect(activeItems).toHaveCount(3);
+    await expect(activeItems).toHaveCount(2);
     await page.waitForTimeout(1_250);
 
     await page.evaluate(() => {
@@ -2239,7 +2239,7 @@ test.describe('auto-scroll', () => {
       }
     });
 
-    await expect(activeItems).toHaveCount(8);
+    await expect(activeItems).toHaveCount(2);
     await expect
       .poll(() =>
         getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
@@ -2292,7 +2292,7 @@ test.describe('auto-scroll', () => {
       leadingExitSamples.every((top) => top !== null && Math.abs(top - anchor.top) <= 0.1),
       JSON.stringify({ anchor, leadingExitSamples })
     ).toBe(true);
-    await expect(activeItems).toHaveCount(7);
+    await expect(activeItems).toHaveCount(2);
     const collapseAnchor = await getVisibleMessageAnchor(list);
     const exploredTop = await page
       .locator('.assistant-activity-summary')
