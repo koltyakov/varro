@@ -17,6 +17,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  on,
   onCleanup,
   onMount,
   untrack,
@@ -24,6 +25,7 @@ import {
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import { requestWorkspaceSelection } from '../lib/workspace-selection';
 import { toggleIssuesEnabled } from '../lib/state-attachments';
+import { prepareForComposerCollapse } from '../lib/message-list-layout';
 import { STORAGE_KEYS, writeStored } from '../lib/state-storage';
 import type {
   EditorDiagnostic,
@@ -1098,19 +1100,80 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
   let heldComposerSessionId: string | null = null;
   let heldComposerMessageCount = 0;
+  let composerCollapseFrame = 0;
 
   function holdComposerHeightUntilMessageAppend(sessionId: string | null) {
-    if (!sessionId || !inputFrameRef) return;
+    if (!inputFrameRef) return;
+    const height = inputFrameRef.getBoundingClientRect().height;
+    releaseHeldComposerHeight();
     heldComposerSessionId = sessionId;
     heldComposerMessageCount = state.messages.length;
-    setSendComposerMinHeight(inputFrameRef.getBoundingClientRect().height);
+    setSendComposerMinHeight(height);
   }
 
-  function releaseHeldComposerHeight() {
+  function releaseHeldComposerHeight(animate = false) {
     heldComposerSessionId = null;
     heldComposerMessageCount = 0;
+    if (animate && sendComposerMinHeight() > 0) {
+      if (composerCollapseFrame) return;
+      // Wait for both the text and attachment clears to reach the DOM before measuring.
+      composerCollapseFrame = requestAnimationFrame((startedAt) => {
+        composerCollapseFrame = 0;
+        const frame = inputFrameRef;
+        const divider = frame?.querySelector('.chat-input-toolbar-divider');
+        if (
+          !frame?.isConnected ||
+          !divider ||
+          window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+        ) {
+          setSendComposerMinHeight(0);
+          return;
+        }
+        const bounds = frame.getBoundingClientRect();
+        // The divider's auto margin keeps the toolbar at the bottom. Subtract that
+        // free space to measure natural height without briefly releasing the hold.
+        const toHeight = bounds.height - parseFloat(getComputedStyle(divider).marginTop);
+        if (bounds.height <= toHeight + 1) {
+          setSendComposerMinHeight(0);
+          return;
+        }
+        const step = (now: number) => {
+          const progress = Math.min(1, (now - startedAt) / 220);
+          const eased = progress * progress * (3 - 2 * progress);
+          const nextHeight = bounds.height + (toHeight - bounds.height) * eased;
+          const currentBounds = frame.getBoundingClientRect();
+          const naturalHeight =
+            currentBounds.height - parseFloat(getComputedStyle(divider).marginTop);
+          // Reserve each disappearing slice before layout can clamp the transcript.
+          prepareForComposerCollapse(
+            frame,
+            currentBounds.height - Math.max(naturalHeight, nextHeight)
+          );
+          // A minimum height lets a newly typed draft grow freely during the collapse.
+          setSendComposerMinHeight(progress < 1 ? nextHeight : 0);
+          composerCollapseFrame = progress < 1 ? requestAnimationFrame(step) : 0;
+        };
+        composerCollapseFrame = requestAnimationFrame(step);
+      });
+      return;
+    }
+    if (animate) return;
+    cancelAnimationFrame(composerCollapseFrame);
+    composerCollapseFrame = 0;
     setSendComposerMinHeight(0);
   }
+
+  createEffect(
+    on(
+      composerSessionId,
+      (sessionId, previousSessionId) => {
+        // Creating the first session keeps this composer mounted through the send.
+        releaseHeldComposerHeight(!previousSessionId && !!sessionId);
+      },
+      { defer: true }
+    )
+  );
+  onCleanup(() => releaseHeldComposerHeight());
 
   createEffect(() => {
     if (sendComposerMinHeight() <= 0) return;
@@ -1119,7 +1182,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const activeSessionId = state.activeSessionId;
     const messageCount = state.messages.length;
     if (activeSessionId !== heldSessionId || messageCount > heldComposerMessageCount) {
-      releaseHeldComposerHeight();
+      releaseHeldComposerHeight(activeSessionId === heldSessionId);
     }
   });
 
@@ -2864,6 +2927,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       };
       const replaced =
         queuedEdit?.sessionId === sessionId && replaceQueuedMessage(queuedEdit.id, message);
+      holdComposerHeightUntilMessageAppend(sessionId);
       if (!replaced) enqueueMessage(message);
       setQueuedMessageEdit(null);
       setHistoryIndex(null);
@@ -2878,6 +2942,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       clearClipboardImages();
       clearNativePdfs();
       resetPastedImageIndex();
+      releaseHeldComposerHeight(true);
       postMessage({ type: 'files/clear', payload: { sentSessionId: sessionId } });
       postMessage({ type: 'terminal-selection/clear' });
       return;
@@ -2918,7 +2983,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (queuedEdit) removeQueuedMessage(queuedEdit.id);
       setQueuedMessageEdit(null);
     }
-    if (!sent) releaseHeldComposerHeight();
+    releaseHeldComposerHeight(sent);
     const shouldRestoreFailedInput =
       !sent &&
       composerSessionId() === sendSessionId &&

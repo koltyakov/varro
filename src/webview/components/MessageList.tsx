@@ -60,6 +60,7 @@ import {
   registerPermissionRemovalHandler,
   registerQueuedMessageRemovalHandler,
   registerTodoCollapseHandler,
+  registerComposerCollapseHandler,
   registerMessageBlockRemovalHandler,
   registerPresentationFlushHandler,
 } from '../lib/message-list-layout';
@@ -6065,6 +6066,27 @@ export function MessageList() {
       reserveQueuedMessageRemoval
     );
     onCleanup(unregisterQueuedMessageRemoval);
+    onCleanup(
+      registerComposerCollapseHandler((element, height) =>
+        untrack(() => {
+          if (
+            !containerRef?.isConnected ||
+            state.messagesLoading ||
+            editingMessage() ||
+            diffFocusPauseActive ||
+            element.closest('.chat-main-column-shell') !==
+              containerRef.closest('.chat-main-column-shell')
+          )
+            return;
+          if (height <= 0 || !autoScroll() || !pinnedToBottom || stickyNavigationOwnsScroll())
+            return;
+          const shortfall = containerRef.scrollTop - (bottomScrollTop() - height);
+          if (shortfall <= 0) return;
+          appendBottomReserveTarget = containerRef.scrollTop;
+          setAppendBottomReserve((reserve) => reserve + Math.ceil(shortfall));
+        })
+      )
+    );
     onCleanup(
       registerMessageBlockRemovalHandler((element) =>
         untrack(() => {

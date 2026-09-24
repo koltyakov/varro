@@ -291,6 +291,14 @@ Direct input acquires ownership only when it can affect the transcript:
   enough trailing reserve to make that destination reachable. Assistant growth consumes that reserve
   while direct transcript input cancels destination settling. Measured appends retain their
   viewport-only transition so provisional row reconciliation cannot create a large jump.
+- Send-time composer collapse eases its held minimum height over 220 ms. Before each shrinking frame,
+  reserve only the scroll-range shortfall at the current painted scroll position. Reserving the whole
+  height delta makes bottom-follow chase temporary space and leaves an unnecessary trailing reserve.
+  Keep the toolbar against the bottom border throughout the hold and collapse. Measure natural height
+  by subtracting the divider's auto-margin space without releasing the hold. Reduced motion releases
+  immediately; session replacement and disposal cancel the frame loop.
+  `composer-send-collapse.spec.ts` and the send-time panel case in
+  `scroll-auto-scroll.spec.ts` cover the height transition and transcript position.
 - The append reserve is general bottom-pinned flow geometry, not only activity-exit state. It may
   replace space lost from trays, todo collapse, external panels, or local container changes. Real
   appended growth consumes it while its original bottom target remains fixed.
