@@ -2766,3 +2766,28 @@
 .chat-attachment-chip .chip-remove:hover {
   color: var(--color-vscode-fg);
 }
+.composer-send-exit {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: inherit;
+  animation: composer-send-exit 140ms ease-out both;
+}
+
+@keyframes composer-send-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-send-exit {
+    display: none;
+  }
+}

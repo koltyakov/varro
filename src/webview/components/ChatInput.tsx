@@ -1101,6 +1101,77 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let heldComposerSessionId: string | null = null;
   let heldComposerMessageCount = 0;
   let composerCollapseFrame = 0;
+  const [sendAnimationActive, setSendAnimationActive] = createSignal(false);
+  let clearSendAnimation: (() => void) | undefined;
+
+  function animateSubmittedContent() {
+    clearSendAnimation?.();
+    const frame = inputFrameRef;
+    if (!frame || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const bounds = frame.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'composer-send-exit';
+    overlay.inert = true;
+    overlay.setAttribute('aria-hidden', 'true');
+    frame.append(overlay);
+    setSendAnimationActive(true);
+    for (const source of frame.querySelectorAll<HTMLElement>(
+      ':scope > .chat-attachments-container, :scope > .chat-editor-container'
+    )) {
+      const sourceBounds = source.getBoundingClientRect();
+      const clone = source.cloneNode(true);
+      if (!(clone instanceof HTMLElement)) continue;
+      // Context toggles remain available for the next draft; only submitted chips exit.
+      for (const toggle of clone.querySelectorAll<HTMLElement>(
+        '.chat-attachment-chip[aria-pressed]'
+      )) {
+        toggle.style.visibility = 'hidden';
+      }
+      for (const element of [clone, ...clone.querySelectorAll<HTMLElement>('*')]) {
+        element.removeAttribute('id');
+        element.removeAttribute('role');
+        element.removeAttribute('contenteditable');
+        element.removeAttribute('tabindex');
+      }
+      Object.assign(clone.style, {
+        position: 'absolute',
+        margin: '0',
+        left: `${sourceBounds.left - bounds.left - frame.clientLeft}px`,
+        top: `${sourceBounds.top - bounds.top - frame.clientTop}px`,
+        width: `${sourceBounds.width}px`,
+        height: `${sourceBounds.height}px`,
+        overflow: 'hidden',
+      });
+      overlay.append(clone);
+      const clonedEditor = clone.querySelector('.rich-composer');
+      if (clonedEditor && richEditorRef) clonedEditor.scrollTop = richEditorRef.scrollTop;
+    }
+    const clear = () => {
+      clearTimeout(timeout);
+      overlay.remove();
+      if (clearSendAnimation === clear) {
+        clearSendAnimation = undefined;
+        setSendAnimationActive(false);
+      }
+    };
+    const timeout = setTimeout(clear, 220);
+    overlay.addEventListener('animationend', (event) => {
+      if (event.target === overlay) clear();
+    });
+    clearSendAnimation = clear;
+  }
+
+  createEffect(
+    on(
+      composerSessionId,
+      (sessionId, previousSessionId) => {
+        if (previousSessionId || !sessionId) clearSendAnimation?.();
+      },
+      { defer: true }
+    )
+  );
+  onCleanup(() => clearSendAnimation?.());
 
   function holdComposerHeightUntilMessageAppend(sessionId: string | null) {
     if (!inputFrameRef) return;
@@ -1606,7 +1677,47 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [sendingInlineAttachments, setSendingInlineAttachments] = createSignal<{
     sessionId: string | null;
     ids: Set<string>;
+    terminal: typeof state.terminalSelection;
+    diagnostics: typeof state.attachedDiagnostics;
   } | null>(null);
+  createEffect(
+    on(composerSessionId, (sessionId, previousSessionId) => {
+      const sending = sendingInlineAttachments();
+      if (!sending || sending.sessionId === sessionId) return;
+      // The first send acquires a session ID before its attachments are cleared.
+      // Keep that same submitted draft hidden through this ownership handoff.
+      if (previousSessionId === null && sending.sessionId === null && sessionId) {
+        setSendingInlineAttachments({ ...sending, sessionId });
+      } else {
+        setSendingInlineAttachments(null);
+      }
+    })
+  );
+  const sendingAttachments = () => {
+    const sending = sendingInlineAttachments();
+    return sending?.sessionId === composerSessionId() ? sending : null;
+  };
+  const visibleTerminalSelection = () =>
+    sendingAttachments()?.terminal === composerTerminalSelection()
+      ? null
+      : composerTerminalSelection();
+  const visibleDiagnostics = () =>
+    sendingAttachments()?.diagnostics === state.attachedDiagnostics
+      ? null
+      : state.attachedDiagnostics;
+  function hideSubmittedAttachments(sessionId: string | null) {
+    setSendingInlineAttachments({
+      sessionId,
+      ids: new Set([
+        ...inlineAttachmentChipIds(),
+        ...composerFiles().map((file) => `file:${file.path}`),
+        ...composerClipboardImages().map((image) => `img:${image.id}`),
+        ...composerNativePdfs().map((pdf) => `pdf:${pdf.id}`),
+      ]),
+      terminal: composerTerminalSelection(),
+      diagnostics: state.attachedDiagnostics,
+    });
+  }
   const isInlineAttachment = (id: string) => {
     const sending = sendingInlineAttachments();
     return (
@@ -1633,10 +1744,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }))
   );
   const visibleNativePdfs = createMemo(() =>
-    composerNativePdfs().map((pdf) => ({
-      ...pdf,
-      attachmentSequence: pdf.attachmentSequence ?? getNativePdfAttachmentSequence(pdf.id),
-    }))
+    composerNativePdfs()
+      .filter((pdf) => !isInlineAttachment(`pdf:${pdf.id}`))
+      .map((pdf) => ({
+        ...pdf,
+        attachmentSequence: pdf.attachmentSequence ?? getNativePdfAttachmentSequence(pdf.id),
+      }))
   );
 
   const [previewImageId, setPreviewImageId] = createSignal<string | null>(null);
@@ -1719,10 +1832,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const hasAttachmentStripItems = () =>
     !!activeContext() ||
     composerIssueCount() > 0 ||
-    (!!composerTerminalSelection() && !inputText().includes(TERMINAL_SELECTION_MARKER)) ||
-    (state.enableProblemsContext &&
-      !!state.attachedDiagnostics &&
-      !state.attachedDiagnostics.inline) ||
+    (!!visibleTerminalSelection() && !inputText().includes(TERMINAL_SELECTION_MARKER)) ||
+    (state.enableProblemsContext && !!visibleDiagnostics() && !visibleDiagnostics()!.inline) ||
     hasMentions();
 
   const composerIssueCount = createMemo(() => {
@@ -2797,6 +2908,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setHistoryDraft('');
       setCompletionIndex(0);
       invalidatePendingPdfAttachments();
+      animateSubmittedContent();
+      hideSubmittedAttachments(sendSessionId);
       setInputText('');
       const clearedInputVersion = inputTextMutationVersion();
       resetPastedImageIndex();
@@ -2852,6 +2965,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         }
         setInputText(text);
       }
+      if (!sent) clearSendAnimation?.();
+      setSendingInlineAttachments(null);
       return;
     }
 
@@ -2946,6 +3061,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setHistoryDraft('');
       setCompletionIndex(0);
       invalidatePendingPdfAttachments();
+      animateSubmittedContent();
       setInputText('');
       clearContextFiles();
       setState('terminalSelection', null);
@@ -2966,7 +3082,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     holdComposerHeightUntilMessageAppend(sendSessionId);
     setWorkspaceSendPending(true);
     invalidatePendingPdfAttachments();
-    setSendingInlineAttachments({ sessionId: sendSessionId, ids: inlineAttachmentChipIds() });
+    animateSubmittedContent();
+    hideSubmittedAttachments(sendSessionId);
     setInputText('');
     const clearedInputVersion = inputTextMutationVersion();
     resetPastedImageIndex();
@@ -2999,10 +3116,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     releaseHeldComposerHeight(sent);
     const shouldRestoreFailedInput =
       !sent &&
-      composerSessionId() === sendSessionId &&
+      sendingAttachments() !== null &&
       inputTextMutationVersion() === clearedInputVersion &&
       inputText() === '';
     batch(() => {
+      if (!sent) clearSendAnimation?.();
       if (shouldRestoreFailedInput) setInputText(text);
       setSendingInlineAttachments(null);
       setWorkspaceSendPending(false);
@@ -5481,15 +5599,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               issuesEnabled={state.issuesEnabled}
               onToggleIssues={toggleIssuesEnabled}
               terminalSelection={
-                inputText().includes(TERMINAL_SELECTION_MARKER) ? null : composerTerminalSelection()
+                inputText().includes(TERMINAL_SELECTION_MARKER) ? null : visibleTerminalSelection()
               }
               diagnostics={
-                state.enableProblemsContext &&
-                state.attachedDiagnostics &&
-                !state.attachedDiagnostics.inline
+                state.enableProblemsContext && visibleDiagnostics() && !visibleDiagnostics()!.inline
                   ? {
-                      count: state.attachedDiagnostics.diagnostics.length,
-                      total: state.attachedDiagnostics.total,
+                      count: visibleDiagnostics()!.diagnostics.length,
+                      total: visibleDiagnostics()!.total,
                     }
                   : null
               }
@@ -5517,13 +5633,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               richEditorRef = el;
             }}
             placeholder={
-              composerEditingMessage()
-                ? 'Edit your message'
-                : composerHasActiveQuestion() || composerHasActivePermission()
-                  ? 'Respond to the prompt above to continue...'
-                  : isComposerDisplayBusy()
-                    ? 'Queue a follow-up or steer'
-                    : 'Describe what to build'
+              sendAnimationActive()
+                ? ''
+                : composerEditingMessage()
+                  ? 'Edit your message'
+                  : composerHasActiveQuestion() || composerHasActivePermission()
+                    ? 'Respond to the prompt above to continue...'
+                    : workspaceSendPending() || isComposerDisplayBusy()
+                      ? 'Queue a follow-up or steer'
+                      : 'Describe what to build'
             }
             value={inputText()}
             pendingPaste={pendingPasteInsertion()}

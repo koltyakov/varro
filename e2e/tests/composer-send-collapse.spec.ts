@@ -39,12 +39,42 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
       // Assert easing at a fixed frame cadence rather than the CI runner's available CPU time.
       await page.clock.pauseAt(new Date('2030-01-01T00:01:00Z'));
       await frame.evaluate((element) => {
+        // CSS animation time runs independently of Playwright's paused JS clock.
+        // Capture the exit at insertion so a slow assertion cannot miss its 140ms lifetime.
+        const observer = new MutationObserver((records) => {
+          for (const record of records) {
+            for (const node of record.addedNodes) {
+              if (!(node instanceof HTMLElement) || !node.matches('.composer-send-exit')) continue;
+              element.setAttribute(
+                'data-send-exit',
+                JSON.stringify({
+                  hidden: node.getAttribute('aria-hidden'),
+                  chips: node.querySelectorAll('.chat-attachment-chip').length,
+                  text: node.textContent,
+                  animation: getComputedStyle(node).animationName,
+                  pointerEvents: getComputedStyle(node).pointerEvents,
+                  placeholder: element
+                    .querySelector(':scope > .chat-editor-container .rich-composer')
+                    ?.getAttribute('data-placeholder'),
+                })
+              );
+              observer.disconnect();
+            }
+          }
+        });
+        observer.observe(element, { childList: true });
+        setTimeout(() => observer.disconnect(), 1000);
         const toolbar = element.querySelector('.toolbar-main')!;
         const measure = () => {
           const bounds = element.getBoundingClientRect();
           return {
             height: bounds.height,
             toolbarBottomGap: bounds.bottom - toolbar.getBoundingClientRect().bottom,
+            draftEmpty: !element.querySelector(':scope > .chat-editor-container .rich-composer')
+              ?.textContent,
+            attachmentCount: element.querySelectorAll(
+              ':scope > .chat-attachments-container .chat-attachment-chip'
+            ).length,
           };
         };
         const samples = [measure()];
@@ -57,15 +87,42 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
           once: true,
           capture: true,
         });
+        element.addEventListener('click', () => requestAnimationFrame(sample), {
+          once: true,
+          capture: true,
+        });
       });
-      await composer.press('Enter');
+      if (scenario === 'blank')
+        await frame.getByRole('button', { name: 'Send (Enter)', exact: true }).click();
+      else await composer.press('Enter');
+      await expect(composer).toHaveText('');
+      await expect(frame.locator(':scope > .chat-attachments-container')).toHaveCount(0);
+      const exit = frame.locator('.composer-send-exit');
+      if (reducedMotion) {
+        await expect(exit).toHaveCount(0);
+      } else {
+        await expect(frame).toHaveAttribute('data-send-exit');
+        expect(JSON.parse((await frame.getAttribute('data-send-exit'))!)).toMatchObject({
+          hidden: 'true',
+          chips: 6,
+          text: expect.stringContaining('Review the attached files, line 1.'),
+          animation: 'composer-send-exit',
+          pointerEvents: 'none',
+          placeholder: '',
+        });
+      }
       for (let index = 0; index < 40; index += 1) await page.clock.runFor(16);
+      await expect(exit).toHaveCount(0);
       await expect(frame).toHaveAttribute('data-collapse-samples');
-      const samples: Array<{ height: number; toolbarBottomGap: number }> = JSON.parse(
-        (await frame.getAttribute('data-collapse-samples'))!
-      );
+      const samples: Array<{
+        height: number;
+        toolbarBottomGap: number;
+        draftEmpty: boolean;
+        attachmentCount: number;
+      }> = JSON.parse((await frame.getAttribute('data-collapse-samples'))!);
       const heights = samples.map((sample) => sample.height);
       for (const sample of samples) {
+        if (sample.draftEmpty) expect(sample.attachmentCount, JSON.stringify(samples)).toBe(0);
         expect(sample.toolbarBottomGap, JSON.stringify(samples)).toBeCloseTo(
           samples[0]!.toolbarBottomGap,
           0
