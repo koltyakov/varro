@@ -54,7 +54,11 @@ test('creates a session and sends a prompt through the mocked bridge', async ({ 
     )
     .toBe(1);
 
-  await expect(page.getByText('Add a smoke test for the sidebar', { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole('log', { name: 'Chat messages' })
+      .getByText('Add a smoke test for the sidebar', { exact: true })
+  ).toBeVisible();
   await expect(page.locator('.chat-turn-assistant').last()).toContainText(
     'Mock assistant response for:'
   );
