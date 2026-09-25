@@ -93,9 +93,11 @@ the shared invariants below remain true.
   cannot remain trapped behind a zero-height virtual range.
 - Compaction-only user messages paint a divider and must have a measured nonzero height. Treating
   them as empty makes virtual unmounts briefly shrink the scroll range and clamp bottom follow.
-- Synthetic user-role text paints short automatic-action notices, never editable user cards. Mixed
-  messages keep these notices outside the real prompt. Action-only rows have nonzero measured height,
-  and their labels participate in layout invalidation. They do not receive prompt numbers or sticky
+- Synthetic user-role text uses expandable tool-style automatic actions, never editable user cards.
+  Mixed messages keep these actions outside the real prompt. Action-only messages join adjacent
+  Explored groups through a presentation-only projection preserving message and part IDs. Non-owner
+  rows can be zero-height while collapsed; expansion and group ownership invalidate their heights
+  using the same rules as tool activity. They do not receive prompt numbers or sticky
   navigation entries. Preserve explicit attachment chips while keeping generated prompt text out of
   user previews and edit drafts.
 - `virtualMetrics.prefix[index]` must describe the same ordered ID list used by the renderer.

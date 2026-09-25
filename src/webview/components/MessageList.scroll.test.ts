@@ -4902,8 +4902,9 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
     animationFrames.flush();
 
-    expect(assignedScrollTops).toHaveLength(assignmentCountAfterNearBottomScroll + 1);
+    expect(scrollTopValue).toBe(760);
     settleBottomFollow(animationFrames, list!);
+    expect(assignedScrollTops.length).toBeGreaterThan(assignmentCountAfterNearBottomScroll);
     expect(assignedScrollTops.at(-1)).toBe(800);
     expect(scrollTopValue).toBe(800);
     animationFrames.restore();

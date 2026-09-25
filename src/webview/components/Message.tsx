@@ -1,5 +1,4 @@
 import {
-  For,
   Show,
   createEffect,
   createMemo,
@@ -63,6 +62,7 @@ import { CompactionDivider } from './message/CompactionDivider';
 import { DiffSummary } from './message/DiffSummary';
 import {
   UserMessageContent,
+  getAutomaticActionInfo,
   getUserMessageEditContext,
   getUserMessageEditText,
   hasUserMessageContent,
@@ -463,7 +463,7 @@ export function Message(props: {
   });
   const shouldRender = () => {
     if (compactionDivider()) return true;
-    if (isUser()) return hasUserContent() || automaticActions().length > 0 || hasOmittedDiffs();
+    if (isUser()) return hasUserContent() || hasVisibleAutomaticActions() || hasOmittedDiffs();
     return !!assistantErrorMessage() || hasVisibleAssistantOutput() || visibleDiffs().length > 0;
   };
   createEffect(() => {
@@ -519,7 +519,12 @@ export function Message(props: {
   const parsedUserContent = createMemo(() =>
     isUser() ? parseUserMessageContent(normalizedParts()) : null
   );
-  const automaticActions = () => parsedUserContent()?.automaticActions ?? [];
+  const automaticParts = () => parsedUserContent()?.automaticParts ?? [];
+  const hasVisibleAutomaticActions = () =>
+    automaticParts().some((part) => {
+      const group = compactActivityPartKeys().get(getAssistantActivityPartKey(part));
+      return !group || group.ownerMessageId === props.info.id || isCompactActivityExpanded(group);
+    });
   const hasImageTextBubble = createMemo(() => {
     const parsed = parsedUserContent();
     return (
@@ -664,13 +669,16 @@ export function Message(props: {
               </Show>
             </div>
           </Show>
-          <For each={automaticActions()}>
-            {(action) => (
-              <div class="automated-message" role="note" aria-label="Automatic action">
-                {action}
-              </div>
-            )}
-          </For>
+          <Show when={automaticParts().length > 0}>
+            <AssistantMessageContent
+              info={getAutomaticActionInfo(props.info)}
+              parts={automaticParts()}
+              textForPart={() => null}
+              compactActivityGroups={hasUserContent() ? undefined : props.compactActivityGroups}
+              nearViewport={props.nearViewport}
+              outerListVirtualized={props.outerListVirtualized}
+            />
+          </Show>
           <Show when={isUser() && hasUserContent()}>
             <time
               class={`message-sent-time${timestampVisible() ? ' is-visible' : ''}${timestampTransitionActive() ? ' is-transition-active' : ''}${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}

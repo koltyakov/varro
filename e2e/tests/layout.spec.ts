@@ -159,7 +159,16 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     const container = element.closest<HTMLElement>('.interactive-list')!;
     return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
   });
-  await page.evaluate(() => {
+  const transition = await completedItem.evaluate(async (element, initialLoadingTop) => {
+    // Observe before publishing completion; the exit can finish between Playwright calls.
+    const exiting = new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        if (!element.classList.contains('is-exiting')) return;
+        observer.disconnect();
+        resolve();
+      });
+      observer.observe(element, { attributes: true, attributeFilter: ['class'] });
+    });
     const harnessWindow = window as typeof window & {
       __varroE2E?: {
         getSessionMessages?: (id: string) => Array<{ parts: Array<Record<string, unknown>> }>;
@@ -181,22 +190,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
       time: { start: Date.now() - 1_000, end: Date.now() },
     };
     harnessWindow.__varroE2E?.updateMessagePart?.(part);
-  });
-
-  await expect(completedItem).toHaveClass(/is-(?:completed|exiting)/);
-  const transition = await completedItem.evaluate(async (element, initialLoadingTop) => {
-    await new Promise<void>((resolve) => {
-      if (element.classList.contains('is-exiting')) {
-        resolve();
-        return;
-      }
-      const observer = new MutationObserver(() => {
-        if (!element.classList.contains('is-exiting')) return;
-        observer.disconnect();
-        resolve();
-      });
-      observer.observe(element, { attributes: true, attributeFilter: ['class'] });
-    });
+    await exiting;
 
     const summary = document.querySelector<HTMLElement>('.assistant-activity-summary');
     if (!summary) throw new Error('Explored summary is missing while the tool exits');
@@ -218,16 +212,11 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
         : null;
     };
     const exitAnimations = [...element.getAnimations(), ...summaryMask.getAnimations()];
-    for (const animation of exitAnimations) {
-      animation.pause();
-      animation.currentTime = 0;
-    }
     samples.push(element.getBoundingClientRect().height);
     const loadingTops = [initialLoadingTop, getLoadingTop()].filter(
       (top): top is number => top !== null
     );
     let summaryMissingFrames = 0;
-    for (const animation of exitAnimations) animation.play();
     let framesAfterRemoval = 0;
     for (let frame = 0; frame < 80 && framesAfterRemoval < 4; frame += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));

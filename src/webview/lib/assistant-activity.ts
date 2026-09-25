@@ -26,6 +26,7 @@ export type AssistantActivityKind =
   | 'web'
   | 'questions'
   | 'skills'
+  | 'actions'
   | 'tools';
 
 const ACTIVITY_KIND_ORDER: readonly AssistantActivityKind[] = [
@@ -37,10 +38,12 @@ const ACTIVITY_KIND_ORDER: readonly AssistantActivityKind[] = [
   'web',
   'questions',
   'skills',
+  'actions',
   'tools',
 ];
 function getActivityKind(part: AssistantActivityPart): AssistantActivityKind {
   if (part.type === 'reasoning') return 'reasoning';
+  if (part.tool === 'automatic_action') return 'actions';
 
   switch (getToolKind(part.tool)) {
     case 'read':
@@ -88,6 +91,8 @@ function formatActivityCount(kind: AssistantActivityKind, count: number) {
       return formatCount(count, 'skill');
     case 'tools':
       return formatCount(count, 'tool call');
+    case 'actions':
+      return formatCount(count, 'action');
   }
 }
 

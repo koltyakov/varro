@@ -13,7 +13,11 @@ import {
 } from '../../lib/part-utils';
 import { getToolInlineFileChangesLayoutSignature } from '../../lib/tool-file-change';
 import type { MessageEntry, Part } from '../../types';
-import { hasUserMessageContent, parseUserMessageContent } from '../message/UserMessageContent';
+import {
+  hasUserMessageContent,
+  parseUserMessageContent,
+  projectAutomaticActionMessage,
+} from '../message/UserMessageContent';
 import { getPresentationPartKey } from './streaming-presentation';
 
 export type StreamingLayoutProjection = {
@@ -80,7 +84,8 @@ export function getMessageBlockBoundaryMap(
 ) {
   const boundaries = new Map<string, MessageBlockBoundary>();
 
-  for (const message of messages) {
+  for (const sourceMessage of messages) {
+    const message = projectAutomaticActionMessage(sourceMessage);
     const messageId = message.info.id;
     if (options.renderEmptyMessageIds.has(messageId)) {
       boundaries.set(messageId, {
@@ -378,7 +383,8 @@ export function getRenderEmptyMessageIds(
     }
   }
 
-  for (const message of messages) {
+  for (const sourceMessage of messages) {
+    const message = projectAutomaticActionMessage(sourceMessage);
     if (message.info.role === 'user') {
       const parsed = parseUserMessageContent(message.parts);
       if (

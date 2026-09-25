@@ -32,9 +32,16 @@ export function pastedTextDataUrl(text: string): string {
 }
 
 export function readPastedTextDataUrl(url: string): string | null {
-  if (!url.startsWith(DATA_PREFIX)) return null;
+  const base64Prefix = 'data:text/plain;base64,';
+  if (!url.startsWith(DATA_PREFIX) && !url.startsWith(base64Prefix)) return null;
   try {
-    const text = decodeURIComponent(url.slice(DATA_PREFIX.length));
+    const text = url.startsWith(base64Prefix)
+      ? new TextDecoder('utf-8', { fatal: true }).decode(
+          Uint8Array.from(atob(url.slice(base64Prefix.length)), (character) =>
+            character.charCodeAt(0)
+          )
+        )
+      : decodeURIComponent(url.slice(DATA_PREFIX.length));
     return pastedTextBytes(text) <= MAX_PASTED_TEXT_BYTES ? text : null;
   } catch {
     return null;

@@ -73,7 +73,11 @@ import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import { getSessionPauseMap } from '../lib/session-pauses';
 import { isSessionResumeMessage, readSessionPauses } from '../../shared/session-pauses';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
-import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
+import {
+  hasUserMessageContent,
+  parseUserMessageContent,
+  projectAutomaticActionMessage,
+} from './message/UserMessageContent';
 import { editingMessage } from '../lib/message-edit-state';
 import { hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import {
@@ -5648,20 +5652,9 @@ export function MessageList() {
       keydownDestinationRafId = requestAnimationFrame(() => {
         keydownDestinationRafId = 0;
         if (disposed || !containerRef || state.activeSessionId !== sessionId) return;
-        const destinationMetrics = shouldVirtualize() ? virtualMetrics() : null;
-        const destinationIndex = destinationMetrics
-          ? getFirstVisibleMessageIndexFromVirtualMetrics({
-              metrics: destinationMetrics,
-              scrollTop: getVirtualScrollTop(containerRef.scrollTop),
-            })
-          : null;
-        const anchor = refineTallRenderItemScrollAnchor(
-          destinationIndex === null
-            ? captureVisibleScrollAnchor({ preferStableRenderItem: true })
-            : capturePaintedVisibleScrollAnchorFromIndex(destinationIndex),
-          0,
-          { includeCompact: true }
-        );
+        // Keep the same exact painted-anchor policy after the destination mounts.
+        // A clipped prompt above it can wrap without moving the visible response.
+        const anchor = captureWidthResizeVisibleScrollAnchor();
         if (!anchor) return;
         directMovementAnchor = {
           anchor,
@@ -6739,6 +6732,12 @@ export function MessageList() {
     lastWheelUpAt = Number.NEGATIVE_INFINITY;
     lastScrollInputAt = Number.NEGATIVE_INFINITY;
     const inputEpoch = directScrollInputEpoch;
+    if (!targetMessageId) {
+      // An explicit return starts at the detached viewport, even when the
+      // transcript has not grown since the last bottom-follow position.
+      lastAutoScrolledBottomScrollTop = containerRef.scrollTop;
+      bottomFollowMotion.reset();
+    }
     setAutoScroll(true);
     queueMicrotask(() => {
       if (
@@ -7201,7 +7200,7 @@ export function MessageList() {
               )
             ),
           }
-        : message
+        : projectAutomaticActionMessage(message)
     );
   });
   const trailingActivityTurnState = createMemo<{

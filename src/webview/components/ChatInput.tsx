@@ -1603,9 +1603,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     { equals: equalStringSets }
   );
 
+  const [sendingInlineAttachments, setSendingInlineAttachments] = createSignal<{
+    sessionId: string | null;
+    ids: Set<string>;
+  } | null>(null);
+  const isInlineAttachment = (id: string) => {
+    const sending = sendingInlineAttachments();
+    return (
+      inlineAttachmentChipIds().has(id) ||
+      (sending?.sessionId === composerSessionId() && sending.ids.has(id))
+    );
+  };
+
   const visibleFiles = createMemo(() =>
     composerFiles()
-      .filter((f) => !inlineAttachmentChipIds().has(`file:${f.path}`))
+      .filter((f) => !isInlineAttachment(`file:${f.path}`))
       .map((file) => ({
         ...file,
         attachmentSequence: file.attachmentSequence ?? getContextFileAttachmentSequence(file.path),
@@ -1613,7 +1625,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
   const visibleClipboardImages = createMemo(() =>
     composerClipboardImages()
-      .filter((img) => !inlineAttachmentChipIds().has(`img:${img.id}`))
+      .filter((img) => !isInlineAttachment(`img:${img.id}`))
       .map((image) => ({
         ...image,
         attachmentSequence:
@@ -2954,6 +2966,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     holdComposerHeightUntilMessageAppend(sendSessionId);
     setWorkspaceSendPending(true);
     invalidatePendingPdfAttachments();
+    setSendingInlineAttachments({ sessionId: sendSessionId, ids: inlineAttachmentChipIds() });
     setInputText('');
     const clearedInputVersion = inputTextMutationVersion();
     resetPastedImageIndex();
@@ -2991,6 +3004,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       inputText() === '';
     batch(() => {
       if (shouldRestoreFailedInput) setInputText(text);
+      setSendingInlineAttachments(null);
       setWorkspaceSendPending(false);
     });
     if (shouldRestoreFailedInput) {
@@ -4041,6 +4055,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     insertion: RichComposerPasteInsertion,
     plainTextOnly: boolean
   ) {
+    if (pastedText.split(/\r\n|\r|\n/).length < 10) return;
+
     // The paste is already editable and sendable. Only upgrade it while this
     // lookup still owns the unchanged draft and its undo entry.
     const owner = {
