@@ -6,8 +6,134 @@ import { projectV2Event } from './opencode-v2-events';
 import { projectV2Message } from './opencode-v2-projection';
 import { parseServerEvent } from '../shared/protocol';
 import { parseSkillAttachment } from '../shared/skill-reference';
+import { asRecord } from '../shared/type-utils';
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+
+describe('V2 transcript deletion', () => {
+  const user: SessionMessageInfo = {
+    id: 'msg_user',
+    type: 'user',
+    text: 'Run tests',
+    time: { created: 1 },
+  };
+  const assistant: SessionMessageInfo = {
+    id: 'msg_assistant',
+    type: 'assistant',
+    agent: 'build',
+    model: { providerID: 'openai', id: 'gpt-6-astra' },
+    content: [],
+    time: { created: 2, completed: 3 },
+    finish: 'error',
+    error: { type: 'provider.auth', message: 'You are signed out of this provider.', status: 401 },
+  };
+  const failed: SessionMessageInfo = {
+    id: 'msg_failed',
+    type: 'idle',
+    outcome: 'failed',
+    time: { created: 4 },
+  };
+
+  it.each([0, 19, 25])(
+    'deletes a failed turn in visible reverse order with %i trailing control records',
+    async (controlCount) => {
+      let records: SessionMessageInfo[] = [
+        user,
+        assistant,
+        failed,
+        ...Array.from({ length: controlCount }, (_, index): SessionMessageInfo => ({
+          id: `msg_control_${index}`,
+          type: 'system',
+          text: 'Tool catalog updated',
+          time: { created: 5 + index },
+        })),
+      ];
+      let staged: string | undefined;
+      const wire = vi.fn<ConstructorParameters<typeof OpenCodeV2Adapter>[0]>(
+        async (method, path, body) => {
+          const url = new URL(path, 'http://localhost');
+          if (method === 'GET' && url.pathname.endsWith('/inbox')) return { data: [] };
+          if (method === 'GET' && url.pathname.endsWith('/message')) {
+            const cursor = url.searchParams.get('cursor');
+            const end = cursor
+              ? records.findIndex((record) => record.id === cursor)
+              : records.length;
+            const start = Math.max(0, end - Number(url.searchParams.get('limit')));
+            return {
+              data: records.slice(start, end).toReversed(),
+              cursor: { next: start > 0 ? records[start]?.id : undefined },
+            };
+          }
+          if (method === 'POST' && path.endsWith('/revert/stage')) {
+            expect(body).toEqual({ messageID: expect.any(String), files: false });
+            staged = String(asRecord(body)?.messageID);
+            return {};
+          }
+          if (method === 'POST' && path.endsWith('/revert/commit')) {
+            const index = records.findIndex((record) => record.id === staged);
+            expect(index).toBeGreaterThanOrEqual(0);
+            records = records.slice(0, index);
+            return {};
+          }
+          throw new Error(`Unexpected request: ${method} ${path}`);
+        }
+      );
+      const adapter = new OpenCodeV2Adapter(wire);
+      expect(await adapter.request('GET', '/session/ses_one/message', undefined)).toMatchObject([
+        { info: { id: user.id } },
+        { info: { id: assistant.id } },
+      ]);
+      for (const message of [assistant, user]) {
+        await expect(
+          adapter.request('DELETE', `/session/ses_one/message/${message.id}`, undefined)
+        ).resolves.toBe(true);
+      }
+      expect(records).toEqual([]);
+    }
+  );
+
+  it('deletes a standalone failure record before its user message', async () => {
+    const wire = vi.fn(async () => ({ data: [failed, user], cursor: {} }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('DELETE', `/session/ses_one/message/${failed.id}`, undefined)
+    ).resolves.toBe(true);
+    expect(wire).toHaveBeenCalledWith(
+      'POST',
+      '/api/session/ses_one/revert/stage',
+      { messageID: failed.id, files: false },
+      expect.anything()
+    );
+  });
+
+  it.each([
+    { name: 'newer user', records: [user, assistant], target: assistant.id },
+    { name: 'newer assistant', records: [assistant, user], target: user.id },
+    { name: 'standalone failure', records: [failed, user], target: user.id },
+    {
+      name: 'failure after a successful assistant',
+      records: [failed, { ...assistant, error: undefined, finish: 'stop' }],
+      target: assistant.id,
+    },
+    { name: 'missing target', records: [], target: 'msg_missing' },
+  ])('refuses deletion across $name', async ({ records, target }) => {
+    const wire = vi.fn(async () => ({ data: records, cursor: {} }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('DELETE', `/session/ses_one/message/${target}`, undefined)
+    ).rejects.toThrow('can only delete messages from the end of the transcript');
+    expect(wire.mock.calls).toHaveLength(1);
+  });
+
+  it('stops without deleting when control-only pages repeat a cursor', async () => {
+    const wire = vi.fn(async () => ({ data: [], cursor: { next: 'repeated' } }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('DELETE', `/session/ses_one/message/${user.id}`, undefined)
+    ).rejects.toThrow('OpenCode repeated a message pagination cursor');
+    expect(wire).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('V2 generated transcript records', () => {
   const base = { id: 'msg_generated', time: { created: 10 } };
