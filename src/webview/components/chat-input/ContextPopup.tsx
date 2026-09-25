@@ -378,6 +378,18 @@ export function ContextUsageButton(props: {
   );
 }
 
+export function SessionCostLabel(props: { cost?: number | null }) {
+  return (
+    <Show when={formatCost(props.cost ?? undefined)}>
+      {(cost) => (
+        <span class="chat-context-cost" title={`${cost()} session cost`}>
+          {cost()}
+        </span>
+      )}
+    </Show>
+  );
+}
+
 export function getContextUsageTone(percent: number) {
   if (percent >= CONTEXT_USAGE_ERROR_PERCENT) return 'error';
   if (percent >= CONTEXT_USAGE_WARNING_PERCENT) return 'warning';

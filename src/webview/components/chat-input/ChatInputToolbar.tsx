@@ -15,7 +15,12 @@ import { Tooltip } from '../Tooltip';
 import { UiIcon } from '../UiIcon';
 import { AttachButton } from './AttachButton';
 import { BusySendMenu } from './BusySendMenu';
-import { ContextPopup, ContextUsageButton, formatContextUsageTitle } from './ContextPopup';
+import {
+  ContextPopup,
+  ContextUsageButton,
+  formatContextUsageTitle,
+  SessionCostLabel,
+} from './ContextPopup';
 import { ProviderLimitPopup } from './ProviderLimitPopup';
 import { SendControls } from './SendControls';
 import { StopButton } from './StopButton';
@@ -326,7 +331,7 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
 }
 
 export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
-  const hasContextControl = () => props.showContextControl && !!props.contextUsage;
+  const hasContextControl = () => props.showContextControl;
   const showRepositoryLink = () =>
     props.allowRepositoryLink &&
     !props.showMcpControl &&
@@ -421,6 +426,8 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
             </Tooltip>
           </Show>
 
+          <SessionCostLabel cost={props.sessionCost} />
+
           <Show when={props.showMcpControl}>
             <Tooltip
               content={`${props.enabledMcpCount} of ${props.availableMcpCount} MCP${props.availableMcpCount === 1 ? '' : 's'} enabled`}
@@ -472,40 +479,41 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
             </div>
           </Show>
 
-          <Show when={props.showContextControl && props.contextUsage}>
-            {(contextUsage) => (
-              <div class="context-anchor" style={{ position: 'relative' }}>
-                <ContextUsageButton
-                  ref={props.contextButtonRef}
-                  percent={contextUsage().percent}
-                  available={contextUsage().used > 0}
-                  title={
-                    props.showContextPopup
-                      ? undefined
-                      : formatContextUsageTitle(contextUsage().percent, contextUsage().used > 0)
-                  }
-                  onClick={props.onToggleContextPopup}
+          <Show when={props.showContextControl}>
+            <div class="context-anchor" style={{ position: 'relative' }}>
+              <ContextUsageButton
+                ref={props.contextButtonRef}
+                percent={props.contextUsage?.percent ?? 0}
+                available={(props.contextUsage?.used ?? 0) > 0}
+                title={
+                  props.showContextPopup
+                    ? undefined
+                    : formatContextUsageTitle(
+                        props.contextUsage?.percent ?? 0,
+                        (props.contextUsage?.used ?? 0) > 0
+                      )
+                }
+                onClick={props.onToggleContextPopup}
+              />
+              <Show when={props.showContextPopup}>
+                <ContextPopup
+                  ref={props.contextPopupRef}
+                  boundaryRef={props.inputFrameRef}
+                  alignTo="right"
+                  usage={props.contextUsage ?? { used: 0, limit: 0, percent: 0 }}
+                  breakdown={props.contextBreakdown}
+                  nestedBreakdown={props.nestedContextBreakdown}
+                  tokens={props.sessionTokens}
+                  cost={props.sessionCost}
+                  subagentTokens={props.subagentTokens}
+                  subagentCount={props.subagentCount}
+                  model={props.currentModel}
+                  compactDisabled={props.contextCompactDisabled}
+                  onClose={props.onCloseContextPopup}
+                  onCompact={props.onCompactSession}
                 />
-                <Show when={props.showContextPopup}>
-                  <ContextPopup
-                    ref={props.contextPopupRef}
-                    boundaryRef={props.inputFrameRef}
-                    alignTo="right"
-                    usage={contextUsage()}
-                    breakdown={props.contextBreakdown}
-                    nestedBreakdown={props.nestedContextBreakdown}
-                    tokens={props.sessionTokens}
-                    cost={props.sessionCost}
-                    subagentTokens={props.subagentTokens}
-                    subagentCount={props.subagentCount}
-                    model={props.currentModel}
-                    compactDisabled={props.contextCompactDisabled}
-                    onClose={props.onCloseContextPopup}
-                    onCompact={props.onCompactSession}
-                  />
-                </Show>
-              </div>
-            )}
+              </Show>
+            </div>
           </Show>
         </div>
       </div>

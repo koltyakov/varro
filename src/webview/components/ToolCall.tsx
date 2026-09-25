@@ -27,7 +27,7 @@ import {
 } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
-import { formatDuration, formatNumber } from '../lib/message-metrics';
+import { formatCost, formatDuration, formatNumber } from '../lib/message-metrics';
 import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
 import { prepareForMessageBlockRemoval } from '../lib/message-list-layout';
 import type { FileChange } from '../lib/tool-file-change';
@@ -1493,28 +1493,29 @@ function GenericToolCall(props: {
     const keys = new Set(visibleEntries.map(([key]) => key));
     return [...visibleEntries, ...taskExecutionEntries().filter(([key]) => !keys.has(key))];
   });
-  const taskTokenUsage = createMemo(() => {
+  const taskUsage = createMemo(() => {
     const sessionId = taskSessionId();
     if (!sessionId) return null;
 
-    const sessionTokens = appState.sessions.find((session) => session.id === sessionId)?.tokens;
-    if (sessionTokens) {
-      return {
-        input: (sessionTokens.input || 0) + (sessionTokens.cache.write || 0),
-        output: (sessionTokens.output || 0) + (sessionTokens.reasoning || 0),
-      };
-    }
-
+    const session = appState.sessions.find((item) => item.id === sessionId);
+    const sessionTokens = session?.tokens;
     let input = 0;
     let output = 0;
+    let messageCost = 0;
+    if (sessionTokens) {
+      input = (sessionTokens.input || 0) + (sessionTokens.cache.write || 0);
+      output = (sessionTokens.output || 0) + (sessionTokens.reasoning || 0);
+    }
     for (const entry of appState.messages) {
       const info = entry.info;
       if (info.role !== 'assistant' || info.sessionID !== sessionId) continue;
+      messageCost += info.cost || 0;
+      if (sessionTokens) continue;
       input += (info.tokens.input || 0) + (info.tokens.cache?.write || 0);
       output += (info.tokens.output || 0) + (info.tokens.reasoning || 0);
     }
-
-    return { input, output };
+    const cost = Math.max(messageCost, session?.cost || 0);
+    return { input, output, cost: cost > 0 ? cost : null };
   });
   const taskRetryStatus = () => {
     if (props.state.status !== 'running') return null;
@@ -1618,7 +1619,7 @@ function GenericToolCall(props: {
     if (updated === undefined) return null;
     return formatDuration(Math.max(0, now() - updated)) || '0ms';
   };
-  const visibleTaskTokenUsage = () => (taskActivityAgeDuration() ? null : taskTokenUsage());
+  const visibleTaskUsage = () => (taskActivityAgeDuration() ? null : taskUsage());
   const visibleRunningDurationLabel = () =>
     taskActivityAgeDuration() ? null : runningDurationLabel();
   const commandMatchesTitle = () =>
@@ -1673,11 +1674,20 @@ function GenericToolCall(props: {
           >
             {props.title}
           </span>
-          <Show when={visibleTaskTokenUsage()}>
-            {(tokens) => (
-              <span class="tool-invocation-token-stats" title="Subagent tokens">
-                ↑ {formatNumber(tokens().input)} ↓ {formatNumber(tokens().output)}
-              </span>
+          <Show when={visibleTaskUsage()}>
+            {(usage) => (
+              <>
+                <span class="tool-invocation-token-stats" title="Subagent tokens">
+                  ↑ {formatNumber(usage().input)} ↓ {formatNumber(usage().output)}
+                </span>
+                <Show when={formatCost(usage().cost ?? undefined)}>
+                  {(cost) => (
+                    <span class="tool-invocation-cost" title="Subagent cost">
+                      {cost()}
+                    </span>
+                  )}
+                </Show>
+              </>
             )}
           </Show>
           <Show when={searchResultCount()}>

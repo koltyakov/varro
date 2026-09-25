@@ -2221,6 +2221,42 @@ describe('ChatInput', () => {
     expect(costRow?.querySelector('.context-popup-row-value')?.textContent).toBe('$0.01');
   });
 
+  it('shows the session cost label next to the context button', async () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 2_000, { cost: 0.01 })]);
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+    await Promise.resolve();
+
+    const costLabel = container?.querySelector('.chat-context-cost');
+    expect(costLabel?.textContent).toBe('$0.01');
+    expect(costLabel?.getAttribute('title')).toBe('$0.01 session cost');
+    const context = container?.querySelector('.chat-context-usage');
+    expect(context).not.toBeNull();
+    expect(
+      Boolean(
+        costLabel &&
+        context &&
+        costLabel.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING
+      )
+    ).toBe(true);
+  });
+
+  it('omits the session cost label when there is no cost', async () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 2_000)]);
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-context-cost')).toBeNull();
+    expect(container?.querySelector('.chat-context-usage')).not.toBeNull();
+  });
+
   it('loads tokens for subagent sessions whose messages and snapshots are not loaded', async () => {
     setupModelState();
     setState('activeSessionId', 'session-1');

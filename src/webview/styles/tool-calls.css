@@ -1328,7 +1328,12 @@ kbd {
 }
 
 .chat-tool-invocation-part
-  :is(.tool-invocation-duration, .tool-invocation-activity-age, .tool-invocation-token-stats) {
+  :is(
+    .tool-invocation-duration,
+    .tool-invocation-activity-age,
+    .tool-invocation-token-stats,
+    .tool-invocation-cost
+  ) {
   display: inline-flex;
   align-self: stretch;
   align-items: center;
@@ -1366,13 +1371,21 @@ kbd {
   margin-inline: 3px;
 }
 
-.chat-tool-invocation-part .tool-invocation-token-stats {
+.chat-tool-invocation-part .tool-invocation-token-stats,
+.chat-tool-invocation-part .tool-invocation-cost {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--color-vscode-muted);
   flex-shrink: 0;
   line-height: 1.2;
   white-space: nowrap;
+}
+
+.chat-tool-invocation-part .tool-invocation-token-stats {
+  color: var(--color-vscode-muted);
+}
+
+.chat-tool-invocation-part .tool-invocation-cost {
+  color: var(--color-vscode-cost);
 }
 
 .chat-tool-invocation-part .tool-invocation-search-count {

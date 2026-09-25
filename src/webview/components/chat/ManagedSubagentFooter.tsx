@@ -25,6 +25,7 @@ import {
   ContextPopup,
   ContextUsageButton,
   formatContextUsageTitle,
+  SessionCostLabel,
 } from '../chat-input/ContextPopup';
 import {
   estimateContextBreakdown,
@@ -254,6 +255,7 @@ export function ManagedSubagentFooter(props: {
           <div class="chat-input-toolbars toolbar-meta managed-subagent-meta">
             <div class="toolbar-meta-left" />
             <div class="toolbar-meta-right">
+              <SessionCostLabel cost={sessionCost()} />
               <Show when={providerLimitBadges().length > 0}>
                 <div class="provider-limit-anchor" style={{ position: 'relative' }}>
                   <ProviderLimitChip

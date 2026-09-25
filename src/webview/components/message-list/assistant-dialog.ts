@@ -8,6 +8,7 @@ import {
   isAssistantMessage,
   isContinuationAssistantFinish,
   sumAssistantTokens,
+  sumSessionCost,
 } from '../../lib/message-metrics';
 import { resolveTaskSessionId } from '../../lib/task-session';
 import type { TaskSessionInfo, TaskSessionLookup } from '../../lib/task-session';
@@ -21,6 +22,7 @@ export type AssistantDialogSummaryInfo = {
   promptMessageId?: string;
   inputTokens: number;
   outputTokens: number;
+  cost?: number;
   agentCount: number;
   interrupted?: boolean;
   permissionRejected?: boolean;
@@ -185,6 +187,7 @@ export function getAssistantDialogSummaryMap(
       promptMessageId: currentUserRequestId ?? undefined,
       inputTokens: tokens.input,
       outputTokens: tokens.output,
+      cost: sumSessionCost(aggregateMessages),
       agentCount,
       interrupted: interrupted ? true : undefined,
       permissionRejected: permissionRejected ? true : undefined,

@@ -75,6 +75,7 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(summary?.querySelector('.assistant-dialog-summary-token-budget')?.textContent).toBe(
       ' - Tokens ↑ 10 ↓ 5'
     );
+    expect(summary?.querySelector('.assistant-dialog-summary-cost')).toBeNull();
 
     summary?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     vi.advanceTimersByTime(150);
@@ -93,6 +94,30 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);
     summary?.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', false);
+  });
+
+  it('shows the response cost in the status line', () => {
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{
+            durationMs: 1_000,
+            inputTokens: 10,
+            outputTokens: 5,
+            cost: 0.04,
+            agentCount: 0,
+          }}
+          msg={{ info: assistantMessage('assistant-1', { sessionID: 'session-1' }), parts: [] }}
+          hasBuildAgent={false}
+          latestPlanImplementationMessageId={null}
+        />
+      ),
+      container
+    );
+
+    expect(container.querySelector('.assistant-dialog-summary-cost')?.textContent).toBe(
+      ' - Cost $0.04'
+    );
   });
 
   it('shows the relative completion age for older interrupted summaries', () => {

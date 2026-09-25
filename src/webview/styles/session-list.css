@@ -1074,6 +1074,10 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   min-height: 1.2em;
 }
 
+.session-item-cost {
+  color: var(--color-vscode-cost);
+}
+
 .session-item-model-meta {
   display: none;
 }

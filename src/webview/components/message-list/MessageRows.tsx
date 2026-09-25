@@ -9,7 +9,12 @@ import {
 import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import type { AssistantActivityGroupInfo } from '../../lib/assistant-activity';
-import { formatNumber, formatTurnDuration, isAssistantMessage } from '../../lib/message-metrics';
+import {
+  formatCost,
+  formatNumber,
+  formatTurnDuration,
+  isAssistantMessage,
+} from '../../lib/message-metrics';
 import { formatMessageSentTime } from '../../lib/message-time';
 import { checkIcon, copyIcon } from '../../lib/ui-icons';
 import { writeClipboard } from '../../lib/write-clipboard';
@@ -405,6 +410,10 @@ function AssistantDialogSummary(props: {
       : props.summary.questionSkipped
         ? ' - Question skipped'
         : '';
+  const costSuffix = () => {
+    const cost = formatCost(props.summary.cost);
+    return cost ? ` - Cost ${cost}` : '';
+  };
   const hasCompletedSummary = () => !props.summary.collectingStats;
   const completedTime = () =>
     hasCompletedSummary() && props.summary.completedAt !== undefined
@@ -523,6 +532,9 @@ function AssistantDialogSummary(props: {
                 {(tokens) => <span class="assistant-dialog-summary-token-budget">{tokens()}</span>}
               </Show>
               {agentSuffix()}
+              <Show when={costSuffix()}>
+                {(cost) => <span class="assistant-dialog-summary-cost">{cost()}</span>}
+              </Show>
             </Show>
           </Show>
         </span>

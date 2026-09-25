@@ -277,6 +277,10 @@
   color: color-mix(in srgb, var(--color-vscode-muted) 70%, transparent);
 }
 
+.context-popup-cost-row .context-popup-row-value {
+  color: var(--color-vscode-cost);
+}
+
 .context-popup-cache-read-info,
 .context-popup-cache-write-info {
   display: inline-flex;

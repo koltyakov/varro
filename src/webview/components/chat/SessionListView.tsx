@@ -54,7 +54,7 @@ import { requestWorkspaceSelection } from '../../lib/workspace-selection';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatEditCount, formatModelName, formatVariantLabel } from '../../lib/format';
-import { formatDuration, formatRelativeAge } from '../../lib/message-metrics';
+import { formatCost, formatDuration, formatRelativeAge } from '../../lib/message-metrics';
 import { getProviderIcon } from '../../lib/provider-icons';
 import { compareSessionsByActivity, compareSessionsForDisplay } from '../../lib/session-order';
 import {
@@ -2535,6 +2535,16 @@ function SessionListItem(props: {
               <span title={`${props.tokens!.toLocaleString('en-US')} tokens spent`}>
                 {formatSessionTokens(props.tokens!)} tokens
               </span>
+            </Show>
+            <Show when={formatCost(props.session.cost)}>
+              {(cost) => (
+                <>
+                  {' · '}
+                  <span class="session-item-cost" title={`${cost()} session cost`}>
+                    {cost()}
+                  </span>
+                </>
+              )}
             </Show>
             <Show when={workedDurationMs()}>
               {(durationMs) => (

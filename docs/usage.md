@@ -384,7 +384,7 @@ The composer can show model and session metadata:
 - Provider limit status, when Varro can read quota information from OpenCode metadata or a supported provider endpoint.
 - Available OpenAI/Codex and Z.ai usage-limit resets and their expiration times. Varro displays these resets and links to the provider's usage page, but does not redeem them.
 - Context usage, based on token totals from assistant messages and the selected model's context window.
-- Reported session cost in the context popup, when OpenCode supplies cost data.
+- Reported session cost, when OpenCode supplies cost data, beside the context-usage icon, in the context popup, and in each session list row. Each completed response and subagent task card also shows its own cost.
 
 If a provider or model hits a usage limit, Varro shows a usage-limit banner with actions to stop retrying or switch providers.
 

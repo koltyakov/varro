@@ -139,6 +139,29 @@ describe('getAssistantDialogSummaryMap', () => {
     ).toMatchObject({ inputTokens: 10_328, outputTokens: 292 });
   });
 
+  it('sums per-response cost across the assistant messages in a dialog', () => {
+    const toolCall = assistantMessage(
+      'assistant-tool-call',
+      'session-parent',
+      'user-1',
+      2_000,
+      3_000
+    );
+    toolCall.info.cost = 0.02;
+    toolCall.info.finish = 'tool-calls';
+    const final = assistantMessage('assistant-final', 'session-parent', 'user-1', 3_100, 4_000);
+    final.info.cost = 0.03;
+    final.info.finish = 'stop';
+
+    const summary = getAssistantDialogSummaryMap(
+      [userMessage('user-1', 'session-parent', 1_000), toolCall, final],
+      undefined,
+      { primarySessionId: 'session-parent' }
+    ).get('assistant-final');
+
+    expect(summary).toMatchObject({ cost: 0.05 });
+  });
+
   it('does not let a child completion become the primary worked summary', () => {
     const messages: MessageEntry[] = [
       userMessage('user-1', 'session-parent', 1_000),

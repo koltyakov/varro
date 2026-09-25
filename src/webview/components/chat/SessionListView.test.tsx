@@ -1061,8 +1061,28 @@ describe('SessionListView diff summaries', () => {
     expect(container.querySelector('.session-item-meta')?.textContent).toContain('1m 5s');
     expect(container.querySelector('[title="12,345 tokens spent"]')).not.toBeNull();
     expect(container.querySelector('[title="1m 5s total time worked"]')).not.toBeNull();
+    expect(container.querySelector('.session-item-cost')).toBeNull();
     expect(diffSpy).not.toHaveBeenCalled();
     expect(messagesSpy).not.toHaveBeenCalled();
+  });
+
+  it('shows the session cost in the meta line when OpenCode reports it', async () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 2,
+      additions: 6,
+      deletions: 4,
+      tokens: 12_345,
+      durationMs: 65_000,
+      activeStartedAt: null,
+    });
+    setState('sessions', [session('session-1', Date.now(), { cost: 0.06 })]);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    await vi.waitFor(() =>
+      expect(container.querySelector('.session-item-meta')?.textContent).toContain('$0.06')
+    );
+    expect(container.querySelector('[title="$0.06 session cost"]')).not.toBeNull();
   });
 
   it('compacts large edit counts', async () => {

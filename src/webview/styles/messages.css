@@ -1456,6 +1456,10 @@ body.vscode-light
   }
 }
 
+.assistant-dialog-summary-cost {
+  color: var(--color-vscode-cost);
+}
+
 .assistant-dialog-summary-turn-actions {
   position: absolute;
   right: 5px;
@@ -2832,8 +2836,10 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
 }
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-right {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-repository-link {
@@ -3046,6 +3052,12 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
   justify-content: flex-end;
 }
 
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-mcp-count,
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-lsp-count,
+.interactive-session .chat-input-toolbars.toolbar-meta .provider-limit-anchor {
+  flex-shrink: 0;
+}
+
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-mcp-count + .context-anchor {
   margin-left: 4px;
 }
@@ -3140,4 +3152,17 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
 
 .chat-context-usage.error .progress-arc {
   stroke: var(--color-vscode-error);
+}
+
+.chat-context-cost {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--color-vscode-cost);
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.chat-input-toolbars.compact-tight .chat-context-cost {
+  display: none;
 }

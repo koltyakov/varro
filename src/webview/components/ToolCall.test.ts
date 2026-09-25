@@ -1713,6 +1713,7 @@ describe('ToolCall', () => {
       {
         info: assistantMessage('subagent-assistant-1', {
           sessionID: 'subagent-session-1',
+          cost: 0.04,
           tokens: {
             input: 3,
             output: 50,
@@ -1755,6 +1756,36 @@ describe('ToolCall', () => {
     expect(stats?.textContent).toBe('↑ 1,234 ↓ 56');
     expect(stats?.querySelector('.diff-lines-added')).toBeNull();
     expect(stats?.querySelector('.diff-lines-removed')).toBeNull();
+    const cost = container?.querySelector('.tool-invocation-cost');
+    expect(cost?.textContent).toBe('$0.04');
+    expect(cost?.getAttribute('title')).toBe('Subagent cost');
+  });
+
+  it('uses the subagent session cost when message costs are missing', () => {
+    setState('sessions', [session('subagent-session-1', { cost: 0.12 })]);
+    setState('messages', [
+      {
+        info: assistantMessage('subagent-assistant-1', { sessionID: 'subagent-session-1' }),
+        parts: [],
+      },
+    ]);
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        ...completedState({ prompt: 'Do something' }, 'Working', 'done'),
+        metadata: { sessionId: 'subagent-session-1' },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-cost')?.textContent).toBe('$0.12');
   });
 
   it('keeps subagent token counts visible while waiting for token data', () => {
@@ -1779,6 +1810,7 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 0 ↓ 0');
+    expect(container?.querySelector('.tool-invocation-cost')).toBeNull();
   });
 
   it.each(['task', 'bash', 'apply_patch'])(

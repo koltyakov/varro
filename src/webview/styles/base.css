@@ -33,6 +33,7 @@
   --color-vscode-info: var(--vscode-charts-blue, #75beff);
   --color-vscode-warning: var(--vscode-editorWarning-foreground, #cca700);
   --color-vscode-success: var(--vscode-charts-green, #73c991);
+  --color-vscode-cost: var(--vscode-charts-blue, #75beff);
   --color-vscode-card: var(--vscode-editorWidget-background, #252526);
   --color-vscode-hover: var(--vscode-list-hoverBackground, #2a2d2e);
   --color-vscode-list-bg: var(

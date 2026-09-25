@@ -172,6 +172,7 @@ import {
 } from '../lib/format';
 import { getVariantsForModel } from '../lib/model-variants';
 import {
+  getAssistantTotalTokens,
   getContextWindow,
   isAssistantMessage,
   isContinuationAssistantFinish,
@@ -4923,7 +4924,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     const limit = currentModel().contextLimit;
     if (!limit) return null;
-    return { used: 0, limit, percent: 0 };
+    if (!best) return { used: 0, limit, percent: 0 };
+    const used = getAssistantTotalTokens(best);
+    return { used, limit, percent: Math.min((used / limit) * 100, 100) };
   });
 
   const contextBreakdown = createMemo(() => {
@@ -5150,7 +5153,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       .join('|'),
     variant: effectiveVariant(),
     selectionCostWarning: selectionCostWarning(),
-    hasContextUsage: !!contextUsage(),
+    hasContextUsage: !!(contextUsage() || sessionCost()),
     loading: isComposerBusy(),
     hasQuestion: composerHasActiveQuestion(),
     hasPermission: composerHasActivePermission(),
@@ -5941,7 +5944,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             contextUsage={contextUsage()}
             contextBreakdown={contextBreakdown()}
             nestedContextBreakdown={nestedContextBreakdown()}
-            showContextControl={!!contextUsage()}
+            showContextControl={!!(contextUsage() || sessionCost())}
             contextButtonRef={(el) => {
               contextButtonRef = el;
             }}
@@ -6158,7 +6161,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           contextUsage={contextUsage()}
           contextBreakdown={contextBreakdown()}
           nestedContextBreakdown={nestedContextBreakdown()}
-          showContextControl={!!contextUsage() && !composerEditingMessage()}
+          showContextControl={!!(contextUsage() || sessionCost()) && !composerEditingMessage()}
           contextButtonRef={(el) => {
             contextButtonRef = el;
           }}
