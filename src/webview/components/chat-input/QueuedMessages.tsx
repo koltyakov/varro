@@ -31,6 +31,7 @@ export type QueuedMessageItem = Pick<
   | 'paused'
   | 'droppedFiles'
   | 'clipboardImages'
+  | 'nativePdfs'
   | 'terminalSelection'
   | 'inlineProblems'
   | 'attachedDiagnostics'
@@ -121,6 +122,7 @@ export function QueuedMessages(props: {
                     attachmentCount={
                       item.attachmentCount ??
                       (item.droppedFiles?.length ?? 0) +
+                        (item.nativePdfs?.length ?? 0) +
                         (item.terminalSelection ? 1 : 0) +
                         (item.inlineProblems?.length ?? 0) +
                         (item.attachedDiagnostics ? 1 : 0)
@@ -154,6 +156,7 @@ export function QueuedMessages(props: {
                 const imageCount = item.clipboardImages?.length || 0;
                 const attachmentCount =
                   (item.droppedFiles?.length || 0) +
+                  (item.nativePdfs?.length ?? 0) +
                   (item.terminalSelection ? 1 : 0) +
                   (item.inlineProblems?.length ?? 0) +
                   (item.attachedDiagnostics ? 1 : 0);
