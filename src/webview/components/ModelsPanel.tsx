@@ -1601,7 +1601,10 @@ function ProviderSection(props: {
                       });
                     }}
                   >
-                    <Show when={props.modelsReorderable && props.models.length > 1}>
+                    <Show
+                      when={props.modelsReorderable && props.models.length > 1}
+                      fallback={<span class="models-model-drag-spacer" aria-hidden="true" />}
+                    >
                       <span
                         class="models-model-drag-handle"
                         draggable={true}
