@@ -44,6 +44,9 @@ jobs:
       - name: Lint
         run: npm run lint:check
 
+      - name: Check formatting
+        run: npm run fmt:check
+
       - name: Test
         run: npm run test:coverage
 

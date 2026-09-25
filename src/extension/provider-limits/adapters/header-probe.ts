@@ -1,6 +1,6 @@
 import { buildProviderLimitProbe, parseProviderLimitHeaders } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
-import { unsupportedProviderStatus } from '../adapter-utils';
+import { unsupportedProviderStatus, providerErrorStatus } from '../adapter-utils';
 
 export function createHeaderProbeAdapter(id: string): ProviderLimitAdapter {
   return {
@@ -54,14 +54,12 @@ export function createHeaderProbeAdapter(id: string): ProviderLimitAdapter {
           } catch {}
         }
       } catch {
-        return {
-          providerID: provider.id,
+        return providerErrorStatus(
+          provider.id,
           modelID,
-          status: 'error',
-          source: 'provider',
           checkedAt,
-          note: 'Failed to poll the provider metadata endpoint',
-        };
+          'Failed to poll the provider metadata endpoint'
+        );
       }
     },
   };

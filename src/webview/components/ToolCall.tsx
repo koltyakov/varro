@@ -26,6 +26,7 @@ import {
   showFileDiffs,
 } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
+import { useSecondClock } from '../lib/clock';
 import { formatCommandDisplay } from '../lib/command-display';
 import { formatDuration, formatNumber } from '../lib/message-metrics';
 import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
@@ -1585,7 +1586,6 @@ function GenericToolCall(props: {
   };
   const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
   const searchResultCount = () => getSearchResultCount(props.tool.tool, props.state);
-  const [now, setNow] = createSignal(Date.now());
   const pendingStartedAt = Date.now();
   const hasRunningDuration = () => isTask() || isBash() || isApplyPatchTool(props.tool.tool);
   const durationStartedAt = () => {
@@ -1599,12 +1599,7 @@ function GenericToolCall(props: {
   onMount(() => {
     if (isTask()) onCleanup(retainTaskActivityAltListener());
   });
-  createEffect(() => {
-    if (durationStartedAt() === null) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    onCleanup(() => clearInterval(timer));
-  });
+  const now = useSecondClock(() => durationStartedAt() !== null);
   const runningDurationLabel = () => {
     const startedAt = durationStartedAt();
     if (startedAt === null) return null;

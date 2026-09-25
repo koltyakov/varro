@@ -18,6 +18,8 @@ import {
   clampPercent,
   readBoundedResponseJson,
   unsupportedProviderStatus,
+  providerErrorStatus,
+  VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const ZAI_QUOTA_ENDPOINT = 'https://api.z.ai/api/monitor/usage/quota/limit';
@@ -54,7 +56,7 @@ export function createZaiAdapter(): ProviderLimitAdapter {
           headers: {
             Accept: 'application/json',
             Authorization: token,
-            'User-Agent': 'Varro/0.1.0',
+            'User-Agent': VARRO_USER_AGENT,
           },
           signal: AbortSignal.timeout(10_000),
         });
@@ -69,14 +71,12 @@ export function createZaiAdapter(): ProviderLimitAdapter {
         }
 
         if (!response.ok) {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: `Z.ai quota endpoint returned ${response.status}`,
-          };
+            `Z.ai quota endpoint returned ${response.status}`
+          );
         }
 
         const payload = await readBoundedResponseJson(response);
@@ -85,14 +85,7 @@ export function createZaiAdapter(): ProviderLimitAdapter {
           return unsupportedProviderStatus(provider.id, modelID, checkedAt, result.note);
         }
         if (result.kind === 'error') {
-          return {
-            providerID: provider.id,
-            modelID,
-            status: 'error',
-            source: 'provider',
-            checkedAt,
-            note: result.note,
-          };
+          return providerErrorStatus(provider.id, modelID, checkedAt, result.note);
         }
 
         const status: ProviderLimitStatus = {
@@ -108,14 +101,12 @@ export function createZaiAdapter(): ProviderLimitAdapter {
         if (resetCredits) status.usageLimitResets = resetCredits;
         return status;
       } catch {
-        return {
-          providerID: provider.id,
+        return providerErrorStatus(
+          provider.id,
           modelID,
-          status: 'error',
-          source: 'provider',
           checkedAt,
-          note: 'Failed to poll the Z.ai quota endpoint',
-        };
+          'Failed to poll the Z.ai quota endpoint'
+        );
       }
     },
   };
@@ -128,7 +119,7 @@ async function fetchZaiResetCredits(token: string): Promise<ProviderLimitResetCr
         Accept: 'application/json',
         Authorization: token,
         'Content-Type': 'application/json',
-        'User-Agent': 'Varro/0.1.0',
+        'User-Agent': VARRO_USER_AGENT,
       },
       signal: AbortSignal.timeout(10_000),
     });

@@ -246,7 +246,7 @@ export function PermissionPrompt(props: {
           class="question-btn question-btn-primary"
           aria-label="Allow once"
           disabled={responding() || props.permission.recoveredIncomplete}
-          onClick={() => handleRespond('once')}
+          onClick={() => void handleRespond('once')}
         >
           <span class="permission-action-label permission-action-label-full" aria-hidden="true">
             Allow once
@@ -296,7 +296,7 @@ export function PermissionPrompt(props: {
           class="question-btn question-btn-danger"
           aria-label="Reject"
           disabled={responding()}
-          onClick={() => handleRespond('reject')}
+          onClick={() => void handleRespond('reject')}
         >
           <span class="permission-action-label permission-action-label-full" aria-hidden="true">
             Reject
@@ -332,15 +332,15 @@ export function PermissionPrompt(props: {
               top: `${alwaysMenuPosition().top}px`,
             }}
           >
-            <button type="button" role="menuitem" onClick={() => handleAlways('session')}>
+            <button type="button" role="menuitem" onClick={() => void handleAlways('session')}>
               <span>For this session</span>
               <small>Matching requests in this session</small>
             </button>
-            <button type="button" role="menuitem" onClick={() => handleAlways('server')}>
+            <button type="button" role="menuitem" onClick={() => void handleAlways('server')}>
               <span>Until server restart</span>
               <small>Matching requests across sessions</small>
             </button>
-            <button type="button" role="menuitem" onClick={() => handleAlways('project')}>
+            <button type="button" role="menuitem" onClick={() => void handleAlways('project')}>
               <span>For this project</span>
               <small>Saved in the project OpenCode config</small>
             </button>

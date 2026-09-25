@@ -10,6 +10,7 @@ import {
   parseRateLimitResetAt,
   type ProviderMetadata,
 } from './provider-limit';
+import { VARRO_USER_AGENT } from '../provider-limits/adapter-utils';
 
 describe('provider limit helpers', () => {
   it('resolves the OpenCode auth path from XDG data home', () => {
@@ -181,7 +182,7 @@ describe('provider limit helpers', () => {
       headers: {
         Accept: 'application/json',
         Authorization: 'Bearer token-2',
-        'User-Agent': 'Varro/0.1.0',
+        'User-Agent': VARRO_USER_AGENT,
         'Editor-Version': 'vscode/1.91.0',
         'Editor-Plugin-Version': 'varro/0.1.0',
       },

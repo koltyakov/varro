@@ -42,9 +42,10 @@
     "watch:extension": "node esbuild.config.mjs --watch",
     "watch:webview": "vite build --watch",
     "dev": "npx concurrently --kill-others-on-fail --names ext,web,preview \"npm run watch:extension\" \"npm run watch:webview\" \"npm run preview:webview\"",
-    "lint": "oxlint -c oxlint.config.mts . --fix",
-    "lint:check": "oxlint -c oxlint.config.mts .",
+    "lint": "oxlint -c oxlint.config.mts --type-aware . --fix",
+    "lint:check": "oxlint -c oxlint.config.mts --type-aware .",
     "fmt": "oxfmt src/",
+    "fmt:check": "oxfmt --check src/",
     "test": "node scripts/run-tests.mjs",
     "test:scripts": "node --test scripts/*.test.mjs",
     "test:scripts:browser": "node --test scripts/browser/*.test.mjs",
@@ -64,11 +65,12 @@
     "ai:streaming": "node scripts/ai-streaming.mjs",
     "test:ai-runner": "npm run build && node scripts/ai-streaming-smoke.mjs",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scripts.json",
     "typecheck:suggestions": "node scripts/check-ts-suggestions.mjs",
     "package:vsix": "node scripts/package-vsix.mjs",
     "package": "npm run build && npm run package:vsix",
-    "vscode:install": "node scripts/vscode-install.mjs"
+    "vscode:install": "node scripts/vscode-install.mjs",
+    "artifacts:prune": "node scripts/prune-artifacts.mjs"
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.18.32",
@@ -78,7 +80,7 @@
     "highlight.js": "11.12.0",
     "jsonc-parser": "3.3.1",
     "marked": "18.0.14",
-    "mermaid": "^11.17.2",
+    "mermaid": "11.17.2",
     "solid-js": "1.9.15"
   },
   "devDependencies": {
@@ -97,13 +99,14 @@
     "oxfmt": "0.70.0",
     "oxlint": "1.85.0",
     "oxlint-plugin-anti-slop": "github:dmmulroy/anti-slop#c44ef22",
+    "oxlint-tsgolint": "7.0.2003",
     "rolldown": "1.2.11",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.1",
     "vite-plugin-solid": "2.11.14",
     "vitest": "5.0.2",
-    "ws": "^8.21.3"
+    "ws": "8.21.3"
   },
   "contributes": {
     "viewsContainers": {

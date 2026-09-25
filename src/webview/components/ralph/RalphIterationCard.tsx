@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
 import type {
   RalphIteration,
   RalphVerificationEvidence,
@@ -6,34 +6,11 @@ import type {
 } from '../../../shared/ralph';
 import { selectSession } from '../../hooks/useOpenCode';
 import { client } from '../../lib/client';
+import { useSecondClock } from '../../lib/clock';
 import { postMessage } from '../../lib/bridge';
 import { isString } from '../../lib/runtime-values';
 import { formatDuration } from '../../lib/message-metrics';
 import { getRalphIterationLiveIssue } from './ralph-live-issue';
-
-// Shared ticker so any in-progress iteration card refreshes its displayed
-// duration roughly once per second without each card spawning its own timer.
-const [tickNow, setTickNow] = createSignal(Date.now());
-let tickerSubscribers = 0;
-let tickerHandle: ReturnType<typeof setInterval> | null = null;
-
-function acquireTicker(): () => void {
-  tickerSubscribers += 1;
-  if (tickerHandle === null) {
-    tickerHandle = setInterval(() => setTickNow(Date.now()), 1000);
-  }
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    tickerSubscribers -= 1;
-    if (tickerSubscribers <= 0 && tickerHandle !== null) {
-      clearInterval(tickerHandle);
-      tickerHandle = null;
-      tickerSubscribers = 0;
-    }
-  };
-}
 
 type RalphIterationStatusLabels = Record<RalphIteration['status'], string>;
 
@@ -85,21 +62,14 @@ export function RalphIterationCard(props: { iteration: RalphIteration }) {
       setOpeningEvidence(false);
     }
   };
-  // Acquire the shared ticker only while this iteration is still in flight,
-  // so completed iterations don't keep an interval alive.
-  createEffect(() => {
-    const { startedAt, endedAt } = props.iteration;
-    if (startedAt && !endedAt) {
-      const release = acquireTicker();
-      onCleanup(release);
-    }
-  });
+  // Completed iterations must not keep the shared clock running.
+  const now = useSecondClock(() => !!props.iteration.startedAt && !props.iteration.endedAt);
 
   const durationMs = () => {
     const { startedAt, endedAt } = props.iteration;
     if (!startedAt) return null;
     if (endedAt) return endedAt - startedAt;
-    return tickNow() - startedAt;
+    return now() - startedAt;
   };
 
   const liveIssue = () => getRalphIterationLiveIssue(props.iteration);

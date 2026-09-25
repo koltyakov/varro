@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import solid from 'vite-plugin-solid';
 import { defineConfig } from 'vitest/config';
 
+const { version } = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8'));
+
 export default defineConfig({
+  define: { __VARRO_VERSION__: JSON.stringify(version) },
   // hot: false keeps vite-plugin-solid from injecting the /@solid-refresh virtual
   // module, which vite-node cannot resolve as a file URL on Windows.
   plugins: [solid({ hot: false })],

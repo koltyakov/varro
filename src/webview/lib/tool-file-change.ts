@@ -1,7 +1,14 @@
 import type { FileDiff, Part, ToolPart, ToolState } from '../types';
 import { getWorkspaceRelativePath, isAbsolutePath, normalizePath } from './path-display';
 import { getToolKind, isApplyPatchTool, normalizeToolName } from './tool-normalization';
-import { asRecord, isNumber, isString, type UnknownRecord, isObject } from './runtime-values';
+import {
+  asRecord,
+  isNumber,
+  isObject,
+  isRecord,
+  isString,
+  type UnknownRecord,
+} from './runtime-values';
 
 export type FileChangeKind = 'added' | 'edited' | 'removed' | 'moved';
 
@@ -164,10 +171,6 @@ function stringValue(source: UnknownRecord, keys: readonly string[]): string | u
     if (isString(value)) return value;
   }
   return undefined;
-}
-
-function isRecord<T>(value: T): value is T & UnknownRecord {
-  return !!value && isObject(value) && !Array.isArray(value);
 }
 
 function withDedupeKey(change: Omit<FileChange, 'dedupeKey'>): FileChange {

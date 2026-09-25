@@ -37,6 +37,7 @@ vi.mock('fs/promises', () => ({
 }));
 
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'fs/promises';
+import { VARRO_USER_AGENT } from '../adapter-utils';
 
 const adapter = createAnthropicAdapter();
 
@@ -327,7 +328,7 @@ describe('createAnthropicAdapter', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Accept: 'application/json',
-          'User-Agent': 'Varro/0.1.0',
+          'User-Agent': VARRO_USER_AGENT,
         }),
       })
     );

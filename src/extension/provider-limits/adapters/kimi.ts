@@ -13,6 +13,8 @@ import {
   parseFiniteNumber,
   readBoundedResponseJson,
   unsupportedProviderStatus,
+  providerErrorStatus,
+  VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const KIMI_USAGE_ENDPOINT = 'https://api.kimi.com/coding/v1/usages';
@@ -46,7 +48,7 @@ export function createKimiAdapter(): ProviderLimitAdapter {
           headers: {
             Accept: 'application/json',
             Authorization: `Bearer ${token}`,
-            'User-Agent': 'Varro/0.1.0',
+            'User-Agent': VARRO_USER_AGENT,
           },
           signal: AbortSignal.timeout(10_000),
         });
@@ -61,14 +63,12 @@ export function createKimiAdapter(): ProviderLimitAdapter {
         }
 
         if (!response.ok) {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: `Kimi For Coding usage endpoint returned ${response.status}`,
-          };
+            `Kimi For Coding usage endpoint returned ${response.status}`
+          );
         }
 
         const payload = await readBoundedResponseJson(response);
@@ -77,14 +77,7 @@ export function createKimiAdapter(): ProviderLimitAdapter {
           return unsupportedProviderStatus(provider.id, modelID, checkedAt, result.note);
         }
         if (result.kind === 'error') {
-          return {
-            providerID: provider.id,
-            modelID,
-            status: 'error',
-            source: 'provider',
-            checkedAt,
-            note: result.note,
-          };
+          return providerErrorStatus(provider.id, modelID, checkedAt, result.note);
         }
 
         return {
@@ -97,14 +90,12 @@ export function createKimiAdapter(): ProviderLimitAdapter {
           note: 'Polled Kimi For Coding usage endpoint',
         };
       } catch {
-        return {
-          providerID: provider.id,
+        return providerErrorStatus(
+          provider.id,
           modelID,
-          status: 'error',
-          source: 'provider',
           checkedAt,
-          note: 'Failed to poll the Kimi For Coding usage endpoint',
-        };
+          'Failed to poll the Kimi For Coding usage endpoint'
+        );
       }
     },
   };

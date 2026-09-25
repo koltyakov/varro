@@ -1,3 +1,4 @@
+// @ts-check
 import { spawn } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

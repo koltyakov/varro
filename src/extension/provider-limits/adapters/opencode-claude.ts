@@ -7,7 +7,11 @@ import type {
 } from '../../../shared/protocol';
 import { asRecord } from '../../../shared/type-utils';
 import type { ProviderMetadata } from '../../util/provider-limit';
-import { readBoundedResponseJson, unsupportedProviderStatus } from '../adapter-utils';
+import {
+  readBoundedResponseJson,
+  unsupportedProviderStatus,
+  providerErrorStatus,
+} from '../adapter-utils';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 
 const PROVIDER_ID = 'claude-code';
@@ -267,12 +271,5 @@ function isProviderLimitUnit(value: string): value is ProviderLimitUnit {
 }
 
 function errorStatus(modelID: string | null, checkedAt: number, note: string): ProviderLimitStatus {
-  return {
-    providerID: PROVIDER_ID,
-    modelID,
-    status: 'error',
-    source: 'provider',
-    checkedAt,
-    note,
-  };
+  return providerErrorStatus(PROVIDER_ID, modelID, checkedAt, note);
 }

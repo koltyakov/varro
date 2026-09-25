@@ -114,3 +114,17 @@ those variations as untested. Explicitly requested attachment coverage still nee
 Reports must say what ran, what failed, and what could not run. A `BLOCKED` row is incomplete coverage,
 not a demonstrated product defect. It cannot become a pass through a different backend or a settled
 screenshot. Include the exact recovery attempted and continue all independent rows before finishing.
+
+## Pruning old evidence
+
+Run output accumulates quickly: isolated databases under `artifacts/ai-test-data/`, streaming runs under
+`artifacts/ai-streaming/`, and adapter runs under `artifacts/opencode-adapters/`. To list what can go:
+
+```sh
+npm run artifacts:prune
+```
+
+This is a dry run. It keeps the newest 10 directories in each location and anything changed in the last
+24 hours, and it never selects the directory named by `VARRO_AI_DATA_DIR`. Add `--apply` to delete, and
+`--keep <n>` or `--min-age-hours <n>` to adjust. It does not touch `artifacts/ai-fuzzy/` ledgers,
+`opencode-adapters/verified.json`, or any `tmp/` fixture.

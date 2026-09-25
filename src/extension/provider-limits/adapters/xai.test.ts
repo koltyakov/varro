@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderMetadata } from '../../util/provider-limit';
 import { createXaiAdapter } from './xai';
+import { VARRO_USER_AGENT } from '../adapter-utils';
 
 const adapter = createXaiAdapter();
 const provider: ProviderMetadata = {
@@ -52,7 +53,7 @@ describe('createXaiAdapter', () => {
           Accept: 'application/json',
           Authorization: 'Bearer supergrok-access-token',
           'x-xai-token-auth': 'xai-grok-cli',
-          'User-Agent': 'Varro/0.1.0',
+          'User-Agent': VARRO_USER_AGENT,
         },
       })
     );

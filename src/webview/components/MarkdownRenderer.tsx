@@ -1797,7 +1797,7 @@ function cacheMermaidSvg(key: string, svg: string) {
 
 async function waitForMermaidLayoutReady() {
   const fonts = document.fonts?.ready;
-  if (fonts) {
+  if (fonts !== undefined) {
     await Promise.race([fonts, new Promise<void>((resolve) => setTimeout(resolve, 500))]);
   }
   await new Promise<void>((resolve) =>
@@ -2385,7 +2385,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     if (mermaidCopy) {
       const diagram = mermaidCopy.closest<HTMLElement>('.mermaid-diagram');
       const source = decodeCopyPayload(diagram?.dataset.mermaidSource || '');
-      if (source) writeClipboard(source);
+      if (source) void writeClipboard(source);
       mermaidCopy.replaceChildren(createUiIconElement(checkIcon, { width: 14, height: 14 }));
       const tid = setTimeout(() => {
         copyTimeouts.delete(tid);
@@ -2419,7 +2419,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
         btn.dataset.copyText ? decodeCopyPayload(btn.dataset.copyText) : (code.textContent ?? '')
       );
       if (!copyText) return;
-      writeClipboard(copyText);
+      void writeClipboard(copyText);
       btn.replaceChildren(createUiIconElement(checkIcon, { width: 14, height: 14 }));
       const tid = setTimeout(() => {
         copyTimeouts.delete(tid);

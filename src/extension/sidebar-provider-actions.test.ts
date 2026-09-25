@@ -591,7 +591,7 @@ describe('createSidebarProviderActions', () => {
     await actions.providerAuthChanged();
     actions.showOutput();
     actions.clearTerminalSelection();
-    actions.runInTerminal('npm test', 'Tests');
+    await actions.runInTerminal('npm test', 'Tests');
     await actions.exportSession('session-1');
     await actions.generateUsageReport(false);
     await actions.reloadWebview();

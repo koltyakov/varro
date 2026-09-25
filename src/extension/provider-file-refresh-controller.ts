@@ -363,7 +363,11 @@ export class ProviderFileRefreshController {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
-      void this.refreshState(generation, true);
+      void this.refreshState(generation, true).catch((err) => {
+        logger.warn(
+          `Failed to refresh provider file state: ${err instanceof Error ? err.message : String(err)}`
+        );
+      });
     }, 250);
   }
 

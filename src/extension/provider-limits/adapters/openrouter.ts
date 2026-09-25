@@ -9,6 +9,8 @@ import {
   clampPercent,
   readBoundedResponseJson,
   unsupportedProviderStatus,
+  providerErrorStatus,
+  VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const OPENROUTER_AUTH_KEY_ENDPOINT = 'https://openrouter.ai/api/v1/auth/key';
@@ -45,7 +47,7 @@ export function createOpenRouterAdapter(): ProviderLimitAdapter {
             headers: {
               Accept: 'application/json',
               Authorization: `Bearer ${token}`,
-              'User-Agent': 'Varro/0.1.0',
+              'User-Agent': VARRO_USER_AGENT,
             },
             signal: AbortSignal.timeout(10_000),
           });
@@ -60,14 +62,12 @@ export function createOpenRouterAdapter(): ProviderLimitAdapter {
           }
 
           if (!response.ok) {
-            return {
-              providerID: provider.id,
+            return providerErrorStatus(
+              provider.id,
               modelID,
-              status: 'error',
-              source: 'provider',
               checkedAt,
-              note: `OpenRouter auth key endpoint returned ${response.status}`,
-            };
+              `OpenRouter auth key endpoint returned ${response.status}`
+            );
           }
 
           const payload = await readBoundedResponseJson(response);
@@ -93,14 +93,12 @@ export function createOpenRouterAdapter(): ProviderLimitAdapter {
           if (isOpenRouterFreeTier(payload)) status.planName = 'Free';
           return status;
         } catch {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: 'Failed to poll the OpenRouter auth key endpoint',
-          };
+            'Failed to poll the OpenRouter auth key endpoint'
+          );
         }
       };
       return coordinate ? coordinate([OPENROUTER_AUTH_KEY_ENDPOINT, token], poll) : poll();

@@ -1,4 +1,4 @@
-import { Show, createSignal, onCleanup } from 'solid-js';
+import { Show } from 'solid-js';
 import packageJson from '../../../../package.json';
 import type { Agent } from '../../types';
 import type { ContextBreakdownSegment } from '../../../shared/context-breakdown';
@@ -10,6 +10,7 @@ import type {
 } from '../../../shared/protocol';
 import { postMessage } from '../../lib/bridge';
 import { formatTurnDuration } from '../../lib/time-format';
+import { useSecondClock } from '../../lib/clock';
 import { runningIcon, warningTriangleIcon } from '../../lib/ui-icons';
 import { Tooltip } from '../Tooltip';
 import { UiIcon } from '../UiIcon';
@@ -516,9 +517,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
 const STALE_TURN_INACTIVITY_MS = 5 * 60_000;
 
 function ActiveTurnTimer(props: { startedAt: number; lastActivityAt: number | null }) {
-  const [now, setNow] = createSignal(Date.now());
-  const timer = setInterval(() => setNow(Date.now()), 1000);
-  onCleanup(() => clearInterval(timer));
+  const now = useSecondClock();
 
   const elapsedMs = () => Math.max(0, now() - props.startedAt);
   const duration = () => formatTurnDuration(elapsedMs());

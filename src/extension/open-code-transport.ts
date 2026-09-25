@@ -12,7 +12,7 @@ import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
 import { diagnosticRoute, diagnosticTimeline } from './diagnostics';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
-import { anySignal, asRecord, findSseChunkBoundary, getString } from './server-utils';
+import { asRecord, findSseChunkBoundary, getString } from './server-utils';
 import { OpenCodeV2Adapter } from './opencode-v2-adapter';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { projectV2Event } from './opencode-v2-events';
@@ -150,7 +150,7 @@ export class OpenCodeTransport {
       const controller = new AbortController();
       this.requestControllers.add(controller);
       const signal = options?.signal
-        ? anySignal(options.signal, controller.signal)
+        ? AbortSignal.any([options.signal, controller.signal])
         : controller.signal;
       try {
         const result =
@@ -216,8 +216,8 @@ export class OpenCodeTransport {
       redirect: 'error',
       headers,
       signal: options?.signal
-        ? anySignal(controller.signal, timeoutSignal, options.signal)
-        : anySignal(controller.signal, timeoutSignal),
+        ? AbortSignal.any([controller.signal, timeoutSignal, options.signal])
+        : AbortSignal.any([controller.signal, timeoutSignal]),
     };
     try {
       if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
@@ -371,7 +371,7 @@ export class OpenCodeTransport {
         const res = await this.fetchAuthenticated(`${url}${path}`, {
           redirect: 'error',
           headers: this.authorizationHeaders(),
-          signal: signal ? anySignal(signal, timeout) : timeout,
+          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
         if (res.status === 401 || res.status === 403) {
           this.healthFailure =

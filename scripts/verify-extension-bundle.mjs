@@ -1,3 +1,4 @@
+// @ts-check
 import { readFile } from 'node:fs/promises';
 import { createRequire, isBuiltin } from 'node:module';
 import { dirname } from 'node:path';

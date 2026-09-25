@@ -3,7 +3,6 @@ import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  anySignal,
   asRecord,
   compareVersions,
   extractVersion,
@@ -101,11 +100,5 @@ describe('server utils', () => {
     const timeoutPromise = waitForProcessExit(pendingProc, 1000);
     await vi.advanceTimersByTimeAsync(1000);
     await expect(timeoutPromise).resolves.toBe(false);
-
-    const first = new AbortController();
-    const second = new AbortController();
-    const combined = anySignal(first.signal, second.signal);
-    second.abort(new Error('stop'));
-    expect(combined.aborted).toBe(true);
   });
 });

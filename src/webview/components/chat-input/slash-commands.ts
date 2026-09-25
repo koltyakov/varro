@@ -9,6 +9,7 @@ import {
   runSlashCommandByName,
 } from '../../hooks/useOpenCode';
 import { ralphStore } from '../../lib/stores/ralph-store';
+import { logError } from '../../lib/log';
 import { PROBLEMS_COMMAND_NAME, SKILLS_COMMAND_NAME } from './completion';
 import type { SlashCommand } from './CompletionMenu';
 import type { Command } from '../../types';
@@ -172,7 +173,7 @@ export function getSlashCommands(props: {
       aliases: ['summarize'],
       description: 'Compact conversation context',
       action: () => {
-        compactSession();
+        void compactSession();
       },
     },
   ];
@@ -217,7 +218,7 @@ export function getSlashCommands(props: {
       aliases: [],
       description: 'Analyze the project and create AGENTS.md',
       action: () => {
-        initSession();
+        void initSession().catch((err) => logError('Failed to initialize AGENTS.md', err));
       },
     });
   }
@@ -255,7 +256,7 @@ export function getSlashCommands(props: {
     aliases: [],
     description: 'Review current code changes',
     action: () => {
-      reviewSession();
+      void reviewSession().catch((err) => logError('Failed to start the review', err));
     },
   });
 

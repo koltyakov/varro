@@ -1403,7 +1403,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       void endpoint.webviewSession.dispose();
       for (const disposable of editorEndpoint.panelDisposables) disposable.dispose();
       editorEndpoint.panelDisposables = [];
-      void this.transferEditorDraftState(viewId);
+      void this.transferEditorDraftState(viewId).catch((err) => {
+        logger.warn(
+          `Failed to release editor draft attachments: ${err instanceof Error ? err.message : String(err)}`
+        );
+      });
     });
     editorEndpoint.panelDisposables.push(viewStateDisposable, disposeDisposable);
     await endpoint.webviewSession.resolve(panel);
@@ -2921,7 +2925,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         () => {
           this.postQueuedMessageSnapshots();
           this.updateSessionReconcileTimer();
-          void this.runSessionReconcile();
+          this.runSessionReconcileSafely();
         },
         (error) => {
           this.postQueuedMessageSnapshots();
@@ -3397,13 +3401,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       (!this.sessionReconcileTimer || this.sessionReconcileIntervalMs !== intervalMs)
     ) {
       if (this.sessionReconcileTimer) clearInterval(this.sessionReconcileTimer);
-      this.sessionReconcileTimer = setInterval(() => void this.runSessionReconcile(), intervalMs);
+      this.sessionReconcileTimer = setInterval(() => this.runSessionReconcileSafely(), intervalMs);
       this.sessionReconcileIntervalMs = intervalMs;
     } else if (!shouldRun && this.sessionReconcileTimer) {
       clearInterval(this.sessionReconcileTimer);
       this.sessionReconcileTimer = null;
       this.sessionReconcileIntervalMs = 0;
     }
+  }
+
+  private runSessionReconcileSafely() {
+    void this.runSessionReconcile().catch((err) => {
+      logger.warn(
+        `Session status reconciliation failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    });
   }
 
   private runSessionReconcile(): Promise<void> {

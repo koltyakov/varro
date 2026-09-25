@@ -13,6 +13,7 @@ import {
   parseFiniteNumber,
   PROVIDER_RESPONSE_MAX_BYTES,
   unsupportedProviderStatus,
+  providerErrorStatus,
 } from '../adapter-utils';
 
 const ANTIGRAVITY_GET_UNLEASH_DATA_PATH =
@@ -118,14 +119,12 @@ export function createAntigravityAdapter(
         }
 
         if (response.status !== 200) {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: `Antigravity language server returned ${response.status}`,
-          };
+            `Antigravity language server returned ${response.status}`
+          );
         }
 
         const result = extractAntigravityWindows(
@@ -137,14 +136,7 @@ export function createAntigravityAdapter(
           return unsupportedProviderStatus(provider.id, modelID, checkedAt, result.note);
         }
         if (result.kind === 'error') {
-          return {
-            providerID: provider.id,
-            modelID,
-            status: 'error',
-            source: 'provider',
-            checkedAt,
-            note: result.note,
-          };
+          return providerErrorStatus(provider.id, modelID, checkedAt, result.note);
         }
 
         return {
@@ -157,14 +149,12 @@ export function createAntigravityAdapter(
           note: 'Polled local Antigravity language server',
         };
       } catch {
-        return {
-          providerID: provider.id,
+        return providerErrorStatus(
+          provider.id,
           modelID,
-          status: 'error',
-          source: 'provider',
           checkedAt,
-          note: 'Failed to poll the local Antigravity language server',
-        };
+          'Failed to poll the local Antigravity language server'
+        );
       }
     },
   };

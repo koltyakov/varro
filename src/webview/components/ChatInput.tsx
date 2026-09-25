@@ -2459,9 +2459,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         !hasPendingApproval() &&
         !composerEditingMessage()
       ) {
-        handleSend('steer');
+        sendFromUi('steer');
       } else {
-        handleSend();
+        sendFromUi();
       }
     }
   }
@@ -2805,6 +2805,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         },
       },
     };
+  }
+
+  function sendFromUi(mode?: 'queue' | 'steer') {
+    void handleSend(mode).catch((err) => logError('Failed to send message', err));
   }
 
   async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
@@ -3746,6 +3750,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return true;
   }
 
+  function handleDropEvent(e: DragEvent) {
+    void handleDrop(e).catch((err) => logError('Failed to attach dropped content', err));
+  }
+
   async function handleDrop(e: DragEvent) {
     if (isInternalDrag(e)) return;
     e.preventDefault();
@@ -4527,11 +4535,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       beginDropTarget(e);
     };
 
-    const handleWindowDrop = async (e: DragEvent) => {
+    const handleWindowDrop = (e: DragEvent) => {
       if (isInternalDrag(e)) return;
       e.preventDefault();
       setIsDraggingOver(false);
-      await handleDrop(e);
+      handleDropEvent(e);
     };
 
     const handleWindowDragLeave = (e: DragEvent) => {
@@ -5587,7 +5595,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
             setIsDraggingOver(false);
           }}
-          onDrop={handleDrop}
+          onDrop={handleDropEvent}
         >
           <Show when={hasAttachmentStripItems()}>
             <AttachmentStrip
@@ -5971,7 +5979,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               busyToggleRef = el;
             }}
             showBusyMenu={showBusyMenu()}
-            onSend={() => handleSend()}
+            onSend={() => sendFromUi()}
             onToggleBusyMenu={() => {
               const next = !showBusyMenu();
               closePopups(next ? 'busy' : undefined);
@@ -5981,11 +5989,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               busyMenuRef = el;
             }}
             onQueue={() => {
-              handleSend('queue');
+              sendFromUi('queue');
               setShowBusyMenu(false);
             }}
             onSteer={() => {
-              handleSend('steer');
+              sendFromUi('steer');
               setShowBusyMenu(false);
             }}
             onStopAndSend={() => void handleStopAndSend()}
@@ -6188,7 +6196,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             busyToggleRef = el;
           }}
           showBusyMenu={showBusyMenu()}
-          onSend={() => handleSend()}
+          onSend={() => sendFromUi()}
           onToggleBusyMenu={() => {
             const next = !showBusyMenu();
             closePopups(next ? 'busy' : undefined);
@@ -6198,11 +6206,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             busyMenuRef = el;
           }}
           onQueue={() => {
-            handleSend('queue');
+            sendFromUi('queue');
             setShowBusyMenu(false);
           }}
           onSteer={() => {
-            handleSend('steer');
+            sendFromUi('steer');
             setShowBusyMenu(false);
           }}
           onStopAndSend={() => void handleStopAndSend()}

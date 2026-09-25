@@ -19,6 +19,7 @@ import {
   readBoundedResponseJson,
   toLabel,
   unsupportedProviderStatus,
+  providerErrorStatus,
 } from '../adapter-utils';
 
 const CODEX_USAGE_ENDPOINTS = [
@@ -115,14 +116,12 @@ export function createCodexAdapter(): ProviderLimitAdapter {
             }
 
             if (!response.ok) {
-              return {
-                providerID: provider.id,
+              return providerErrorStatus(
+                provider.id,
                 modelID,
-                status: 'error',
-                source: 'provider',
                 checkedAt,
-                note: `Codex usage endpoint returned ${response.status}`,
-              };
+                `Codex usage endpoint returned ${response.status}`
+              );
             }
 
             const payload = await readBoundedResponseJson(response);
@@ -156,14 +155,12 @@ export function createCodexAdapter(): ProviderLimitAdapter {
             return status;
           }
         } catch {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: 'Failed to poll the Codex usage endpoint',
-          };
+            'Failed to poll the Codex usage endpoint'
+          );
         }
 
         return unsupportedProviderStatus(

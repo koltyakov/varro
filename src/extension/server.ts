@@ -1289,7 +1289,7 @@ export class OpenCodeServer extends EventEmitter {
       return;
     }
 
-    this.pollHealthTimer = setTimeout(async () => {
+    const pollOnce = async () => {
       this.pollHealthTimer = null;
       if (
         signal?.aborted ||
@@ -1361,6 +1361,12 @@ export class OpenCodeServer extends EventEmitter {
           confirmOwnership
         );
       }
+    };
+    this.pollHealthTimer = setTimeout(() => {
+      // An unexpected throw must fail startup instead of leaving it pending.
+      void pollOnce().catch((err: unknown) => {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      });
     }, 200);
   }
 
@@ -1504,9 +1510,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private startMaintenanceLoop() {
-    this.processManager.startMaintenanceLoop(() => {
-      void this.runMaintenanceTick();
-    });
+    this.processManager.startMaintenanceLoop(() => this.runMaintenanceTickSafely());
   }
 
   private stopMaintenanceLoop() {
@@ -1514,9 +1518,15 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private requestMaintenanceCheck(force = false) {
-    this.processManager.requestMaintenanceCheck(() => {
-      void this.runMaintenanceTick();
-    }, force);
+    this.processManager.requestMaintenanceCheck(() => this.runMaintenanceTickSafely(), force);
+  }
+
+  private runMaintenanceTickSafely() {
+    void this.runMaintenanceTick().catch((err: unknown) => {
+      logger.warn(
+        `OpenCode maintenance check failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    });
   }
 
   private async runMaintenanceTick() {

@@ -1,5 +1,5 @@
 import pkg from 'esbuild';
-import { rmSync } from 'fs';
+import { readFileSync, rmSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -11,6 +11,7 @@ const { build, context } = pkg;
 const projectRoot = dirname(fileURLToPath(import.meta.url));
 const isWatch = process.argv.includes('--watch');
 const extensionOutfile = resolve(projectRoot, 'dist/extension/extension.js');
+const { version } = JSON.parse(readFileSync(resolve(projectRoot, 'package.json'), 'utf8'));
 
 rmSync(dirname(extensionOutfile), { force: true, recursive: true });
 
@@ -29,6 +30,7 @@ const common = {
   entryPoints: [resolve(projectRoot, 'src/extension/extension.ts')],
   outfile: extensionOutfile,
   bundle: true,
+  define: { __VARRO_VERSION__: JSON.stringify(version) },
   external: ['vscode'],
   format: 'cjs',
   mainFields: ['module', 'main'],

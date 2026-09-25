@@ -48,6 +48,7 @@ import type {
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { Session } from '../../types';
 import { client, type SessionListPage } from '../../lib/client';
+import { useSecondClock } from '../../lib/clock';
 import { postMessage } from '../../lib/bridge';
 import { setManualWorkspaceSelection } from '../../lib/app-state';
 import { requestWorkspaceSelection } from '../../lib/workspace-selection';
@@ -1047,17 +1048,12 @@ export function SessionListView(props: {
   class?: string;
 }) {
   const diffSummaryOwner = Symbol('session-list');
-  const initialNow = Date.now();
-  const [activeNow, setActiveNow] = createSignal(initialNow);
-  const [ageNow, setAgeNow] = createSignal(initialNow);
-  const clock = setInterval(() => {
-    const nextNow = Date.now();
-    setActiveNow(nextNow);
-    setAgeNow((current) =>
-      Math.floor(current / 60_000) === Math.floor(nextNow / 60_000) ? current : nextNow
-    );
-  }, 1_000);
-  onCleanup(() => clearInterval(clock));
+  const activeNow = useSecondClock();
+  // Relative ages only change per minute, so avoid regrouping sessions every second.
+  const ageNow = createMemo<number>((current) => {
+    const nextNow = activeNow();
+    return Math.floor(current / 60_000) === Math.floor(nextNow / 60_000) ? current : nextNow;
+  }, Date.now());
 
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
   const [activeGroupedSection, setActiveGroupedSection] =
@@ -1733,7 +1729,7 @@ export function SessionListView(props: {
               count={recycleBinEntries().length}
               expanded={expanded()}
               onToggle={() => toggleGroupedSection('recycle-bin')}
-              onArchive={() => emptyRecycleBin()}
+              onArchive={() => void emptyRecycleBin()}
               archiveLabel="Empty"
             />
             <Show when={expanded()}>
