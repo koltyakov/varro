@@ -6732,6 +6732,12 @@ export function MessageList() {
     lastWheelUpAt = Number.NEGATIVE_INFINITY;
     lastScrollInputAt = Number.NEGATIVE_INFINITY;
     const inputEpoch = directScrollInputEpoch;
+    if (!targetMessageId) {
+      // An explicit return starts at the detached viewport, even when the
+      // transcript has not grown since the last bottom-follow position.
+      lastAutoScrolledBottomScrollTop = containerRef.scrollTop;
+      bottomFollowMotion.reset();
+    }
     setAutoScroll(true);
     queueMicrotask(() => {
       if (

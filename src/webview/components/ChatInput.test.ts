@@ -7791,6 +7791,9 @@ describe('ChatInput', () => {
     expect(editor?.getAttribute('role')).toBe('textbox');
   });
 
+  const copiedText = Array.from({ length: 10 }, (_, index) => `code line ${index + 1}`).join('\n');
+  const otherCopiedText = copiedText.replaceAll('code', 'other');
+
   it('keeps a pending paste before subsequently typed text', async () => {
     let resolveMatch!: (value: null) => void;
     vi.mocked(client.varro.matchCopiedSelection).mockImplementationOnce(
@@ -7805,7 +7808,7 @@ describe('ChatInput', () => {
     setCollapsedSelection(editor, 0);
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
-      value: { getData: () => 'pasted ', items: [], types: ['text/plain'] },
+      value: { getData: () => `${copiedText} `, items: [], types: ['text/plain'] },
     });
     editor.dispatchEvent(event);
     editor.appendChild(document.createTextNode('typed'));
@@ -7813,8 +7816,8 @@ describe('ChatInput', () => {
     editor.dispatchEvent(new Event('input', { bubbles: true }));
     resolveMatch(null);
     await flushAsyncWork();
-    expect(inputText()).toBe('pasted typed');
-    expect(editor.textContent).toBe('pasted typed');
+    expect(inputText()).toBe(`${copiedText} typed`);
+    expect(editor.textContent).toBe(`${copiedText.replaceAll('\n', '')} typed`);
   });
 
   it('turns a large paste into one undoable immutable attachment', async () => {
@@ -7848,6 +7851,46 @@ describe('ChatInput', () => {
     expect(state.droppedFiles).toHaveLength(0);
   });
 
+  it('keeps a pasted attachment out of the attachment strip while Enter sends it', async () => {
+    let resolveSend!: (sent: boolean) => void;
+    sendMessageMock.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (resolveSend = resolve))
+    );
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor, 0);
+    const text = 'Large pasted text\n'.repeat(30);
+    const paste = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, 'clipboardData', {
+      value: { getData: () => text, items: [], types: ['text/plain'] },
+    });
+    editor.dispatchEvent(paste);
+    await flushAsyncWork();
+    const draft = inputText();
+    expect(editor.querySelector('.inline-chip')).not.toBeNull();
+    expect(container!.querySelector('.chat-attachments-container')).toBeNull();
+
+    const enter = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    });
+    editor.dispatchEvent(enter);
+    await flushAsyncWork();
+    expect(enter.defaultPrevented).toBe(true);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock.mock.calls[0]?.[0]).toBe(draft);
+    expect(inputText()).toBe('');
+    expect(container!.querySelector('.chat-attachments-container')).toBeNull();
+
+    resolveSend(false);
+    await flushAsyncWork();
+    expect(inputText()).toBe(draft);
+    expect(editor.querySelector('.inline-chip')).not.toBeNull();
+    expect(container!.querySelector('.chat-attachments-container')).toBeNull();
+  });
+
   it('does not convert a pending paste after the destination session changes', async () => {
     let resolveMatch!: (value: null) => void;
     vi.mocked(client.varro.matchCopiedSelection).mockImplementationOnce(
@@ -7863,7 +7906,7 @@ describe('ChatInput', () => {
     setCollapsedSelection(editor, 0);
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
-      value: { getData: () => 'x'.repeat(2100), items: [], types: ['text/plain'] },
+      value: { getData: () => copiedText.repeat(30), items: [], types: ['text/plain'] },
     });
     editor.dispatchEvent(event);
     setState('activeSessionId', 'session-2');
@@ -7890,15 +7933,15 @@ describe('ChatInput', () => {
     setCollapsedSelection(editor.firstChild!, 8);
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
-      value: { getData: () => 'pasted code', items: [], types: ['text/plain'] },
+      value: { getData: () => copiedText, items: [], types: ['text/plain'] },
     });
     editor.dispatchEvent(event);
     container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
     await flushAsyncWork();
-    resolveMatch({ type: 'terminal', selection: { text: 'pasted code', terminalName: 'zsh' } });
+    resolveMatch({ type: 'terminal', selection: { text: copiedText, terminalName: 'zsh' } });
     await flushAsyncWork();
     expect({ sent: sendMessageMock.mock.calls[0]?.[0], draft: inputText() }).toEqual({
-      sent: 'Explain pasted code',
+      sent: `Explain ${copiedText}`,
       draft: '',
     });
     expect(state.terminalSelection).toBeNull();
@@ -7936,21 +7979,21 @@ describe('ChatInput', () => {
       );
       await flushAsyncWork();
     };
-    paste('alpha');
+    paste(copiedText);
     await flushAsyncWork();
     openChipMenu(editor, 'mention-file');
     clickExpandToText();
     await flushAsyncWork();
-    expect(inputText()).toBe('alpha');
+    expect(inputText()).toBe(copiedText);
     const range = document.createRange();
     range.selectNodeContents(editor);
     window.getSelection()!.removeAllRanges();
     window.getSelection()!.addRange(range);
-    paste('beta');
+    paste(otherCopiedText);
     await flushAsyncWork();
     expect(inputText()).toBe('@src/app.ts');
     await history();
-    expect(inputText()).toBe('alpha');
+    expect(inputText()).toBe(copiedText);
     await history();
     expect(inputText()).toBe('@src/app.ts');
     await history(true);
@@ -7958,7 +8001,7 @@ describe('ChatInput', () => {
     openChipMenu(editor, 'mention-file');
     clickExpandToText();
     await flushAsyncWork();
-    expect(inputText()).toBe('beta');
+    expect(inputText()).toBe(otherCopiedText);
     await history();
     await history();
     await history();
@@ -7966,7 +8009,7 @@ describe('ChatInput', () => {
     openChipMenu(editor, 'mention-file');
     clickExpandToText();
     await flushAsyncWork();
-    expect(inputText()).toBe('alpha');
+    expect(inputText()).toBe(copiedText);
   });
 
   it('turns a matching copied editor selection into a file-range chip', async () => {
@@ -7985,13 +8028,13 @@ describe('ChatInput', () => {
     if (editor) setCollapsedSelection(editor, 0);
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''), items: [] },
+      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
     });
     editor?.dispatchEvent(event);
-    expect(inputText()).toBe('copied code');
+    expect(inputText()).toBe(copiedText);
     await flushAsyncWork();
 
-    expect(client.varro.matchCopiedSelection).toHaveBeenCalledWith('copied code', false);
+    expect(client.varro.matchCopiedSelection).toHaveBeenCalledWith(copiedText, false);
     expect(inputText()).toBe('@src/app.ts');
     expect(editor?.querySelector('.inline-chip')?.textContent).toContain('L3-5');
     const chip = editor?.querySelector<HTMLElement>('[data-chip-type="mention-file"]');
@@ -8025,7 +8068,7 @@ describe('ChatInput', () => {
   it('turns a matching terminal paste into a terminal chip', async () => {
     vi.mocked(client.varro.matchCopiedSelection).mockResolvedValueOnce({
       type: 'terminal',
-      selection: { text: 'first line\nsecond line', terminalName: 'zsh' },
+      selection: { text: copiedText, terminalName: 'zsh' },
     });
     setInputText('Test ');
     cleanup = render(() => ChatInput(), container!);
@@ -8035,23 +8078,21 @@ describe('ChatInput', () => {
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
       value: {
-        getData: (type: string) => (type === 'text/plain' ? 'first line\nsecond line' : ''),
+        getData: (type: string) => (type === 'text/plain' ? copiedText : ''),
         items: [],
       },
     });
     editor?.dispatchEvent(event);
-    expect(inputText()).toBe('Test first line\nsecond line');
-    expect(editor?.textContent).not.toContain('first line');
+    expect(inputText()).toBe(`Test ${copiedText}`);
+    expect(editor?.textContent).not.toContain(copiedText);
     await flushAsyncWork();
 
     expect(inputText()).toBe('Test [Terminal selection]');
-    expect(editor?.querySelector('.inline-chip')?.textContent).toContain('2 lines');
-    expect(editor?.querySelector('.inline-chip')?.getAttribute('title')).toBe(
-      'first line\nsecond line'
-    );
+    expect(editor?.querySelector('.inline-chip')?.textContent).toContain('10 lines');
+    expect(editor?.querySelector('.inline-chip')?.getAttribute('title')).toBe(copiedText);
     expect(container?.querySelector('.chat-attachments-container')).toBeNull();
     expect(state.terminalSelection).toEqual({
-      text: 'first line\nsecond line',
+      text: copiedText,
       terminalName: 'zsh',
     });
     container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.click();
@@ -8063,7 +8104,7 @@ describe('ChatInput', () => {
   });
 
   it('does not insert the same copied terminal selection twice', async () => {
-    const selection = { text: 'first line\nsecond line', terminalName: 'zsh' };
+    const selection = { text: copiedText, terminalName: 'zsh' };
     vi.mocked(client.varro.matchCopiedSelection)
       .mockResolvedValueOnce({ type: 'terminal', selection })
       .mockResolvedValueOnce({ type: 'terminal', selection });
@@ -8102,7 +8143,7 @@ describe('ChatInput', () => {
     setInputText('Check [Terminal selection] ');
     vi.mocked(client.varro.matchCopiedSelection).mockResolvedValueOnce({
       type: 'terminal',
-      selection: { text: 'npm run lint', terminalName: 'zsh' },
+      selection: { text: otherCopiedText, terminalName: 'zsh' },
     });
     cleanup = render(() => ChatInput(), container!);
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
@@ -8115,14 +8156,14 @@ describe('ChatInput', () => {
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
       value: {
-        getData: (type: string) => (type === 'text/plain' ? 'npm run lint' : ''),
+        getData: (type: string) => (type === 'text/plain' ? otherCopiedText : ''),
         items: [],
       },
     });
     editor.dispatchEvent(event);
     await flushAsyncWork();
 
-    expect(inputText()).toBe('Check [Terminal selection] npm run lint');
+    expect(inputText()).toBe(`Check [Terminal selection] ${otherCopiedText}`);
     expect(state.terminalSelection).toEqual({ text: 'npm test', terminalName: 'zsh' });
   });
 
@@ -8160,7 +8201,7 @@ describe('ChatInput', () => {
     setCollapsedSelection(editor.firstChild, 4);
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? 'fooBar(1)' : ''), items: [] },
+      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
     });
     editor.dispatchEvent(event);
     await flushAsyncWork();
@@ -8170,7 +8211,7 @@ describe('ChatInput', () => {
     clickExpandToText();
     await flushAsyncWork();
 
-    expect(inputText()).toBe('Fix fooBar(1)');
+    expect(inputText()).toBe(`Fix ${copiedText}`);
     expect(state.droppedFiles).toEqual([]);
     expect(client.varro.readWorkspaceFile).not.toHaveBeenCalled();
 
@@ -8187,7 +8228,7 @@ describe('ChatInput', () => {
     openChipMenu(editor, 'mention-file');
     clickExpandToText();
     await flushAsyncWork();
-    expect(inputText()).toBe('Fix fooBar(1)');
+    expect(inputText()).toBe(`Fix ${copiedText}`);
     expect(client.varro.readWorkspaceFile).not.toHaveBeenCalled();
   });
 
@@ -8282,7 +8323,7 @@ describe('ChatInput', () => {
       const event = new Event('paste', { bubbles: true, cancelable: true });
       Object.defineProperty(event, 'clipboardData', {
         value: {
-          getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''),
+          getData: (type: string) => (type === 'text/plain' ? copiedText : ''),
           items: [],
         },
       });
@@ -8331,7 +8372,7 @@ describe('ChatInput', () => {
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
       value: {
-        getData: (type: string) => (type === 'text/plain' ? 'different copied code' : ''),
+        getData: (type: string) => (type === 'text/plain' ? otherCopiedText : ''),
         items: [],
       },
     });
@@ -8363,11 +8404,11 @@ describe('ChatInput', () => {
     if (editor?.firstChild) setCollapsedSelection(editor.firstChild, 7);
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''), items: [] },
+      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
     });
     editor?.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
-    expect(inputText()).toBe('Before copied codeafter');
+    expect(inputText()).toBe(`Before ${copiedText}after`);
 
     resolveMatch?.({
       type: 'file',
@@ -8399,7 +8440,7 @@ describe('ChatInput', () => {
     if (editor) setCollapsedSelection(editor, 0);
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''), items: [] },
+      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
     });
     editor?.dispatchEvent(event);
     setInputText('typed');
@@ -8428,14 +8469,14 @@ describe('ChatInput', () => {
     if (editor) setCollapsedSelection(editor, 0);
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''), items: [] },
+      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
     });
     editor?.dispatchEvent(event);
-    expect(inputText()).toBe('copied code');
-    expect(editor?.textContent).not.toContain('copied code');
+    expect(inputText()).toBe(copiedText);
+    expect(editor?.textContent).not.toContain(copiedText);
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(inputText()).toBe('copied code');
-    expect(editor?.textContent).toBe('copied code');
+    expect(inputText()).toBe(copiedText);
+    expect(editor?.textContent).toBe(copiedText.replaceAll('\n', ''));
   });
 
   it('marks plain-text-only clipboards as possible terminal copies', async () => {
@@ -8447,7 +8488,7 @@ describe('ChatInput', () => {
       const event = new Event('paste', { bubbles: true, cancelable: true });
       Object.defineProperty(event, 'clipboardData', {
         value: {
-          getData: (type: string) => (type === 'text/plain' ? 'npm test' : ''),
+          getData: (type: string) => (type === 'text/plain' ? copiedText : ''),
           items: [],
           types,
         },
@@ -8460,8 +8501,8 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(vi.mocked(client.varro.matchCopiedSelection).mock.calls).toEqual([
-      ['npm test', true],
-      ['npm test', false],
+      [copiedText, true],
+      [copiedText, false],
     ]);
   });
 
@@ -8473,12 +8514,12 @@ describe('ChatInput', () => {
     if (editor) setCollapsedSelection(editor, 0);
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''), items: [] },
+      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
     });
     editor?.dispatchEvent(event);
     await flushAsyncWork();
-    expect(inputText()).toBe('copied code');
-    expect(editor?.textContent).toBe('copied code');
+    expect(inputText()).toBe(copiedText);
+    expect(editor?.textContent).toBe(copiedText.replaceAll('\n', ''));
   });
 
   it('keeps unmatched clipboard text at the original cursor after the lookup', async () => {

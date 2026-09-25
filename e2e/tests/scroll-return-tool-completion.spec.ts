@@ -42,6 +42,9 @@ for (const distance of [540, 1768]) {
         },
       });
     });
+    // Let the running tool enter before detaching, so its delayed growth cannot
+    // accidentally enable smooth scrolling for an otherwise settled transcript.
+    await expect(page.locator('.assistant-active-activity-item')).toBeVisible();
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(2);

@@ -1496,6 +1496,8 @@ describe('MessageList history pagination', () => {
     await Promise.resolve();
     harness.animationFrames.flush();
     await Promise.resolve();
+    expect(harness.getScrollTop()).toBe(20);
+    settleBottomFollow(harness.animationFrames, harness.list);
     expect(harness.getScrollTop()).toBe(800);
 
     await harness.resolveLoad();
