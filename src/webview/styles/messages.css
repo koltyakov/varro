@@ -1397,47 +1397,32 @@ body.vscode-light
   gap: 8px;
 }
 
-.assistant-dialog-summary-completed-time {
-  --assistant-summary-time-chip-radius: var(--radius-control);
+.assistant-dialog-summary-completed-time,
+.assistant-dialog-summary-turn-action {
+  color: var(--color-vscode-muted);
+  background: var(--color-vscode-sidebar);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+  border-radius: var(--radius-control);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-vscode-widget-shadow) 70%, transparent);
+}
 
+.assistant-dialog-summary-completed-time {
   position: absolute;
   left: 5px;
-  top: 0;
-  height: 24px;
+  top: 3px;
+  height: 18px;
   padding: 0 5px;
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   font-size: 10px;
   line-height: 12px;
-  color: var(--color-vscode-muted);
-  background: var(--color-vscode-list-bg);
-  border-radius: var(--radius-control);
   opacity: 0;
-  filter: blur(3px);
+  filter: blur(2px);
   pointer-events: none;
   transition:
     opacity 120ms ease,
     filter 120ms ease;
-}
-
-.assistant-dialog-summary-completed-time::before {
-  content: '';
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  left: 0;
-  right: 0;
-  box-sizing: border-box;
-  border: 1px solid var(--assistant-summary-line-color);
-  border-radius: var(--assistant-summary-time-chip-radius);
-  pointer-events: none;
-}
-
-.assistant-dialog-summary-completed-time-text {
-  position: relative;
-  z-index: 1;
-  color: color-mix(in srgb, var(--color-vscode-muted) 65%, transparent);
 }
 
 .assistant-dialog-summary.is-completion-time-visible .assistant-dialog-summary-completed-time {
@@ -1491,11 +1476,6 @@ body.vscode-light
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-vscode-muted);
-  background: var(--color-vscode-sidebar);
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
-  border-radius: var(--radius-control);
-  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-vscode-widget-shadow) 70%, transparent);
   cursor: pointer;
   opacity: 0;
   filter: blur(2px);
