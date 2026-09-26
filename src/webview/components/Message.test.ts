@@ -3148,12 +3148,8 @@ describe('Message assistant final answer rendering', () => {
     expect(
       errorBlock?.querySelector('.assistant-message-flow-item-error-details-toggle')
     ).toBeNull();
-    const retryButton = container?.querySelector<HTMLButtonElement>(
-      '.assistant-message-flow-item-error-action'
-    );
-    expect(retryButton?.textContent).toContain('Retry');
-    retryButton?.click();
-    expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
+    expect(errorBlock?.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
+    expect(retryMessageMock).not.toHaveBeenCalled();
 
     setIsLastAssistant(false);
     expect(errorBlock?.textContent).toBe('Provider reconnected.');

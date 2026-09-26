@@ -339,7 +339,12 @@ export function Message(props: {
   });
   const canRetryAssistant = createMemo(() => {
     const error = assistant()?.error;
-    return !!error && !props.retryState && !isAbortedAssistantError(error);
+    return (
+      !!error &&
+      !props.retryState &&
+      !isAbortedAssistantError(error) &&
+      !(providerAuthRequired() && providerAuthRestored())
+    );
   });
   const assistantErrorAction = createMemo(() => {
     if (!(props.isLastAssistant ?? false) || !canRetryAssistant()) return undefined;
