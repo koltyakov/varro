@@ -1,4 +1,5 @@
 import { render } from 'solid-js/web';
+import { startHostExtension } from './host/extensions';
 import { AppRoot } from './App';
 import { cleanupBridge, initializeBridge, postMessage } from './lib/bridge';
 // oxlint-disable-next-line no-unassigned-import
@@ -176,14 +177,17 @@ export function bootstrapWebview(root: HTMLElement | null) {
 
 export function startWebview(root: HTMLElement | null) {
   bootstrapWindow[APP_CLEANUP_KEY]?.();
+  const stopHost = startHostExtension();
   initializeBridge();
   const cleanup = bootstrapWebview(root);
   if (!cleanup) {
+    stopHost();
     delete bootstrapWindow[APP_CLEANUP_KEY];
     return undefined;
   }
   const cleanupCurrentApp = () => {
     cleanup();
+    stopHost();
     if (bootstrapWindow[APP_CLEANUP_KEY] === cleanupCurrentApp) {
       delete bootstrapWindow[APP_CLEANUP_KEY];
     }

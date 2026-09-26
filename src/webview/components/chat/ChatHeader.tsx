@@ -1,4 +1,6 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { supportsDetachedEditors } from '../../host/extensions';
+import { HostActions } from '../HostActions';
 import { Portal } from 'solid-js/web';
 import type { SessionDiffSummary, SiblingWorkspaceAlertKind } from '../../../shared/protocol';
 import { readSessionPauses } from '../../../shared/session-pauses';
@@ -146,16 +148,19 @@ function NewChatButton(props: { onCreateSession: () => void }) {
               >
                 New Chat Editor
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  closeMenu();
-                  postMessage({ type: 'chat/new-window' });
-                }}
-              >
-                New Chat Window
-              </button>
+              <Show when={supportsDetachedEditors()}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    closeMenu();
+                    postMessage({ type: 'chat/new-window' });
+                  }}
+                >
+                  New Chat Window
+                </button>
+              </Show>
+              <HostActions slot="chat.new" onComplete={closeMenu} />
             </div>
           </Portal>
         )}

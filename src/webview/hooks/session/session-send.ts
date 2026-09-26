@@ -1,4 +1,7 @@
 import { batch } from 'solid-js';
+import { captureExtensionContexts } from '../../host/extensions';
+import { cloneExtensionContexts, formatExtensionContext } from '../../../shared/extension-context';
+import type { ExtensionContext } from '../../../shared/extension-context';
 import { pastedTextDataUrl } from '../../../shared/pasted-text';
 import {
   cloneDatabaseContext,
@@ -97,6 +100,7 @@ type ComposerState = {
   issuesEnabled?: boolean;
   enableProblemsContext?: boolean;
   issuesAttachment?: IssueAttachment | null;
+  extensionContexts?: ExtensionContext[];
   inlineProblems?: InlineProblemAttachment[];
   allAgents?: Agent[];
   visionDelegationTexts?: string[];
@@ -130,7 +134,7 @@ export type QueuedAttachmentSnapshot = Pick<
   | 'terminalSelection'
   | 'attachedDiagnostics'
   | 'inlineProblems'
-> & { issuesAttachment?: IssueAttachment | null };
+> & { issuesAttachment?: IssueAttachment | null; extensionContexts?: ExtensionContext[] };
 
 type SessionSendOptions = SendFlowOptions & {
   messageId?: string;
@@ -159,6 +163,7 @@ type CapturedComposerAttachments = {
     terminalSelection: { text: string; terminalName: string } | null;
     attachedDiagnostics?: AttachedDiagnostics | null;
     issuesAttachment?: IssueAttachment | null;
+    extensionContexts?: ExtensionContext[];
     inlineProblems: InlineProblemAttachment[];
   };
   droppedFileIdentities: Map<string, DroppedFile>;
@@ -331,7 +336,18 @@ export function buildSessionSendBody(
   const currentDocumentEnabled = isCurrentDocumentEnabled(sessionId);
   const editorText = composerState.editorContext.editorText;
   const databaseContext = composerState.editorContext.databaseContext;
-  if (databaseContext && currentDocumentEnabled) {
+  const extensionContexts = captureExtensionContexts(
+    composerState.extensionContexts ??
+      (currentDocumentEnabled ? composerState.editorContext.extensionContexts : undefined)
+  );
+  for (const context of extensionContexts ?? [])
+    parts.push({ type: 'text', text: formatExtensionContext(context) });
+  const replacesDocument = extensionContexts?.some(
+    (context) => context.placement === 'replace-document'
+  );
+  if (replacesDocument) {
+    // The provider owns active context. Supplemental providers retain ordinary file context.
+  } else if (databaseContext && currentDocumentEnabled) {
     parts.push({ type: 'text', text: formatDatabaseContext(databaseContext) });
   } else if (editorText && currentDocumentEnabled) {
     const range = `lines ${editorText.range.startLine}-${editorText.range.endLine}`;
@@ -546,6 +562,7 @@ export function buildSessionSendBody(
 }
 
 export function getQueuedAttachmentSnapshot(composerState: {
+  extensionContexts?: ExtensionContext[];
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
   nativePdfs?: NativePdfAttachment[];
@@ -555,6 +572,7 @@ export function getQueuedAttachmentSnapshot(composerState: {
   inlineProblems?: InlineProblemAttachment[];
 }): QueuedAttachmentSnapshot {
   return {
+    extensionContexts: cloneExtensionContexts(composerState.extensionContexts),
     inlineProblems: composerState.inlineProblems?.length
       ? cloneInlineProblems(composerState.inlineProblems)
       : undefined,
@@ -622,6 +640,7 @@ function captureComposerAttachments(
         terminalSelection: queuedAttachments.terminalSelection ?? null,
         attachedDiagnostics: queuedAttachments.attachedDiagnostics ?? null,
         issuesAttachment: queuedAttachments.issuesAttachment,
+        extensionContexts: queuedAttachments.extensionContexts,
         inlineProblems: queuedAttachments.inlineProblems ?? [],
       }
     : {
@@ -640,6 +659,7 @@ function captureComposerAttachments(
     nativePdfs: queuedSnapshot.nativePdfs ?? [],
     terminalSelection: queuedSnapshot.terminalSelection ?? null,
     issuesAttachment: queuedSnapshot.issuesAttachment,
+    extensionContexts: queuedSnapshot.extensionContexts,
     attachedDiagnostics: queuedSnapshot.attachedDiagnostics
       ? queuedSnapshot.attachedDiagnostics
       : undefined,
@@ -985,6 +1005,7 @@ export class SessionSendOperations {
       editorContext: {
         ...sourceEditorContext,
         databaseContext: cloneDatabaseContext(sourceEditorContext.databaseContext),
+        extensionContexts: cloneExtensionContexts(sourceEditorContext.extensionContexts),
         workspaceFolders: sourceEditorContext.workspaceFolders?.map((folder) => ({ ...folder })),
         activeFile: sourceEditorContext.activeFile ? { ...sourceEditorContext.activeFile } : null,
         selection: sourceEditorContext.selection ? { ...sourceEditorContext.selection } : null,
@@ -1267,7 +1288,13 @@ export async function sendMessageWithDependencies(
     await deps.syncSessionMcps(sessionId);
   }
 
-  const sendPayload = deps.buildSendPayload(sessionId, text, options);
+  let sendPayload: SessionSendPayload | null;
+  try {
+    sendPayload = deps.buildSendPayload(sessionId, text, options);
+  } catch (error) {
+    deps.setError(error instanceof Error ? error.message : 'Could not capture message context');
+    return false;
+  }
   if (!sendPayload) return false;
   const { body, effectiveModel, optimisticImages } = sendPayload;
   const messageId = options?.messageId ?? createOpenCodeMessageID();

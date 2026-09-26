@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { setHostDragImage } from '../host/extensions';
 import { Portal } from 'solid-js/web';
 import { asRecord } from '../../shared/type-utils';
 import {
@@ -333,7 +334,7 @@ export function ModelsPanel() {
     event.dataTransfer.setData(PROVIDER_DRAG_TYPE, providerID);
     // SAFETY: Provider drag starts only from the rendered HTML drag handle.
     const row = (event.currentTarget as HTMLElement).closest<HTMLElement>('.models-provider');
-    if (row) event.dataTransfer.setDragImage(row, 12, row.offsetHeight / 2);
+    if (row) setHostDragImage(event.dataTransfer, row, 12, row.offsetHeight / 2);
     setDraggedProviderID(providerID);
   }
 
@@ -1417,7 +1418,7 @@ function ProviderSection(props: {
     event.dataTransfer.setData(MODEL_DRAG_TYPE, modelVisibilityKey(props.provider.id, modelID));
     // SAFETY: Model drag starts only from the rendered HTML drag handle.
     const row = (event.currentTarget as HTMLElement).closest<HTMLElement>('.models-model-row');
-    if (row) event.dataTransfer.setDragImage(row, 12, row.offsetHeight / 2);
+    if (row) setHostDragImage(event.dataTransfer, row, 12, row.offsetHeight / 2);
     setDraggedModelID(modelID);
   }
 

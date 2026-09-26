@@ -1,4 +1,5 @@
 import { batch } from 'solid-js';
+import { getHostExtension } from '../host/extensions';
 import { unwrap } from 'solid-js/store';
 import type { ExtensionMessage, WebviewMessage } from '../../shared/protocol';
 import { parseExtensionMessage } from '../../shared/extension-message';
@@ -29,6 +30,7 @@ const slowApiRequestHandlers = new Set<SlowApiRequestHandler>();
 const slowApiRequests = new Map<number, SlowApiRequest>();
 let disposed = false;
 let bridgeInitialized = false;
+let unsubscribeHost: (() => void) | undefined;
 const BRIDGE_CLEANUP_KEY = '__cleanupVarroBridge';
 type BridgeWindow = Window & {
   [BRIDGE_CLEANUP_KEY]?: () => void;
@@ -64,7 +66,7 @@ function flushStreamBatch() {
   });
 }
 
-const messageListener = (event: MessageEvent) => {
+const messageListener = (event: Pick<MessageEvent, 'data'>) => {
   const msg = parseExtensionMessage(event.data);
   if (!msg) return;
   if (
@@ -90,6 +92,8 @@ export function cleanupBridge() {
   streamBatchTimer = undefined;
   streamBatch = [];
   window.removeEventListener('message', messageListener);
+  unsubscribeHost?.();
+  unsubscribeHost = undefined;
   bridgeInitialized = false;
   handlers.clear();
   for (const p of pending.values()) {
@@ -133,7 +137,7 @@ export function postMessage(msg: WebviewMessage): boolean {
 
 function sendToExtension(msg: WebviewMessage): SendResult {
   if (disposed) return { sent: false };
-  const send = bridgeWindow.__sendToExtension;
+  const send = getHostExtension()?.services?.send ?? bridgeWindow.__sendToExtension;
   if (!send) return { sent: false };
   try {
     // Solid store proxies cannot cross the host's structured-clone boundary.
@@ -198,7 +202,9 @@ export function initializeBridge() {
   disposed = false;
   bridgeInitialized = true;
   handlers.add(handleBridgeMessage);
-  window.addEventListener('message', messageListener);
+  const subscribe = getHostExtension()?.services?.subscribe;
+  if (subscribe) unsubscribeHost = subscribe((data) => messageListener({ data }));
+  else window.addEventListener('message', messageListener);
   bridgeWindow[BRIDGE_CLEANUP_KEY] = cleanupBridge;
 }
 

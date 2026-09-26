@@ -1519,7 +1519,7 @@ test('reveals user and sticky message timestamps on hover', async ({ page }) => 
   await expect(workedSummary.getByLabel('Worked for', { exact: true })).toBeVisible();
   await expect(tokenBudget).not.toHaveCSS('display', 'none');
   await expect(completedTime).toHaveCSS('opacity', '0');
-  await expect(completedTime).toHaveCSS('filter', 'blur(3px)');
+  await expect(completedTime).toHaveCSS('filter', 'blur(2px)');
   await expect(completedTime).toHaveCSS('transition-duration', '0.12s, 0.12s');
   await workedSummary.hover();
   await expect(completedTime).toHaveCSS('opacity', '1');
@@ -1538,7 +1538,7 @@ test('reveals user and sticky message timestamps on hover', async ({ page }) => 
   await expect(promptCard).toBeInViewport();
   await page.getByRole('textbox', { name: 'Message composer' }).hover();
   await expect(completedTime).toHaveCSS('opacity', '0');
-  await expect(completedTime).toHaveCSS('filter', 'blur(3px)');
+  await expect(completedTime).toHaveCSS('filter', 'blur(2px)');
   await promptCard.hover();
   await expect(completedTime).toHaveCSS('opacity', '1');
   await expect(completedTime).toHaveCSS('filter', 'blur(0px)');
@@ -1548,21 +1548,25 @@ test('reveals user and sticky message timestamps on hover', async ({ page }) => 
     const fork = summary?.querySelector<HTMLElement>('.assistant-dialog-summary-fork');
     if (!summary || !content || !fork) throw new Error('Worked time chip fixtures are missing');
     const chipStyle = getComputedStyle(element);
-    const chipBorderStyle = getComputedStyle(element, '::before');
+    const forkStyle = getComputedStyle(fork);
     const timeText = element.querySelector<HTMLElement>(
       '.assistant-dialog-summary-completed-time-text'
     );
     if (!timeText) throw new Error('Worked time text is missing');
-    const lineStyle = getComputedStyle(content, '::before');
     return {
       left: element.getBoundingClientRect().left - summary.getBoundingClientRect().left,
-      borderBottom: Number.parseFloat(chipBorderStyle.bottom),
+      top: element.getBoundingClientRect().top - content.getBoundingClientRect().top,
+      height: element.getBoundingClientRect().height,
       backgroundColor: chipStyle.backgroundColor,
-      chatBackgroundColor: getComputedStyle(document.body).backgroundColor,
-      borderColor: chipBorderStyle.borderBottomColor,
-      borderTop: Number.parseFloat(chipBorderStyle.top),
-      borderTopWidth: chipBorderStyle.borderTopWidth,
-      borderRadius: chipBorderStyle.borderBottomLeftRadius,
+      forkBackgroundColor: forkStyle.backgroundColor,
+      color: chipStyle.color,
+      forkColor: forkStyle.color,
+      borderColor: chipStyle.borderBottomColor,
+      forkBorderColor: forkStyle.borderBottomColor,
+      borderTopWidth: chipStyle.borderTopWidth,
+      borderRadius: chipStyle.borderBottomLeftRadius,
+      boxShadow: chipStyle.boxShadow,
+      forkBoxShadow: forkStyle.boxShadow,
       paddingLeft: chipStyle.paddingLeft,
       paddingRight: chipStyle.paddingRight,
       textCenter:
@@ -1570,19 +1574,18 @@ test('reveals user and sticky message timestamps on hover', async ({ page }) => 
         timeText.getBoundingClientRect().height / 2 -
         element.getBoundingClientRect().top,
       bottomPadding:
-        element.getBoundingClientRect().bottom -
-        Number.parseFloat(chipBorderStyle.bottom) -
-        timeText.getBoundingClientRect().bottom,
-      forkRadius: getComputedStyle(fork).borderTopLeftRadius,
-      lineColor: lineStyle.backgroundColor,
+        element.getBoundingClientRect().bottom - timeText.getBoundingClientRect().bottom,
+      forkRadius: forkStyle.borderTopLeftRadius,
     };
   });
   expect(timeChipStyle.left).toBeCloseTo(5, 0);
-  expect(timeChipStyle.borderBottom).toBeCloseTo(3, 0);
-  expect(timeChipStyle.backgroundColor).toBe(timeChipStyle.chatBackgroundColor);
-  expect(timeChipStyle.borderColor).toBe(timeChipStyle.lineColor);
-  expect(timeChipStyle.borderTop).toBeCloseTo(timeChipStyle.borderBottom, 0);
-  expect(timeChipStyle.textCenter).toBeCloseTo(12, 0);
+  expect(timeChipStyle.top).toBeCloseTo(3, 0);
+  expect(timeChipStyle.height).toBeCloseTo(18, 0);
+  expect(timeChipStyle.backgroundColor).toBe(timeChipStyle.forkBackgroundColor);
+  expect(timeChipStyle.color).toBe(timeChipStyle.forkColor);
+  expect(timeChipStyle.borderColor).toBe(timeChipStyle.forkBorderColor);
+  expect(timeChipStyle.boxShadow).toBe(timeChipStyle.forkBoxShadow);
+  expect(timeChipStyle.textCenter).toBeCloseTo(timeChipStyle.height / 2, 0);
   expect(timeChipStyle.borderTopWidth).toBe('1px');
   expect(timeChipStyle.borderRadius).toBe(timeChipStyle.forkRadius);
   expect(timeChipStyle.paddingLeft).toBe('5px');

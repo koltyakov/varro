@@ -1,4 +1,6 @@
 import { For } from 'solid-js';
+import type { ExtensionContext } from '../../../shared/extension-context';
+import { showAttachmentDetails } from '../../host/extensions';
 import type { ClipboardImage, NativePdfAttachment } from '../../lib/app-state-types';
 import type { DroppedFile } from '../../../shared/protocol';
 import { formatContextLineRanges } from '../../../shared/context-files';
@@ -28,6 +30,7 @@ type TerminalSelectionAttachment = {
 };
 
 export function AttachmentStrip(props: {
+  extensionContexts?: ExtensionContext[];
   activeContext: ActiveContextAttachment | null;
   activeContextEnabled: boolean;
   activeContextTitle: string | null;
@@ -68,6 +71,19 @@ export function AttachmentStrip(props: {
 
   return (
     <div class="chat-attachments-container">
+      <For each={props.extensionContexts}>
+        {(context) => (
+          <AttachmentChip
+            label={context.label}
+            icon={context.captured?.icon ?? 'file'}
+            detail={showAttachmentDetails() ? context.captured?.detail : undefined}
+            title={`${context.label}${context.captured?.detail ? ` · ${context.captured.detail}` : ''} · Click to ${props.activeContextEnabled ? 'disable' : 'enable'} current context`}
+            disabled={!props.activeContextEnabled}
+            toggle
+            onClick={props.onToggleActiveContext}
+          />
+        )}
+      </For>
       <For each={orderedAttachments()}>
         {(item) => {
           if (item.type === 'active-context') {

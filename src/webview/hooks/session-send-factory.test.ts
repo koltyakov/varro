@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ExtensionContext } from '../../shared/extension-context';
+import { error, replaceClipboardImages, replaceContextFiles } from '../lib/state';
 import type * as BridgeModule from '../lib/bridge';
 
 const { postMessage } = vi.hoisted(() => ({
@@ -18,7 +20,6 @@ import { appStore } from '../lib/stores/app-store';
 import { composerStore } from '../lib/stores/composer-store';
 import { routingStore } from '../lib/stores/routing-store';
 import { startNewChatDraft } from '../lib/new-chat-draft';
-import { replaceClipboardImages, replaceContextFiles } from '../lib/state';
 import { SessionSendOperations } from './session/session-send';
 import { parseInlineProblem, problemReferenceMarker } from '../lib/editor-problems';
 
@@ -59,6 +60,44 @@ function createOperations(
 }
 
 describe('SessionSendOperations', () => {
+  it('sends restored extension snapshots without a provider and reports missing uncaptured providers', async () => {
+    appStore.setState('activeSessionId', 'session-1');
+    const captured: ExtensionContext = {
+      provider: 'uninstalled.context',
+      version: 4,
+      label: 'Saved issue',
+      placement: 'replace-document',
+      data: { revision: 1 },
+      captured: { text: 'Original issue' },
+    };
+    const editorContext = {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+      extensionContexts: [captured],
+    };
+    const sendAsync = vi.fn<SendAsync>(async () => {});
+    const operations = createOperations(sendAsync);
+    expect(
+      await operations.sendMessage('queued prompt', {
+        queuedContext: { currentDocumentEnabled: true, editorContext },
+      })
+    ).toBe(true);
+    expect(JSON.stringify(sendAsync.mock.calls[0]![1])).toContain('Original issue');
+    sendAsync.mockClear();
+    const { captured: _captured, ...uncaptured } = captured;
+    expect(
+      await operations.sendMessage('blocked prompt', {
+        queuedContext: {
+          currentDocumentEnabled: true,
+          editorContext: { ...editorContext, extensionContexts: [uncaptured] },
+        },
+      })
+    ).toBe(false);
+    expect(sendAsync).not.toHaveBeenCalled();
+    expect(error()).toContain('Context provider unavailable');
+  });
   it.each([false, true])(
     'clears sent inline problems and restores them on failure=%s',
     async (fail) => {

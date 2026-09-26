@@ -17,6 +17,7 @@ import {
   sessionSearchFocusKey,
   state,
 } from '../../lib/state';
+import { setHostDragImage } from '../../host/extensions';
 import {
   Show,
   For,
@@ -1414,7 +1415,7 @@ export function SessionListView(props: {
     const handle = event.currentTarget;
     if (!(handle instanceof HTMLElement)) return;
     const row = handle.closest<HTMLElement>('.session-item');
-    if (row) event.dataTransfer.setDragImage(row, 12, row.offsetHeight / 2);
+    if (row) setHostDragImage(event.dataTransfer, row, 12, row.offsetHeight / 2);
     setDraggedPinnedSessionId(sessionId);
   };
 

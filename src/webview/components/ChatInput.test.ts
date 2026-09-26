@@ -52,6 +52,7 @@ import {
 } from '../lib/state-queued-messages';
 import { sendQueuedAsSteer } from './chat-input/queued-steer';
 import { databaseBackupIcon, databaseScriptPlusIcon, runningIcon } from '../lib/ui-icons';
+import { registerHostExtension } from '../host/extensions';
 import { toCssUrl } from './UiIcon';
 import { getMaterialChipIcon } from './MaterialChipIcon';
 import { getVisibleThreadMessages } from './message-list/thread-visibility';
@@ -266,6 +267,7 @@ afterEach(() => {
   setState('enableProblemsContext', true);
   setState('editorContext', {
     databaseContext: undefined,
+    extensionContexts: undefined,
     workspacePath: null,
     activeWorkspacePath: null,
     activeFile: null,
@@ -10261,6 +10263,69 @@ describe('ChatInput', () => {
     expect(chip?.textContent).toContain('users');
     expect(chip?.textContent).toContain('DDL');
     expect(chip?.querySelector('[data-chip-icon="table"]')).not.toBeNull();
+  });
+
+  it('captures extension context when queueing and renders its fallback chip', async () => {
+    const disposeHost = registerHostExtension({
+      apiVersion: 1,
+      id: 'example.host',
+      contexts: [
+        {
+          id: 'example.selection',
+          version: 1,
+          validate: () => true,
+          capture: () => ({ text: 'Captured selection', detail: 'Original source' }),
+        },
+      ],
+    });
+    try {
+      setInputText('Explain this');
+      setIsLoading(true);
+      setState('activeSessionId', 'session-1');
+      setState('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+        extensionContexts: [
+          {
+            provider: 'example.selection',
+            version: 1,
+            label: 'Issue 42',
+            placement: 'replace-document',
+            data: { revision: 1 },
+          },
+        ],
+      });
+      cleanup = render(() => ChatInput(), container!);
+      expect(container?.querySelector('.chat-attachments-container')?.textContent).toContain(
+        'Issue 42'
+      );
+      container?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')?.click();
+      await flushAsyncWork();
+      expect(
+        state.queuedMessages[0]?.queuedContext?.editorContext.extensionContexts?.[0]?.captured?.text
+      ).toBe('Captured selection');
+      setState('editorContext', 'extensionContexts', [
+        {
+          provider: 'example.selection',
+          version: 1,
+          label: 'Issue 43',
+          placement: 'replace-document',
+          data: { revision: 2 },
+        },
+      ]);
+      expect(
+        state.queuedMessages[0]?.queuedContext?.editorContext.extensionContexts?.[0]?.label
+      ).toBe('Issue 42');
+      expect(container?.querySelector('.chat-queue-meta-item')?.getAttribute('aria-label')).toBe(
+        '1 attachment'
+      );
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+      disposeHost();
+    }
   });
 
   it('shows database selection context and can disable it', async () => {

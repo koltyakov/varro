@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { setHostDragImage } from '../../host/extensions';
 import type { QueuedMessage } from '../../lib/app-state-types';
 import {
   arrowUpIcon,
@@ -35,6 +36,7 @@ export type QueuedMessageItem = Pick<
   | 'terminalSelection'
   | 'inlineProblems'
   | 'attachedDiagnostics'
+  | 'queuedContext'
 >;
 
 function bindQueueOverflowFade(element: HTMLElement, trackItemCount: () => number) {
@@ -155,6 +157,9 @@ export function QueuedMessages(props: {
                 let labelRef: HTMLSpanElement | undefined;
                 const imageCount = item.clipboardImages?.length || 0;
                 const attachmentCount =
+                  (item.queuedContext?.currentDocumentEnabled
+                    ? (item.queuedContext.editorContext.extensionContexts?.length ?? 0)
+                    : 0) +
                   (item.droppedFiles?.length || 0) +
                   (item.nativePdfs?.length ?? 0) +
                   (item.terminalSelection ? 1 : 0) +
@@ -188,7 +193,7 @@ export function QueuedMessages(props: {
                   const row = (event.currentTarget as HTMLElement).closest<HTMLElement>(
                     '.chat-queue-item'
                   );
-                  if (row) event.dataTransfer.setDragImage(row, 12, row.offsetHeight / 2);
+                  if (row) setHostDragImage(event.dataTransfer, row, 12, row.offsetHeight / 2);
                   setDraggedItemId(item.id);
                 };
                 const dragOverItem = (event: DragEvent) => {

@@ -1,4 +1,5 @@
 import { isString, isObject } from '../../lib/runtime-values';
+import { getHostFilePath } from '../../host/extensions';
 export async function collectDroppedPaths(
   dataTransfer: DataTransfer | null,
   options: { includeFilePaths?: boolean; preferFileContent?: boolean } = {}
@@ -42,14 +43,15 @@ export async function collectDroppedPaths(
   if (options.includeFilePaths !== false) {
     for (const file of Array.from(dataTransfer.files)) {
       // SAFETY: The surrounding shape or discriminator check establishes the File contract used below.
-      const path = (file as File & { path?: string }).path;
+      const path = getHostFilePath(file);
       if (path) paths.add(path);
     }
 
     for (const item of Array.from(dataTransfer.items)) {
       // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
-      const file = item.getAsFile() as (File & { path?: string }) | null;
-      if (file?.path) paths.add(file.path);
+      const file = item.getAsFile();
+      const path = file ? getHostFilePath(file) : undefined;
+      if (path) paths.add(path);
     }
   }
 

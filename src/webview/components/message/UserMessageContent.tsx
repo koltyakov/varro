@@ -1,4 +1,10 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import {
+  formatExtensionContext,
+  readExtensionContextBlock,
+} from '../../../shared/extension-context';
+import type { ExtensionContext } from '../../../shared/extension-context';
+import { readLegacyExtensionContext, showAttachmentDetails } from '../../host/extensions';
 import { Portal } from 'solid-js/web';
 import { createPastedText, readPastedTextDataUrl } from '../../../shared/pasted-text';
 import { SESSION_RESUME_PROMPT } from '../../../shared/session-pauses';
@@ -83,6 +89,7 @@ import { ProblemsIcon } from '../ProblemsIcon';
 import { ProblemsTooltip } from '../ProblemsTooltip';
 
 export type MessageAttachment =
+  | { type: 'extension-context'; context: ExtensionContext }
   | { type: 'problem-reference'; reference: InlineProblemAttachment }
   | ({ type: 'issues' } & IssueAttachment)
   | { type: 'database'; context: DatabaseContext }
@@ -562,6 +569,14 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
     const trimmedLine = line.trim();
 
     if (!inCodeFence) {
+      const extensionBlock =
+        readExtensionContextBlock(lines, index) ?? readLegacyExtensionContext(lines, index);
+      if (extensionBlock) {
+        flushTextBuffer();
+        attachments.push({ type: 'extension-context', context: extensionBlock.context });
+        index = extensionBlock.end;
+        continue;
+      }
       // Some backends join prompt and context parts into one text part.
       if (parseIssueAttachment(`${line}\n`)) {
         let end = index + 1;
@@ -570,7 +585,7 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
           if (
             parseIssueAttachment(`${candidate}\n`) ||
             parseUserMessageAttachmentLine(candidate, false) ||
-            /^\[(?:Working directory:|Database context\]|Selection from terminal |Unsaved (?:selection|buffer) from |Problem [\w-]+\])/.test(
+            /^\[(?:Working directory:|Database context\]|Extension context\]|Selection from terminal |Unsaved (?:selection|buffer) from |Problem [\w-]+\])/.test(
               candidate
             )
           )
@@ -778,6 +793,7 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
       attachment.type === 'problem-reference' ||
       attachment.type === 'editor-text' ||
       attachment.type === 'database' ||
+      attachment.type === 'extension-context' ||
       attachment.type === 'skill'
     )
       continue;
@@ -824,8 +840,11 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
   const terminalAttachment = parsed.attachments.find(
     (attachment) => attachment.type === 'terminal-selection' && attachment.text
   );
+  const extensionContexts = parsed.attachments.flatMap((attachment) =>
+    attachment.type === 'extension-context' ? [attachment.context] : []
+  );
 
-  return {
+  const context: MessageEditContext = {
     files,
     inlineProblems: parsed.attachments.some((attachment) => attachment.type === 'problem-reference')
       ? parsed.attachments.flatMap((attachment) =>
@@ -847,6 +866,8 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
         ? { terminalName: terminalAttachment.terminalName, text: terminalAttachment.text }
         : null,
   };
+  if (extensionContexts.length > 0) context.extensionContexts = extensionContexts;
+  return context;
 }
 
 export function hasUserMessageEditableContent(parts: Part[]): boolean {
@@ -855,6 +876,7 @@ export function hasUserMessageEditableContent(parts: Part[]): boolean {
   const context = getUserMessageEditContext(parts);
   return (
     context.files.length > 0 ||
+    !!context.extensionContexts?.length ||
     context.images.length > 0 ||
     (context.pdfs?.length ?? 0) > 0 ||
     context.terminalSelection !== null ||
@@ -884,6 +906,8 @@ export function getUserMessagePreviewText(parts: Part[]): string {
   const firstAttachment = parsed.attachments[0];
   if (firstAttachment) {
     switch (firstAttachment.type) {
+      case 'extension-context':
+        return firstAttachment.context.label;
       case 'problem-reference':
         return `${problemReferenceLabel(firstAttachment.reference)} ${problemReferenceLocation(firstAttachment.reference)}`;
       case 'issues':
@@ -1649,6 +1673,8 @@ function isStandaloneFileReference(text: string): boolean {
 
 function getAttachmentTextMarker(attachment: MessageAttachment): string | null {
   switch (attachment.type) {
+    case 'extension-context':
+      return null;
     case 'problem-reference':
       return problemReferenceMarker(attachment.reference);
     case 'skill':
@@ -2102,7 +2128,7 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
         <FolderIcon class="inline-chip-icon" width="11" height="11" />
       </Show>
       <span class="inline-chip-label">{getAttachmentLabel(attachment())}</span>
-      <Show when={database()}>
+      <Show when={showAttachmentDetails() && database()}>
         {(table) => <span class="inline-chip-detail">{databaseAttachmentDetail(table())}</span>}
       </Show>
       <Show when={fileSelection()}>
@@ -2174,6 +2200,17 @@ function openAttachment(value: MessageAttachment) {
     postMessage({
       type: 'vscode/open-text',
       payload: { content: value.text, title: `Problems ${value.count}`, language: 'plaintext' },
+    });
+    return;
+  }
+  if (value.type === 'extension-context') {
+    postMessage({
+      type: 'vscode/open-text',
+      payload: {
+        content: value.context.captured?.text ?? JSON.stringify(value.context.data, null, 2),
+        title: value.context.label,
+        language: 'plaintext',
+      },
     });
     return;
   }
@@ -2270,6 +2307,10 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
 
   const iconSvg = () => {
     const value = attachment();
+    if (value.type === 'extension-context' && value.context.captured?.icon === 'table')
+      return <MaterialChipIcon kind="table" class="chip-icon" />;
+    if (value.type === 'extension-context' && value.context.captured?.icon === 'terminal')
+      return <MaterialChipIcon kind="terminal" class="chip-icon" />;
     if (value.type === 'file-reference' && value.database)
       return <MaterialChipIcon kind="table" class="chip-icon" />;
     if (attachment().type === 'database')
@@ -2286,6 +2327,15 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
 
   const detail = () => {
     const value = attachment();
+    if (
+      !showAttachmentDetails() &&
+      (value.type === 'extension-context' ||
+        value.type === 'database' ||
+        (value.type === 'file-reference' && value.database))
+    )
+      return null;
+    if (value.type === 'extension-context')
+      return <span class="chip-detail">{value.context.captured?.detail}</span>;
     if (value.type === 'file-reference' && value.database)
       return <span class="chip-detail">{databaseAttachmentDetail(value.database)}</span>;
     if (value.type === 'database')
@@ -2552,6 +2602,15 @@ function getDisplayMessageAttachmentLabel(attachment: DisplayMessageAttachment):
 
 function getDisplayMessageAttachmentDetail(attachment: DisplayMessageAttachment): string | null {
   if (attachment.type !== 'message') return null;
+  const value = attachment.attachment;
+  if (
+    !showAttachmentDetails() &&
+    (value.type === 'extension-context' ||
+      value.type === 'database' ||
+      (value.type === 'file-reference' && value.database))
+  )
+    return null;
+  if (value.type === 'extension-context') return value.context.captured?.detail ?? null;
   if (attachment.attachment.type === 'problem-reference')
     return problemReferenceLocation(attachment.attachment.reference);
   if (attachment.attachment.type === 'issues') return String(attachment.attachment.count);
@@ -2634,6 +2693,8 @@ function getTerminalLineCountLabel(text: string | undefined): string | null {
 
 function getAttachmentLabel(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'extension-context':
+      return attachment.context.label;
     case 'problem-reference':
       return problemReferenceLabel(attachment.reference);
     case 'issues':
@@ -2664,6 +2725,8 @@ function getMessageAttachmentPath(attachment: MessageAttachment): string | undef
 
 function getAttachmentTitle(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'extension-context':
+      return `${attachment.context.label}${attachment.context.captured?.detail ? ` · ${attachment.context.captured.detail}` : ''}`;
     case 'problem-reference':
       return attachment.reference.group
         ? `Problems ${attachment.reference.group.length}`
@@ -2693,6 +2756,8 @@ function getInlineAttachmentCopyMarker(attachment: MessageAttachment): string {
 
 function getStandaloneAttachmentCopyText(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'extension-context':
+      return formatExtensionContext(attachment.context);
     case 'problem-reference':
       return problemReferenceMarker(attachment.reference);
     case 'issues':

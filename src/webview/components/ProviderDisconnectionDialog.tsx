@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { hostMetadata } from '../host/extensions';
 import { Portal } from 'solid-js/web';
 import type { Provider } from '../types';
 import { postMessage } from '../lib/bridge';
@@ -250,7 +251,7 @@ export function ProviderDisconnectionDialog(props: {
                               })
                             }
                           >
-                            Open {formatConfigFilename(path)} in VS Code
+                            Open {formatConfigFilename(path)} in {hostMetadata().ideName}
                           </button>
                         )}
                       </For>

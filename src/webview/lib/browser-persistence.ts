@@ -1,4 +1,5 @@
 import type { Persistence } from '../../shared/persistence';
+import { getHostExtension } from '../host/extensions';
 import { postMessage } from './bridge';
 import { logWarn } from './log';
 import type { UnknownRecord } from '../../shared/type-utils';
@@ -155,7 +156,7 @@ function shouldUseLocalStorage(key: string): boolean {
 
 function acquireLocalStorage(): Storage | undefined {
   try {
-    return window.localStorage;
+    return getHostExtension()?.services?.projectStorage ?? window.localStorage;
   } catch {
     return undefined;
   }
@@ -167,6 +168,8 @@ type VsCodeWebviewStateApi = {
 };
 
 function getVsCodeWebviewStateApi(): VsCodeWebviewStateApi | undefined {
+  const service = getHostExtension()?.services?.viewState;
+  if (service) return service;
   const value = asRecord(window)?.__vscodeWebviewState;
   if (!value || !isObject(value)) return undefined;
   // SAFETY: VS Code installs __vscodeWebviewState with the getState/setState API before startup.

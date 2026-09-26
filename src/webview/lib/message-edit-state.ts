@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import type { ExtensionContext } from '../../shared/extension-context';
 import type {
   ChatModelSelection,
   DroppedFile,
@@ -15,6 +16,7 @@ export type MessageEditContext = {
   issues?: IssueAttachment;
   attachedDiagnostics?: AttachedDiagnostics;
   inlineProblems?: InlineProblemAttachment[];
+  extensionContexts?: ExtensionContext[];
 };
 
 export type MessageEditDraftBackup = MessageEditContext & { text: string };
