@@ -194,7 +194,9 @@ test('shows a background process card until the resumed response finishes', asyn
     },
     { type: 'session.status', properties: { sessionID: session.id, status: { type: 'idle' } } },
   ]);
-  await expect(page.locator('.assistant-dialog-summary')).toContainText('Worked for');
+  await expect(
+    page.locator('.assistant-dialog-summary').getByLabel('Worked for', { exact: true })
+  ).toBeVisible();
   await expect(page.locator('.loading-indicator')).toHaveCount(0);
   await expect(page.locator('.toolbar-turn-timer')).toHaveCount(0);
 });

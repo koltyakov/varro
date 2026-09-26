@@ -966,8 +966,10 @@ test('keeps the sent card and previous Worked summary stable through Thinking', 
     );
   });
   await expect(
-    page.locator('.trailing-assistant-summary-row .assistant-dialog-summary')
-  ).toContainText('Worked for');
+    page
+      .locator('.trailing-assistant-summary-row .assistant-dialog-summary')
+      .getByLabel('Worked for', { exact: true })
+  ).toBeVisible();
   await expect(page.getByLabel('Stop')).toHaveCount(0);
   await expect(page.getByLabel('Send (Enter)')).toBeVisible();
   await delayPromptRequest(page, 2_000);
@@ -1010,7 +1012,7 @@ test('keeps the sent card and previous Worked summary stable through Thinking', 
         '.trailing-assistant-summary-row .assistant-dialog-summary'
       );
       const workedSummaries = [rowSummary, trailingSummary].filter(
-        (summary): summary is HTMLElement => !!summary?.textContent?.includes('Worked for')
+        (summary): summary is HTMLElement => !!summary?.querySelector('[aria-label="Worked for"]')
       );
       const workedSummary = workedSummaries[0];
       previousWorkedSamples.push({
