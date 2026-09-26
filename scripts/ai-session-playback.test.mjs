@@ -19,6 +19,36 @@ import {
   savePlaybackCapture,
 } from './ai-session-playback.mjs';
 
+test('historical reconstruction preserves part order when timestamps regress', () => {
+  const user = { info: { id: 'u', sessionID: 's' }, parts: [] };
+  const parts = [
+    { id: 'reasoning', type: 'reasoning', text: 'think', time: { start: 150, end: 180 } },
+    { id: 'text', type: 'text', text: 'answer' },
+    {
+      id: 'tool',
+      type: 'tool',
+      state: { status: 'completed', input: {}, time: { start: 110, end: 190 } },
+    },
+  ];
+  const assistant = {
+    info: { id: 'a', sessionID: 's', time: { created: 100, completed: 200 } },
+    parts,
+  };
+  const rows = parts.map((part) => ({
+    id: part.id,
+    message_id: 'a',
+    session_id: 's',
+    data: JSON.stringify(part),
+    time_created: 100,
+    time_updated: 200,
+  }));
+  const events = reconstructHistoricalEvents('s', user, assistant, rows);
+  const ids = events
+    .filter(({ event }) => event.type === 'message.part.updated')
+    .map(({ event }) => event.properties.part.id);
+  assert.deepEqual([...new Set(ids)], ['reasoning', 'text', 'tool']);
+});
+
 test('discovery isolates standard, playback, and raster modes', () => {
   const cwd = fileURLToPath(new URL('..', import.meta.url));
   const cli = fileURLToPath(new URL('../node_modules/@playwright/test/cli.js', import.meta.url));

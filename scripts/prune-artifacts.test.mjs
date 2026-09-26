@@ -50,6 +50,9 @@ test('never selects the active isolated data directory or its ancestors', () => 
 
 test('defaults to a dry run and validates numeric options', () => {
   assert.deepEqual(parsePruneArguments([]), { apply: false, keep: 10, minAgeHours: 24 });
+  assert.deepEqual(parsePruneArguments(['--dry-run']), parsePruneArguments([]));
+  assert.throws(() => parsePruneArguments(['--apply', '--dry-run']), /cannot be combined/);
+  assert.throws(() => parsePruneArguments(['--dry-run', '--apply']), /cannot be combined/);
   assert.deepEqual(parsePruneArguments(['--apply', '--keep', '3', '--min-age-hours', '0']), {
     apply: true,
     keep: 3,
@@ -62,6 +65,8 @@ test('defaults to a dry run and validates numeric options', () => {
 test('only targets regenerable run output', () => {
   assert.ok(PRUNE_TARGETS.every((target) => target.directory.startsWith('artifacts/')));
   assert.ok(!PRUNE_TARGETS.some((target) => target.directory === 'artifacts/ai-fuzzy'));
-  const adapters = PRUNE_TARGETS.find((target) => target.directory === 'artifacts/opencode-adapters');
+  const adapters = PRUNE_TARGETS.find(
+    (target) => target.directory === 'artifacts/opencode-adapters'
+  );
   assert.ok(adapters && !adapters.pattern.test('verified.json'));
 });

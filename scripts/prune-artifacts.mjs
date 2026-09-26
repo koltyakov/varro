@@ -35,6 +35,7 @@ export function parsePruneArguments(args) {
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--apply') options.apply = true;
+    else if (argument === '--dry-run') options.apply = false;
     else if (argument === '--keep' || argument === '--min-age-hours') {
       const value = Number(args[index + 1]);
       if (!Number.isInteger(value) || value < 0) {
@@ -46,6 +47,9 @@ export function parsePruneArguments(args) {
     } else {
       throw new Error(`Unknown argument: ${argument}`);
     }
+  }
+  if (args.includes('--apply') && args.includes('--dry-run')) {
+    throw new Error('--apply and --dry-run cannot be combined');
   }
   return options;
 }
@@ -129,7 +133,9 @@ async function main() {
       totalBytes += size;
       totalCount += 1;
       // oxlint-disable-next-line no-console
-      console.log(`${options.apply ? 'remove' : 'would remove'} ${path.relative(projectRoot, candidate.path)} (${formatSize(size)})`);
+      console.log(
+        `${options.apply ? 'remove' : 'would remove'} ${path.relative(projectRoot, candidate.path)} (${formatSize(size)})`
+      );
       if (options.apply) await rm(candidate.path, { recursive: true });
     }
   }

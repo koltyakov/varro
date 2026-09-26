@@ -11,6 +11,7 @@ import {
   streamingDeltaQueue,
 } from './app-state';
 import { areMessageEntriesEquivalent, getSharedMessagePrefixLength } from './message-entry-sync';
+import { recordProviderAuthSuccess } from './provider-connection-state';
 import { markSessionResponseCompleted, markSessionSeen } from './state-session-lifecycle';
 import { flushPendingStreamingDeltasFor, shouldUseStreamingText } from './streaming-deltas';
 import { isTodoToolName, isTodoToolTitle } from './tool-normalization';
@@ -30,6 +31,7 @@ function flushPendingStreamingDeltas() {
 }
 
 export function upsertMessage(msg: MessageEntry) {
+  recordProviderAuthSuccess(msg.info);
   flushPendingStreamingDeltas();
   if (isOptimisticUserMessage(msg) && !isOptimisticUserMessageId(msg.info.id)) {
     trackPendingOptimisticUserMessage(msg.info.sessionID, msg.info.id);
@@ -51,6 +53,7 @@ export function upsertMessage(msg: MessageEntry) {
 }
 
 export function upsertMessageInfo(info: Message) {
+  recordProviderAuthSuccess(info);
   setState(
     'messages',
     produce((msgs) => {
@@ -530,6 +533,7 @@ export function clearMessages() {
 type StreamingTextSnapshot = { partId: string; text: string } | null;
 
 export function replaceMessages(incoming: MessageEntry[]) {
+  for (const message of incoming) recordProviderAuthSuccess(message.info);
   flushPendingStreamingDeltas();
   const streamingSnapshot = getStreamingTextSnapshot();
   const nextMessages = cloneMessageEntries(incoming);
@@ -647,6 +651,7 @@ export function setMessagesIncremental(
 ) {
   flushPendingStreamingDeltas();
   const current = state.messages;
+  for (const message of incoming) recordProviderAuthSuccess(message.info);
   incoming = preserveMissingOptimisticUserMessages(current, incoming);
   const streamingSnapshot = getStreamingTextSnapshot();
   if (current === incoming) return;

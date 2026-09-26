@@ -411,7 +411,7 @@ test('SDK global SSE parser receives the directory envelope and current status s
     },
     { delayMs: 150, event: event('session.idle', { sessionID: info.sessionID }) },
   ];
-  const server = await createStreamingServer(input);
+  const server = await createStreamingServer({ ...input, checkpoints: [1] });
   t.after(() => server.close());
   const controller = new AbortController();
   t.after(() => controller.abort());
@@ -440,6 +440,7 @@ test('SDK global SSE parser receives the directory envelope and current status s
   assert.deepEqual(await (await fetch(`${server.url}/session/status`)).json(), {
     [id]: { type: 'busy' },
   });
+  server.resume();
   await run;
   controller.abort();
   await subscription.stream.return();
