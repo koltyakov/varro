@@ -86,12 +86,6 @@ export async function copyProviderSettings(sourceDirectory, destinationDirectory
       if (error.code === 'ENOENT') continue;
       throw error;
     }
-    // Resolve file substitutions relative to their original config, before relocating it.
-    text = text.replace(
-      /\{file:([^}]+)\}/g,
-      (_, filename) =>
-        `{file:${filename.startsWith('~') ? filename : path.resolve(sourceDirectory, filename)}}`
-    );
     const errors = [];
     const config = parse(text, errors, { allowTrailingComma: true });
     // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Validate the host JSONC object at the file boundary.
@@ -109,7 +103,18 @@ export async function copyProviderSettings(sourceDirectory, destinationDirectory
     ]) {
       if (Object.hasOwn(config, key)) settings[key] = config[key];
     }
-    await writeFile(path.join(destinationDirectory, name), JSON.stringify(settings), {
+    // Resolve parsed strings so serialization escapes Windows paths and other JSON characters.
+    const serialized = JSON.stringify(settings, (_key, value) =>
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON values need a string guard before resolving file references.
+      typeof value === 'string'
+        ? value.replace(
+            /\{file:([^}]+)\}/g,
+            (_, filename) =>
+              `{file:${filename.startsWith('~') ? filename : path.resolve(sourceDirectory, filename)}}`
+          )
+        : value
+    );
+    await writeFile(path.join(destinationDirectory, name), serialized, {
       mode: 0o600,
       flag: 'wx',
     });
