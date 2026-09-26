@@ -74,7 +74,7 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.18.32",
-    "@opencode/client": "^2.0.16",
+    "@opencode/client": "^2.0.18",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.16",
     "highlight.js": "11.12.0",
@@ -87,7 +87,7 @@
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/css.escape": "1.5.2",
-    "@types/node": "26.6.2",
+    "@types/node": "26.6.3",
     "@types/vscode": "1.120.0",
     "@vitest/coverage-v8": "5.0.2",
     "@vscode/vsce": "4.0.0",
@@ -468,11 +468,6 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Let Varro generate a fallback title when OpenCode leaves a session untitled. Disable this to rely only on OpenCode's native session naming."
-        },
-        "varro.chat.enableAskAgent": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Add Varro's read-only `Ask` primary agent at runtime. Varro does not write this agent to OpenCode configuration and uses an existing `ask` agent instead when one is configured."
         },
         "varro.chat.autoCompact": {
           "type": "boolean",

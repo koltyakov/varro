@@ -74,7 +74,6 @@ const {
       disconnect: ReturnType<typeof vi.fn>;
       rescopeEventStream: ReturnType<typeof vi.fn>;
       updateCompactionSettings: ReturnType<typeof vi.fn>;
-      updateAskAgentEnabled: ReturnType<typeof vi.fn>;
       updateLaunchSettings: ReturnType<typeof vi.fn>;
     },
   },
@@ -116,7 +115,6 @@ vi.mock('vscode', () => ({
 vi.mock('./server', () => ({
   OpenCodeServer: class {
     updateCompactionSettings = vi.fn(() => Promise.resolve());
-    updateAskAgentEnabled = vi.fn(() => Promise.resolve());
     updateLaunchSettings = vi.fn();
     disconnect = vi.fn(() => Promise.resolve());
     rescopeEventStream = vi.fn(() => Promise.resolve({ state: 'inactive', directory: undefined }));
@@ -124,7 +122,6 @@ vi.mock('./server', () => ({
     constructor(...args: unknown[]) {
       latestServerInstance.current = {
         updateCompactionSettings: this.updateCompactionSettings,
-        updateAskAgentEnabled: this.updateAskAgentEnabled,
         updateLaunchSettings: this.updateLaunchSettings,
         disconnect: this.disconnect,
         rescopeEventStream: this.rescopeEventStream,
@@ -231,7 +228,6 @@ describe('extension activation', () => {
         reserved: 7777,
       },
       undefined,
-      true,
       secrets
     );
   });
@@ -334,31 +330,6 @@ describe('extension activation', () => {
     });
   });
 
-  it('passes and reapplies the optional Ask agent setting', async () => {
-    let enabled = true;
-    getMock.mockImplementation((key: string, fallback?: unknown) =>
-      key === 'chat.enableAskAgent' ? enabled : readDefaultConfig(key, fallback)
-    );
-    const { activate } = await import('./extension');
-
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
-
-    expect(openCodeServerMock.mock.lastCall?.[6]).toBe(true);
-
-    enabled = false;
-    const listener = onDidChangeConfigurationMock.mock.lastCall?.[0];
-    listener?.({
-      affectsConfiguration: (key: string) => key === 'varro.chat.enableAskAgent',
-    });
-
-    expect(latestServerInstance.current?.updateAskAgentEnabled).toHaveBeenCalledWith(false);
-  });
-
   it('offers to reload the window when the configured server port changes', async () => {
     const { activate } = await import('./extension');
 
@@ -423,7 +394,6 @@ describe('extension activation', () => {
         reserved: 4096,
       },
       undefined,
-      true,
       undefined
     );
   });
@@ -1095,18 +1065,6 @@ describe('extension manifest', () => {
       minimum: 6,
       maximum: 100,
       default: null,
-    });
-  });
-
-  it('contributes the enabled-by-default Ask agent setting', () => {
-    const properties = packageJson.contributes.configuration.properties as Record<
-      string,
-      Record<string, unknown>
-    >;
-
-    expect(properties['varro.chat.enableAskAgent']).toMatchObject({
-      type: 'boolean',
-      default: true,
     });
   });
 

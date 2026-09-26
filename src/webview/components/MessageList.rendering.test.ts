@@ -3554,7 +3554,7 @@ describe('MessageList loading row', () => {
     stopLoading();
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
+    expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
     expect(
       container?.querySelector('.interactive-loading-row.trailing-assistant-summary-row')
     ).toBeInstanceOf(HTMLDivElement);
@@ -4115,12 +4115,12 @@ describe('MessageList loading row', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).not.toContain('Worked for');
+    expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
 
     stopLoading();
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
+    expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
     expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
       HTMLDivElement
     );
@@ -4153,7 +4153,7 @@ describe('MessageList loading row', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
+    expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
     expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
       HTMLDivElement
     );
@@ -4191,7 +4191,7 @@ describe('MessageList loading row', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('.trailing-assistant-summary-row')).toBe(workedRow);
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
+    expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
     expect(container?.querySelector('.loading-indicator')).toBeNull();
 
     batch(() => {
@@ -4216,7 +4216,7 @@ describe('MessageList loading row', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('.trailing-assistant-summary-row')).toBe(workedRow);
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
+    expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
     expect(container?.querySelector('.loading-indicator')).toBeNull();
 
     batch(() => {
@@ -4259,7 +4259,7 @@ describe('MessageList loading row', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
+    expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
     expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
       HTMLDivElement
     );
@@ -4287,7 +4287,7 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('.background-process')?.textContent).toContain(
       'Background process'
     );
-    expect(container?.textContent).not.toContain('Worked for');
+    expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
 
     // The new execution can start before its first assistant message is hydrated.
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
@@ -4295,7 +4295,7 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('.background-process')?.textContent).toContain(
       'Background process'
     );
-    expect(container?.textContent).not.toContain('Worked for');
+    expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
     replaceMessages([
       ...entries,
       {
@@ -4307,7 +4307,7 @@ describe('MessageList loading row', () => {
     vi.advanceTimersByTime(700);
     await Promise.resolve();
     expect(container?.querySelector('.background-process')).toBeNull();
-    expect(container?.textContent).not.toContain('Worked for');
+    expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
 
     const final = assistantMessage('assistant-2', { time: { created: 12_000, completed: 13_000 } });
     final.finish = 'stop';
@@ -4322,7 +4322,7 @@ describe('MessageList loading row', () => {
     await Promise.resolve();
     vi.advanceTimersByTime(3_000);
     await Promise.resolve();
-    expect(container?.textContent).toContain('Worked for 12s');
+    expect(container?.textContent).toContain('12s');
     expect(container?.querySelector('.loading-indicator')).toBeNull();
   });
 
@@ -4363,7 +4363,7 @@ describe('MessageList loading row', () => {
     vi.advanceTimersByTime(700);
     await Promise.resolve();
 
-    expect(container?.textContent).not.toContain('Worked for');
+    expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
 
     replaceMessages([
       prompt,
@@ -4382,13 +4382,13 @@ describe('MessageList loading row', () => {
 
     vi.advanceTimersByTime(700);
     await Promise.resolve();
-    expect(container?.textContent).not.toContain('Worked for');
+    expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
 
     setState('streamingPartId', null);
     setState('streamingText', '');
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 12s - Tokens ↑ 50 ↓ 10');
+    expect(container?.textContent).toContain('12s ↑ 50 ↓ 10');
   });
 
   it('keeps a rejected permission command visible and summarizes the stopped turn', async () => {
@@ -4420,9 +4420,7 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.tool-invocation-title')?.textContent).toBe('npm run release');
     expect(container?.querySelector('.tool-invocation-error-label')?.textContent).toBe('rejected');
-    expect(container?.textContent).toContain(
-      'Worked for 10s - Permission rejected - Tokens ↑ 42 ↓ 7'
-    );
+    expect(container?.textContent).toContain('10s Permission rejected ↑ 42 ↓ 7');
   });
 
   it.each([
@@ -4498,7 +4496,7 @@ describe('MessageList loading row', () => {
 
     expect(container?.querySelectorAll('.assistant-dialog-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-dialog-summary')?.textContent).toContain(
-      'Worked for 12s - Tokens ↑ 50 ↓ 10'
+      '12s ↑ 50 ↓ 10'
     );
     expect(container?.querySelector('.assistant-dialog-summary')?.textContent).not.toContain(label);
     expect(
@@ -4540,7 +4538,7 @@ describe('MessageList loading row', () => {
     );
     expect(container?.querySelector('.question-summary-answer')?.textContent).toBe('Skipped');
     expect(container?.querySelector('.tool-invocation-error-label')).toBeNull();
-    expect(container?.textContent).toContain('Worked for 10s - Question skipped - Tokens ↑ 42 ↓ 7');
+    expect(container?.textContent).toContain('10s Question skipped ↑ 42 ↓ 7');
   });
 
   it('does not render the loading row in a draft session when stale messages leak in', async () => {

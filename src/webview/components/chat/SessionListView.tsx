@@ -1,4 +1,5 @@
 import {
+  getModelDisplayName,
   getSelectedAgentForSession,
   getSelectedModelForSession,
   getSessionTreeIds,
@@ -55,7 +56,7 @@ import { requestWorkspaceSelection } from '../../lib/workspace-selection';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatEditCount, formatModelName, formatVariantLabel } from '../../lib/format';
-import { formatDuration, formatRelativeAge } from '../../lib/message-metrics';
+import { formatDuration, formatRelativeAge, formatTurnCost } from '../../lib/message-metrics';
 import { getProviderIcon } from '../../lib/provider-icons';
 import { compareSessionsByActivity, compareSessionsForDisplay } from '../../lib/session-order';
 import {
@@ -2164,6 +2165,13 @@ function SessionListItem(props: {
     return { files: unique.size, iterations: run.iterations.length };
   };
   const summaryStats = () => props.diffSummary ?? getSessionSummaryStats(props.session);
+  const sessionCost = () => {
+    const summary = props.diffSummary;
+    if (summary?.historyStatsUnavailable) return '';
+    const breakdown = summary?.tokenBreakdown;
+    if (!breakdown) return '';
+    return formatTurnCost((breakdown.session.cost ?? 0) + (breakdown.subagents.cost ?? 0));
+  };
   const workedDurationMs = () => {
     if (props.durationMs === null) return null;
     const activeDuration =
@@ -2183,7 +2191,11 @@ function SessionListItem(props: {
       : null;
     if (!model) return null;
     const provider = state.providers.find((item) => item.id === model.providerID);
-    const modelName = formatModelName(provider?.models[model.id]?.name || model.id);
+    const modelName = getModelDisplayName(
+      model.providerID,
+      model.id,
+      formatModelName(provider?.models[model.id]?.name || model.id)
+    );
     const reasoningLabel = model.variant ? formatVariantLabel(model.variant) : 'Default';
     return {
       providerID: model.providerID,
@@ -2538,6 +2550,16 @@ function SessionListItem(props: {
                   {' · '}
                   <span title={`${formatDuration(durationMs())} total time worked`}>
                     {formatDuration(durationMs())}
+                  </span>
+                </>
+              )}
+            </Show>
+            <Show when={sessionCost()}>
+              {(cost) => (
+                <>
+                  {' · '}
+                  <span class="session-item-cost" title="Total cost including subagents">
+                    ${cost()}
                   </span>
                 </>
               )}

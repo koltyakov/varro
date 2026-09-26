@@ -259,6 +259,7 @@ export type SessionTitleFallbackResponse = {
 } | null;
 
 export type SessionTokenUsage = {
+  cost?: number;
   total: number;
   input: number;
   output: number;

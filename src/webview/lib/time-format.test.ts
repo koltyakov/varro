@@ -23,10 +23,13 @@ describe('time format helpers', () => {
     expect(formatDuration(90_000_000)).toBe('1d 1h');
   });
 
-  it('clamps sub-second turn durations to <1s', () => {
-    expect(formatTurnDuration(undefined)).toBe('<1s');
-    expect(formatTurnDuration(2)).toBe('<1s');
-    expect(formatTurnDuration(999)).toBe('<1s');
+  it('uses milliseconds only for sub-second turn durations', () => {
+    expect(formatTurnDuration(undefined)).toBe('0ms');
+    expect(formatTurnDuration(0)).toBe('0ms');
+    expect(formatTurnDuration(2)).toBe('2ms');
+    expect(formatTurnDuration(999)).toBe('999ms');
+    expect(formatTurnDuration(1_000)).toBe('1s');
+    expect(formatTurnDuration(1_001)).toBe('1s');
     expect(formatTurnDuration(1_500)).toBe('2s');
     expect(formatTurnDuration(125_000)).toBe('2m 5s');
   });

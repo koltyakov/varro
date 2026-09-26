@@ -11,7 +11,8 @@ import type {
 import { postMessage } from '../../lib/bridge';
 import { formatTurnDuration } from '../../lib/time-format';
 import { useSecondClock } from '../../lib/clock';
-import { runningIcon, warningTriangleIcon } from '../../lib/ui-icons';
+import { dollarIcon, runningIcon, warningTriangleIcon } from '../../lib/ui-icons';
+import { formatTurnCost } from '../../lib/message-metrics';
 import { Tooltip } from '../Tooltip';
 import { UiIcon } from '../UiIcon';
 import { AttachButton } from './AttachButton';
@@ -45,6 +46,7 @@ type ContextUsageInfo = {
 };
 
 type SessionTokensInfo = {
+  cost?: number;
   total: number;
   input: number;
   output: number;
@@ -471,6 +473,29 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                 />
               </Show>
             </div>
+          </Show>
+
+          <Show
+            when={
+              props.showContextControl &&
+              formatTurnCost(
+                Math.max(props.sessionCost ?? 0, props.sessionTokens.cost ?? 0) +
+                  (props.subagentTokens.cost ?? 0)
+              )
+            }
+          >
+            {(cost) => (
+              <Tooltip content="Overall cost including all subagents">
+                <span
+                  class="toolbar-session-cost"
+                  tabindex="0"
+                  aria-label={`Overall cost: $${cost()}`}
+                >
+                  <UiIcon source={dollarIcon} width="12" height="12" />
+                  <span>{cost()}</span>
+                </span>
+              </Tooltip>
+            )}
           </Show>
 
           <Show when={props.showContextControl && props.contextUsage}>

@@ -72,6 +72,20 @@ recreate a rendering boundary already available in a capture.
 
 ## Reproduce a boundary
 
+### Latest-message navigation
+
+Use `goToLatest` from `scripts/ai-fuzzy-navigation.mjs` with the expected session and final rendered
+message IDs. It dispatches one native input, then waits for that message to be visible at the bottom
+and for geometry to settle across samples, with a 30-second deadline and diagnostic samples on failure.
+The disappearing jump button is not proof of arrival. A 110-turn reproduction took about 2.4 seconds
+to reach the final marker, so a fixed 400 ms sleep produced false failures.
+
+`runAi01` in the same module owns the seeded wheel, native scrollbar, Option-counter, and return-to-latest
+sequence. Call it with a bound `CdpController` after selecting an isolated long history; the caller owns
+the paint observer and evidence storage. Live fixture setup also uses the shared arrival check.
+
+### Replay checkpoints
+
 ```sh
 npm run ai:streaming -- inspect --capture <capture.json>
 npm run ai:streaming -- run --capture <capture.json> --output artifacts/ai-streaming/<new-run> --checkpoints 12,34
@@ -108,6 +122,8 @@ regressions rather than another permanent prerequisite for every future run.
 
 Treat heuristics as leads. For example, a Markdown text-length decrease alone does not establish a painted
 disappearance. Review the same element's clipping-aware geometry and rendered frames around that event.
+For the known host-level resize clipping reproduction and its plain-HTML control, see
+[webview resize clipping](webview-resize-clipping.md).
 Optional attachment forms that are absent do not block an otherwise complete AI-03 base scenario; report
 those variations as untested. Explicitly requested attachment coverage still needs its own prepared case.
 

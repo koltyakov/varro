@@ -151,7 +151,6 @@ export async function activate(context: vscode.ExtensionContext) {
   const simulateMissingCli = config.get<boolean>('debug.simulateMissingCli', false);
   const simulateNoProviders = config.get<boolean>('debug.simulateNoProviders', false);
   const compactionSettings = readCompactionSettings(config);
-  const askAgentEnabled = config.get<boolean>('chat.enableAskAgent', true);
   syncShowFileDiffsContext(config);
 
   server = new OpenCodeServer(
@@ -161,7 +160,6 @@ export async function activate(context: vscode.ExtensionContext) {
     simulateMissingCli,
     compactionSettings,
     undefined,
-    askAgentEnabled,
     context.secrets
   );
   let scopedWorkspacePath: string | null | undefined;
@@ -238,19 +236,11 @@ export async function activate(context: vscode.ExtensionContext) {
       const compactionChanged =
         event.affectsConfiguration('varro.chat.autoCompact') ||
         event.affectsConfiguration('varro.chat.autoCompactionReservedTokens');
-      const askAgentChanged = event.affectsConfiguration('varro.chat.enableAskAgent');
       const launchSettingsChanged =
         event.affectsConfiguration('varro.server.autoStart') ||
         event.affectsConfiguration('varro.server.command');
       const fileDiffsChanged = event.affectsConfiguration('varro.chat.showFileDiffs');
-      if (
-        !portChanged &&
-        !compactionChanged &&
-        !askAgentChanged &&
-        !launchSettingsChanged &&
-        !fileDiffsChanged
-      )
-        return;
+      if (!portChanged && !compactionChanged && !launchSettingsChanged && !fileDiffsChanged) return;
 
       if (portChanged) {
         void vscode.window
@@ -271,9 +261,6 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       if (compactionChanged) {
         void server?.updateCompactionSettings(readCompactionSettings(nextConfig));
-      }
-      if (askAgentChanged) {
-        void server?.updateAskAgentEnabled(nextConfig.get<boolean>('chat.enableAskAgent', true));
       }
       if (launchSettingsChanged) {
         server?.updateLaunchSettings({

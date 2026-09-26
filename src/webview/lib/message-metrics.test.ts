@@ -3,6 +3,7 @@ import type { AssistantMessage, FileDiff, Message, MessageEntry, Part, Provider 
 import {
   getAssistantDiffRequest,
   formatCost,
+  formatTurnCost,
   formatNumber,
   getAssistantDuration,
   getAssistantTotalTokens,
@@ -96,6 +97,21 @@ describe('message metrics helpers', () => {
     expect(formatCost(0.05)).toBe('$0.05');
     expect(formatCost(1.5)).toBe('$1.50');
     expect(formatCost(12.345)).toBe('$12.35');
+  });
+
+  it('formats reported turn costs in dollars and hides amounts below a cent', () => {
+    expect(formatTurnCost(undefined)).toBe('');
+    expect(formatTurnCost(0)).toBe('');
+    expect(formatTurnCost(Number.NaN)).toBe('');
+    expect(formatTurnCost(-1)).toBe('');
+    expect(formatTurnCost(0.00001)).toBe('');
+    expect(formatTurnCost(0.001)).toBe('');
+    expect(formatTurnCost(0.0099)).toBe('');
+    expect(formatTurnCost(0.01)).toBe('0.01');
+    expect(formatTurnCost(0.07)).toBe('0.07');
+    expect(formatTurnCost(0.076)).toBe('0.08');
+    expect(formatTurnCost(1)).toBe('1.00');
+    expect(formatTurnCost(1.234)).toBe('1.23');
   });
 
   it('sums session cost across assistant messages', () => {

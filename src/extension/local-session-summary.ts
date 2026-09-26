@@ -169,7 +169,7 @@ const projectDiff = (value) => {
 };
 const projectInfo = (value) => {
   const result = {};
-  for (const key of ['role', 'parentID', 'mode', 'providerID', 'modelID', 'variant', 'time', 'tokens']) {
+  for (const key of ['role', 'parentID', 'mode', 'providerID', 'modelID', 'variant', 'time', 'tokens', 'cost']) {
     if (value[key] !== undefined) result[key] = value[key];
   }
   if (value.summary && typeof value.summary === 'object') {

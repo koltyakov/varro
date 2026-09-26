@@ -7470,6 +7470,7 @@ export function MessageList() {
       parentID: session.parentID,
       title: session.title,
       time: { created: session.time.created },
+      cost: session.cost,
       tokens: session.tokens
         ? { input: session.tokens.input, output: session.tokens.output }
         : undefined,

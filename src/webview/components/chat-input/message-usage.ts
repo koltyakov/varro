@@ -134,6 +134,11 @@ export function getSessionTreeTokenBreakdown(
       snapshotTokens && snapshotTokens.total >= messageTokens.total
         ? snapshotTokens
         : messageTokens;
+    const cost = getSessionCost(
+      messagesBySession.get(sessionId) || [],
+      sessionsById.get(sessionId)
+    );
+    if (cost) tokens.cost = cost;
     if (sessionId === rootSessionId) {
       addTokenUsage(session, tokens);
       continue;
@@ -168,6 +173,7 @@ function emptyTokenUsage(): TokenUsage {
 }
 
 function addTokenUsage(target: TokenUsage, source: TokenUsage) {
+  if (source.cost) target.cost = (target.cost ?? 0) + source.cost;
   target.total += source.total;
   target.input += source.input;
   target.output += source.output;
@@ -202,6 +208,12 @@ type MergeableTokenBreakdown = Pick<
   'session' | 'subagents' | 'subagentCount'
 >;
 
+function mergeUsage(local: TokenUsage, complete: TokenUsage): TokenUsage {
+  const tokens = complete.total >= local.total ? complete : local;
+  const cost = Math.max(local.cost ?? 0, complete.cost ?? 0);
+  return cost === (tokens.cost ?? 0) ? tokens : { ...tokens, cost };
+}
+
 /**
  * Merges a server-side token breakdown over the one derived from locally loaded messages.
  *
@@ -218,14 +230,8 @@ export function mergeCompleteTokenBreakdown(
 
   return {
     ...local,
-    session:
-      complete.breakdown.session.total >= local.session.total
-        ? complete.breakdown.session
-        : local.session,
-    subagents:
-      complete.breakdown.subagents.total >= local.subagents.total
-        ? complete.breakdown.subagents
-        : local.subagents,
+    session: mergeUsage(local.session, complete.breakdown.session),
+    subagents: mergeUsage(local.subagents, complete.breakdown.subagents),
     subagentCount: Math.max(local.subagentCount, complete.breakdown.subagentCount),
   };
 }

@@ -12,6 +12,7 @@ import { validateFileDiffs } from './validate-diffs';
 export { formatDuration, formatTurnDuration, formatRelativeAge } from './time-format';
 
 export type TokenUsage = {
+  cost?: number;
   total: number;
   input: number;
   output: number;
@@ -58,6 +59,11 @@ export function formatCost(cost: number | undefined): string {
 
 export function sumSessionCost(messages: AssistantMessage[]): number {
   return messages.reduce((sum, msg) => sum + msg.cost, 0);
+}
+
+export function formatTurnCost(cost: number | undefined): string {
+  if (cost === undefined || !Number.isFinite(cost) || cost < 0.01) return '';
+  return cost.toFixed(2);
 }
 
 export function sumAssistantTokens(messages: AssistantMessage[]): TokenUsage {

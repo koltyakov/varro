@@ -591,7 +591,6 @@ export class OpenCodeProcess {
   private readonly processCleanupOperations = new WeakMap<ChildProcess, Promise<void>>();
   private readonly processResourceCleanupOperations = new WeakMap<ChildProcess, Promise<void>>();
   private compactionSettings: OpenCodeCompactionSettings;
-  private askAgentEnabled: boolean;
   private injectedConfigPath: string | null = null;
   private injectedConfigOwnerPid: number | null = null;
   private injectedConfigOperation: Promise<void> = Promise.resolve();
@@ -737,8 +736,7 @@ export class OpenCodeProcess {
     simulateMissingCli = false,
     compactionSettings?: Partial<OpenCodeCompactionSettings>,
     ownershipLeasePath = getManagedServerOwnershipLeasePath(port),
-    private readonly linuxProcRoot = '/proc',
-    askAgentEnabled = false
+    private readonly linuxProcRoot = '/proc'
   ) {
     const validatedPort = validateServerPort(port);
     this._port = validatedPort;
@@ -747,7 +745,6 @@ export class OpenCodeProcess {
     this.command = command?.trim() || '';
     this.simulateMissingCli = simulateMissingCli;
     this.compactionSettings = normalizeCompactionSettings(compactionSettings);
-    this.askAgentEnabled = askAgentEnabled;
     this.ownershipLeasePath = ownershipLeasePath;
     this.ownershipMarkerPath = `${ownershipLeasePath}.managed`;
     try {
@@ -885,6 +882,9 @@ export class OpenCodeProcess {
     this.portFallbackAttempts = 0;
     this.portInUseDetected = false;
     await this.cleanupInjectedConfigFile();
+    logger.info(
+      'Varro cannot inject its runtime-only Ask agent into an existing shared or externally managed OpenCode server. Only agents already configured on that server are available.'
+    );
   }
 
   async revalidateAdoptedManagedServer(): Promise<boolean> {
@@ -1359,7 +1359,7 @@ export class OpenCodeProcess {
       experimental: { continue_loop_on_deny: true },
     };
     if (Object.keys(compaction).length > 0) config.compaction = compaction;
-    if (this.askAgentEnabled && !(await this.hasConfiguredAskAgent())) {
+    if (!(await this.hasConfiguredAskAgent())) {
       config.agent = { ask: ASK_AGENT };
     }
     return `${JSON.stringify(config, null, 2)}\n`;
@@ -1436,46 +1436,6 @@ export class OpenCodeProcess {
 
   hasInjectedCompactionOverride() {
     return this.compactionSettings.auto !== null || this.compactionSettings.reserved !== null;
-  }
-
-  async updateAskAgentEnabled(enabled: boolean, callbacks: UpdateCompactionSettingsCallbacks) {
-    const changed = this.askAgentEnabled !== enabled;
-    this.askAgentEnabled = enabled;
-    await this.rewriteInjectedConfigFile();
-    if (!changed || callbacks.status.state !== 'running') return;
-    if (this.foreignActiveOwnership) await this.refreshManagedServerOwnership();
-    if (!this._managedProcess) {
-      logger.warn(
-        'Varro Ask agent changes can only be reapplied automatically for a Varro-managed OpenCode server'
-      );
-      if (!this.autoStart) {
-        await vscode.window.showInformationMessage(
-          'The Varro Ask agent cannot be injected in attach-only mode. Configure the agent on the OpenCode server host or inside the container.'
-        );
-      }
-      return;
-    }
-    if (!this.injectedConfigPath) {
-      if (getEnvironmentValue(process.env, 'OPENCODE_CONFIG')?.trim()) {
-        logger.warn(
-          'Preserving caller-provided OPENCODE_CONFIG; the Varro Ask agent cannot be injected for this managed server'
-        );
-        return;
-      }
-      if (enabled) {
-        await callbacks.restartManagedServerForCompactionSettings();
-      }
-      return;
-    }
-    try {
-      await callbacks.request('POST', '/global/dispose');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.warn(
-        `Failed to dispose OpenCode instances after Ask agent setting change: ${message}`
-      );
-      await callbacks.restartManagedServerForCompactionSettings();
-    }
   }
 
   async updateCompactionSettings(

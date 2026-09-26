@@ -17,6 +17,7 @@ import { requireIsolatedTestServer } from './ai-test-isolation.mjs';
 import { AiOpenCodeClient } from './ai-opencode-client.mjs';
 import { normalizeCapturedEvents, savePlaybackCapture } from './ai-session-playback.mjs';
 import { installObserver } from './ai-streaming.mjs';
+import { goToLatest } from './ai-fuzzy-navigation.mjs';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_MODEL = 'openai/gpt-5.6-luna';
@@ -3900,8 +3901,11 @@ async function runLive(options) {
         };
         await writeJsonAtomic(manifestPath, manifest);
       }
-      await cdp.click('[aria-label="Scroll to latest message"]');
-      await cdp.key('.interactive-list', 'End');
+      const history = await client.messages(tracked.id, 1000);
+      const latest = history.at(-1);
+      if (latest) {
+        await goToLatest(cdp, { sessionId: tracked.id, messageId: latest.info.id });
+      }
       const selectedModel = await cdp.selectExactModel(requestedModel);
       const selectedPermissionMode = ['AI-07', 'AI-08'].includes(scenario)
         ? await cdp.selectPermissionMode('full')

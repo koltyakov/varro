@@ -61,3 +61,25 @@ describe('paused session duration', () => {
     });
   });
 });
+
+describe('session summary costs', () => {
+  it('preserves fractional costs from full histories with descendant token snapshots', async () => {
+    const messages = [{ info: { role: 'assistant', cost: 0.004, tokens: { input: 100 } } }];
+    const descendants = [
+      {
+        id: 'child',
+        tokens: { input: 900 },
+        messages: [{ info: { role: 'assistant', cost: 0.066, tokens: { input: 800 } } }],
+      },
+    ];
+    const local = sessionSummary.fromLocal({ messages, descendants });
+    const remote = await sessionSummary.fromRemote([], messages, descendants, async () =>
+      descendants.map((child) => child.messages)
+    );
+    for (const summary of [local, remote]) {
+      expect(summary.tokenBreakdown?.session.cost).toBe(0.004);
+      expect(summary.tokenBreakdown?.subagents.cost).toBe(0.066);
+      expect(summary.tokenBreakdown?.subagents.input).toBe(900);
+    }
+  });
+});

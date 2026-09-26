@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { isDeepStrictEqual } from 'node:util';
+import { V2_REPLAY_EVENTS, V2ReplayProjection } from './ai-streaming-v2.mjs';
 
 const EVENT_TYPES = new Set([
   'message.updated',
@@ -16,6 +17,7 @@ const EVENT_TYPES = new Set([
   'session.idle',
   'todo.updated',
   'session.diff',
+  ...V2_REPLAY_EVENTS,
 ]);
 const MAX_SUBSCRIBER_BUFFER_BYTES = 8 * 1024 * 1024;
 
@@ -89,7 +91,10 @@ export async function createStreamingServer({ capture, timeline, directory, chec
 
   function sessionInfo(info) {
     if (info?.id !== sourceID) throw new Error('Foreign session info');
-    const mapped = remap(info);
+    // Ancestry is metadata, not a replay routing destination. Detach only these
+    // session-level fields; nested foreign routing in messages/events still fails.
+    const { parentID: _parentID, fork: _fork, ...detached } = info;
+    const mapped = remap(detached);
     delete mapped.parentID;
     return { ...mapped, id: sessionID, projectID, directory };
   }
@@ -126,13 +131,22 @@ export async function createStreamingServer({ capture, timeline, directory, chec
 
   function mapEvent(event) {
     if (!EVENT_TYPES.has(event?.type)) throw new Error(`Unsupported capture event: ${event?.type}`);
-    const mapped = remap(event);
+    // Validate and detach session ancestry before recursively validating routing.
+    const mapped =
+      event.type === 'session.updated'
+        ? {
+            ...remap({ ...event, properties: { ...event.properties, info: null } }),
+            properties: {
+              ...remap({ ...event.properties, info: null }),
+              info: sessionInfo(event.properties.info),
+            },
+          }
+        : remap(event);
     // Capture sequence numbers belong to a different stream and must not dedupe replay events.
     delete mapped.id;
     delete mapped.seq;
     delete mapped.sequenceOnly;
-    if (event.type === 'session.updated')
-      mapped.properties.info = sessionInfo(event.properties.info);
+    if ('workspaceDirectory' in mapped) mapped.workspaceDirectory = directory;
     if (event.type === 'message.updated')
       mapped.properties.info = messageInfo(event.properties.info);
     const routing =
@@ -152,6 +166,7 @@ export async function createStreamingServer({ capture, timeline, directory, chec
     diff: remap(capture.initialDiff ?? []),
   };
   const expectedMessages = messagesSnapshot(capture.finalMessages);
+  const v2 = new V2ReplayProjection(expectedMessages);
   for (const entry of capture.events ?? []) mapEvent(entry.event);
   let durationMs = 0;
   const entries = timeline.map((entry) => {
@@ -178,6 +193,10 @@ export async function createStreamingServer({ capture, timeline, directory, chec
 
   // Keep the reducer private to this server; preflight and delivery use identical rules.
   function apply(state, event) {
+    if (V2_REPLAY_EVENTS.has(event.type)) {
+      v2.apply(state, event);
+      return;
+    }
     const p = event.properties;
     const messageID = p.messageID ?? p.part?.messageID ?? p.info?.id;
     const message = state.messages.find((entry) => entry.info.id === messageID);

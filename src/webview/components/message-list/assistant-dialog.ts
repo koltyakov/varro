@@ -14,6 +14,7 @@ import type { TaskSessionInfo, TaskSessionLookup } from '../../lib/task-session'
 import type { AssistantMessage, MessageEntry } from '../../types';
 import { pauseCompletedAt } from '../../../shared/session-pauses';
 import type { SessionPauseBoundary } from '../../../shared/session-pauses';
+import { hasUserMessageContent, parseUserMessageContent } from '../message/UserMessageContent';
 
 export type AssistantDialogSummaryInfo = {
   durationMs: number;
@@ -21,6 +22,7 @@ export type AssistantDialogSummaryInfo = {
   promptMessageId?: string;
   inputTokens: number;
   outputTokens: number;
+  cost?: number;
   agentCount: number;
   interrupted?: boolean;
   permissionRejected?: boolean;
@@ -122,15 +124,15 @@ export function getAssistantDialogSummaryMap(
       return;
     }
 
-    if (targetMessageIds && !targetMessageIds.has(lastMessage.id)) {
-      resetCurrentDialog();
-      return;
-    }
-
     if (
       args?.pausedAt === undefined &&
       lastEntry?.parts.some((part) => part.type === 'tool' && part.state.status === 'running')
     ) {
+      resetCurrentDialog();
+      return;
+    }
+
+    if (targetMessageIds && !targetMessageIds.has(lastMessage.id)) {
       resetCurrentDialog();
       return;
     }
@@ -185,6 +187,7 @@ export function getAssistantDialogSummaryMap(
       promptMessageId: currentUserRequestId ?? undefined,
       inputTokens: tokens.input,
       outputTokens: tokens.output,
+      cost: tokens.cost,
       agentCount,
       interrupted: interrupted ? true : undefined,
       permissionRejected: permissionRejected ? true : undefined,
@@ -199,6 +202,11 @@ export function getAssistantDialogSummaryMap(
     if (!isAssistantMessage(entry.info)) {
       if (options?.primarySessionId && entry.info.sessionID !== options.primarySessionId) {
         continue;
+      }
+      if (entry.info.role === 'user') {
+        const parsed = parseUserMessageContent(entry.parts);
+        // Recovery and background-work notices continue the existing request.
+        if (parsed.automaticActions.length > 0 && !hasUserMessageContent(parsed)) continue;
       }
       flush({
         nextUserRequestCreated: entry.info.role === 'user' ? entry.info.time.created : undefined,
@@ -313,8 +321,23 @@ function sumAssistantDialogTokens(
     tokens.cacheRead += session.tokens.cache?.read || 0;
     tokens.cacheWrite += session.tokens.cache?.write || 0;
   }
+  const costsBySession = new Map<string, number>();
+  for (const message of aggregateMessages) {
+    if (!Number.isFinite(message.cost) || message.cost <= 0) continue;
+    costsBySession.set(
+      message.sessionID,
+      (costsBySession.get(message.sessionID) ?? 0) + message.cost
+    );
+  }
+  for (const sessionId of childSessionIds) {
+    const cost = sessionsById.get(sessionId)?.cost;
+    if (cost === undefined || !Number.isFinite(cost) || cost <= 0) continue;
+    costsBySession.set(sessionId, Math.max(costsBySession.get(sessionId) ?? 0, cost));
+  }
+  const cost = [...costsBySession.values()].reduce((sum, value) => sum + value, 0);
   return {
     ...tokens,
+    cost: cost > 0 ? cost : undefined,
     input: tokens.input + tokens.cacheWrite,
     output: tokens.output + tokens.reasoning,
   };

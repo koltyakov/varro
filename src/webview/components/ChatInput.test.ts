@@ -2219,9 +2219,10 @@ describe('ChatInput', () => {
     const costRow = container?.querySelector('.context-popup-cost-row');
     expect(costRow?.querySelector('.context-popup-row-label')?.textContent).toBe('Cost');
     expect(costRow?.querySelector('.context-popup-row-value')?.textContent).toBe('$0.01');
+    expect(costRow?.querySelector('.context-popup-cost-info')).toBeNull();
   });
 
-  it('loads tokens for subagent sessions whose messages and snapshots are not loaded', async () => {
+  it('loads tokens and costs for subagent sessions whose messages and snapshots are not loaded', async () => {
     setupModelState();
     setState('activeSessionId', 'session-1');
     setState('sessions', [
@@ -2236,6 +2237,7 @@ describe('ChatInput', () => {
       tokens: 1_400,
       tokenBreakdown: {
         session: {
+          cost: 0.004,
           total: 500,
           input: 400,
           output: 100,
@@ -2244,6 +2246,7 @@ describe('ChatInput', () => {
           cacheWrite: 0,
         },
         subagents: {
+          cost: 0.066,
           total: 900,
           input: 700,
           output: 100,
@@ -2274,6 +2277,25 @@ describe('ChatInput', () => {
     expect(client.varro.session.diffSummary).toHaveBeenCalledWith('session-1', undefined, {
       directory: '/repo',
     });
+    expect(container?.querySelector('.context-popup-cost-row')?.textContent).toBe('Cost$0.07');
+    expect(container?.querySelector('.toolbar-session-cost')?.textContent).toBe('0.07');
+    expect(container?.querySelector('.toolbar-session-cost')?.getAttribute('aria-label')).toBe(
+      'Overall cost: $0.07'
+    );
+    const costInfo = container?.querySelector<HTMLElement>('.context-popup-cost-info');
+    expect(costInfo?.tabIndex).toBe(0);
+    costInfo?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.waitFor(
+      () => {
+        expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+          'Cost includes all subagents.'
+        );
+      },
+      { timeout: 2_000 }
+    );
+    costInfo?.dispatchEvent(new MouseEvent('mouseleave'));
+    container?.querySelector<HTMLButtonElement>('.context-popup-section-toggle')?.click();
+    expect(container?.querySelectorAll('.context-popup-cost-row')).toHaveLength(1);
 
     const nested = container?.querySelector<HTMLInputElement>('.context-breakdown-nested input');
     expect(nested?.checked).toBe(true);

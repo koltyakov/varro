@@ -78,6 +78,130 @@ async function waitFor(predicate) {
   }
 }
 
+test('native v2 capture detaches fork metadata and exposes only delivered parallel tool state', async (t) => {
+  const sessionID = 'native';
+  const user = { info: { id: 'u', sessionID, role: 'user', time: { created: 1 } }, parts: [] };
+  const assistant = {
+    info: {
+      id: 'a',
+      sessionID,
+      role: 'assistant',
+      parentID: 'u',
+      time: { created: 2, completed: 9 },
+      finish: 'stop',
+      path: { cwd: directory, root: directory },
+    },
+    parts: ['one', 'two'].map((id) => ({
+      id,
+      sessionID,
+      messageID: 'a',
+      type: 'tool',
+      callID: id,
+      tool: 'read',
+      state: {
+        status: 'completed',
+        input: { path: id },
+        output: `result ${id}`,
+        time: { start: 4, end: 8 },
+      },
+    })),
+  };
+  const native = (name, props = {}) => event(`session.next.${name}`, { sessionID, ...props });
+  const events = [
+    native('prompted', { messageID: 'u' }),
+    native('step.started', {
+      assistantMessageID: 'a',
+      agent: 'build',
+      model: { providerID: 'test', modelID: 'test' },
+      started: 2,
+    }),
+    ...['one', 'two'].flatMap((callID) => [
+      native('tool.input.started', { assistantMessageID: 'a', callID, name: 'read' }),
+      native('tool.called', {
+        assistantMessageID: 'a',
+        callID,
+        input: { path: callID },
+        timestamp: 4,
+      }),
+    ]),
+    ...['two', 'one'].map((callID) =>
+      native('tool.success', {
+        assistantMessageID: 'a',
+        callID,
+        output: `result ${callID}`,
+        timestamp: 8,
+      })
+    ),
+    native('step.ended', { assistantMessageID: 'a', finish: 'stop', timestamp: 9 }),
+  ];
+  const capture = {
+    session: { id: sessionID, fork: { sessionID: 'foreign-parent' } },
+    initialMessages: [],
+    finalMessages: [user, assistant],
+    events: events.map((item) => ({ event: item })),
+  };
+  const original = structuredClone(capture);
+  const server = await createStreamingServer({
+    capture,
+    directory,
+    timeline: events.map((item) => ({ delayMs: 0, event: item })),
+    checkpoints: [2, 6, 7],
+  });
+  t.after(() => server.close());
+  const stream = await connect(server, t);
+  const running = server.start();
+  await waitFor(() => server.getResult().state === 'paused');
+  const read = async () =>
+    (await fetch(`${server.url}/session/${server.getResult().sessionID}/message`)).json();
+  assert.deepEqual((await read())[1].parts, []);
+  assert.equal((await read())[1].info.time.completed, undefined);
+  server.resume();
+  await waitFor(() => server.getResult().state === 'paused');
+  assert.deepEqual(
+    (await read())[1].parts.map((p) => p.state.status),
+    ['running', 'running']
+  );
+  assert.ok((await read())[1].parts.every((p) => p.state.output === undefined));
+  // Reconnection sees the same partial REST state and does not restart delivery.
+  stream.response.destroy();
+  await connect(server, t);
+  assert.equal((await read())[1].parts[0].state.status, 'running');
+  server.resume();
+  await waitFor(() => server.getResult().state === 'paused');
+  assert.deepEqual(
+    (await read())[1].parts.map((p) => p.state.status),
+    ['running', 'completed']
+  );
+  server.resume();
+  assert.equal((await running).canonicalMatch, true);
+  assert.deepEqual(capture, original);
+  const bad = structuredClone(capture);
+  bad.events[0].event.properties.untrusted = { sessionID: 'foreign-child' };
+  await assert.rejects(
+    createStreamingServer({ capture: bad, directory, timeline: [] }),
+    /Foreign session routing/
+  );
+});
+
+test('session updates detach fork ancestry without accepting foreign nested event routing', async (t) => {
+  const input = fixture();
+  const session = {
+    ...input.capture.session,
+    fork: { sessionID: 'parent', messageID: 'fork-point' },
+  };
+  input.timeline.unshift({ delayMs: 0, event: event('session.updated', { info: session }) });
+  const server = await createStreamingServer(input);
+  t.after(() => server.close());
+  await connect(server, t);
+  assert.equal((await server.start()).canonicalMatch, true);
+  const response = await fetch(`${server.url}/session/${server.getResult().sessionID}`);
+  const current = await response.json();
+  assert.equal(current.fork, undefined);
+  assert.equal(current.parentID, undefined);
+  session.metadata = { sessionID: 'foreign' };
+  await assert.rejects(createStreamingServer(input), /Foreign session routing/);
+});
+
 test('checkpoints stop exact event bursts, preserve REST state, and resume without catch-up', async (t) => {
   const input = fixture();
   const server = await createStreamingServer({ ...input, checkpoints: [0, 1, 2] });

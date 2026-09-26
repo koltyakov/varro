@@ -245,7 +245,6 @@ export class OpenCodeServer extends EventEmitter {
     simulateMissingCli = false,
     compactionSettings?: Partial<OpenCodeCompactionSettings>,
     ownershipLeasePath?: string,
-    askAgentEnabled = false,
     private readonly secrets?: vscode.SecretStorage
   ) {
     super();
@@ -255,9 +254,7 @@ export class OpenCodeServer extends EventEmitter {
       command,
       simulateMissingCli,
       compactionSettings,
-      ownershipLeasePath,
-      undefined,
-      askAgentEnabled
+      ownershipLeasePath
     );
     this.transport = new OpenCodeTransport({
       getUrl: () => this.url,
@@ -2183,16 +2180,6 @@ export class OpenCodeServer extends EventEmitter {
 
   async updateCompactionSettings(value?: Partial<OpenCodeCompactionSettings>) {
     await this.processManager.updateCompactionSettings(value, {
-      status: this._status,
-      request: (method, path, body) =>
-        body === undefined ? this.request(method, path) : this.request(method, path, body),
-      restartManagedServerForCompactionSettings: () =>
-        this.restartManagedServerForCompactionSettings(),
-    });
-  }
-
-  async updateAskAgentEnabled(enabled: boolean) {
-    await this.processManager.updateAskAgentEnabled(enabled, {
       status: this._status,
       request: (method, path, body) =>
         body === undefined ? this.request(method, path) : this.request(method, path, body),

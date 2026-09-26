@@ -1450,6 +1450,26 @@ body.vscode-light
   transition: none;
 }
 
+.assistant-dialog-summary .model-change-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.assistant-dialog-summary-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.assistant-dialog-summary-metric .ui-icon {
+  opacity: 0.7;
+}
+
+.assistant-dialog-summary-cost {
+  margin-left: -2px;
+}
+
 @container (max-width: 400px) {
   .assistant-dialog-summary-token-budget {
     display: none;
@@ -3046,7 +3066,8 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
   justify-content: flex-end;
 }
 
-.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-mcp-count + .context-anchor {
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-mcp-count + .context-anchor,
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-session-cost + .context-anchor {
   margin-left: 4px;
 }
 

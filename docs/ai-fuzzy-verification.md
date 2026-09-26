@@ -194,7 +194,22 @@ production server. Verification uses `lsof` on macOS/Linux. On Windows it uses P
 `Get-NetTCPConnection` for listener ownership and the read-only Restart Manager resource query for
 database ownership; it never invokes shutdown or restart APIs.
 
-Start a dedicated server in a tracked terminal, for example with an available port:
+`npm run ai:vscode` now starts a dedicated server automatically when `VARRO_AI_SERVER_URL` is
+unset. It uses `VARRO_OPENCODE_TEST_BINARY`, or discovers `opencode2` then `opencode`, and copies
+the host's global provider/model configuration and provider credentials into a fresh directory under
+`artifacts/ai-test-data/`. V1 credentials come from `auth.json`; v2 credentials come from a read-only
+query of the host database's credential table. No session rows are copied. The v2 server initializes
+its own schema before credentials are inserted while it is stopped, then restarts with those accounts.
+The copied files have owner-only permissions. The launcher prints the server URL and data directory;
+use those as `VARRO_AI_SERVER_URL` and `VARRO_AI_DATA_DIR` for subsequent controller commands.
+Load `OPENCODE_SERVER_USERNAME` and `OPENCODE_SERVER_PASSWORD` from the printed owner-only
+`controller-env.json` into those commands' environment without printing their values.
+The editor also inherits Varro's saved model-list preferences from the standard VS Code profile.
+Set `VARRO_AI_HOST_USER_DATA` to use a different VS Code user-data directory.
+Stop the server PID recorded in launch metadata during cleanup and remove its test credential copies.
+An explicit server URL and replay servers retain their supplied configuration.
+
+For a manually managed server, start it in a tracked terminal, for example with an available port:
 
 ```sh
 XDG_DATA_HOME="$PWD/artifacts/ai-test-data/data" \
@@ -206,10 +221,11 @@ opencode serve --hostname 127.0.0.1 --port 49001
 ```
 
 Reuse the user's existing OpenCode provider connection during isolated setup. A fresh `XDG_DATA_HOME`
-also isolates `auth.json`, so provision only the required provider entry into the verified test data
+also isolates credentials, so provision only the required provider entry into the verified test data
 directory with owner-only permissions, without printing its contents. Record the test copy for removal
 during cleanup. This is routine test setup; do not ask the user to authenticate again when an existing
 connection is available. Never modify the source credential or copy production session storage.
+Copying `auth.json` alone does not provision a v2 server; use the automatic launcher above for v2.
 Select the required model in the isolated editor and verify it with a small marked request. A missing
 provider in `/provider`'s `connected` list alone does not establish an authentication failure. If selection
 or the request fails, inspect the isolated setup and exact error before asking the user for a missing

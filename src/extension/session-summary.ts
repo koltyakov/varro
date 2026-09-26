@@ -40,10 +40,9 @@ async function summarizeRemoteSession(
   const messageLists = await loadDescendantMessages();
   for (let index = 0; index < descendants.length; index += 1) {
     const snapshot = summarizeTokenUsageRecord(asRecord(descendants[index]?.tokens));
-    addSessionTokenUsage(
-      subagents,
-      snapshot.total > 0 ? snapshot : summarizeSessionTokenUsage(messageLists[index])
-    );
+    const messageUsage = summarizeSessionTokenUsage(messageLists[index]);
+    if (messageUsage.cost) snapshot.cost = messageUsage.cost;
+    addSessionTokenUsage(subagents, snapshot.total > 0 ? snapshot : messageUsage);
   }
   const tokenBreakdown = {
     session,
@@ -294,6 +293,10 @@ function summarizeSessionTokenUsage(value: unknown): SessionTokenUsage {
   for (const entry of value) {
     const info = asRecord(asRecord(entry)?.info);
     if (info?.role !== 'assistant') continue;
+    const cost = info.cost;
+    if (typeof cost === 'number' && Number.isFinite(cost) && cost > 0) {
+      usage.cost = (usage.cost ?? 0) + cost;
+    }
     const tokens = asRecord(info.tokens);
     if (!tokens) continue;
 
@@ -321,10 +324,9 @@ function summarizeLocalSession(
   for (const descendant of data.descendants) {
     const descendantMessages = projectMessageHistory(descendant.messages);
     const snapshot = summarizeTokenUsageRecord(asRecord(descendant.tokens));
-    addSessionTokenUsage(
-      subagents,
-      snapshot.total > 0 ? snapshot : summarizeSessionTokenUsage(descendantMessages)
-    );
+    const messageUsage = summarizeSessionTokenUsage(descendantMessages);
+    if (messageUsage.cost) snapshot.cost = messageUsage.cost;
+    addSessionTokenUsage(subagents, snapshot.total > 0 ? snapshot : messageUsage);
     contextSessions.push({
       messages: descendantMessages,
       characters: descendant.contextCharacters,
@@ -440,6 +442,7 @@ function getSessionTokensExcludingCacheReads(usage: SessionTokenUsage): number {
 }
 
 function addSessionTokenUsage(target: SessionTokenUsage, source: SessionTokenUsage) {
+  if (source.cost) target.cost = (target.cost ?? 0) + source.cost;
   target.total += source.total;
   target.input += source.input;
   target.output += source.output;
