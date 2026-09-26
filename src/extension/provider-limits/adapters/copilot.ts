@@ -18,6 +18,8 @@ import {
   readBoundedResponseJson,
   toLabel,
   unsupportedProviderStatus,
+  providerErrorStatus,
+  VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const COPILOT_USER_ENDPOINT = 'https://api.github.com/copilot_internal/user';
@@ -76,7 +78,7 @@ export function createCopilotAdapter(): ProviderLimitAdapter {
           headers: {
             Accept: 'application/json',
             Authorization: `Bearer ${token}`,
-            'User-Agent': 'Varro/0.1.0',
+            'User-Agent': VARRO_USER_AGENT,
             'Editor-Version': 'vscode/1.91.0',
             'Editor-Plugin-Version': 'varro/0.1.0',
           },
@@ -93,14 +95,12 @@ export function createCopilotAdapter(): ProviderLimitAdapter {
         }
 
         if (!response.ok) {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: `GitHub Copilot quota endpoint returned ${response.status}`,
-          };
+            `GitHub Copilot quota endpoint returned ${response.status}`
+          );
         }
 
         const payload = await readBoundedResponseJson(response);
@@ -127,14 +127,12 @@ export function createCopilotAdapter(): ProviderLimitAdapter {
         if (planName) status.planName = planName;
         return status;
       } catch {
-        return {
-          providerID: provider.id,
+        return providerErrorStatus(
+          provider.id,
           modelID,
-          status: 'error',
-          source: 'provider',
           checkedAt,
-          note: 'Failed to poll the GitHub Copilot quota endpoint',
-        };
+          'Failed to poll the GitHub Copilot quota endpoint'
+        );
       }
     },
   };

@@ -1516,7 +1516,7 @@ test('reveals user and sticky message timestamps on hover', async ({ page }) => 
   const workedSummary = page.locator('.assistant-dialog-summary').last();
   const completedTime = workedSummary.locator('.assistant-dialog-summary-completed-time');
   const tokenBudget = workedSummary.locator('.assistant-dialog-summary-token-budget');
-  await expect(workedSummary).toContainText('Worked for');
+  await expect(workedSummary.getByLabel('Worked for', { exact: true })).toBeVisible();
   await expect(tokenBudget).not.toHaveCSS('display', 'none');
   await expect(completedTime).toHaveCSS('opacity', '0');
   await expect(completedTime).toHaveCSS('filter', 'blur(3px)');

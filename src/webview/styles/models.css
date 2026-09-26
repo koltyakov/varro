@@ -1181,6 +1181,11 @@
   box-shadow: inset 0 0 0 1px var(--color-vscode-accent);
 }
 
+.models-model-drag-spacer {
+  flex-shrink: 0;
+  width: 10px;
+}
+
 .models-model-drag-handle {
   display: inline-flex;
   align-items: center;

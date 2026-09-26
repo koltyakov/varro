@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import type { Message } from '../types';
 
 type ProviderConnectionRequest = {
   id: number;
@@ -41,6 +42,33 @@ export function markProviderAuthFailure(
 
 export function providerRequiresReconnection(providerID: string) {
   return Boolean(providerAuthFailures()[providerID]);
+}
+
+/** Successful history and live completions supersede earlier authentication failures. */
+export function recordProviderAuthSuccess(info: Message) {
+  if (info.role !== 'assistant' || info.error || !info.time.completed) return;
+  const providerID = info.providerID.trim();
+  if (!providerID) return;
+  const restoredThrough = Math.max(
+    providerAuthRestoredThrough.get(providerID) ?? -Infinity,
+    info.time.created
+  );
+  providerAuthRestoredThrough.set(providerID, restoredThrough);
+  setProviderAuthFailures((current) => {
+    const failures = current[providerID];
+    if (!failures) return current;
+    const remaining = failures.filter((id) => {
+      const createdAt = providerAuthFailureCreatedAt.get(id);
+      if (createdAt === undefined || createdAt > restoredThrough) return true;
+      resolvedAuthFailureMessageIDs.add(id);
+      return false;
+    });
+    if (remaining.length === failures.length) return current;
+    const next = { ...current };
+    if (remaining.length) next[providerID] = remaining;
+    else delete next[providerID];
+    return next;
+  });
 }
 
 export function providerAuthRestoredForMessage(messageID: string) {

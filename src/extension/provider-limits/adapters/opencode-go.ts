@@ -8,6 +8,8 @@ import {
   getString,
   readBoundedResponseJson,
   unsupportedProviderStatus,
+  providerErrorStatus,
+  VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const OPENCODE_GO_USAGE_ENDPOINT = 'https://opencode.ai/zen/go/v1/usage';
@@ -35,7 +37,7 @@ export function createOpenCodeGoAdapter(): ProviderLimitAdapter {
           headers: {
             Accept: 'application/json',
             Authorization: `Bearer ${apiKey}`,
-            'User-Agent': 'Varro/0.1.0',
+            'User-Agent': VARRO_USER_AGENT,
           },
           signal: AbortSignal.timeout(10_000),
         });
@@ -59,14 +61,12 @@ export function createOpenCodeGoAdapter(): ProviderLimitAdapter {
         }
 
         if (!response.ok) {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: `OpenCode Go usage endpoint returned ${response.status}`,
-          };
+            `OpenCode Go usage endpoint returned ${response.status}`
+          );
         }
 
         const windows = extractOpenCodeGoWindows(await readBoundedResponseJson(response));
@@ -90,14 +90,12 @@ export function createOpenCodeGoAdapter(): ProviderLimitAdapter {
           note: 'Polled OpenCode Go usage endpoint',
         };
       } catch {
-        return {
-          providerID: provider.id,
+        return providerErrorStatus(
+          provider.id,
           modelID,
-          status: 'error',
-          source: 'provider',
           checkedAt,
-          note: 'Failed to poll the OpenCode Go usage endpoint',
-        };
+          'Failed to poll the OpenCode Go usage endpoint'
+        );
       }
     },
   };

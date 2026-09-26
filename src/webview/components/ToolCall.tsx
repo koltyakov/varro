@@ -26,8 +26,9 @@ import {
   showFileDiffs,
 } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
+import { useSecondClock } from '../lib/clock';
 import { formatCommandDisplay } from '../lib/command-display';
-import { formatDuration, formatNumber } from '../lib/message-metrics';
+import { formatCost, formatDuration, formatNumber } from '../lib/message-metrics';
 import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
 import { prepareForMessageBlockRemoval } from '../lib/message-list-layout';
 import type { FileChange } from '../lib/tool-file-change';
@@ -1487,12 +1488,6 @@ function GenericToolCall(props: {
       ['reasoning', reasoning || 'default'],
     ];
   });
-  const detailInputEntries = createMemo(() => {
-    if (!isTask()) return props.inputEntries;
-    const visibleEntries = props.inputEntries.filter(([key]) => key !== 'task_id');
-    const keys = new Set(visibleEntries.map(([key]) => key));
-    return [...visibleEntries, ...taskExecutionEntries().filter(([key]) => !keys.has(key))];
-  });
   const taskTokenUsage = createMemo(() => {
     const sessionId = taskSessionId();
     if (!sessionId) return null;
@@ -1515,6 +1510,35 @@ function GenericToolCall(props: {
     }
 
     return { input, output };
+  });
+  const taskCost = createMemo(() => {
+    const sessionId = taskSessionId();
+    if (!sessionId) return '';
+    let messageCost = 0;
+    for (const entry of appState.messages) {
+      const info = entry.info;
+      if (info.role !== 'assistant' || info.sessionID !== sessionId) continue;
+      if (Number.isFinite(info.cost) && info.cost > 0) messageCost += info.cost;
+    }
+    const sessionCost = appState.sessions.find((session) => session.id === sessionId)?.cost ?? 0;
+    return formatCost(Math.max(messageCost, Number.isFinite(sessionCost) ? sessionCost : 0));
+  });
+  const detailInputEntries = createMemo(() => {
+    if (!isTask()) return props.inputEntries;
+    const visibleEntries = props.inputEntries.filter(
+      ([key]) => key !== 'task_id' && key !== 'cost'
+    );
+    const keys = new Set(visibleEntries.map(([key]) => key));
+    const entries = [
+      ...visibleEntries,
+      ...taskExecutionEntries().filter(([key]) => !keys.has(key)),
+    ];
+    const cost = taskCost();
+    if (cost) {
+      const reasoningIndex = entries.findIndex(([key]) => key === 'reasoning');
+      entries.splice(reasoningIndex < 0 ? entries.length : reasoningIndex + 1, 0, ['cost', cost]);
+    }
+    return entries;
   });
   const taskRetryStatus = () => {
     if (props.state.status !== 'running') return null;
@@ -1585,7 +1609,6 @@ function GenericToolCall(props: {
   };
   const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
   const searchResultCount = () => getSearchResultCount(props.tool.tool, props.state);
-  const [now, setNow] = createSignal(Date.now());
   const pendingStartedAt = Date.now();
   const hasRunningDuration = () => isTask() || isBash() || isApplyPatchTool(props.tool.tool);
   const durationStartedAt = () => {
@@ -1599,12 +1622,7 @@ function GenericToolCall(props: {
   onMount(() => {
     if (isTask()) onCleanup(retainTaskActivityAltListener());
   });
-  createEffect(() => {
-    if (durationStartedAt() === null) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    onCleanup(() => clearInterval(timer));
-  });
+  const now = useSecondClock(() => durationStartedAt() !== null);
   const runningDurationLabel = () => {
     const startedAt = durationStartedAt();
     if (startedAt === null) return null;

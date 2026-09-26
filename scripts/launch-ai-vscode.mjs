@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireIsolatedTestServer, testServerOrigin } from './ai-test-isolation.mjs';
+import { startAiTestServer } from './ai-test-server.mjs';
+import { copyHostModelPreferences } from './ai-test-host-settings.mjs';
 
 import {
   executeVscodeCommand,
@@ -48,7 +50,21 @@ const executable = await resolveVscodeExecutable();
 const workspace = path.resolve(process.env.VARRO_AI_WORKSPACE?.trim() || projectRoot);
 await access(workspace);
 const replayUrl = process.env.VARRO_AI_REPLAY_URL;
-const testServerUrl = testServerOrigin(replayUrl ?? process.env.VARRO_AI_SERVER_URL);
+const managedServer =
+  !replayUrl && !process.env.VARRO_AI_SERVER_URL ? await startAiTestServer(workspace) : undefined;
+const testServerUrl = testServerOrigin(
+  replayUrl ?? process.env.VARRO_AI_SERVER_URL ?? managedServer?.url
+);
+// A failed editor launch must not leave its automatically provisioned server running.
+let launchComplete = false;
+process.once('beforeExit', async () => {
+  if (!launchComplete) await managedServer?.stop();
+});
+process.once('uncaughtException', async (error) => {
+  await managedServer?.stop();
+  process.stderr.write(`${error.stack || error.message}\n`);
+  process.exit(1);
+});
 let isolation;
 if (replayUrl) {
   const response = await fetch(new URL('/varro/test-isolation', testServerUrl), {
@@ -59,7 +75,8 @@ if (replayUrl) {
     throw new Error('The replay endpoint is not a read-only replay server');
   }
 } else {
-  isolation = await requireIsolatedTestServer(testServerUrl, workspace);
+  isolation =
+    managedServer?.isolation ?? (await requireIsolatedTestServer(testServerUrl, workspace));
 }
 // Keep this short because macOS limits local IPC socket paths to roughly 103 bytes.
 const profileRoot = await mkdtemp(path.join(os.tmpdir(), 'vfz-'));
@@ -68,6 +85,16 @@ const extensions = path.join(profileRoot, 'e');
 await mkdir(userData);
 await mkdir(extensions);
 await mkdir(path.join(userData, 'User'));
+if (managedServer) {
+  const hostUserData =
+    process.env.VARRO_AI_HOST_USER_DATA ||
+    (process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library/Application Support/Code')
+      : process.platform === 'win32'
+        ? path.join(process.env.APPDATA || '', 'Code')
+        : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'Code'));
+  await copyHostModelPreferences(hostUserData, userData);
+}
 await writeFile(
   path.join(userData, 'User/settings.json'),
   JSON.stringify({
@@ -89,7 +116,7 @@ environment.VARRO_TEST_SERVER_URL = testServerUrl;
 environment.XDG_DATA_HOME = isolation?.xdgDataHome ?? path.join(profileRoot, 'data');
 environment.XDG_STATE_HOME = path.join(profileRoot, 'state');
 environment.XDG_CACHE_HOME = path.join(profileRoot, 'cache');
-environment.XDG_CONFIG_HOME = path.join(profileRoot, 'config');
+environment.XDG_CONFIG_HOME = managedServer?.configHome ?? path.join(profileRoot, 'config');
 environment.OPENCODE_DB = isolation?.sourceDatabase ?? path.join(profileRoot, 'opencode.db');
 environment.OPENCODE_PID = '';
 
@@ -210,9 +237,11 @@ const metadata = await writeVscodeLaunchMetadata(metadataPath, {
 });
 metadata.testServerUrl = testServerUrl;
 metadata.isolation = isolation ?? { kind: 'read-only-replay' };
+if (managedServer) metadata.managedServerRoot = managedServer.root;
 await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 });
 
 child.unref();
+launchComplete = true;
 process.stdout.write(
   `Launched persistent VS Code Extension Development Host (Code PID ${String(metadata.pid)})\n`
 );
@@ -220,4 +249,10 @@ process.stdout.write(`Profile: ${profileRoot}\n`);
 process.stdout.write(`Workspace: ${workspace}\n`);
 process.stdout.write(`Launch metadata: ${metadataPath}\n`);
 process.stdout.write(`Remote debugging: http://127.0.0.1:${String(remoteDebuggingPort)}\n`);
+process.stdout.write(`AI server: ${testServerUrl}\n`);
+if (isolation) process.stdout.write(`AI data directory: ${isolation.data}\n`);
+if (managedServer)
+  process.stdout.write(
+    `Controller credentials: ${path.join(managedServer.root, 'controller-env.json')}\n`
+  );
 process.stdout.write(`Varro sidebar width: ${String(sidebarWidth)}px\n`);

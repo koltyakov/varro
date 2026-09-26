@@ -5,6 +5,7 @@ import type { JsonValue } from '../../shared/type-utils';
 export { asRecord, getString } from '../../shared/type-utils';
 
 export const PROVIDER_RESPONSE_MAX_BYTES = 1024 * 1024;
+export const VARRO_USER_AGENT = `Varro/${__VARRO_VERSION__}`;
 
 export async function readBoundedResponseText(
   response: Response,
@@ -80,6 +81,22 @@ export function unsupportedProviderStatus(
 ): ProviderLimitStatus {
   return {
     status: 'unsupported',
+    source: 'provider',
+    providerID,
+    modelID,
+    checkedAt,
+    note,
+  };
+}
+
+export function providerErrorStatus(
+  providerID: string,
+  modelID: string | null | undefined,
+  checkedAt: number,
+  note: string
+): ProviderLimitStatus {
+  return {
+    status: 'error',
     source: 'provider',
     providerID,
     modelID,

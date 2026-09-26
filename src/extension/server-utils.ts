@@ -55,8 +55,8 @@ export function waitForProcessExit(proc: ChildProcess, timeoutMs: number): Promi
   });
 }
 
-export function anySignal(...signals: AbortSignal[]): AbortSignal {
-  return AbortSignal.any(signals);
+export function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function extractVersion(value: string): string | null {

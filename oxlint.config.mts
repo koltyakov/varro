@@ -25,6 +25,7 @@ export default defineConfig({
         allow: [
           '__initialTheme',
           '__initialWebviewState',
+          '__VARRO_VERSION__',
           '__parseMarkdownForTests',
           '__resetMarkdownCachesForTests',
           '__sendToExtension',
@@ -71,6 +72,27 @@ export default defineConfig({
     'typescript/no-require-imports': 'error',
     'typescript/no-namespace': 'error',
     'typescript/consistent-type-imports': 'warn',
+    // Type-aware (requires --type-aware): unhandled async failures are invisible in both hosts.
+    'typescript/no-floating-promises': 'error',
+    'typescript/no-misused-promises': 'error',
+    'typescript/await-thenable': 'error',
+    // Other type-aware rules in the enabled categories are not adopted yet.
+    'typescript/consistent-return': 'off',
+    'typescript/no-base-to-string': 'off',
+    'typescript/no-implied-eval': 'off',
+    'typescript/no-meaningless-void-operator': 'off',
+    'typescript/no-misused-spread': 'off',
+    'typescript/no-redundant-type-constituents': 'off',
+    'typescript/no-unnecessary-boolean-literal-compare': 'off',
+    'typescript/no-unnecessary-template-expression': 'off',
+    'typescript/no-unnecessary-type-arguments': 'off',
+    'typescript/no-unnecessary-type-assertion': 'off',
+    'typescript/no-unnecessary-type-conversion': 'off',
+    'typescript/no-unnecessary-type-parameters': 'off',
+    'typescript/no-unsafe-type-assertion': 'off',
+    'typescript/require-array-sort-compare': 'off',
+    'typescript/restrict-template-expressions': 'off',
+    'typescript/unbound-method': 'off',
     'import/no-duplicates': 'error',
     // Keep lifecycle handlers and test helpers beside their registration and cleanup.
     'unicorn/consistent-function-scoping': 'off',
@@ -96,4 +118,11 @@ export default defineConfig({
     'anti-slop/no-widen-then-assert': 'error',
     'anti-slop/require-safety-comment-for-type-assertion': 'error',
   },
+  overrides: [
+    {
+      // Async mock implementations and fixture servers are intentional in tests.
+      files: ['**/*.test.ts', '**/*.test.tsx', '**/*.test-support.ts', '**/*.test-utils.ts'],
+      rules: { 'typescript/no-misused-promises': 'off' },
+    },
+  ],
 });

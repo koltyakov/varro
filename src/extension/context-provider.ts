@@ -12,6 +12,7 @@ import {
   normalizeRelativeWorkspacePath,
   resolveWorkspaceRelativePath,
 } from './util/path';
+import { delay } from './server-utils';
 
 export type WorkspaceResolutionOptions = {
   /** Resolve paths that do not exist on disk yet (e.g. a deleted file in a diff). */
@@ -1345,10 +1346,6 @@ function cloneEditorContext(context: EditorContext): EditorContext {
     diagnosticsTotal: context.diagnosticsTotal,
     diagnosticCounts: context.diagnosticCounts ? { ...context.diagnosticCounts } : undefined,
   };
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function withTimeout<T>(promise: Thenable<T>, timeoutMs: number, message: string): Promise<T> {

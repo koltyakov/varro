@@ -2692,19 +2692,10 @@ describe('OpenCodeProcess config ownership', () => {
     ]);
   });
 
-  it('injects the optional Ask agent only into the temporary runtime config', async () => {
+  it('automatically injects the Ask agent only into the temporary runtime config', async () => {
     const configHome = await mkdtemp(join(tmpdir(), 'varro-empty-config-'));
     process.env.XDG_CONFIG_HOME = configHome;
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'opencode',
-      false,
-      undefined,
-      undefined,
-      undefined,
-      true
-    );
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
 
     const config = JSON.parse(await manager.serializeInjectedConfig()) as {
       agent?: Record<string, Record<string, unknown>>;
@@ -2730,16 +2721,7 @@ describe('OpenCodeProcess config ownership', () => {
       process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
         [key]: { Ask: { description: 'User-defined agent', mode: 'primary' } },
       });
-      const manager = new OpenCodeProcess(
-        4096,
-        true,
-        'opencode',
-        false,
-        undefined,
-        undefined,
-        undefined,
-        true
-      );
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
 
       expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({
         experimental: { continue_loop_on_deny: true },
@@ -2760,16 +2742,7 @@ describe('OpenCodeProcess config ownership', () => {
     const configHome = await mkdtemp(join(tmpdir(), 'varro-empty-config-'));
     process.env.XDG_CONFIG_HOME = configHome;
     vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: workspace } }];
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'opencode',
-      false,
-      undefined,
-      undefined,
-      undefined,
-      true
-    );
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
 
     expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({
       experimental: { continue_loop_on_deny: true },
@@ -2798,16 +2771,7 @@ describe('OpenCodeProcess config ownership', () => {
     const configHome = await mkdtemp(join(tmpdir(), 'varro-empty-config-'));
     process.env.XDG_CONFIG_HOME = configHome;
     vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: workspace } }];
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'opencode',
-      false,
-      undefined,
-      undefined,
-      undefined,
-      true
-    );
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
 
     expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({
       experimental: { continue_loop_on_deny: true },
@@ -2834,16 +2798,7 @@ describe('OpenCodeProcess config ownership', () => {
     const configHome = await mkdtemp(join(tmpdir(), 'varro-empty-config-'));
     process.env.XDG_CONFIG_HOME = configHome;
     vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: workspace } }];
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'opencode',
-      false,
-      undefined,
-      undefined,
-      undefined,
-      true
-    );
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
 
     const config = JSON.parse(await manager.serializeInjectedConfig()) as {
       agent?: Record<string, unknown>;
@@ -2856,15 +2811,16 @@ describe('OpenCodeProcess config ownership', () => {
     ]);
   });
 
-  it('injects continuation defaults with Ask disabled and no compaction override', async () => {
+  it('injects continuation defaults and Ask with no compaction override', async () => {
     const manager = new OpenCodeProcess(4096, true, 'opencode');
 
     await manager.syncInjectedConfigFile();
     try {
       const env = (manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }).buildServerEnv();
       expect(env.OPENCODE_CONFIG).toBeTruthy();
-      expect(JSON.parse(await readFile(env.OPENCODE_CONFIG!, 'utf-8'))).toEqual({
+      expect(JSON.parse(await readFile(env.OPENCODE_CONFIG!, 'utf-8'))).toMatchObject({
         experimental: { continue_loop_on_deny: true },
+        agent: { ask: { mode: 'primary' } },
       });
     } finally {
       await manager.cleanupPreparedInjectedConfigFile();
@@ -2900,7 +2856,7 @@ describe('OpenCodeProcess config ownership', () => {
       const env = (manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }).buildServerEnv();
       expect(env.OPENCODE_CONFIG_CONTENT).toBe(override);
       expect(env.OPENCODE_CONFIG).not.toBe(projectConfig);
-      expect(JSON.parse(await readFile(env.OPENCODE_CONFIG!, 'utf-8'))).toEqual({
+      expect(JSON.parse(await readFile(env.OPENCODE_CONFIG!, 'utf-8'))).toMatchObject({
         experimental: { continue_loop_on_deny: true },
       });
       expect(await readFile(projectConfig, 'utf-8')).toBe(override);
@@ -2908,20 +2864,6 @@ describe('OpenCodeProcess config ownership', () => {
       await manager.cleanupPreparedInjectedConfigFile();
       await rm(project, { recursive: true, force: true });
     }
-  });
-
-  it('restarts a managed server when enabling Ask requires a new runtime config', async () => {
-    const manager = new OpenCodeProcess(4096, true, 'opencode');
-    manager.managedProcess = true;
-    const restart = vi.fn().mockResolvedValue(undefined);
-
-    await manager.updateAskAgentEnabled(true, {
-      status: { state: 'running', url: 'http://localhost:4096' },
-      request: vi.fn(),
-      restartManagedServerForCompactionSettings: restart,
-    });
-
-    expect(restart).toHaveBeenCalledOnce();
   });
 
   it('binds exit cleanup to the config owned by that process', async () => {
@@ -2975,7 +2917,7 @@ describe('OpenCodeProcess config ownership', () => {
     await manager.releaseExitedProcess(first as unknown as ChildProcess);
 
     expect(firstPath).not.toBe(secondPath);
-    expect(JSON.parse(await readFile(secondPath, 'utf-8'))).toEqual({
+    expect(JSON.parse(await readFile(secondPath, 'utf-8'))).toMatchObject({
       experimental: { continue_loop_on_deny: true },
       compaction: { auto: true, reserved: 4096 },
     });

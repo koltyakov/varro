@@ -16,10 +16,13 @@ import checkCircleIcon from 'iconoir/icons/check-circle.svg';
 import checkSquareIcon from 'iconoir/icons/check-square.svg';
 import clockIcon from 'iconoir/icons/clock.svg';
 import codeBracketsSquareIcon from 'iconoir/icons/code-brackets-square.svg';
+import coinsIcon from 'iconoir/icons/coins.svg';
 import copyIcon from 'iconoir/icons/copy.svg';
 import databaseBackupIcon from 'iconoir/icons/database-backup.svg';
 import databaseScriptPlusIcon from 'iconoir/icons/database-script-plus.svg';
 import downloadIcon from 'iconoir/icons/download.svg';
+import dollarCircleIcon from 'iconoir/icons/dollar-circle.svg';
+import dollarIcon from 'iconoir/icons/dollar.svg';
 import editPencilIcon from 'iconoir/icons/edit-pencil.svg';
 import emptyPageIcon from 'iconoir/icons/empty-page.svg';
 import expandIcon from 'iconoir/icons/expand.svg';
@@ -32,6 +35,7 @@ import gitForkIcon from 'iconoir/icons/git-fork.svg';
 import gitIcon from 'iconoir/icons/git.svg';
 import helpCircleIcon from 'iconoir/icons/help-circle.svg';
 import hourglassIcon from 'iconoir/icons/hourglass.svg';
+import infoCircleIcon from 'iconoir/icons/info-circle.svg';
 import languageIcon from 'iconoir/icons/language.svg';
 import lightBulbIcon from 'iconoir/icons/light-bulb.svg';
 import lockIcon from 'iconoir/icons/lock.svg';
@@ -76,6 +80,9 @@ import xmarkIcon from 'iconoir/icons/xmark.svg';
 import xmarkCircleIcon from 'iconoir/icons/xmark-circle.svg';
 
 export {
+  dollarCircleIcon,
+  dollarIcon,
+  infoCircleIcon,
   archiveIcon,
   appNotificationIcon,
   arrowLeftIcon,
@@ -94,6 +101,7 @@ export {
   checkSquareIcon,
   clockIcon,
   codeBracketsSquareIcon,
+  coinsIcon,
   copyIcon,
   databaseBackupIcon,
   databaseScriptPlusIcon,

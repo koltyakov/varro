@@ -50,7 +50,7 @@ For WSL, open the project in a VS Code WSL window, then install and authenticate
 
 | Version | Minimum supported | Tested with this release | npm package |
 | --- | --- | --- | --- |
-| v2, recommended | 2.0.5 | 2.0.15 | `@opencode/cli` |
+| v2, recommended | 2.0.5 | 2.0.18 | `@opencode/cli` |
 | v1, still supported | 1.16.0 | 1.18.32 | `opencode-ai` |
 
 To keep using v1, retain your installation or run `npm install -g opencode-ai`. Set `varro.server.command` to its executable path. Setting it to `opencode` selects v1 only if that command resolves to a v1 installation. Varro detects the API automatically.
@@ -297,7 +297,9 @@ The Models view also shows whether a model exposes tools, variants, vision suppo
 
 Define primary agents in OpenCode configuration. Varro lists them in the agent picker and uses the selected agent for the main conversation.
 
-Alternatively, enable `varro.chat.enableAskAgent` to add Varro's read-only `Ask` primary agent only to the managed OpenCode runtime. The setting does not modify `opencode.json`; if inherited, global, or project OpenCode configuration already defines an agent named `ask` (case-insensitive), Varro uses that definition instead.
+Varro automatically adds its read-only `Ask` primary agent to the managed OpenCode runtime. This does not modify `opencode.json`; if inherited, global, or project OpenCode configuration already defines an agent named `ask` (case-insensitive), Varro uses that definition instead.
+
+Runtime injection requires Varro to launch the server itself. When Varro attaches to an existing OpenCode v2 shared service or an external server, it cannot inject Ask. OpenCode's shared-service API does not support runtime agent registration. Agents already configured on the server remain available.
 
 Choose the config scope based on where you want the agent to appear:
 
@@ -646,7 +648,7 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install v2 with `npm install -g @opencode/cli` on macOS, Linux, or WSL, or download the native Windows CLI from the [v2 install page](https://opencode.ai/v2/docs/). V1 remains available with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.32` and v2 `2.0.15`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
+- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.32` and v2 `2.0.18`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
 - OpenCode v2 authentication: Varro captures managed-server credentials automatically and redacts them from output. Existing local services use their registered credentials. An externally managed server can also use `OPENCODE_SERVER_PASSWORD` and `OPENCODE_SERVER_USERNAME` from the extension host's environment.
 - OpenCode v2 session settings: Varro stores mutable session annotations locally because the released v2 API cannot update session metadata. Session sharing is unavailable through this API, so its menu action is disabled. Existing v1-format configuration remains supported.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.

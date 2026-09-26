@@ -1,4 +1,5 @@
 import {
+  getModelDisplayName,
   getSelectedAgentForSession,
   getSelectedModelForSession,
   getSessionTreeIds,
@@ -48,13 +49,14 @@ import type {
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { Session } from '../../types';
 import { client, type SessionListPage } from '../../lib/client';
+import { useSecondClock } from '../../lib/clock';
 import { postMessage } from '../../lib/bridge';
 import { setManualWorkspaceSelection } from '../../lib/app-state';
 import { requestWorkspaceSelection } from '../../lib/workspace-selection';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatEditCount, formatModelName, formatVariantLabel } from '../../lib/format';
-import { formatDuration, formatRelativeAge } from '../../lib/message-metrics';
+import { formatDuration, formatRelativeAge, formatTurnCost } from '../../lib/message-metrics';
 import { getProviderIcon } from '../../lib/provider-icons';
 import { compareSessionsByActivity, compareSessionsForDisplay } from '../../lib/session-order';
 import {
@@ -1047,17 +1049,12 @@ export function SessionListView(props: {
   class?: string;
 }) {
   const diffSummaryOwner = Symbol('session-list');
-  const initialNow = Date.now();
-  const [activeNow, setActiveNow] = createSignal(initialNow);
-  const [ageNow, setAgeNow] = createSignal(initialNow);
-  const clock = setInterval(() => {
-    const nextNow = Date.now();
-    setActiveNow(nextNow);
-    setAgeNow((current) =>
-      Math.floor(current / 60_000) === Math.floor(nextNow / 60_000) ? current : nextNow
-    );
-  }, 1_000);
-  onCleanup(() => clearInterval(clock));
+  const activeNow = useSecondClock();
+  // Relative ages only change per minute, so avoid regrouping sessions every second.
+  const ageNow = createMemo<number>((current) => {
+    const nextNow = activeNow();
+    return Math.floor(current / 60_000) === Math.floor(nextNow / 60_000) ? current : nextNow;
+  }, Date.now());
 
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
   const [activeGroupedSection, setActiveGroupedSection] =
@@ -1733,7 +1730,7 @@ export function SessionListView(props: {
               count={recycleBinEntries().length}
               expanded={expanded()}
               onToggle={() => toggleGroupedSection('recycle-bin')}
-              onArchive={() => emptyRecycleBin()}
+              onArchive={() => void emptyRecycleBin()}
               archiveLabel="Empty"
             />
             <Show when={expanded()}>
@@ -2168,6 +2165,13 @@ function SessionListItem(props: {
     return { files: unique.size, iterations: run.iterations.length };
   };
   const summaryStats = () => props.diffSummary ?? getSessionSummaryStats(props.session);
+  const sessionCost = () => {
+    const summary = props.diffSummary;
+    if (summary?.historyStatsUnavailable) return '';
+    const breakdown = summary?.tokenBreakdown;
+    if (!breakdown) return '';
+    return formatTurnCost((breakdown.session.cost ?? 0) + (breakdown.subagents.cost ?? 0));
+  };
   const workedDurationMs = () => {
     if (props.durationMs === null) return null;
     const activeDuration =
@@ -2187,7 +2191,11 @@ function SessionListItem(props: {
       : null;
     if (!model) return null;
     const provider = state.providers.find((item) => item.id === model.providerID);
-    const modelName = formatModelName(provider?.models[model.id]?.name || model.id);
+    const modelName = getModelDisplayName(
+      model.providerID,
+      model.id,
+      formatModelName(provider?.models[model.id]?.name || model.id)
+    );
     const reasoningLabel = model.variant ? formatVariantLabel(model.variant) : 'Default';
     return {
       providerID: model.providerID,
@@ -2542,6 +2550,16 @@ function SessionListItem(props: {
                   {' · '}
                   <span title={`${formatDuration(durationMs())} total time worked`}>
                     {formatDuration(durationMs())}
+                  </span>
+                </>
+              )}
+            </Show>
+            <Show when={sessionCost()}>
+              {(cost) => (
+                <>
+                  {' · '}
+                  <span class="session-item-cost" title="Total cost including subagents">
+                    ${cost()}
                   </span>
                 </>
               )}

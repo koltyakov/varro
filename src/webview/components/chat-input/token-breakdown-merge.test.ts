@@ -29,6 +29,22 @@ function breakdown(
 const local = breakdown(100, 50, 2);
 
 describe('mergeCompleteTokenBreakdown', () => {
+  it('merges costs independently of token counts without counting snapshots twice', () => {
+    const live = breakdown(100, 50, 2);
+    live.session.cost = 0.004;
+    live.subagents.cost = 0.066;
+    const historical = breakdown(500, 400, 2);
+    historical.session.cost = 0.003;
+    historical.subagents.cost = 0.06;
+    const merged = mergeCompleteTokenBreakdown(
+      live,
+      { rootId: 'root-1', breakdown: historical },
+      'root-1'
+    );
+    expect(merged.session.cost).toBe(0.004);
+    expect(merged.subagents.cost).toBe(0.066);
+    expect(merged.subagents.total).toBe(400);
+  });
   it('returns the local breakdown when there is no root session', () => {
     const complete = { rootId: 'root-1', breakdown: breakdown(900, 900, 9) };
     expect(mergeCompleteTokenBreakdown(local, complete, null)).toBe(local);

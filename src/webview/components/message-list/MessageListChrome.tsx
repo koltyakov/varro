@@ -1,5 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { recheckSessionStatus } from '../../hooks/useOpenCode';
+import { useSecondClock } from '../../lib/clock';
+import { logError } from '../../lib/log';
 import { formatMessageSentTime } from '../../lib/message-time';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { loadingLastActivityAt, loadingStartedAt, state, stopLoading } from '../../lib/state';
@@ -311,7 +313,8 @@ export function LoadingRow(props: {
   waiting?: boolean;
   waitingStartedAt?: number;
 }) {
-  const [now, setNow] = createSignal(Date.now());
+  // A reserved, hidden row shows no elapsed time or stale state.
+  const now = useSecondClock(() => props.visible);
   const waiting = () => props.waiting && !props.compacting;
   const waitingClock = createMemo<{ sessionId: string | null; startedAt: number } | null>(
     (previous) => {
@@ -335,11 +338,6 @@ export function LoadingRow(props: {
     const lastActivity = loadingLastActivityAt() ?? startedAt;
     return currentNow - lastActivity >= STALE_LOADING_INACTIVITY_MS;
   };
-
-  const timer = setInterval(() => {
-    setNow(Date.now());
-  }, 1000);
-  onCleanup(() => clearInterval(timer));
 
   const totalElapsedMs = () => {
     const startedAt = waiting() ? (waitingClock()?.startedAt ?? null) : loadingStartedAt();
@@ -392,7 +390,11 @@ export function LoadingRow(props: {
               <button
                 class="loading-action"
                 onClick={() => {
-                  if (state.activeSessionId) recheckSessionStatus(state.activeSessionId);
+                  const sessionId = state.activeSessionId;
+                  if (!sessionId) return;
+                  void recheckSessionStatus(sessionId).catch((err) =>
+                    logError('Failed to recheck session status', err)
+                  );
                 }}
                 title="Check if session is still running"
               >

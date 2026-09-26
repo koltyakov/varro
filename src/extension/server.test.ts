@@ -105,7 +105,6 @@ class OpenCodeServer extends RealOpenCodeServer {
       simulateMissingCli,
       compactionSettings,
       join('/tmp', `varro-server-test-${process.pid}-${++serverOwnershipPathSequence}.json`),
-      false,
       secrets
     );
   }

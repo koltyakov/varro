@@ -288,6 +288,16 @@
   vertical-align: -1px;
 }
 
+.context-popup-cost-info {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  color: color-mix(in srgb, var(--color-vscode-muted) 70%, transparent);
+  cursor: help;
+  vertical-align: -1px;
+}
+
+.context-popup-cost-info:focus-visible,
 .context-popup-cache-read-info:focus-visible,
 .context-popup-cache-write-info:focus-visible {
   outline: 1px solid var(--color-vscode-focus-border);
@@ -820,6 +830,37 @@
 .toolbar-mcp-count-label {
   color: color-mix(in srgb, var(--color-vscode-fg-soft) 34%, transparent);
   font-weight: 400;
+}
+
+.toolbar-session-cost {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 0;
+  height: 24px;
+  color: color-mix(in srgb, var(--color-vscode-fg-soft) 34%, transparent);
+  font-size: 10.5px;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.provider-limit-anchor + .toolbar-session-cost {
+  /* Offset the dollar SVG padding only after the padded Limits control. */
+  margin-left: -4px;
+}
+
+.toolbar-session-cost > span:last-child {
+  margin-left: -1px;
+  color: color-mix(in srgb, var(--color-vscode-fg-soft) 56%, transparent);
+  font-weight: 500;
+}
+
+.toolbar-session-cost:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 1px;
 }
 
 .toolbar-mcp-count-value {
@@ -2765,4 +2806,29 @@
 
 .chat-attachment-chip .chip-remove:hover {
   color: var(--color-vscode-fg);
+}
+.composer-send-exit {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: inherit;
+  animation: composer-send-exit 140ms ease-out both;
+}
+
+@keyframes composer-send-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-send-exit {
+    display: none;
+  }
 }

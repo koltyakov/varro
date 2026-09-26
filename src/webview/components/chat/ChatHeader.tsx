@@ -6,6 +6,7 @@ import { deleteSession } from '../../hooks/useOpenCode';
 import { postMessage } from '../../lib/bridge';
 import { requestWorkspaceSelection } from '../../lib/workspace-selection';
 import { client } from '../../lib/client';
+import { useSecondClock } from '../../lib/clock';
 import { formatDuration } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
 import { cableTagIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
@@ -502,7 +503,12 @@ export function ActiveChatHeader(props: {
     SessionDiffSummary,
     'durationMs' | 'activeStartedAt'
   > | null>(null);
-  const [workNow, setWorkNow] = createSignal(Date.now());
+  const [workSummaryReceivedAt, setWorkSummaryReceivedAt] = createSignal(Date.now());
+  const clockNow = useSecondClock(
+    () => isActiveSessionRunning() && workSummary()?.activeStartedAt != null
+  );
+  // A fresh summary must not be compared with a clock value from before it arrived.
+  const workNow = () => Math.max(clockNow(), workSummaryReceivedAt());
   const workedDurationMs = () => {
     const summary = workSummary();
     if (!summary) return null;
@@ -533,7 +539,7 @@ export function ActiveChatHeader(props: {
       )
       .then((summary) => {
         if (cancelled) return;
-        setWorkNow(Date.now());
+        setWorkSummaryReceivedAt(Date.now());
         setWorkSummary({
           durationMs: summary.durationMs,
           activeStartedAt: summary.activeStartedAt,
@@ -543,12 +549,6 @@ export function ActiveChatHeader(props: {
     onCleanup(() => {
       cancelled = true;
     });
-  });
-
-  createEffect(() => {
-    if (!isActiveSessionRunning() || workSummary()?.activeStartedAt == null) return;
-    const timer = setInterval(() => setWorkNow(Date.now()), 1_000);
-    onCleanup(() => clearInterval(timer));
   });
 
   let titleRef: HTMLSpanElement | undefined;

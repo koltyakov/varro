@@ -127,19 +127,24 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     const output = new OpenCodeStartupOutput((password) => {
       authorization = basicAuthorization(password);
     });
-    await mkdir(join(root, 'config/opencode'), { recursive: true });
-    await writeFile(
-      join(root, 'config/opencode/opencode.json'),
-      JSON.stringify({
-        providers: {
-          fixture: {
-            package: '@opencode/ai/providers/openai-compatible',
-            settings: { baseURL: `http://127.0.0.1:${address.port}/v1`, apiKey: 'fixture-only' },
-            models: { fixture: { name: 'Fixture', limit: { context: 32000, output: 1000 } } },
+    const version =
+      process.env.VARRO_OPENCODE_TEST_VERSION ??
+      spawnSync(binary!, ['--version'], { encoding: 'utf8', timeout: 10000 }).stdout.trim();
+    if (version.startsWith('2.')) {
+      await mkdir(join(root, 'config/opencode'), { recursive: true });
+      await writeFile(
+        join(root, 'config/opencode/opencode.json'),
+        JSON.stringify({
+          providers: {
+            fixture: {
+              package: '@opencode/ai/providers/openai-compatible',
+              settings: { baseURL: `http://127.0.0.1:${address.port}/v1`, apiKey: 'fixture-only' },
+              models: { fixture: { name: 'Fixture', limit: { context: 32000, output: 1000 } } },
+            },
           },
-        },
-      })
-    );
+        })
+      );
+    }
     let logs = '';
     child = crossSpawn(binary!, ['serve', '--hostname', '127.0.0.1', '--port', '0'], {
       cwd: join(root, 'workspace'),

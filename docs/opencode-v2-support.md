@@ -18,7 +18,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 54 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.32`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.15`, with ten platform- or family-specific skips. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 62 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.32`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.18`, with ten platform- or family-specific skips. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -76,6 +76,22 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.18 compatibility review
+
+Reviewed v2.0.16 to v2.0.18, `ac2426e103` through `39021dfd67`.
+The client and protocol add pairing endpoints, and shell records gain an optional
+`signal` field. Existing Basic authentication remains supported; unauthorized
+responses now include a structured error body. Varro checks HTTP status codes and
+requires no transport or adapter changes for these additions.
+
+Session, message, permission, form, configuration, and SSE contracts consumed by
+Varro remain compatible. The runtime now flushes pending text and reasoning deltas
+before subsequent block starts, restores legacy media compaction checkpoints,
+updates provider variants and model metadata, and improves shell output notices.
+New pairing UI, TUI queue controls, and AI media APIs require no Varro adaptation.
+The tested v2 client is `2.0.18`; v1 remains at `1.18.32`, with support floors
+unchanged at v2 `2.0.5` and v1 `1.16.0`.
 
 ### 2.0.15 compatibility review
 

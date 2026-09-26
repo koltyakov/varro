@@ -7,6 +7,7 @@ export type TaskSessionInfo = {
   parentID?: string;
   title: string;
   time: { created: number };
+  cost?: number;
   tokens?: {
     input: number;
     output: number;

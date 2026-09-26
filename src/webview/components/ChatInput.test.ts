@@ -2219,9 +2219,10 @@ describe('ChatInput', () => {
     const costRow = container?.querySelector('.context-popup-cost-row');
     expect(costRow?.querySelector('.context-popup-row-label')?.textContent).toBe('Cost');
     expect(costRow?.querySelector('.context-popup-row-value')?.textContent).toBe('$0.01');
+    expect(costRow?.querySelector('.context-popup-cost-info')).toBeNull();
   });
 
-  it('loads tokens for subagent sessions whose messages and snapshots are not loaded', async () => {
+  it('loads tokens and costs for subagent sessions whose messages and snapshots are not loaded', async () => {
     setupModelState();
     setState('activeSessionId', 'session-1');
     setState('sessions', [
@@ -2236,6 +2237,7 @@ describe('ChatInput', () => {
       tokens: 1_400,
       tokenBreakdown: {
         session: {
+          cost: 0.004,
           total: 500,
           input: 400,
           output: 100,
@@ -2244,6 +2246,7 @@ describe('ChatInput', () => {
           cacheWrite: 0,
         },
         subagents: {
+          cost: 0.066,
           total: 900,
           input: 700,
           output: 100,
@@ -2274,6 +2277,25 @@ describe('ChatInput', () => {
     expect(client.varro.session.diffSummary).toHaveBeenCalledWith('session-1', undefined, {
       directory: '/repo',
     });
+    expect(container?.querySelector('.context-popup-cost-row')?.textContent).toBe('Cost$0.07');
+    expect(container?.querySelector('.toolbar-session-cost')?.textContent).toBe('0.07');
+    expect(container?.querySelector('.toolbar-session-cost')?.getAttribute('aria-label')).toBe(
+      'Overall cost: $0.07'
+    );
+    const costInfo = container?.querySelector<HTMLElement>('.context-popup-cost-info');
+    expect(costInfo?.tabIndex).toBe(0);
+    costInfo?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.waitFor(
+      () => {
+        expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+          'Cost includes all subagents.'
+        );
+      },
+      { timeout: 2_000 }
+    );
+    costInfo?.dispatchEvent(new MouseEvent('mouseleave'));
+    container?.querySelector<HTMLButtonElement>('.context-popup-section-toggle')?.click();
+    expect(container?.querySelectorAll('.context-popup-cost-row')).toHaveLength(1);
 
     const nested = container?.querySelector<HTMLInputElement>('.context-breakdown-nested input');
     expect(nested?.checked).toBe(true);
@@ -8989,6 +9011,53 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-attachment-chip')).toBe(imageChip);
     expect(imageChip.classList).toContain('disabled');
   });
+
+  it.each([false, true])(
+    'hides submitted strip attachments while sending and restores a failed draft (creates session: %s)',
+    async (createsSession) => {
+      setupModelState();
+      setState('activeSessionId', createsSession ? null : 'session-1');
+      let resolveSend!: (sent: boolean) => void;
+      sendMessageMock.mockImplementationOnce(
+        () => new Promise<boolean>((resolve) => (resolveSend = resolve))
+      );
+      addContextFile({ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' });
+      addClipboardImage({
+        id: 'image-1',
+        url: 'data:image/png;base64,aW1hZ2U=',
+        mime: 'image/png',
+        filename: 'Image 1',
+        size: 5,
+      });
+      setInputText('Review these attachments');
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+      expect(container!.querySelectorAll('.chat-attachment-chip')).toHaveLength(2);
+      container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
+      await flushAsyncWork();
+      expect(sendMessageMock).toHaveBeenCalledTimes(1);
+      expect(editor.textContent).toBe('');
+      expect(editor.getAttribute('data-placeholder')).toBe('Queue a follow-up or steer');
+      expect(container!.querySelector('.chat-attachments-container')).toBeNull();
+      if (createsSession) {
+        setState('activeSessionId', 'created-session');
+        await flushAsyncWork();
+        expect(editor.textContent).toBe('');
+        expect(editor.getAttribute('data-placeholder')).toBe('Queue a follow-up or steer');
+        expect(container!.querySelector('.chat-attachments-container')).toBeNull();
+      }
+      // The send still owns its payload; a newly attached file belongs to the next draft.
+      expect(state.droppedFiles).toHaveLength(1);
+      expect(state.clipboardImages).toHaveLength(1);
+      addContextFile({ path: '/repo/src/next.ts', relativePath: 'src/next.ts', type: 'file' });
+      expect(container!.querySelectorAll('.chat-attachment-chip')).toHaveLength(1);
+      expect(container!.querySelector('.chat-attachment-chip')?.textContent).toContain('next.ts');
+      resolveSend(false);
+      await flushAsyncWork();
+      expect(editor.textContent).toBe('Review these attachments');
+      expect(container!.querySelectorAll('.chat-attachment-chip')).toHaveLength(3);
+    }
+  );
 
   it('keeps unchanged attachment chips mounted while typing', async () => {
     setupModelState();

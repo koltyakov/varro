@@ -308,7 +308,9 @@ test.describe('auto-scroll', () => {
       JSON.stringify(samples)
     ).toBe(true);
     expect(new Set(samples.map((sample) => Math.round(sample.slotHeight))).size).toBe(1);
-    await expect(page.locator('.trailing-assistant-summary-row')).toContainText('Worked for');
+    await expect(
+      page.locator('.trailing-assistant-summary-row').getByLabel('Worked for', { exact: true })
+    ).toBeVisible();
   });
 
   test('keeps the transcript fixed until edit replacement then resumes bottom follow', async ({

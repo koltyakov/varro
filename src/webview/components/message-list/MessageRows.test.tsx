@@ -39,6 +39,52 @@ afterEach(() => {
 });
 
 describe('AssistantDialogSummaryForMessage', () => {
+  it('shows only the turn cost without a parenthesized total', () => {
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{
+            durationMs: 1_000,
+            inputTokens: 10,
+            outputTokens: 5,
+            agentCount: 1,
+            cost: 0.07,
+          }}
+          msg={{ info: assistantMessage('assistant-1', { sessionID: 'session-1' }), parts: [] }}
+          hasBuildAgent={false}
+          latestPlanImplementationMessageId={null}
+        />
+      ),
+      container
+    );
+    expect(container.querySelector('.assistant-dialog-summary-cost')?.textContent).toBe('0.07');
+  });
+  it.each([undefined, 0, 0.07, 1.25])('shows reported spending after turn tokens: %s', (cost) => {
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 10, outputTokens: 5, agentCount: 1, cost }}
+          msg={{ info: assistantMessage('assistant-1', { sessionID: 'session-1' }), parts: [] }}
+          hasBuildAgent={false}
+          latestPlanImplementationMessageId={null}
+        />
+      ),
+      container
+    );
+    const spending = container.querySelector('.assistant-dialog-summary-cost');
+    expect(container.querySelector('.assistant-dialog-summary-cumulative-cost')).toBeNull();
+    if (!cost) {
+      expect(spending).toBeNull();
+    } else {
+      expect(spending?.textContent).toBe(cost < 1 ? '0.07' : '1.25');
+      expect(spending?.querySelector('[aria-label="US dollars"]')).not.toBeNull();
+      expect(
+        spending?.previousElementSibling?.classList.contains(
+          'assistant-dialog-summary-token-budget'
+        )
+      ).toBe(true);
+    }
+  });
   it('shows the completion clock time and reports its prompt while hovered', () => {
     vi.useFakeTimers();
     const completedAt = new Date(2026, 0, 2, 13, 45).getTime();
@@ -73,7 +119,7 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(completedTime?.textContent).not.toMatch(/\d{1,2}\/\d{1,2}/);
     expect(summary?.classList.contains('is-completion-time-visible')).toBe(true);
     expect(summary?.querySelector('.assistant-dialog-summary-token-budget')?.textContent).toBe(
-      ' - Tokens ↑ 10 ↓ 5'
+      '↑ 10 ↓ 5'
     );
 
     summary?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));

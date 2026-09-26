@@ -1175,7 +1175,7 @@ describe('MessageList sticky prompt preview', () => {
       container?.querySelector('[data-msg-id="assistant-1"] .assistant-dialog-summary')
     ).toBeNull();
     expect(container?.querySelector('.trailing-assistant-summary-row')?.textContent).toContain(
-      'Worked for 5s - Tokens ↑ 600 ↓ 60 - Agents 1'
+      '5s ↑ 600 ↓ 60 Agents 1'
     );
   });
 
@@ -1275,7 +1275,7 @@ describe('MessageList sticky prompt preview', () => {
       cacheSessionHistoryPage('session-1', 'bottom-range', [state.messages[0]!]);
       await Promise.resolve();
       expect(container?.querySelector('.trailing-assistant-summary-row')?.textContent).toContain(
-        'Worked for 2s'
+        '2s'
       );
 
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
@@ -1285,7 +1285,7 @@ describe('MessageList sticky prompt preview', () => {
       expect(
         container?.querySelector('[data-msg-id="assistant-0"] .assistant-dialog-summary')
           ?.textContent
-      ).toContain('Worked for 2s');
+      ).toContain('2s');
 
       cacheSessionHistoryPage('session-1', 'top-range', [state.messages[0]!]);
       await Promise.resolve();
@@ -1293,7 +1293,7 @@ describe('MessageList sticky prompt preview', () => {
       list.dispatchEvent(new Event('scroll'));
       await Promise.resolve();
       expect(container?.querySelector('.trailing-assistant-summary-row')?.textContent).toContain(
-        'Worked for 2s'
+        '2s'
       );
     } finally {
       animationFrames.restore();
@@ -1359,21 +1359,23 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 3,100 ↓ 310 - Agents 2');
+    expect(container?.textContent).toContain('10s ↑ 3,100 ↓ 310 Agents 2');
   });
 
-  it('includes nested subagent session snapshots when their messages are not loaded', async () => {
+  it('includes nested subagent token and cost snapshots when their messages are not loaded', async () => {
     setState('activeSessionId', 'session-1');
     setSessions([
       session('session-1'),
       session('child-1', {
         parentID: 'session-1',
         time: { created: 2_500, updated: 8_000 },
+        cost: 0.0326,
         tokens: { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
       }),
       session('child-2', {
         parentID: 'child-1',
         time: { created: 3_000, updated: 11_000 },
+        cost: 0.03,
         tokens: { input: 2_000, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
       }),
     ]);
@@ -1383,10 +1385,13 @@ describe('MessageList sticky prompt preview', () => {
         parts: [textPart('text-1', 'Prompt')],
       },
       {
-        info: assistantMessage('assistant-1', {
-          time: { created: 2_000, completed: 5_000 },
-          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
-        }),
+        info: {
+          ...assistantMessage('assistant-1', {
+            time: { created: 2_000, completed: 5_000 },
+            tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+          }),
+          cost: 0.0074,
+        },
         parts: [
           {
             id: 'agent-1',
@@ -1403,7 +1408,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 4s - Tokens ↑ 3,100 ↓ 310');
+    expect(container?.textContent).toContain('4s ↑ 3,100 ↓ 310 0.07');
   });
 
   it('keeps subagent session tokens scoped to the turn that launched them', () => {
@@ -1591,7 +1596,7 @@ describe('MessageList sticky prompt preview', () => {
     );
     expect(summary).toBeInstanceOf(HTMLDivElement);
     expect(summary?.textContent).toContain('Interrupted');
-    expect(summary?.textContent).not.toContain('Worked for');
+    expect(summary?.querySelector('[aria-label="Worked for"]')).toBeNull();
   });
 
   it('includes prefetched turn history in the Worked for summary', async () => {
@@ -1610,7 +1615,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
     expect(container?.textContent).toContain('Collecting stats...');
-    expect(container?.textContent).not.toContain('Worked for 5s - Tokens ↑ 200 ↓ 20');
+    expect(container?.textContent).not.toContain('5s ↑ 200 ↓ 20');
 
     cacheSessionHistoryPage('session-1', 'cursor-1', [
       {
@@ -1627,7 +1632,7 @@ describe('MessageList sticky prompt preview', () => {
     ]);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 300 ↓ 30');
+    expect(container?.textContent).toContain('10s ↑ 300 ↓ 30');
     expect(container?.querySelector('[data-msg-id="assistant-1"]')).toBeNull();
   });
 
@@ -1655,7 +1660,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 10s');
+    expect(container?.textContent).toContain('10s');
     expect(container?.textContent).not.toContain('Tokens');
   });
 
@@ -1785,7 +1790,7 @@ describe('MessageList sticky prompt preview', () => {
     vi.advanceTimersByTime(700);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 4s - Tokens ↑ 100 ↓ 10');
+    expect(container?.textContent).toContain('4s ↑ 100 ↓ 10');
   });
 
   it('renders with virtualization enabled without hitting initialization order errors', async () => {

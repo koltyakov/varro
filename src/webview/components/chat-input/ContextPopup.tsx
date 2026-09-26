@@ -3,6 +3,7 @@ import {
   checkSquareIcon,
   databaseBackupIcon,
   databaseScriptPlusIcon,
+  infoCircleIcon,
   navArrowRightIcon,
   squareIcon,
 } from '../../lib/ui-icons';
@@ -40,6 +41,7 @@ const BREAKDOWN_LABELS = {
 } satisfies ContextBreakdownLabels;
 
 type ContextTokens = {
+  cost?: number;
   total: number;
   input: number;
   output: number;
@@ -207,10 +209,27 @@ export function ContextPopup(props: {
             {sessionTokensAvailable() ? formatNumber(sessionTotal()) : '--'}
           </span>
         </div>
-        <Show when={formatCost(props.cost ?? undefined)}>
+        <Show
+          when={formatCost(
+            Math.max(props.cost ?? 0, props.tokens.cost ?? 0) + (props.subagentTokens.cost ?? 0)
+          )}
+        >
           {(cost) => (
             <div class="context-popup-row context-popup-cost-row">
-              <span class="context-popup-row-label">Cost</span>
+              <span class="context-popup-row-label">
+                Cost
+                <Show when={props.subagentCount > 0}>
+                  <Tooltip content="Cost includes all subagents.">
+                    <span
+                      class="context-popup-cost-info"
+                      tabindex="0"
+                      aria-label="Cost includes all subagents"
+                    >
+                      <UiIcon source={infoCircleIcon} width="11" height="11" />
+                    </span>
+                  </Tooltip>
+                </Show>
+              </span>
               <span class="context-popup-row-value">{cost()}</span>
             </div>
           )}

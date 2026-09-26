@@ -118,6 +118,18 @@ responses are rejected as `foreign-session-reference` before choosing the longes
 Historical prose that mentions another session is preserved. The replay server independently rejects
 foreign routing in supplied captures; preparation does not rewrite existing captures or source data.
 
+Session-level `parentID` and `fork` ancestry are detached when replay creates its isolated session.
+They are not event destinations. Foreign `sessionID`/`sessionId` references inside message parts,
+tool metadata, and event payloads still reject the capture.
+
+Retained native v2 captures can replay prompt admission/promotion, synthetic context, steps,
+text/reasoning, and tool input/running/progress/completion events directly. The native wire order and
+offsets are retained; normal short-gap/long-wait scheduling still applies. The replay server projects
+partial REST history as events arrive, so pause, reconnect, and pagination cannot expose future tool
+output or text. Recorded terminal snapshots supply projection-only fields at their terminal event,
+with content and ordering validation. Unknown native event families fail before listening rather than
+being dropped. A `HISTORY` reconstruction remains an estimated-timing input, not a native recording.
+
 The longest `--count` eligible sessions form the subset first. Selection then greedily adds weighted
 response coverage within that subset for reasoning, text, tools, edits, large output, Markdown,
 and baseline history above 50 messages, choosing one response per session. Seeded hashes break

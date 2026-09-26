@@ -19,10 +19,9 @@ export function formatDuration(ms: number | undefined): string {
   return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
 }
 
-/** Turn summaries stay at second granularity; sub-second work reads "<1s". */
+/** Turn summaries use milliseconds only for sub-second work. */
 export function formatTurnDuration(ms: number | undefined): string {
-  if (!ms || ms < 1000) return '<1s';
-  return formatDuration(ms);
+  return formatDuration(ms) || '0ms';
 }
 
 export function formatRelativeAge(timestamp: number, now: number): string {

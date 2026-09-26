@@ -1,4 +1,4 @@
-import { Show, createSignal, onCleanup } from 'solid-js';
+import { Show } from 'solid-js';
 import packageJson from '../../../../package.json';
 import type { Agent } from '../../types';
 import type { ContextBreakdownSegment } from '../../../shared/context-breakdown';
@@ -10,7 +10,9 @@ import type {
 } from '../../../shared/protocol';
 import { postMessage } from '../../lib/bridge';
 import { formatTurnDuration } from '../../lib/time-format';
-import { runningIcon, warningTriangleIcon } from '../../lib/ui-icons';
+import { useSecondClock } from '../../lib/clock';
+import { dollarIcon, runningIcon, warningTriangleIcon } from '../../lib/ui-icons';
+import { formatTurnCost } from '../../lib/message-metrics';
 import { Tooltip } from '../Tooltip';
 import { UiIcon } from '../UiIcon';
 import { AttachButton } from './AttachButton';
@@ -44,6 +46,7 @@ type ContextUsageInfo = {
 };
 
 type SessionTokensInfo = {
+  cost?: number;
   total: number;
   input: number;
   output: number;
@@ -472,6 +475,29 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
             </div>
           </Show>
 
+          <Show
+            when={
+              props.showContextControl &&
+              formatTurnCost(
+                Math.max(props.sessionCost ?? 0, props.sessionTokens.cost ?? 0) +
+                  (props.subagentTokens.cost ?? 0)
+              )
+            }
+          >
+            {(cost) => (
+              <Tooltip content="Overall cost including all subagents">
+                <span
+                  class="toolbar-session-cost"
+                  tabindex="0"
+                  aria-label={`Overall cost: $${cost()}`}
+                >
+                  <UiIcon source={dollarIcon} width="12" height="12" />
+                  <span>{cost()}</span>
+                </span>
+              </Tooltip>
+            )}
+          </Show>
+
           <Show when={props.showContextControl && props.contextUsage}>
             {(contextUsage) => (
               <div class="context-anchor" style={{ position: 'relative' }}>
@@ -516,9 +542,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
 const STALE_TURN_INACTIVITY_MS = 5 * 60_000;
 
 function ActiveTurnTimer(props: { startedAt: number; lastActivityAt: number | null }) {
-  const [now, setNow] = createSignal(Date.now());
-  const timer = setInterval(() => setNow(Date.now()), 1000);
-  onCleanup(() => clearInterval(timer));
+  const now = useSecondClock();
 
   const elapsedMs = () => Math.max(0, now() - props.startedAt);
   const duration = () => formatTurnDuration(elapsedMs());

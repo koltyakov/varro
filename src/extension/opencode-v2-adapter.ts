@@ -715,13 +715,42 @@ export class OpenCodeV2Adapter {
       }
       if (action.startsWith('message/') && method === 'DELETE') {
         const messageID = decodeURIComponent(action.slice('message/'.length));
-        const page = await data<SessionMessageInfo[]>(
-          'GET',
-          `${endpoint}/message?limit=20&order=desc`
+        const notLast = new Error(
+          'OpenCode v2 can only delete messages from the end of the transcript'
         );
-        const last = page.find(isV2TranscriptMessage);
-        if (last?.id !== messageID)
-          throw new Error('OpenCode v2 can only delete messages from the end of the transcript');
+        let cursor: string | undefined;
+        const seen = new Set<string>();
+        let bytes = 0;
+        let trailingFailure = false;
+        let found = false;
+        do {
+          const page = (await raw(
+            'GET',
+            `${endpoint}/message?limit=20&${cursor ? `cursor=${encodeURIComponent(cursor)}` : 'order=desc'}`
+          )) as SessionMessagesResponse;
+          if (!Array.isArray(page?.data)) throw new Error('Invalid OpenCode v2 message page');
+          bytes += Buffer.byteLength(JSON.stringify(page.data));
+          if (bytes > (options.maxResponseBytes ?? 16 * 1024 * 1024))
+            throw new OpenCodeResponseTooLargeError(options.maxResponseBytes ?? 16 * 1024 * 1024);
+          for (const message of page.data) {
+            if (!isV2TranscriptMessage(message)) continue;
+            if (message.id === messageID) {
+              // History suppresses failed idle records when the assistant already carries the error.
+              if (trailingFailure && !(message.type === 'assistant' && message.error))
+                throw notLast;
+              found = true;
+              break;
+            }
+            if (message.type !== 'idle') throw notLast;
+            trailingFailure = true;
+          }
+          if (found) break;
+          cursor = page.cursor?.next ?? undefined;
+          if (cursor && seen.has(cursor))
+            throw new Error('OpenCode repeated a message pagination cursor');
+          if (cursor) seen.add(cursor);
+        } while (cursor);
+        if (!found) throw notLast;
         await raw('POST', `${endpoint}/revert/stage`, { messageID, files: false });
         await raw('POST', `${endpoint}/revert/commit`, {});
         return true;

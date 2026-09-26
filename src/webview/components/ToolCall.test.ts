@@ -1755,6 +1755,25 @@ describe('ToolCall', () => {
     expect(stats?.textContent).toBe('↑ 1,234 ↓ 56');
     expect(stats?.querySelector('.diff-lines-added')).toBeNull();
     expect(stats?.querySelector('.diff-lines-removed')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-cost')).toBeNull();
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    const costRow = () =>
+      [...(container?.querySelectorAll('.structured-tool-row') ?? [])].find(
+        (row) => row.querySelector('.structured-tool-label')?.textContent === 'cost'
+      );
+    expect(costRow()).toBeUndefined();
+    setState('messages', 0, 'info', { cost: 0.009 });
+    expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('<$0.01');
+    expect(
+      costRow()?.previousElementSibling?.querySelector('.structured-tool-label')?.textContent
+    ).toBe('reasoning');
+    setState('messages', 0, 'info', { cost: 0.01 });
+    expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('$0.01');
+    setState('sessions', [session('subagent-session-1', { cost: 0.07 })]);
+    expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('$0.07');
+    setState('messages', 0, 'info', { cost: 0.08 });
+    expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('$0.08');
+    expect(container?.querySelector('.tool-invocation-header')?.textContent).not.toContain('$');
   });
 
   it('keeps subagent token counts visible while waiting for token data', () => {

@@ -232,10 +232,15 @@ export function reconstructHistoricalEvents(sessionId, userMessage, assistantMes
 
   const assistantCreated = Number(assistantMessage.info.time?.created) || 0;
   let lastOffset = 12;
+  let lastPartStart = 16;
   for (const [rowIndex, row] of partRows.entries()) {
     const part = projectHistoricalPart(row);
     const sourceOffset = Math.max(16, Number(row.time_created) - assistantCreated);
-    const baseOffset = Number.isFinite(sourceOffset) ? sourceOffset : lastOffset + 16;
+    // Creation order is canonical even when imported timestamps overlap or regress.
+    const baseOffset = Math.max(
+      lastPartStart,
+      Number.isFinite(sourceOffset) ? sourceOffset : lastOffset + 16
+    );
     if ((part.type === 'text' || part.type === 'reasoning') && typeof part.text === 'string') {
       const finalText = part.text;
       const messageEnd = assistantMessage.info.time?.completed;
@@ -250,7 +255,8 @@ export function reconstructHistoricalEvents(sessionId, userMessage, assistantMes
           end > start &&
           (!Number.isFinite(messageEnd) || end <= messageEnd)
       );
-      const startedAt = span ? Math.max(16, span[0] - assistantCreated) : baseOffset;
+      const startedAt = span ? Math.max(baseOffset, span[0] - assistantCreated) : baseOffset;
+      lastPartStart = startedAt;
       const duration = span ? Math.max(0, span[1] - assistantCreated - startedAt) : undefined;
       const chunks = streamChunks(finalText, duration);
       // Only estimated timing is clipped to the next part; persisted spans can overlap tools.
@@ -283,6 +289,7 @@ export function reconstructHistoricalEvents(sessionId, userMessage, assistantMes
       lastOffset = Math.max(lastOffset, completedAt);
       continue;
     }
+    lastPartStart = baseOffset;
     if (part.type === 'tool' && part.state && typeof part.state === 'object') {
       const input = part.state.input ?? {};
       add(baseOffset, {

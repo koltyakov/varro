@@ -1,3 +1,4 @@
+// @ts-check
 import { spawn } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -65,6 +66,7 @@ export function partitionTestArguments(args, scriptTests) {
   };
 }
 
+/** @returns {Promise<void>} */
 function run(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {

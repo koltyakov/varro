@@ -9,9 +9,14 @@ import {
 import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import type { AssistantActivityGroupInfo } from '../../lib/assistant-activity';
-import { formatNumber, formatTurnDuration, isAssistantMessage } from '../../lib/message-metrics';
+import {
+  formatNumber,
+  formatTurnCost,
+  formatTurnDuration,
+  isAssistantMessage,
+} from '../../lib/message-metrics';
 import { formatMessageSentTime } from '../../lib/message-time';
-import { checkIcon, copyIcon } from '../../lib/ui-icons';
+import { checkIcon, clockIcon, coinsIcon, copyIcon, dollarCircleIcon } from '../../lib/ui-icons';
 import { writeClipboard } from '../../lib/write-clipboard';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type { MessageEntry, QuestionRequest, ToolPart } from '../../types';
@@ -395,15 +400,15 @@ function AssistantDialogSummary(props: {
   let summaryRef: HTMLDivElement | undefined;
   const tokenSuffix = () =>
     props.summary.inputTokens > 0 || props.summary.outputTokens > 0
-      ? ` - Tokens ↑ ${formatNumber(props.summary.inputTokens)} ↓ ${formatNumber(props.summary.outputTokens)}`
+      ? `↑ ${formatNumber(props.summary.inputTokens)} ↓ ${formatNumber(props.summary.outputTokens)}`
       : '';
   const agentSuffix = () =>
-    props.summary.agentCount > 0 ? ` - Agents ${formatNumber(props.summary.agentCount)}` : '';
+    props.summary.agentCount > 0 ? `Agents ${formatNumber(props.summary.agentCount)}` : '';
   const statusSuffix = () =>
     props.summary.permissionRejected
-      ? ' - Permission rejected'
+      ? 'Permission rejected'
       : props.summary.questionSkipped
-        ? ' - Question skipped'
+        ? 'Question skipped'
         : '';
   const hasCompletedSummary = () => !props.summary.collectingStats;
   const completedTime = () =>
@@ -517,12 +522,56 @@ function AssistantDialogSummary(props: {
               when={!props.summary.interrupted && !props.summary.collectingStats}
               fallback={props.summary.interrupted ? 'Interrupted' : 'Collecting stats...'}
             >
-              Worked for {formatTurnDuration(props.summary.durationMs)}
-              {statusSuffix()}
-              <Show when={tokenSuffix()}>
-                {(tokens) => <span class="assistant-dialog-summary-token-budget">{tokens()}</span>}
+              <span class="assistant-dialog-summary-metric">
+                <UiIcon source={clockIcon} width="12" height="12" aria-label="Worked for" />
+                {formatTurnDuration(props.summary.durationMs)}
+              </span>
+              <Show when={statusSuffix()}>
+                {(status) => (
+                  <>
+                    {' '}
+                    <span>{status()}</span>
+                  </>
+                )}
               </Show>
-              {agentSuffix()}
+              <Show when={tokenSuffix()}>
+                {(tokens) => (
+                  <>
+                    {' '}
+                    <span class="assistant-dialog-summary-metric assistant-dialog-summary-token-budget">
+                      <UiIcon source={coinsIcon} width="12" height="12" aria-label="Tokens" />
+                      {tokens()}
+                    </span>
+                  </>
+                )}
+              </Show>
+              <Show when={formatTurnCost(props.summary.cost)}>
+                {(cost) => (
+                  <>
+                    {' '}
+                    <span
+                      class="assistant-dialog-summary-metric assistant-dialog-summary-cost"
+                      aria-label="Turn cost including subagents"
+                    >
+                      <UiIcon
+                        source={dollarCircleIcon}
+                        width="12"
+                        height="12"
+                        aria-label="US dollars"
+                      />
+                      {cost()}
+                    </span>
+                  </>
+                )}
+              </Show>
+              <Show when={agentSuffix()}>
+                {(agents) => (
+                  <>
+                    {' '}
+                    <span>{agents()}</span>
+                  </>
+                )}
+              </Show>
             </Show>
           </Show>
         </span>

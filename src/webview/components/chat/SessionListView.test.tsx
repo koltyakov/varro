@@ -1030,6 +1030,7 @@ describe('SessionListView diff summaries', () => {
       expect(container.querySelector('.session-item-meta-skeleton')).toBeNull();
       expect(container.querySelector('.session-item-meta')?.textContent).toContain('2 files');
     });
+    expect(container.querySelector('.session-item-cost')).toBeNull();
   });
 
   it('uses the aggregate session diff response instead of loading full diffs or messages', async () => {
@@ -1038,6 +1039,27 @@ describe('SessionListView diff summaries', () => {
       additions: 6,
       deletions: 4,
       tokens: 12_345,
+      tokenBreakdown: {
+        session: {
+          total: 100,
+          input: 100,
+          output: 0,
+          reasoning: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cost: 0.0074,
+        },
+        subagents: {
+          total: 200,
+          input: 200,
+          output: 0,
+          reasoning: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cost: 0.0626,
+        },
+        subagentCount: 2,
+      },
       durationMs: 65_000,
       activeStartedAt: null,
     });
@@ -1061,6 +1083,8 @@ describe('SessionListView diff summaries', () => {
     expect(container.querySelector('.session-item-meta')?.textContent).toContain('1m 5s');
     expect(container.querySelector('[title="12,345 tokens spent"]')).not.toBeNull();
     expect(container.querySelector('[title="1m 5s total time worked"]')).not.toBeNull();
+    expect(container.querySelector('.session-item-cost')?.textContent).toBe('$0.07');
+    expect(container.querySelector('.session-item-meta')?.textContent).toContain('1m 5s · $0.07');
     expect(diffSpy).not.toHaveBeenCalled();
     expect(messagesSpy).not.toHaveBeenCalled();
   });

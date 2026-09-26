@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderMetadata } from '../../util/provider-limit';
 import { createOllamaCloudAdapter } from './ollama-cloud';
+import { VARRO_USER_AGENT } from '../adapter-utils';
 
 const adapter = createOllamaCloudAdapter();
 const provider: ProviderMetadata = {
@@ -53,7 +54,7 @@ describe('createOllamaCloudAdapter', () => {
         headers: {
           Accept: 'application/json',
           Authorization: 'Bearer ollama-api-key',
-          'User-Agent': 'Varro/0.1.0',
+          'User-Agent': VARRO_USER_AGENT,
         },
       })
     );

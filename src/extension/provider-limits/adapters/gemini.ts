@@ -13,6 +13,8 @@ import {
   readBoundedResponseJson,
   toLabel,
   unsupportedProviderStatus,
+  providerErrorStatus,
+  VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const GEMINI_QUOTA_ENDPOINT = 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota';
@@ -52,7 +54,7 @@ export function createGeminiAdapter(): ProviderLimitAdapter {
             Accept: 'application/json',
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
-            'User-Agent': 'Varro/0.1.0',
+            'User-Agent': VARRO_USER_AGENT,
           },
           body: '{}',
           signal: AbortSignal.timeout(10_000),
@@ -68,14 +70,12 @@ export function createGeminiAdapter(): ProviderLimitAdapter {
         }
 
         if (!response.ok) {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: `Gemini quota endpoint returned ${response.status}`,
-          };
+            `Gemini quota endpoint returned ${response.status}`
+          );
         }
 
         const payload = await readBoundedResponseJson(response);
@@ -99,14 +99,12 @@ export function createGeminiAdapter(): ProviderLimitAdapter {
           note: 'Polled Gemini quota endpoint',
         };
       } catch {
-        return {
-          providerID: provider.id,
+        return providerErrorStatus(
+          provider.id,
           modelID,
-          status: 'error',
-          source: 'provider',
           checkedAt,
-          note: 'Failed to poll the Gemini quota endpoint',
-        };
+          'Failed to poll the Gemini quota endpoint'
+        );
       }
     },
   };

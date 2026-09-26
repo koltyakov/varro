@@ -60,6 +60,136 @@ function incompleteAssistantMessage(
 }
 
 describe('getAssistantDialogSummaryMap', () => {
+  it('sums reported turn costs including child snapshots once and excludes later turns', () => {
+    const first = assistantMessage('a1', 'root', 'u1', 2_000, 3_000);
+    first.info.cost = 0.004;
+    const child = assistantMessage('c1', 'child', 'a1', 2_100, 2_900, 'subagent');
+    child.info.cost = 0.03;
+    const second = assistantMessage('a2', 'root', 'u2', 5_000, 6_000);
+    second.info.cost = 0.01;
+    const summaries = getAssistantDialogSummaryMap(
+      [userMessage('u1', 'root', 1_000), first, child, userMessage('u2', 'root', 4_000), second],
+      undefined,
+      {
+        primarySessionId: 'root',
+        sessions: [
+          { id: 'child', parentID: 'root', title: 'Child', time: { created: 2_000 }, cost: 0.066 },
+        ],
+      }
+    );
+    expect(summaries.get('a1')?.cost).toBeCloseTo(0.07);
+    expect(summaries.get('a2')?.cost).toBe(0.01);
+  });
+
+  it('keeps the requested turn cost separate from earlier turns', () => {
+    const first = assistantMessage('a1', 'root', 'u1', 2_000, 3_000);
+    first.info.cost = 1.43;
+    const second = assistantMessage('a2', 'root', 'u2', 5_000, 6_000);
+    second.info.cost = 0.07;
+    const summaries = getAssistantDialogSummaryMap(
+      [userMessage('u1', 'root', 1_000), first, userMessage('u2', 'root', 4_000), second],
+      new Set(['a2'])
+    );
+    expect(summaries.size).toBe(1);
+    expect(summaries.get('a2')?.cost).toBe(0.07);
+  });
+
+  it('does not estimate cost when OpenCode reports no spending', () => {
+    const message = assistantMessage('a1', 'root', 'u1', 2_000, 3_000);
+    expect(
+      getAssistantDialogSummaryMap([userMessage('u1', 'root', 1_000), message]).get('a1')?.cost
+    ).toBeUndefined();
+  });
+  it.each([false, true])(
+    'keeps provider recovery and server restart in one turn, completed: %s',
+    (completed) => {
+      const notice = (id: string, created: number, text: string) => {
+        const entry = userMessage(id, 'session-parent', created);
+        entry.parts = [
+          {
+            id: `${id}-text`,
+            messageID: id,
+            sessionID: 'session-parent',
+            type: 'text',
+            text,
+            synthetic: true,
+          },
+        ];
+        return entry;
+      };
+      const failed = assistantMessage('failed', 'session-parent', 'prompt', 2_000, 3_000);
+      failed.info.finish = 'error';
+      failed.info.error = {
+        name: 'UnknownError',
+        data: { message: 'WebSocket closed with code 1012' },
+      };
+      const restarted = assistantMessage('restarted', 'session-parent', 'recovery', 4_000, 5_000);
+      const resumed = assistantMessage('resumed', 'session-parent', 'restart', 6_000, 7_000);
+      resumed.info.finish = completed ? 'stop' : 'tool-calls';
+      const messages = [
+        userMessage('prompt', 'session-parent', 1_000),
+        failed,
+        notice(
+          'recovery',
+          3_100,
+          'The previous response was interrupted. Continue from where you left off without repeating completed content.'
+        ),
+        restarted,
+        notice(
+          'restart',
+          5_100,
+          'The server restarted while you were working. Continue from where you left off without repeating completed work.'
+        ),
+        resumed,
+      ];
+
+      const summaries = getAssistantDialogSummaryMap(messages, undefined, {
+        primarySessionId: 'session-parent',
+      });
+      expect([...summaries.keys()]).toEqual(completed ? ['resumed'] : []);
+      if (completed) {
+        expect(summaries.get('resumed')).toMatchObject({
+          durationMs: 6_000,
+          promptMessageId: 'prompt',
+          inputTokens: 30,
+          outputTokens: 15,
+        });
+      }
+    }
+  );
+
+  it('still ends a turn when a real prompt includes automatic context', () => {
+    const followup = userMessage('followup', 'session-parent', 4_000);
+    followup.parts = [
+      {
+        id: 'context',
+        messageID: 'followup',
+        sessionID: 'session-parent',
+        type: 'text',
+        text: 'Instructions from: /repo/AGENTS.md',
+        synthetic: true,
+      },
+      {
+        id: 'prompt-text',
+        messageID: 'followup',
+        sessionID: 'session-parent',
+        type: 'text',
+        text: 'Do the next task',
+      },
+    ];
+    const summaries = getAssistantDialogSummaryMap([
+      userMessage('prompt', 'session-parent', 1_000),
+      assistantMessage('first', 'session-parent', 'prompt', 2_000, 3_000),
+      followup,
+      assistantMessage('second', 'session-parent', 'followup', 5_000, 6_000),
+    ]);
+    expect([...summaries.keys()]).toEqual(['first', 'second']);
+    expect(summaries.get('second')).toMatchObject({
+      promptMessageId: 'followup',
+      durationMs: 2_000,
+    });
+  });
+
   it.each([true, false])(
     'closes paused work and excludes the gap before continuation with a prompt: %s',
     (newPrompt) => {

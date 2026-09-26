@@ -14,6 +14,8 @@ import {
   clampPercent,
   readBoundedResponseText,
   unsupportedProviderStatus,
+  providerErrorStatus,
+  VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const MINIMAX_REMAINS_ENDPOINT = 'https://api.minimax.io/v1/api/openplatform/coding_plan/remains';
@@ -46,7 +48,7 @@ export function createMiniMaxAdapter(): ProviderLimitAdapter {
           headers: {
             Accept: 'application/json',
             Authorization: `Bearer ${token}`,
-            'User-Agent': 'Varro/0.1.0',
+            'User-Agent': VARRO_USER_AGENT,
           },
           signal: AbortSignal.timeout(10_000),
         });
@@ -62,14 +64,12 @@ export function createMiniMaxAdapter(): ProviderLimitAdapter {
         }
 
         if (response.status === 403 && isMiniMaxAccessBlocked(response, bodyText)) {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: 'MiniMax quota endpoint is blocked by the upstream edge',
-          };
+            'MiniMax quota endpoint is blocked by the upstream edge'
+          );
         }
 
         const payload = parseJsonBody(bodyText);
@@ -90,45 +90,32 @@ export function createMiniMaxAdapter(): ProviderLimitAdapter {
             };
           }
           if (result.kind === 'error') {
-            return {
-              providerID: provider.id,
-              modelID,
-              status: 'error',
-              source: 'provider',
-              checkedAt,
-              note: result.note,
-            };
+            return providerErrorStatus(provider.id, modelID, checkedAt, result.note);
           }
         }
 
         if (!response.ok) {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: `MiniMax quota endpoint returned ${response.status}`,
-          };
+            `MiniMax quota endpoint returned ${response.status}`
+          );
         }
 
-        return {
-          providerID: provider.id,
+        return providerErrorStatus(
+          provider.id,
           modelID,
-          status: 'error',
-          source: 'provider',
           checkedAt,
-          note: 'MiniMax quota endpoint returned an invalid response',
-        };
+          'MiniMax quota endpoint returned an invalid response'
+        );
       } catch {
-        return {
-          providerID: provider.id,
+        return providerErrorStatus(
+          provider.id,
           modelID,
-          status: 'error',
-          source: 'provider',
           checkedAt,
-          note: 'Failed to poll the MiniMax quota endpoint',
-        };
+          'Failed to poll the MiniMax quota endpoint'
+        );
       }
     },
   };

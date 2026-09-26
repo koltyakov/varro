@@ -245,7 +245,6 @@ export class OpenCodeServer extends EventEmitter {
     simulateMissingCli = false,
     compactionSettings?: Partial<OpenCodeCompactionSettings>,
     ownershipLeasePath?: string,
-    askAgentEnabled = false,
     private readonly secrets?: vscode.SecretStorage
   ) {
     super();
@@ -255,9 +254,7 @@ export class OpenCodeServer extends EventEmitter {
       command,
       simulateMissingCli,
       compactionSettings,
-      ownershipLeasePath,
-      undefined,
-      askAgentEnabled
+      ownershipLeasePath
     );
     this.transport = new OpenCodeTransport({
       getUrl: () => this.url,
@@ -1289,7 +1286,7 @@ export class OpenCodeServer extends EventEmitter {
       return;
     }
 
-    this.pollHealthTimer = setTimeout(async () => {
+    const pollOnce = async () => {
       this.pollHealthTimer = null;
       if (
         signal?.aborted ||
@@ -1361,6 +1358,12 @@ export class OpenCodeServer extends EventEmitter {
           confirmOwnership
         );
       }
+    };
+    this.pollHealthTimer = setTimeout(() => {
+      // An unexpected throw must fail startup instead of leaving it pending.
+      void pollOnce().catch((err: unknown) => {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      });
     }, 200);
   }
 
@@ -1504,9 +1507,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private startMaintenanceLoop() {
-    this.processManager.startMaintenanceLoop(() => {
-      void this.runMaintenanceTick();
-    });
+    this.processManager.startMaintenanceLoop(() => this.runMaintenanceTickSafely());
   }
 
   private stopMaintenanceLoop() {
@@ -1514,9 +1515,15 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private requestMaintenanceCheck(force = false) {
-    this.processManager.requestMaintenanceCheck(() => {
-      void this.runMaintenanceTick();
-    }, force);
+    this.processManager.requestMaintenanceCheck(() => this.runMaintenanceTickSafely(), force);
+  }
+
+  private runMaintenanceTickSafely() {
+    void this.runMaintenanceTick().catch((err: unknown) => {
+      logger.warn(
+        `OpenCode maintenance check failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    });
   }
 
   private async runMaintenanceTick() {
@@ -2173,16 +2180,6 @@ export class OpenCodeServer extends EventEmitter {
 
   async updateCompactionSettings(value?: Partial<OpenCodeCompactionSettings>) {
     await this.processManager.updateCompactionSettings(value, {
-      status: this._status,
-      request: (method, path, body) =>
-        body === undefined ? this.request(method, path) : this.request(method, path, body),
-      restartManagedServerForCompactionSettings: () =>
-        this.restartManagedServerForCompactionSettings(),
-    });
-  }
-
-  async updateAskAgentEnabled(enabled: boolean) {
-    await this.processManager.updateAskAgentEnabled(enabled, {
       status: this._status,
       request: (method, path, body) =>
         body === undefined ? this.request(method, path) : this.request(method, path, body),

@@ -7,6 +7,8 @@ import {
   getString,
   readBoundedResponseJson,
   unsupportedProviderStatus,
+  providerErrorStatus,
+  VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const OLLAMA_CLOUD_USAGE_ENDPOINT = 'https://ollama.com/api/usage';
@@ -36,7 +38,7 @@ export function createOllamaCloudAdapter(): ProviderLimitAdapter {
           headers: {
             Accept: 'application/json',
             Authorization: `Bearer ${apiKey}`,
-            'User-Agent': 'Varro/0.1.0',
+            'User-Agent': VARRO_USER_AGENT,
           },
           signal: AbortSignal.timeout(10_000),
         });
@@ -51,14 +53,12 @@ export function createOllamaCloudAdapter(): ProviderLimitAdapter {
         }
 
         if (!response.ok) {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: `Ollama Cloud usage endpoint returned ${response.status}`,
-          };
+            `Ollama Cloud usage endpoint returned ${response.status}`
+          );
         }
 
         const windows = extractOllamaCloudWindows(await readBoundedResponseJson(response));
@@ -81,14 +81,12 @@ export function createOllamaCloudAdapter(): ProviderLimitAdapter {
           note: 'Polled Ollama Cloud usage endpoint',
         };
       } catch {
-        return {
-          providerID: provider.id,
+        return providerErrorStatus(
+          provider.id,
           modelID,
-          status: 'error',
-          source: 'provider',
           checkedAt,
-          note: 'Failed to poll the Ollama Cloud usage endpoint',
-        };
+          'Failed to poll the Ollama Cloud usage endpoint'
+        );
       }
     },
   };

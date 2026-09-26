@@ -67,8 +67,8 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.name === 'undo')).toBe(false);
     expect(commands.filter((command) => command.name === 'settings')).toHaveLength(1);
 
-    commands.find((command) => command.name === 'stats')?.action('');
-    commands.find((command) => command.name === 'stats')?.action('all');
+    void commands.find((command) => command.name === 'stats')?.action('');
+    void commands.find((command) => command.name === 'stats')?.action('all');
     expect(onGenerateStats).toHaveBeenNthCalledWith(1, false);
     expect(onGenerateStats).toHaveBeenNthCalledWith(2, true);
   });

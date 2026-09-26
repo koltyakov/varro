@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEffect, createRoot } from 'solid-js';
-import type { FileDiff, Message, Part, Session } from '../../types';
+import type { AssistantMessage, FileDiff, Part, Session } from '../../types';
+import {
+  markProviderAuthFailure,
+  providerRequiresReconnection,
+  resetProviderConnectionState,
+} from '../provider-connection-state';
+import { upsertMessageInfo } from '../state-messages';
 import {
   captureSessionStatusSnapshotTime,
   resetSessionStatusSnapshotTracking,
@@ -33,7 +39,7 @@ function createSession(id: string, parentID?: string): Session {
   };
 }
 
-function completedAssistantMessage(sessionID = 'session-1'): Message {
+function completedAssistantMessage(sessionID = 'session-1'): AssistantMessage {
   return {
     id: `${sessionID}-assistant-1`,
     sessionID,
@@ -90,6 +96,30 @@ describe('sessionStore', () => {
     resetDefaultAppState();
     resetQuestionResolutionState();
     resetSessionStatusSnapshotTracking();
+    resetProviderConnectionState();
+  });
+
+  it('recovers provider models from successful history without mounting message rows', () => {
+    markProviderAuthFailure('openai', 'old-error', 0);
+    setMessagesIncremental([{ info: completedAssistantMessage(), parts: [] }]);
+    expect(providerRequiresReconnection('openai')).toBe(false);
+    markProviderAuthFailure('openai', 'late-mounted-error', 0);
+    expect(providerRequiresReconnection('openai')).toBe(false);
+    markProviderAuthFailure('openai', 'new-error', 3);
+    upsertMessageInfo(completedAssistantMessage());
+    expect(providerRequiresReconnection('openai')).toBe(true);
+    upsertMessageInfo({ ...completedAssistantMessage(), time: { created: 4, completed: 5 } });
+    expect(providerRequiresReconnection('openai')).toBe(false);
+  });
+
+  it('does not treat pending or failed responses as restored authentication', () => {
+    markProviderAuthFailure('openai', 'error', 0);
+    const info = completedAssistantMessage();
+    if (info.role !== 'assistant') throw new Error('Expected assistant fixture');
+    upsertMessageInfo({ ...info, time: { created: 4 } });
+    expect(providerRequiresReconnection('openai')).toBe(true);
+    upsertMessageInfo({ ...info, error: { name: 'UnknownError', data: { message: 'failed' } } });
+    expect(providerRequiresReconnection('openai')).toBe(true);
   });
 
   it('updates active session, diffs, and session status entries', () => {

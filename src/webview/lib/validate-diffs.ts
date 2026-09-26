@@ -1,5 +1,5 @@
 import type { FileDiff } from '../types';
-import { isNumber, isString, type UnknownRecord, isObject } from './runtime-values';
+import { isNumber, isRecord, isString } from './runtime-values';
 
 function isFileDiff<T>(value: T): value is T & FileDiff {
   if (!isRecord(value)) return false;
@@ -12,10 +12,6 @@ function isFileDiff<T>(value: T): value is T & FileDiff {
     isNumber(record.additions) &&
     isNumber(record.deletions)
   );
-}
-
-function isRecord<T>(value: T): value is T & UnknownRecord {
-  return !!value && isObject(value) && !Array.isArray(value);
 }
 
 export function validateFileDiffs<T>(value: T): FileDiff[] {

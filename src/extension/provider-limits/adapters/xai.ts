@@ -14,6 +14,8 @@ import {
   parseFiniteNumber,
   readBoundedResponseJson,
   unsupportedProviderStatus,
+  providerErrorStatus,
+  VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const XAI_BILLING_ENDPOINT = 'https://cli-chat-proxy.grok.com/v1/billing?format=credits';
@@ -81,7 +83,7 @@ export function createXaiAdapter(): ProviderLimitAdapter {
               Accept: 'application/json',
               Authorization: `Bearer ${accessToken}`,
               'x-xai-token-auth': 'xai-grok-cli',
-              'User-Agent': 'Varro/0.1.0',
+              'User-Agent': VARRO_USER_AGENT,
             },
             signal: AbortSignal.timeout(10_000),
           });
@@ -101,14 +103,12 @@ export function createXaiAdapter(): ProviderLimitAdapter {
         }
 
         if (!response.ok) {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: `SuperGrok billing endpoint returned ${response.status}`,
-          };
+            `SuperGrok billing endpoint returned ${response.status}`
+          );
         }
 
         const windows = extractXaiBillingWindows(
@@ -126,14 +126,12 @@ export function createXaiAdapter(): ProviderLimitAdapter {
             );
           }
           if (!monthlyResponse.ok && windows.length === 0) {
-            return {
-              providerID: provider.id,
+            return providerErrorStatus(
+              provider.id,
               modelID,
-              status: 'error',
-              source: 'provider',
               checkedAt,
-              note: `SuperGrok billing endpoint returned ${monthlyResponse.status}`,
-            };
+              `SuperGrok billing endpoint returned ${monthlyResponse.status}`
+            );
           }
           if (monthlyResponse.ok) {
             const monthlyWindows = extractXaiBillingWindows(
@@ -153,7 +151,7 @@ export function createXaiAdapter(): ProviderLimitAdapter {
               'Content-Type': 'application/grpc-web+proto',
               Origin: 'https://grok.com',
               Referer: 'https://grok.com/?_s=usage',
-              'User-Agent': 'Varro/0.1.0',
+              'User-Agent': VARRO_USER_AGENT,
               'x-grpc-web': '1',
               'x-user-agent': 'connect-es/2.1.1',
             },
@@ -221,14 +219,12 @@ export function createXaiAdapter(): ProviderLimitAdapter {
         if (error instanceof XaiRefreshCredentialsError) {
           return unsupportedProviderStatus(provider.id, modelID, checkedAt, error.message);
         }
-        return {
-          providerID: provider.id,
+        return providerErrorStatus(
+          provider.id,
           modelID,
-          status: 'error',
-          source: 'provider',
           checkedAt,
-          note: 'Failed to poll the SuperGrok billing endpoint',
-        };
+          'Failed to poll the SuperGrok billing endpoint'
+        );
       }
     },
   };
@@ -249,7 +245,7 @@ async function fetchXaiResetCredits(
         'x-user-agent': 'connect-es/2.1.1',
         Origin: 'https://grok.com',
         Referer: 'https://grok.com/?_s=usage',
-        'User-Agent': 'Varro/0.1.0',
+        'User-Agent': VARRO_USER_AGENT,
       },
       body: EMPTY_GRPC_FRAME,
       signal: AbortSignal.timeout(10_000),

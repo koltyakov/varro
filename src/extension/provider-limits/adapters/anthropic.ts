@@ -25,7 +25,10 @@ import {
   readBoundedResponseText,
   toLabel,
   unsupportedProviderStatus,
+  providerErrorStatus,
+  VARRO_USER_AGENT,
 } from '../adapter-utils';
+import { delay } from '../../server-utils';
 
 const ANTHROPIC_USAGE_ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
 const ANTHROPIC_OAUTH_TOKEN_ENDPOINT = 'https://console.anthropic.com/v1/oauth/token';
@@ -100,16 +103,12 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
         if (combinedStatus) return combinedStatus;
 
         if (localProxyBaseUrl) {
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note:
-              localProxyStatus?.fallbackNote ||
-              'Failed to poll the local Claude proxy quota endpoint',
-          };
+            localProxyStatus?.fallbackNote || 'Failed to poll the local Claude proxy quota endpoint'
+          );
         }
 
         return unsupportedProviderStatus(
@@ -140,14 +139,12 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
               return unsupportedProviderStatus(provider.id, modelID, checkedAt, refreshed.note);
             }
             if (refreshed.status === 'error') {
-              return {
-                providerID: provider.id,
+              return providerErrorStatus(
+                provider.id,
                 modelID,
-                status: 'error',
-                source: 'provider',
                 checkedAt,
-                note: `${refreshed.note} after Anthropic usage endpoint returned ${response.status}`,
-              };
+                `${refreshed.note} after Anthropic usage endpoint returned ${response.status}`
+              );
             }
 
             try {
@@ -159,14 +156,12 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
                 refreshed.expiresInSeconds
               );
             } catch {
-              return {
-                providerID: provider.id,
+              return providerErrorStatus(
+                provider.id,
                 modelID,
-                status: 'error',
-                source: 'provider',
                 checkedAt,
-                note: `Anthropic usage endpoint returned ${response.status} and refreshed credentials could not be saved`,
-              };
+                `Anthropic usage endpoint returned ${response.status} and refreshed credentials could not be saved`
+              );
             }
 
             response = await fetchAnthropicUsage(refreshed.accessToken);
@@ -183,14 +178,12 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
           }
 
           if (!response.ok) {
-            return {
-              providerID: provider.id,
+            return providerErrorStatus(
+              provider.id,
               modelID,
-              status: 'error',
-              source: 'provider',
               checkedAt,
-              note: `Anthropic usage endpoint returned ${response.status}`,
-            };
+              `Anthropic usage endpoint returned ${response.status}`
+            );
           }
 
           const payload = await readBoundedResponseJson(response);
@@ -217,14 +210,12 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
           return apiStatus;
         } catch (error) {
           if (error instanceof ProviderQuotaIdentityChanged) throw error;
-          return {
-            providerID: provider.id,
+          return providerErrorStatus(
+            provider.id,
             modelID,
-            status: 'error',
-            source: 'provider',
             checkedAt,
-            note: 'Failed to poll the Anthropic usage endpoint',
-          };
+            'Failed to poll the Anthropic usage endpoint'
+          );
         }
       };
       const accessToken = credentials.accessToken;
@@ -301,7 +292,7 @@ async function readAnthropicLocalProxyStatus(
     const response = await fetch(new URL(MERIDIAN_QUOTA_ENDPOINT_PATH, baseUrl), {
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'Varro/0.1.0',
+        'User-Agent': VARRO_USER_AGENT,
       },
       signal: AbortSignal.timeout(5_000),
     });
@@ -807,10 +798,6 @@ async function isStaleCredentialLock(lockPath: string) {
 
 function isFileSystemError(value: unknown, code: string) {
   return !!value && typeof value === 'object' && 'code' in value && value.code === code;
-}
-
-function delay(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 function parsePositiveInteger(value: unknown) {
