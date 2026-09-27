@@ -341,6 +341,43 @@ describe('FileSearchService', () => {
     }
   });
 
+  it('matches read as contiguous text instead of scattered letters in unrelated paths', async () => {
+    vscodeMock.workspace.findFiles.mockResolvedValue([
+      { fsPath: '/repo/README.md' },
+      { fsPath: '/repo/src/session-read-state.ts' },
+      { fsPath: '/repo/docs/reading/guide.md' },
+      { fsPath: '/repo/scripts/vscode-sandbox/run.ts' },
+      { fsPath: '/repo/src/shared/pasted-text.ts' },
+    ]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const onResult = vi.fn();
+    try {
+      search(service, 1, 'ReAd', 12, onResult);
+      await vi.waitFor(() => expect(onResult).toHaveBeenCalledOnce());
+      expect(onResult).toHaveBeenCalledWith({
+        requestId: 1,
+        query: 'ReAd',
+        files: [
+          { path: '/repo/docs/reading', relativePath: 'docs/reading', type: 'directory' },
+          { path: '/repo/README.md', relativePath: 'README.md', type: 'file' },
+          {
+            path: '/repo/src/session-read-state.ts',
+            relativePath: 'src/session-read-state.ts',
+            type: 'file',
+          },
+          {
+            path: '/repo/docs/reading/guide.md',
+            relativePath: 'docs/reading/guide.md',
+            type: 'file',
+          },
+        ],
+      });
+    } finally {
+      service.dispose();
+    }
+  });
+
   it('returns unique parent folders ahead of their matching files', async () => {
     vscodeMock.workspace.findFiles.mockResolvedValue([
       { fsPath: '/repo/src/components/Button.tsx' },

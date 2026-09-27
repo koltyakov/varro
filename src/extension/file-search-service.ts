@@ -62,7 +62,7 @@ function getGitSearchablePaths(directory: string): Promise<Set<string> | undefin
 }
 
 /**
- * Owns workspace-file discovery and fuzzy ranking for the `@file` picker.
+ * Owns workspace-file discovery and substring ranking for the `@file` picker.
  *
  * Why this is separate from SidebarProvider: the cache, in-flight
  * deduplication, and cancellation state form a cohesive unit that used
@@ -439,13 +439,5 @@ function getFileSearchScore(file: WorkspaceFileSearchEntry, query: string) {
   if (leaf.includes(query)) return 6_000 - leaf.indexOf(query) * 8 - leaf.length;
   if (haystack.includes(query)) return 5_000 - haystack.indexOf(query) * 4 - haystack.length;
 
-  let score = 0;
-  let index = 0;
-  for (const char of query) {
-    const next = haystack.indexOf(char, index);
-    if (next === -1) return Number.NEGATIVE_INFINITY;
-    score += 12 - Math.min(next - index, 11);
-    index = next + 1;
-  }
-  return score - haystack.length;
+  return Number.NEGATIVE_INFINITY;
 }
