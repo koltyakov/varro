@@ -499,6 +499,18 @@ describe('state streaming deltas', () => {
     expect(state.streamingText).toBe('');
   });
 
+  it('materializes streaming text even when a refresh retains the store entry', async () => {
+    upsertMessage({ info: assistantMessage(), parts: [textPart('text-1', '')] });
+    applyMessagePartDelta('message-1', 'text-1', 'Retained answer', 'session-1');
+    await nextFrame();
+
+    setMessagesIncremental([...state.messages]);
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({ text: 'Retained answer' });
+    expect(state.streamingPartId).toBeNull();
+    expect(state.streamingText).toBe('');
+  });
+
   it('keeps newer snapshot text when clearing streaming state', async () => {
     upsertMessage({
       info: assistantMessage(),

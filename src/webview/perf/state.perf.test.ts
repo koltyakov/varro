@@ -457,4 +457,62 @@ describe('state perf guards', () => {
       expect(state.messages[nextIndex]?.parts[0]).toBe(retainedParts[index]);
     }
   });
+
+  it.each(['refresh', 'append'] as const)(
+    'does not reread retained tool bodies during a history-tail %s',
+    (change) => {
+      let outputReads = 0;
+      const existingMessages = Array.from({ length: 1000 }, (_, index) => ({
+        info: createAssistantMessage(`message-${index}`),
+        parts: [
+          {
+            id: `tool-${index}`,
+            messageID: `message-${index}`,
+            sessionID: 'session-1',
+            type: 'tool' as const,
+            tool: 'bash',
+            callID: `call-${index}`,
+            state: {
+              status: 'completed' as const,
+              input: { command: 'pwd' },
+              title: 'Working directory',
+              get output() {
+                outputReads += 1;
+                return '/workspace';
+              },
+              metadata: {},
+              time: { start: 1, end: 2 },
+            },
+          },
+        ],
+      }));
+      setState('messages', existingMessages);
+      const retained = [...state.messages];
+      outputReads = 0;
+
+      setMessagesIncremental([
+        ...retained.slice(0, -1),
+        {
+          info: createAssistantMessage('message-999'),
+          parts: [createTextPart('part-999', 'message-999', 'Refreshed response')],
+        },
+        ...(change === 'append'
+          ? [
+              {
+                info: createAssistantMessage('message-1000'),
+                parts: [createTextPart('part-1000', 'message-1000', 'Appended response')],
+              },
+            ]
+          : []),
+      ]);
+
+      expect(outputReads).toBe(0);
+      expect(state.messages).toHaveLength(change === 'append' ? 1001 : 1000);
+      expect(state.messages[0]).toBe(retained[0]);
+      expect(state.messages[998]).toBe(retained[998]);
+      expect(state.messages[999]?.parts[0]).toMatchObject({ text: 'Refreshed response' });
+      if (change === 'append')
+        expect(state.messages[1000]?.parts[0]).toMatchObject({ text: 'Appended response' });
+    }
+  );
 });

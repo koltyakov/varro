@@ -114,6 +114,32 @@ test('burst scrolling avoids synchronous mounted-row geometry scans', async ({ p
   expect(rowRectReads).toBeLessThan(100);
 });
 
+test('return to latest crosses a long history without traversing every intermediate row', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+  const list = page.locator('.interactive-list');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  await expect.poll(() => getRenderedMessageRowCount(page)).toBeLessThan(90);
+  await list.press('Home');
+  await expect
+    .poll(() =>
+      list.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)
+    )
+    .toBeGreaterThan(10_000);
+
+  await page.getByRole('button', { name: 'Scroll to latest message', exact: true }).click();
+  await expect
+    .poll(
+      () =>
+        list.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop),
+      { timeout: 3000 }
+    )
+    .toBeLessThanOrEqual(2);
+  await expect(page.locator('[data-msg-id="message-large-assistant-239"]')).toBeInViewport();
+  await expect.poll(() => getRenderedMessageRowCount(page)).toBeLessThan(90);
+});
+
 test('appending a message does not remount the full transcript', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=large-transcript');
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);

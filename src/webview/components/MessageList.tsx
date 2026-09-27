@@ -6764,7 +6764,15 @@ export function MessageList() {
       }
       if (shouldAlignNewTurn && startNewTurnAlignment(sessionId, targetMessageId)) return;
       if (startPendingAppendScrollTransition(sessionId)) return;
-      performScroll({ force: true });
+      // Distant navigation must not traverse the entire history at streaming speed.
+      // Nearby returns and subsequent bottom growth still use the normal follower.
+      performScroll({
+        force: true,
+        immediate:
+          !targetMessageId &&
+          !!containerRef &&
+          distanceFromBottom() > containerRef.clientHeight * 4,
+      });
       startFollowLoop(sessionId);
     });
     return requestKey;

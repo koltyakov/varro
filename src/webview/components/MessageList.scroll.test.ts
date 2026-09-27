@@ -49,6 +49,52 @@ installMessageListTestEnvironment({
 });
 
 describe('MessageList auto-scroll', () => {
+  it('reaches latest promptly across a very tall history and still eases subsequent growth', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let height = 900_000;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return new DOMRect(
+        0,
+        0,
+        500,
+        this.classList.contains('interactive-list-track') ? height : 400
+      );
+    });
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(list.scrollTop).toBe(height - 400);
+
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+    list.scrollTop = 200;
+    list.dispatchEvent(new Event('scroll'));
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    for (let frame = 0; frame < 20; frame += 1) animationFrames.flush();
+    expect(list.scrollTop).toBe(height - 400);
+
+    const previousBottom = list.scrollTop;
+    height += 200;
+    startLoading();
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(list.scrollTop).toBeGreaterThanOrEqual(previousBottom);
+    expect(list.scrollTop).toBeLessThan(height - 400);
+    settleBottomFollow(animationFrames, list);
+    expect(list.scrollTop).toBe(height - 400);
+    animationFrames.restore();
+  });
+
   it('restores bottom follow on send after scrolling up and follows subsequent growth', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
