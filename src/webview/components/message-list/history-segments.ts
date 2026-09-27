@@ -1,3 +1,4 @@
+import { createMemo, type Accessor } from 'solid-js';
 import type { MessageEntry } from '../../types';
 import { projectAutomaticActionMessage } from '../message/UserMessageContent';
 import type { StreamingLayoutProjection } from './row-layout';
@@ -51,6 +52,26 @@ export function sameFrozenSegmentBoundary(
   next: FrozenSegmentBoundary
 ) {
   return previous.index === next.index && previous.entry === next.entry;
+}
+
+/**
+ * Settled history ranges for accumulators that continue from one range into the next. A new turn
+ * only changes the recent range; the frozen range changes when its sticky boundary moves.
+ */
+export function createSettledHistoryRanges(entries: Accessor<readonly MessageEntry[]>) {
+  const historyEnd = createMemo(() => getHistorySegmentEnd(entries()));
+  const frozenBoundary = createMemo<FrozenSegmentBoundary>(
+    (previous) => getFrozenSegmentBoundary(entries(), historyEnd(), previous),
+    { entry: null, index: 0 },
+    { equals: sameFrozenSegmentBoundary }
+  );
+  const frozen = createMemo(() => entries().slice(0, frozenBoundary().index), [], {
+    equals: sameEntries,
+  });
+  const recent = createMemo(() => entries().slice(frozenBoundary().index, historyEnd()), [], {
+    equals: sameEntries,
+  });
+  return { frozen, recent, historyEnd };
 }
 
 export function sameEntries<T>(previous: readonly T[], next: readonly T[]) {

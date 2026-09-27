@@ -7,7 +7,7 @@ import {
   type FileChange,
   type FileChangeKind,
 } from '../lib/tool-file-change';
-import { getHistorySegmentEnd, sameEntries } from './message-list/history-segments';
+import { createSettledHistoryRanges } from './message-list/history-segments';
 import { getDiffSummaryStats } from './chat/SessionListView';
 import { formatDisplayPath, getLeafPathName } from '../lib/path-display';
 import { formatEditCount } from '../lib/format';
@@ -46,20 +46,25 @@ export function ChangedFilesList() {
     cachedSummaryStats = null;
   };
   // Settled history is scanned once; streaming updates resume from its state.
-  const historyEnd = createMemo(() => getHistorySegmentEnd(activeMessages()));
-  const historyMessages = createMemo(() => activeMessages().slice(0, historyEnd()), [], {
-    equals: sameEntries,
-  });
-  const historyScan = createMemo(() =>
+  const history = createSettledHistoryRanges(activeMessages);
+  const frozenScan = createMemo(() =>
     MessageFileChangeScan.scan(
-      historyMessages(),
+      history.frozen(),
       CHANGED_FILE_DISPLAY_LIMIT,
       state.editorContext.workspacePath
     )
   );
+  const historyScan = createMemo(() =>
+    MessageFileChangeScan.scan(
+      history.recent(),
+      CHANGED_FILE_DISPLAY_LIMIT,
+      state.editorContext.workspacePath,
+      frozenScan()
+    )
+  );
   const messageFileChanges = createMemo(() =>
     MessageFileChangeScan.scan(
-      activeMessages().slice(historyEnd()),
+      activeMessages().slice(history.historyEnd()),
       CHANGED_FILE_DISPLAY_LIMIT,
       state.editorContext.workspacePath,
       historyScan()

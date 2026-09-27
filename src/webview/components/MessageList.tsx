@@ -1892,6 +1892,8 @@ export function MessageList() {
     // Native scroll movement is reported after wheel/key intent, so layout settling must yield to both.
     const invalidatedAnchorInputEpoch = directScrollInputEpoch;
     const preferredLayoutAnchor = preferredAnchor ?? pendingThinkingLayoutAnchor;
+    // Bottom-follow can move a still-mounted detached anchor before a disclosure pauses follow.
+    // Reuse its saved offset only while it still describes the current scroll position.
     const invalidatedAnchor =
       (invalidatedUnmountedHeight || mountedRows.length > 0) &&
       !autoScroll() &&
@@ -1906,7 +1908,10 @@ export function MessageList() {
       !(activeSessionId && getCurrentPendingHistoryAnchor(activeSessionId))
         ? shouldVirtualize()
           ? (preferredLayoutAnchor ??
-            (lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
+            (lastDetachedVisibleAnchor &&
+            containerRef &&
+            Math.abs(containerRef.scrollTop - lastDetachedVisibleAnchorScrollTop) <= 1 &&
+            getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
               ? lastDetachedVisibleAnchor
               : captureDetachedVisibleScrollAnchor(containerRef?.scrollTop ?? 0)))
           : captureVisibleScrollAnchor()

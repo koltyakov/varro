@@ -15,7 +15,7 @@ export function getBuildAgentName(agents: Agent[]) {
   return agents.find((agent) => agent.name === 'build')?.name || null;
 }
 
-export function deriveSelectedModelFromMessages(messages: MessageEntry[]) {
+export function deriveSelectedModelFromMessages(messages: readonly MessageEntry[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]?.info;
     if (!message) continue;

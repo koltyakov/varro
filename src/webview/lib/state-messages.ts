@@ -1172,6 +1172,39 @@ function cloneValue<T>(value: T): T {
   return value;
 }
 
+export type MessageLookup = {
+  byId: ReadonlyMap<string, MessageEntry>;
+  bySessionId: ReadonlyMap<string, readonly MessageEntry[]>;
+};
+
+let cachedMessageLookupMessages: MessageEntry[] | null = null;
+let cachedMessageLookupVersion = -1;
+let cachedMessageLookup: MessageLookup = { byId: new Map(), bySessionId: new Map() };
+
+/**
+ * First occurrence of each message and each session's messages in transcript order, shared by
+ * components that would otherwise scan every message. Rebuilt on structural message changes.
+ */
+export function getMessageLookup(): MessageLookup {
+  const messages = state.messages;
+  const version = messageStructureVersion();
+  if (cachedMessageLookupMessages === messages && cachedMessageLookupVersion === version) {
+    return cachedMessageLookup;
+  }
+  const byId = new Map<string, MessageEntry>();
+  const bySessionId = new Map<string, MessageEntry[]>();
+  for (const entry of messages) {
+    if (!byId.has(entry.info.id)) byId.set(entry.info.id, entry);
+    const sessionMessages = bySessionId.get(entry.info.sessionID);
+    if (sessionMessages) sessionMessages.push(entry);
+    else bySessionId.set(entry.info.sessionID, [entry]);
+  }
+  cachedMessageLookupMessages = messages;
+  cachedMessageLookupVersion = version;
+  cachedMessageLookup = { byId, bySessionId };
+  return cachedMessageLookup;
+}
+
 export function getChildRunsByParentId(
   messages: MessageEntry[]
 ): Map<string, Array<MessageEntry<AssistantMessage>>> {

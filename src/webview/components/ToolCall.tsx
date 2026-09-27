@@ -20,6 +20,7 @@ import type { AssistantMessage, QuestionRequest, ToolPart } from '../types';
 import { postMessage } from '../lib/bridge';
 import {
   state as appState,
+  getMessageLookup,
   getPermissionGroupMembers,
   getSessionTreeIds,
   getSessionTreeRootId,
@@ -1441,13 +1442,15 @@ function GenericToolCall(props: {
       return null;
     }
 
-    return resolveTaskSessionId(props.tool, appState.messages, appState.sessions);
+    // Only the tool's first matching parent message is read from the transcript.
+    const parent = getMessageLookup().byId.get(props.tool.messageID);
+    return resolveTaskSessionId(props.tool, parent ? [parent] : [], appState.sessions);
   };
   const taskExecutionEntries = createMemo<Array<[string, unknown]>>(() => {
     const sessionId = taskSessionId();
     let latest: AssistantMessage | null = null;
     if (sessionId) {
-      for (const entry of appState.messages) {
+      for (const entry of getMessageLookup().bySessionId.get(sessionId) ?? []) {
         const info = entry.info;
         if (info.role !== 'assistant' || info.sessionID !== sessionId) continue;
         if (!latest || info.time.created >= latest.time.created) latest = info;
@@ -1459,7 +1462,7 @@ function GenericToolCall(props: {
       isString(type) && type.trim()
         ? appState.allAgents.find((candidate) => candidate.name === type.trim())
         : null;
-    const parentEntry = appState.messages.find((entry) => entry.info.id === props.tool.messageID);
+    const parentEntry = getMessageLookup().byId.get(props.tool.messageID);
     const parent = parentEntry?.info.role === 'assistant' ? parentEntry.info : null;
     const metadata = 'metadata' in props.state ? props.state.metadata : undefined;
     const metadataModel = asRecord(asRecord(metadata)?.model);
@@ -1502,7 +1505,7 @@ function GenericToolCall(props: {
 
     let input = 0;
     let output = 0;
-    for (const entry of appState.messages) {
+    for (const entry of getMessageLookup().bySessionId.get(sessionId) ?? []) {
       const info = entry.info;
       if (info.role !== 'assistant' || info.sessionID !== sessionId) continue;
       input += (info.tokens.input || 0) + (info.tokens.cache?.write || 0);
@@ -1515,7 +1518,7 @@ function GenericToolCall(props: {
     const sessionId = taskSessionId();
     if (!sessionId) return '';
     let messageCost = 0;
-    for (const entry of appState.messages) {
+    for (const entry of getMessageLookup().bySessionId.get(sessionId) ?? []) {
       const info = entry.info;
       if (info.role !== 'assistant' || info.sessionID !== sessionId) continue;
       if (Number.isFinite(info.cost) && info.cost > 0) messageCost += info.cost;

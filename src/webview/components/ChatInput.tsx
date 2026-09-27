@@ -129,6 +129,7 @@ import {
   loadingStartedAt,
   showTurnTimer,
   getReviewerModelNames,
+  getMessageLookup,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { readWebviewInstanceContext } from '../lib/state-stored-values';
@@ -250,7 +251,7 @@ import {
   estimateNestedContextBreakdown,
   type ContextMessageEntry,
 } from '../../shared/context-breakdown';
-import { getHistorySegmentEnd, sameEntries } from './message-list/history-segments';
+import { createSettledHistoryRanges, sameEntries } from './message-list/history-segments';
 import {
   MAX_DROPPED_CONTENT_FILES,
   MAX_DROPPED_CONTENT_FILE_BYTES,
@@ -266,8 +267,6 @@ import {
 import {
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
-  groupMessageEntriesBySession,
-  getMessageEntriesForSession,
   getSessionCost,
   accumulateSessionMessageTotals,
   getSessionTreeTokenBreakdown,
@@ -852,7 +851,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     () =>
       !!props.newSession ||
       (!state.messagesLoading &&
-        getMessageEntriesForSession(state.messages, composerSessionId()).length === 0)
+        !getMessageLookup().bySessionId.get(composerSessionId() ?? '')?.length)
   );
   const selectedWorkspacePath = createMemo(() => {
     const session = state.sessions.find((item) => item.id === state.activeSessionId);
@@ -3720,7 +3719,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (!sessionId) return [];
     const entries = [
       ...getSessionHistoryPrompts(sessionId),
-      ...state.messages.filter((entry) => entry.info.sessionID === sessionId),
+      ...(getMessageLookup().bySessionId.get(sessionId) ?? []),
     ];
     const seen = new Set<string>();
     return entries
@@ -4939,7 +4938,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const clipboardImagesNeedVision = () =>
     composerClipboardImages().length > 0 && !currentPromptCanHandleImages();
-  const messagesBySession = createMemo(() => groupMessageEntriesBySession(state.messages));
+  const messagesBySession = createMemo(() => getMessageLookup().bySessionId);
   const sessionsById = createMemo(
     () => new Map(state.sessions.map((session) => [session.id, session]))
   );
@@ -4988,20 +4987,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   // Settled history character counts are reused while the trailing turn streams.
-  const contextHistoryEnd = createMemo(() => getHistorySegmentEnd(currentSessionMessageEntries()));
-  const contextHistoryEntries = createMemo(
-    () => currentSessionMessageEntries().slice(0, contextHistoryEnd()),
-    [],
-    { equals: sameEntries }
-  );
+  const contextHistory = createSettledHistoryRanges(currentSessionMessageEntries);
+  const contextFrozenCharacters = createMemo(() => countContextCharacters(contextHistory.frozen()));
   const contextHistoryCharacters = createMemo(() =>
-    countContextCharacters(contextHistoryEntries())
+    combineContextCharacters(
+      contextFrozenCharacters(),
+      countContextCharacters(contextHistory.recent())
+    )
   );
   const countSessionContextCharacters = (messages: readonly ContextMessageEntry[]) =>
     messages === currentSessionMessageEntries()
       ? combineContextCharacters(
           contextHistoryCharacters(),
-          countContextCharacters(messages.slice(contextHistoryEnd()))
+          countContextCharacters(messages.slice(contextHistory.historyEnd()))
         )
       : countContextCharacters(messages);
   const contextBreakdown = createMemo(() => {
@@ -5042,12 +5040,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     [],
     { equals: sameEntries }
   );
-  const tokenHistoryEnd = createMemo(() => getHistorySegmentEnd(state.messages));
-  const tokenHistoryEntries = createMemo(() => state.messages.slice(0, tokenHistoryEnd()), [], {
-    equals: sameEntries,
-  });
+  const tokenHistory = createSettledHistoryRanges(() => state.messages);
+  const tokenFrozenTotals = createMemo(() =>
+    accumulateSessionMessageTotals(tokenHistory.frozen(), tokenTreeSessionIds())
+  );
   const tokenHistoryTotals = createMemo(() =>
-    accumulateSessionMessageTotals(tokenHistoryEntries(), tokenTreeSessionIds())
+    accumulateSessionMessageTotals(
+      tokenHistory.recent(),
+      tokenTreeSessionIds(),
+      tokenFrozenTotals()
+    )
   );
   const localSessionTokenBreakdown = createMemo(() => {
     const rootId = tokenTreeRootId();
@@ -5057,7 +5059,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const sessionIds = tokenTreeSessionIds();
     return getSessionTreeTokenBreakdownFromTotals(
       accumulateSessionMessageTotals(
-        state.messages.slice(tokenHistoryEnd()),
+        state.messages.slice(tokenHistory.historyEnd()),
         sessionIds,
         tokenHistoryTotals()
       ),
@@ -5281,7 +5283,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (!sessionId) return undefined;
     const sessionIds = getSessionTreeIdsForSession(sessionId);
     const rootSessionId = getSessionTreeRootId(sessionId) || sessionId;
-    const latestPromptCreatedAt = state.messages.reduce(
+    const latestPromptCreatedAt = (getMessageLookup().bySessionId.get(rootSessionId) ?? []).reduce(
       (latest, entry) =>
         entry.info.role === 'user' && entry.info.sessionID === rootSessionId
           ? Math.max(latest, entry.info.time.created)
@@ -5440,18 +5442,22 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
 
   const pendingSteersForSession = createMemo(() => {
-    const deliveredIds = new Set(
-      state.messages
-        .filter((entry) => entry.info.role === 'user' && !entry.info.pendingDelivery)
-        .map((entry) => entry.info.id)
-    );
-    const queued = queuedForSession().filter(
-      (item) => steeringQueuedMessageIds().has(item.id) && !deliveredIds.has(item.messageId ?? '')
-    );
+    const steering = queuedForSession().filter((item) => steeringQueuedMessageIds().has(item.id));
+    // Delivery is only checked while steering messages are queued.
+    const deliveredIds =
+      steering.length === 0
+        ? new Set<string>()
+        : new Set(
+            state.messages
+              .filter((entry) => entry.info.role === 'user' && !entry.info.pendingDelivery)
+              .map((entry) => entry.info.id)
+          );
+    const queued = steering.filter((item) => !deliveredIds.has(item.messageId ?? ''));
     const queuedMessageIds = new Set(queued.map((item) => item.messageId));
+    const sessionId = composerSessionId();
     return [
       ...queued,
-      ...state.messages
+      ...((sessionId && getMessageLookup().bySessionId.get(sessionId)) || [])
         .filter(
           (entry) =>
             entry.info.sessionID === composerSessionId() &&

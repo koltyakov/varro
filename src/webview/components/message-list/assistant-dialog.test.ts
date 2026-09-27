@@ -96,7 +96,7 @@ describe('getAssistantDialogSummaryMap', () => {
       );
       const history = getAssistantDialogSummaryMap(messages.slice(0, split), undefined, {
         ...options,
-        childRunsByParentId: new Map([['assistant-2', [child as MessageEntry<AssistantMessage>]]]),
+        childRunsByParentId: new Map([['assistant-2', [child]]]),
         range: { start: 0, end: split, nextUserRequestCreated: messages[split]!.info.time.created },
       });
       const tail = getAssistantDialogSummaryMap(messages, undefined, {

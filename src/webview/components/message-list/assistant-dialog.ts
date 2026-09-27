@@ -62,10 +62,10 @@ export function getAssistantDialogSummaryMap(
 ) {
   const result = new Map<string, AssistantDialogSummaryInfo>();
   const pauseTimes = new Map(options?.pauses?.map((pause) => [pause.messageId, pause.pausedAt]));
-  const start = options?.range?.start ?? 0;
-  const end = options?.range?.end ?? messages.length;
+  const rangeStart = options?.range?.start ?? 0;
+  const rangeEnd = options?.range?.end ?? messages.length;
   const entriesById = new Map<string, MessageEntry>(options?.entriesById);
-  for (let index = options?.entriesById ? start : 0; index < messages.length; index += 1) {
+  for (let index = options?.entriesById ? rangeStart : 0; index < messages.length; index += 1) {
     const entry = messages[index]!;
     // Preserve Array.find's first-match behavior if malformed history contains duplicate IDs.
     if (!entriesById.has(entry.info.id)) entriesById.set(entry.info.id, entry);
@@ -218,7 +218,7 @@ export function getAssistantDialogSummaryMap(
     resetCurrentDialog();
   };
 
-  for (let index = start; index < end; index += 1) {
+  for (let index = rangeStart; index < rangeEnd; index += 1) {
     const entry = messages[index]!;
     if (!isAssistantMessage(entry.info)) {
       if (options?.primarySessionId && entry.info.sessionID !== options.primarySessionId) {
