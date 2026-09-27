@@ -49,7 +49,7 @@ The Playwright suite is browser-level webview E2E coverage. It runs the real Sol
 
 Local E2E runs use half the available CPU cores, capped at four workers to leave room for frame-sensitive browser checks. Override this with `npm run test:e2e -- --workers=2` on a busy machine. Playback and raster diagnostics default to one worker. CI splits the suite across two jobs with two workers each.
 
-For shorter feedback loops, select a spec as above, filter test names with `npm run test:e2e -- --grep "composer"`, or rerun failures with `npm run test:e2e -- --last-failed`. If port 4174 is occupied, set `VARRO_E2E_PORT` to a free port, for example `VARRO_E2E_PORT=4184 npm run test:e2e` in macOS/Linux shells.
+For shorter feedback loops, select a spec as above, filter test names with `npm run test:e2e -- --grep "composer"`, or rerun failures with `npm run test:e2e -- --last-failed`. Standard and raster E2E runs use port 4174 when available and automatically select a free port when it is occupied. To require a specific port, set `VARRO_E2E_PORT`, for example `VARRO_E2E_PORT=4184 npm run test:e2e` in macOS/Linux shells. Playback keeps its existing-server behavior.
 
 For first-run and recovery checks in a disposable real Extension Host, run `npm run test:vscode-sandbox`. See [Onboarding Verification](onboarding-verification.md) for the scenario matrix and manual non-happy-path checks.
 

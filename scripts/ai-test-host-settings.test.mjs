@@ -23,16 +23,14 @@ test('inherits the curated model list without bringing host sessions or drafts i
     'varro.modelPreferences.hostMigration.v1': true,
   };
   host.exec('CREATE TABLE ItemTable (key TEXT UNIQUE, value BLOB)');
-  host
-    .prepare('INSERT INTO ItemTable VALUES (?, ?)')
-    .run(
-      'koltyakov.varro',
-      JSON.stringify({
-        ...preferences,
-        'varro.queuedMessages': ['private draft'],
-        'varro.sessionSelectedModels': { production: 'openai/test' },
-      })
-    );
+  host.prepare('INSERT INTO ItemTable VALUES (?, ?)').run(
+    'koltyakov.varro',
+    JSON.stringify({
+      ...preferences,
+      'varro.queuedMessages': ['private draft'],
+      'varro.sessionSelectedModels': { production: 'openai/test' },
+    })
+  );
   host.close();
   const before = await readFile(filename);
   await copyHostModelPreferences(source, destination);
@@ -62,14 +60,22 @@ test('inherits provider configuration and credentials without copying or changin
   const config = `{
     // Host provider settings include relative file references.
     "model": "openai/test",
-    "providers": { "openai": { "settings": { "apiKey": "{file:./key}" } } },
+    "providers": { "openai": { "settings": { "apiKey": "{file:./key}", "quoted": ${JSON.stringify('{file:./"key"}')}, "home": "{file:~/key}" } } },
     "mcp": { "servers": { "production": {} } },
   }`;
   await writeFile(path.join(source, 'opencode.jsonc'), config);
   await copyProviderSettings(source, destination);
   assert.deepEqual(JSON.parse(await readFile(path.join(destination, 'opencode.jsonc'), 'utf8')), {
     model: 'openai/test',
-    providers: { openai: { settings: { apiKey: `{file:${path.join(source, 'key')}}` } } },
+    providers: {
+      openai: {
+        settings: {
+          apiKey: `{file:${path.join(source, 'key')}}`,
+          quoted: `{file:${path.join(source, '"key"')}}`,
+          home: '{file:~/key}',
+        },
+      },
+    },
   });
   assert.equal(await readFile(path.join(source, 'opencode.jsonc'), 'utf8'), config);
   const sourcePath = path.join(source, 'opencode.db');

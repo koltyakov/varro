@@ -158,7 +158,8 @@ export function v2ToolOutput(value: unknown): string {
 function projectTool(
   tool: SessionMessageAssistantTool,
   sessionID: string,
-  messageID: string
+  messageID: string,
+  stripToolAttachments: boolean
 ): UnknownRecord {
   const base = {
     id: tool.id,
@@ -177,25 +178,28 @@ function projectTool(
     return { ...base, state: { status: 'pending', input: {}, raw: state.input } };
   const metadata = state.metadata ?? {};
   if (state.status === 'running') return { ...base, state: { ...state, metadata, time } };
-  const attachments = state.content
-    ?.filter((content) => content.type === 'file')
-    .map((content, index) => ({
-      id: `${tool.id}:file:${index}`,
-      sessionID,
-      messageID,
-      type: 'file',
-      url: content.uri,
-      mime: content.mime,
-      filename: content.name,
-    }));
+  const { content, ...toolState } = state;
+  const attachments = stripToolAttachments
+    ? []
+    : content
+        ?.filter((item) => item.type === 'file')
+        .map((item, index) => ({
+          id: `${tool.id}:file:${index}`,
+          sessionID,
+          messageID,
+          type: 'file',
+          url: item.uri,
+          mime: item.mime,
+          filename: item.name,
+        }));
   return {
     ...base,
     state: {
-      ...state,
+      ...toolState,
       metadata,
       title: isString(metadata.title) ? metadata.title : undefined,
       time,
-      output: v2ToolOutput(state.content),
+      output: v2ToolOutput(content),
       error: state.status === 'error' ? state.error.message : undefined,
       attachments,
     },
@@ -249,7 +253,8 @@ export function projectV2Message(
   sessionID: string,
   directory = '',
   parentID = '',
-  context: V2MessageContext = {}
+  context: V2MessageContext = {},
+  options: { stripToolAttachments?: boolean } = {}
 ): ProjectedV2Message {
   const base = { id: message.id, sessionID, time: message.time };
   const part = (ordinal: number, type: string, fields: UnknownRecord): UnknownRecord => ({
@@ -308,7 +313,8 @@ export function projectV2Message(
       sessionID,
       directory,
       parentID,
-      context
+      context,
+      options
     );
   }
   if (message.type === 'idle' && message.outcome === 'failed') {
@@ -373,7 +379,7 @@ export function projectV2Message(
       },
       parts: message.content.map((content) =>
         content.type === 'tool'
-          ? projectTool(content, sessionID, message.id)
+          ? projectTool(content, sessionID, message.id, options.stripToolAttachments === true)
           : part(ordinals[content.type]++, content.type, {
               text: content.text,
               time:

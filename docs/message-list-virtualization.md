@@ -238,6 +238,11 @@ the shared invariants below remain true.
   animated tray height. Otherwise the shrinking scroll range reverses the just-completed gesture.
 - Transcript-scrolling keys release the old activity-exit target and summary anchor while handing its
   reserved space to the append reserve. The old exit target must not undo a downward key destination.
+- Grabbing the scrollbar or beginning a touch scroll also releases the activity-exit target, retained
+  summary anchor, and queued collapse correction without shrinking the scroll range. Bottom-follow
+  yields while the pointer owns scrolling, including beyond the input-intent timeout.
+  `scroll-scrollbar-activity.spec.ts` uses native thumb drags during and after collapse, then checks
+  detached streaming and explicit return to latest.
 - Non-append insertion, removal, filtering, or view replacement may use a bounded structural owner.
   Capture before publishing the changed visible collection and restore after row reconciliation only
   when no stronger owner exists. Pure appends belong to bottom-follow or append-transition ownership.
@@ -363,6 +368,9 @@ Direct input acquires ownership only when it can affect the transcript:
   connected until the destination takes ownership.
 - A bottom reserve compensates only for space actively disappearing from flow. It is inert structural
   chrome, does not become part of row-only virtual prefixes, and is removed when no exit remains.
+- Activity collapse at scroll position zero needs no bottom reserve. Accumulating the removed height
+  in a short transcript eventually fills the unused viewport and flashes the scrollbar on subsequent
+  tool entrances and exits. `scroll-short-transcript.spec.ts` checks repeated previews every frame.
 - When bottom-pinned activity leaves flow, including a direct active-tray collapse into Explored,
   hand its disappearing height to the append reserve so the transcript stays fixed until subsequent
   streamed content consumes that space. Transfer the reserve before removing the final exiting row;

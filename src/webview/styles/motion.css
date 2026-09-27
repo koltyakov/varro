@@ -18,10 +18,10 @@
     content: '…';
   }
 
+  /* Keep the opacity-only working indicator visible as ongoing activity. */
   .jump-to-latest-activity > span {
-    animation: none;
-    transform: none;
-    opacity: 0.75;
+    animation-duration: 900ms !important;
+    animation-iteration-count: infinite !important;
   }
 
   .shimmer-progress {

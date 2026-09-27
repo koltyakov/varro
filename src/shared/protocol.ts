@@ -1,4 +1,5 @@
 import type { OpenCodeInstallMethod } from './opencode-install';
+import type { ExtensionContext } from './extension-context';
 import type { ContextBreakdownSegment } from './context-breakdown';
 import type { NativePdfAttachment } from './native-pdf';
 import type { ServerEventPropertiesByName, WorkspaceStatusEntry } from './opencode-types';
@@ -86,6 +87,7 @@ export interface EditorContext {
   } | null;
   editorText?: EditorTextContext | null;
   databaseContext?: DatabaseContext | null;
+  extensionContexts?: ExtensionContext[];
   diagnostics: EditorDiagnostic[];
   diagnosticsTotal?: number;
   diagnosticCounts?: { errors: number; warnings: number };

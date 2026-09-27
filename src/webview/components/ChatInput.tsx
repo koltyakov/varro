@@ -5,6 +5,9 @@ import {
   MAX_PASTED_TEXT_BYTES,
   MAX_PASTED_TEXT_TOTAL_BYTES,
 } from '../../shared/pasted-text';
+import { captureExtensionContexts } from '../host/extensions';
+import type { ExtensionContext } from '../../shared/extension-context';
+import { cloneExtensionContexts } from '../../shared/extension-context';
 import {
   cloneDatabaseContext,
   databaseContextDetail,
@@ -1780,6 +1783,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
 
   const activeContext = createMemo(() => {
+    if (
+      !composerEditingMessage() &&
+      composerExtensionContexts()?.some((context) => context.placement === 'replace-document')
+    )
+      return null;
     const database = state.editorContext.databaseContext;
     if (database && !composerEditingMessage())
       return {
@@ -1830,6 +1838,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }`;
   });
   const hasAttachmentStripItems = () =>
+    !!composerExtensionContexts()?.length ||
     !!activeContext() ||
     composerIssueCount() > 0 ||
     (!!visibleTerminalSelection() && !inputText().includes(TERMINAL_SELECTION_MARKER)) ||
@@ -1852,6 +1861,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         ? 0
         : getEditorIssueCount(state.editorContext);
   });
+
+  function composerExtensionContexts() {
+    const editing = composerEditingMessage();
+    if (editing) return editing.context.extensionContexts ?? [];
+    const queued = state.queuedMessages.find((item) => item.id === queuedMessageEdit()?.id);
+    return queued?.queuedContext
+      ? queued.queuedContext.editorContext.extensionContexts
+      : state.editorContext.extensionContexts;
+  }
 
   const composerProblemDetails = createMemo(() => {
     if (!state.enableProblemsContext) return null;
@@ -2898,8 +2916,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           : editing.model || undefined;
       const submittedEdit = captureEditDraftBackup();
       submittedEdit.issues = editing.context.issues;
+      submittedEdit.extensionContexts = cloneExtensionContexts(editing.context.extensionContexts);
       const previousDraft = getMessageEditDraftBackup();
       const hasEditableAttachments =
+        !!editing.context.extensionContexts?.length ||
         state.droppedFiles.length > 0 ||
         hasSendableImages ||
         !!state.terminalSelection ||
@@ -2926,6 +2946,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           queuedAttachments: {
             ...queuedAttachments,
             issuesAttachment: editing.context.issues ?? null,
+            extensionContexts: activeContextEnabled(sendSessionId)
+              ? (editing.context.extensionContexts ?? [])
+              : [],
           },
           selectedModel,
           onOptimisticPublish: () => {
@@ -2939,6 +2962,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           queuedAttachments: {
             ...queuedAttachments,
             issuesAttachment: editing.context.issues ?? null,
+            extensionContexts: activeContextEnabled(sendSessionId)
+              ? (editing.context.extensionContexts ?? [])
+              : [],
           },
         });
       }
@@ -2998,7 +3024,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       const queuedDroppedFiles = [...(queuedAttachments.droppedFiles ?? [])];
       const activeFile = composerActiveFile();
       let autoAttachedFilePath: string | undefined;
-      if (activeFile && activeContextEnabled(sessionId)) {
+      if (
+        activeFile &&
+        activeContextEnabled(sessionId) &&
+        !composerExtensionContexts()?.some((context) => context.placement === 'replace-document')
+      ) {
         const activeFileContext = {
           path: activeFile.path,
           relativePath: activeFile.relativePath,
@@ -3018,6 +3048,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           );
         }
       }
+      let extensionContexts: ExtensionContext[] | undefined;
+      try {
+        extensionContexts = activeContextEnabled(sessionId)
+          ? captureExtensionContexts(composerExtensionContexts())
+          : cloneExtensionContexts(composerExtensionContexts());
+      } catch (error) {
+        setError(error instanceof Error ? error.message : String(error));
+        return;
+      }
       const message = {
         id: createAttachmentID(),
         sessionId,
@@ -3034,6 +3073,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           editorContext: {
             ...state.editorContext,
             databaseContext: cloneDatabaseContext(state.editorContext.databaseContext),
+            extensionContexts,
             workspaceFolders: state.editorContext.workspaceFolders?.map((folder) => ({
               ...folder,
             })),
@@ -3108,6 +3148,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               onOptimisticPublish: props.newSession ? props.onBeforeSend : undefined,
             };
       if (capturedTarget !== undefined) sendOptions.targetSessionId = capturedTarget;
+      if (queuedEdit)
+        sendOptions.queuedAttachments = {
+          ...queuedAttachments,
+          extensionContexts: activeContextEnabled(sendSessionId)
+            ? captureExtensionContexts(composerExtensionContexts())
+            : [],
+        };
       const pendingSend = sendMessage(text, sendOptions);
       sent = await pendingSend;
     } catch {
@@ -5599,6 +5646,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         >
           <Show when={hasAttachmentStripItems()}>
             <AttachmentStrip
+              extensionContexts={composerExtensionContexts()}
               activeContext={activeContext()}
               activeContextEnabled={activeContextEnabled(composerSessionId())}
               activeContextTitle={activeContextTitle()}

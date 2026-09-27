@@ -1,4 +1,5 @@
 import { MAX_PASTED_TEXT_BYTES, pastedTextBytes } from './pasted-text';
+import { isExtensionContexts } from './extension-context';
 import {
   isDatabaseAttachment,
   isDatabaseContext,
@@ -800,6 +801,8 @@ export function isEditorContext<T>(value: T): value is T & EditorContext {
   }
   if (record.editorText !== undefined && !isEditorText(record.editorText)) return false;
   if (record.databaseContext != null && !isDatabaseContext(record.databaseContext)) return false;
+  if (record.extensionContexts !== undefined && !isExtensionContexts(record.extensionContexts))
+    return false;
   if (!Array.isArray(record.diagnostics)) return false;
   if (
     record.diagnosticsTotal !== undefined &&

@@ -756,6 +756,42 @@ describe('v2 provider refresh', () => {
   });
 });
 
+describe('v2 agent icon options', () => {
+  it('merges configured icons into resolved and config-only agents', async () => {
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+      if (path === '/api/agent')
+        return {
+          data: [
+            {
+              id: 'build',
+              name: 'Build',
+              mode: 'primary',
+              hidden: false,
+              permissions: [],
+              request: { body: { icon: 'tools', temperature: 0.2 } },
+            },
+          ],
+        };
+      if (path === '/api/config')
+        return [
+          {
+            info: {
+              agents: {
+                build: { request: { body: { icon: 'binocular' } } },
+                vision: { mode: 'subagent', request: { body: { icon: 'eye' } } },
+              },
+            },
+          },
+        ];
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    expect(await adapter.request('GET', '/agent', undefined)).toMatchObject([
+      { name: 'build', options: { icon: 'binocular', temperature: 0.2 } },
+      { name: 'vision', mode: 'subagent', options: { icon: 'eye' } },
+    ]);
+  });
+});
+
 describe('v2 configured model catalogs', () => {
   const tier = { tier: { type: 'context', size: 128_000 }, input: 4, output: 16 };
   const base = { input: 2, output: 8, cache: { read: 0.5, write: 1 } };

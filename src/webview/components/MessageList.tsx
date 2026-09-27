@@ -3921,6 +3921,7 @@ export function MessageList() {
   function reserveActivityExitSpace(key: string) {
     if (
       !containerRef ||
+      containerRef.scrollTop <= 0 ||
       !autoScroll() ||
       (!pinnedToBottom && getDistanceFromBottom(containerRef) > 2) ||
       stickyNavigationOwnsScroll()
@@ -4192,6 +4193,13 @@ export function MessageList() {
   ) {
     if (!containerRef || reserve <= 0.5) return;
 
+    const collapseTarget =
+      targetScrollTop ??
+      Math.max(containerRef.scrollTop, lastObservedScrollTop, lastAutoScrolledBottomScrollTop);
+    // At the top, removing flow content cannot clamp the viewport backward. Reserving it would
+    // accumulate invisible height in short chats until later activity briefly creates overflow.
+    if (collapseTarget <= 0) return;
+
     if (options?.captureSummary !== false) {
       captureActivityExitSummaryAnchor();
       if (activityExitSummaryAnchor) {
@@ -4199,9 +4207,6 @@ export function MessageList() {
         startActivityExitSummarySettle(activityExitSummaryAnchor);
       }
     }
-    const collapseTarget =
-      targetScrollTop ??
-      Math.max(containerRef.scrollTop, lastObservedScrollTop, lastAutoScrolledBottomScrollTop);
     appendBottomReserveTarget = collapseTarget;
     setAppendBottomReserve((current) => current + reserve);
     activityExitBottomTarget = collapseTarget;
@@ -4280,6 +4285,7 @@ export function MessageList() {
     if (
       keys.size === 0 ||
       !containerRef ||
+      containerRef.scrollTop <= 0 ||
       !autoScroll() ||
       (!pinnedToBottom && getDistanceFromBottom(containerRef) > 2) ||
       stickyNavigationOwnsScroll()
@@ -4482,6 +4488,7 @@ export function MessageList() {
 
   function performScroll(options?: { force?: boolean; immediate?: boolean; elapsedMs?: number }) {
     if (
+      pointerScrollOwnershipActive ||
       stickyNavigationOwnsScroll() ||
       activityExitBottomTarget !== null ||
       activityExitSummaryAnchor
@@ -5180,7 +5187,8 @@ export function MessageList() {
     }
     const userScrolledUp =
       now - lastWheelUpAt <= 160 ||
-      (scrollDelta < -1 && now - lastScrollInputAt <= SCROLL_INPUT_WINDOW_MS);
+      (scrollDelta < -1 &&
+        (pointerScrollOwnershipActive || now - lastScrollInputAt <= SCROLL_INPUT_WINDOW_MS));
     const confirmedManualUpwardMovement = scrollDelta < 0 && userScrolledUp;
     if (!autoScrollEnabled || now - lastWheelAt <= ACTIVE_WHEEL_WINDOW_MS || userScrolledUp) {
       lastUserScrollAt = now;
@@ -5722,6 +5730,11 @@ export function MessageList() {
     }
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     historyAnchorSettleOwner = null;
+    // Release the collapse owner without shrinking the scrollbar range under the grabbed thumb.
+    preserveActivityExitReserve();
+    clearActivityExitSummaryAnchor();
+    if (activityCollapseSettleRafId) cancelAnimationFrame(activityCollapseSettleRafId);
+    activityCollapseSettleRafId = 0;
     pointerScrollOwnershipActive = true;
     lastScrollInputAt = performance.now();
     directScrollInputEpoch += 1;

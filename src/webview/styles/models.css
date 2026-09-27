@@ -179,7 +179,7 @@
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
+  --scrollbar-thumb-color: var(--color-vscode-chat-scrollbar-thumb);
 }
 
 .models-body-inner {

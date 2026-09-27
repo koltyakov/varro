@@ -15,7 +15,7 @@ export function formatVariantInitial(variant: string) {
 
 export function formatAgentLabel(agent: string | null | undefined) {
   if (!agent) return '';
-  return agent[0]!.toUpperCase() + agent.slice(1);
+  return formatVariantLabel(agent);
 }
 
 export function formatAgentInitial(agent: string | null | undefined) {

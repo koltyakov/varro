@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.30.4",
+  "version": "0.30.6",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -54,9 +54,9 @@
     "test:compatibility:ui": "npm run build && node scripts/opencode-compatibility/run-ui.mjs",
     "compatibility:discover": "node scripts/opencode-compatibility/run.mjs --report artifacts/opencode-compatibility.json",
     "pretest:e2e": "playwright install chromium",
-    "test:e2e": "playwright test",
+    "test:e2e": "node scripts/run-e2e.mjs",
     "pretest:e2e:raster": "playwright install chromium",
-    "test:e2e:raster": "VARRO_E2E_MODE=raster playwright test",
+    "test:e2e:raster": "VARRO_E2E_MODE=raster node scripts/run-e2e.mjs",
     "test:vscode-sandbox": "npm run build && node scripts/vscode-sandbox/run.mjs",
     "ai:vscode": "npm run build && node scripts/launch-ai-vscode.mjs",
     "ai:preconditions": "node scripts/ai-fuzzy-preconditions.mjs",
@@ -106,7 +106,7 @@
     "vite": "8.3.1",
     "vite-plugin-solid": "2.11.14",
     "vitest": "5.0.2",
-    "ws": "8.21.3"
+    "ws": "8.22.0"
   },
   "contributes": {
     "viewsContainers": {

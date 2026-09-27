@@ -1,18 +1,16 @@
 /* Narrow scrollbars for inline widgets */
 .toolbar-popover,
 .tool-invocation-params {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+  --scrollbar-thumb-color: transparent;
   scrollbar-gutter: stable;
 }
 
 .toolbar-popover:hover,
 .tool-invocation-params:hover {
-  scrollbar-color: var(
-      --vscode-scrollbarSlider-hoverBackground,
-      color-mix(in srgb, var(--color-vscode-fg) 12%, transparent)
-    )
-    transparent;
+  --scrollbar-thumb-color: var(
+    --vscode-scrollbarSlider-hoverBackground,
+    color-mix(in srgb, var(--color-vscode-fg) 12%, transparent)
+  );
 }
 
 input,
@@ -196,7 +194,7 @@ input:focus-visible {
   scrollbar-gutter: stable;
   overscroll-behavior-y: contain;
   padding: 0 0 8px 0;
-  scrollbar-color: var(--color-vscode-chat-scrollbar-thumb-desktop) transparent;
+  --scrollbar-thumb-color: var(--color-vscode-chat-scrollbar-thumb-desktop);
 }
 
 .interactive-list.is-session-hydrating {
@@ -415,8 +413,7 @@ input:focus-visible {
   overflow-y: auto;
   margin-right: -14px;
   padding-right: 14px;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent) transparent;
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: inherit;
@@ -471,7 +468,7 @@ input:focus-visible {
 }
 
 .latest-user-message-sticky:hover .latest-user-message-sticky-text {
-  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent) transparent;
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
 }
 
 .latest-user-message-sticky-meta {

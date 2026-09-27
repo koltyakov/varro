@@ -1289,6 +1289,13 @@ describe('MessageList compact activity', () => {
     replaceMessages([user, { info, parts: [read, search] }]);
 
     cleanup = render(() => MessageList(), container!);
+    // Exit anchoring is only needed when collapsing activity can clamp a scrolled viewport.
+    const list = container!.querySelector<HTMLElement>('.interactive-list')!;
+    Object.defineProperties(list, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 600 },
+    });
+    list.scrollTop = 200;
     await vi.advanceTimersByTimeAsync(500);
     replaceMessages([
       user,
@@ -1318,6 +1325,7 @@ describe('MessageList compact activity', () => {
       vi.mocked(observer.observe).mock.calls.some(([target]) => target === track)
     );
     expect(activityObserver).toBeDefined();
+    expect(activityObserver?.disconnect).not.toHaveBeenCalled();
 
     cleanup();
     cleanup = undefined;

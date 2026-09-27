@@ -1,4 +1,5 @@
 import type { EditorContext, InlineProblemAttachment } from '../../shared/protocol';
+import { hostMetadata } from '../host/extensions';
 import { isInlineProblemAttachment } from '../../shared/extension-message';
 import { asRecord } from '../../shared/type-utils';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../../shared/workspace-path';
@@ -171,7 +172,7 @@ export function problemReferenceDetails(
 }
 
 export function getProblemsSeverity(text: string): 'error' | 'warning' | 'info' {
-  const counts = text.match(/^\[VS Code problems for [^\n]+: (\d+) errors, (\d+) warnings\]\n/);
+  const counts = text.match(/^\[[^\]\n]+ problems for [^\n]+: (\d+) errors, (\d+) warnings\]\n/);
   if (counts) {
     if (Number(counts[1]) > 0) return 'error';
     if (Number(counts[2]) > 0) return 'warning';
@@ -181,7 +182,7 @@ export function getProblemsSeverity(text: string): 'error' | 'warning' | 'info' 
 
 /** Recognize standalone diagnostic parts, including messages sent before issue chips existed. */
 export function parseIssueAttachment(text: string): IssueAttachment | null {
-  const automatic = text.match(/^\[VS Code problems for [^\n]+: (\d+) errors, (\d+) warnings\]\n/);
+  const automatic = text.match(/^\[[^\]\n]+ problems for [^\n]+: (\d+) errors, (\d+) warnings\]\n/);
   const explicit = text.match(/^\[Attached diagnostics: \d+ of (\d+)\]\n/);
   const count = automatic
     ? Number(automatic[1]) + Number(automatic[2])
@@ -256,7 +257,7 @@ export function formatEditorProblems(context: EditorContext): string | null {
   });
   const body = rows.join('\n\n');
   return (
-    `[VS Code problems for ${path(file.path)}: ${counts.errors} errors, ${counts.warnings} warnings]\n` +
+    `[${hostMetadata().ideName} problems for ${path(file.path)}: ${counts.errors} errors, ${counts.warnings} warnings]\n` +
     'Editor diagnostics are context, not a request to fix unrelated issues.\n' +
     (body.length > 12000 ? `${body.slice(0, 12000)}\n[Problem details truncated]` : body) +
     (total > rows.length ? `\n${total - rows.length} additional problems omitted.` : '')

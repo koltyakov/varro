@@ -8,15 +8,13 @@ import type {
 } from '../../../shared/protocol';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import { getProviderIcon } from '../../lib/provider-icons';
+import { getAgentIcon } from '../../lib/agent-icons';
 import {
-  calendarCheckIcon,
-  chatBubbleQuestionIcon,
   checkIcon,
   folderSettingsIcon,
   navArrowDownIcon,
   openNewWindowIcon,
   settingsIcon,
-  toolsIcon,
 } from '../../lib/ui-icons';
 import { formatModelName } from '../../lib/format';
 import { postMessage } from '../../lib/bridge';
@@ -47,13 +45,6 @@ function PickerChevron() {
 }
 
 const selectedIconStyle = { '--toolbar-selected-icon': toCssUrl(checkIcon) };
-
-function getPrimaryAgentIcon(name: string) {
-  if (name.toLowerCase() === 'build') return toolsIcon;
-  if (name.toLowerCase() === 'ask') return chatBubbleQuestionIcon;
-  if (name.toLowerCase() === 'plan') return calendarCheckIcon;
-  return null;
-}
 
 function getAutoApproveActivityTitle(activity: AutoApproveActivity) {
   const label = {
@@ -537,7 +528,7 @@ export function AgentPicker(props: {
     style: Record<string, string>;
   } | null>(null);
   const selectedAgent = () => props.agents.find((agent) => agent.name === props.selectedAgent);
-  const selectedIcon = () => getPrimaryAgentIcon(props.selectedAgent ?? '');
+  const selectedIcon = () => getAgentIcon(selectedAgent() ?? { name: props.selectedAgent ?? '' });
   const tooltipContent = () => {
     const agent = selectedAgent();
     if (!agent) return 'Select agent';
@@ -698,7 +689,7 @@ export function AgentPicker(props: {
               <AgentPickerOption
                 label={props.getLabel(agent)}
                 detail={props.getDetail(agent)}
-                icon={getPrimaryAgentIcon(agent.name)}
+                icon={getAgentIcon(agent)}
                 selected={props.selectedAgent === agent.name}
                 focused={props.focusIndex === index()}
                 onSelect={() => props.onSelect(agent)}

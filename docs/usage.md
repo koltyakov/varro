@@ -339,6 +339,44 @@ The `"*": "deny"` rule is the read-only boundary. The prompt describes expected 
 
 Omit `model` to use the configured global model, or add a provider-qualified model such as `"model": "openai/gpt-5.6-sol"` inside the agent. Add `"default_agent": "ask"` at the top level if new sessions should select it by default.
 
+### Agent icons
+
+Custom agents use the Iconoir `cube` icon in the agent picker and compact toolbar. Choose another icon by its kebab-case name from [Iconoir](https://iconoir.com), such as `binocular` or `code-brackets`. Solid variants use the `-solid` suffix. Icons come from the Iconoir version bundled with Varro; an unknown name falls back to `cube`.
+
+Set `icon` directly on the agent in `opencode.json` or `opencode.jsonc`. This v1-compatible format works with both OpenCode v1 and v2:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "reviewer": {
+      "description": "Reviews code",
+      "mode": "primary",
+      "icon": "binocular",
+      "prompt": "Review the code for correctness and regressions."
+    }
+  }
+}
+```
+
+Keep the singular `agent` key and v1-format fields such as `prompt` and `permission` for these definitions, including when running v2. Native v2 `agents` entries do not preserve arbitrary top-level fields such as `icon`.
+
+On v1, Markdown agent definitions also accept `icon` in frontmatter:
+
+```yaml
+---
+description: Reviews code
+mode: primary
+icon: binocular
+---
+
+Review the code for correctness and regressions.
+```
+
+Save this as `.opencode/agents/reviewer.md`. The tested v2 releases, 2.0.5 and 2.0.18, omit Markdown-defined agents from the catalog API used by Varro. Use the JSON definition above for cross-version support.
+
+Build, Ask, and Plan retain their default icons unless an icon is configured. After changing a definition, reload the agent configuration using the server restart guidance above.
+
 ### Session selections across editor instances
 
 On v1, Varro saves explicit model, reasoning variant, and agent selections in OpenCode session metadata.

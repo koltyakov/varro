@@ -308,6 +308,9 @@ export class OpenCodeV2Adapter {
         captureNextCursor: false,
         stripMessageParts: false,
         stripSummaryDiffs: false,
+        // Native v2 content is projected below; enforce its wire budget here.
+        maxProjectedResponseBytes: options.maxResponseBytes,
+        stripToolAttachments: false,
       });
     };
     const data = async <T>(verb: string, targetPath: string, payload?: unknown): Promise<T> => {
@@ -349,6 +352,10 @@ export class OpenCodeV2Adapter {
           ...agents[existing],
           ...agent,
           name,
+          options: {
+            ...asRecord(agents[existing]?.options),
+            ...asRecord(asRecord(agent.request)?.body),
+          },
           model: model
             ? {
                 providerID: model.providerID,
@@ -666,10 +673,14 @@ export class OpenCodeV2Adapter {
           if (message.type === 'model-switched') context.model = message.model;
           if (!isV2TranscriptMessage(message)) return [];
           if (message.type === 'idle' && assistantFailed) return [];
-          const projected = projectV2Message(message, sessionID, directory, parent, {
-            ...context,
-            ...this.failures.get(message.id),
-          });
+          const projected = projectV2Message(
+            message,
+            sessionID,
+            directory,
+            parent,
+            { ...context, ...this.failures.get(message.id) },
+            options
+          );
           if (message.type === 'user') {
             parent = message.id;
             assistantFailed = false;
@@ -694,7 +705,8 @@ export class OpenCodeV2Adapter {
             sessionID,
             directory,
             '',
-            context
+            context,
+            options
           );
           if (options.stripMessageParts) projected.parts = [];
           messages.push(projected);
@@ -710,7 +722,8 @@ export class OpenCodeV2Adapter {
           sessionID,
           directory,
           this.messageParents.get(message.id),
-          this.contexts.get(sessionID)
+          this.contexts.get(sessionID),
+          options
         );
       }
       if (action.startsWith('message/') && method === 'DELETE') {

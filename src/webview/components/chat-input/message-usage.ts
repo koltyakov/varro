@@ -4,6 +4,7 @@ import {
   type TokenUsage,
 } from '../../lib/message-metrics';
 import type { AssistantMessage, Message, Part, Session, TextPart } from '../../types';
+import { stripContextForHistory } from '../../lib/context-history';
 
 export type MessageInfoEntry = { info: Message };
 
@@ -186,7 +187,7 @@ export function getUserMessageHistoryText(parts: Part[]) {
   const text = parts
     .filter((part): part is TextPart => part.type === 'text')
     .filter((part) => !part.synthetic && !part.ignored)
-    .map((part) => part.text.trim())
+    .map((part) => stripContextForHistory(part.text).trim())
     .filter(
       (value) =>
         value.length > 0 &&

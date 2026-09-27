@@ -331,7 +331,7 @@
   max-height: 180px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent) transparent;
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
 }
 
 .chat-thinking-box .thinking-content::-webkit-scrollbar {
@@ -820,8 +820,7 @@
   max-height: none;
   overflow: auto;
   border-top: none;
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
+  --scrollbar-thumb-color: var(--color-vscode-chat-scrollbar-thumb);
   overscroll-behavior: contain;
 }
 
@@ -2918,11 +2917,11 @@ kbd {
   overscroll-behavior-y: auto;
   margin-right: -14px;
   padding-right: 14px;
-  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent) transparent;
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
 }
 
 .user-message-card:hover .user-message-text-scroll {
-  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent) transparent;
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
 }
 
 .user-message-text-scroll.has-more-below {

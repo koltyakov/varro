@@ -251,7 +251,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   overflow-x: hidden;
   overflow-y: auto;
   overflow-y: overlay;
-  scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
+  --scrollbar-thumb-color: var(--color-vscode-chat-scrollbar-thumb);
 }
 
 .session-list-content {
@@ -289,7 +289,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 
 @media (max-width: 959px) {
   .session-list-scroll {
-    scrollbar-color: var(--color-vscode-chat-scrollbar-thumb-desktop) transparent;
+    --scrollbar-thumb-color: var(--color-vscode-chat-scrollbar-thumb-desktop);
   }
 }
 

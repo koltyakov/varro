@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import cubeIcon from 'iconoir/icons/cube.svg';
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebviewMessage } from '../../../shared/protocol';
@@ -833,7 +834,7 @@ describe('ToolbarPickers', () => {
     expect(options[0]?.querySelector('.agent-picker-option-icon')).not.toBeNull();
     expect(options[1]?.querySelector('.agent-picker-option-icon')).not.toBeNull();
     expect(options[2]?.querySelector('.agent-picker-option-icon')).not.toBeNull();
-    expect(options[3]?.querySelector('.agent-picker-option-icon')).toBeNull();
+    expect(options[3]?.querySelector('.agent-picker-option-icon')).not.toBeNull();
     expect(
       options[0]
         ?.querySelector('.agent-picker-option-label')
@@ -866,18 +867,53 @@ describe('ToolbarPickers', () => {
     expect(toggleButton?.querySelector('.toolbar-picker-label')?.textContent).toBe('Build');
   });
 
-  it('keeps a custom agent initial in compact values', () => {
+  it.each([undefined, 'not-an-icon', '../../cube', 42])(
+    'uses the cube fallback for a custom agent with icon %s',
+    (icon) => {
+      cleanup = render(
+        () => (
+          <AgentPicker
+            agents={[
+              createAgent({ name: 'reviewer', mode: 'primary', builtIn: false, options: { icon } }),
+            ]}
+            selectedAgent="reviewer"
+            selectedLabel="R"
+            compact={true}
+            focusIndex={0}
+            showPicker={false}
+            getLabel={(agent) => agent.name}
+            getDetail={(agent) => agent.description ?? 'No description'}
+            onToggle={vi.fn()}
+            onSelect={vi.fn()}
+            onFocusIndex={vi.fn()}
+          />
+        ),
+        container!
+      );
+
+      const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
+      expect(
+        toggleButton
+          ?.querySelector<HTMLElement>('.agent-picker-value-icon')
+          ?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(cubeIcon));
+      expect(toggleButton?.querySelector('.toolbar-picker-label')).toBeNull();
+    }
+  );
+
+  it('updates configured icons in the compact value and picker options', () => {
+    const [icon, setIcon] = createSignal('binocular');
     cleanup = render(
       () => (
         <AgentPicker
-          agents={[createAgent({ name: 'reviewer', mode: 'primary', builtIn: false })]}
-          selectedAgent="reviewer"
-          selectedLabel="R"
+          agents={[createAgent({ name: 'build', options: { icon: icon() } })]}
+          selectedAgent="build"
+          selectedLabel="B"
           compact={true}
           focusIndex={0}
-          showPicker={false}
+          showPicker={true}
           getLabel={(agent) => agent.name}
-          getDetail={(agent) => agent.description ?? 'No description'}
+          getDetail={() => ''}
           onToggle={vi.fn()}
           onSelect={vi.fn()}
           onFocusIndex={vi.fn()}
@@ -886,9 +922,18 @@ describe('ToolbarPickers', () => {
       container!
     );
 
-    const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
-    expect(toggleButton?.querySelector('.agent-picker-value-icon')).toBeNull();
-    expect(toggleButton?.querySelector('.toolbar-picker-label')?.textContent).toBe('R');
+    for (const name of ['binocular', 'cube-scan-solid']) {
+      setIcon(name);
+      const sources = [
+        container?.querySelector<HTMLElement>('.agent-picker-value-icon'),
+        container?.querySelector<HTMLElement>('.agent-picker-option-icon'),
+      ].map((element) => element?.style.getPropertyValue('--ui-icon-mask'));
+      const path = name.endsWith('-solid')
+        ? `/solid/${name.slice(0, -6)}.svg`
+        : `/regular/${name}.svg`;
+      expect(sources[0]).toContain(path);
+      expect(sources[1]).toBe(sources[0]);
+    }
   });
 
   it('shows the selected agent description below its name in the tooltip', async () => {

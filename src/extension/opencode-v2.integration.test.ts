@@ -108,6 +108,12 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       JSON.stringify({
         model: 'fixture/fixture',
         command: { 'fixture-note': { template: 'Reply with the fixture response.' } },
+        agent: {
+          'icon-legacy-json': { mode: 'primary', icon: 'binocular' },
+          'icon-options-json': { mode: 'primary', options: { icon: 'cube-scan-solid' } },
+          'icon-vision-json': { mode: 'subagent', icon: 'eye' },
+          'icon-default': { mode: 'primary' },
+        },
         provider: {
           fixture: {
             npm: '@ai-sdk/openai-compatible',
@@ -124,6 +130,12 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
         },
       })
     );
+    const agentDirectory = join(root, 'workspace/.opencode/agents');
+    await mkdir(agentDirectory, { recursive: true });
+    await writeFile(
+      join(agentDirectory, 'icon-legacy-markdown.md'),
+      '---\ndescription: Icon fixture\nmode: subagent\nicon: eye\n---\nDescribe images.\n'
+    );
     const output = new OpenCodeStartupOutput((password) => {
       authorization = basicAuthorization(password);
     });
@@ -135,6 +147,9 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       await writeFile(
         join(root, 'config/opencode/opencode.json'),
         JSON.stringify({
+          agents: {
+            'icon-native-json': { mode: 'primary', request: { body: { icon: 'code-brackets' } } },
+          },
           providers: {
             fixture: {
               package: '@opencode/ai/providers/openai-compatible',
@@ -261,6 +276,44 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     );
     expect(result).toBeNull();
     expect(modelRequests).toHaveLength(before);
+  });
+
+  it('preserves configured JSON agent icons through the released backend and adapter', async () => {
+    const before = modelRequests.length;
+    const response = await transport.request('GET', '/agent');
+    await writeFile(join(root, 'agent-icons.json'), JSON.stringify(response, null, 2));
+    expect(Array.isArray(response)).toBe(true);
+    const agents = (response as UnknownRecord[]).map(asRecord);
+    const expected = [
+      { name: 'icon-legacy-json', mode: 'primary', options: { icon: 'binocular' } },
+      { name: 'icon-options-json', mode: 'primary', options: { icon: 'cube-scan-solid' } },
+      { name: 'icon-vision-json', mode: 'subagent', options: { icon: 'eye' } },
+    ];
+    if (transport.version === 2) {
+      expected.push({
+        name: 'icon-native-json',
+        mode: 'primary',
+        options: { icon: 'code-brackets' },
+      });
+    }
+    for (const agent of expected) {
+      expect(agents.find((entry) => entry?.name === agent.name)).toMatchObject(agent);
+    }
+    const defaultAgent = agents.find((entry) => entry?.name === 'icon-default');
+    expect(defaultAgent).toBeDefined();
+    expect(asRecord(defaultAgent?.options)?.icon).toBeUndefined();
+    expect(modelRequests).toHaveLength(before);
+  });
+
+  it('preserves configured Markdown agent icons on v1', async (context) => {
+    if (transport.version === 2) {
+      context.skip('Released v2 catalogs omit Markdown-defined agents');
+    }
+    const agents = (await transport.request('GET', '/agent')) as UnknownRecord[];
+    expect(agents.find((agent) => agent.name === 'icon-legacy-markdown')).toMatchObject({
+      mode: 'subagent',
+      options: { icon: 'eye' },
+    });
   });
 
   it('loads bootstrap catalogs', async () => {
