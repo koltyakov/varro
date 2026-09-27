@@ -49,8 +49,31 @@ function getAssistantPartCharacters(part: Part): AssistantPartCharacters {
 
 export function estimateContextBreakdown(
   messages: readonly ContextMessageEntry[],
-  inputTokens: number
+  inputTokens: number,
+  countCharacters: (
+    messages: readonly ContextMessageEntry[]
+  ) => ContextCharacterCounts = countContextCharacters
 ): ContextBreakdownSegment[] {
+  if (inputTokens <= 0) return [];
+  return estimateContextBreakdownFromCharacters(countCharacters(messages), inputTokens);
+}
+
+/** Combines counts of consecutive transcript segments; the later system prompt wins. */
+export function combineContextCharacters(
+  earlier: ContextCharacterCounts,
+  later: ContextCharacterCounts
+): ContextCharacterCounts {
+  return {
+    system: later.system || earlier.system,
+    user: earlier.user + later.user,
+    assistant: earlier.assistant + later.assistant,
+    tool: earlier.tool + later.tool,
+  };
+}
+
+export function countContextCharacters(
+  messages: readonly ContextMessageEntry[]
+): ContextCharacterCounts {
   const characters: ContextCharacterCounts = { system: 0, user: 0, assistant: 0, tool: 0 };
 
   for (const message of messages) {
@@ -70,7 +93,7 @@ export function estimateContextBreakdown(
     }
   }
 
-  return estimateContextBreakdownFromCharacters(characters, inputTokens);
+  return characters;
 }
 
 export function estimateContextBreakdownFromCharacters(
@@ -113,7 +136,10 @@ export function estimateContextBreakdownFromCharacters(
 }
 
 export function estimateNestedContextBreakdown(
-  sessions: readonly (readonly ContextMessageEntry[])[]
+  sessions: readonly (readonly ContextMessageEntry[])[],
+  countCharacters: (
+    messages: readonly ContextMessageEntry[]
+  ) => ContextCharacterCounts = countContextCharacters
 ): ContextBreakdownSegment[] {
   const totals = {
     system: 0,
@@ -136,7 +162,7 @@ export function estimateNestedContextBreakdown(
     if (sessionInputTokens <= 0) continue;
 
     inputTokens += sessionInputTokens;
-    for (const segment of estimateContextBreakdown(messages, sessionInputTokens)) {
+    for (const segment of estimateContextBreakdown(messages, sessionInputTokens, countCharacters)) {
       totals[segment.key] += segment.tokens;
     }
   }

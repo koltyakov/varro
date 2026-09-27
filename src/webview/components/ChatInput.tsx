@@ -244,9 +244,13 @@ import {
 import { parseUserMessageContent } from './message/UserMessageContent';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
 import {
+  combineContextCharacters,
+  countContextCharacters,
   estimateContextBreakdown,
   estimateNestedContextBreakdown,
+  type ContextMessageEntry,
 } from '../../shared/context-breakdown';
+import { getHistorySegmentEnd, sameEntries } from './message-list/history-segments';
 import {
   MAX_DROPPED_CONTENT_FILES,
   MAX_DROPPED_CONTENT_FILE_BYTES,
@@ -4981,11 +4985,32 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return { used: 0, limit, percent: 0 };
   });
 
+  // Settled history character counts are reused while the trailing turn streams.
+  const contextHistoryEnd = createMemo(() => getHistorySegmentEnd(currentSessionMessageEntries()));
+  const contextHistoryEntries = createMemo(
+    () => currentSessionMessageEntries().slice(0, contextHistoryEnd()),
+    [],
+    { equals: sameEntries }
+  );
+  const contextHistoryCharacters = createMemo(() =>
+    countContextCharacters(contextHistoryEntries())
+  );
+  const countSessionContextCharacters = (messages: readonly ContextMessageEntry[]) =>
+    messages === currentSessionMessageEntries()
+      ? combineContextCharacters(
+          contextHistoryCharacters(),
+          countContextCharacters(messages.slice(contextHistoryEnd()))
+        )
+      : countContextCharacters(messages);
   const contextBreakdown = createMemo(() => {
     const inputTokens = getLatestAssistantMessageInfoWithTokens(currentSessionMessageEntries(), {
       includeSubagents: true,
     })?.tokens.input;
-    return estimateContextBreakdown(currentSessionMessageEntries(), inputTokens ?? 0);
+    return estimateContextBreakdown(
+      currentSessionMessageEntries(),
+      inputTokens ?? 0,
+      countSessionContextCharacters
+    );
   });
   const nestedContextBreakdown = createMemo(() => {
     const sessionId = composerSessionId();
@@ -4997,7 +5022,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return complete.nestedBreakdown;
     }
     return estimateNestedContextBreakdown(
-      [...sessionIds].map((id) => messagesBySession().get(id) || [])
+      [...sessionIds].map((id) => messagesBySession().get(id) || []),
+      countSessionContextCharacters
     );
   });
 

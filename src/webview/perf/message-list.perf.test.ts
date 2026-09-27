@@ -11,7 +11,7 @@ import {
   getCompactActivityDisclosureLayoutSignatures,
   getRenderEmptyMessageIds,
 } from '../components/message-list/row-layout';
-import type { AssistantMessage, Message, Part, TextPart } from '../types';
+import type { AssistantMessage, Message, Part, TextPart, UserMessage } from '../types';
 import { settlePerfEffects } from './harness';
 
 const { messageRowPassCounts } = vi.hoisted(() => ({
@@ -74,6 +74,17 @@ function createAssistantMessage(id: string): AssistantMessage {
       reasoning: 0,
       cache: { read: 0, write: 0 },
     },
+  };
+}
+
+function createUserMessage(id: string): UserMessage {
+  return {
+    id,
+    sessionID: 'session-1',
+    role: 'user',
+    time: { created: 1 },
+    agent: 'build',
+    model: { providerID: 'openai', modelID: 'gpt-4o' },
   };
 }
 
@@ -350,5 +361,103 @@ describe('MessageList perf guards', () => {
       baselineReads,
       'final part commitment must not rescan each shared group for every historical row'
     ).toBeLessThan(size * 100);
+  });
+
+  it('does not rederive settled history while the trailing turn streams tool activity', async () => {
+    const turns = 120;
+    let historyReads = 0;
+    const messages = Array.from({ length: turns }, (_, index) => {
+      const userId = `user-${index}`;
+      const assistantId = `assistant-${index}`;
+      const tool: Part = {
+        id: `tool-${index}`,
+        messageID: assistantId,
+        sessionID: 'session-1',
+        type: 'tool',
+        tool: 'read',
+        callID: `call-${index}`,
+        state: {
+          status: 'completed',
+          input: { filePath: `/workspace/file-${index}.ts` },
+          output: 'Generated output.',
+          title: 'Read file',
+          metadata: {},
+          time: { start: 1, end: 2 },
+        },
+      };
+      Object.defineProperty(tool, 'type', {
+        get() {
+          historyReads += 1;
+          return 'tool';
+        },
+      });
+      return [
+        entry({ ...createUserMessage(userId), time: { created: index * 10 } }, [
+          createTextPart(`prompt-${index}`, userId, `Prompt ${index}`),
+        ]),
+        entry({ ...createAssistantMessage(assistantId), parentID: userId }, [
+          tool,
+          createTextPart(`answer-${index}`, assistantId, `Answer ${index}`),
+        ]),
+      ];
+    }).flat();
+    const trailingUser = createUserMessage('user-trailing');
+    messages.push(
+      entry({ ...trailingUser, time: { created: turns * 10 } }, [
+        createTextPart('prompt-trailing', 'user-trailing', 'Inspect the project'),
+      ]),
+      entry(
+        {
+          ...createAssistantMessage('assistant-trailing'),
+          parentID: 'user-trailing',
+          time: { created: turns * 10 + 1 },
+        },
+        []
+      )
+    );
+    setState('messages', messages);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    cleanup = render(() => MessageList(), container!);
+    await settlePerfEffects();
+    expect(historyReads).toBeGreaterThan(0);
+    historyReads = 0;
+
+    const toolCount = 4;
+    for (let index = 0; index < toolCount; index += 1) {
+      const tool = {
+        id: `trailing-tool-${index}`,
+        messageID: 'assistant-trailing',
+        sessionID: 'session-1',
+        type: 'tool' as const,
+        tool: 'read',
+        callID: `trailing-call-${index}`,
+      };
+      const input = { filePath: `/workspace/trailing-${index}.ts` };
+      upsertPart({ ...tool, state: { status: 'pending', input, raw: '' } });
+      await settlePerfEffects();
+      upsertPart({ ...tool, state: { status: 'running', input, time: { start: 1 } } });
+      await settlePerfEffects();
+      upsertPart({
+        ...tool,
+        state: {
+          status: 'completed',
+          input,
+          output: 'Trailing output.',
+          title: 'Read file',
+          metadata: {},
+          time: { start: 1, end: 2 },
+        },
+      });
+      await settlePerfEffects();
+    }
+
+    // Dialog summaries still rescan history on structural changes; activity grouping, empty-row,
+    // boundary, and layout-signature passes must not.
+    const updates = toolCount * 3;
+    expect(
+      historyReads,
+      'streaming the trailing turn must not rerun whole-history activity and layout passes'
+    ).toBeLessThan(turns * updates * 10);
   });
 });

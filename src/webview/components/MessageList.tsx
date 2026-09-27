@@ -8,6 +8,7 @@ import {
   onCleanup,
   onMount,
   untrack,
+  type Accessor,
 } from 'solid-js';
 import {
   isAbortedAssistantError,
@@ -187,6 +188,17 @@ import {
   getThinkingLayoutSignatures,
   hasVisibleProjectedText,
 } from './message-list/row-layout';
+import {
+  getHistorySegmentEnd,
+  mergeSegmentMaps,
+  restrictMessageIds,
+  restrictPartKeys,
+  restrictStreamingProjection,
+  sameEntries,
+  sameKeys,
+  sameStreamingProjection,
+  sameValues,
+} from './message-list/history-segments';
 import { isNumber, isFunction } from '../lib/runtime-values';
 import { onAfterChatFontConfigChange, onBeforeChatFontConfigChange } from '../lib/chat-font-config';
 import {
@@ -942,31 +954,87 @@ export function MessageList() {
         previous.hiddenPartKeys === current.hiddenPartKeys,
     }
   );
+  // Settled history before the last user message is derived once and reused while the trailing
+  // turn streams. History derivations must read these restricted views, not trailing-turn state.
+  const historySegmentEnd = createMemo(() => getHistorySegmentEnd(messages()));
+  const historyMessages = createMemo(() => messages().slice(0, historySegmentEnd()), [], {
+    equals: sameEntries,
+  });
+  const tailMessages = createMemo(() => messages().slice(historySegmentEnd()));
+  const historyMessageIds = createMemo<ReadonlySet<string>>(
+    () => new Set(historyMessages().map((message) => message.info.id)),
+    new Set(),
+    { equals: sameKeys }
+  );
+  const historyPartIds = createMemo<ReadonlySet<string>>(
+    () => new Set(historyMessages().flatMap((message) => message.parts.map((part) => part.id))),
+    new Set(),
+    { equals: sameKeys }
+  );
+  const restrictToHistoryParts = (keys: Accessor<ReadonlySet<string>>) =>
+    createMemo<ReadonlySet<string>>(
+      () => restrictPartKeys(keys(), historyMessageIds()),
+      new Set(),
+      { equals: sameKeys }
+    );
+  const restrictToHistoryMessages = (ids: Accessor<Iterable<string>>) =>
+    createMemo<ReadonlySet<string>>(
+      () => restrictMessageIds(ids(), historyMessageIds()),
+      new Set(),
+      { equals: sameKeys }
+    );
+  const historyVisibleActiveActivityPartKeys = restrictToHistoryParts(
+    visibleActiveActivityPartKeys
+  );
+  const historyRetainedActivityPartKeys = restrictToHistoryParts(retainedActivityPartKeys);
+  const historyExitingActivityPartKeys = restrictToHistoryParts(exitingActivityPartKeys);
+  const historyHiddenParts = restrictToHistoryParts(() => presentation.hiddenParts());
+  const historyStreamingLayoutProjection = createMemo<StreamingLayoutProjection>(
+    () =>
+      restrictStreamingProjection(
+        streamingLayoutProjection(),
+        historyPartIds(),
+        historyMessageIds()
+      ),
+    { partId: null, text: '' },
+    { equals: sameStreamingProjection }
+  );
   const visibleBlockingStreamingPart = createMemo(() => {
     const part = streamingPart();
     const streamingText = (part && presentation.textForPart(part)) ?? state.streamingText;
     return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
   });
+  // History scans are tracked so they stay current whenever the untracked tail scan runs.
+  const historyVisibleRunningToolPart = createMemo(() =>
+    hasVisibleRunningToolPart(historyMessages())
+  );
   const visibleRunningToolPart = createMemo(() => {
     messageStructureVersion();
-    return untrack(() => hasVisibleRunningToolPart(messages()));
+    return untrack(
+      () => historyVisibleRunningToolPart() || hasVisibleRunningToolPart(tailMessages())
+    );
   });
+  const hasVisibleRunningInlineFileEdit = (entries: readonly MessageEntry[]) =>
+    entries.some((message) =>
+      message.parts.some(
+        (part) =>
+          part.type === 'tool' &&
+          (part.state.status === 'pending' || part.state.status === 'running') &&
+          shouldShowAssistantPartInline(part) &&
+          isAssistantEditActivityPart(part) &&
+          !shouldCompactAssistantActivityPart(part, {
+            keepEditInline: true,
+            keepReasoningInline: false,
+          })
+      )
+    );
+  const historyVisibleRunningInlineFileEdit = createMemo(() =>
+    hasVisibleRunningInlineFileEdit(historyMessages())
+  );
   const visibleRunningInlineFileEdit = createMemo(() => {
     messageStructureVersion();
-    return untrack(() =>
-      messages().some((message) =>
-        message.parts.some(
-          (part) =>
-            part.type === 'tool' &&
-            (part.state.status === 'pending' || part.state.status === 'running') &&
-            shouldShowAssistantPartInline(part) &&
-            isAssistantEditActivityPart(part) &&
-            !shouldCompactAssistantActivityPart(part, {
-              keepEditInline: true,
-              keepReasoningInline: false,
-            })
-        )
-      )
+    return untrack(
+      () => historyVisibleRunningInlineFileEdit() || hasVisibleRunningInlineFileEdit(tailMessages())
     );
   });
   const committedTextBlockKey = createMemo(() => {
@@ -1792,7 +1860,9 @@ export function MessageList() {
     for (const messageId of candidateMessageIds) {
       const previousSignature = zeroHeightRenderGeometrySignatures.get(messageId);
       if (previousSignature === undefined) continue;
-      const currentSignature = getMessageRenderGeometrySignature(messageId, streaming);
+      const currentSignature =
+        historyMessageRenderGeometrySignatures().get(messageId) ??
+        getMessageRenderGeometrySignature(messageId, streaming);
       if (currentSignature === previousSignature) continue;
       measuredHeights.delete(messageId);
       zeroHeightRenderGeometrySignatures.delete(messageId);
@@ -2350,8 +2420,13 @@ export function MessageList() {
     return key ? (permissionRequestsByToolCall().get(key) ?? null) : null;
   }
 
-  const compactActivityLayoutSignatures = createMemo(() =>
-    getCompactActivityLayoutSignatures(messages(), (part) => {
+  const getCompactActivityLayoutSegment = (
+    entries: readonly MessageEntry[],
+    visibleActive: Accessor<ReadonlySet<string>>,
+    retained: Accessor<ReadonlySet<string>>,
+    exiting: Accessor<ReadonlySet<string>>
+  ) =>
+    getCompactActivityLayoutSignatures(entries, (part) => {
       const key = getAssistantActivityPartKey(part);
       if (part.type === 'tool') {
         const question = getQuestionRequestForTool(part);
@@ -2361,11 +2436,29 @@ export function MessageList() {
           return `permission:${permission.permission.id}:${permission.isActive ? 'active' : 'queued'}`;
         }
       }
-      if (visibleActiveActivityPartKeys().has(key)) return 'active';
-      if (retainedActivityPartKeys().has(key)) return 'retained';
-      if (exitingActivityPartKeys().has(key)) return 'exiting';
+      if (visibleActive().has(key)) return 'active';
+      if (retained().has(key)) return 'retained';
+      if (exiting().has(key)) return 'exiting';
       return isAssistantActivityPartRunning(part) ? 'delayed' : 'grouped';
-    })
+    });
+  const historyCompactActivityLayoutSignatures = createMemo(() =>
+    getCompactActivityLayoutSegment(
+      historyMessages(),
+      historyVisibleActiveActivityPartKeys,
+      historyRetainedActivityPartKeys,
+      historyExitingActivityPartKeys
+    )
+  );
+  const compactActivityLayoutSignatures = createMemo(() =>
+    mergeSegmentMaps(
+      historyCompactActivityLayoutSignatures(),
+      getCompactActivityLayoutSegment(
+        tailMessages(),
+        visibleActiveActivityPartKeys,
+        retainedActivityPartKeys,
+        exitingActivityPartKeys
+      )
+    )
   );
 
   createEffect(() => {
@@ -2488,6 +2581,21 @@ export function MessageList() {
     const index = messageIndexById().get(messageId);
     const message = index === undefined ? undefined : messages()[index];
     if (!message) return null;
+    return getMessageEntryRenderGeometrySignature(message, {
+      streaming,
+      canCompact: canCompactActivityPart,
+      isDiffEligible: isAssistantDiffEligible,
+    });
+  }
+  function getMessageEntryRenderGeometrySignature(
+    message: MessageEntry,
+    context: {
+      streaming: StreamingLayoutProjection;
+      canCompact: (part: AssistantActivityPart) => boolean;
+      isDiffEligible: (message: MessageEntry) => boolean;
+    }
+  ) {
+    const { streaming } = context;
     const summaryHasOmittedDiffs =
       message.info.role === 'user' &&
       !!message.info.summary &&
@@ -2498,7 +2606,7 @@ export function MessageList() {
           ? 'aborted'
           : 'error'
         : 'ok';
-    const infoProjection = `${message.info.role}:${summaryHasOmittedDiffs ? 1 : 0}:${errorProjection}:${isAssistantDiffEligible(message) ? 1 : 0}`;
+    const infoProjection = `${message.info.role}:${summaryHasOmittedDiffs ? 1 : 0}:${errorProjection}:${context.isDiffEligible(message) ? 1 : 0}`;
     const partProjection = message.parts
       .map((part) => {
         if (streaming.hiddenPartKeys?.has(getPresentationPartKey(part))) return `${part.id}:queued`;
@@ -2507,7 +2615,7 @@ export function MessageList() {
         }
         const visible = shouldShowAssistantPartInline(part);
         if (!isAssistantActivityPart(part)) return `${part.id}:${part.type}:${visible ? 1 : 0}`;
-        return `${part.id}:${part.type}:${visible ? 1 : 0}:${canCompactActivityPart(part) ? 1 : 0}:${isAssistantActivityPartRunning(part) ? 1 : 0}`;
+        return `${part.id}:${part.type}:${visible ? 1 : 0}:${context.canCompact(part) ? 1 : 0}:${isAssistantActivityPartRunning(part) ? 1 : 0}`;
       })
       .join('|');
     return `${infoProjection}|${partProjection}`;
@@ -2516,15 +2624,13 @@ export function MessageList() {
   let previousMessageRenderGeometrySignatures = new Map<string, string | null>();
   createEffect(() => {
     messageStructureVersion();
-    const current = untrack(
-      () =>
-        new Map(
-          messages().map((message) => [
-            message.info.id,
-            getMessageRenderGeometrySignature(message.info.id),
-          ])
-        )
-    );
+    const current = untrack(() => {
+      const signatures = new Map<string, string | null>(historyMessageRenderGeometrySignatures());
+      for (const message of tailMessages()) {
+        signatures.set(message.info.id, getMessageRenderGeometrySignature(message.info.id));
+      }
+      return signatures;
+    });
     let changed = false;
     for (const [messageId, signature] of current) {
       if (
@@ -6875,101 +6981,132 @@ export function MessageList() {
     prevLoading = loading;
   });
 
+  const getModelChangeSegment = (
+    entries: readonly MessageEntry[],
+    providerMap: ReadonlyMap<string, (typeof state.providers)[number]>,
+    initialPrevious: AssistantMessage | undefined
+  ) => {
+    const result = new Map<string, ModelChangeInfo>();
+    let previous = initialPrevious;
+    for (const msg of entries) {
+      if (!isAssistantMessage(msg.info)) continue;
+      // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
+      const cur = msg.info as AssistantMessage;
+      if (cur.mode === 'subagent') continue;
+      if (msg.parts.some((part) => part.type === 'compaction')) continue;
+      if (previous) {
+        const previousProvider = providerMap.get(previous.providerID);
+        const currentProvider = providerMap.get(cur.providerID);
+        const fromProvider = previousProvider?.name || previous.providerID;
+        const toProvider = currentProvider?.name || cur.providerID;
+        const fromModel = formatModelName(
+          previousProvider?.models[previous.modelID]?.name || previous.modelID
+        );
+        const toModel = formatModelName(currentProvider?.models[cur.modelID]?.name || cur.modelID);
+        const fromReasoning = previous.variant
+          ? formatVariantLabel(previous.variant)
+          : modelSupportsReasoning(previous.providerID, previous.modelID, state.providers)
+            ? 'Default'
+            : 'No thinking';
+        const toReasoning = cur.variant
+          ? formatVariantLabel(cur.variant)
+          : modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)
+            ? 'Default'
+            : 'No thinking';
+        const providerChanged = previous.providerID !== cur.providerID;
+        const modelChanged = previous.modelID !== cur.modelID;
+        const reasoningChanged = fromReasoning !== toReasoning;
+
+        if (providerChanged || modelChanged || reasoningChanged) {
+          const normalFrom = providerChanged
+            ? formatLabelWithProvider(`${fromModel} ${fromReasoning}`, fromProvider)
+            : `${fromModel} ${fromReasoning}`;
+          const normalTo = providerChanged
+            ? formatLabelWithProvider(`${toModel} ${toReasoning}`, toProvider)
+            : modelChanged
+              ? `${toModel} ${toReasoning}`
+              : toReasoning;
+          const narrowFrom = providerChanged
+            ? formatLabelWithProvider(fromModel, fromProvider)
+            : modelChanged
+              ? fromModel
+              : fromReasoning;
+          const narrowTo = providerChanged
+            ? formatLabelWithProvider(
+                `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`,
+                toProvider
+              )
+            : modelChanged
+              ? `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`
+              : toReasoning;
+          result.set(msg.info.id, {
+            normalFrom,
+            normalTo,
+            narrowFrom,
+            narrowTo,
+            from: formatLabelWithProvider(`${fromModel} ${fromReasoning}`, fromProvider),
+            to: formatLabelWithProvider(`${toModel} ${toReasoning}`, toProvider),
+          });
+        }
+      }
+      previous = cur;
+    }
+    return { result, previous };
+  };
+  // Tracked so it is current whenever the version-driven tail pass reads it.
+  const historyModelChanges = createMemo(() =>
+    getModelChangeSegment(
+      historyMessages(),
+      new Map(state.providers.map((p) => [p.id, p])),
+      undefined
+    )
+  );
   const modelChangeMap = createMemo(() => {
     messageInfoVersion();
     const providerMap = new Map(state.providers.map((p) => [p.id, p]));
-    const messagesSnapshot = messages();
+    const tail = tailMessages();
     return untrack(() => {
-      const result = new Map<string, ModelChangeInfo>();
-      let previous: AssistantMessage | undefined;
-      for (const msg of messagesSnapshot) {
-        if (!isAssistantMessage(msg.info)) continue;
-        // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
-        const cur = msg.info as AssistantMessage;
-        if (cur.mode === 'subagent') continue;
-        if (msg.parts.some((part) => part.type === 'compaction')) continue;
-        if (previous) {
-          const previousProvider = providerMap.get(previous.providerID);
-          const currentProvider = providerMap.get(cur.providerID);
-          const fromProvider = previousProvider?.name || previous.providerID;
-          const toProvider = currentProvider?.name || cur.providerID;
-          const fromModel = formatModelName(
-            previousProvider?.models[previous.modelID]?.name || previous.modelID
-          );
-          const toModel = formatModelName(
-            currentProvider?.models[cur.modelID]?.name || cur.modelID
-          );
-          const fromReasoning = previous.variant
-            ? formatVariantLabel(previous.variant)
-            : modelSupportsReasoning(previous.providerID, previous.modelID, state.providers)
-              ? 'Default'
-              : 'No thinking';
-          const toReasoning = cur.variant
-            ? formatVariantLabel(cur.variant)
-            : modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)
-              ? 'Default'
-              : 'No thinking';
-          const providerChanged = previous.providerID !== cur.providerID;
-          const modelChanged = previous.modelID !== cur.modelID;
-          const reasoningChanged = fromReasoning !== toReasoning;
-
-          if (providerChanged || modelChanged || reasoningChanged) {
-            const normalFrom = providerChanged
-              ? formatLabelWithProvider(`${fromModel} ${fromReasoning}`, fromProvider)
-              : `${fromModel} ${fromReasoning}`;
-            const normalTo = providerChanged
-              ? formatLabelWithProvider(`${toModel} ${toReasoning}`, toProvider)
-              : modelChanged
-                ? `${toModel} ${toReasoning}`
-                : toReasoning;
-            const narrowFrom = providerChanged
-              ? formatLabelWithProvider(fromModel, fromProvider)
-              : modelChanged
-                ? fromModel
-                : fromReasoning;
-            const narrowTo = providerChanged
-              ? formatLabelWithProvider(
-                  `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`,
-                  toProvider
-                )
-              : modelChanged
-                ? `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`
-                : toReasoning;
-            result.set(msg.info.id, {
-              normalFrom,
-              normalTo,
-              narrowFrom,
-              narrowTo,
-              from: formatLabelWithProvider(`${fromModel} ${fromReasoning}`, fromProvider),
-              to: formatLabelWithProvider(`${toModel} ${toReasoning}`, toProvider),
-            });
-          }
-        }
-        previous = cur;
-      }
-      return result;
+      const history = historyModelChanges();
+      return mergeSegmentMaps(
+        history.result,
+        getModelChangeSegment(tail, providerMap, history.previous).result
+      );
     });
   });
 
-  const previousTrailingFileEventSignatureMap = createMemo(() => {
-    messageStructureVersion();
-    const visibleMessages = messages();
-    return untrack(() => {
-      const result = new Map<string, string | null>();
-      let previousTrailingSignature: string | null = null;
+  const getTrailingFileEventSignatureSegment = (
+    entries: readonly MessageEntry[],
+    initialSignature: string | null
+  ) => {
+    const result = new Map<string, string | null>();
+    let previousTrailingSignature = initialSignature;
 
-      for (const msg of visibleMessages) {
-        result.set(msg.info.id, previousTrailingSignature);
+    for (const msg of entries) {
+      result.set(msg.info.id, previousTrailingSignature);
 
-        if (!isAssistantMessage(msg.info)) {
-          previousTrailingSignature = null;
-          continue;
-        }
-
-        previousTrailingSignature = getTrailingFileEventSignature(msg.parts);
+      if (!isAssistantMessage(msg.info)) {
+        previousTrailingSignature = null;
+        continue;
       }
 
-      return result;
+      previousTrailingSignature = getTrailingFileEventSignature(msg.parts);
+    }
+
+    return { result, trailingSignature: previousTrailingSignature };
+  };
+  // Tracked so it is current whenever the version-driven tail pass reads it.
+  const historyTrailingFileEventSignatures = createMemo(() =>
+    getTrailingFileEventSignatureSegment(historyMessages(), null)
+  );
+  const previousTrailingFileEventSignatureMap = createMemo(() => {
+    messageStructureVersion();
+    const tail = tailMessages();
+    return untrack(() => {
+      const history = historyTrailingFileEventSignatures();
+      return mergeSegmentMaps(
+        history.result,
+        getTrailingFileEventSignatureSegment(tail, history.trailingSignature).result
+      );
     });
   });
   const trailingAssistantTurn = createMemo(() => {
@@ -7153,8 +7290,19 @@ export function MessageList() {
   const inlineThinkingMessageIds = createMemo<ReadonlySet<string>>(
     () => inlineThinkingTurn().messageIds
   );
+  const historyExpandedThinkingMessageIds = restrictToHistoryMessages(expandedThinkingMessageIds);
+  const historyThinkingLayoutSignatures = createMemo(() =>
+    getThinkingLayoutSignatures(
+      historyMessages(),
+      showThinking(),
+      historyExpandedThinkingMessageIds()
+    )
+  );
   const thinkingLayoutSignatures = createMemo(() =>
-    getThinkingLayoutSignatures(messages(), showThinking(), expandedThinkingMessageIds())
+    mergeSegmentMaps(
+      historyThinkingLayoutSignatures(),
+      getThinkingLayoutSignatures(tailMessages(), showThinking(), expandedThinkingMessageIds())
+    )
   );
   let previousThinkingLayoutSignatures = new Map<string, string>();
   createEffect(() => {
@@ -7208,9 +7356,11 @@ export function MessageList() {
     scheduleChangedLayoutRowMeasurements(previousErrorDetailsLayoutSignatures, current);
     previousErrorDetailsLayoutSignatures = new Map(current);
   });
-  const compactActivityMessages = createMemo(() => {
-    const previousSignatures = previousTrailingFileEventSignatureMap();
-    return messages().map((message) =>
+  const projectCompactActivityMessages = (
+    entries: readonly MessageEntry[],
+    previousSignatures: ReadonlyMap<string, string | null>
+  ) =>
+    entries.map((message) =>
       isAssistantMessage(message.info)
         ? {
             info: message.info,
@@ -7223,7 +7373,29 @@ export function MessageList() {
           }
         : projectAutomaticActionMessage(message)
     );
-  });
+  const historyTrailingFileEventSignatureMap = createMemo<ReadonlyMap<string, string | null>>(
+    () => {
+      const signatures = previousTrailingFileEventSignatureMap();
+      const historyIds = historyMessageIds();
+      const restricted = new Map<string, string | null>();
+      for (const [messageId, signature] of signatures) {
+        if (historyIds.has(messageId)) restricted.set(messageId, signature);
+      }
+      return restricted;
+    },
+    new Map(),
+    { equals: sameValues }
+  );
+  const historyCompactActivityMessages = createMemo(() =>
+    projectCompactActivityMessages(historyMessages(), historyTrailingFileEventSignatureMap())
+  );
+  const tailCompactActivityMessages = createMemo(() =>
+    projectCompactActivityMessages(tailMessages(), previousTrailingFileEventSignatureMap())
+  );
+  const compactActivityMessages = createMemo(() => [
+    ...historyCompactActivityMessages(),
+    ...tailCompactActivityMessages(),
+  ]);
   const trailingActivityTurnState = createMemo<{
     sessionId: string | null;
     userMessageId: string | null;
@@ -7260,14 +7432,47 @@ export function MessageList() {
     if (exitingActivityPartKeys().size === 0) preserveActivityExitReserve();
   });
 
-  const canCompactActivityPart = (part: AssistantActivityPart) =>
-    shouldShowAssistantPartInline(part) &&
-    shouldCompactAssistantActivityPart(part, {
-      keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
-      keepReasoningInline: inlineThinkingMessageIds().has(part.messageID),
-    }) &&
-    (part.type !== 'tool' ||
-      (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part)));
+  const createCanCompactActivityPart =
+    (
+      keepEditInlineMessageIds: Accessor<ReadonlySet<string>>,
+      keepReasoningInlineMessageIds: Accessor<ReadonlySet<string>>
+    ) =>
+    (part: AssistantActivityPart) =>
+      shouldShowAssistantPartInline(part) &&
+      shouldCompactAssistantActivityPart(part, {
+        keepEditInline: keepEditInlineMessageIds().has(part.messageID),
+        keepReasoningInline: keepReasoningInlineMessageIds().has(part.messageID),
+      }) &&
+      (part.type !== 'tool' ||
+        (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part)));
+  const canCompactActivityPart = createCanCompactActivityPart(
+    keepTrailingTurnEditMessageIds,
+    inlineThinkingMessageIds
+  );
+  const historyActiveActivityMessageIds = restrictToHistoryMessages(activeActivityMessageIds);
+  const canCompactHistoryActivityPart = createCanCompactActivityPart(
+    restrictToHistoryMessages(keepTrailingTurnEditMessageIds),
+    restrictToHistoryMessages(inlineThinkingMessageIds)
+  );
+  const historyLastAssistantId = createMemo(() => {
+    const messageId = lastAssistantID();
+    return messageId !== null && historyMessageIds().has(messageId) ? messageId : null;
+  });
+  const historyMessageRenderGeometrySignatures = createMemo(() => {
+    const context = {
+      streaming: historyStreamingLayoutProjection(),
+      canCompact: canCompactHistoryActivityPart,
+      isDiffEligible: (message: MessageEntry) =>
+        getAssistantDiffRequest(message.info, message.info.id === historyLastAssistantId()) !==
+        null,
+    };
+    return new Map(
+      historyMessages().map((message) => [
+        message.info.id,
+        getMessageEntryRenderGeometrySignature(message, context),
+      ])
+    );
+  });
 
   const presentationMessages = createMemo(() => {
     const ids = trailingAssistantTurn()?.assistantMessageIds;
@@ -7398,67 +7603,165 @@ export function MessageList() {
   });
   presentationSourceReader.read = () => presentationSource();
   createComputed(() => presentationSource());
-  const assistantActivityGroupMap = createMemo<Map<string, AssistantActivityGroupInfo[]>>(
-    (previous) => {
-      trackMessageBlockExpansionState();
-      const activeMessageIds = activeActivityMessageIds();
-      const activityMessages = compactActivityMessages();
-      const streaming = streamingLayoutProjection();
-      const isBoundaryPart = (part: Part) =>
-        part.type === 'text'
-          ? hasVisibleProjectedText(part, streaming)
-          : shouldShowAssistantPartInline(part);
-      const isNormallyIncluded = (part: AssistantActivityPart) =>
-        canCompactActivityPart(part) &&
-        !presentation.hiddenParts().has(getPresentationPartKey(part)) &&
-        (!isAssistantActivityPartRunning(part) ||
-          !activeMessageIds.has(part.messageID) ||
-          visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part)));
-      const ownerIsTransitioning = (group: AssistantActivityGroupInfo) => {
-        const ownerKey = `${group.ownerMessageId}\u0000${group.ownerPartId}`;
-        return retainedActivityPartKeys().has(ownerKey) || exitingActivityPartKeys().has(ownerKey);
-      };
-      return preserveAssistantActivityGroupKeys(
-        getAssistantActivityGroupMap(activityMessages, isNormallyIncluded, isBoundaryPart),
-        previous,
-        { pinPreviousOwner: ownerIsTransitioning }
-      );
-    },
-    new Map()
-  );
-  createComputed<ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>>((previous) => {
-    const current = assistantActivityGroupMap();
-    const currentGroups = new Set([...current.values()].flat());
-    const currentKeys = new Set([...currentGroups].map(({ key }) => key));
-    const currentPartKeys = new Set(
-      [...currentGroups].flatMap((group) => group.parts.map(getAssistantActivityPartKey))
-    );
-    const disappearedKeys = new Set<string>();
-    for (const group of new Set([...previous.values()].flat())) {
-      if (
-        !currentKeys.has(group.key) &&
-        group.parts.every((part) => currentPartKeys.has(getAssistantActivityPartKey(part)))
-      ) {
-        disappearedKeys.add(group.key);
-      }
+  type ActivitySegmentState = {
+    activeMessageIds: Accessor<ReadonlySet<string>>;
+    canCompact: (part: AssistantActivityPart) => boolean;
+    hiddenParts: Accessor<ReadonlySet<string>>;
+    visibleActive: Accessor<ReadonlySet<string>>;
+    retained: Accessor<ReadonlySet<string>>;
+    exiting: Accessor<ReadonlySet<string>>;
+    streaming: Accessor<StreamingLayoutProjection>;
+  };
+  const historyActivitySegmentState: ActivitySegmentState = {
+    activeMessageIds: historyActiveActivityMessageIds,
+    canCompact: canCompactHistoryActivityPart,
+    hiddenParts: historyHiddenParts,
+    visibleActive: historyVisibleActiveActivityPartKeys,
+    retained: historyRetainedActivityPartKeys,
+    exiting: historyExitingActivityPartKeys,
+    streaming: historyStreamingLayoutProjection,
+  };
+  const tailActivitySegmentState: ActivitySegmentState = {
+    activeMessageIds: activeActivityMessageIds,
+    canCompact: canCompactActivityPart,
+    hiddenParts: () => presentation.hiddenParts(),
+    visibleActive: visibleActiveActivityPartKeys,
+    retained: retainedActivityPartKeys,
+    exiting: exitingActivityPartKeys,
+    streaming: streamingLayoutProjection,
+  };
+  // Both segments preserve keys against the latest combined map, as one full pass would.
+  let previousAssistantActivityGroupMap: ReadonlyMap<
+    string,
+    readonly AssistantActivityGroupInfo[]
+  > = new Map();
+  const getAssistantActivityGroupSegment = (
+    activityMessages: readonly MessageEntry[],
+    segment: ActivitySegmentState,
+    claimedKeys?: ReadonlySet<string>
+  ) => {
+    trackMessageBlockExpansionState();
+    const activeMessageIds = segment.activeMessageIds();
+    const streaming = segment.streaming();
+    const isBoundaryPart = (part: Part) =>
+      part.type === 'text'
+        ? hasVisibleProjectedText(part, streaming)
+        : shouldShowAssistantPartInline(part);
+    const isNormallyIncluded = (part: AssistantActivityPart) =>
+      segment.canCompact(part) &&
+      !segment.hiddenParts().has(getPresentationPartKey(part)) &&
+      (!isAssistantActivityPartRunning(part) ||
+        !activeMessageIds.has(part.messageID) ||
+        segment.visibleActive().has(getAssistantActivityPartKey(part)));
+    const ownerIsTransitioning = (group: AssistantActivityGroupInfo) => {
+      const ownerKey = `${group.ownerMessageId}\u0000${group.ownerPartId}`;
+      return segment.retained().has(ownerKey) || segment.exiting().has(ownerKey);
+    };
+    // Every group is indexed under each message it spans, so this segment's own entries hold
+    // every previous group that can match one of its parts.
+    const previous = new Map<string, readonly AssistantActivityGroupInfo[]>();
+    for (const message of activityMessages) {
+      const groups = previousAssistantActivityGroupMap.get(message.info.id);
+      if (groups) previous.set(message.info.id, groups);
     }
-    reserveCollapsedActivityGroupSpace(disappearedKeys);
+    return preserveAssistantActivityGroupKeys(
+      getAssistantActivityGroupMap(activityMessages, isNormallyIncluded, isBoundaryPart),
+      previous,
+      { pinPreviousOwner: ownerIsTransitioning, claimedKeys }
+    );
+  };
+  const historyAssistantActivityGroupMap = createMemo(() =>
+    getAssistantActivityGroupSegment(historyCompactActivityMessages(), historyActivitySegmentState)
+  );
+  const historyActivityGroupKeys = createMemo<ReadonlySet<string>>(
+    () =>
+      new Set(
+        [...historyAssistantActivityGroupMap().values()].flatMap((groups) =>
+          groups.map(({ key }) => key)
+        )
+      ),
+    new Set(),
+    { equals: sameKeys }
+  );
+  const tailAssistantActivityGroupMap = createMemo(() =>
+    getAssistantActivityGroupSegment(
+      tailCompactActivityMessages(),
+      tailActivitySegmentState,
+      historyActivityGroupKeys()
+    )
+  );
+  const assistantActivityGroupMap = createMemo(() => {
+    const current = mergeSegmentMaps(
+      historyAssistantActivityGroupMap(),
+      tailAssistantActivityGroupMap()
+    );
+    previousAssistantActivityGroupMap = current;
     return current;
-  }, new Map());
-  const compactActivityDisclosureLayoutSignatures = createMemo(() => {
+  });
+  type ActivityGroupMaps = Record<
+    'history' | 'tail' | 'combined',
+    ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>
+  >;
+  createComputed<ActivityGroupMaps>(
+    (previous) => {
+      const current = assistantActivityGroupMap();
+      const history = historyAssistantActivityGroupMap();
+      const tail = tailAssistantActivityGroupMap();
+      // Unchanged history keeps its group objects and keys, so only tail groups can disappear.
+      const historyUnchanged = history === previous.history;
+      const currentGroups = new Set([...(historyUnchanged ? tail : current).values()].flat());
+      const currentKeys = new Set([...currentGroups].map(({ key }) => key));
+      if (historyUnchanged) for (const key of historyActivityGroupKeys()) currentKeys.add(key);
+      const currentPartKeys = new Set(
+        [...currentGroups].flatMap((group) => group.parts.map(getAssistantActivityPartKey))
+      );
+      const disappearedKeys = new Set<string>();
+      const previousGroups = historyUnchanged ? previous.tail : previous.combined;
+      for (const group of new Set([...previousGroups.values()].flat())) {
+        if (
+          !currentKeys.has(group.key) &&
+          group.parts.every((part) => currentPartKeys.has(getAssistantActivityPartKey(part)))
+        ) {
+          disappearedKeys.add(group.key);
+        }
+      }
+      reserveCollapsedActivityGroupSpace(disappearedKeys);
+      return { history, tail, combined: current };
+    },
+    { history: new Map(), tail: new Map(), combined: new Map() }
+  );
+  const getCompactActivityDisclosureLayoutSegment = (
+    groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
+    segment: ActivitySegmentState
+  ) => {
     trackMessageBlockExpansionState();
     return getCompactActivityDisclosureLayoutSignatures(
-      assistantActivityGroupMap(),
+      groups,
       (key) => getMessageBlockExpanded(key) ?? false,
       (part) => {
         const key = getAssistantActivityPartKey(part);
-        if (renderedVisibleActiveActivityPartKeys().has(key)) return 'active';
-        if (renderedRetainedActivityPartKeys().has(key)) return 'retained';
-        if (renderedExitingActivityPartKeys().has(key)) return 'exiting';
+        if (segment.visibleActive().has(key)) return 'active';
+        if (segment.retained().has(key)) return 'retained';
+        if (segment.exiting().has(key)) return 'exiting';
         return 'grouped';
       }
     );
-  });
+  };
+  const historyCompactActivityDisclosureLayoutSignatures = createMemo(() =>
+    getCompactActivityDisclosureLayoutSegment(
+      historyAssistantActivityGroupMap(),
+      historyActivitySegmentState
+    )
+  );
+  const compactActivityDisclosureLayoutSignatures = createMemo(() =>
+    mergeSegmentMaps(
+      historyCompactActivityDisclosureLayoutSignatures(),
+      getCompactActivityDisclosureLayoutSegment(
+        tailAssistantActivityGroupMap(),
+        tailActivitySegmentState
+      )
+    )
+  );
   let previousCompactActivityDisclosureLayoutSignatures = new Map<string, string>();
 
   createEffect(() => {
@@ -7554,24 +7857,43 @@ export function MessageList() {
     rowSummaries.delete(trailing.message.info.id);
     return rowSummaries;
   });
+  const getRenderEmptySegment = (
+    activityMessages: readonly MessageEntry[],
+    groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
+    segment: ActivitySegmentState
+  ) =>
+    getRenderEmptyMessageIds(
+      activityMessages,
+      groups,
+      (key) => getMessageBlockExpanded(key) ?? false,
+      {
+        delayed: segment.hiddenParts(),
+        visibleActive: segment.visibleActive(),
+        retained: segment.retained(),
+        exiting: segment.exiting(),
+      },
+      segment.streaming()
+    );
+  const historyRenderEmptyMessageIds = createMemo(() => {
+    trackMessageBlockExpansionState();
+    return getRenderEmptySegment(
+      historyCompactActivityMessages(),
+      historyAssistantActivityGroupMap(),
+      historyActivitySegmentState
+    );
+  });
   createEffect(() => {
     messageStructureVersion();
     trackMessageBlockExpansionState();
     const previous = knownZeroHeightMessageIds();
-    const activityMessages = compactActivityMessages();
-    const delayedActivityPartKeys = presentation.hiddenParts();
-    const candidates = getRenderEmptyMessageIds(
-      activityMessages,
-      assistantActivityGroupMap(),
-      (key) => getMessageBlockExpanded(key) ?? false,
-      {
-        delayed: delayedActivityPartKeys,
-        visibleActive: renderedVisibleActiveActivityPartKeys(),
-        retained: renderedRetainedActivityPartKeys(),
-        exiting: renderedExitingActivityPartKeys(),
-      },
-      streamingLayoutProjection()
-    );
+    const candidates = new Set([
+      ...historyRenderEmptyMessageIds(),
+      ...getRenderEmptySegment(
+        tailCompactActivityMessages(),
+        tailAssistantActivityGroupMap(),
+        tailActivitySegmentState
+      ),
+    ]);
     const modelChanges = modelChangeMap();
     const dialogSummaries = rowAssistantDialogSummaryMap();
     const pauses = rowSessionPauseMap();
@@ -7610,11 +7932,20 @@ export function MessageList() {
     setKnownZeroHeightMessageIds(next);
     if (forcedContentChanged) publishMeasurementVersion();
   });
-  const messageBlockBoundaryMap = createMemo(() => {
+  const getMessageBlockBoundarySegment = (
+    activityMessages: readonly MessageEntry[],
+    groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
+    segment: ActivitySegmentState,
+    rowIds: {
+      renderEmpty: ReadonlySet<string>;
+      modelChanges: ReadonlySet<string>;
+      dialogSummaries: ReadonlySet<string>;
+    }
+  ) => {
     trackMessageBlockExpansionState();
     const waitingActivityPartKeys = new Set<string>();
     const trailingPermissionMessageIds = new Set<string>();
-    for (const message of compactActivityMessages()) {
+    for (const message of activityMessages) {
       if (!isAssistantMessage(message.info)) continue;
       for (const part of message.parts) {
         if (part.type !== 'tool') continue;
@@ -7626,21 +7957,53 @@ export function MessageList() {
         }
       }
     }
-    return getMessageBlockBoundaryMap(compactActivityMessages(), assistantActivityGroupMap(), {
-      delayedActivityPartKeys: presentation.hiddenParts(),
+    return getMessageBlockBoundaryMap(activityMessages, groups, {
+      delayedActivityPartKeys: segment.hiddenParts(),
       expandedActivityGroup: (key) => getMessageBlockExpanded(key) ?? false,
-      renderEmptyMessageIds: knownZeroHeightMessageIds(),
+      renderEmptyMessageIds: rowIds.renderEmpty,
       showThinking: showThinking(),
-      streaming: streamingLayoutProjection(),
-      visibleActiveActivityPartKeys: renderedVisibleActiveActivityPartKeys(),
-      retainedActivityPartKeys: renderedRetainedActivityPartKeys(),
+      streaming: segment.streaming(),
+      visibleActiveActivityPartKeys: segment.visibleActive(),
+      retainedActivityPartKeys: segment.retained(),
       trailingPermissionMessageIds,
-      exitingActivityPartKeys: renderedExitingActivityPartKeys(),
+      exitingActivityPartKeys: segment.exiting(),
       waitingActivityPartKeys,
-      modelChangeMessageIds: new Set(modelChangeMap().keys()),
-      dialogSummaryMessageIds: new Set(rowAssistantDialogSummaryMap().keys()),
+      modelChangeMessageIds: rowIds.modelChanges,
+      dialogSummaryMessageIds: rowIds.dialogSummaries,
     });
-  });
+  };
+  const historyKnownZeroHeightMessageIds = restrictToHistoryMessages(knownZeroHeightMessageIds);
+  const historyModelChangeMessageIds = restrictToHistoryMessages(() => modelChangeMap().keys());
+  const historyDialogSummaryMessageIds = restrictToHistoryMessages(() =>
+    rowAssistantDialogSummaryMap().keys()
+  );
+  const historyMessageBlockBoundaryMap = createMemo(() =>
+    getMessageBlockBoundarySegment(
+      historyCompactActivityMessages(),
+      historyAssistantActivityGroupMap(),
+      historyActivitySegmentState,
+      {
+        renderEmpty: historyKnownZeroHeightMessageIds(),
+        modelChanges: historyModelChangeMessageIds(),
+        dialogSummaries: historyDialogSummaryMessageIds(),
+      }
+    )
+  );
+  const messageBlockBoundaryMap = createMemo(() =>
+    mergeSegmentMaps(
+      historyMessageBlockBoundaryMap(),
+      getMessageBlockBoundarySegment(
+        tailCompactActivityMessages(),
+        tailAssistantActivityGroupMap(),
+        tailActivitySegmentState,
+        {
+          renderEmpty: knownZeroHeightMessageIds(),
+          modelChanges: new Set(modelChangeMap().keys()),
+          dialogSummaries: new Set(rowAssistantDialogSummaryMap().keys()),
+        }
+      )
+    )
+  );
   const borderedAdjacencyLayoutSignatures = createMemo(() => {
     return getBorderedAdjacencyLayoutSignatures(
       messages(),

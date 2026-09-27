@@ -221,7 +221,11 @@ export function getAssistantActivityGroupMap(
 export function preserveAssistantActivityGroupKeys(
   current: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
   previous: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
-  options?: { pinPreviousOwner?: (group: AssistantActivityGroupInfo) => boolean }
+  options?: {
+    pinPreviousOwner?: (group: AssistantActivityGroupInfo) => boolean;
+    /** Keys already claimed by groups earlier in the transcript, preserved separately. */
+    claimedKeys?: ReadonlySet<string>;
+  }
 ) {
   const previousGroupByPart = new Map<string, AssistantActivityGroupInfo>();
   const indexedGroups = new Set<AssistantActivityGroupInfo>();
@@ -237,7 +241,7 @@ export function preserveAssistantActivityGroupKeys(
   }
 
   const replacements = new Map<AssistantActivityGroupInfo, AssistantActivityGroupInfo>();
-  const claimedPreviousKeys = new Set<string>();
+  const claimedPreviousKeys = new Set<string>(options?.claimedKeys);
   for (const groups of current.values()) {
     for (const group of groups) {
       if (replacements.has(group)) continue;
