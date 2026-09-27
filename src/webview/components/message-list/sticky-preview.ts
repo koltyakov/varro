@@ -84,11 +84,13 @@ export function getStickyUserMessagePreview(
 }
 
 export function getUserMessageNavigationPreviews(
-  messages: MessageEntry[],
-  subagentSessionIds: ReadonlySet<string> = getSubagentSessionIds(messages)
+  messages: readonly MessageEntry[],
+  subagentSessionIds: ReadonlySet<string> = getSubagentSessionIds(messages),
+  indexOffset = 0
 ): StickyUserMessagePreview[] {
   const previews: StickyUserMessagePreview[] = [];
-  for (const [index, entry] of messages.entries()) {
+  for (const [position, entry] of messages.entries()) {
+    const index = indexOffset + position;
     if (entry.info.role !== 'user' || subagentSessionIds.has(entry.info.sessionID)) continue;
     const text = getUserMessagePreviewText(entry.parts);
     if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;

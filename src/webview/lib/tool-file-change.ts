@@ -1017,27 +1017,64 @@ type SummaryMessage = {
  */
 type CollectedMessageFileChanges = { changes: FileChange[]; truncated: boolean };
 
-function collectMessageFileChanges(
-  messages: readonly SummaryMessage[],
-  workspacePath: string | null | undefined,
-  maxChanges: number
-): CollectedMessageFileChanges {
-  const result: FileChange[] = [];
-  const exactEntries = new Map<string, FileChange>();
-  const relativeEntries = new Map<string, FileChange>();
-  const absoluteAliases = new Map<string, FileChange>();
-  let truncated = false;
+/**
+ * Resumable collection state, so a settled history prefix can be scanned once and continued with
+ * newer messages. Continuing copies the prefix state; it never mutates the scan it resumes.
+ */
+export class MessageFileChangeScan {
+  private readonly result: FileChange[] = [];
+  private readonly exactEntries = new Map<string, FileChange>();
+  private readonly relativeEntries = new Map<string, FileChange>();
+  private readonly absoluteAliases = new Map<string, FileChange>();
+  private truncated = false;
 
-  const keyFor = (change: FileChange) => {
+  private constructor(
+    private readonly workspacePath: string | null | undefined,
+    private readonly maxChanges: number
+  ) {}
+
+  static scan(
+    messages: readonly SummaryMessage[],
+    maxChanges: number,
+    workspacePath?: string | null,
+    previous?: MessageFileChangeScan
+  ) {
+    const scan = new MessageFileChangeScan(workspacePath, Math.max(0, maxChanges));
+    if (
+      previous &&
+      previous.workspacePath === scan.workspacePath &&
+      previous.maxChanges === scan.maxChanges
+    ) {
+      scan.copyFrom(previous);
+    }
+    scan.scanMessages(messages);
+    return scan;
+  }
+
+  private copyFrom(previous: MessageFileChangeScan) {
+    const copies = new Map(previous.result.map((entry) => [entry, { ...entry }]));
+    this.result.push(...copies.values());
+    for (const [source, target] of [
+      [previous.exactEntries, this.exactEntries],
+      [previous.relativeEntries, this.relativeEntries],
+      [previous.absoluteAliases, this.absoluteAliases],
+    ] as const) {
+      for (const [key, entry] of source) target.set(key, copies.get(entry)!);
+    }
+    this.truncated = previous.truncated;
+  }
+
+  private keyFor(change: FileChange) {
     const path = change.toPath || change.path;
-    return (getWorkspaceRelativePath(path, workspacePath) ?? normalizePath(path)).replace(
+    return (getWorkspaceRelativePath(path, this.workspacePath) ?? normalizePath(path)).replace(
       /^\.\//,
       ''
     );
-  };
+  }
 
-  const record = (change: FileChange) => {
-    const key = keyFor(change);
+  private record(change: FileChange) {
+    const { result, exactEntries, relativeEntries, absoluteAliases, maxChanges } = this;
+    const key = this.keyFor(change);
     const absolute = isAbsolutePath(key);
     let existing = exactEntries.get(key);
     if (!existing && absolute) {
@@ -1051,12 +1088,12 @@ function collectMessageFileChanges(
     if (!existing) {
       if (Number.isFinite(maxChanges)) {
         const descendantAlreadyRecorded = result.some((entry) =>
-          keyFor(entry).startsWith(`${key}/`)
+          this.keyFor(entry).startsWith(`${key}/`)
         );
         if (descendantAlreadyRecorded) return true;
         for (let index = result.length - 1; index >= 0; index -= 1) {
           const entry = result[index]!;
-          if (!key.startsWith(`${keyFor(entry)}/`)) continue;
+          if (!key.startsWith(`${this.keyFor(entry)}/`)) continue;
           result.splice(index, 1);
           for (const entries of [exactEntries, relativeEntries, absoluteAliases]) {
             for (const [entryKey, value] of entries) {
@@ -1070,7 +1107,7 @@ function collectMessageFileChanges(
       const hasCounts = (change.additions ?? 0) > 0 || (change.deletions ?? 0) > 0;
       if (!hasExtension(key) && !hasCounts) return true;
       if (result.length >= maxChanges) {
-        truncated = true;
+        this.truncated = true;
         return false;
       }
       const entry = { ...change };
@@ -1096,61 +1133,67 @@ function collectMessageFileChanges(
     existing.additions = (existing.additions ?? 0) + (change.additions ?? 0);
     existing.deletions = (existing.deletions ?? 0) + (change.deletions ?? 0);
     return true;
-  };
+  }
 
-  scanMessages: for (const message of messages) {
-    const summary = message.info?.summary;
-    const summaryDiffs =
-      // SAFETY: The surrounding shape or discriminator check establishes the readonly contract used below.
-      summary && isObject(summary) && 'diffs' in summary && Array.isArray(summary.diffs)
-        ? (summary.diffs as readonly FileDiff[])
-        : [];
-    for (const diff of summaryDiffs) {
-      const change = getDiffFileChange(diff);
-      if (change && !record(change)) break scanMessages;
-    }
-
-    for (const part of message.parts) {
-      if (part.type === 'tool') {
-        // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
-        for (const change of getToolFileChanges(part.tool, (part as ToolPart).state)) {
-          if (!change.isSummary && !record(change)) break scanMessages;
-        }
-        continue;
+  private scanMessages(messages: readonly SummaryMessage[]) {
+    // The budget ran out earlier; later changes are intentionally not merged.
+    if (this.truncated) return;
+    for (const message of messages) {
+      const summary = message.info?.summary;
+      const summaryDiffs =
+        // SAFETY: The surrounding shape or discriminator check establishes the readonly contract used below.
+        summary && isObject(summary) && 'diffs' in summary && Array.isArray(summary.diffs)
+          ? (summary.diffs as readonly FileDiff[])
+          : [];
+      for (const diff of summaryDiffs) {
+        const change = getDiffFileChange(diff);
+        if (change && !this.record(change)) return;
       }
-      if (part.type === 'patch') {
-        for (const file of part.files) {
-          if (file && !record(withDedupeKey({ kind: 'edited', path: file }))) break scanMessages;
+
+      for (const part of message.parts) {
+        if (part.type === 'tool') {
+          // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
+          for (const change of getToolFileChanges(part.tool, (part as ToolPart).state)) {
+            if (!change.isSummary && !this.record(change)) return;
+          }
+          continue;
+        }
+        if (part.type === 'patch') {
+          for (const file of part.files) {
+            if (file && !this.record(withDedupeKey({ kind: 'edited', path: file }))) return;
+          }
         }
       }
     }
   }
 
-  // Drop directory entries: paths that are an ancestor of another changed path,
-  // or that have no file extension and no line counts. Real edited files keep an
-  // extension or carry actual +/- counts.
-  const keys = result.map(keyFor);
-  const ancestorKeys = new Set<string>();
-  for (const key of keys) {
-    let separator = key.indexOf('/');
-    while (separator !== -1) {
-      ancestorKeys.add(key.slice(0, separator));
-      separator = key.indexOf('/', separator + 1);
+  finish(): CollectedMessageFileChanges {
+    // Drop directory entries: paths that are an ancestor of another changed path,
+    // or that have no file extension and no line counts. Real edited files keep an
+    // extension or carry actual +/- counts.
+    const keys = this.result.map((change) => this.keyFor(change));
+    const ancestorKeys = new Set<string>();
+    for (const key of keys) {
+      let separator = key.indexOf('/');
+      while (separator !== -1) {
+        ancestorKeys.add(key.slice(0, separator));
+        separator = key.indexOf('/', separator + 1);
+      }
     }
+    const changes = this.result.filter((change, index) => {
+      const key = keys[index]!;
+      if (ancestorKeys.has(key)) return false;
+      const hasCounts = (change.additions ?? 0) > 0 || (change.deletions ?? 0) > 0;
+      return hasExtension(key) || hasCounts;
+    });
+    return { changes, truncated: this.truncated };
   }
-  const changes = result.filter((change, index) => {
-    const key = keys[index]!;
-    if (ancestorKeys.has(key)) return false;
-    const hasCounts = (change.additions ?? 0) > 0 || (change.deletions ?? 0) > 0;
-    return hasExtension(key) || hasCounts;
-  });
-  return { changes, truncated };
 }
 
 export function getBoundedMessageFileChanges(
   messages: readonly SummaryMessage[],
   maxChanges: number,
   workspacePath?: string | null
-): { changes: FileChange[]; truncated: boolean } {
-  return collectMessageFileChanges(messages, workspacePath, Math.max(0, maxChanges));
+): CollectedMessageFileChanges {
+  return MessageFileChangeScan.scan(messages, maxChanges, workspacePath).finish();
 }

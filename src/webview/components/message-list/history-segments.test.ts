@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AssistantMessage, MessageEntry, Part, UserMessage } from '../../types';
 import {
+  getFrozenSegmentBoundary,
   getHistorySegmentEnd,
   mergeSegmentMaps,
   restrictPartKeys,
@@ -63,6 +64,27 @@ describe('history segments', () => {
       ])
     ).toBe(2);
     expect(getHistorySegmentEnd([assistant('assistant-1'), automatic])).toBe(0);
+  });
+
+  it('keeps a frozen boundary until enough newer history accumulates', () => {
+    const transcript = (turns: number) =>
+      Array.from({ length: turns }, (_, turn) => [
+        user(`user-${turn}`, [text(`prompt-${turn}`, `user-${turn}`, `Prompt ${turn}`)]),
+        assistant(`assistant-${turn}`),
+      ]).flat();
+    const empty = { entry: null, index: 0 };
+
+    expect(getFrozenSegmentBoundary(transcript(300), 598, empty)).toBe(empty);
+
+    const messages = transcript(1000);
+    const frozen = getFrozenSegmentBoundary(messages, 1200, empty);
+    expect(frozen.index).toBe(800);
+    expect(frozen.entry).toBe(messages[800]);
+    expect(getFrozenSegmentBoundary(messages, 1598, frozen)).toBe(frozen);
+    expect(getFrozenSegmentBoundary(messages, 1600, frozen).index).toBe(1200);
+
+    const prepended = [assistant('older'), ...messages];
+    expect(getFrozenSegmentBoundary(prepended, 1201, frozen).index).toBe(801);
   });
 
   it('keeps only history-owned streaming state', () => {

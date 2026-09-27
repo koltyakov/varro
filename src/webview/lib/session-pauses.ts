@@ -15,13 +15,28 @@ export type SessionPause = {
   resumed: boolean;
 };
 
+export type SessionProgress = {
+  messageIndexes: ReadonlyMap<string, number>;
+  latestProgress: ReadonlyMap<string, number>;
+};
+
 export function getSessionPauseMap(
   sessions: readonly Session[],
   messages: readonly MessageEntry[]
 ): Map<string, SessionPause> {
-  const latestProgress = new Map<string, number>();
-  const messageIndexes = new Map<string, number>();
-  for (const [index, message] of messages.entries()) {
+  return getSessionPauseMapFromProgress(sessions, collectSessionProgress(messages));
+}
+
+/** Collects transcript positions; `earlier` holds the progress of the messages before `offset`. */
+export function collectSessionProgress(
+  messages: readonly MessageEntry[],
+  offset = 0,
+  earlier?: SessionProgress
+): SessionProgress {
+  const latestProgress = new Map(earlier?.latestProgress);
+  const messageIndexes = new Map(earlier?.messageIndexes);
+  for (const [position, message] of messages.entries()) {
+    const index = offset + position;
     messageIndexes.set(message.info.id, index);
     if (
       message.info.role === 'user' &&
@@ -33,6 +48,13 @@ export function getSessionPauseMap(
     }
     latestProgress.set(message.info.sessionID, index);
   }
+  return { messageIndexes, latestProgress };
+}
+
+export function getSessionPauseMapFromProgress(
+  sessions: readonly Session[],
+  { messageIndexes, latestProgress }: SessionProgress
+): Map<string, SessionPause> {
   const pauses = new Map<string, SessionPause>();
   for (const session of sessions) {
     for (const pause of readSessionPauses(session.metadata)) {

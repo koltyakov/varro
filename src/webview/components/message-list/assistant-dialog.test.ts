@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskSessionInfo } from '../../lib/task-session';
 import type { AssistantMessage, MessageEntry, UserMessage } from '../../types';
-import { getAssistantDialogSummaryMap } from './assistant-dialog';
+import { flushesAssistantDialog, getAssistantDialogSummaryMap } from './assistant-dialog';
 
 function userMessage(id: string, sessionID: string, created: number): MessageEntry<UserMessage> {
   return {
@@ -60,6 +60,54 @@ function incompleteAssistantMessage(
 }
 
 describe('getAssistantDialogSummaryMap', () => {
+  it('summarizes transcript ranges exactly like one pass', () => {
+    const child = {
+      ...assistantMessage('child-run', 'child-1', 'assistant-2', 22, 24, 'subagent'),
+    };
+    child.info.cost = 0.3;
+    const messages: MessageEntry[] = [
+      assistantMessage('leading', 'session-1', 'older-user', 1, 2),
+      userMessage('user-1', 'session-1', 10),
+      assistantMessage('assistant-1', 'session-1', 'user-1', 11, 15),
+      userMessage('user-2', 'session-1', 20),
+      assistantMessage('assistant-2', 'session-1', 'user-2', 21, 25),
+      child,
+      assistantMessage('assistant-3', 'session-1', 'user-2', 26, 30),
+      userMessage('user-3', 'session-1', 40),
+      assistantMessage('assistant-4', 'session-1', 'user-3', 41, 45),
+    ];
+    const options = {
+      sessions: [
+        { id: 'session-1', title: 'Root', time: { created: 0 } },
+        { id: 'child-1', parentID: 'session-1', title: 'Child', time: { created: 22 }, cost: 0.2 },
+      ],
+      primarySessionId: 'session-1',
+      collectLeadingSummaryStats: true,
+      pauses: [{ messageId: 'assistant-3', pausedAt: 31 }],
+    };
+    const whole = getAssistantDialogSummaryMap(messages, undefined, options);
+    expect(whole.size).toBeGreaterThan(2);
+    const splits = messages.flatMap((entry, index) =>
+      index > 0 && flushesAssistantDialog(entry, 'session-1') ? [index] : []
+    );
+    for (const split of splits) {
+      const entriesById = new Map(
+        messages.slice(0, split).map((entry) => [entry.info.id, entry] as const)
+      );
+      const history = getAssistantDialogSummaryMap(messages.slice(0, split), undefined, {
+        ...options,
+        childRunsByParentId: new Map([['assistant-2', [child as MessageEntry<AssistantMessage>]]]),
+        range: { start: 0, end: split, nextUserRequestCreated: messages[split]!.info.time.created },
+      });
+      const tail = getAssistantDialogSummaryMap(messages, undefined, {
+        ...options,
+        entriesById,
+        range: { start: split, end: messages.length },
+      });
+      expect(new Map([...history, ...tail])).toEqual(whole);
+    }
+  });
+
   it('sums reported turn costs including child snapshots once and excludes later turns', () => {
     const first = assistantMessage('a1', 'root', 'u1', 2_000, 3_000);
     first.info.cost = 0.004;

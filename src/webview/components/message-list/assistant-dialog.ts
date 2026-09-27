@@ -36,7 +36,24 @@ type AssistantDialogOptions = {
   primarySessionId?: string;
   suppressTrailingSummary?: boolean;
   collectLeadingSummaryStats?: boolean;
+  /**
+   * Summarizes only `messages[start..end)`, which must start at a flushing prompt or at 0.
+   * Without `nextUserRequestCreated` the range ends the transcript.
+   */
+  range?: { start: number; end: number; nextUserRequestCreated?: number };
+  /** First occurrences of the messages before `range.start`. */
+  entriesById?: ReadonlyMap<string, MessageEntry>;
+  childRunsByParentId?: Map<string, Array<MessageEntry<AssistantMessage>>>;
 };
+
+/** Whether a transcript entry ends the previous dialog in `getAssistantDialogSummaryMap`. */
+export function flushesAssistantDialog(entry: MessageEntry, primarySessionId?: string) {
+  if (isAssistantMessage(entry.info)) return false;
+  if (primarySessionId && entry.info.sessionID !== primarySessionId) return false;
+  if (entry.info.role !== 'user') return true;
+  const parsed = parseUserMessageContent(entry.parts);
+  return !(parsed.automaticActions.length > 0 && !hasUserMessageContent(parsed));
+}
 
 export function getAssistantDialogSummaryMap(
   messages: MessageEntry[],
@@ -45,8 +62,11 @@ export function getAssistantDialogSummaryMap(
 ) {
   const result = new Map<string, AssistantDialogSummaryInfo>();
   const pauseTimes = new Map(options?.pauses?.map((pause) => [pause.messageId, pause.pausedAt]));
-  const entriesById = new Map<string, MessageEntry>();
-  for (const entry of messages) {
+  const start = options?.range?.start ?? 0;
+  const end = options?.range?.end ?? messages.length;
+  const entriesById = new Map<string, MessageEntry>(options?.entriesById);
+  for (let index = options?.entriesById ? start : 0; index < messages.length; index += 1) {
+    const entry = messages[index]!;
     // Preserve Array.find's first-match behavior if malformed history contains duplicate IDs.
     if (!entriesById.has(entry.info.id)) entriesById.set(entry.info.id, entry);
   }
@@ -65,7 +85,7 @@ export function getAssistantDialogSummaryMap(
     sessionsById,
     sessionsByParentId,
   };
-  let childRunsByParentId: Map<string, Array<MessageEntry<AssistantMessage>>> | null = null;
+  let childRunsByParentId = options?.childRunsByParentId ?? null;
   let currentMessages: AssistantMessage[] = [];
   let currentPrimaryMessageIds: string[] = [];
   let currentSubagentHandoffCount = 0;
@@ -198,7 +218,8 @@ export function getAssistantDialogSummaryMap(
     resetCurrentDialog();
   };
 
-  for (const entry of messages) {
+  for (let index = start; index < end; index += 1) {
+    const entry = messages[index]!;
     if (!isAssistantMessage(entry.info)) {
       if (options?.primarySessionId && entry.info.sessionID !== options.primarySessionId) {
         continue;
@@ -239,7 +260,8 @@ export function getAssistantDialogSummaryMap(
     if (pausedAt !== undefined) flush({ pausedAt, nextUserRequestCreated: pausedAt });
   }
 
-  flush({ trailing: true });
+  const nextUserRequestCreated = options?.range?.nextUserRequestCreated;
+  flush(nextUserRequestCreated === undefined ? { trailing: true } : { nextUserRequestCreated });
   return result;
 }
 

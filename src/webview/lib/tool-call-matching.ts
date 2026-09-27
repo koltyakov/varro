@@ -73,3 +73,30 @@ export function buildPermissionRequestLookup(
 
   return result;
 }
+
+/** Lookups rebuilt from an unchanged request list keep their consumers from rederiving. */
+export function sameToolCallLookup<T>(
+  previous: ReadonlyMap<string, T>,
+  next: ReadonlyMap<string, T>,
+  sameValue: (previous: T, next: T) => boolean = Object.is
+) {
+  if (previous.size !== next.size) return false;
+  for (const [key, value] of next) {
+    const previousValue = previous.get(key);
+    if (previousValue === undefined || !sameValue(previousValue, value)) return false;
+  }
+  return true;
+}
+
+export function samePermissionMatch(
+  previous: ToolCallPermissionMatch,
+  next: ToolCallPermissionMatch
+) {
+  return (
+    previous.permission === next.permission &&
+    previous.isActive === next.isActive &&
+    previous.isPrimaryOwner === next.isPrimaryOwner &&
+    previous.queuePosition === next.queuePosition &&
+    previous.queueTotal === next.queueTotal
+  );
+}

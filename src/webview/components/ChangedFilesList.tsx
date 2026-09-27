@@ -3,10 +3,11 @@ import { isActiveSessionWorking, showChangedFiles, state } from '../lib/state';
 import { postMessage } from '../lib/bridge';
 import {
   getDiffFileChanges,
-  getBoundedMessageFileChanges,
+  MessageFileChangeScan,
   type FileChange,
   type FileChangeKind,
 } from '../lib/tool-file-change';
+import { getHistorySegmentEnd, sameEntries } from './message-list/history-segments';
 import { getDiffSummaryStats } from './chat/SessionListView';
 import { formatDisplayPath, getLeafPathName } from '../lib/path-display';
 import { formatEditCount } from '../lib/format';
@@ -44,12 +45,25 @@ export function ChangedFilesList() {
     cachedChanges = [];
     cachedSummaryStats = null;
   };
-  const messageFileChanges = createMemo(() =>
-    getBoundedMessageFileChanges(
-      activeMessages(),
+  // Settled history is scanned once; streaming updates resume from its state.
+  const historyEnd = createMemo(() => getHistorySegmentEnd(activeMessages()));
+  const historyMessages = createMemo(() => activeMessages().slice(0, historyEnd()), [], {
+    equals: sameEntries,
+  });
+  const historyScan = createMemo(() =>
+    MessageFileChangeScan.scan(
+      historyMessages(),
       CHANGED_FILE_DISPLAY_LIMIT,
       state.editorContext.workspacePath
     )
+  );
+  const messageFileChanges = createMemo(() =>
+    MessageFileChangeScan.scan(
+      activeMessages().slice(historyEnd()),
+      CHANGED_FILE_DISPLAY_LIMIT,
+      state.editorContext.workspacePath,
+      historyScan()
+    ).finish()
   );
 
   // The file rows reflect what THIS session's agent changed - the file-changing

@@ -269,7 +269,9 @@ import {
   groupMessageEntriesBySession,
   getMessageEntriesForSession,
   getSessionCost,
+  accumulateSessionMessageTotals,
   getSessionTreeTokenBreakdown,
+  getSessionTreeTokenBreakdownFromTotals,
   getUserMessageHistoryText,
   mergeCompleteTokenBreakdown,
 } from './chat-input/message-usage';
@@ -5027,16 +5029,40 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     );
   });
 
-  const localSessionTokenBreakdown = createMemo(() => {
+  // Settled transcript usage is summed once; streaming updates continue from its totals.
+  const tokenTreeRootId = createMemo(() => {
     const sessionId = composerSessionId();
-    if (!sessionId) {
+    return sessionId ? getSessionTreeRootId(sessionId) || sessionId : null;
+  });
+  const tokenTreeSessionIds = createMemo(
+    () => {
+      const rootId = tokenTreeRootId();
+      return rootId ? getSessionTreeIds(rootId) : [];
+    },
+    [],
+    { equals: sameEntries }
+  );
+  const tokenHistoryEnd = createMemo(() => getHistorySegmentEnd(state.messages));
+  const tokenHistoryEntries = createMemo(() => state.messages.slice(0, tokenHistoryEnd()), [], {
+    equals: sameEntries,
+  });
+  const tokenHistoryTotals = createMemo(() =>
+    accumulateSessionMessageTotals(tokenHistoryEntries(), tokenTreeSessionIds())
+  );
+  const localSessionTokenBreakdown = createMemo(() => {
+    const rootId = tokenTreeRootId();
+    if (!rootId) {
       return getSessionTreeTokenBreakdown([], [], [], '');
     }
-    const rootId = getSessionTreeRootId(sessionId) || sessionId;
-    return getSessionTreeTokenBreakdown(
-      state.messages,
+    const sessionIds = tokenTreeSessionIds();
+    return getSessionTreeTokenBreakdownFromTotals(
+      accumulateSessionMessageTotals(
+        state.messages.slice(tokenHistoryEnd()),
+        sessionIds,
+        tokenHistoryTotals()
+      ),
       state.sessions,
-      getSessionTreeIds(rootId),
+      sessionIds,
       rootId
     );
   });

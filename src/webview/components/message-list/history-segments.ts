@@ -7,12 +7,50 @@ import type { StreamingLayoutProjection } from './row-layout';
 // History derivations must read history-restricted views of transient trailing-turn state so they
 // rerun only when something that can affect a history row actually changes.
 
+// Automatic-action prompts render as assistant activity and can join the previous group.
+function startsSegment(message: MessageEntry) {
+  return projectAutomaticActionMessage(message).info.role === 'user';
+}
+
 export function getHistorySegmentEnd(messages: readonly MessageEntry[]) {
   for (let index = messages.length - 1; index > 0; index -= 1) {
-    // Automatic-action prompts render as assistant activity and can join the previous group.
-    if (projectAutomaticActionMessage(messages[index]!).info.role === 'user') return index;
+    if (startsSegment(messages[index]!)) return index;
   }
   return 0;
+}
+
+export type FrozenSegmentBoundary = { entry: MessageEntry | null; index: number };
+
+const RECENT_HISTORY_WINDOW = 400;
+
+/**
+ * History is split again so a new turn only rederives a bounded recent segment. The frozen
+ * boundary stays put until about two windows of newer history accumulate, and moves whenever its
+ * message shifts or stops starting a segment.
+ */
+export function getFrozenSegmentBoundary(
+  messages: readonly MessageEntry[],
+  historyEnd: number,
+  previous: FrozenSegmentBoundary,
+  isBoundary: (message: MessageEntry) => boolean = startsSegment
+): FrozenSegmentBoundary {
+  if (previous.index <= historyEnd && historyEnd - previous.index < 2 * RECENT_HISTORY_WINDOW) {
+    if (previous.index === 0) return previous;
+    const entry = messages[previous.index];
+    if (entry === previous.entry && isBoundary(entry)) return previous;
+  }
+  for (let index = historyEnd - RECENT_HISTORY_WINDOW; index > 0; index -= 1) {
+    const entry = messages[index]!;
+    if (isBoundary(entry)) return { entry, index };
+  }
+  return { entry: null, index: 0 };
+}
+
+export function sameFrozenSegmentBoundary(
+  previous: FrozenSegmentBoundary,
+  next: FrozenSegmentBoundary
+) {
+  return previous.index === next.index && previous.entry === next.entry;
 }
 
 export function sameEntries<T>(previous: readonly T[], next: readonly T[]) {
@@ -95,4 +133,55 @@ export function mergeSegmentMaps<T>(history: ReadonlyMap<string, T>, tail: Reado
   const merged = new Map(history);
   for (const [messageId, value] of tail) merged.set(messageId, value);
   return merged;
+}
+
+type DialogSessionProjection = {
+  id: string;
+  parentID?: string;
+  title: string;
+  time: { created: number };
+  cost?: number;
+  tokens?: { input: number; output: number };
+};
+
+export function sameDialogSessions(
+  previous: readonly DialogSessionProjection[],
+  next: readonly DialogSessionProjection[]
+) {
+  return (
+    previous.length === next.length &&
+    next.every((session, index) => {
+      const earlier = previous[index]!;
+      return (
+        earlier.id === session.id &&
+        earlier.parentID === session.parentID &&
+        earlier.title === session.title &&
+        earlier.time.created === session.time.created &&
+        Object.is(earlier.cost, session.cost) &&
+        earlier.tokens?.input === session.tokens?.input &&
+        earlier.tokens?.output === session.tokens?.output &&
+        !earlier.tokens === !session.tokens
+      );
+    })
+  );
+}
+
+export function sameChildRuns<T extends MessageEntry>(
+  previous: ReadonlyMap<string, readonly T[]>,
+  next: ReadonlyMap<string, readonly T[]>
+) {
+  if (previous.size !== next.size) return false;
+  for (const [parentId, runs] of next) {
+    const earlier = previous.get(parentId);
+    if (
+      !earlier ||
+      earlier.length !== runs.length ||
+      runs.some(
+        (run, index) => run.info !== earlier[index]!.info || run.parts !== earlier[index]!.parts
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
 }

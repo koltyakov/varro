@@ -27,7 +27,8 @@ VARRO_OPENCODE_TEST_BINARY=/absolute/path/to/opencode node --test scripts/ai-ope
 
 Build first and add `VARRO_AI_TEST_EDITOR=1` to also verify the authenticated editor launcher and a
 native composer follow-up. This test uses a local fixture provider and separate database; it verifies
-runner compatibility without consuming provider credentials. It does not replace Luna/Terra scenarios.
+runner compatibility without consuming provider credentials. It does not replace GPT-6 Luna Fast/Sol scenarios
+run through the OpenAI subscription. Use the OpenAI subscription for all AI test model calls.
 
 ## Choose the input that exercises the behavior
 
