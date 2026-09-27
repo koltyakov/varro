@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { execFile } from 'child_process';
 import { basename, dirname, relative } from 'path';
 import type { DroppedFile } from '../shared/protocol';
 import { getWorkspaceFolderLabel } from '../shared/workspace-folders';
@@ -38,6 +39,27 @@ const WORKSPACE_FILE_EXCLUDE_GLOB = `{${[...WORKSPACE_FILE_EXCLUDED_DIRECTORIES]
   .join(',')}}`;
 
 class WorkspaceFileCacheInvalidatedError extends Error {}
+
+function getGitSearchablePaths(directory: string): Promise<Set<string> | undefined> {
+  return new Promise((resolve) => {
+    execFile(
+      'git',
+      ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '.'],
+      { cwd: directory, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 10_000 },
+      (error, stdout, stderr) => {
+        if (error) {
+          // Non-Git workspaces and hosts without Git still use VS Code discovery.
+          if (error.code !== 'ENOENT' && !stderr.includes('not a git repository')) {
+            logger.warn(`File search Git ignore filtering failed: ${error.message}`);
+          }
+          resolve(undefined);
+          return;
+        }
+        resolve(new Set(stdout.split('\0').filter(Boolean)));
+      }
+    );
+  });
+}
 
 /**
  * Owns workspace-file discovery and fuzzy ranking for the `@file` picker.
@@ -265,12 +287,23 @@ export class FileSearchService {
     // Discovery order is not relevance order. Limit ranked results, not the index.
     const promise = Promise.all(
       workspaceFolders.map((workspaceFolder) =>
-        Promise.resolve(
+        Promise.all([
           vscode.workspace.findFiles(
             new vscode.RelativePattern(workspaceFolder, WORKSPACE_FILE_GLOB),
             WORKSPACE_FILE_EXCLUDE_GLOB
-          )
-        ).then((files) => files.map((uri) => ({ uri, workspaceFolder })))
+          ),
+          getGitSearchablePaths(workspaceFolder.uri.fsPath),
+        ]).then(([files, searchablePaths]) =>
+          files
+            .filter(
+              (uri) =>
+                !searchablePaths ||
+                searchablePaths.has(
+                  relative(workspaceFolder.uri.fsPath, uri.fsPath).replace(/\\/g, '/')
+                )
+            )
+            .map((uri) => ({ uri, workspaceFolder }))
+        )
       )
     )
       .then((fileGroups) => {
