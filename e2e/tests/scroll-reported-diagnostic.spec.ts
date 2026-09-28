@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
 import type { SessionMessageInfo } from '@opencode/client';
 import {
@@ -9,9 +9,12 @@ import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry } from '../../src/webview/types';
 
 test('reported short transcript geometry', async ({ page }, testInfo) => {
-  const raw: { data: SessionMessageInfo[] } = JSON.parse(
-    readFileSync('tmp/scroll-reported-messages.json', 'utf8')
+  const transcriptPath = 'tmp/scroll-reported-messages.json';
+  test.skip(
+    !existsSync(transcriptPath),
+    `Local diagnostic requires a captured transcript at ${transcriptPath}`
   );
+  const raw: { data: SessionMessageInfo[] } = JSON.parse(readFileSync(transcriptPath, 'utf8'));
   const sessionID = 'reported-scroll-copy';
   const userID = raw.data.find((message) => message.type === 'user')!.id;
   const messages = raw.data
@@ -126,5 +129,5 @@ test('reported short transcript geometry', async ({ page }, testInfo) => {
     body: JSON.stringify(geometry, null, 2),
     contentType: 'application/json',
   });
-  await page.screenshot({ path: 'tmp/scroll-reported.png' });
+  await page.screenshot({ path: testInfo.outputPath('scroll-reported.png') });
 });
