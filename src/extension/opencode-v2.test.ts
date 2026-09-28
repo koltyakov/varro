@@ -1600,6 +1600,24 @@ describe('v2 transcript and permission projection', () => {
     ).toBe('catalog.updated');
   });
 
+  it('reports a remotely resolved permission using the stale-request error contract', async () => {
+    const wire = vi.fn(async () => ({ data: [] }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    adapter.observe('permission.asked', { id: 'perm_one', sessionID: 'ses_child' });
+    adapter.observe('permission.replied', { requestID: 'perm_one', sessionID: 'ses_child' });
+
+    await expect(
+      adapter.request('POST', '/permission/perm_one/reply', { reply: 'always' })
+    ).rejects.toThrow('404 Permission request not found: perm_one');
+    expect(wire).toHaveBeenCalledTimes(1);
+    expect(wire).toHaveBeenCalledWith(
+      'GET',
+      '/api/permission/request',
+      undefined,
+      expect.anything()
+    );
+  });
+
   it('does not discard requests when the server rejects the reply', async () => {
     const calls: string[] = [];
     const adapter = new OpenCodeV2Adapter(async (_method, path, body) => {

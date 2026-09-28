@@ -514,7 +514,7 @@ export class OpenCodeV2Adapter {
       if (kind === 'permission') {
         if (!this.permissions.has(id)) await this.request('GET', '/permission', undefined, options);
         const sessionID = this.permissions.get(id);
-        if (!sessionID) throw new Error('OpenCode permission request is no longer pending');
+        if (!sessionID) throw new Error(`404 Permission request not found: ${id}`);
         await raw(
           'POST',
           `/api/session/${encodeURIComponent(sessionID)}/permission/${encodeURIComponent(id)}/reply`,
