@@ -1761,6 +1761,11 @@ export function SessionListView(props: {
   );
 
   function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (!props.embedded) setShowSessionPicker(false);
+      return;
+    }
     const sessions = visibleSessions();
     if (sessions.length === 0) return;
 
@@ -1806,11 +1811,6 @@ export function SessionListView(props: {
         if (!props.embedded) setShowSessionPicker(false);
       }
       return;
-    }
-
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      if (!props.embedded) setShowSessionPicker(false);
     }
   }
 

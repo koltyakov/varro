@@ -13,6 +13,19 @@ Promoting the plain root with `translateZ(0)`, `will-change: transform`, and
 There is no verified Varro-side workaround. Changing message-list anchoring or
 hiding the transcript during resize would not address the demonstrated cause.
 
+A fresh isolated-host retest on September 28 retained 169 compositor frames across
+the baseline, `overflow: visible`, and `overflow: clip` experiments. The visible
+override still shows stale-width paint during expansion, including frames 003 and
+044. These overrides do not establish a fix. Evidence and the reversible runner
+are under `artifacts/ai-fuzzy/20260928-resolve/resize-*`.
+
+Run 48267 also reproduced the defect with `--disable-gpu`. CDP `SystemInfo.getInfo`
+confirmed software compositing and rasterization. All three overflow variants still
+clipped, across 144 retained frames. For example, `software-resize/resize-baseline/019.png`
+shows the expanded sidebar with the plain document clipped to its old 360px width.
+Evidence is under `artifacts/ai-fuzzy/20260928-48267/`. Disabling GPU acceleration
+does not establish a workaround either.
+
 ## Reduced reproduction
 
 Use a disposable Extension Development Host with a webview view in the secondary

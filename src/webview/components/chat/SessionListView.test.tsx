@@ -248,6 +248,20 @@ describe('SessionListSectionHeader icons', () => {
   });
 });
 
+describe('SessionListView keyboard recovery', () => {
+  it.each([false, true])('handles Escape with no sessions, embedded=%s', (embedded) => {
+    setSessions([]);
+    setShowSessionPicker(true);
+    cleanup = render(() => <SessionListView embedded={embedded} />, container);
+    container
+      .querySelector('.session-list-view')!
+      .dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      );
+    expect(showSessionPicker()).toBe(embedded);
+  });
+});
+
 describe('SessionListView model details', () => {
   it('persists project scope from the search-row picker and hides it while searching', async () => {
     const getScope = vi

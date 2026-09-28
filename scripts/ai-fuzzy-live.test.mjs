@@ -130,16 +130,23 @@ test('keeps the latest live-gate sample and the best busy sample separately', as
   assert.equal(gate.observations.length, 2);
 });
 
-test('repeats the bounded sticky nudge until bottom follow releases', async () => {
+test('prepares the sticky gate even without a nested activity scroller', async () => {
   let wheelCount = 0;
   const gate = await waitForLiveGate({
     client: { isBusy: async () => true },
     cdp: {
       snapshot: async () => ({
         ...ready,
+        nestedActivityScroller: null,
         stickyMessageId: wheelCount >= 2 ? 'message-1' : null,
       }),
-      wheel: async () => {
+      click: async (selector) => {
+        assert.equal(selector, '.assistant-activity-summary[aria-expanded="false"]');
+        return true;
+      },
+      key: async (selector, key) => {
+        assert.equal(selector, '.interactive-list');
+        assert.equal(key, 'End');
         wheelCount += 1;
         return true;
       },
@@ -154,7 +161,7 @@ test('repeats the bounded sticky nudge until bottom follow releases', async () =
   assert.deepEqual(gate.missing, []);
 });
 
-test('keeps nudging while a live tray has range and the marked prompt is not sticky', async () => {
+test('bounds native sticky preparation while the marked prompt is not sticky', async () => {
   let wheelCount = 0;
   const gate = await waitForLiveGate({
     client: { isBusy: async () => true },
@@ -163,7 +170,8 @@ test('keeps nudging while a live tray has range and the marked prompt is not sti
         ...ready,
         stickyMessageId: wheelCount >= 5 ? 'message-1' : null,
       }),
-      wheel: async () => {
+      click: async () => false,
+      key: async () => {
         wheelCount += 1;
         return true;
       },

@@ -1537,8 +1537,23 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
             : ignoreStaleProgressAfterFinishedAssistant(sessionID))
         ) {
           // A completed assistant does not mean later shell or skill records are already loaded.
+          // Local idle settlement can precede the final server payload. Reconcile
+          // authoritative text without restarting the completed session's spinner.
+          const completedMessage = assistantMessageID
+            ? findMessageById(assistantMessageID)?.info
+            : null;
+          const locallyCompleted =
+            completedMessage?.role === 'assistant' &&
+            !completedMessage.finish &&
+            !completedMessage.error;
+          if (locallyCompleted && eventName === 'session.next.text.ended') {
+            if (handleProjectedSessionEvent(eventName, p)) {
+              recordSessionMessageSnapshotMutation(sessionID);
+            }
+          }
           if (
-            TRANSCRIPT_SYNC_SESSION_EVENTS.has(eventName) &&
+            (TRANSCRIPT_SYNC_SESSION_EVENTS.has(eventName) ||
+              (locallyCompleted && eventName === 'session.next.step.ended')) &&
             seqStatus !== 'gap' &&
             isSessionInActiveTree(sessionID)
           ) {

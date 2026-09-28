@@ -2,6 +2,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { QueuedMessage } from './app-state-types';
 import type { WebviewMessage } from '../../shared/protocol';
+import { parseExtensionMessage } from '../../shared/extension-message';
 
 const bridge = vi.hoisted(() => ({ postMessage: vi.fn((_message: WebviewMessage) => true) }));
 vi.mock('./bridge', () => bridge);
@@ -38,13 +39,18 @@ it('keeps a newer enqueue when an earlier persistence echo arrives', async () =>
     secondUpdate?.type !== 'queued-messages/update'
   )
     throw new Error('Queue updates missing');
-  queue.applyQueuedMessagesSnapshot([first], firstUpdate.payload.mutationId);
+  const deliver = (messages: QueuedMessage[], mutationId: string | undefined) => {
+    const parsed = parseExtensionMessage({
+      type: 'queued-messages/sync',
+      payload: { messages, mutationId },
+    });
+    if (parsed?.type !== 'queued-messages/sync') throw new Error('Snapshot rejected');
+    queue.applyQueuedMessagesSnapshot(parsed.payload.messages, parsed.payload.mutationId);
+  };
+  deliver([first], firstUpdate.payload.mutationId);
   expect(state.queuedMessages.map((message) => message.id)).toEqual(['first', 'second']);
-  queue.applyQueuedMessagesSnapshot([first, second], secondUpdate.payload.mutationId);
-  queue.applyQueuedMessagesSnapshot(
-    [{ ...second, ownerViewId: 'editor-1' }],
-    secondUpdate.payload.mutationId
-  );
+  deliver([first, second], secondUpdate.payload.mutationId);
+  deliver([{ ...second, ownerViewId: 'editor-1' }], secondUpdate.payload.mutationId);
   expect(state.queuedMessages.map((message) => message.ownerViewId)).toEqual(['editor-1']);
 });
 

@@ -810,6 +810,9 @@ export class CdpController {
           clientHeight: transcript.clientHeight,
         } : null,
         markerMessageId,
+        markerBottom: markerRow && transcript
+          ? markerRow.getBoundingClientRect().bottom - transcript.getBoundingClientRect().top
+          : null,
         turnMessageIds: turnRows.map((row) => row.getAttribute('data-msg-id')).filter(Boolean),
         turnPartIds: [...new Set(queryAll('[data-activity-part-id]').map((element) =>
           element.getAttribute('data-activity-part-id')
@@ -818,6 +821,7 @@ export class CdpController {
           element.getAttribute('data-assistant-render-key')
         ).filter(Boolean))],
         stickyMessageId: marker && stickyMessageId !== markerMessageId ? null : stickyMessageId,
+        observedStickyMessageId: stickyMessageId,
         activeActivityCount: queryAll('.assistant-active-activity-item').length,
         nestedActivityScroller: nested ? {
           scrollTop: nested.scrollTop,
@@ -905,7 +909,7 @@ export class CdpController {
                 const top = visibleTop + 8;
                 const bottom = visibleBottom - 8;
                 if (right <= left || bottom <= top) return null;
-                const controls = 'button, a, input, textarea, select, summary, [role="button"], [contenteditable="true"], [tabindex]';
+                const controls = 'button, a, input, textarea, select, summary, .session-item, [role="button"], [contenteditable="true"], [tabindex]';
                 const xs = [left, right, (left + right) / 2];
                 const ys = [(top + bottom) / 2, top, bottom, top + (bottom - top) / 4, bottom - (bottom - top) / 4];
                 for (const x of xs) {
@@ -1690,7 +1694,7 @@ export async function waitForLiveGate({
 }) {
   const deadline = Date.now() + timeoutMs;
   let sawBusy = false;
-  let stickyNudgeAttempts = 0;
+  let stickyPreparationAttempts = 0;
   let best = null;
   let latest = null;
   const observations = [];
@@ -1724,16 +1728,26 @@ export async function waitForLiveGate({
       };
     }
     if (
-      stickyNudgeAttempts < 12 &&
+      stickyPreparationAttempts < 12 &&
       busy &&
-      snapshot.nestedActivityScroller?.hasRange &&
       missing.length === 1 &&
       missing[0] === 'sticky latest prompt'
     ) {
-      stickyNudgeAttempts += 1;
-      if (await cdp.wheel('.interactive-list', -96, 'right')) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
+      stickyPreparationAttempts += 1;
+      // Compact tool output may be shorter than the viewport. Scrolling upward
+      // moves the new prompt back into view and can expose the previous turn's
+      // sticky instead. Expand this turn's output, then navigate toward its end.
+      const expanded = await cdp.click('.assistant-activity-summary[aria-expanded="false"]', {
+        messageIds: snapshot.turnMessageIds,
+      });
+      const navigated = await cdp.key('.interactive-list', 'End');
+      observations.push({
+        action: 'prepare-sticky',
+        attempt: stickyPreparationAttempts,
+        expanded,
+        navigated,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
       continue;
     }
     if (sawBusy && !busy) break;
@@ -3485,6 +3499,12 @@ async function runLifecycleScenario({
     if (!(await waitForBusy(client, tracked.id, Math.min(timeoutMs, 15_000)))) {
       throw new Error('AI-19 did not observe the root stream become busy');
     }
+    const editorBusy = await waitForObservation(
+      () => editor.evaluate(`!!document.querySelector('.stop-button')`),
+      (busy) => busy === true,
+      Math.min(timeoutMs, 15_000)
+    );
+    if (!editorBusy) throw new Error('AI-19 editor did not display the active stream');
     if (
       !(await sendComposerPromptWithRetry(
         editor,
@@ -3974,6 +3994,9 @@ async function runLive(options) {
         await cdp.startSessionEventCapture();
       }
       if (scenario === 'AI-17') {
+        if (!(await waitForSessionQuiescence(client, cdp, tracked.id, timeoutMs * 3))) {
+          throw new Error('AI-17 session and queue did not become quiescent before observation');
+        }
         const tokens = [
           ...Array.from(
             { length: 20 },

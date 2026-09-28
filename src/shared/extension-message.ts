@@ -392,6 +392,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
     case 'queued-messages/sync': {
       const payload = asRecord(record.payload);
       if (!payload || !Array.isArray(payload.messages)) return null;
+      if (payload.mutationId !== undefined && !isString(payload.mutationId)) return null;
       for (const message of payload.messages) {
         const item = asRecord(message);
         const queuedContext = asRecord(item?.queuedContext);
@@ -423,6 +424,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
             ExtensionMessage,
             { type: 'queued-messages/sync' }
           >['payload']['messages'],
+          mutationId: payload.mutationId,
         },
       };
     }

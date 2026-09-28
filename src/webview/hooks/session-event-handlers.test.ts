@@ -3422,6 +3422,48 @@ describe('registerSessionEventHandlers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
+  it('reconciles final server text after local completion without reviving busy state', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const message = createCompletedAssistantEntry(1, 2);
+    loadingStartedAt.mockReturnValue(null);
+    upsertPart.mockClear();
+    startLoading.mockClear();
+    const cleanups = registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [message],
+        setSessionStatusEntry,
+        syncSessionMessages,
+      })
+    );
+    emitServerEvent(handlers, 'session.next.text.ended', {
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: message.info.id,
+        textID: 'text-final',
+        text: 'Complete response including FINAL_MARKER',
+      },
+      seq: 1,
+    });
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageID: message.info.id,
+        id: 'text-final',
+        text: 'Complete response including FINAL_MARKER',
+      })
+    );
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'session-1', assistantMessageID: message.info.id, finish: 'stop' },
+      seq: 2,
+    });
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
+    expect(startLoading).not.toHaveBeenCalled();
+    for (const cleanup of cleanups) cleanup();
+  });
+
   it('does not mark active full assistant completion updates idle', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();

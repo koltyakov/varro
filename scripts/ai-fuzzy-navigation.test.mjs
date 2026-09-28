@@ -58,3 +58,35 @@ test('bottom geometry in another route cannot satisfy navigation', async () => {
   );
   await assert.rejects(goToLatest(f.cdp, f.options), /did not become visible/);
 });
+
+test('streaming arrival tracks a growing bottom without requiring stationary height', async () => {
+  const f = fixture((time) => ({
+    top: 2380 + time,
+    height: 3000 + time,
+    client: 600,
+    visibleIds: ['last'],
+  }));
+  await assert.rejects(goToLatest(f.cdp, f.options), /did not become visible/);
+  const streaming = fixture((time) => ({
+    top: 2380 + time,
+    height: 3000 + time,
+    client: 600,
+    visibleIds: ['last'],
+  }));
+  const result = await goToLatest(streaming.cdp, { ...streaming.options, streaming: true });
+  assert.ok(result.samples.at(-1).at >= 150);
+  assert.deepEqual(streaming.inputs, ['click']);
+});
+
+test('streaming arrival rejects a detached viewport even when the large latest row is visible', async () => {
+  const f = fixture((time) => ({
+    top: 2000,
+    height: 3000 + time,
+    client: 600,
+    visibleIds: ['last'],
+  }));
+  await assert.rejects(
+    goToLatest(f.cdp, { ...f.options, streaming: true }),
+    /did not become visible/
+  );
+});
