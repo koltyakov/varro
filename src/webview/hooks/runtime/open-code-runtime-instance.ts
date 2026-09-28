@@ -1651,7 +1651,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         if (permissionAutomationOwner && !modePending && !modeRecovering && mode === 'full') {
           pendingPermissionHandlers.push(
             sessionApprovalOperations
-              .respondPermission(permission.sessionID, permission.id, 'always', {
+              .respondPermission(permission.sessionID, permission.id, 'once', {
                 rethrow: true,
                 automatic: true,
                 permissionAutomationLease,

@@ -2310,7 +2310,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           throw err;
         }
         try {
-          const modes = await this.sessionPermissionModes.set(sessionID, mode);
+          const modes = await this.sessionPermissionModes.set(
+            sessionID,
+            mode,
+            asRecord(session) ?? undefined
+          );
           this.postPermissionModes(modes);
         } catch (err) {
           logger.warn(
@@ -2318,14 +2322,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           );
           this.postPermissionModes();
           try {
-            await this.patchSessionPermissionMode(
+            const recovered = await this.patchSessionPermissionMode(
               sessionID,
               'default',
               directory,
               getSafeDefaultPermissionRules(),
               recoverFallback
             );
-            await this.sessionPermissionModes.set(sessionID, 'default');
+            await this.sessionPermissionModes.set(
+              sessionID,
+              'default',
+              asRecord(recovered) ?? undefined
+            );
             this.postPermissionModes();
           } catch (recoveryError) {
             logger.warn(
@@ -2574,8 +2582,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
         this.postPermissionModes();
         try {
-          await this.patchSessionPermissionMode(sessionID, mode, directory);
-          const modes = await this.sessionPermissionModes.set(sessionID, mode);
+          const session = await this.patchSessionPermissionMode(sessionID, mode, directory);
+          const modes = await this.sessionPermissionModes.set(
+            sessionID,
+            mode,
+            asRecord(session) ?? undefined
+          );
           this.postPermissionModes(modes);
         } catch (err) {
           this.postPermissionModes();

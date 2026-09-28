@@ -2789,12 +2789,31 @@ async function runMultiWebviewScenario({
   const existingChild = recordedChild
     ? sessions.find((session) => session.id === recordedChild.id && session.parentID === tracked.id)
     : null;
-  const child =
-    existingChild ??
-    (await client.request('POST', '/session', {
-      title: childTitle,
-      parentID: tracked.id,
-    }));
+  let child = existingChild;
+  if (!child) {
+    // V2's compatibility parent annotation is private to the creating client.
+    // Use real delegation so the editor and controller see the same ancestry.
+    await sidebar.selectExactModel(requestedModel);
+    await sidebar.selectPermissionMode('auto');
+    markModelMayEdit();
+    if (
+      !(await sendComposerPromptWithRetry(
+        sidebar,
+        `[VFZ:${manifest.seed}:AI-18:CHILD] Launch exactly one general subagent using ${requestedModel}. Ask it to reply AI18-CHILD-READY without tools, edits or further delegation. Wait for it and finish AI18-PARENT-READY. Do not use any other tools or change files.`
+      ))
+    )
+      throw new Error('AI-18 could not request its real child');
+    child = await waitForObservation(
+      async () =>
+        (await client.listSessions()).find(
+          (session) =>
+            session.parentID === tracked.id &&
+            !sessions.some((existing) => existing.id === session.id)
+        ),
+      (session) => !!session,
+      timeoutMs
+    );
+  }
   if (!child?.id || child.parentID !== tracked.id) {
     throw new Error('OpenCode did not create the requested AI-18 child session');
   }
@@ -2808,6 +2827,12 @@ async function runMultiWebviewScenario({
       createdBy: 'AI-18',
     });
     await writeJsonAtomic(manifestPath, manifest);
+    await client.request('PATCH', `/session/${encodeURIComponent(child.id)}`, {
+      title: childTitle,
+    });
+    if (!(await waitForSessionQuiescence(client, sidebar, tracked.id, timeoutMs * 3))) {
+      throw new Error('AI-18 child preparation did not settle');
+    }
   }
 
   const evidence = {

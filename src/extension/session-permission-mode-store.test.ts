@@ -4,6 +4,35 @@ import type { Persistence } from '../shared/persistence';
 import { SessionPermissionModeStore } from './session-permission-mode-store';
 
 describe('SessionPermissionModeStore', () => {
+  it('rejects an older metadata snapshot after a confirmed mode change', async () => {
+    const persistence: Persistence = { get: vi.fn(), set: vi.fn(), remove: vi.fn() };
+    const store = new SessionPermissionModeStore(persistence);
+    await store.set('session-1', 'default', { time: { updated: 200 } });
+    expect(
+      store.restoreSessionMetadata({
+        id: 'session-1',
+        time: { updated: 100 },
+        metadata: { varro: { permissionMode: 'full' } },
+      })
+    ).toBe(false);
+    expect(store.list()).toEqual({ 'session-1': 'default' });
+    expect(
+      store.restoreSessionMetadata({
+        id: 'session-1',
+        time: { updated: 300 },
+        metadata: { varro: { permissionMode: 'auto' } },
+      })
+    ).toBe(true);
+    expect(
+      store.restoreSessionMetadata({
+        id: 'session-1',
+        time: { updated: 250 },
+        metadata: { varro: { permissionMode: 'full' } },
+      })
+    ).toBe(false);
+    expect(store.list()).toEqual({ 'session-1': 'auto' });
+  });
+
   it('uses valid metadata over local selections without guessing from rules', async () => {
     const persistence: Persistence = { get: vi.fn(), set: vi.fn(), remove: vi.fn() };
     const store = new SessionPermissionModeStore(persistence);

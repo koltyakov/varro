@@ -1580,7 +1580,7 @@ describe('useOpenCode permission and config flows', () => {
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'session-1',
           'perm-1',
-          'always',
+          'once',
           { permissionAutomationLease: 1 }
         )
       );
@@ -1628,7 +1628,7 @@ describe('useOpenCode permission and config flows', () => {
       expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
         'session-1',
         'perm-during-patch',
-        'always',
+        'once',
         { permissionAutomationLease: 1 }
       );
     } finally {
@@ -1670,7 +1670,7 @@ describe('useOpenCode permission and config flows', () => {
       await hookModule.updatePermissionModeForSession('full', 'child-1');
 
       expect(clientMocks.sessionRespondPermission.mock.calls).toEqual([
-        ['child-1', 'perm-child', 'always', { permissionAutomationLease: 1 }],
+        ['child-1', 'perm-child', 'once', { permissionAutomationLease: 1 }],
       ]);
     } finally {
       dispose();

@@ -137,7 +137,7 @@ export async function autoApprovePermissionsForSessionWithDependencies(
 ) {
   await Promise.all(
     permissions.map((permission) =>
-      deps.respondPermission(permission.sessionID, permission.id, 'always').catch(() => {})
+      deps.respondPermission(permission.sessionID, permission.id, 'once').catch(() => {})
     )
   );
 }

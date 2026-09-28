@@ -566,7 +566,7 @@ describe('registerSessionEventHandlers', () => {
     });
 
     await vi.waitFor(() => {
-      expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-1', 'always', {
+      expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-1', 'once', {
         rethrow: true,
       });
     });
@@ -972,7 +972,7 @@ describe('registerSessionEventHandlers', () => {
     });
 
     await vi.waitFor(() => {
-      expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-2', 'always', {
+      expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-2', 'once', {
         rethrow: true,
       });
     });

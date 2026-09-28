@@ -538,6 +538,8 @@ Direct input acquires ownership only when it can affect the transcript:
   sticky UI below the minimum supported viewport height.
 - A sticky prompt is a derived overlay for a real user message. Its message ID must remain the sole
   navigation identity.
+- Automatic notices and child-session handoffs do not end that prompt. If one is the first visible
+  row, retain the preceding real prompt; collision checks consider mounted user-message cards only.
 - Navigation aligns the real `.user-message-card`, not an estimated row position or attachment
   summary.
 - The destination uses the same top gap as the sticky box.

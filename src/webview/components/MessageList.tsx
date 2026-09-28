@@ -2664,7 +2664,7 @@ export function MessageList() {
     if (
       !preview &&
       firstVisibleMessageIndex !== null &&
-      visibleMessages[firstVisibleMessageIndex]?.info.role === 'assistant'
+      visibleMessages[firstVisibleMessageIndex]
     ) {
       const loadedMessageIds = new Set(visibleMessages.map((entry) => entry.info.id));
       const boundaryPrompts = getSessionHistoryPrompts(state.activeSessionId)
@@ -3981,7 +3981,11 @@ export function MessageList() {
       const nextMessage = currentMessages[index];
       if (nextMessage?.info.role !== 'user') continue;
 
-      const nextElement = getStickyUserMessageSourceElement(nextMessage.info.id);
+      const nextRow = mountedMessageRows.get(nextMessage.info.id);
+      if (!nextRow) return null;
+      // Automatic notices and child-session handoffs are user-role rows without a prompt card.
+      const nextElement = nextRow.querySelector<HTMLElement>('.user-message-card');
+      if (!nextElement) continue;
       const nextRect = nextElement?.getBoundingClientRect();
       if (!nextRect) return null;
 
@@ -3999,7 +4003,8 @@ export function MessageList() {
     if (!containerRef) return null;
     for (const row of containerRef.querySelectorAll<HTMLElement>('.interactive-request')) {
       if (row.dataset.msgId === messageId) continue;
-      const source = row.querySelector<HTMLElement>('.user-message-card') ?? row;
+      const source = row.querySelector<HTMLElement>('.user-message-card');
+      if (!source) continue;
       const rect = source.getBoundingClientRect();
       if (rect.bottom <= containerRect.top) continue;
       return rect.top - containerRect.top;

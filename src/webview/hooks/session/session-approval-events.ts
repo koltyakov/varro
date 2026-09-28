@@ -43,7 +43,8 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
     }
     if (deps.shouldAutoApprovePermissions(permission.sessionID)) {
       const respond = deps.respondAutomaticPermission ?? deps.respondPermission;
-      void respond(permission.sessionID, permission.id, 'always', { rethrow: true }).catch(() => {
+      // Full access belongs to this session, not the server's saved approval layer.
+      void respond(permission.sessionID, permission.id, 'once', { rethrow: true }).catch(() => {
         if (!deps.shouldAutoApprovePermissions(permission.sessionID)) {
           permissionsStore.addPermission(permission);
           deps.permissionVisible?.(permission.id);

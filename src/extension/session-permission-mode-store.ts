@@ -4,7 +4,7 @@ import {
   isSafePersistedSessionId,
   type PermissionMode,
 } from '../shared/protocol';
-import { asRecord } from '../shared/type-utils';
+import { asRecord, isNumber } from '../shared/type-utils';
 import type { UnknownRecord } from '../shared/type-utils';
 
 const SESSION_PERMISSION_MODES_KEY = 'varro.sessionPermissionModes';
@@ -14,6 +14,7 @@ export class SessionPermissionModeStore {
   private modes: Record<string, PermissionMode>;
   private fallbackSessionIds: Set<string>;
   private mutationQueue: Promise<void> = Promise.resolve();
+  private readonly metadataUpdatedAt = new Map<string, number>();
 
   constructor(private readonly persistence: Persistence) {
     const stored = asRecord(persistence.get<unknown>(SESSION_PERMISSION_MODES_KEY));
@@ -59,6 +60,17 @@ export class SessionPermissionModeStore {
     const sessionId = session.id;
     const mode = asRecord(asRecord(session.metadata)?.varro)?.permissionMode;
     if (!isSafePersistedSessionId(sessionId) || !isPermissionMode(mode)) return false;
+    const updatedAt = asRecord(session.time)?.updated;
+    const confirmedAt = this.metadataUpdatedAt.get(sessionId);
+    // A session-list response can arrive after a newer explicit mode PATCH.
+    if (
+      confirmedAt !== undefined &&
+      (!isNumber(updatedAt) ||
+        updatedAt < confirmedAt ||
+        (updatedAt === confirmedAt && this.modes[sessionId] !== mode))
+    )
+      return false;
+    if (isNumber(updatedAt)) this.metadataUpdatedAt.set(sessionId, updatedAt);
     if (this.modes[sessionId] === mode) return false;
     // Remote metadata is authoritative. Reads must not patch sessions or advance their timestamps.
     this.modes = { ...this.modes, [sessionId]: mode };
@@ -69,7 +81,11 @@ export class SessionPermissionModeStore {
     return [...this.fallbackSessionIds];
   }
 
-  set(sessionId: string, mode: PermissionMode | null): Promise<Record<string, PermissionMode>> {
+  set(
+    sessionId: string,
+    mode: PermissionMode | null,
+    confirmedSession?: UnknownRecord
+  ): Promise<Record<string, PermissionMode>> {
     if (!isSafePersistedSessionId(sessionId)) {
       return Promise.reject(new Error('Invalid persisted session ID'));
     }
@@ -78,6 +94,9 @@ export class SessionPermissionModeStore {
       if (mode === null) delete next[sessionId];
       else next[sessionId] = mode;
       this.modes = next;
+      const updatedAt = asRecord(confirmedSession?.time)?.updated;
+      if (mode === null) this.metadataUpdatedAt.delete(sessionId);
+      else if (isNumber(updatedAt)) this.metadataUpdatedAt.set(sessionId, updatedAt);
       await this.persistence.set(SESSION_PERMISSION_MODES_KEY, next);
       if (this.fallbackSessionIds.has(sessionId)) {
         await this.persistFallbacks(

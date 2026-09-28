@@ -162,7 +162,7 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     const version =
       process.env.VARRO_OPENCODE_TEST_VERSION ??
       spawnSync(binary!, ['--version'], { encoding: 'utf8', timeout: 10000 }).stdout.trim();
-    if (version.startsWith('2.')) {
+    if (/^(?:opencode\s+v?)?2\./.test(version)) {
       await mkdir(join(root, 'config/opencode'), { recursive: true });
       await writeFile(
         join(root, 'config/opencode/opencode.json'),
@@ -862,6 +862,69 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       await transport.request('DELETE', `/session/${id}`);
     }
   }, 45000);
+
+  it('keeps full-access approval session-scoped and asks again after reset', async (context) => {
+    if (!(await transport.readHealthInfo()).version?.startsWith('2.')) {
+      context.skip();
+      return;
+    }
+    const session = asRecord(
+      await transport.request('POST', '/session', {
+        title: 'Permission reset fixture',
+        permission: [{ permission: 'read', pattern: '*', action: 'ask' }],
+      })
+    );
+    const id = String(session?.id);
+    try {
+      await transport.request('POST', `/session/${id}/prompt_async`, {
+        model: { providerID: 'fixture', modelID: 'fixture' },
+        parts: [{ type: 'text', text: 'RUN_READ_FIXTURE allowed' }],
+      });
+      let initial: UnknownRecord | undefined;
+      await vi.waitFor(
+        async () => {
+          initial = ((await transport.request('GET', '/permission')) as UnknownRecord[]).find(
+            (request) => request.sessionID === id
+          );
+          expect(initial?.permission).toBe('read');
+        },
+        { timeout: 10000 }
+      );
+      await transport.request('PATCH', `/session/${id}`, {
+        permission: [{ permission: '*', pattern: '*', action: 'allow' }],
+      });
+      await transport.request('POST', `/permission/${initial?.id}/reply`, { reply: 'once' });
+      expect(asRecord(await transport.request('GET', '/api/permission/saved'))?.data).toEqual([]);
+      await vi.waitFor(
+        async () => {
+          const status = asRecord(await transport.request('GET', '/session/status'))?.[id];
+          expect(status === undefined || asRecord(status)?.type === 'idle').toBe(true);
+        },
+        { timeout: 10000 }
+      );
+      await transport.request('PATCH', `/session/${id}`, {
+        permission: [{ permission: 'read', pattern: '*', action: 'ask' }],
+      });
+      await transport.request('POST', `/session/${id}/prompt_async`, {
+        model: { providerID: 'fixture', modelID: 'fixture' },
+        parts: [{ type: 'text', text: 'RUN_READ_FIXTURE must ask again' }],
+      });
+      let pending: UnknownRecord | undefined;
+      await vi.waitFor(
+        async () => {
+          pending = ((await transport.request('GET', '/permission')) as UnknownRecord[]).find(
+            (request) => request.sessionID === id
+          );
+          expect(pending?.permission).toBe('read');
+        },
+        { timeout: 10000 }
+      );
+      await transport.request('POST', `/permission/${pending?.id}/reply`, { reply: 'once' });
+    } finally {
+      await transport.request('POST', `/session/${id}/abort`, {});
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 30000);
 
   it('keeps native permission and form requests actionable through acknowledgement', async (context) => {
     const health = await transport.readHealthInfo();
