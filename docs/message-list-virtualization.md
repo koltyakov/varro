@@ -281,6 +281,12 @@ Direct input acquires ownership only when it can affect the transcript:
 - Bottom follow remains active frame by frame while streaming or geometry is unsettled. It may stop
   only after track height, bottom target, and distance from bottom stabilize; stream observation
   requires consecutive stable frames.
+- Initial positioning also requires consecutive stable frames. Keep initial measurement corrections
+  immediate until then, so row sizing delivered after the first frame does not start animated follow.
+- Keep the transcript hidden behind its loading indicator through initial positioning and any initial
+  viewport-filling history fetch. Reaching the end of the first page is not a ready-to-paint state when
+  compact tool rows leave that page shorter than the viewport. Reveal only after the final bottom
+  position settles; direct user ownership releases this initial visibility hold.
 - User-detached follow reattaches after genuine downward movement reaches the reattachment threshold, or
   an explicit outer downward wheel at the physical bottom. That wheel resumes disclosure-paused follow
   even when the expanded transcript still fits and the browser cannot emit a scroll event. It respects

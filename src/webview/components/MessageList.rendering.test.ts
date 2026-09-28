@@ -547,6 +547,7 @@ describe('MessageList entrance animation', () => {
 
 describe('MessageList loading states', () => {
   it('keeps loading visible through populated hydration on consecutive session openings', async () => {
+    const frames = installQueuedAnimationFrameMocks();
     setSessions([
       session('session-1', { time: { created: 1, updated: 2 } }),
       session('session-2', { time: { created: 1, updated: 2 } }),
@@ -598,9 +599,34 @@ describe('MessageList loading states', () => {
       setState('messagesLoading', false);
       await Promise.resolve();
       expect(container!.querySelector(`[data-msg-id="${messageId}"]`)).toBe(row);
+      expect(row!.closest('.is-session-hydrating')).not.toBeNull();
+      expectVisibleLoading();
+      frames.flush();
+      frames.flush();
       expect(row!.closest('.is-session-hydrating')).toBeNull();
       expect(container!.querySelector('[aria-label="Loading messages"]')).toBeNull();
     }
+    frames.restore();
+  });
+
+  it('reveals an active restored turn without waiting for streaming to settle', async () => {
+    const frames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    replaceMessages([
+      { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Continue working')] },
+      {
+        info: assistantMessage('reply', { time: { created: 2 } }),
+        parts: [textPart('reply-text', 'Work in progress')],
+      },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    expect(container!.querySelector('.is-session-hydrating')).not.toBeNull();
+    await Promise.resolve();
+    frames.flush();
+    expect(container!.querySelector('.is-session-hydrating')).toBeNull();
+    expect(container!.querySelector('[aria-label="Loading messages"]')).toBeNull();
+    frames.restore();
   });
 
   it('hides the previous transcript while a cross-workspace session activation is pending', async () => {

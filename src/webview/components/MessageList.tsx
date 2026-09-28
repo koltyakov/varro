@@ -633,6 +633,9 @@ export function MessageList() {
   let lastObservedScrollTop = 0;
   let pendingInitialScrollSessionId: string | null = null;
   let pendingInitialHistoryFillSessionId: string | null = null;
+  const [initialPositioningSessionId, setInitialPositioningSessionId] = createSignal<string | null>(
+    null
+  );
   let initialScrollRafId = 0;
   let appendScrollRafId = 0;
   let appendScrollSessionId: string | null = null;
@@ -5097,6 +5100,7 @@ export function MessageList() {
   }
 
   function disengageBottomFollow() {
+    setInitialPositioningSessionId(null);
     pendingInitialScrollSessionId = null;
     pendingScrollToBottomRequest = false;
     pendingExpansionScrollAnchor = null;
@@ -5190,6 +5194,9 @@ export function MessageList() {
         !!state.streamingText.length || !!state.streamingPartId || presentation.pending();
       const isWorking = !!visibleRunningToolPart() || activeSessionWorking();
       if (isStreaming) bottomFollowObservedStreaming = true;
+      // A live turn may never settle while new output arrives. Its snapshot is already
+      // positioned; show it now and let ordinary follow own subsequent growth.
+      if (isStreaming || isWorking) setInitialPositioningSessionId(null);
       const stable =
         Math.abs(currentHeight - lastAutoScrolledTrackHeight) <= 1 &&
         Math.abs(currentBottomScrollTop - lastAutoScrolledBottomScrollTop) <= 1 &&
@@ -5200,8 +5207,14 @@ export function MessageList() {
         bottomFollowSettleFrames = 0;
       }
 
+      // Initial row measurements can arrive after the first stable frame. Keep their
+      // corrections immediate until consecutive frames agree on the hydrated layout.
       const settleFrameCount =
-        bottomFollowObservedStreaming || isWorking ? BOTTOM_FOLLOW_SETTLE_FRAME_COUNT : 1;
+        pendingInitialHistoryFillSessionId === sessionId ||
+        bottomFollowObservedStreaming ||
+        isWorking
+          ? BOTTOM_FOLLOW_SETTLE_FRAME_COUNT
+          : 1;
       if (bottomFollowSettleFrames >= settleFrameCount) {
         const shouldFillInitialViewport =
           pendingInitialHistoryFillSessionId === sessionId &&
@@ -5231,6 +5244,7 @@ export function MessageList() {
         expectedScrollTop = -1;
         followModeLocked = false;
         activeFollowLoopSessionId = null;
+        setInitialPositioningSessionId(null);
         return;
       }
 
@@ -6870,6 +6884,11 @@ export function MessageList() {
     setMeasurementVersion((version) => version + 1);
     pendingInitialScrollSessionId = editingAtSessionStart ? null : sessionId;
     pendingInitialHistoryFillSessionId = editingAtSessionStart ? null : sessionId;
+    setInitialPositioningSessionId(
+      !editingAtSessionStart && untrack(() => state.messagesLoading || messages().length > 0)
+        ? sessionId
+        : null
+    );
     cancelPendingScroll();
     pendingScrollToBottomRequest = false;
     deferredScrollToBottomRequestKey = null;
@@ -6896,7 +6915,11 @@ export function MessageList() {
   createEffect(() => {
     const sessionId = state.activeSessionId;
     const msgs = messages();
-    if (state.messagesLoading || msgs.length === 0) return;
+    if (state.messagesLoading) return;
+    if (msgs.length === 0) {
+      setInitialPositioningSessionId(null);
+      return;
+    }
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;
       scheduleVisibleMeasurement();
@@ -9078,9 +9101,13 @@ export function MessageList() {
     }
   }
 
+  const hydratingSession = () =>
+    state.messagesLoading ||
+    (!!state.activeSessionId && initialPositioningSessionId() === state.activeSessionId);
+
   return (
     <div class="interactive-list-shell min-h-0 flex-1">
-      <Show when={state.messagesLoading}>
+      <Show when={hydratingSession()}>
         <div class="chat-messages-loading" role="status" aria-label="Loading messages">
           <span class="chat-messages-loading-dot" />
           <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
@@ -9089,7 +9116,7 @@ export function MessageList() {
       </Show>
       <div
         ref={containerRef}
-        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${autoScroll() || shouldMeasureRows() || loadingOlderHistory() || exitingActivityPartKeys().size > 0 ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}${state.messagesLoading && messages().length > 0 ? ' is-session-hydrating' : ''}`}
+        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${autoScroll() || shouldMeasureRows() || loadingOlderHistory() || exitingActivityPartKeys().size > 0 ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}${hydratingSession() && messages().length > 0 ? ' is-session-hydrating' : ''}`}
         role="log"
         tabIndex={0}
         aria-live="polite"
