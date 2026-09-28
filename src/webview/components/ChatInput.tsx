@@ -244,6 +244,7 @@ import {
 } from './chat-input/QueuedMessages';
 import { parseUserMessageContent } from './message/UserMessageContent';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
+import { ProviderQuotaWarning } from './chat-input/ProviderQuotaWarning';
 import {
   combineContextCharacters,
   countContextCharacters,
@@ -5625,6 +5626,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           onSwitchProvider={() => {
             closePopups();
             setShowModelPicker(true);
+          }}
+        />
+      </Show>
+
+      <Show when={!hasExpandedDiffOverlay() && !visibleUsageLimit() && !composerEditingMessage()}>
+        <ProviderQuotaWarning
+          limit={currentProviderLimit()}
+          modelID={currentModel().modelID}
+          modelName={currentModel().modelName}
+          providerName={currentModel().providerName}
+          onOpenUsage={() => closePopups()}
+          onRefresh={() => {
+            const model = currentModel();
+            if (model.providerID) void refreshProviderLimit(model.providerID, model.modelID);
           }}
         />
       </Show>

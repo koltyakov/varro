@@ -1,0 +1,105 @@
+import { createSignal } from 'solid-js';
+import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
+import { getProviderLimitWindowRemainingPercent } from '../../lib/format';
+import { asRecord, isNumber, isString } from '../../lib/runtime-values';
+import { readStored, STORAGE_KEYS, writeStored } from '../../lib/state-storage';
+import { filterCompactProviderLimitForModel } from './toolbar-compact';
+
+const LOW_REMAINING_PERCENT = 25;
+const UNKNOWN_RESET_DISMISSAL_MS = 60 * 60_000;
+
+type QuotaWarningDismissal = {
+  providerID: string;
+  windowID: string;
+  resetAt: number | null;
+  expiresAt: number;
+};
+
+export function getLowQuotaWindows(
+  limit: ProviderLimitStatus | null,
+  modelID: string | null,
+  modelName: string
+): ProviderLimitWindow[] {
+  const filtered = filterCompactProviderLimitForModel(limit, modelID, modelName);
+  if (filtered?.status !== 'available') return [];
+
+  const model = `${modelID ?? ''} ${modelName}`.toLowerCase();
+  return filtered.windows
+    .filter((window) => {
+      const scope = `${window.id} ${window.label}`.toLowerCase().replace(/[_-]/g, ' ');
+      if (/\b(code review|review requests|mcp|cowork|omelette)\b/.test(scope)) return false;
+      const family = /\b(sonnet|opus|haiku)\b/.exec(scope)?.[1];
+      if (family && !model.includes(family)) return false;
+      const remaining = getProviderLimitWindowRemainingPercent(window);
+      return window.remaining <= 0 || (remaining !== null && remaining <= LOW_REMAINING_PERCENT);
+    })
+    .toSorted((left, right) => {
+      const exhausted = Number(right.remaining <= 0) - Number(left.remaining <= 0);
+      if (exhausted) return exhausted;
+      const remaining =
+        (getProviderLimitWindowRemainingPercent(left) ?? 0) -
+        (getProviderLimitWindowRemainingPercent(right) ?? 0);
+      return remaining || left.id.localeCompare(right.id);
+    });
+}
+
+export function isQuotaWarningDismissed(
+  dismissals: readonly QuotaWarningDismissal[],
+  providerID: string,
+  window: ProviderLimitWindow,
+  now: number
+): boolean {
+  return dismissals.some(
+    (entry) =>
+      entry.providerID === providerID &&
+      entry.windowID === window.id &&
+      entry.resetAt === window.resetAt &&
+      entry.expiresAt > now
+  );
+}
+
+const [dismissalVersion, setDismissalVersion] = createSignal(0);
+
+export const quotaWarningDismissals = {
+  read(): QuotaWarningDismissal[] {
+    dismissalVersion();
+    const stored = readStored<unknown>(STORAGE_KEYS.quotaWarningDismissals);
+    if (!Array.isArray(stored)) return [];
+    const entries: QuotaWarningDismissal[] = [];
+    for (const value of stored) {
+      const entry = asRecord(value);
+      if (
+        !entry ||
+        !isString(entry.providerID) ||
+        !isString(entry.windowID) ||
+        !isNumber(entry.expiresAt) ||
+        !Number.isFinite(entry.expiresAt) ||
+        !(entry.resetAt === null || (isNumber(entry.resetAt) && Number.isFinite(entry.resetAt)))
+      )
+        continue;
+      entries.push({
+        providerID: entry.providerID,
+        windowID: entry.windowID,
+        resetAt: entry.resetAt,
+        expiresAt: entry.expiresAt,
+      });
+    }
+    return entries;
+  },
+
+  reload() {
+    setDismissalVersion((version) => version + 1);
+  },
+
+  dismiss(providerID: string, windows: readonly ProviderLimitWindow[], now: number) {
+    const entries = this.read().filter((entry) => entry.expiresAt > now);
+    for (const window of windows) {
+      if (isQuotaWarningDismissed(entries, providerID, window, now)) continue;
+      const expiresAt = window.resetAt ?? now + UNKNOWN_RESET_DISMISSAL_MS;
+      if (expiresAt <= now) continue;
+      entries.push({ providerID, windowID: window.id, resetAt: window.resetAt, expiresAt });
+    }
+    writeStored(STORAGE_KEYS.quotaWarningDismissals, entries);
+    this.reload();
+  },
+};
