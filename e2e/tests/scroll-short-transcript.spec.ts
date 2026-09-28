@@ -23,12 +23,24 @@ for (const width of [480, 1280]) {
     await composer.fill(
       "Check in v1 and v2 if I switch from Ask to Build mode and back and force, when a prompt ends up in build, agent should not be still thinking it's in ask mode."
     );
-    await composer.evaluate((node) => {
+    await composer.evaluate(async (node) => {
       const dataTransfer = new DataTransfer();
-      for (let index = 0; index < 3; index += 1)
-        dataTransfer.items.add(
-          new File([new Uint8Array([137, 80, 78, 71])], `image-${index}.png`, { type: 'image/png' })
-        );
+      const canvas = document.createElement('canvas');
+      canvas.width = 16;
+      canvas.height = 16;
+      const context = canvas.getContext('2d')!;
+      for (let index = 0; index < 3; index += 1) {
+        // Image deduplication uses content, so each fixture needs distinct pixels.
+        context.fillStyle = `rgb(${index * 100}, 0, 0)`;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        const blob = await new Promise<Blob>((resolve, reject) => {
+          canvas.toBlob((value) => {
+            if (value) resolve(value);
+            else reject(new Error('Could not create PNG fixture'));
+          }, 'image/png');
+        });
+        dataTransfer.items.add(new File([blob], `image-${index}.png`, { type: 'image/png' }));
+      }
       const event = new Event('paste', { bubbles: true, cancelable: true });
       Object.defineProperty(event, 'clipboardData', { value: dataTransfer });
       node.dispatchEvent(event);
