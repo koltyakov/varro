@@ -524,6 +524,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.showTurnTimer') ||
         event.affectsConfiguration('varro.debug.showQuotaWarning') ||
+        event.affectsConfiguration('varro.debug.resetWarningDays') ||
         event.affectsConfiguration('varro.chat.enableProblemsContext') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
         event.affectsConfiguration('varro.chat.defaultPermissionMode') ||

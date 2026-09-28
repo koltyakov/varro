@@ -9,6 +9,7 @@ import {
   untrack,
 } from 'solid-js';
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
+import { DEFAULT_RESET_WARNING_DAYS } from '../../../shared/provider-limit-config';
 import { postMessage } from '../../lib/bridge';
 import { useSecondClock } from '../../lib/clock';
 import {
@@ -25,6 +26,7 @@ import {
   getLowQuotaWindows,
   isQuotaWarningDismissed,
   quotaWarningDismissals,
+  resetWarningDismissals,
 } from './provider-quota-warning';
 
 export function ProviderQuotaWarning(props: {
@@ -33,6 +35,7 @@ export function ProviderQuotaWarning(props: {
   modelName: string;
   providerName: string;
   forceShow?: boolean;
+  resetWarningDays?: number;
   onRefresh: () => void;
 }) {
   const lowWindows = createMemo(() =>
@@ -43,7 +46,35 @@ export function ProviderQuotaWarning(props: {
     void props.forceShow;
     setDebugDismissed(false);
   });
-  const now = useSecondClock(() => lowWindows().length > 0);
+  const resetCredits = createMemo(() => {
+    const limit = props.limit;
+    return limit?.status === 'available' && (limit.usageLimitResets?.availableCount ?? 0) > 0
+      ? (limit.usageLimitResets?.credits ?? [])
+      : [];
+  });
+  const now = useSecondClock(() => lowWindows().length > 0 || resetCredits().length > 0);
+  const resetDismissals = createMemo(() => resetWarningDismissals.read());
+  const expiringResets = createMemo(() => {
+    const groups = new Map<number, number>();
+    for (const credit of resetCredits()) {
+      const expiresAt = credit.expiresAt;
+      if (
+        expiresAt === null ||
+        expiresAt <= now() ||
+        expiresAt - now() >
+          (props.resetWarningDays ?? DEFAULT_RESET_WARNING_DAYS) * 24 * 60 * 60_000 ||
+        (props.forceShow
+          ? debugDismissed()
+          : resetDismissals().some(
+              (entry) =>
+                entry.providerID === props.limit?.providerID && entry.expiresAt === expiresAt
+            ))
+      )
+        continue;
+      groups.set(expiresAt, (groups.get(expiresAt) ?? 0) + 1);
+    }
+    return [...groups].toSorted(([left], [right]) => left - right);
+  });
   const dismissals = createMemo(() => quotaWarningDismissals.read());
   const visibleWindows = createMemo(() =>
     lowWindows().filter(
@@ -64,6 +95,17 @@ export function ProviderQuotaWarning(props: {
   const isCritical = createMemo(() =>
     visibleWindows().some((window) => getProviderLimitTone(props.limit, window) === 'error')
   );
+  const [showResetExpirations, setShowResetExpirations] = createSignal(false);
+  const warningMode = createMemo(() =>
+    visibleWindows().length === 0 ? 'resets' : expiringResets().length > 0 ? 'rotate' : 'quota'
+  );
+  createEffect(() => {
+    const mode = warningMode();
+    setShowResetExpirations(mode === 'resets');
+    if (mode !== 'rotate') return;
+    const timer = window.setInterval(() => setShowResetExpirations((value) => !value), 15_000);
+    onCleanup(() => window.clearInterval(timer));
+  });
   const refreshedResets = new Set<string>();
 
   createEffect(() => {
@@ -88,6 +130,8 @@ export function ProviderQuotaWarning(props: {
     const onStorage = (event: StorageEvent) => {
       if (event.key === null || event.key === STORAGE_KEYS.quotaWarningDismissals)
         quotaWarningDismissals.reload();
+      if (event.key === null || event.key === STORAGE_KEYS.resetWarningDismissals)
+        resetWarningDismissals.reload();
     };
     window.addEventListener('storage', onStorage);
     onCleanup(() => {
@@ -96,22 +140,45 @@ export function ProviderQuotaWarning(props: {
   });
 
   return (
-    <Show when={visibleWindows().length > 0}>
-      <div class="chat-quota-warning" classList={{ error: isCritical() }}>
+    <Show when={visibleWindows().length > 0 || expiringResets().length > 0}>
+      <div
+        class="chat-quota-warning"
+        classList={{
+          error: showResetExpirations()
+            ? (expiringResets()[0]?.[0] ?? Infinity) - now() <= 24 * 60 * 60_000
+            : isCritical(),
+        }}
+      >
         <div class="chat-quota-warning-copy" role="status" aria-live="polite">
-          <For each={visibleWindows()}>
-            {(window) => (
-              <div class="chat-quota-warning-row">
-                <span>{formatQuotaWarning(window)}</span>
-                <Show when={window.resetAt !== null}>
-                  <span class="chat-quota-warning-reset">
-                    {' '}
-                    · resets in {formatQuotaReset(window.resetAt!, now())}
+          <Show when={!showResetExpirations()}>
+            <For each={visibleWindows()}>
+              {(window) => (
+                <div class="chat-quota-warning-row">
+                  <span>{formatQuotaWarning(window)}</span>
+                  <Show when={window.resetAt !== null}>
+                    <span class="chat-quota-warning-reset">
+                      {' '}
+                      · resets in {formatQuotaReset(window.resetAt!, now())}
+                    </span>
+                  </Show>
+                </div>
+              )}
+            </For>
+          </Show>
+          <Show when={showResetExpirations()}>
+            <For each={expiringResets().slice(0, 1)}>
+              {([expiresAt]) => (
+                <div class="chat-quota-warning-row">
+                  <span>
+                    Reset expires in{' '}
+                    <span class="chat-quota-warning-reset">
+                      {formatQuotaReset(expiresAt, now())}
+                    </span>
                   </span>
-                </Show>
-              </div>
-            )}
-          </For>
+                </div>
+              )}
+            </For>
+          </Show>
         </div>
         <div class="chat-quota-warning-actions">
           <Show when={availableResets() > 0}>
@@ -139,18 +206,23 @@ export function ProviderQuotaWarning(props: {
             title={
               props.forceShow
                 ? 'Dismiss debug preview'
-                : isCritical()
-                  ? 'Dismiss until quota resets (1 hour if unknown)'
-                  : 'Dismiss until quota becomes critical or resets (1 hour if reset unknown)'
+                : expiringResets().length > 0
+                  ? 'Dismiss these reset expirations and current quota warnings'
+                  : isCritical()
+                    ? 'Dismiss until quota resets (1 hour if unknown)'
+                    : 'Dismiss until quota becomes critical or resets (1 hour if reset unknown)'
             }
             onClick={() => {
               if (props.forceShow) setDebugDismissed(true);
-              else
+              else {
+                const expirations = expiringResets().map(([expiresAt]) => expiresAt);
                 quotaWarningDismissals.dismiss(
                   props.limit!.providerID,
                   visibleWindows(),
                   Date.now()
                 );
+                resetWarningDismissals.dismiss(props.limit!.providerID, expirations, Date.now());
+              }
             }}
           >
             <UiIcon source={xmarkIcon} width="12" height="12" />

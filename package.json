@@ -515,6 +515,13 @@
           "default": false,
           "description": "Debug only: show the quota warning for available provider quotas regardless of remaining allowance or saved dismissals. Closing this preview does not save a dismissal."
         },
+        "varro.debug.resetWarningDays": {
+          "deprecationMessage": "Debug only setting. Not intended for regular use.",
+          "type": "number",
+          "minimum": 5,
+          "default": 5,
+          "description": "Debug only: days before a usage reset expires to show its warning. Increase this to preview resets expiring later. Saved dismissals still apply unless debug.showQuotaWarning is enabled."
+        },
         "varro.debug.simulateUpgradeFailure": {
           "deprecationMessage": "Debug only setting. Not intended for regular use.",
           "type": "string",

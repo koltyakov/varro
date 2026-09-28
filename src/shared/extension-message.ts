@@ -312,6 +312,12 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (isBoolean(payload.showTurnTimer)) config.showTurnTimer = payload.showTurnTimer;
       if (isBoolean(payload.debugShowQuotaWarning))
         config.debugShowQuotaWarning = payload.debugShowQuotaWarning;
+      if (
+        isNumber(payload.debugResetWarningDays) &&
+        Number.isFinite(payload.debugResetWarningDays) &&
+        payload.debugResetWarningDays >= 5
+      )
+        config.debugResetWarningDays = payload.debugResetWarningDays;
       if (isBoolean(payload.enableProblemsContext))
         config.enableProblemsContext = payload.enableProblemsContext;
       return { type, payload: config };

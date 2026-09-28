@@ -43,6 +43,7 @@ describe('readExtensionConfigState', () => {
       expandThinking: false,
       showTurnTimer: true,
       debugShowQuotaWarning: false,
+      debugResetWarningDays: 5,
       enableProblemsContext: true,
       chatFontSize: 13,
       chatEditorFontSize: 12,
@@ -65,6 +66,16 @@ describe('readExtensionConfigState', () => {
   it('reads the quota-warning debug setting', () => {
     mocks.values.set('varro.debug.showQuotaWarning', true);
     expect(readExtensionConfigState().debugShowQuotaWarning).toBe(true);
+  });
+
+  it.each([14, 30, 5.5])('reads a custom reset warning window of %s days', (days) => {
+    mocks.values.set('varro.debug.resetWarningDays', days);
+    expect(readExtensionConfigState().debugResetWarningDays).toBe(days);
+  });
+
+  it.each([0, 4, -1, NaN, Infinity, '14'])('defaults invalid reset warning days %s', (days) => {
+    mocks.values.set('varro.debug.resetWarningDays', days);
+    expect(readExtensionConfigState().debugResetWarningDays).toBe(5);
   });
 
   it('reads the Problems context opt-out', () => {

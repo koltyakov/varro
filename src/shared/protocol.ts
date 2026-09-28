@@ -865,6 +865,7 @@ export type InitialWebviewState = {
   showChangedFiles?: boolean;
   showTurnTimer?: boolean;
   debugShowQuotaWarning?: boolean;
+  debugResetWarningDays?: number;
   enableProblemsContext?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;

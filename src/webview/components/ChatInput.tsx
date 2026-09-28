@@ -5634,6 +5634,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         <ProviderQuotaWarning
           limit={currentProviderLimit()}
           forceShow={state.debugShowQuotaWarning}
+          resetWarningDays={state.debugResetWarningDays}
           modelID={currentModel().modelID}
           modelName={currentModel().modelName}
           providerName={currentModel().providerName}

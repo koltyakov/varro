@@ -1,6 +1,7 @@
 import type { DesktopSessionPaneSide, PermissionMode } from './protocol';
 
 export const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS = 120;
+export const DEFAULT_RESET_WARNING_DAYS = 5;
 
 export type ExtensionConfigState = {
   showFileDiffs?: boolean;
@@ -8,6 +9,7 @@ export type ExtensionConfigState = {
   showChangedFiles?: boolean;
   showTurnTimer?: boolean;
   debugShowQuotaWarning?: boolean;
+  debugResetWarningDays?: number;
   enableProblemsContext?: boolean;
   desktopSessionPaneSide: DesktopSessionPaneSide;
   defaultPermissionMode: PermissionMode;
@@ -23,6 +25,7 @@ export type WebviewConfigUpdatePayload = Pick<
   | 'showChangedFiles'
   | 'showTurnTimer'
   | 'debugShowQuotaWarning'
+  | 'debugResetWarningDays'
   | 'enableProblemsContext'
   | 'desktopSessionPaneSide'
   | 'defaultPermissionMode'

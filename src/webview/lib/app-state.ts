@@ -123,6 +123,7 @@ export interface AppState {
   issuesEnabled: boolean;
   enableProblemsContext: boolean;
   debugShowQuotaWarning: boolean;
+  debugResetWarningDays?: number;
   draftCurrentDocumentEnabled: boolean | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
@@ -377,6 +378,7 @@ export function createAppState(): AppStateInstance {
         : [],
     enableProblemsContext: initialWebviewState.enableProblemsContext ?? true,
     debugShowQuotaWarning: initialWebviewState.debugShowQuotaWarning ?? false,
+    debugResetWarningDays: initialWebviewState.debugResetWarningDays,
     emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
     currentDocumentEnabled: currentDocumentWorkspace
       ? (projectCurrentDocumentEnabled[currentDocumentWorkspace] ?? true)

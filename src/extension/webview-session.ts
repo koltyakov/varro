@@ -513,6 +513,7 @@ export class WebviewSession {
       showChangedFiles: config.showChangedFiles,
       showTurnTimer: config.showTurnTimer,
       debugShowQuotaWarning: config.debugShowQuotaWarning,
+      debugResetWarningDays: config.debugResetWarningDays,
       enableProblemsContext: config.enableProblemsContext,
       desktopSessionPaneSide: config.desktopSessionPaneSide,
       defaultPermissionMode: config.defaultPermissionMode,

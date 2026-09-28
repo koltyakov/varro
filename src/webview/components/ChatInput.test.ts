@@ -1503,6 +1503,7 @@ describe('ChatInput', () => {
         status: 'available',
         source: 'provider',
         checkedAt: Date.now(),
+        usageLimitResets: { availableCount: 1, credits: null },
         windows: [
           {
             id: 'five_hour',

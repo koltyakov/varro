@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
 import { STORAGE_KEYS, writeStored } from '../../lib/state-storage';
 import { ProviderQuotaWarning } from './ProviderQuotaWarning';
-import { getLowQuotaWindows, quotaWarningDismissals } from './provider-quota-warning';
+import {
+  getLowQuotaWindows,
+  quotaWarningDismissals,
+  resetWarningDismissals,
+} from './provider-quota-warning';
 
 const NOW = Date.parse('2026-09-27T12:00:00Z');
 const HOUR = 60 * 60_000;
@@ -33,6 +37,8 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   writeStored(STORAGE_KEYS.quotaWarningDismissals, null);
   quotaWarningDismissals.reload();
+  writeStored(STORAGE_KEYS.resetWarningDismissals, null);
+  resetWarningDismissals.reload();
   container = document.createElement('div');
   document.body.append(container);
   sendToExtension.mockClear();
@@ -45,6 +51,7 @@ afterEach(() => {
   container.remove();
   writeStored(STORAGE_KEYS.quotaWarningDismissals, null);
   vi.useRealTimers();
+  writeStored(STORAGE_KEYS.resetWarningDismissals, null);
   Reflect.deleteProperty(window, '__sendToExtension');
 });
 
@@ -52,6 +59,7 @@ function mount(initial: ProviderLimitStatus, modelID = 'gpt-6') {
   const [limit, setLimit] = createSignal<ProviderLimitStatus | null>(initial);
   const [model, setModel] = createSignal(modelID);
   const [forceShow, setForceShow] = createSignal(false);
+  const [resetWarningDays, setResetWarningDays] = createSignal<number>();
   const onRefresh = vi.fn();
   const mountBanner = () => {
     dispose = render(
@@ -62,6 +70,7 @@ function mount(initial: ProviderLimitStatus, modelID = 'gpt-6') {
           modelName={model()}
           providerName={limit()?.providerID ?? ''}
           forceShow={forceShow()}
+          resetWarningDays={resetWarningDays()}
           onRefresh={onRefresh}
         />
       ),
@@ -73,6 +82,7 @@ function mount(initial: ProviderLimitStatus, modelID = 'gpt-6') {
     setLimit,
     setModel,
     setForceShow,
+    setResetWarningDays,
     onRefresh,
     remount: () => {
       dispose?.();
@@ -90,6 +100,113 @@ function dismiss() {
 }
 
 describe('ProviderQuotaWarning', () => {
+  function withResets(expirations: (number | null)[], providerID = 'openai') {
+    return {
+      ...snapshot([quota('weekly', 80)], providerID),
+      usageLimitResets: {
+        availableCount: expirations.length,
+        credits: expirations.map((expiresAt) => ({ title: 'Full reset', expiresAt })),
+      },
+    };
+  }
+
+  it('warns within five days, shows only the nearest expiration and removes expired resets', () => {
+    const expiresAt = NOW + 5 * 24 * HOUR;
+    const { setLimit } = mount(withResets([expiresAt + 1_000, null, NOW]));
+    expect(banner()).toBeNull();
+    vi.advanceTimersByTime(1_000);
+    expect(banner()?.textContent).toContain('Reset expires in 5d');
+    setLimit(withResets([expiresAt, expiresAt - HOUR, expiresAt, null, NOW]));
+    expect(container.querySelectorAll('.chat-quota-warning-row')).toHaveLength(1);
+    expect(banner()?.textContent).toContain('Reset expires in 4d 23h');
+    vi.setSystemTime(expiresAt);
+    vi.advanceTimersByTime(1_000);
+    expect(banner()).toBeNull();
+  });
+
+  it('updates the reset expiration window from the debug setting', () => {
+    const { setResetWarningDays } = mount(withResets([NOW + 10 * 24 * HOUR]));
+    expect(banner()).toBeNull();
+    setResetWarningDays(14);
+    expect(banner()?.textContent).toContain('Reset expires in 10d');
+    setResetWarningDays(5);
+    expect(banner()).toBeNull();
+  });
+
+  it('turns reset warnings red at 24 hours and removes them at expiration', () => {
+    const expiresAt = NOW + 24 * HOUR + 1_000;
+    mount(withResets([expiresAt]));
+    expect(banner()?.classList.contains('error')).toBe(false);
+    vi.advanceTimersByTime(1_000);
+    expect(banner()?.classList.contains('error')).toBe(true);
+    vi.setSystemTime(expiresAt - 2_000);
+    vi.advanceTimersByTime(1_000);
+    expect(banner()?.classList.contains('error')).toBe(true);
+    vi.advanceTimersByTime(1_000);
+    expect(banner()).toBeNull();
+  });
+
+  it('persists reset closes per provider and expiration across polling and remounts', () => {
+    const expiresAt = NOW + 4 * 24 * HOUR;
+    const { setLimit, setModel, remount } = mount(withResets([expiresAt]));
+    dismiss();
+    resetWarningDismissals.reload();
+    setLimit(withResets([expiresAt]));
+    setModel('gpt-6-sol');
+    remount();
+    expect(banner()).toBeNull();
+    setLimit(withResets([expiresAt], 'anthropic'));
+    expect(banner()).not.toBeNull();
+    setLimit(withResets([expiresAt, expiresAt + HOUR]));
+    expect(container.querySelectorAll('.chat-quota-warning-row')).toHaveLength(1);
+    expect(banner()?.textContent).toContain('Reset expires in 4d 1h');
+    setLimit({ ...withResets([expiresAt]), windows: [quota('weekly', 8)] });
+    expect(banner()?.textContent).toContain('weekly: 8% left');
+    expect(banner()?.textContent).not.toContain('Reset expires');
+  });
+
+  it('rotates quota and reset warnings in one panel and dismisses both', () => {
+    const { setLimit, remount } = mount({
+      ...withResets([NOW + 4 * 24 * HOUR]),
+      windows: [quota('weekly', 0)],
+    });
+    expect(container.querySelectorAll('.chat-quota-warning')).toHaveLength(1);
+    expect(banner()?.textContent).toContain('weekly: 0% left');
+    expect(banner()?.textContent).not.toContain('Reset expires');
+    vi.advanceTimersByTime(5_000);
+    expect(banner()?.textContent).toContain('weekly: 0% left');
+    vi.advanceTimersByTime(10_000);
+    expect(banner()?.textContent).toContain('Reset expires in');
+    expect(banner()?.textContent).not.toContain('weekly:');
+    expect(banner()?.classList.contains('error')).toBe(false);
+    vi.advanceTimersByTime(15_000);
+    expect(banner()?.textContent).toContain('weekly: 0% left');
+    expect(banner()?.classList.contains('error')).toBe(true);
+    dismiss();
+    remount();
+    expect(banner()).toBeNull();
+    setLimit(withResets([NOW + HOUR]));
+    expect(banner()?.textContent).toContain('Reset expires in');
+  });
+
+  it('syncs reset dismissals through storage and keeps debug closes temporary', () => {
+    const expiresAt = NOW + HOUR;
+    const { setForceShow } = mount(withResets([expiresAt]));
+    setForceShow(true);
+    dismiss();
+    expect(resetWarningDismissals.read()).toEqual([]);
+    setForceShow(false);
+    expect(banner()).not.toBeNull();
+    resetWarningDismissals.dismiss('openai', [expiresAt], NOW);
+    expect(banner()).toBeNull();
+    writeStored(STORAGE_KEYS.resetWarningDismissals, [
+      null,
+      { providerID: 'openai', expiresAt: 'bad' },
+    ]);
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEYS.resetWarningDismissals }));
+    expect(banner()).not.toBeNull();
+  });
+
   it('previews healthy quotas and saved dismissals without persisting debug closes', () => {
     const windows = [quota('weekly', 80), quota('five_hour', 100)];
     quotaWarningDismissals.dismiss('openai', windows, NOW);

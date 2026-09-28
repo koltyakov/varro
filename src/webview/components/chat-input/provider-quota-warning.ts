@@ -8,6 +8,44 @@ import { filterCompactProviderLimitForModel } from './toolbar-compact';
 const LOW_REMAINING_PERCENT = 25;
 const UNKNOWN_RESET_DISMISSAL_MS = 60 * 60_000;
 
+type ResetWarningDismissal = { providerID: string; expiresAt: number };
+
+const [resetDismissalVersion, setResetDismissalVersion] = createSignal(0);
+
+export const resetWarningDismissals = {
+  read(): ResetWarningDismissal[] {
+    resetDismissalVersion();
+    const stored = readStored<unknown>(STORAGE_KEYS.resetWarningDismissals);
+    if (!Array.isArray(stored)) return [];
+    return stored.flatMap((value) => {
+      const entry = asRecord(value);
+      return entry &&
+        isString(entry.providerID) &&
+        isNumber(entry.expiresAt) &&
+        Number.isFinite(entry.expiresAt)
+        ? [{ providerID: entry.providerID, expiresAt: entry.expiresAt }]
+        : [];
+    });
+  },
+
+  reload() {
+    setResetDismissalVersion((version) => version + 1);
+  },
+
+  dismiss(providerID: string, expirations: readonly number[], now: number) {
+    const entries = this.read().filter((entry) => entry.expiresAt > now);
+    for (const expiresAt of expirations) {
+      if (
+        expiresAt > now &&
+        !entries.some((entry) => entry.providerID === providerID && entry.expiresAt === expiresAt)
+      )
+        entries.push({ providerID, expiresAt });
+    }
+    writeStored(STORAGE_KEYS.resetWarningDismissals, entries);
+    this.reload();
+  },
+};
+
 type QuotaWarningDismissal = {
   providerID: string;
   windowID: string;

@@ -13,6 +13,7 @@ async function updateQuota(page: Page, windows: ProviderLimitWindow[]) {
         status: 'available',
         source: 'provider',
         checkedAt: Date.now(),
+        usageLimitResets: { availableCount: 3, credits: null },
         windows,
       },
     },
@@ -80,7 +81,7 @@ for (const theme of ['dark', 'light']) {
         .locator('.interactive-input-part')
         .screenshot({ path: testInfo.outputPath('quota-warning.png') });
 
-      const usage = warning.getByRole('link', { name: 'View usage' });
+      const usage = warning.getByRole('link', { name: '3 resets available' });
       await expect(usage).toHaveAttribute('href', 'https://github.com/settings/billing');
       await page.evaluate(() => {
         // Mirror VS Code's window-level link opener, which ignores defaultPrevented.

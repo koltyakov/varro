@@ -105,6 +105,9 @@ export function createMountBridgeOperations(deps: {
           if (payload.debugShowQuotaWarning !== undefined) {
             appStore.setState('debugShowQuotaWarning', payload.debugShowQuotaWarning);
           }
+          if (payload.debugResetWarningDays !== undefined) {
+            appStore.setState('debugResetWarningDays', payload.debugResetWarningDays);
+          }
           uiStore.setDesktopSessionPaneSide(payload.desktopSessionPaneSide);
           permissionsStore.setDefaultPermissionModePreference(payload.defaultPermissionMode);
         },
