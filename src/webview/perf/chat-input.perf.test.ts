@@ -5,6 +5,9 @@ import {
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
   sumAssistantTokensFromMessageEntries,
+  accumulateSessionMessageTotals,
+  getSessionTreeTokenBreakdown,
+  getSessionTreeTokenBreakdownFromTotals,
   sumSessionTreeTokens,
 } from '../components/chat-input/message-usage';
 import type { AssistantMessage, Message, Session } from '../types';
@@ -177,6 +180,28 @@ describe('ChatInput perf helpers', () => {
         { info: assistantMessage('assistant-2', { input: 2, output: 3 }) },
       ])
     ).toMatchObject({ total: 20, input: 12, output: 8 });
+  });
+
+  it('continues session usage from a summed transcript prefix exactly', () => {
+    const entries = [0.1, 0.2, 0.3, 0.7, 0.05].map((cost, index) => ({
+      info: {
+        ...assistantMessage(`message-${index}`, { input: index + 1, output: index * 2 }),
+        sessionID: index === 2 ? 'child-1' : 'session-1',
+        cost,
+      },
+    }));
+    const sessions = [session('session-1'), session('child-1', 'session-1')];
+    const sessionIds = ['session-1', 'child-1'];
+    const whole = getSessionTreeTokenBreakdown(entries, sessions, sessionIds, 'session-1');
+    expect(whole.total.cost).toBeGreaterThan(0);
+    for (let split = 0; split <= entries.length; split += 1) {
+      const prefix = accumulateSessionMessageTotals(entries.slice(0, split), sessionIds);
+      const totals = accumulateSessionMessageTotals(entries.slice(split), sessionIds, prefix);
+      expect(
+        getSessionTreeTokenBreakdownFromTotals(totals, sessions, sessionIds, 'session-1')
+      ).toEqual(whole);
+      expect(accumulateSessionMessageTotals(entries.slice(0, split), sessionIds)).toEqual(prefix);
+    }
   });
 
   it('includes descendant session tokens without double-counting loaded child messages', () => {

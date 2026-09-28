@@ -111,7 +111,7 @@ export async function runSlashCommandWithDependencies(
     getActiveSessionId(): string | null;
     createSession(): Promise<string | null>;
     startLoading(): void;
-    runSessionCommand(sessionId: string, input: SessionCommandInput): Promise<MessageEntry>;
+    runSessionCommand(sessionId: string, input: SessionCommandInput): Promise<MessageEntry | void>;
     shouldApplyToActiveSession(sessionId: string): boolean;
     upsertMessageInfo(info: Message): void;
     upsertPart(part: Part): void;
@@ -146,11 +146,13 @@ export async function runSlashCommandWithDependencies(
       ...routing,
     });
     if (deps.shouldApplyToActiveSession(sessionId)) {
-      deps.upsertMessageInfo(result.info);
-      for (const part of result.parts) {
-        deps.upsertPart(part);
+      if (result) {
+        deps.upsertMessageInfo(result.info);
+        for (const part of result.parts) {
+          deps.upsertPart(part);
+        }
+        deps.syncTodosFromMessages();
       }
-      deps.syncTodosFromMessages();
       deps.requestMessageListScrollToBottom();
     }
     await Promise.all([deps.syncSession(sessionId), deps.recheckSessionStatus(sessionId)]).catch(
@@ -183,7 +185,7 @@ type SessionActionDependencies = {
   hasCommand(name: string): boolean;
   getCommandRouting(): CommandRouting;
   startLoading(): void;
-  runSessionCommand(sessionId: string, input: SessionCommandInput): Promise<MessageEntry>;
+  runSessionCommand(sessionId: string, input: SessionCommandInput): Promise<MessageEntry | void>;
   shouldApplyToActiveSession(sessionId: string): boolean;
   upsertMessageInfo(info: Message): void;
   upsertPart(part: Part): void;

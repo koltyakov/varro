@@ -1,5 +1,16 @@
 /* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- These tests verify the VS Code search boundary with partial workspace and cancellation fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'child_process';
+import type * as ChildProcess from 'child_process';
+import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
+const gitMock = vi.hoisted(() => ({ execFile: vi.fn() }));
+vi.mock('child_process', async (importOriginal) => ({
+  ...(await importOriginal<typeof ChildProcess>()),
+  execFile: gitMock.execFile,
+}));
 
 const loggerMock = vi.hoisted(() => ({
   warn: vi.fn(),
@@ -76,6 +87,16 @@ describe('FileSearchService', () => {
     vi.resetModules();
     vi.clearAllMocks();
     vi.useRealTimers();
+    gitMock.execFile
+      .mockReset()
+      .mockImplementation(
+        (
+          _command: string,
+          _args: string[],
+          _options: unknown,
+          callback: (error: { code: string }, stdout: string, stderr: string) => void
+        ) => callback({ code: 'ENOENT' }, '', '')
+      );
     const workspaceFolder = vscodeMock.workspaceFolder;
     vscodeMock.workspace.createFileSystemWatcher.mockImplementation(() => {
       let createListener: ((uri: { fsPath: string }) => void) | undefined;
@@ -129,6 +150,59 @@ describe('FileSearchService', () => {
       false
     );
     service.dispose();
+  });
+
+  it('searches tracked and new project files without ignored artifacts, including nested Git rules', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'varro-file-search-'));
+    const { execFile } = await vi.importActual<typeof ChildProcess>('child_process');
+    gitMock.execFile.mockImplementation(execFile);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    try {
+      execFileSync('git', ['init', '--quiet', root]);
+      await mkdir(join(root, 'artifacts'));
+      await mkdir(join(root, 'src'));
+      await writeFile(join(root, '.gitignore'), 'artifacts/\n*.log\n');
+      await writeFile(join(root, 'src/.gitignore'), '*.md\n!README-new.md\n');
+      const paths = [
+        'README.md',
+        'src/README-new.md',
+        'src/README-hidden.md',
+        'artifacts/README.md',
+        'README.log',
+      ];
+      await Promise.all(paths.map((path) => writeFile(join(root, path), 'test')));
+      execFileSync('git', ['-C', root, 'add', 'README.md']);
+      // A tracked file remains searchable even when an ignore rule matches it.
+      await writeFile(join(root, '.gitignore'), 'artifacts/\n*.log\nREADME.md\n');
+      const folder = { name: 'project', uri: { fsPath: root } };
+      vscodeMock.workspace.workspaceFolders = [folder];
+      vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(folder);
+      vscodeMock.workspace.asRelativePath.mockImplementation((uri: { fsPath: string }) =>
+        uri.fsPath.slice(root.length + 1)
+      );
+      vscodeMock.workspace.findFiles.mockResolvedValue(
+        paths.map((path) => ({ fsPath: join(root, path) }))
+      );
+      const onResult = vi.fn();
+      search(service, 1, 'README', 12, onResult, root);
+      await vi.waitFor(() => expect(onResult).toHaveBeenCalledOnce());
+      expect(onResult).toHaveBeenCalledWith({
+        requestId: 1,
+        query: 'README',
+        files: [
+          { path: join(root, 'README.md'), relativePath: 'README.md', type: 'file' },
+          {
+            path: join(root, 'src/README-new.md'),
+            relativePath: 'src/README-new.md',
+            type: 'file',
+          },
+        ],
+      });
+    } finally {
+      service.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('ignores content changes when maintaining the file-name cache', async () => {
@@ -261,6 +335,43 @@ describe('FileSearchService', () => {
         requestId: 1,
         query: 'last-file.ts',
         files: [{ path: '/repo/src/last-file.ts', relativePath: 'src/last-file.ts', type: 'file' }],
+      });
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('matches read as contiguous text instead of scattered letters in unrelated paths', async () => {
+    vscodeMock.workspace.findFiles.mockResolvedValue([
+      { fsPath: '/repo/README.md' },
+      { fsPath: '/repo/src/session-read-state.ts' },
+      { fsPath: '/repo/docs/reading/guide.md' },
+      { fsPath: '/repo/scripts/vscode-sandbox/run.ts' },
+      { fsPath: '/repo/src/shared/pasted-text.ts' },
+    ]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const onResult = vi.fn();
+    try {
+      search(service, 1, 'ReAd', 12, onResult);
+      await vi.waitFor(() => expect(onResult).toHaveBeenCalledOnce());
+      expect(onResult).toHaveBeenCalledWith({
+        requestId: 1,
+        query: 'ReAd',
+        files: [
+          { path: '/repo/docs/reading', relativePath: 'docs/reading', type: 'directory' },
+          { path: '/repo/README.md', relativePath: 'README.md', type: 'file' },
+          {
+            path: '/repo/src/session-read-state.ts',
+            relativePath: 'src/session-read-state.ts',
+            type: 'file',
+          },
+          {
+            path: '/repo/docs/reading/guide.md',
+            relativePath: 'docs/reading/guide.md',
+            type: 'file',
+          },
+        ],
       });
     } finally {
       service.dispose();

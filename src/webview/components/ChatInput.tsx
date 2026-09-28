@@ -129,6 +129,7 @@ import {
   loadingStartedAt,
   showTurnTimer,
   getReviewerModelNames,
+  getMessageLookup,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { readWebviewInstanceContext } from '../lib/state-stored-values';
@@ -243,10 +244,15 @@ import {
 } from './chat-input/QueuedMessages';
 import { parseUserMessageContent } from './message/UserMessageContent';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
+import { ProviderQuotaWarning } from './chat-input/ProviderQuotaWarning';
 import {
+  combineContextCharacters,
+  countContextCharacters,
   estimateContextBreakdown,
   estimateNestedContextBreakdown,
+  type ContextMessageEntry,
 } from '../../shared/context-breakdown';
+import { createSettledHistoryRanges, sameEntries } from './message-list/history-segments';
 import {
   MAX_DROPPED_CONTENT_FILES,
   MAX_DROPPED_CONTENT_FILE_BYTES,
@@ -262,10 +268,10 @@ import {
 import {
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
-  groupMessageEntriesBySession,
-  getMessageEntriesForSession,
   getSessionCost,
+  accumulateSessionMessageTotals,
   getSessionTreeTokenBreakdown,
+  getSessionTreeTokenBreakdownFromTotals,
   getUserMessageHistoryText,
   mergeCompleteTokenBreakdown,
 } from './chat-input/message-usage';
@@ -846,7 +852,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     () =>
       !!props.newSession ||
       (!state.messagesLoading &&
-        getMessageEntriesForSession(state.messages, composerSessionId()).length === 0)
+        !getMessageLookup().bySessionId.get(composerSessionId() ?? '')?.length)
   );
   const selectedWorkspacePath = createMemo(() => {
     const session = state.sessions.find((item) => item.id === state.activeSessionId);
@@ -3714,7 +3720,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (!sessionId) return [];
     const entries = [
       ...getSessionHistoryPrompts(sessionId),
-      ...state.messages.filter((entry) => entry.info.sessionID === sessionId),
+      ...(getMessageLookup().bySessionId.get(sessionId) ?? []),
     ];
     const seen = new Set<string>();
     return entries
@@ -4933,7 +4939,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const clipboardImagesNeedVision = () =>
     composerClipboardImages().length > 0 && !currentPromptCanHandleImages();
-  const messagesBySession = createMemo(() => groupMessageEntriesBySession(state.messages));
+  const messagesBySession = createMemo(() => getMessageLookup().bySessionId);
   const sessionsById = createMemo(
     () => new Map(state.sessions.map((session) => [session.id, session]))
   );
@@ -4981,11 +4987,31 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return { used: 0, limit, percent: 0 };
   });
 
+  // Settled history character counts are reused while the trailing turn streams.
+  const contextHistory = createSettledHistoryRanges(currentSessionMessageEntries);
+  const contextFrozenCharacters = createMemo(() => countContextCharacters(contextHistory.frozen()));
+  const contextHistoryCharacters = createMemo(() =>
+    combineContextCharacters(
+      contextFrozenCharacters(),
+      countContextCharacters(contextHistory.recent())
+    )
+  );
+  const countSessionContextCharacters = (messages: readonly ContextMessageEntry[]) =>
+    messages === currentSessionMessageEntries()
+      ? combineContextCharacters(
+          contextHistoryCharacters(),
+          countContextCharacters(messages.slice(contextHistory.historyEnd()))
+        )
+      : countContextCharacters(messages);
   const contextBreakdown = createMemo(() => {
     const inputTokens = getLatestAssistantMessageInfoWithTokens(currentSessionMessageEntries(), {
       includeSubagents: true,
     })?.tokens.input;
-    return estimateContextBreakdown(currentSessionMessageEntries(), inputTokens ?? 0);
+    return estimateContextBreakdown(
+      currentSessionMessageEntries(),
+      inputTokens ?? 0,
+      countSessionContextCharacters
+    );
   });
   const nestedContextBreakdown = createMemo(() => {
     const sessionId = composerSessionId();
@@ -4997,20 +5023,49 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return complete.nestedBreakdown;
     }
     return estimateNestedContextBreakdown(
-      [...sessionIds].map((id) => messagesBySession().get(id) || [])
+      [...sessionIds].map((id) => messagesBySession().get(id) || []),
+      countSessionContextCharacters
     );
   });
 
-  const localSessionTokenBreakdown = createMemo(() => {
+  // Settled transcript usage is summed once; streaming updates continue from its totals.
+  const tokenTreeRootId = createMemo(() => {
     const sessionId = composerSessionId();
-    if (!sessionId) {
+    return sessionId ? getSessionTreeRootId(sessionId) || sessionId : null;
+  });
+  const tokenTreeSessionIds = createMemo(
+    () => {
+      const rootId = tokenTreeRootId();
+      return rootId ? getSessionTreeIds(rootId) : [];
+    },
+    [],
+    { equals: sameEntries }
+  );
+  const tokenHistory = createSettledHistoryRanges(() => state.messages);
+  const tokenFrozenTotals = createMemo(() =>
+    accumulateSessionMessageTotals(tokenHistory.frozen(), tokenTreeSessionIds())
+  );
+  const tokenHistoryTotals = createMemo(() =>
+    accumulateSessionMessageTotals(
+      tokenHistory.recent(),
+      tokenTreeSessionIds(),
+      tokenFrozenTotals()
+    )
+  );
+  const localSessionTokenBreakdown = createMemo(() => {
+    const rootId = tokenTreeRootId();
+    if (!rootId) {
       return getSessionTreeTokenBreakdown([], [], [], '');
     }
-    const rootId = getSessionTreeRootId(sessionId) || sessionId;
-    return getSessionTreeTokenBreakdown(
-      state.messages,
+    const sessionIds = tokenTreeSessionIds();
+    return getSessionTreeTokenBreakdownFromTotals(
+      accumulateSessionMessageTotals(
+        state.messages.slice(tokenHistory.historyEnd()),
+        sessionIds,
+        tokenHistoryTotals()
+      ),
       state.sessions,
-      getSessionTreeIds(rootId),
+      sessionIds,
       rootId
     );
   });
@@ -5229,7 +5284,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (!sessionId) return undefined;
     const sessionIds = getSessionTreeIdsForSession(sessionId);
     const rootSessionId = getSessionTreeRootId(sessionId) || sessionId;
-    const latestPromptCreatedAt = state.messages.reduce(
+    const latestPromptCreatedAt = (getMessageLookup().bySessionId.get(rootSessionId) ?? []).reduce(
       (latest, entry) =>
         entry.info.role === 'user' && entry.info.sessionID === rootSessionId
           ? Math.max(latest, entry.info.time.created)
@@ -5388,18 +5443,22 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
 
   const pendingSteersForSession = createMemo(() => {
-    const deliveredIds = new Set(
-      state.messages
-        .filter((entry) => entry.info.role === 'user' && !entry.info.pendingDelivery)
-        .map((entry) => entry.info.id)
-    );
-    const queued = queuedForSession().filter(
-      (item) => steeringQueuedMessageIds().has(item.id) && !deliveredIds.has(item.messageId ?? '')
-    );
+    const steering = queuedForSession().filter((item) => steeringQueuedMessageIds().has(item.id));
+    // Delivery is only checked while steering messages are queued.
+    const deliveredIds =
+      steering.length === 0
+        ? new Set<string>()
+        : new Set(
+            state.messages
+              .filter((entry) => entry.info.role === 'user' && !entry.info.pendingDelivery)
+              .map((entry) => entry.info.id)
+          );
+    const queued = steering.filter((item) => !deliveredIds.has(item.messageId ?? ''));
     const queuedMessageIds = new Set(queued.map((item) => item.messageId));
+    const sessionId = composerSessionId();
     return [
       ...queued,
-      ...state.messages
+      ...((sessionId && getMessageLookup().bySessionId.get(sessionId)) || [])
         .filter(
           (entry) =>
             entry.info.sessionID === composerSessionId() &&
@@ -5567,6 +5626,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           onSwitchProvider={() => {
             closePopups();
             setShowModelPicker(true);
+          }}
+        />
+      </Show>
+
+      <Show when={!hasExpandedDiffOverlay() && !visibleUsageLimit() && !composerEditingMessage()}>
+        <ProviderQuotaWarning
+          limit={currentProviderLimit()}
+          forceShow={state.debugShowQuotaWarning}
+          modelID={currentModel().modelID}
+          modelName={currentModel().modelName}
+          providerName={currentModel().providerName}
+          onRefresh={() => {
+            const model = currentModel();
+            if (model.providerID) void refreshProviderLimit(model.providerID, model.modelID);
           }}
         />
       </Show>

@@ -520,6 +520,9 @@ Direct input acquires ownership only when it can affect the transcript:
   Each frame starts at the current position, including newer downward user movement. Direct input,
   editing, disclosure ownership, and activity exit still take precedence. Content arriving after
   canonical completion must release the old activity-summary anchor just like a live delta.
+- An explicit return to latest more than four viewport heights away positions immediately rather than
+  traversing every intermediate row at streaming speed. Nearby returns and subsequent growth retain
+  normal easing. A newer direct gesture still cancels the queued return.
 - `MessageList.presentation.test.ts` and `streaming-presentation.test.ts` cover canonical/display
   separation, grouped fast previews, completion, interruption, hydration, and cancellation.
   `e2e/tests/scroll-streaming-presentation.spec.ts` records every-frame preview, text, anchor, and scroll

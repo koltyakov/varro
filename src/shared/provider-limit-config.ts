@@ -7,6 +7,7 @@ export type ExtensionConfigState = {
   expandThinking?: boolean;
   showChangedFiles?: boolean;
   showTurnTimer?: boolean;
+  debugShowQuotaWarning?: boolean;
   enableProblemsContext?: boolean;
   desktopSessionPaneSide: DesktopSessionPaneSide;
   defaultPermissionMode: PermissionMode;
@@ -21,6 +22,7 @@ export type WebviewConfigUpdatePayload = Pick<
   | 'expandThinking'
   | 'showChangedFiles'
   | 'showTurnTimer'
+  | 'debugShowQuotaWarning'
   | 'enableProblemsContext'
   | 'desktopSessionPaneSide'
   | 'defaultPermissionMode'

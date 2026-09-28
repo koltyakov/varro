@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.30.6",
+  "version": "0.30.7",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -508,6 +508,12 @@
           "type": "boolean",
           "default": false,
           "description": "Debug only: make Varro behave as if no providers are configured"
+        },
+        "varro.debug.showQuotaWarning": {
+          "deprecationMessage": "Debug only setting. Not intended for regular use.",
+          "type": "boolean",
+          "default": false,
+          "description": "Debug only: show the quota warning for available provider quotas regardless of remaining allowance or saved dismissals. Closing this preview does not save a dismissal."
         },
         "varro.debug.simulateUpgradeFailure": {
           "deprecationMessage": "Debug only setting. Not intended for regular use.",

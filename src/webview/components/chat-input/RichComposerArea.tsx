@@ -425,6 +425,45 @@ export function RichComposerArea(props: {
     return true;
   }
 
+  function moveToLineStart(event: KeyboardEvent): boolean {
+    const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
+    const isLineStart = isMacOS
+      ? event.key === 'ArrowLeft' && event.metaKey
+      : event.key === 'Home' && !event.metaKey;
+    if (
+      !isLineStart ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.isComposing ||
+      !editorEl?.querySelector('.composer-external-link') ||
+      !getSelectionRange()
+    ) {
+      return false;
+    }
+
+    const selection = window.getSelection();
+    if (!selection?.modify) return false;
+    event.preventDefault();
+    // Let the browser find the visual line boundary, including soft wraps.
+    selection.modify(event.shiftKey ? 'extend' : 'move', 'backward', 'lineboundary');
+    if (!selection.focusNode || !editorEl.contains(selection.focusNode)) return true;
+
+    for (const reference of editorEl.querySelectorAll('.composer-external-link')) {
+      const text = reference.querySelector('.link-leading-label')?.firstChild;
+      if (!text) continue;
+      const iconRange = document.createRange();
+      iconRange.setStartBefore(reference);
+      iconRange.setEnd(text, 0);
+      if (iconRange.comparePoint(selection.focusNode, selection.focusOffset) !== 0) continue;
+
+      // The icon is decoration, not a caret stop. Keep the selection anchor for Shift.
+      if (event.shiftKey) selection.extend(text, 0);
+      else selection.collapse(text, 0);
+      break;
+    }
+    return true;
+  }
+
   function moveAcrossAtomicReference(event: KeyboardEvent): boolean {
     if (
       (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') ||
@@ -1073,7 +1112,7 @@ export function RichComposerArea(props: {
           }
         }}
         onKeyDown={(e) => {
-          if (moveAcrossAtomicReference(e)) return;
+          if (moveToLineStart(e) || moveAcrossAtomicReference(e)) return;
           const removedTrailingLineBreak =
             e.key === 'Backspace' &&
             !e.altKey &&

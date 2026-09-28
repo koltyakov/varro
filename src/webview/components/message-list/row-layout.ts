@@ -190,28 +190,37 @@ export function getBorderedAdjacencyLayoutSignatures(
   boundaries: ReadonlyMap<string, MessageBlockBoundary>,
   renderEmptyMessageIds: ReadonlySet<string>
 ) {
+  return getBorderedAdjacencyLayoutSegment(messages, boundaries, renderEmptyMessageIds).signatures;
+}
+
+export type BorderedAdjacencyAnchor = { messageId: string; boundary: MessageBlockBoundary };
+
+/** Continues adjacency from the last visible message of an earlier transcript segment. */
+export function getBorderedAdjacencyLayoutSegment(
+  messages: readonly { info: { id: string } }[],
+  boundaries: ReadonlyMap<string, MessageBlockBoundary>,
+  renderEmptyMessageIds: ReadonlySet<string>,
+  previous: BorderedAdjacencyAnchor | null = null
+) {
   const signatures = new Map<string, string>();
-  let previousVisibleMessageId: string | null = null;
+  let previousVisible = previous;
 
   for (const message of messages) {
     const messageId = message.info.id;
     const boundary = boundaries.get(messageId);
     if (!boundary) continue;
-    const previousBoundary = previousVisibleMessageId
-      ? boundaries.get(previousVisibleMessageId)
-      : undefined;
     const followsBordered =
-      !!previousBoundary?.endsBordered &&
+      !!previousVisible?.boundary.endsBordered &&
       boundary.startsBordered &&
       !renderEmptyMessageIds.has(messageId);
     signatures.set(
       messageId,
-      `${boundary.signature}\u0000${previousVisibleMessageId ?? ''}\u0000${followsBordered ? 'tight' : 'normal'}`
+      `${boundary.signature}\u0000${previousVisible?.messageId ?? ''}\u0000${followsBordered ? 'tight' : 'normal'}`
     );
-    if (!renderEmptyMessageIds.has(messageId)) previousVisibleMessageId = messageId;
+    if (!renderEmptyMessageIds.has(messageId)) previousVisible = { messageId, boundary };
   }
 
-  return signatures;
+  return { signatures, lastVisible: previousVisible };
 }
 
 export function getAssistantFlowSpacingSize(

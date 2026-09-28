@@ -398,7 +398,7 @@ export const client = {
         model?: string;
       },
       options?: { directory?: string }
-    ): Promise<MessageEntry> {
+    ): Promise<MessageEntry | void> {
       return apiCall(
         'POST',
         withDirectory(`/session/${encodeURIComponent(id)}/command`, options?.directory),

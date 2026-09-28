@@ -1,4 +1,15 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import {
+  $PROXY,
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createRoot,
+  createSignal,
+  onCleanup,
+  type Accessor,
+} from 'solid-js';
+import { $RAW } from 'solid-js/store';
 import {
   formatExtensionContext,
   readExtensionContextBlock,
@@ -282,7 +293,26 @@ export function getUserMessageMarkupSuffix(text: string): UserMessageMarkupSuffi
   return null;
 }
 
+const parsedUserMessageContentCache = new WeakMap<object, Accessor<ParsedUserMessageContent>>();
+
+/**
+ * Many whole-history passes parse the same prompts after every transcript update. Store-backed
+ * parts share one tracked parse that reruns only when a field it reads changes. Plain arrays and
+ * store-update drafts, which are not tracked, are parsed directly. Treat the result as read-only.
+ */
 export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent {
+  // SAFETY: Store proxies expose their raw target through `$RAW`; other arrays return undefined.
+  const raw = (parts as Part[] & { [$RAW]?: Part[] & { [$PROXY]?: unknown } })[$RAW];
+  if (!raw || raw[$PROXY] !== parts) return parseUserMessageParts(parts);
+  let parsed = parsedUserMessageContentCache.get(raw);
+  if (!parsed) {
+    parsed = createRoot(() => createMemo(() => parseUserMessageParts(parts)));
+    parsedUserMessageContentCache.set(raw, parsed);
+  }
+  return parsed();
+}
+
+function parseUserMessageParts(parts: Part[]): ParsedUserMessageContent {
   const messageTexts: string[] = [];
   const automaticActions = new Set<string>();
   const automaticParts: ToolPart[] = [];

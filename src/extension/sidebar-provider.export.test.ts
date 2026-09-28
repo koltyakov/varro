@@ -11,11 +11,16 @@ import {
 const vscodeMock = getVscodeMock();
 const spawnMock = getSpawnMock();
 
-function createExportServer() {
+function createExportServer(apiVersion: 1 | 2 = 1) {
   return createServer({
+    apiVersion,
+    url: 'http://127.0.0.1:54321',
     request: vi.fn(async (method: string, path: string) => {
       if (method === 'GET' && path === '/session/session-1') {
         return { id: 'session-1', directory: '/repo' };
+      }
+      if (method === 'GET' && path === '/api/experimental/session/session-1/export') {
+        return { data: { info: { id: 'session-1', directory: '/repo' }, messages: [] } };
       }
       throw new Error(`Unexpected request: ${method} ${path}`);
     }),
@@ -43,11 +48,11 @@ function mockExportProcess() {
 }
 
 describe('SidebarProvider export flows', () => {
-  it('exports a session through the OpenCode CLI and opens the result', async () => {
+  it.each([1, 2] as const)('exports a V%i session and opens the result', async (apiVersion) => {
     const { stdout, closeHandlers } = mockExportProcess();
 
     const { provider } = await createSidebarProviderInstance({
-      server: createExportServer(),
+      server: createExportServer(apiVersion),
     });
 
     const exportPromise = provider.handleMessage({
@@ -55,18 +60,38 @@ describe('SidebarProvider export flows', () => {
       payload: { sessionId: 'session-1' },
     });
 
-    await vi.waitFor(() => {
-      expect(spawnMock).toHaveBeenCalledTimes(1);
-      expect(closeHandlers).toHaveLength(1);
-    });
-    stdout.write('{"id":"session-1"}');
-    closeHandlers[0]?.(0, null);
+    if (apiVersion === 1) {
+      await vi.waitFor(() => {
+        expect(spawnMock).toHaveBeenCalledTimes(1);
+        expect(closeHandlers).toHaveLength(1);
+      });
+      stdout.write('{"id":"session-1"}');
+      closeHandlers[0]?.(0, null);
+    }
     await exportPromise;
 
-    expect(spawnMock).toHaveBeenCalled();
+    if (apiVersion === 1) {
+      expect(spawnMock).toHaveBeenCalledWith(
+        'opencode',
+        ['export', 'session-1'],
+        expect.objectContaining({ cwd: '/repo' })
+      );
+    } else {
+      expect(spawnMock).not.toHaveBeenCalled();
+    }
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith({
       language: 'json',
-      content: '{"id":"session-1"}',
+      content:
+        apiVersion === 1
+          ? '{"id":"session-1"}'
+          : JSON.stringify(
+              {
+                info: { id: 'session-1', directory: '/repo' },
+                messages: [],
+              },
+              null,
+              2
+            ),
     });
     expect(vscodeMock.window.showTextDocument).toHaveBeenCalled();
   });

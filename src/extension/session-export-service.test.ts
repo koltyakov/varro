@@ -80,6 +80,7 @@ type ErrorHandler = (error: Error) => void;
 
 function createServer() {
   return {
+    apiVersion: 1 as const,
     getWorkspaceCwd: vi.fn(() => '/repo'),
     request: vi.fn<OpenCodeServer['request']>(async () => ({
       id: 'session-1',
@@ -202,6 +203,57 @@ describe('SessionExportService', () => {
       recursive: true,
       force: true,
     });
+  });
+
+  it.each([false, true])(
+    'exports V2 through the authenticated API with attach-only=%s',
+    async (isAttachOnly) => {
+      const server = { ...createServer(), apiVersion: 2 as const, isAttachOnly };
+      const data = { info: { id: 'session-1', directory: '/repo' }, messages: [] };
+      server.request.mockResolvedValueOnce(data.info).mockResolvedValueOnce({ data });
+
+      await new SessionExportService(server, 1000).exportSession('session-1');
+
+      expect(server.request).toHaveBeenLastCalledWith(
+        'GET',
+        '/api/experimental/session/session-1/export',
+        undefined,
+        { directory: '/repo', maxResponseBytes: 64 * 1024 * 1024, signal: expect.any(AbortSignal) }
+      );
+      expect(mocks.openTextDocument).toHaveBeenCalledWith({
+        language: 'json',
+        content: JSON.stringify(data, null, 2),
+      });
+      expect(mocks.spawn).not.toHaveBeenCalled();
+      expect(mocks.mkdtemp).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([null, {}, { data: null }, { data: { info: {}, messages: 'invalid' } }])(
+    'rejects malformed V2 export data: %j',
+    async (response) => {
+      const server = { ...createServer(), apiVersion: 2 as const };
+      server.request
+        .mockResolvedValueOnce({ id: 'session-1', directory: '/repo' })
+        .mockResolvedValueOnce(response);
+      await expect(
+        new SessionExportService(server, 1000).exportSession('session-1')
+      ).rejects.toThrow('OpenCode export returned invalid session data');
+      expect(mocks.openTextDocument).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not display a V2 export after the workspace changes', async () => {
+    const server = { ...createServer(), apiVersion: 2 as const };
+    const info = { id: 'session-1', directory: '/repo' };
+    server.request.mockResolvedValueOnce(info).mockImplementationOnce(async () => {
+      server.getWorkspaceCwd.mockReturnValue('/other-repo');
+      return { data: { info, messages: [] } };
+    });
+    await expect(new SessionExportService(server, 1000).exportSession('session-1')).rejects.toThrow(
+      'Workspace changed during session export'
+    );
+    expect(mocks.openTextDocument).not.toHaveBeenCalled();
   });
 
   it('passes special-character Windows export arguments to cross-spawn without joining them', async () => {

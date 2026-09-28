@@ -9,6 +9,7 @@ import {
   getToolFileChangeSignature,
   getToolReadPath,
   isToolFileRead,
+  MessageFileChangeScan,
 } from './tool-file-change';
 import type { UnknownRecord } from '../../shared/type-utils';
 
@@ -975,6 +976,37 @@ describe('tool file change helpers', () => {
     expect(result.truncated).toBe(true);
     expect(result.changes).toHaveLength(100);
     expect(result.changes.at(-1)?.path).toBe('generated/file-99.ts');
+  });
+
+  it('resumes a prefix scan exactly like one pass without changing the prefix', () => {
+    const workspace = '/repo';
+    const messages = [
+      { parts: [toolPart('edit', completedState({ path: '/repo/src/app.ts', additions: 4 }))] },
+      { parts: [toolPart('create', completedState({ path: 'src' }))] },
+      // SAFETY: The fixture provides the Part fields read by this statement.
+      { parts: [{ type: 'patch', files: ['src/app.ts', 'src/new.ts'] } as Part] },
+      { parts: [toolPart('edit', completedState({ path: 'src/app.ts', deletions: 2 }))] },
+      { parts: [toolPart('edit', completedState({ path: 'src/late.ts', additions: 1 }))] },
+    ];
+
+    for (const limit of [Number.POSITIVE_INFINITY, 1, 2]) {
+      const whole = getBoundedMessageFileChanges(messages, limit, workspace);
+      expect(whole.changes.length).toBeGreaterThan(0);
+      expect(whole.truncated).toBe(limit < 3);
+      for (let split = 0; split <= messages.length; split += 1) {
+        const prefix = MessageFileChangeScan.scan(messages.slice(0, split), limit, workspace);
+        const prefixResult = structuredClone(prefix.finish());
+        const resumed = MessageFileChangeScan.scan(
+          messages.slice(split),
+          limit,
+          workspace,
+          prefix
+        ).finish();
+
+        expect(resumed).toEqual(whole);
+        expect(prefix.finish()).toEqual(prefixResult);
+      }
+    }
   });
 
   it('does not count directory entries against the bounded change budget', () => {

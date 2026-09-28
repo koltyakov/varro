@@ -9,6 +9,7 @@ import {
   buildLivePrompt,
   buildMultiWebviewScenarioPlan,
   canonicalDeliveryFailures,
+  CdpController,
   classifyPromptDisposition,
   clickOpenInEditor,
   duplicateDeliveryFailures,
@@ -50,6 +51,16 @@ const ready = {
   diffControl: true,
   nestedActivityScroller: { hasRange: true },
 };
+
+test('awaits asynchronous frame observations before returning their values', async () => {
+  const controller = Object.create(CdpController.prototype);
+  controller.contextId = 7;
+  controller.call = async (_method, params) => {
+    const value = vm.runInNewContext(params.expression);
+    return { result: { value: params.awaitPromise ? await value : undefined } };
+  };
+  assert.deepEqual(await controller.evaluate('Promise.resolve(42)'), 42);
+});
 
 test('retries an exhausted live tool window without retrying a scrolling failure', () => {
   const execution = { executed: false, actions: [{ outcome: 'active-window-ended' }] };
@@ -524,14 +535,14 @@ test('builds the controlled duplicate-delivery stream prompt', () => {
 });
 
 test('maps requested model IDs to their composer labels', () => {
-  assert.equal(modelDisplayName('openai/gpt-5.6-luna'), 'GPT-5.6 Luna');
-  assert.equal(modelDisplayName('openai/gpt-5.6-sol'), 'GPT-5.6 Sol');
+  assert.equal(modelDisplayName('openai/gpt-6-luna-fast'), 'GPT-6 Luna Fast');
+  assert.equal(modelDisplayName('openai/gpt-6-sol'), 'GPT-6 Sol');
 });
 
-test('accepts only the required Luna and Terra live models', () => {
-  assert.equal(validateLiveModel('openai/gpt-5.6-luna'), 'openai/gpt-5.6-luna');
-  assert.equal(validateLiveModel('openai/gpt-5.6-terra'), 'openai/gpt-5.6-terra');
-  assert.throws(() => validateLiveModel('openai/gpt-5.6-sol'), /Luna|luna/);
+test('accepts only the required Luna Fast and Sol live models', () => {
+  assert.equal(validateLiveModel('openai/gpt-6-luna-fast'), 'openai/gpt-6-luna-fast');
+  assert.equal(validateLiveModel('openai/gpt-6-sol'), 'openai/gpt-6-sol');
+  assert.throws(() => validateLiveModel('openai/gpt-5.6-luna'), /Luna|luna/);
 });
 
 test('accepts a bounded restart count for duplicate-delivery stress', () => {

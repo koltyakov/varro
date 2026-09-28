@@ -20,7 +20,7 @@ import { installObserver } from './ai-streaming.mjs';
 import { goToLatest } from './ai-fuzzy-navigation.mjs';
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_MODEL = 'openai/gpt-5.6-luna';
+const DEFAULT_MODEL = 'openai/gpt-6-luna-fast';
 const DEFAULT_MAX_PROMPTS = 3;
 const DEFAULT_GATE_TIMEOUT_MS = 90_000;
 
@@ -65,8 +65,8 @@ export function modelDisplayName(value) {
 }
 
 export function validateLiveModel(value) {
-  if (!['openai/gpt-5.6-luna', 'openai/gpt-5.6-terra'].includes(value)) {
-    throw new Error('--model must be openai/gpt-5.6-luna or openai/gpt-5.6-terra');
+  if (!['openai/gpt-6-luna-fast', 'openai/gpt-6-sol'].includes(value)) {
+    throw new Error('--model must be openai/gpt-6-luna-fast or openai/gpt-6-sol');
   }
   return value;
 }
@@ -738,6 +738,7 @@ export class CdpController {
       contextId: this.contextId,
       expression,
       returnByValue: true,
+      awaitPromise: true,
     });
   }
 
@@ -4071,7 +4072,7 @@ async function runLive(options) {
       let actions = [];
       let scope = null;
       let activityExecution = null;
-      if (scenario === 'AI-07') {
+      if (scenario === 'AI-07' || scenario === 'AI-08') {
         await cdp.evaluate(
           `(() => { (${installObserver.toString()})(); globalThis.varroAiStreamingObserver.start(); })()`
         );
@@ -4273,7 +4274,7 @@ async function runLive(options) {
         settled,
         fixtureAfterPreparation,
       };
-      if (scenario === 'AI-07') {
+      if (scenario === 'AI-07' || scenario === 'AI-08') {
         Object.assign(result, {
           preparation: { passed: best?.missing.length === 0 },
           activityExecution,
@@ -4320,7 +4321,7 @@ async function runLive(options) {
     } catch (error) {
       controllerError = new AggregateError(
         [controllerError, error].filter(Boolean),
-        'AI-07 frame observation cleanup failed'
+        `${scenario} frame observation cleanup failed`
       );
     }
   }

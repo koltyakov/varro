@@ -92,6 +92,150 @@ test('keeps URL boundaries editable in the composer', async ({ page }) => {
   await expect(composer).toBeFocused();
 });
 
+for (const platform of [
+  {
+    name: 'macOS',
+    agentPlatform: 'Macintosh; Intel Mac OS X 10_15_7',
+    lineStart: 'Meta+ArrowLeft',
+  },
+  { name: 'Windows', agentPlatform: 'Windows NT 10.0; Win64; x64', lineStart: 'Home' },
+  { name: 'Linux', agentPlatform: 'X11; Linux x86_64', lineStart: 'Home' },
+]) {
+  test.describe(`composer line navigation on ${platform.name}`, () => {
+    test.use({
+      userAgent: `Mozilla/5.0 (${platform.agentPlatform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36`,
+    });
+
+    test('skips URL icons when moving or selecting to the start of a line', async ({ page }) => {
+      await page.goto('/e2e/harness/index.html?scenario=blank');
+
+      const composer = page.locator('.rich-composer').first();
+      const href = 'https://github.com/koltyakov/varro/issues/36';
+      for (const prefix of ['', 'Previous line\n']) {
+        await composer.fill('');
+        await composer.evaluate((editor, text) => {
+          const clipboardData = new DataTransfer();
+          clipboardData.setData('text/plain', text);
+          editor.dispatchEvent(
+            new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData })
+          );
+        }, `${prefix}${href}`);
+        const url = composer.locator('.composer-external-link');
+        await expect(url).toHaveText(href);
+        for (const shortcut of [platform.lineStart, `Shift+${platform.lineStart}`]) {
+          await url.evaluate((element) => {
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            range.collapse(false);
+            const selection = window.getSelection();
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+          });
+          await composer.press(shortcut);
+          await expect
+            .poll(() =>
+              url.evaluate((element) => {
+                const selection = window.getSelection();
+                return {
+                  atTextStart:
+                    selection?.focusNode ===
+                      element.querySelector('.link-leading-label')?.firstChild &&
+                    selection?.focusOffset === 0,
+                  selectedText: selection?.toString(),
+                };
+              })
+            )
+            .toEqual({ atTextStart: true, selectedText: shortcut.includes('Shift') ? href : '' });
+        }
+        await composer.press('ArrowLeft');
+        await composer.press(platform.lineStart);
+        await page.keyboard.type('See ');
+        await expect(composer).toHaveText(`${prefix.replaceAll('\n', '')}See ${href}`);
+        await expect(url).toHaveText(href);
+      }
+    });
+
+    test('keeps line-start selection on the current visual line of a wrapped URL', async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 360, height: 600 });
+      await page.goto('/e2e/harness/index.html?scenario=blank');
+
+      const composer = page.locator('.rich-composer').first();
+      const href = `https://github.com/koltyakov/varro/issues/36?details=${'abcdefghij'.repeat(12)}`;
+      await composer.fill(href);
+      const url = composer.locator('.composer-external-link');
+      await expect(url).toHaveText(href);
+      const endTop = await url.evaluate((element) => {
+        const text = element.lastChild!;
+        const range = document.createRange();
+        range.setStart(text, text.textContent!.length);
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        return range.getBoundingClientRect().top;
+      });
+
+      await composer.press(`Shift+${platform.lineStart}`);
+      const position = await url.evaluate((element) => {
+        const selection = window.getSelection()!;
+        const caret = document.createRange();
+        caret.setStart(selection.focusNode!, selection.focusOffset);
+        // Measure the next character: a collapsed range at a soft wrap can report
+        // the preceding line even when the caret has downstream affinity.
+        caret.setEnd(selection.focusNode!, selection.focusOffset + 1);
+        return {
+          top: caret.getBoundingClientRect().top,
+          firstLineTop: element.querySelector('.link-leading-label')!.getBoundingClientRect().top,
+          selectedText: selection.toString(),
+        };
+      });
+      expect(position.top).toBeCloseTo(endTop, 0);
+      expect(position.top).toBeGreaterThan(position.firstLineTop);
+      expect(position.selectedText.length).toBeGreaterThan(0);
+      expect(position.selectedText.length).toBeLessThan(href.length);
+      expect(href.endsWith(position.selectedText)).toBe(true);
+    });
+
+    test('leaves other platform, word, and document navigation shortcuts native', async ({
+      page,
+    }) => {
+      await page.goto('/e2e/harness/index.html?scenario=blank');
+      const composer = page.locator('.rich-composer').first();
+      await composer.fill('https://github.com/koltyakov/varro/issues/36');
+      await expect(composer.locator('.composer-external-link')).toHaveCount(1);
+
+      const otherPlatform =
+        platform.name === 'macOS' ? { key: 'Home' } : { key: 'ArrowLeft', metaKey: true };
+      const shortcuts = [
+        otherPlatform,
+        { ...otherPlatform, shiftKey: true },
+        { key: 'Home', ctrlKey: true },
+        { key: 'Home', ctrlKey: true, shiftKey: true },
+        { key: 'ArrowLeft', ctrlKey: true },
+        { key: 'ArrowLeft', ctrlKey: true, shiftKey: true },
+        { key: 'ArrowLeft', altKey: true },
+        { key: 'ArrowLeft', altKey: true, shiftKey: true },
+        { key: 'ArrowLeft', metaKey: true, altKey: true },
+        { key: 'Home', altKey: true },
+        { key: 'End' },
+        { key: 'End', shiftKey: true },
+      ] satisfies KeyboardEventInit[];
+      const prevented = await composer.evaluate(
+        (editor, keys) =>
+          keys.map((key) => {
+            const event = new KeyboardEvent('keydown', { ...key, bubbles: true, cancelable: true });
+            editor.dispatchEvent(event);
+            return event.defaultPrevented;
+          }),
+        shortcuts
+      );
+      expect(prevented).toEqual(shortcuts.map(() => false));
+    });
+  });
+}
+
 test('paints reference icons when selection starts at the first visible character', async ({
   page,
 }) => {
@@ -1058,7 +1202,9 @@ test('keeps the sent card and previous Worked summary stable through Thinking', 
   }, text);
 
   await page.getByLabel('Send (Enter)').click();
-  await expect(page.getByText(text, { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(text, { exact: true }).and(page.locator('.user-message-text'))
+  ).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(

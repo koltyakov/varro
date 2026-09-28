@@ -5,7 +5,7 @@ checkpointed replay, and independent scenario execution.
 
 > [!IMPORTANT]
 > An AI test run passes only when the requested scenarios run in a real, interactable VS Code
-> Extension Development Host. If VS Code cannot be launched or controlled, GPT Luna or Terra cannot be
+> Extension Development Host. If VS Code cannot be launched or controlled, GPT-6 Luna Fast or GPT-6 Sol cannot be
 > used, required sessions cannot be prepared, or any real-editor scenario cannot reach its precondition,
 > the **overall AI test result is `FAIL`**. Automated preflight results may still be reported as supporting
 > evidence, but they cannot make the AI test pass. Put this overall result at the top of the run ledger
@@ -51,8 +51,9 @@ For an unqualified **Run AI tests** or **Run fuzzy tests** request:
 1. Check the worktree and record the tested commit plus existing uncommitted changes. Do not discard
    or modify unrelated changes.
 2. Run the automated preflight and the standard real-editor scenarios `AI-01` through `AI-08`.
-3. Use `openai/gpt-5.6-luna` for repeatable synthetic height streams and GPT-5.6 Luna or GPT-5.6 Terra
-   for realistic reasoning, tool, and edit workflows. Terra is explicitly allowed and preferred when
+3. Use the OpenAI subscription for all AI test model calls. Use GPT-6 Luna Fast
+   (`openai/gpt-6-luna-fast`) for repeatable synthetic height streams and GPT-6 Luna Fast or GPT-6 Sol
+   for realistic reasoning, tool, and edit workflows. Sol (`openai/gpt-6-sol`) is explicitly allowed and preferred when
    it produces more representative multi-step repository work. Record the exact provider/model for
    every scenario and do not silently change models during a reproduction because output length,
    reasoning cadence, tool concurrency, and timing are test inputs.
@@ -156,7 +157,7 @@ under test.
    do not guess at recovery. Also verify that the AI run created no changes in the Varro source worktree;
    never revert unrelated Varro changes made by the user or another agent.
 
-If credentials, a GUI, or Luna/Terra are unavailable, continue with every feasible automated check and
+If credentials, a GUI, or Luna Fast/Sol are unavailable, continue with every feasible automated check and
 mark the affected real-editor scenarios `BLOCKED`, but report the overall AI test as `FAIL`. Never turn
 a blocked visual check into a pass or describe an automated-only run as a successful AI test.
 
@@ -269,8 +270,8 @@ as copies or regenerated in isolated storage before use. Old production-backed m
    hosts are strictly required by the scenario.
 2. Use a dedicated Extension Development Host window. Do not use a production Varro window that has
    unrelated sessions or settings.
-3. Open the Varro view and explicitly select GPT Luna or GPT Terra. Use Luna for controlled text-height
-   streams and Luna or Terra for realistic repository work; record the exact provider/model per scenario.
+3. Open the Varro view and explicitly select GPT-6 Luna Fast or GPT-6 Sol. Use Luna Fast for controlled text-height
+   streams and Luna Fast or Sol for realistic repository work; record the exact provider/model per scenario.
    Apply and verify this selection before every live scenario, not only duplicate-delivery checks.
 4. Start with the secondary sidebar between 430 and 500 CSS pixels wide and the window at least 800
    CSS pixels high. Record window size, zoom, sidebar side, panel visibility, theme, and font scaling.
@@ -323,7 +324,7 @@ this order:
    **"The Extension Development Host is running, but I cannot control its VS Code window. Would you
    like to enable/approve editor automation, perform the listed native actions while I record results,
    or stop and record the AI test as failed?"**
-5. If credentials, GPT Luna/Terra, a clean `tmp/opencode` fixture, required prepared history, or another
+5. If credentials, GPT-6 Luna Fast/Sol, a clean `tmp/opencode` fixture, required prepared history, or another
    precondition needs user action, ask one concrete question describing the missing prerequisite and
    the available choices.
 6. If the user stops, declines, or the problem remains unresolved, mark affected scenarios `BLOCKED`
@@ -565,13 +566,13 @@ pagination test.
 Use the precondition helper instead of regenerating long history for every run:
 
 ```sh
-npm run ai:preconditions -- prepare-run --seed <seed>
+npm run ai:preconditions -- prepare-run --seed <seed> --model openai/gpt-6-luna-fast
 ```
 
 The helper validates a workspace-scoped `VFZ GOLDEN` session, forks it without opening it in the
 webview, records the fork and a deterministic 50-action plan in an ignored manifest, and reports the
 static gate for every scenario. If no valid golden exists, it creates one once with
-`openai/gpt-5.6-luna` by default. Use `--golden <session-id>` to adopt and validate an older prepared
+`openai/gpt-6-luna-fast` when invoked as above. Use `--golden <session-id>` to adopt and validate an older prepared
 history. The source golden is never a run-created session and must not be deleted during run cleanup.
 
 Static history can establish AI-01 through AI-06 cheaply. It cannot satisfy AI-07 or AI-08 by itself.
@@ -743,7 +744,7 @@ Pass invariants:
 
 Precondition: the 32-turn session is at the bottom.
 
-1. Send the controlled text stream recipe with Luna or Terra and make no input for the first 20 visible
+1. Send the controlled text stream recipe with Luna Fast or Sol and make no input for the first 20 visible
    sections.
 2. Wheel upward beyond one viewport while the model is still streaming and record a visible marker
    offset.
@@ -767,11 +768,11 @@ Pass invariants:
 
 Precondition: the Extension Development Host workspace is the clean `tmp/opencode` fixture, the session
 is virtualized, and the latest user prompt can become sticky. The live turn must produce real reasoning,
-tool activity, a file edit, and a retained disclosure. A scrollable active tray is optional because Luna
-and Terra may serialize otherwise independent tool calls. AI-16 owns required live nested-scroller
+tool activity, a file edit, and a retained disclosure. A scrollable active tray is optional because Luna Fast
+and Sol may serialize otherwise independent tool calls. AI-16 owns required live nested-scroller
 stress. The deterministic layout suite always verifies native-style nested-to-outer wheel ownership.
 
-1. Send the realistic tool and activity recipe using Luna or Terra. Record the clean fixture baseline
+1. Send the realistic tool and activity recipe using Luna Fast or Sol. Record the clean fixture baseline
    and every changed path before timed interaction continues.
 2. Keep the source prompt just above the viewport while reasoning text and tool cards appear.
 3. Expand an activity disclosure when available and wheel the outer transcript. If the active tray has
@@ -810,7 +811,7 @@ Pass invariants:
 
 ### AI-08 Seeded Mixed-Ownership Fuzz
 
-Precondition: an active Luna or Terra realistic repository stream in a virtualized session with at
+Precondition: an active Luna Fast or Sol realistic repository stream in a virtualized session with at
 least one file edit and one expandable disclosure.
 AI-08 establishes these gates independently. It can start from the clean recorded baseline or reuse
 edits whose commit, status, exact changed paths, and content hash equal the latest fixture exit evidence.
@@ -878,7 +879,7 @@ invariants relevant to the changed component.
 ### AI-17 Duplicate Delivery During Send And Streaming
 
 Precondition: a dedicated Extension Development Host with a prepared run session open at the latest
-message and Luna or Terra selected.
+message and Luna Fast or Sol selected.
 
 Run the frame-level duplicate oracle through the live controller:
 
@@ -909,7 +910,7 @@ controller:
 
 ```sh
 npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-18 \
-  --surface sidebar --view-id sidebar --model openai/gpt-5.6-luna
+  --surface sidebar --view-id sidebar --model openai/gpt-6-luna-fast
 ```
 
 Precondition: the fixture is at its clean baseline or matches the latest recorded fixture exit evidence,
@@ -922,7 +923,7 @@ The controller records its deterministic plan before acting, then performs these
 real webviews and native VS Code workbench commands:
 
 1. Select the sidebar by `surface=sidebar`, `viewId=sidebar`, and the prepared root route.
-2. Select and verify the requested Luna or Terra model and permission mode in the sidebar.
+2. Select and verify the requested Luna Fast or Sol model and permission mode in the sidebar.
 3. Open the root in a chat editor, record its stable editor `viewId`, then route the child and root through
    that same editor. Verify the editor title and transcript route each time.
 4. Start a real root stream. Queue marked turns from the sidebar and editor while that stream remains
@@ -954,11 +955,11 @@ Pass invariants:
 
 ### AI-19 Permission And Queued-Edit Lifecycle
 
-Run the focused lifecycle controller with Luna or Terra:
+Run the focused lifecycle controller with Luna Fast or Sol:
 
 ```sh
 npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-19 \
-  --surface sidebar --view-id sidebar --model openai/gpt-5.6-luna
+  --surface sidebar --view-id sidebar --model openai/gpt-6-luna-fast
 ```
 
 Precondition: the fixture is at its clean baseline or matches the latest recorded fixture exit evidence,

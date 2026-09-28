@@ -8,6 +8,7 @@ import {
   onCleanup,
   onMount,
   untrack,
+  type Accessor,
 } from 'solid-js';
 import {
   isAbortedAssistantError,
@@ -39,6 +40,7 @@ import {
   showModelPicker,
   showThinking,
   showFileDiffs,
+  getChildRunsByParentId,
 } from '../lib/state';
 import {
   getAssistantActivityPartKey,
@@ -70,7 +72,11 @@ import {
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
 import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
-import { getSessionPauseMap } from '../lib/session-pauses';
+import {
+  collectSessionProgress,
+  getSessionPauseMapFromProgress,
+  type SessionProgress,
+} from '../lib/session-pauses';
 import { isSessionResumeMessage, readSessionPauses } from '../../shared/session-pauses';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
 import {
@@ -103,6 +109,8 @@ import {
 import {
   buildPermissionRequestLookup,
   buildQuestionRequestLookup,
+  samePermissionMatch,
+  sameToolCallLookup,
   getToolCallLookupKey,
 } from '../lib/tool-call-matching';
 import {
@@ -169,15 +177,21 @@ import {
   hasVisibleRunningToolPart,
 } from './message-list/thread-visibility';
 import { getLatestPlanImplementationMessageId } from './message-list/plan-actions';
-import { getAssistantRetryStates } from './message-list/assistant-retry';
 import {
+  sameAssistantRetryScanState,
+  scanAssistantRetryStates,
+  type AssistantRetryScanState,
+  type AssistantRetryState,
+} from './message-list/assistant-retry';
+import {
+  flushesAssistantDialog,
   getAssistantDialogSummaryMap,
   type AssistantDialogSummaryInfo,
 } from './message-list/assistant-dialog';
 import {
   getChangedInlinePreviewMessageIds,
   getAssistantFlowSpacingSize,
-  getBorderedAdjacencyLayoutSignatures,
+  getBorderedAdjacencyLayoutSegment,
   getCompactActivityDisclosureLayoutSignatures,
   getCompactActivityLayoutSignatures,
   getErrorDetailsLayoutSignatures,
@@ -187,6 +201,22 @@ import {
   getThinkingLayoutSignatures,
   hasVisibleProjectedText,
 } from './message-list/row-layout';
+import {
+  getFrozenSegmentBoundary,
+  getHistorySegmentEnd,
+  mergeSegmentMaps,
+  sameFrozenSegmentBoundary,
+  type FrozenSegmentBoundary,
+  restrictMessageIds,
+  restrictPartKeys,
+  restrictStreamingProjection,
+  sameChildRuns,
+  sameDialogSessions,
+  sameEntries,
+  sameKeys,
+  sameStreamingProjection,
+  sameValues,
+} from './message-list/history-segments';
 import { isNumber, isFunction } from '../lib/runtime-values';
 import { onAfterChatFontConfigChange, onBeforeChatFontConfigChange } from '../lib/chat-font-config';
 import {
@@ -309,17 +339,22 @@ export function getNewlyAppendedMessageIds(
 }
 
 export function getPromptNumberMap(messages: readonly MessageEntry[]) {
-  const result = new Map<string, number>();
-  let promptNumber = 0;
+  return numberPrompts(messages).numbers;
+}
+
+/** Numbers prompts after `previousNumber` earlier prompts. */
+function numberPrompts(messages: readonly MessageEntry[], previousNumber = 0) {
+  const numbers = new Map<string, number>();
+  let promptNumber = previousNumber;
   for (const message of messages) {
     if (message.info.role !== 'user') continue;
     if (isSessionResumeMessage(message.parts)) continue;
     const parsed = parseUserMessageContent(message.parts);
     if (parsed.automaticActions.length > 0 && !hasUserMessageContent(parsed)) continue;
     promptNumber += 1;
-    result.set(message.info.id, promptNumber);
+    numbers.set(message.info.id, promptNumber);
   }
-  return result;
+  return { numbers, lastNumber: promptNumber };
 }
 
 export function getActiveTurnMessageId(
@@ -591,14 +626,6 @@ export function MessageList() {
       return current === promptMessageId ? null : current;
     });
   };
-  const lastAssistantID = createMemo(() => {
-    messageStructureVersion();
-    const msgs = getVisibleThreadMessages(state.messages, state.activeSessionId, state.sessions);
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (isAssistantMessage(msgs[i]!.info)) return msgs[i]!.info.id;
-    }
-    return null;
-  });
   const isAssistantDiffEligible = (message: MessageEntry) =>
     getAssistantDiffRequest(message.info, message.info.id === lastAssistantID()) !== null;
   let expectedScrollTop = -1;
@@ -833,23 +860,6 @@ export function MessageList() {
         (state.sessionAutoPermissionCounts[candidateSessionId]?.inFlight ?? 0) > 0
     );
   });
-  const shouldShowStarterLogo = createMemo(() => {
-    if (state.messagesLoading) return false;
-    const sessionId = state.activeSessionId;
-    if (getVisibleThreadMessages(state.messages, sessionId, state.sessions).length > 0)
-      return false;
-    if (!sessionId) return true;
-
-    const session = state.sessions.find((candidate) => candidate.id === sessionId);
-    if (!session) return false;
-    if (state.queuedMessages.some((item) => item.sessionId === sessionId)) return false;
-    if (isSessionAwaitingInput(sessionId)) return false;
-
-    const statusType = state.sessionStatus[sessionId]?.type;
-    if (statusType === 'busy' || statusType === 'retry') return false;
-
-    return session.time.created === session.time.updated;
-  });
   const observedVisibleMessageBounds = new Map<string, { top: number; bottom: number }>();
   const mountedMessageRows = new Map<string, HTMLDivElement>();
   let previousVisibleStructureSessionId: string | null = null;
@@ -905,15 +915,120 @@ export function MessageList() {
     }
     return visibleMessages;
   });
+  // Both derive from the same visible thread instead of refiltering the whole transcript.
+  const lastAssistantID = createMemo(() => {
+    const msgs = messages();
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (isAssistantMessage(msgs[i]!.info)) return msgs[i]!.info.id;
+    }
+    return null;
+  });
+  const shouldShowStarterLogo = createMemo(() => {
+    if (state.messagesLoading) return false;
+    const sessionId = state.activeSessionId;
+    if (messages().length > 0) return false;
+    if (!sessionId) return true;
+
+    const session = state.sessions.find((candidate) => candidate.id === sessionId);
+    if (!session) return false;
+    if (state.queuedMessages.some((item) => item.sessionId === sessionId)) return false;
+    if (isSessionAwaitingInput(sessionId)) return false;
+
+    const statusType = state.sessionStatus[sessionId]?.type;
+    if (statusType === 'busy' || statusType === 'retry') return false;
+
+    return session.time.created === session.time.updated;
+  });
   const latestPlanImplementationMessageId = createMemo(() => {
     messageInfoVersion();
     const visibleMessages = messages();
     return untrack(() => getLatestPlanImplementationMessageId(visibleMessages));
   });
+  // Settled history before the last user message is derived once and reused while the trailing
+  // turn streams. A sticky frozen boundary splits it again, so a new turn only rederives the
+  // recent segment. Segment derivations must read their restricted views, not trailing-turn state.
+  const historySegmentEnd = createMemo(() => getHistorySegmentEnd(messages()));
+  const historyMessages = createMemo(() => messages().slice(0, historySegmentEnd()), [], {
+    equals: sameEntries,
+  });
+  const tailMessages = createMemo(() => messages().slice(historySegmentEnd()));
+  const frozenSegmentBoundary = createMemo<FrozenSegmentBoundary>(
+    (previous) => getFrozenSegmentBoundary(messages(), historySegmentEnd(), previous),
+    { entry: null, index: 0 },
+    { equals: sameFrozenSegmentBoundary }
+  );
+  const createHistorySegment = (range: Accessor<readonly [number, number]>) => {
+    const entries = createMemo(() => messages().slice(...range()), [], { equals: sameEntries });
+    const messageIds = createMemo<ReadonlySet<string>>(
+      () => new Set(entries().map((message) => message.info.id)),
+      new Set(),
+      { equals: sameKeys }
+    );
+    // First occurrence wins, matching a forward transcript scan.
+    const partsById = createMemo(() => {
+      const parts = new Map<string, Part>();
+      for (const message of entries()) {
+        for (const part of message.parts) if (!parts.has(part.id)) parts.set(part.id, part);
+      }
+      return parts;
+    });
+    const partIds = createMemo<ReadonlySet<string>>(() => new Set(partsById().keys()), new Set(), {
+      equals: sameKeys,
+    });
+    return {
+      entries,
+      offset: () => range()[0],
+      messageIds,
+      partsById,
+      restrictParts: (keys: Accessor<ReadonlySet<string>>) =>
+        createMemo<ReadonlySet<string>>(() => restrictPartKeys(keys(), messageIds()), new Set(), {
+          equals: sameKeys,
+        }),
+      restrictMessages: (ids: Accessor<Iterable<string>>) =>
+        createMemo<ReadonlySet<string>>(() => restrictMessageIds(ids(), messageIds()), new Set(), {
+          equals: sameKeys,
+        }),
+      restrictStreaming: (projection: Accessor<StreamingLayoutProjection>) =>
+        createMemo<StreamingLayoutProjection>(
+          () => restrictStreamingProjection(projection(), partIds(), messageIds()),
+          { partId: null, text: '' },
+          { equals: sameStreamingProjection }
+        ),
+    };
+  };
+  type HistorySegment = ReturnType<typeof createHistorySegment>;
+  // Frozen history first, then recent history; each continues from the one before it.
+  const historySegments: readonly HistorySegment[] = [
+    createHistorySegment(() => [0, frozenSegmentBoundary().index]),
+    createHistorySegment(() => [frozenSegmentBoundary().index, historySegmentEnd()]),
+  ];
+  const mapHistorySegments = <T,>(derive: (segment: HistorySegment, index: number) => T) =>
+    historySegments.map(derive);
+  /** Chains a derivation through the segments, each seeded by the previous segment's result. */
+  const chainHistorySegments = <T,>(
+    derive: (segment: HistorySegment, previous: Accessor<T> | null) => Accessor<T>
+  ) => {
+    const results: Accessor<T>[] = [];
+    for (const segment of historySegments) {
+      results.push(derive(segment, results.at(-1) ?? null));
+    }
+    return results;
+  };
+  const mergeHistorySegmentMaps = <T,>(maps: readonly Accessor<ReadonlyMap<string, T>>[]) =>
+    createMemo(() =>
+      maps.reduce<Map<string, T>>((merged, map) => mergeSegmentMaps(merged, map()), new Map())
+    );
   const streamingPart = createMemo(() => {
     const streamingPartId = state.streamingPartId;
     messageStructureVersion();
-    return untrack(() => findStreamingPart(messages(), streamingPartId));
+    return untrack(
+      () =>
+        (streamingPartId &&
+          historySegments
+            .map((segment) => segment.partsById().get(streamingPartId))
+            .find((part) => part !== undefined)) ||
+        findStreamingPart(tailMessages(), streamingPartId)
+    );
   });
   const streamingTextLength = createMemo(() => state.streamingText.length);
   const streamingLayoutProjection = createMemo<StreamingLayoutProjection>(
@@ -942,31 +1057,53 @@ export function MessageList() {
         previous.hiddenPartKeys === current.hiddenPartKeys,
     }
   );
+  const historySegmentPresentation = mapHistorySegments((segment) => ({
+    visibleActive: segment.restrictParts(visibleActiveActivityPartKeys),
+    retained: segment.restrictParts(retainedActivityPartKeys),
+    exiting: segment.restrictParts(exitingActivityPartKeys),
+    hiddenParts: segment.restrictParts(() => presentation.hiddenParts()),
+    streaming: segment.restrictStreaming(streamingLayoutProjection),
+  }));
   const visibleBlockingStreamingPart = createMemo(() => {
     const part = streamingPart();
     const streamingText = (part && presentation.textForPart(part)) ?? state.streamingText;
     return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
   });
+  // History scans are tracked so they stay current whenever the untracked tail scan runs.
+  const historyVisibleRunningToolPart = mapHistorySegments((segment) =>
+    createMemo(() => hasVisibleRunningToolPart(segment.entries()))
+  );
   const visibleRunningToolPart = createMemo(() => {
     messageStructureVersion();
-    return untrack(() => hasVisibleRunningToolPart(messages()));
+    return untrack(
+      () =>
+        historyVisibleRunningToolPart.some((running) => running()) ||
+        hasVisibleRunningToolPart(tailMessages())
+    );
   });
+  const hasVisibleRunningInlineFileEdit = (entries: readonly MessageEntry[]) =>
+    entries.some((message) =>
+      message.parts.some(
+        (part) =>
+          part.type === 'tool' &&
+          (part.state.status === 'pending' || part.state.status === 'running') &&
+          shouldShowAssistantPartInline(part) &&
+          isAssistantEditActivityPart(part) &&
+          !shouldCompactAssistantActivityPart(part, {
+            keepEditInline: true,
+            keepReasoningInline: false,
+          })
+      )
+    );
+  const historyVisibleRunningInlineFileEdit = mapHistorySegments((segment) =>
+    createMemo(() => hasVisibleRunningInlineFileEdit(segment.entries()))
+  );
   const visibleRunningInlineFileEdit = createMemo(() => {
     messageStructureVersion();
-    return untrack(() =>
-      messages().some((message) =>
-        message.parts.some(
-          (part) =>
-            part.type === 'tool' &&
-            (part.state.status === 'pending' || part.state.status === 'running') &&
-            shouldShowAssistantPartInline(part) &&
-            isAssistantEditActivityPart(part) &&
-            !shouldCompactAssistantActivityPart(part, {
-              keepEditInline: true,
-              keepReasoningInline: false,
-            })
-        )
-      )
+    return untrack(
+      () =>
+        historyVisibleRunningInlineFileEdit.some((running) => running()) ||
+        hasVisibleRunningInlineFileEdit(tailMessages())
     );
   });
   const committedTextBlockKey = createMemo(() => {
@@ -990,18 +1127,69 @@ export function MessageList() {
     for (const [index, entry] of messages().entries()) result.set(entry.info.id, index);
     return result;
   });
-  const subagentSessionIds = createMemo(() => getSubagentSessionIds(messages()));
-  const promptNumberMap = createMemo(() =>
-    getPromptNumberMap(
-      mergeOlderHistory(messages(), getSessionHistoryPrompts(state.activeSessionId))
+  const historySubagentSessionIds = mapHistorySegments((segment) =>
+    createMemo(() => getSubagentSessionIds(segment.entries()))
+  );
+  const subagentSessionIds = createMemo<ReadonlySet<string>>(
+    () =>
+      new Set([
+        ...historySubagentSessionIds.flatMap((ids) => [...ids()]),
+        ...getSubagentSessionIds(tailMessages()),
+      ]),
+    new Set(),
+    { equals: sameKeys }
+  );
+  // Older prompt pages only change numbering and positions when they add prompts the loaded
+  // transcript lacks; otherwise the transcript splits like the message list.
+  const olderPromptsOutsideTranscript = createMemo(() => {
+    const indexes = messageIndexById();
+    const visible = messages();
+    const olderPrompts = getSessionHistoryPrompts(state.activeSessionId);
+    return olderPrompts.some((prompt) => {
+      const index = indexes.get(prompt.info.id);
+      return index === undefined || visible[index]?.info.sessionID !== prompt.info.sessionID;
+    })
+      ? olderPrompts
+      : null;
+  });
+  const historyPromptNumbers = chainHistorySegments<ReturnType<typeof numberPrompts>>(
+    (segment, previous) =>
+      createMemo(() => numberPrompts(segment.entries(), previous?.().lastNumber ?? 0))
+  );
+  const promptNumberMap = createMemo(() => {
+    const olderPrompts = olderPromptsOutsideTranscript();
+    if (olderPrompts) return getPromptNumberMap(mergeOlderHistory(messages(), olderPrompts));
+    const history = historyPromptNumbers.map((numbers) => numbers());
+    return [
+      ...history.map(({ numbers }) => numbers),
+      numberPrompts(tailMessages(), history.at(-1)?.lastNumber ?? 0).numbers,
+    ].reduce<Map<string, number>>(
+      (merged, numbers) => mergeSegmentMaps(merged, numbers),
+      new Map()
+    );
+  });
+  const historyNavigationPreviews = mapHistorySegments((segment) =>
+    createMemo(() =>
+      getUserMessageNavigationPreviews(segment.entries(), subagentSessionIds(), segment.offset())
     )
   );
-  const turnNavigationPreviews = createMemo(() =>
-    getUserMessageNavigationPreviews(
-      mergeOlderHistory(messages(), getSessionHistoryPrompts(state.activeSessionId)),
-      subagentSessionIds()
-    )
-  );
+  const turnNavigationPreviews = createMemo(() => {
+    const olderPrompts = olderPromptsOutsideTranscript();
+    if (olderPrompts) {
+      return getUserMessageNavigationPreviews(
+        mergeOlderHistory(messages(), olderPrompts),
+        subagentSessionIds()
+      );
+    }
+    return [
+      ...historyNavigationPreviews.flatMap((previews) => previews()),
+      ...getUserMessageNavigationPreviews(
+        tailMessages(),
+        subagentSessionIds(),
+        historyMessages().length
+      ),
+    ];
+  });
 
   function clearObservedVisibleMessages() {
     observedVisibleMessageBounds.clear();
@@ -1704,6 +1892,8 @@ export function MessageList() {
     // Native scroll movement is reported after wheel/key intent, so layout settling must yield to both.
     const invalidatedAnchorInputEpoch = directScrollInputEpoch;
     const preferredLayoutAnchor = preferredAnchor ?? pendingThinkingLayoutAnchor;
+    // Bottom-follow can move a still-mounted detached anchor before a disclosure pauses follow.
+    // Reuse its saved offset only while it still describes the current scroll position.
     const invalidatedAnchor =
       (invalidatedUnmountedHeight || mountedRows.length > 0) &&
       !autoScroll() &&
@@ -1718,7 +1908,10 @@ export function MessageList() {
       !(activeSessionId && getCurrentPendingHistoryAnchor(activeSessionId))
         ? shouldVirtualize()
           ? (preferredLayoutAnchor ??
-            (lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
+            (lastDetachedVisibleAnchor &&
+            containerRef &&
+            Math.abs(containerRef.scrollTop - lastDetachedVisibleAnchorScrollTop) <= 1 &&
+            getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
               ? lastDetachedVisibleAnchor
               : captureDetachedVisibleScrollAnchor(containerRef?.scrollTop ?? 0)))
           : captureVisibleScrollAnchor()
@@ -1792,7 +1985,9 @@ export function MessageList() {
     for (const messageId of candidateMessageIds) {
       const previousSignature = zeroHeightRenderGeometrySignatures.get(messageId);
       if (previousSignature === undefined) continue;
-      const currentSignature = getMessageRenderGeometrySignature(messageId, streaming);
+      const currentSignature =
+        historyMessageRenderGeometrySignatures().get(messageId) ??
+        getMessageRenderGeometrySignature(messageId, streaming);
       if (currentSignature === previousSignature) continue;
       measuredHeights.delete(messageId);
       zeroHeightRenderGeometrySignatures.delete(messageId);
@@ -2325,19 +2520,25 @@ export function MessageList() {
     }
   });
 
-  const questionRequestsByToolCall = createMemo(() =>
-    buildQuestionRequestLookup(state.questions, activeSessionRootId())
+  const questionRequestsByToolCall = createMemo(
+    () => buildQuestionRequestLookup(state.questions, activeSessionRootId()),
+    new Map(),
+    { equals: (previous, next) => sameToolCallLookup(previous, next) }
   );
-  const permissionRequestsByToolCall = createMemo(() => {
-    const sequence = pendingPermissionSequence();
-    return buildPermissionRequestLookup(
-      state.permissions,
-      activeSessionRootId(),
-      sequence.position,
-      sequence.total,
-      sequence.activePermission?.id
-    );
-  });
+  const permissionRequestsByToolCall = createMemo(
+    () => {
+      const sequence = pendingPermissionSequence();
+      return buildPermissionRequestLookup(
+        state.permissions,
+        activeSessionRootId(),
+        sequence.position,
+        sequence.total,
+        sequence.activePermission?.id
+      );
+    },
+    new Map(),
+    { equals: (previous, next) => sameToolCallLookup(previous, next, samePermissionMatch) }
+  );
 
   function getQuestionRequestForTool(part: Extract<Part, { type: 'tool' }>) {
     const key = getToolCallLookupKey(activeSessionRootId(), part.messageID, part.callID);
@@ -2350,8 +2551,13 @@ export function MessageList() {
     return key ? (permissionRequestsByToolCall().get(key) ?? null) : null;
   }
 
-  const compactActivityLayoutSignatures = createMemo(() =>
-    getCompactActivityLayoutSignatures(messages(), (part) => {
+  const getCompactActivityLayoutSegment = (
+    entries: readonly MessageEntry[],
+    visibleActive: Accessor<ReadonlySet<string>>,
+    retained: Accessor<ReadonlySet<string>>,
+    exiting: Accessor<ReadonlySet<string>>
+  ) =>
+    getCompactActivityLayoutSignatures(entries, (part) => {
       const key = getAssistantActivityPartKey(part);
       if (part.type === 'tool') {
         const question = getQuestionRequestForTool(part);
@@ -2361,11 +2567,33 @@ export function MessageList() {
           return `permission:${permission.permission.id}:${permission.isActive ? 'active' : 'queued'}`;
         }
       }
-      if (visibleActiveActivityPartKeys().has(key)) return 'active';
-      if (retainedActivityPartKeys().has(key)) return 'retained';
-      if (exitingActivityPartKeys().has(key)) return 'exiting';
+      if (visibleActive().has(key)) return 'active';
+      if (retained().has(key)) return 'retained';
+      if (exiting().has(key)) return 'exiting';
       return isAssistantActivityPartRunning(part) ? 'delayed' : 'grouped';
-    })
+    });
+  const historyCompactActivityLayoutSignatures = mergeHistorySegmentMaps(
+    mapHistorySegments((segment, index) =>
+      createMemo(() =>
+        getCompactActivityLayoutSegment(
+          segment.entries(),
+          historySegmentPresentation[index]!.visibleActive,
+          historySegmentPresentation[index]!.retained,
+          historySegmentPresentation[index]!.exiting
+        )
+      )
+    )
+  );
+  const compactActivityLayoutSignatures = createMemo(() =>
+    mergeSegmentMaps(
+      historyCompactActivityLayoutSignatures(),
+      getCompactActivityLayoutSegment(
+        tailMessages(),
+        visibleActiveActivityPartKeys,
+        retainedActivityPartKeys,
+        exitingActivityPartKeys
+      )
+    )
   );
 
   createEffect(() => {
@@ -2488,6 +2716,21 @@ export function MessageList() {
     const index = messageIndexById().get(messageId);
     const message = index === undefined ? undefined : messages()[index];
     if (!message) return null;
+    return getMessageEntryRenderGeometrySignature(message, {
+      streaming,
+      canCompact: canCompactActivityPart,
+      isDiffEligible: isAssistantDiffEligible,
+    });
+  }
+  function getMessageEntryRenderGeometrySignature(
+    message: MessageEntry,
+    context: {
+      streaming: StreamingLayoutProjection;
+      canCompact: (part: AssistantActivityPart) => boolean;
+      isDiffEligible: (message: MessageEntry) => boolean;
+    }
+  ) {
+    const { streaming } = context;
     const summaryHasOmittedDiffs =
       message.info.role === 'user' &&
       !!message.info.summary &&
@@ -2498,7 +2741,7 @@ export function MessageList() {
           ? 'aborted'
           : 'error'
         : 'ok';
-    const infoProjection = `${message.info.role}:${summaryHasOmittedDiffs ? 1 : 0}:${errorProjection}:${isAssistantDiffEligible(message) ? 1 : 0}`;
+    const infoProjection = `${message.info.role}:${summaryHasOmittedDiffs ? 1 : 0}:${errorProjection}:${context.isDiffEligible(message) ? 1 : 0}`;
     const partProjection = message.parts
       .map((part) => {
         if (streaming.hiddenPartKeys?.has(getPresentationPartKey(part))) return `${part.id}:queued`;
@@ -2507,7 +2750,7 @@ export function MessageList() {
         }
         const visible = shouldShowAssistantPartInline(part);
         if (!isAssistantActivityPart(part)) return `${part.id}:${part.type}:${visible ? 1 : 0}`;
-        return `${part.id}:${part.type}:${visible ? 1 : 0}:${canCompactActivityPart(part) ? 1 : 0}:${isAssistantActivityPartRunning(part) ? 1 : 0}`;
+        return `${part.id}:${part.type}:${visible ? 1 : 0}:${context.canCompact(part) ? 1 : 0}:${isAssistantActivityPartRunning(part) ? 1 : 0}`;
       })
       .join('|');
     return `${infoProjection}|${partProjection}`;
@@ -2516,15 +2759,13 @@ export function MessageList() {
   let previousMessageRenderGeometrySignatures = new Map<string, string | null>();
   createEffect(() => {
     messageStructureVersion();
-    const current = untrack(
-      () =>
-        new Map(
-          messages().map((message) => [
-            message.info.id,
-            getMessageRenderGeometrySignature(message.info.id),
-          ])
-        )
-    );
+    const current = untrack(() => {
+      const signatures = new Map<string, string | null>(historyMessageRenderGeometrySignatures());
+      for (const message of tailMessages()) {
+        signatures.set(message.info.id, getMessageRenderGeometrySignature(message.info.id));
+      }
+      return signatures;
+    });
     let changed = false;
     for (const [messageId, signature] of current) {
       if (
@@ -6764,7 +7005,15 @@ export function MessageList() {
       }
       if (shouldAlignNewTurn && startNewTurnAlignment(sessionId, targetMessageId)) return;
       if (startPendingAppendScrollTransition(sessionId)) return;
-      performScroll({ force: true });
+      // Distant navigation must not traverse the entire history at streaming speed.
+      // Nearby returns and subsequent bottom growth still use the normal follower.
+      performScroll({
+        force: true,
+        immediate:
+          !targetMessageId &&
+          !!containerRef &&
+          distanceFromBottom() > containerRef.clientHeight * 4,
+      });
       startFollowLoop(sessionId);
     });
     return requestKey;
@@ -6867,101 +7116,156 @@ export function MessageList() {
     prevLoading = loading;
   });
 
+  const getModelChangeSegment = (
+    entries: readonly MessageEntry[],
+    providerMap: ReadonlyMap<string, (typeof state.providers)[number]>,
+    initialPrevious: AssistantMessage | undefined
+  ) => {
+    const result = new Map<string, ModelChangeInfo>();
+    let previous = initialPrevious;
+    for (const msg of entries) {
+      if (!isAssistantMessage(msg.info)) continue;
+      // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
+      const cur = msg.info as AssistantMessage;
+      if (cur.mode === 'subagent') continue;
+      if (msg.parts.some((part) => part.type === 'compaction')) continue;
+      if (previous) {
+        const previousProvider = providerMap.get(previous.providerID);
+        const currentProvider = providerMap.get(cur.providerID);
+        const fromProvider = previousProvider?.name || previous.providerID;
+        const toProvider = currentProvider?.name || cur.providerID;
+        const fromModel = formatModelName(
+          previousProvider?.models[previous.modelID]?.name || previous.modelID
+        );
+        const toModel = formatModelName(currentProvider?.models[cur.modelID]?.name || cur.modelID);
+        const fromReasoning = previous.variant
+          ? formatVariantLabel(previous.variant)
+          : modelSupportsReasoning(previous.providerID, previous.modelID, state.providers)
+            ? 'Default'
+            : 'No thinking';
+        const toReasoning = cur.variant
+          ? formatVariantLabel(cur.variant)
+          : modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)
+            ? 'Default'
+            : 'No thinking';
+        const providerChanged = previous.providerID !== cur.providerID;
+        const modelChanged = previous.modelID !== cur.modelID;
+        const reasoningChanged = fromReasoning !== toReasoning;
+
+        if (providerChanged || modelChanged || reasoningChanged) {
+          const normalFrom = providerChanged
+            ? formatLabelWithProvider(`${fromModel} ${fromReasoning}`, fromProvider)
+            : `${fromModel} ${fromReasoning}`;
+          const normalTo = providerChanged
+            ? formatLabelWithProvider(`${toModel} ${toReasoning}`, toProvider)
+            : modelChanged
+              ? `${toModel} ${toReasoning}`
+              : toReasoning;
+          const narrowFrom = providerChanged
+            ? formatLabelWithProvider(fromModel, fromProvider)
+            : modelChanged
+              ? fromModel
+              : fromReasoning;
+          const narrowTo = providerChanged
+            ? formatLabelWithProvider(
+                `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`,
+                toProvider
+              )
+            : modelChanged
+              ? `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`
+              : toReasoning;
+          result.set(msg.info.id, {
+            normalFrom,
+            normalTo,
+            narrowFrom,
+            narrowTo,
+            from: formatLabelWithProvider(`${fromModel} ${fromReasoning}`, fromProvider),
+            to: formatLabelWithProvider(`${toModel} ${toReasoning}`, toProvider),
+          });
+        }
+      }
+      previous = cur;
+    }
+    return { result, previous };
+  };
+  // Tracked so it is current whenever the version-driven tail pass reads it.
+  const historyModelChangeSegments = chainHistorySegments<ReturnType<typeof getModelChangeSegment>>(
+    (segment, previous) =>
+      createMemo(() =>
+        getModelChangeSegment(
+          segment.entries(),
+          new Map(state.providers.map((p) => [p.id, p])),
+          previous?.().previous
+        )
+      )
+  );
+  const historyModelChanges = createMemo(() => ({
+    result: historyModelChangeSegments.reduce(
+      (merged, segment) => mergeSegmentMaps(merged, segment().result),
+      new Map<string, ModelChangeInfo>()
+    ),
+    previous: historyModelChangeSegments.at(-1)!().previous,
+  }));
   const modelChangeMap = createMemo(() => {
     messageInfoVersion();
     const providerMap = new Map(state.providers.map((p) => [p.id, p]));
-    const messagesSnapshot = messages();
+    const tail = tailMessages();
     return untrack(() => {
-      const result = new Map<string, ModelChangeInfo>();
-      let previous: AssistantMessage | undefined;
-      for (const msg of messagesSnapshot) {
-        if (!isAssistantMessage(msg.info)) continue;
-        // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
-        const cur = msg.info as AssistantMessage;
-        if (cur.mode === 'subagent') continue;
-        if (msg.parts.some((part) => part.type === 'compaction')) continue;
-        if (previous) {
-          const previousProvider = providerMap.get(previous.providerID);
-          const currentProvider = providerMap.get(cur.providerID);
-          const fromProvider = previousProvider?.name || previous.providerID;
-          const toProvider = currentProvider?.name || cur.providerID;
-          const fromModel = formatModelName(
-            previousProvider?.models[previous.modelID]?.name || previous.modelID
-          );
-          const toModel = formatModelName(
-            currentProvider?.models[cur.modelID]?.name || cur.modelID
-          );
-          const fromReasoning = previous.variant
-            ? formatVariantLabel(previous.variant)
-            : modelSupportsReasoning(previous.providerID, previous.modelID, state.providers)
-              ? 'Default'
-              : 'No thinking';
-          const toReasoning = cur.variant
-            ? formatVariantLabel(cur.variant)
-            : modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)
-              ? 'Default'
-              : 'No thinking';
-          const providerChanged = previous.providerID !== cur.providerID;
-          const modelChanged = previous.modelID !== cur.modelID;
-          const reasoningChanged = fromReasoning !== toReasoning;
-
-          if (providerChanged || modelChanged || reasoningChanged) {
-            const normalFrom = providerChanged
-              ? formatLabelWithProvider(`${fromModel} ${fromReasoning}`, fromProvider)
-              : `${fromModel} ${fromReasoning}`;
-            const normalTo = providerChanged
-              ? formatLabelWithProvider(`${toModel} ${toReasoning}`, toProvider)
-              : modelChanged
-                ? `${toModel} ${toReasoning}`
-                : toReasoning;
-            const narrowFrom = providerChanged
-              ? formatLabelWithProvider(fromModel, fromProvider)
-              : modelChanged
-                ? fromModel
-                : fromReasoning;
-            const narrowTo = providerChanged
-              ? formatLabelWithProvider(
-                  `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`,
-                  toProvider
-                )
-              : modelChanged
-                ? `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`
-                : toReasoning;
-            result.set(msg.info.id, {
-              normalFrom,
-              normalTo,
-              narrowFrom,
-              narrowTo,
-              from: formatLabelWithProvider(`${fromModel} ${fromReasoning}`, fromProvider),
-              to: formatLabelWithProvider(`${toModel} ${toReasoning}`, toProvider),
-            });
-          }
-        }
-        previous = cur;
-      }
-      return result;
+      const history = historyModelChanges();
+      return mergeSegmentMaps(
+        history.result,
+        getModelChangeSegment(tail, providerMap, history.previous).result
+      );
     });
   });
 
-  const previousTrailingFileEventSignatureMap = createMemo(() => {
-    messageStructureVersion();
-    const visibleMessages = messages();
-    return untrack(() => {
-      const result = new Map<string, string | null>();
-      let previousTrailingSignature: string | null = null;
+  const getTrailingFileEventSignatureSegment = (
+    entries: readonly MessageEntry[],
+    initialSignature: string | null
+  ) => {
+    const result = new Map<string, string | null>();
+    let previousTrailingSignature = initialSignature;
 
-      for (const msg of visibleMessages) {
-        result.set(msg.info.id, previousTrailingSignature);
+    for (const msg of entries) {
+      result.set(msg.info.id, previousTrailingSignature);
 
-        if (!isAssistantMessage(msg.info)) {
-          previousTrailingSignature = null;
-          continue;
-        }
-
-        previousTrailingSignature = getTrailingFileEventSignature(msg.parts);
+      if (!isAssistantMessage(msg.info)) {
+        previousTrailingSignature = null;
+        continue;
       }
 
-      return result;
+      previousTrailingSignature = getTrailingFileEventSignature(msg.parts);
+    }
+
+    return { result, trailingSignature: previousTrailingSignature };
+  };
+  // Tracked so it is current whenever the version-driven tail pass reads it.
+  const historyTrailingFileEventSignatureSegments = chainHistorySegments<
+    ReturnType<typeof getTrailingFileEventSignatureSegment>
+  >((segment, previous) =>
+    createMemo(() =>
+      getTrailingFileEventSignatureSegment(
+        segment.entries(),
+        previous?.().trailingSignature ?? null
+      )
+    )
+  );
+  const historyTrailingFileEventSignatures = createMemo(() => ({
+    result: historyTrailingFileEventSignatureSegments.reduce(
+      (merged, segment) => mergeSegmentMaps(merged, segment().result),
+      new Map<string, string | null>()
+    ),
+    trailingSignature: historyTrailingFileEventSignatureSegments.at(-1)!().trailingSignature,
+  }));
+  const previousTrailingFileEventSignatureMap = createMemo(() => {
+    messageStructureVersion();
+    const tail = tailMessages();
+    return untrack(() => {
+      const history = historyTrailingFileEventSignatures();
+      return mergeSegmentMaps(
+        history.result,
+        getTrailingFileEventSignatureSegment(tail, history.trailingSignature).result
+      );
     });
   });
   const trailingAssistantTurn = createMemo(() => {
@@ -7145,8 +7449,19 @@ export function MessageList() {
   const inlineThinkingMessageIds = createMemo<ReadonlySet<string>>(
     () => inlineThinkingTurn().messageIds
   );
+  const historyThinkingLayoutSignatures = mergeHistorySegmentMaps(
+    mapHistorySegments((segment) => {
+      const expandedMessageIds = segment.restrictMessages(expandedThinkingMessageIds);
+      return createMemo(() =>
+        getThinkingLayoutSignatures(segment.entries(), showThinking(), expandedMessageIds())
+      );
+    })
+  );
   const thinkingLayoutSignatures = createMemo(() =>
-    getThinkingLayoutSignatures(messages(), showThinking(), expandedThinkingMessageIds())
+    mergeSegmentMaps(
+      historyThinkingLayoutSignatures(),
+      getThinkingLayoutSignatures(tailMessages(), showThinking(), expandedThinkingMessageIds())
+    )
   );
   let previousThinkingLayoutSignatures = new Map<string, string>();
   createEffect(() => {
@@ -7174,35 +7489,80 @@ export function MessageList() {
 
     previousThinkingLayoutSignatures = new Map(current);
   });
-  const assistantRetryStates = createMemo(() => {
+  // Retry states scan newest to oldest: the tail scan seeds the cached history scan.
+  const tailAssistantRetryScan = createMemo(() => {
     messageInfoVersion();
-    return getAssistantRetryStates(messages(), state.sessionStatus);
+    return scanAssistantRetryStates(tailMessages(), state.sessionStatus);
   });
-  const errorDetailsLayoutSignatures = createMemo(() => {
+  const retainRetryScanState = (scanState: Accessor<AssistantRetryScanState>) =>
+    createMemo<AssistantRetryScanState>(
+      scanState,
+      { successfulProviders: new Set(), newerUserSessions: new Set(), continuations: new Map() },
+      { equals: sameAssistantRetryScanState }
+    );
+  // Newest segment first: each older segment continues from the state its newer neighbor left.
+  const historyAssistantRetryScans: Accessor<ReturnType<typeof scanAssistantRetryStates>>[] = [];
+  let newerRetryScanState = retainRetryScanState(() => tailAssistantRetryScan().state);
+  for (let index = historySegments.length - 1; index >= 0; index -= 1) {
+    const segment = historySegments[index]!;
+    const seed = newerRetryScanState;
+    const scan = createMemo(() =>
+      scanAssistantRetryStates(segment.entries(), state.sessionStatus, seed())
+    );
+    historyAssistantRetryScans[index] = scan;
+    newerRetryScanState = retainRetryScanState(() => scan().state);
+  }
+  const historyAssistantRetryStates = createMemo(() =>
+    historyAssistantRetryScans.reduceRight<Map<string, AssistantRetryState>>(
+      (merged, scan) => mergeSegmentMaps(merged, scan().states),
+      new Map()
+    )
+  );
+  const assistantRetryStates = createMemo(() =>
+    mergeSegmentMaps(tailAssistantRetryScan().states, historyAssistantRetryStates())
+  );
+  const getErrorDetailsLayoutSegment = (
+    entries: readonly MessageEntry[],
+    retries: ReadonlyMap<string, string>
+  ) => {
     trackMessageBlockExpansionState();
     const expandedMessageIds = new Set(
-      messages().flatMap((message) =>
+      entries.flatMap((message) =>
         getMessageBlockExpanded(getAssistantErrorDetailsExpansionKey(message.info.id))
           ? [message.info.id]
           : []
       )
     );
-    const signatures = getErrorDetailsLayoutSignatures(messages(), expandedMessageIds);
-    const retries = assistantRetryStates();
+    const signatures = getErrorDetailsLayoutSignatures(entries, expandedMessageIds);
     for (const [id, signature] of signatures) {
       signatures.set(id, `${signature}:${retries.get(id) ?? 'error'}`);
     }
     return signatures;
-  });
+  };
+  const historyErrorDetailsLayoutSignatures = mergeHistorySegmentMaps(
+    mapHistorySegments((segment, index) =>
+      createMemo(() =>
+        getErrorDetailsLayoutSegment(segment.entries(), historyAssistantRetryScans[index]!().states)
+      )
+    )
+  );
+  const errorDetailsLayoutSignatures = createMemo(() =>
+    mergeSegmentMaps(
+      historyErrorDetailsLayoutSignatures(),
+      getErrorDetailsLayoutSegment(tailMessages(), tailAssistantRetryScan().states)
+    )
+  );
   let previousErrorDetailsLayoutSignatures = new Map<string, string>();
   createEffect(() => {
     const current = errorDetailsLayoutSignatures();
     scheduleChangedLayoutRowMeasurements(previousErrorDetailsLayoutSignatures, current);
     previousErrorDetailsLayoutSignatures = new Map(current);
   });
-  const compactActivityMessages = createMemo(() => {
-    const previousSignatures = previousTrailingFileEventSignatureMap();
-    return messages().map((message) =>
+  const projectCompactActivityMessages = (
+    entries: readonly MessageEntry[],
+    previousSignatures: ReadonlyMap<string, string | null>
+  ) =>
+    entries.map((message) =>
       isAssistantMessage(message.info)
         ? {
             info: message.info,
@@ -7215,7 +7575,31 @@ export function MessageList() {
           }
         : projectAutomaticActionMessage(message)
     );
+  const historyCompactActivityMessages = mapHistorySegments((segment) => {
+    const trailingFileEventSignatures = createMemo<ReadonlyMap<string, string | null>>(
+      () => {
+        const signatures = previousTrailingFileEventSignatureMap();
+        const segmentIds = segment.messageIds();
+        const restricted = new Map<string, string | null>();
+        for (const [messageId, signature] of signatures) {
+          if (segmentIds.has(messageId)) restricted.set(messageId, signature);
+        }
+        return restricted;
+      },
+      new Map(),
+      { equals: sameValues }
+    );
+    return createMemo(() =>
+      projectCompactActivityMessages(segment.entries(), trailingFileEventSignatures())
+    );
   });
+  const tailCompactActivityMessages = createMemo(() =>
+    projectCompactActivityMessages(tailMessages(), previousTrailingFileEventSignatureMap())
+  );
+  const compactActivityMessages = createMemo(() => [
+    ...historyCompactActivityMessages.flatMap((segmentMessages) => segmentMessages()),
+    ...tailCompactActivityMessages(),
+  ]);
   const trailingActivityTurnState = createMemo<{
     sessionId: string | null;
     userMessageId: string | null;
@@ -7252,14 +7636,55 @@ export function MessageList() {
     if (exitingActivityPartKeys().size === 0) preserveActivityExitReserve();
   });
 
-  const canCompactActivityPart = (part: AssistantActivityPart) =>
-    shouldShowAssistantPartInline(part) &&
-    shouldCompactAssistantActivityPart(part, {
-      keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
-      keepReasoningInline: inlineThinkingMessageIds().has(part.messageID),
-    }) &&
-    (part.type !== 'tool' ||
-      (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part)));
+  const createCanCompactActivityPart =
+    (
+      keepEditInlineMessageIds: Accessor<ReadonlySet<string>>,
+      keepReasoningInlineMessageIds: Accessor<ReadonlySet<string>>
+    ) =>
+    (part: AssistantActivityPart) =>
+      shouldShowAssistantPartInline(part) &&
+      shouldCompactAssistantActivityPart(part, {
+        keepEditInline: keepEditInlineMessageIds().has(part.messageID),
+        keepReasoningInline: keepReasoningInlineMessageIds().has(part.messageID),
+      }) &&
+      (part.type !== 'tool' ||
+        (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part)));
+  const canCompactActivityPart = createCanCompactActivityPart(
+    keepTrailingTurnEditMessageIds,
+    inlineThinkingMessageIds
+  );
+  const historySegmentActivity = mapHistorySegments((segment, index) => ({
+    ...historySegmentPresentation[index]!,
+    activeMessageIds: segment.restrictMessages(activeActivityMessageIds),
+    canCompact: createCanCompactActivityPart(
+      segment.restrictMessages(keepTrailingTurnEditMessageIds),
+      segment.restrictMessages(inlineThinkingMessageIds)
+    ),
+  }));
+  const historyMessageRenderGeometrySignatures = mergeHistorySegmentMaps(
+    mapHistorySegments((segment, index) => {
+      const lastAssistantId = createMemo(() => {
+        const messageId = lastAssistantID();
+        return messageId !== null && segment.messageIds().has(messageId) ? messageId : null;
+      });
+      return createMemo(() => {
+        const context = {
+          streaming: historySegmentActivity[index]!.streaming(),
+          canCompact: historySegmentActivity[index]!.canCompact,
+          isDiffEligible: (message: MessageEntry) =>
+            getAssistantDiffRequest(message.info, message.info.id === lastAssistantId()) !== null,
+        };
+        return new Map(
+          segment
+            .entries()
+            .map((message) => [
+              message.info.id,
+              getMessageEntryRenderGeometrySignature(message, context),
+            ])
+        );
+      });
+    })
+  );
 
   const presentationMessages = createMemo(() => {
     const ids = trailingAssistantTurn()?.assistantMessageIds;
@@ -7390,67 +7815,175 @@ export function MessageList() {
   });
   presentationSourceReader.read = () => presentationSource();
   createComputed(() => presentationSource());
-  const assistantActivityGroupMap = createMemo<Map<string, AssistantActivityGroupInfo[]>>(
-    (previous) => {
-      trackMessageBlockExpansionState();
-      const activeMessageIds = activeActivityMessageIds();
-      const activityMessages = compactActivityMessages();
-      const streaming = streamingLayoutProjection();
-      const isBoundaryPart = (part: Part) =>
-        part.type === 'text'
-          ? hasVisibleProjectedText(part, streaming)
-          : shouldShowAssistantPartInline(part);
-      const isNormallyIncluded = (part: AssistantActivityPart) =>
-        canCompactActivityPart(part) &&
-        !presentation.hiddenParts().has(getPresentationPartKey(part)) &&
-        (!isAssistantActivityPartRunning(part) ||
-          !activeMessageIds.has(part.messageID) ||
-          visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part)));
-      const ownerIsTransitioning = (group: AssistantActivityGroupInfo) => {
-        const ownerKey = `${group.ownerMessageId}\u0000${group.ownerPartId}`;
-        return retainedActivityPartKeys().has(ownerKey) || exitingActivityPartKeys().has(ownerKey);
-      };
-      return preserveAssistantActivityGroupKeys(
-        getAssistantActivityGroupMap(activityMessages, isNormallyIncluded, isBoundaryPart),
-        previous,
-        { pinPreviousOwner: ownerIsTransitioning }
-      );
-    },
-    new Map()
-  );
-  createComputed<ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>>((previous) => {
-    const current = assistantActivityGroupMap();
-    const currentGroups = new Set([...current.values()].flat());
-    const currentKeys = new Set([...currentGroups].map(({ key }) => key));
-    const currentPartKeys = new Set(
-      [...currentGroups].flatMap((group) => group.parts.map(getAssistantActivityPartKey))
-    );
-    const disappearedKeys = new Set<string>();
-    for (const group of new Set([...previous.values()].flat())) {
-      if (
-        !currentKeys.has(group.key) &&
-        group.parts.every((part) => currentPartKeys.has(getAssistantActivityPartKey(part)))
-      ) {
-        disappearedKeys.add(group.key);
-      }
+  type ActivitySegmentState = {
+    activeMessageIds: Accessor<ReadonlySet<string>>;
+    canCompact: (part: AssistantActivityPart) => boolean;
+    hiddenParts: Accessor<ReadonlySet<string>>;
+    visibleActive: Accessor<ReadonlySet<string>>;
+    retained: Accessor<ReadonlySet<string>>;
+    exiting: Accessor<ReadonlySet<string>>;
+    streaming: Accessor<StreamingLayoutProjection>;
+  };
+  const tailActivitySegmentState: ActivitySegmentState = {
+    activeMessageIds: activeActivityMessageIds,
+    canCompact: canCompactActivityPart,
+    hiddenParts: () => presentation.hiddenParts(),
+    visibleActive: visibleActiveActivityPartKeys,
+    retained: retainedActivityPartKeys,
+    exiting: exitingActivityPartKeys,
+    streaming: streamingLayoutProjection,
+  };
+  // Both segments preserve keys against the latest combined map, as one full pass would.
+  let previousAssistantActivityGroupMap: ReadonlyMap<
+    string,
+    readonly AssistantActivityGroupInfo[]
+  > = new Map();
+  const getAssistantActivityGroupSegment = (
+    activityMessages: readonly MessageEntry[],
+    segment: ActivitySegmentState,
+    claimedKeys?: ReadonlySet<string>
+  ) => {
+    trackMessageBlockExpansionState();
+    const activeMessageIds = segment.activeMessageIds();
+    const streaming = segment.streaming();
+    const isBoundaryPart = (part: Part) =>
+      part.type === 'text'
+        ? hasVisibleProjectedText(part, streaming)
+        : shouldShowAssistantPartInline(part);
+    const isNormallyIncluded = (part: AssistantActivityPart) =>
+      segment.canCompact(part) &&
+      !segment.hiddenParts().has(getPresentationPartKey(part)) &&
+      (!isAssistantActivityPartRunning(part) ||
+        !activeMessageIds.has(part.messageID) ||
+        segment.visibleActive().has(getAssistantActivityPartKey(part)));
+    const ownerIsTransitioning = (group: AssistantActivityGroupInfo) => {
+      const ownerKey = `${group.ownerMessageId}\u0000${group.ownerPartId}`;
+      return segment.retained().has(ownerKey) || segment.exiting().has(ownerKey);
+    };
+    // Every group is indexed under each message it spans, so this segment's own entries hold
+    // every previous group that can match one of its parts.
+    const previous = new Map<string, readonly AssistantActivityGroupInfo[]>();
+    for (const message of activityMessages) {
+      const groups = previousAssistantActivityGroupMap.get(message.info.id);
+      if (groups) previous.set(message.info.id, groups);
     }
-    reserveCollapsedActivityGroupSpace(disappearedKeys);
+    return preserveAssistantActivityGroupKeys(
+      getAssistantActivityGroupMap(activityMessages, isNormallyIncluded, isBoundaryPart),
+      previous,
+      { pinPreviousOwner: ownerIsTransitioning, claimedKeys }
+    );
+  };
+  // Each segment treats keys claimed by earlier groups as taken, as one full pass would.
+  const historyAssistantActivityGroupSegments: Accessor<
+    Map<string, AssistantActivityGroupInfo[]>
+  >[] = [];
+  let historyActivityGroupKeys: Accessor<ReadonlySet<string>> = () => new Set<string>();
+  for (const index of historySegments.keys()) {
+    const claimedKeys = historyActivityGroupKeys;
+    const groups = createMemo(() =>
+      getAssistantActivityGroupSegment(
+        historyCompactActivityMessages[index]!(),
+        historySegmentActivity[index]!,
+        claimedKeys()
+      )
+    );
+    historyAssistantActivityGroupSegments.push(groups);
+    historyActivityGroupKeys = createMemo<ReadonlySet<string>>(
+      () =>
+        new Set([
+          ...claimedKeys(),
+          ...[...groups().values()].flatMap((segmentGroups) => segmentGroups.map(({ key }) => key)),
+        ]),
+      new Set(),
+      { equals: sameKeys }
+    );
+  }
+  const historyAssistantActivityGroupMap = mergeHistorySegmentMaps(
+    historyAssistantActivityGroupSegments
+  );
+  const tailAssistantActivityGroupMap = createMemo(() =>
+    getAssistantActivityGroupSegment(
+      tailCompactActivityMessages(),
+      tailActivitySegmentState,
+      historyActivityGroupKeys()
+    )
+  );
+  const assistantActivityGroupMap = createMemo(() => {
+    const current = mergeSegmentMaps(
+      historyAssistantActivityGroupMap(),
+      tailAssistantActivityGroupMap()
+    );
+    previousAssistantActivityGroupMap = current;
     return current;
-  }, new Map());
-  const compactActivityDisclosureLayoutSignatures = createMemo(() => {
+  });
+  type ActivityGroupMaps = Record<
+    'history' | 'tail' | 'combined',
+    ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>
+  >;
+  createComputed<ActivityGroupMaps>(
+    (previous) => {
+      const current = assistantActivityGroupMap();
+      const history = historyAssistantActivityGroupMap();
+      const tail = tailAssistantActivityGroupMap();
+      // Unchanged history keeps its group objects and keys, so only tail groups can disappear.
+      const historyUnchanged = history === previous.history;
+      const currentGroups = new Set([...(historyUnchanged ? tail : current).values()].flat());
+      const currentKeys = new Set([...currentGroups].map(({ key }) => key));
+      if (historyUnchanged) for (const key of historyActivityGroupKeys()) currentKeys.add(key);
+      const currentPartKeys = new Set(
+        [...currentGroups].flatMap((group) => group.parts.map(getAssistantActivityPartKey))
+      );
+      const disappearedKeys = new Set<string>();
+      const previousGroups = historyUnchanged ? previous.tail : previous.combined;
+      for (const group of new Set([...previousGroups.values()].flat())) {
+        if (
+          !currentKeys.has(group.key) &&
+          group.parts.every((part) => currentPartKeys.has(getAssistantActivityPartKey(part)))
+        ) {
+          disappearedKeys.add(group.key);
+        }
+      }
+      reserveCollapsedActivityGroupSpace(disappearedKeys);
+      return { history, tail, combined: current };
+    },
+    { history: new Map(), tail: new Map(), combined: new Map() }
+  );
+  const getCompactActivityDisclosureLayoutSegment = (
+    groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
+    segment: ActivitySegmentState
+  ) => {
     trackMessageBlockExpansionState();
     return getCompactActivityDisclosureLayoutSignatures(
-      assistantActivityGroupMap(),
+      groups,
       (key) => getMessageBlockExpanded(key) ?? false,
       (part) => {
         const key = getAssistantActivityPartKey(part);
-        if (renderedVisibleActiveActivityPartKeys().has(key)) return 'active';
-        if (renderedRetainedActivityPartKeys().has(key)) return 'retained';
-        if (renderedExitingActivityPartKeys().has(key)) return 'exiting';
+        if (segment.visibleActive().has(key)) return 'active';
+        if (segment.retained().has(key)) return 'retained';
+        if (segment.exiting().has(key)) return 'exiting';
         return 'grouped';
       }
     );
-  });
+  };
+  const historyCompactActivityDisclosureLayoutSignatures = mergeHistorySegmentMaps(
+    mapHistorySegments((_segment, index) =>
+      createMemo(() =>
+        getCompactActivityDisclosureLayoutSegment(
+          historyAssistantActivityGroupSegments[index]!(),
+          historySegmentActivity[index]!
+        )
+      )
+    )
+  );
+  const compactActivityDisclosureLayoutSignatures = createMemo(() =>
+    mergeSegmentMaps(
+      historyCompactActivityDisclosureLayoutSignatures(),
+      getCompactActivityDisclosureLayoutSegment(
+        tailAssistantActivityGroupMap(),
+        tailActivitySegmentState
+      )
+    )
+  );
   let previousCompactActivityDisclosureLayoutSignatures = new Map<string, string>();
 
   createEffect(() => {
@@ -7475,10 +8008,8 @@ export function MessageList() {
     return !getPrefetchedSessionHistory(sessionId).some((entry) => entry.info.role === 'user');
   });
 
-  const assistantDialogSummaryMap = createMemo(() => {
-    messageStructureVersion();
-    const suppressTrailingSummary = trailingSummaryMessageId() === null;
-    const sessions = state.sessions.map((session) => ({
+  const projectDialogSessions = () =>
+    state.sessions.map((session) => ({
       id: session.id,
       parentID: session.parentID,
       title: session.title,
@@ -7488,19 +8019,138 @@ export function MessageList() {
         ? { input: session.tokens.input, output: session.tokens.output }
         : undefined,
     }));
+  // Settled dialogs are summarized per history segment and reused until something they read
+  // changes: their messages, subagent runs, pauses, or the projected sessions.
+  const dialogSessions = createMemo(projectDialogSessions, [], { equals: sameDialogSessions });
+  const dialogChildRuns = createMemo<Map<string, Array<MessageEntry<AssistantMessage>>>>(
+    () => {
+      messageStructureVersion();
+      const dialogMessages = assistantDialogMessages();
+      return untrack(() => getChildRunsByParentId(dialogMessages));
+    },
+    new Map(),
+    { equals: sameChildRuns }
+  );
+  const dialogPauses = createMemo(
+    () =>
+      readSessionPauses(
+        state.sessions.find((session) => session.id === state.activeSessionId)?.metadata
+      ),
+    [],
+    {
+      equals: (previous, next) =>
+        previous.length === next.length &&
+        previous.every(
+          (pause, index) =>
+            pause.messageId === next[index]!.messageId && pause.pausedAt === next[index]!.pausedAt
+        ),
+    }
+  );
+  const dialogFlushes = (entry: MessageEntry) =>
+    flushesAssistantDialog(entry, state.activeSessionId ?? undefined);
+  const dialogHistoryEnd = createMemo(() => {
+    const dialogMessages = assistantDialogMessages();
+    for (let index = dialogMessages.length - 1; index > 0; index -= 1) {
+      if (dialogFlushes(dialogMessages[index]!)) return index;
+    }
+    return 0;
+  });
+  const dialogFrozenBoundary = createMemo<FrozenSegmentBoundary>(
+    (previous) =>
+      getFrozenSegmentBoundary(
+        assistantDialogMessages(),
+        dialogHistoryEnd(),
+        previous,
+        dialogFlushes
+      ),
+    { entry: null, index: 0 },
+    { equals: sameFrozenSegmentBoundary }
+  );
+  const dialogCreatedAt = (index: Accessor<number>) =>
+    createMemo(() => assistantDialogMessages()[index()]?.info.time.created);
+  const dialogFrozenNextCreated = dialogCreatedAt(() => dialogFrozenBoundary().index);
+  const dialogHistoryNextCreated = dialogCreatedAt(dialogHistoryEnd);
+  const dialogFrozenPrefix = createMemo(
+    () => assistantDialogMessages().slice(0, dialogFrozenBoundary().index),
+    [],
+    { equals: sameEntries }
+  );
+  const dialogHistoryPrefix = createMemo(
+    () => assistantDialogMessages().slice(0, dialogHistoryEnd()),
+    [],
+    { equals: sameEntries }
+  );
+  // First occurrences, matching the summary's own lookup over the full transcript.
+  const firstEntriesById = (
+    entries: readonly MessageEntry[],
+    base = new Map<string, MessageEntry>()
+  ) => {
+    const entriesById = new Map(base);
+    for (const entry of entries) {
+      if (!entriesById.has(entry.info.id)) entriesById.set(entry.info.id, entry);
+    }
+    return entriesById;
+  };
+  const dialogFrozenEntriesById = createMemo(() => firstEntriesById(dialogFrozenPrefix()));
+  const dialogHistoryEntriesById = createMemo(() =>
+    firstEntriesById(
+      dialogHistoryPrefix().slice(dialogFrozenBoundary().index),
+      dialogFrozenEntriesById()
+    )
+  );
+  const settledDialogOptions = () => ({
+    sessions: dialogSessions(),
+    primarySessionId: state.activeSessionId ?? undefined,
+    collectLeadingSummaryStats: collectingLeadingDialogStats(),
+    pauses: dialogPauses(),
+    childRunsByParentId: dialogChildRuns(),
+  });
+  const frozenDialogSummaries = createMemo(() => {
+    const end = dialogFrozenBoundary().index;
+    const nextUserRequestCreated = dialogFrozenNextCreated();
+    if (end === 0 || nextUserRequestCreated === undefined) {
+      return new Map<string, AssistantDialogSummaryInfo>();
+    }
+    return getAssistantDialogSummaryMap(dialogFrozenPrefix(), undefined, {
+      ...settledDialogOptions(),
+      range: { start: 0, end, nextUserRequestCreated },
+    });
+  });
+  const recentDialogSummaries = createMemo(() => {
+    const start = dialogFrozenBoundary().index;
+    const end = dialogHistoryEnd();
+    const nextUserRequestCreated = dialogHistoryNextCreated();
+    if (end <= start || nextUserRequestCreated === undefined) {
+      return new Map<string, AssistantDialogSummaryInfo>();
+    }
+    return getAssistantDialogSummaryMap(dialogHistoryPrefix(), undefined, {
+      ...settledDialogOptions(),
+      entriesById: dialogFrozenEntriesById(),
+      range: { start, end, nextUserRequestCreated },
+    });
+  });
+  const assistantDialogSummaryMap = createMemo(() => {
+    messageStructureVersion();
+    const suppressTrailingSummary = trailingSummaryMessageId() === null;
+    const sessions = projectDialogSessions();
     const dialogMessages = assistantDialogMessages();
     const collectLeadingSummaryStats = collectingLeadingDialogStats();
     const pauses = readSessionPauses(
       state.sessions.find((session) => session.id === state.activeSessionId)?.metadata
     );
     return untrack(() =>
-      getAssistantDialogSummaryMap(dialogMessages, undefined, {
-        sessions,
-        primarySessionId: state.activeSessionId ?? undefined,
-        suppressTrailingSummary,
-        collectLeadingSummaryStats,
-        pauses,
-      })
+      mergeSegmentMaps(
+        mergeSegmentMaps(frozenDialogSummaries(), recentDialogSummaries()),
+        getAssistantDialogSummaryMap(dialogMessages, undefined, {
+          sessions,
+          primarySessionId: state.activeSessionId ?? undefined,
+          suppressTrailingSummary,
+          collectLeadingSummaryStats,
+          pauses,
+          entriesById: dialogHistoryEntriesById(),
+          range: { start: dialogHistoryEnd(), end: dialogMessages.length },
+        })
+      )
     );
   });
   const trailingAssistantDialogSummary = createMemo<{
@@ -7516,7 +8166,17 @@ export function MessageList() {
       ? { message, summary: previous.summary }
       : null;
   });
-  const sessionPauseMap = createMemo(() => getSessionPauseMap(state.sessions, messages()));
+  const historySessionProgressSegments = chainHistorySegments<SessionProgress>(
+    (segment, previous) =>
+      createMemo(() => collectSessionProgress(segment.entries(), segment.offset(), previous?.()))
+  );
+  const historySessionProgress = () => historySessionProgressSegments.at(-1)!();
+  const sessionPauseMap = createMemo(() =>
+    getSessionPauseMapFromProgress(
+      state.sessions,
+      collectSessionProgress(tailMessages(), historyMessages().length, historySessionProgress())
+    )
+  );
   const rowSessionPauseMap = createMemo(() => {
     const pauses = sessionPauseMap();
     if (editingMessage()) return pauses;
@@ -7546,24 +8206,47 @@ export function MessageList() {
     rowSummaries.delete(trailing.message.info.id);
     return rowSummaries;
   });
+  const getRenderEmptySegment = (
+    activityMessages: readonly MessageEntry[],
+    groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
+    segment: ActivitySegmentState
+  ) =>
+    getRenderEmptyMessageIds(
+      activityMessages,
+      groups,
+      (key) => getMessageBlockExpanded(key) ?? false,
+      {
+        delayed: segment.hiddenParts(),
+        visibleActive: segment.visibleActive(),
+        retained: segment.retained(),
+        exiting: segment.exiting(),
+      },
+      segment.streaming()
+    );
+  const historyRenderEmptyMessageIdSegments = mapHistorySegments((_segment, index) =>
+    createMemo(() => {
+      trackMessageBlockExpansionState();
+      return getRenderEmptySegment(
+        historyCompactActivityMessages[index]!(),
+        historyAssistantActivityGroupSegments[index]!(),
+        historySegmentActivity[index]!
+      );
+    })
+  );
+  const historyRenderEmptyMessageIds = () =>
+    historyRenderEmptyMessageIdSegments.flatMap((ids) => [...ids()]);
   createEffect(() => {
     messageStructureVersion();
     trackMessageBlockExpansionState();
     const previous = knownZeroHeightMessageIds();
-    const activityMessages = compactActivityMessages();
-    const delayedActivityPartKeys = presentation.hiddenParts();
-    const candidates = getRenderEmptyMessageIds(
-      activityMessages,
-      assistantActivityGroupMap(),
-      (key) => getMessageBlockExpanded(key) ?? false,
-      {
-        delayed: delayedActivityPartKeys,
-        visibleActive: renderedVisibleActiveActivityPartKeys(),
-        retained: renderedRetainedActivityPartKeys(),
-        exiting: renderedExitingActivityPartKeys(),
-      },
-      streamingLayoutProjection()
-    );
+    const candidates = new Set([
+      ...historyRenderEmptyMessageIds(),
+      ...getRenderEmptySegment(
+        tailCompactActivityMessages(),
+        tailAssistantActivityGroupMap(),
+        tailActivitySegmentState
+      ),
+    ]);
     const modelChanges = modelChangeMap();
     const dialogSummaries = rowAssistantDialogSummaryMap();
     const pauses = rowSessionPauseMap();
@@ -7602,11 +8285,20 @@ export function MessageList() {
     setKnownZeroHeightMessageIds(next);
     if (forcedContentChanged) publishMeasurementVersion();
   });
-  const messageBlockBoundaryMap = createMemo(() => {
+  const getMessageBlockBoundarySegment = (
+    activityMessages: readonly MessageEntry[],
+    groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
+    segment: ActivitySegmentState,
+    rowIds: {
+      renderEmpty: ReadonlySet<string>;
+      modelChanges: ReadonlySet<string>;
+      dialogSummaries: ReadonlySet<string>;
+    }
+  ) => {
     trackMessageBlockExpansionState();
     const waitingActivityPartKeys = new Set<string>();
     const trailingPermissionMessageIds = new Set<string>();
-    for (const message of compactActivityMessages()) {
+    for (const message of activityMessages) {
       if (!isAssistantMessage(message.info)) continue;
       for (const part of message.parts) {
         if (part.type !== 'tool') continue;
@@ -7618,26 +8310,86 @@ export function MessageList() {
         }
       }
     }
-    return getMessageBlockBoundaryMap(compactActivityMessages(), assistantActivityGroupMap(), {
-      delayedActivityPartKeys: presentation.hiddenParts(),
+    return getMessageBlockBoundaryMap(activityMessages, groups, {
+      delayedActivityPartKeys: segment.hiddenParts(),
       expandedActivityGroup: (key) => getMessageBlockExpanded(key) ?? false,
-      renderEmptyMessageIds: knownZeroHeightMessageIds(),
+      renderEmptyMessageIds: rowIds.renderEmpty,
       showThinking: showThinking(),
-      streaming: streamingLayoutProjection(),
-      visibleActiveActivityPartKeys: renderedVisibleActiveActivityPartKeys(),
-      retainedActivityPartKeys: renderedRetainedActivityPartKeys(),
+      streaming: segment.streaming(),
+      visibleActiveActivityPartKeys: segment.visibleActive(),
+      retainedActivityPartKeys: segment.retained(),
       trailingPermissionMessageIds,
-      exitingActivityPartKeys: renderedExitingActivityPartKeys(),
+      exitingActivityPartKeys: segment.exiting(),
       waitingActivityPartKeys,
-      modelChangeMessageIds: new Set(modelChangeMap().keys()),
-      dialogSummaryMessageIds: new Set(rowAssistantDialogSummaryMap().keys()),
+      modelChangeMessageIds: rowIds.modelChanges,
+      dialogSummaryMessageIds: rowIds.dialogSummaries,
     });
+  };
+  const historyMessageBlockBoundarySegments = mapHistorySegments((segment, index) => {
+    const renderEmpty = segment.restrictMessages(knownZeroHeightMessageIds);
+    const modelChanges = segment.restrictMessages(() => modelChangeMap().keys());
+    const dialogSummaries = segment.restrictMessages(() => rowAssistantDialogSummaryMap().keys());
+    return {
+      renderEmpty,
+      boundaries: createMemo(() =>
+        getMessageBlockBoundarySegment(
+          historyCompactActivityMessages[index]!(),
+          historyAssistantActivityGroupSegments[index]!(),
+          historySegmentActivity[index]!,
+          {
+            renderEmpty: renderEmpty(),
+            modelChanges: modelChanges(),
+            dialogSummaries: dialogSummaries(),
+          }
+        )
+      ),
+    };
+  });
+  const historyMessageBlockBoundaryMap = mergeHistorySegmentMaps(
+    historyMessageBlockBoundarySegments.map(({ boundaries }) => boundaries)
+  );
+  const messageBlockBoundaryMap = createMemo(() =>
+    mergeSegmentMaps(
+      historyMessageBlockBoundaryMap(),
+      getMessageBlockBoundarySegment(
+        tailCompactActivityMessages(),
+        tailAssistantActivityGroupMap(),
+        tailActivitySegmentState,
+        {
+          renderEmpty: knownZeroHeightMessageIds(),
+          modelChanges: new Set(modelChangeMap().keys()),
+          dialogSummaries: new Set(rowAssistantDialogSummaryMap().keys()),
+        }
+      )
+    )
+  );
+  const historyBorderedAdjacency = chainHistorySegments<
+    ReturnType<typeof getBorderedAdjacencyLayoutSegment>
+  >((segment, previous) => {
+    const index = historySegments.indexOf(segment);
+    const { boundaries, renderEmpty } = historyMessageBlockBoundarySegments[index]!;
+    return createMemo(() =>
+      getBorderedAdjacencyLayoutSegment(
+        segment.entries(),
+        boundaries(),
+        renderEmpty(),
+        previous?.().lastVisible ?? null
+      )
+    );
   });
   const borderedAdjacencyLayoutSignatures = createMemo(() => {
-    return getBorderedAdjacencyLayoutSignatures(
-      messages(),
-      messageBlockBoundaryMap(),
-      knownZeroHeightMessageIds()
+    const history = historyBorderedAdjacency.map((adjacency) => adjacency());
+    return [
+      ...history.map(({ signatures }) => signatures),
+      getBorderedAdjacencyLayoutSegment(
+        tailMessages(),
+        messageBlockBoundaryMap(),
+        knownZeroHeightMessageIds(),
+        history.at(-1)?.lastVisible ?? null
+      ).signatures,
+    ].reduce<Map<string, string>>(
+      (merged, signatures) => mergeSegmentMaps(merged, signatures),
+      new Map()
     );
   });
   let previousBorderedAdjacencyLayoutSignatures: Map<string, string> | null = null;

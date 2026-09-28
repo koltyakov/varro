@@ -894,6 +894,7 @@ describe('mount bridge helpers', () => {
         expandThinking: true,
         showChangedFiles: true,
         showTurnTimer: true,
+        debugShowQuotaWarning: true,
         enableProblemsContext: false,
         desktopSessionPaneSide: 'right',
         defaultPermissionMode: 'full',
@@ -916,6 +917,7 @@ describe('mount bridge helpers', () => {
     expect(setExpandThinking).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
     expect(setShowTurnTimer).toHaveBeenCalledWith(true);
+    expect(setState).toHaveBeenCalledWith('debugShowQuotaWarning', true);
     expect(setState).toHaveBeenCalledWith('enableProblemsContext', false);
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-size')).toBe('16px');
     expect(document.documentElement.style.getPropertyValue('--varro-chat-editor-font-size')).toBe(

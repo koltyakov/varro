@@ -14,6 +14,19 @@ const sessionSendAsync = vi.fn<SessionSendAsync>();
 Object.assign(clientMocks, { sessionSendAsync });
 
 describe('command helpers', () => {
+  it('accepts an asynchronous V2 command and reconciles its session without a response message', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('commands', [{ name: 'test', template: 'Run tests' }]);
+    clientMocks.sessionCommand.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    expect(await hookModule.runSlashCommandByName('test', '--watch')).toBe(true);
+    expect(stateModule.error()).toBeNull();
+    expect(clientMocks.sessionGet).toHaveBeenCalled();
+  });
+
   it('runs custom slash commands against the session command API', async () => {
     const { stateModule, hookModule } = await loadModules();
 

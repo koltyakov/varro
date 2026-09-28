@@ -112,34 +112,70 @@ export function getSessionTreeTokenBreakdown(
   sessionIds: readonly string[],
   rootSessionId: string
 ) {
-  const treeIds = new Set(sessionIds);
-  const messagesBySession = new Map<string, MessageInfoEntry[]>();
-  for (const entry of messages) {
-    const sessionId = entry.info.sessionID;
-    if (!treeIds.has(sessionId)) continue;
-    const entries = messagesBySession.get(sessionId);
-    if (entries) entries.push(entry);
-    else messagesBySession.set(sessionId, [entry]);
-  }
+  return getSessionTreeTokenBreakdownFromTotals(
+    accumulateSessionMessageTotals(messages, sessionIds),
+    sessions,
+    sessionIds,
+    rootSessionId
+  );
+}
 
+export type SessionMessageTotals = ReadonlyMap<string, { tokens: TokenUsage; cost: number }>;
+
+/**
+ * Sums assistant usage per tree session in transcript order. `earlier` holds the sums for the
+ * messages before `messages`, so a settled prefix can be summed once and continued exactly.
+ */
+export function accumulateSessionMessageTotals(
+  messages: readonly MessageInfoEntry[],
+  sessionIds: readonly string[],
+  earlier?: SessionMessageTotals
+): SessionMessageTotals {
+  const treeIds = new Set(sessionIds);
+  const totals = new Map<string, { tokens: TokenUsage; cost: number }>();
+  for (const [sessionId, total] of earlier ?? []) {
+    totals.set(sessionId, { tokens: { ...total.tokens }, cost: total.cost });
+  }
+  for (const entry of messages) {
+    const info = entry.info;
+    if (!treeIds.has(info.sessionID) || !isAssistantMessage(info)) continue;
+    let total = totals.get(info.sessionID);
+    if (!total) {
+      total = { tokens: emptyTokenUsage(), cost: 0 };
+      totals.set(info.sessionID, total);
+    }
+    total.tokens.total += getAssistantTotalTokens(info);
+    total.tokens.input += info.tokens.input || 0;
+    total.tokens.output += info.tokens.output || 0;
+    total.tokens.reasoning += info.tokens.reasoning || 0;
+    total.tokens.cacheRead += info.tokens.cache?.read || 0;
+    total.tokens.cacheWrite += info.tokens.cache?.write || 0;
+    total.cost += info.cost || 0;
+  }
+  return totals;
+}
+
+export function getSessionTreeTokenBreakdownFromTotals(
+  totals: SessionMessageTotals,
+  sessions: readonly Session[],
+  sessionIds: readonly string[],
+  rootSessionId: string
+) {
+  const treeIds = new Set(sessionIds);
   const sessionsById = new Map(sessions.map((session) => [session.id, session]));
   const session = emptyTokenUsage();
   const subagents = emptyTokenUsage();
   let subagentCount = 0;
   for (const sessionId of treeIds) {
-    const messageTokens = sumAssistantTokensFromMessageEntries(
-      messagesBySession.get(sessionId) || []
-    );
+    const messageTotal = totals.get(sessionId);
+    const messageTokens = messageTotal ? { ...messageTotal.tokens } : emptyTokenUsage();
     const snapshotTokens = getSessionTokenUsage(sessionsById.get(sessionId));
     const tokens =
       snapshotTokens && snapshotTokens.total >= messageTokens.total
         ? snapshotTokens
         : messageTokens;
-    const cost = getSessionCost(
-      messagesBySession.get(sessionId) || [],
-      sessionsById.get(sessionId)
-    );
-    if (cost) tokens.cost = cost;
+    const sessionCost = Math.max(messageTotal?.cost ?? 0, sessionsById.get(sessionId)?.cost || 0);
+    if (sessionCost > 0) tokens.cost = sessionCost;
     if (sessionId === rootSessionId) {
       addTokenUsage(session, tokens);
       continue;

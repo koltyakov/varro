@@ -422,11 +422,11 @@ describe('webview message validation', () => {
     expect(
       parseWebviewMessage({
         type: 'terminal/run',
-        payload: { command: 'opencode providers logout', title: 'Provider Logout' },
+        payload: { command: 'opencode auth logout', title: 'Provider Logout' },
       })
     ).toEqual({
       type: 'terminal/run',
-      payload: { command: 'opencode providers logout', title: 'Provider Logout' },
+      payload: { command: 'opencode auth logout', title: 'Provider Logout' },
     });
   });
 

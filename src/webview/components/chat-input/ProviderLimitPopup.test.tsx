@@ -70,6 +70,7 @@ describe('ProviderLimitPopup', () => {
       type: 'vscode/open-external',
       payload: { url: 'https://grok.com/?_s=usage' },
     });
+    expect(sendToExtension).toHaveBeenCalledTimes(1);
 
     toggle?.click();
     expect(container.querySelector('.provider-limit-reset-rows')).toBeNull();

@@ -684,14 +684,10 @@ export function setMessagesIncremental(
       'messages',
       produce((msgs) => {
         let changed = false;
-        let startIndex = 0;
-        while (startIndex < sharedPrefixLength && msgs[startIndex] === incoming[startIndex]) {
-          startIndex += 1;
-        }
-
-        for (let i = startIndex; i < incoming.length; i++) {
+        for (let i = 0; i < incoming.length; i++) {
           const next = incoming[i]!;
-          const currentEntry = msgs[i];
+          // Compare retained read-store identities, but still materialize pending streamed text.
+          const currentEntry = current[i];
           if (
             currentEntry &&
             areMessageEntriesEquivalent(currentEntry, next) &&
@@ -803,7 +799,8 @@ function reconcileMessageInsertion(
 
         for (let index = 0; index < incoming.length; index += 1) {
           if (index >= insertion.index && index < insertion.index + insertion.count) continue;
-          const currentEntry = msgs[index]!;
+          // History-window merges retain read-store proxies, not produce proxies.
+          const currentEntry = state.messages[index]!;
           const next = incoming[index]!;
           if (
             areMessageEntriesEquivalent(currentEntry, next) &&
@@ -1173,6 +1170,39 @@ function cloneValue<T>(value: T): T {
     ) as T;
   }
   return value;
+}
+
+export type MessageLookup = {
+  byId: ReadonlyMap<string, MessageEntry>;
+  bySessionId: ReadonlyMap<string, readonly MessageEntry[]>;
+};
+
+let cachedMessageLookupMessages: MessageEntry[] | null = null;
+let cachedMessageLookupVersion = -1;
+let cachedMessageLookup: MessageLookup = { byId: new Map(), bySessionId: new Map() };
+
+/**
+ * First occurrence of each message and each session's messages in transcript order, shared by
+ * components that would otherwise scan every message. Rebuilt on structural message changes.
+ */
+export function getMessageLookup(): MessageLookup {
+  const messages = state.messages;
+  const version = messageStructureVersion();
+  if (cachedMessageLookupMessages === messages && cachedMessageLookupVersion === version) {
+    return cachedMessageLookup;
+  }
+  const byId = new Map<string, MessageEntry>();
+  const bySessionId = new Map<string, MessageEntry[]>();
+  for (const entry of messages) {
+    if (!byId.has(entry.info.id)) byId.set(entry.info.id, entry);
+    const sessionMessages = bySessionId.get(entry.info.sessionID);
+    if (sessionMessages) sessionMessages.push(entry);
+    else bySessionId.set(entry.info.sessionID, [entry]);
+  }
+  cachedMessageLookupMessages = messages;
+  cachedMessageLookupVersion = version;
+  cachedMessageLookup = { byId, bySessionId };
+  return cachedMessageLookup;
 }
 
 export function getChildRunsByParentId(

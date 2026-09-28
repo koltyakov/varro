@@ -46,6 +46,89 @@ describe('v2 Windows location paths', () => {
 });
 
 describe('v2 prompt delivery', () => {
+  it.each(['', 'Review src/'])(
+    'activates a skill by ID and preserves arguments %j',
+    async (argumentsText) => {
+      const calls: Array<{ path: string; body: unknown }> = [];
+      const adapter = new OpenCodeV2Adapter(async (_method, path, body) => {
+        calls.push({ path, body });
+        if (path.startsWith('/api/command')) return { data: [] };
+        if (path.startsWith('/api/skill'))
+          return { data: [{ id: 'code-review', name: 'Code Review' }] };
+        return { data: { id: 'ses_skill' } };
+      });
+      await expect(
+        adapter.request('POST', '/session/ses_skill/command', {
+          command: 'code-review',
+          arguments: argumentsText,
+        })
+      ).resolves.toBeUndefined();
+      expect(calls).toContainEqual({
+        path: '/api/experimental/session/ses_skill/skill',
+        body: { id: 'code-review', resume: !argumentsText },
+      });
+      expect(calls.some((call) => call.path === '/api/session/ses_skill/command')).toBe(false);
+      const prompts = calls.filter((call) => call.path === '/api/session/ses_skill/prompt');
+      expect(prompts).toHaveLength(argumentsText ? 1 : 0);
+      if (argumentsText) expect(prompts[0]?.body).toMatchObject({ text: argumentsText });
+    }
+  );
+
+  it('returns no transcript message for an admitted slash command', async () => {
+    const wire = vi.fn(async (_method: string, path: string) => ({
+      data: path.startsWith('/api/command')
+        ? [{ name: 'inspect' }]
+        : { id: 'msg_pending', type: 'user', delivery: 'steer' },
+    }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('POST', '/session/ses_command/command', {
+        command: 'inspect',
+        arguments: 'src/',
+      })
+    ).resolves.toBeUndefined();
+    expect(wire).toHaveBeenLastCalledWith(
+      'POST',
+      '/api/session/ses_command/command',
+      expect.objectContaining({ name: 'inspect', text: 'src/' }),
+      expect.anything()
+    );
+  });
+
+  it('selects the requested model before compacting', async () => {
+    const wire = vi.fn(async () => ({}));
+    const adapter = new OpenCodeV2Adapter(wire);
+    expect(
+      await adapter.request('POST', '/session/ses_compact/summarize', {
+        providerID: 'fixture',
+        modelID: 'selected',
+      })
+    ).toBe(true);
+    expect(wire.mock.calls).toEqual([
+      [
+        'POST',
+        '/api/session/ses_compact/model',
+        { model: { providerID: 'fixture', id: 'selected' } },
+        expect.anything(),
+      ],
+      ['POST', '/api/session/ses_compact/compact', {}, expect.anything()],
+    ]);
+  });
+
+  it('does not compact with the previous model when selecting a model fails', async () => {
+    const wire = vi.fn(async () => {
+      throw new Error('Model unavailable');
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('POST', '/session/ses_compact/summarize', {
+        providerID: 'fixture',
+        modelID: 'missing',
+      })
+    ).rejects.toThrow('Model unavailable');
+    expect(wire).toHaveBeenCalledOnce();
+  });
+
   it.each([undefined, 0, 1000])('uses the provider request start timestamp %s', (started) => {
     expect(
       projectV2Event({
@@ -86,6 +169,7 @@ describe('v2 session system instructions', () => {
       const calls: Array<{ method: string; path: string; body: unknown }> = [];
       const adapter = new OpenCodeV2Adapter(async (method, path, body) => {
         calls.push({ method, path, body });
+        if (path.startsWith('/api/command')) return { data: [{ name: 'review' }] };
         return { data: { id: 'ses_workspace' } };
       });
       // The message route with a system prompt is reserved for one-shot generation.
@@ -114,10 +198,11 @@ describe('v2 session system instructions', () => {
         expect(calls.map(({ method, path }) => `${method} ${path}`)).toEqual([
           'GET /api/session/ses_workspace',
           'PUT /api/experimental/session/ses_workspace/instructions/entries/varro.system',
+          ...(action === 'command' ? ['GET /api/command'] : []),
           `POST /api/session/ses_workspace/${action === 'command' ? 'command' : 'prompt'}`,
         ]);
         expect(calls[1]?.body).toEqual({ value: system });
-        expect(calls[2]?.body).toMatchObject({ text: 'What folders are in the workspace?' });
+        expect(calls.at(-1)?.body).toMatchObject({ text: 'What folders are in the workspace?' });
       }
     }
   );
@@ -1027,11 +1112,44 @@ describe('OpenCode connection discovery', () => {
 });
 
 describe('v2 transcript and permission projection', () => {
+  it('lists skills by their invocable IDs and preserves command name precedence', async () => {
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+      if (path.startsWith('/api/config')) return [];
+      if (path.startsWith('/api/skill'))
+        return {
+          data: [
+            {
+              id: 'code-review',
+              name: 'Code Review',
+              description: 'Inspect code',
+              content: 'Review instructions',
+            },
+            { id: 'inspect', name: 'Shadowed skill', content: 'Ignore' },
+          ],
+        };
+      return { data: [{ name: 'inspect' }] };
+    });
+    expect(await adapter.request('GET', '/command', undefined)).toEqual([
+      { name: 'inspect', description: '', template: '', hints: [] },
+      {
+        name: 'code-review',
+        description: 'Inspect code',
+        template: 'Review instructions',
+        source: 'skill',
+        hints: [],
+      },
+    ]);
+  });
+
   it('normalizes description-less native commands for slash-command search', async () => {
     const adapter = new OpenCodeV2Adapter(async (_method, path) =>
       path.startsWith('/api/config')
         ? [{ type: 'document', info: { commands: { local: { template: 'Local prompt' } } } }]
-        : { data: [{ name: 'inspect' }, { name: 'explain', description: 'Explain this code' }] }
+        : {
+            data: path.startsWith('/api/skill')
+              ? []
+              : [{ name: 'inspect' }, { name: 'explain', description: 'Explain this code' }],
+          }
     );
     expect(await adapter.request('GET', '/command', undefined)).toEqual([
       { name: 'inspect', description: '', template: '', hints: [] },
@@ -1480,6 +1598,24 @@ describe('v2 transcript and permission projection', () => {
         projectV2Event({ id: 'evt_provider', type: 'provider.updated', data: {} })[0]
       )?.type
     ).toBe('catalog.updated');
+  });
+
+  it('reports a remotely resolved permission using the stale-request error contract', async () => {
+    const wire = vi.fn(async () => ({ data: [] }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    adapter.observe('permission.asked', { id: 'perm_one', sessionID: 'ses_child' });
+    adapter.observe('permission.replied', { requestID: 'perm_one', sessionID: 'ses_child' });
+
+    await expect(
+      adapter.request('POST', '/permission/perm_one/reply', { reply: 'always' })
+    ).rejects.toThrow('404 Permission request not found: perm_one');
+    expect(wire).toHaveBeenCalledTimes(1);
+    expect(wire).toHaveBeenCalledWith(
+      'GET',
+      '/api/permission/request',
+      undefined,
+      expect.anything()
+    );
   });
 
   it('does not discard requests when the server rejects the reply', async () => {

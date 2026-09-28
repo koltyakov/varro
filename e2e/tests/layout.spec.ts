@@ -1397,7 +1397,9 @@ test('keeps Explored spacing consistent beside user blocks', async ({ page }) =>
   await page.addStyleTag({ content: '.assistant-dialog-summary { display: none !important; }' });
   await page.getByRole('textbox', { name: 'Message composer' }).fill('Spacing user boundary.');
   await page.getByRole('button', { name: 'Send (Enter)' }).click();
-  const followingUser = page.getByText('Spacing user boundary.', { exact: true });
+  const followingUser = page
+    .getByText('Spacing user boundary.', { exact: true })
+    .and(page.locator('.user-message-text'));
   await expect(followingUser).toBeVisible();
   const followingUserRow = page.locator('.interactive-request').filter({ has: followingUser });
   await expect(followingUserRow).not.toHaveClass(/interactive-item-entering/);

@@ -310,6 +310,8 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (isBoolean(payload.expandThinking)) config.expandThinking = payload.expandThinking;
       if (isBoolean(payload.showChangedFiles)) config.showChangedFiles = payload.showChangedFiles;
       if (isBoolean(payload.showTurnTimer)) config.showTurnTimer = payload.showTurnTimer;
+      if (isBoolean(payload.debugShowQuotaWarning))
+        config.debugShowQuotaWarning = payload.debugShowQuotaWarning;
       if (isBoolean(payload.enableProblemsContext))
         config.enableProblemsContext = payload.enableProblemsContext;
       return { type, payload: config };

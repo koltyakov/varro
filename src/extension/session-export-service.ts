@@ -5,6 +5,7 @@ import { mkdtemp, open, readFile, rm, stat } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import * as vscode from 'vscode';
+import { asRecord } from '../shared/type-utils';
 import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import type { OpenCodeServer } from './server';
 import { assertSessionInCurrentWorkspace } from './session-workspace';
@@ -20,14 +21,14 @@ export class SessionExportService {
   constructor(
     private readonly server: Pick<
       OpenCodeServer,
-      'getWorkspaceCwd' | 'request' | 'resolveCommand'
+      'apiVersion' | 'getWorkspaceCwd' | 'request' | 'resolveCommand'
     > &
       Partial<Pick<OpenCodeServer, 'isAttachOnly'>>,
     private readonly exportTimeoutMs: number
   ) {}
 
   async exportSession(sessionId: string, directory?: string) {
-    if (this.server.isAttachOnly) {
+    if (this.server.isAttachOnly && this.server.apiVersion !== 2) {
       await vscode.window.showInformationMessage(
         'Session export through the local CLI is not supported in attach-only mode. Run opencode export on the server host or inside the OpenCode container.'
       );
@@ -40,12 +41,15 @@ export class SessionExportService {
         ? assertSessionInCurrentWorkspace(this.server, sessionId, workspacePath)
         : assertSessionInCurrentWorkspace(this.server, sessionId));
       if (!directory) this.assertWorkspaceUnchanged(workspaceIdentity);
-      const content = await this.readExportContentFromTempFile(
-        sessionId,
-        workspacePath,
-        workspaceIdentity,
-        !directory
-      );
+      const content =
+        this.server.apiVersion === 2
+          ? await this.readExportContentFromServer(sessionId, workspacePath)
+          : await this.readExportContentFromTempFile(
+              sessionId,
+              workspacePath,
+              workspaceIdentity,
+              !directory
+            );
       if (!directory) this.assertWorkspaceUnchanged(workspaceIdentity);
       assertValidJson(content, 'OpenCode export');
       const document = await vscode.workspace.openTextDocument({
@@ -59,6 +63,29 @@ export class SessionExportService {
       await vscode.window.showErrorMessage(`Failed to export session: ${message}`);
       throw err;
     }
+  }
+
+  private async readExportContentFromServer(
+    sessionId: string,
+    directory: string | undefined
+  ): Promise<string> {
+    const response = asRecord(
+      await this.server.request(
+        'GET',
+        `/api/experimental/session/${encodeURIComponent(sessionId)}/export`,
+        undefined,
+        {
+          directory,
+          maxResponseBytes: MAX_EXPORT_BYTES,
+          signal: AbortSignal.timeout(this.exportTimeoutMs),
+        }
+      )
+    );
+    const data = asRecord(response?.data);
+    if (!asRecord(data?.info) || !Array.isArray(data?.messages)) {
+      throw new Error('OpenCode export returned invalid session data');
+    }
+    return JSON.stringify(data, null, 2);
   }
 
   private async readExportContentFromTempFile(

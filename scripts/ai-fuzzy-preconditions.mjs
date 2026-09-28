@@ -9,7 +9,7 @@ import { AiOpenCodeClient } from './ai-opencode-client.mjs';
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_MODEL = 'openai/gpt-5.6-luna';
+const DEFAULT_MODEL = 'openai/gpt-6-luna-fast';
 const DEFAULT_TURNS = 110;
 
 export async function requireFixtureWorkspace(workspace) {

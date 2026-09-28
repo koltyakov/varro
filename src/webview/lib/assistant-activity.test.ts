@@ -389,6 +389,55 @@ describe('assistant activity summaries', () => {
     });
   });
 
+  it('matches a full pass when an earlier segment has already claimed a previous key', () => {
+    const first = completedTool('command-first', 'bash');
+    const second = { ...completedTool('command-second', 'bash'), messageID: 'assistant-2' };
+    const previousGroup = {
+      key: 'activity-shared',
+      ownerMessageId: 'assistant-1',
+      ownerPartId: first.id,
+      parts: [first, second],
+    };
+    const previous = new Map([
+      ['assistant-1', [previousGroup]],
+      ['assistant-2', [previousGroup]],
+    ]);
+    const firstGroup = {
+      key: 'activity-first',
+      ownerMessageId: 'assistant-1',
+      ownerPartId: first.id,
+      parts: [first],
+    };
+    const secondGroup = {
+      key: 'activity-second',
+      ownerMessageId: 'assistant-2',
+      ownerPartId: second.id,
+      parts: [second],
+    };
+
+    const full = preserveAssistantActivityGroupKeys(
+      new Map([
+        ['assistant-1', [firstGroup]],
+        ['assistant-2', [secondGroup]],
+      ]),
+      previous
+    );
+    const earlier = preserveAssistantActivityGroupKeys(
+      new Map([['assistant-1', [firstGroup]]]),
+      previous
+    );
+    const later = preserveAssistantActivityGroupKeys(
+      new Map([['assistant-2', [secondGroup]]]),
+      previous,
+      { claimedKeys: new Set(earlier.get('assistant-1')!.map(({ key }) => key)) }
+    );
+
+    expect(full.get('assistant-1')?.[0]?.key).toBe('activity-shared');
+    expect(full.get('assistant-2')?.[0]?.key).toBe('activity-second');
+    expect(earlier.get('assistant-1')).toEqual(full.get('assistant-1'));
+    expect(later.get('assistant-2')).toEqual(full.get('assistant-2'));
+  });
+
   it('keeps a pinned summary owner while parallel activity continues joining its group', () => {
     const earlier = completedTool('command-earlier', 'bash');
     const later = { ...completedTool('command-later', 'bash'), messageID: 'assistant-2' };

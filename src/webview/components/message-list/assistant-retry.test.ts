@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { AssistantMessage, MessageEntry } from '../../types';
+import type { AssistantMessage, MessageEntry, SessionStatus } from '../../types';
 import { assistantMessage, userMessage } from '../MessageList.test-utils';
-import { getAssistantRetryStates } from './assistant-retry';
+import { getAssistantRetryStates, scanAssistantRetryStates } from './assistant-retry';
 
 function response(id: string, overrides: Partial<AssistantMessage> = {}): MessageEntry {
   return {
@@ -21,6 +21,28 @@ const interrupted = response('interrupted', {
 });
 
 describe('assistant automatic retry presentation', () => {
+  it('matches one backward pass when a newer segment seeds an older one', () => {
+    const messages: MessageEntry[] = [
+      { info: userMessage('user-1'), parts: [] },
+      response('failed', { finish: 'error', error, parentID: 'user-1' }),
+      interrupted,
+      response('continuation'),
+      { info: userMessage('user-2'), parts: [] },
+      response('later', { parentID: 'user-2' }),
+      response('later-failed', { finish: 'error', error, retry: { attempt: 1, at: 5 } }),
+    ];
+    const statuses: Array<Record<string, SessionStatus>> = [{}, { 'session-1': { type: 'busy' } }];
+    for (const status of statuses) {
+      const whole = getAssistantRetryStates(messages, status);
+      expect(whole.size).toBeGreaterThan(0);
+      for (let split = 0; split <= messages.length; split += 1) {
+        const newer = scanAssistantRetryStates(messages.slice(split), status);
+        const older = scanAssistantRetryStates(messages.slice(0, split), status, newer.state);
+        expect(new Map([...newer.states, ...older.states])).toEqual(whole);
+      }
+    }
+  });
+
   it('waits for a completed provider response before reporting recovery', () => {
     const busy = { 'session-1': { type: 'busy' as const } };
     expect(getAssistantRetryStates([interrupted], busy).get('interrupted')).toBe('retrying');

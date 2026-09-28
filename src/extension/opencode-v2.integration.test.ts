@@ -12,6 +12,20 @@ import { parseHealthResponse } from '../shared/health';
 import { OpenCodeTransport } from './open-code-transport';
 import { basicAuthorization, OpenCodeStartupOutput } from './opencode-connection';
 import { tryGenerateOneShot } from './one-shot-generation';
+import { SessionExportService } from './session-export-service';
+
+const exportEditor = vi.hoisted(() => ({
+  openTextDocument: vi.fn(async (options: { content: string; language: string }) => options),
+  showTextDocument: vi.fn(),
+  showErrorMessage: vi.fn(),
+}));
+vi.mock('vscode', () => ({
+  workspace: { openTextDocument: exportEditor.openTextDocument },
+  window: {
+    showTextDocument: exportEditor.showTextDocument,
+    showErrorMessage: exportEditor.showErrorMessage,
+  },
+}));
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
@@ -39,6 +53,12 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     const git = spawnSync('git', ['init', '--quiet'], { cwd: join(root, 'workspace') });
     if (git.status !== 0) throw new Error('Could not initialize isolated fixture repository');
     await writeFile(join(root, 'workspace/probe.txt'), 'isolated tool fixture\n');
+    const skillDirectory = join(root, 'workspace/.opencode/skills/fixture-skill');
+    await mkdir(skillDirectory, { recursive: true });
+    await writeFile(
+      join(skillDirectory, 'SKILL.md'),
+      '---\nname: fixture-skill\ndescription: A command compatibility fixture\n---\nReply with the fixture response. Do not call tools.\n'
+    );
     modelServer = createServer(async (request, response) => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -147,6 +167,7 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       await writeFile(
         join(root, 'config/opencode/opencode.json'),
         JSON.stringify({
+          skills: [join(root, 'workspace/.opencode/skills')],
           agents: {
             'icon-native-json': { mode: 'primary', request: { body: { icon: 'code-brackets' } } },
           },
@@ -219,6 +240,41 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     modelServer?.closeAllConnections();
     await new Promise<void>((done) => (modelServer ? modelServer.close(() => done()) : done()));
     if (root) await writeFile(join(root, 'events.json'), JSON.stringify(events, null, 2));
+  });
+
+  it('exports from a password-protected V2 server using the authenticated connection', async () => {
+    if (transport.version !== 2) return;
+    expect(authorization).toMatch(/^Basic /);
+    const session = asRecord(
+      await transport.request('POST', '/session', { title: 'Export fixture' })
+    );
+    const id = session?.id;
+    if (!isString(id)) throw new Error('Missing export fixture session');
+    const service = new SessionExportService(
+      {
+        apiVersion: 2,
+        isAttachOnly: true,
+        getWorkspaceCwd: () => join(root, 'workspace'),
+        request: transport.request.bind(transport),
+        resolveCommand: () => {
+          throw new Error('V2 export must use the authenticated API');
+        },
+      },
+      20000
+    );
+    try {
+      await service.exportSession(id);
+      const document = exportEditor.openTextDocument.mock.calls.at(-1)?.[0];
+      expect(document?.language).toBe('json');
+      expect(JSON.parse(document!.content)).toMatchObject({
+        info: { id, title: 'Export fixture' },
+        messages: [],
+      });
+      expect(exportEditor.showTextDocument).toHaveBeenCalled();
+      expect(exportEditor.showErrorMessage).not.toHaveBeenCalled();
+    } finally {
+      await transport.request('DELETE', `/session/${id}`);
+    }
   });
 
   it('falls back for a configured custom model without admitting duplicate generation', async () => {
@@ -648,12 +704,14 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     );
     const id = String(session?.id);
     try {
-      await transport.request('POST', `/session/${id}/command`, {
+      const result = await transport.request('POST', `/session/${id}/command`, {
         command: 'fixture-note',
         arguments: '',
         agent: 'build',
         model: 'fixture/fixture',
       });
+      if (transport.version === 2) expect(result).toBeUndefined();
+      else expect(result).toMatchObject({ info: { role: 'assistant' }, parts: expect.any(Array) });
       await vi.waitFor(
         async () => {
           const messages = (await transport.request('GET', `/session/${id}/message`)) as Array<{
@@ -669,6 +727,84 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
                 message.parts.some((part) => part.text === 'Adapter stream verified.')
             )
           ).toBe(true);
+        },
+        { timeout: 30000 }
+      );
+    } finally {
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 45000);
+
+  it('lists and runs a skill slash command with arguments', async () => {
+    await vi.waitFor(
+      async () =>
+        expect(await transport.request('GET', '/skill')).toEqual(
+          expect.arrayContaining([expect.objectContaining({ name: 'fixture-skill' })])
+        ),
+      { timeout: 5000 }
+    );
+    const commands = (await transport.request('GET', '/command')) as UnknownRecord[];
+    expect(commands.find((command) => command.name === 'fixture-skill')).toMatchObject({
+      source: 'skill',
+    });
+    const session = asRecord(
+      await transport.request('POST', '/session', { title: 'Skill command fixture' })
+    );
+    const id = String(session?.id);
+    const before = providerPrompts.length;
+    try {
+      await transport.request('POST', `/session/${id}/command`, {
+        command: 'fixture-skill',
+        arguments: 'SKILL_ARGUMENT_FIXTURE',
+        agent: 'build',
+        model: 'fixture/fixture',
+      });
+      await vi.waitFor(
+        async () => {
+          const status = asRecord(await transport.request('GET', '/session/status'))?.[id];
+          expect(status === undefined || asRecord(status)?.type === 'idle').toBe(true);
+          expect(
+            JSON.stringify(await transport.request('GET', `/session/${id}/message`))
+          ).toContain('Adapter stream verified.');
+          expect(JSON.stringify(providerPrompts.slice(before))).toContain('SKILL_ARGUMENT_FIXTURE');
+        },
+        { timeout: 30000 }
+      );
+    } finally {
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 45000);
+
+  it('compacts with the selected model through the common API', async () => {
+    const session = asRecord(
+      await transport.request('POST', '/session', { title: 'Compaction fixture' })
+    );
+    const id = String(session?.id);
+    try {
+      await transport.request('POST', `/session/${id}/message`, {
+        model: { providerID: 'fixture', modelID: 'fixture' },
+        parts: [{ type: 'text', text: 'Reply before compaction. Do not call tools.' }],
+      });
+      if (transport.version === 2) {
+        await transport.request('POST', `/api/session/${id}/model`, {
+          model: { providerID: 'missing', id: 'previous-model' },
+        });
+      }
+      const before = modelRequests.length;
+      expect(
+        await transport.request('POST', `/session/${id}/summarize`, {
+          providerID: 'fixture',
+          modelID: 'fixture',
+        })
+      ).toBe(true);
+      await vi.waitFor(
+        async () => {
+          expect(modelRequests.length).toBeGreaterThan(before);
+          const status = asRecord(await transport.request('GET', '/session/status'))?.[id];
+          expect(status === undefined || asRecord(status)?.type === 'idle').toBe(true);
+          const messages = await transport.request('GET', `/session/${id}/message`);
+          expect(JSON.stringify(messages)).toContain('Adapter stream verified.');
+          expect(JSON.stringify(messages)).not.toContain('Model not found');
         },
         { timeout: 30000 }
       );

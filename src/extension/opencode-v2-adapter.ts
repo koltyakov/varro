@@ -16,6 +16,7 @@ import type {
   SessionsResponse,
   ModelRef,
   ShellInfo,
+  SkillInfo,
 } from '@opencode/client';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -513,7 +514,7 @@ export class OpenCodeV2Adapter {
       if (kind === 'permission') {
         if (!this.permissions.has(id)) await this.request('GET', '/permission', undefined, options);
         const sessionID = this.permissions.get(id);
-        if (!sessionID) throw new Error('OpenCode permission request is no longer pending');
+        if (!sessionID) throw new Error(`404 Permission request not found: ${id}`);
         await raw(
           'POST',
           `/api/session/${encodeURIComponent(sessionID)}/permission/${encodeURIComponent(id)}/reply`,
@@ -825,12 +826,33 @@ export class OpenCodeV2Adapter {
             delivery: input.delivery === 'queue' ? 'queue' : 'steer',
             resume: input.noReply ? false : undefined,
           };
+          if (action === 'command') {
+            const commands = await data<CommandInfo[]>('GET', query('/api/command', true));
+            if (!commands.some((command) => command.name === input.command)) {
+              const skills = await data<SkillInfo[]>('GET', query('/api/skill', true));
+              const skill = skills.find((entry) => entry.id === input.command);
+              if (skill) {
+                await raw(
+                  'POST',
+                  `/api/experimental/session/${encodeURIComponent(sessionID)}/skill`,
+                  {
+                    id: skill.id,
+                    resume: payload.text ? false : !input.noReply,
+                  }
+                );
+                if (payload.text) await raw('POST', `${endpoint}/prompt`, payload);
+                return;
+              }
+            }
+          }
           const admitted = await raw(
             'POST',
             `${endpoint}/${action === 'command' ? 'command' : 'prompt'}`,
             action === 'command' ? { ...payload, name: input.command } : payload
           );
-          if (action === 'prompt_async' || action === 'command' || input.noReply) return admitted;
+          // Commands run asynchronously in V2; their messages arrive through events and history.
+          if (action === 'command') return;
+          if (action === 'prompt_async' || input.noReply) return admitted;
           await raw('POST', `/api/experimental/session/${encodeURIComponent(sessionID)}/wait`, {});
           const messages = await data<SessionMessageInfo[]>(
             'GET',
@@ -854,8 +876,15 @@ export class OpenCodeV2Adapter {
         return true;
       }
       if (action === 'summarize') {
-        await raw('POST', `${endpoint}/compact`, {});
-        return true;
+        return this.submit(sessionID, async () => {
+          if (isString(input.providerID) && isString(input.modelID)) {
+            await raw('POST', `${endpoint}/model`, {
+              model: { providerID: input.providerID, id: input.modelID },
+            });
+          }
+          await raw('POST', `${endpoint}/compact`, {});
+          return true;
+        });
       }
       if (action === 'fork')
         return this.session(
@@ -918,7 +947,19 @@ export class OpenCodeV2Adapter {
         if (existing >= 0) commands[existing] = normalized;
         else commands.push(normalized);
       }
-      return commands;
+      const skills = await data<SkillInfo[]>('GET', query('/api/skill', true));
+      return [
+        ...commands,
+        ...skills
+          .filter((skill) => !commands.some((command) => command.name === skill.id))
+          .map((skill) => ({
+            name: skill.id,
+            description: skill.description ?? '',
+            template: skill.content,
+            source: 'skill',
+            hints: [],
+          })),
+      ];
     }
     if (['/skill', '/project', '/vcs', '/vcs/status'].includes(route) && method === 'GET')
       return data('GET', query(`/api${route}`, true));

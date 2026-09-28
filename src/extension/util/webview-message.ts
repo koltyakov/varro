@@ -51,7 +51,7 @@ import {
 const ALLOWED_TERMINAL_COMMANDS = new Set<string>([
   'opencode auth login',
   'opencode auth',
-  'opencode providers logout',
+  'opencode auth logout',
   ...OPENCODE_TERMINAL_COMMANDS,
 ]);
 

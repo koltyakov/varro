@@ -31,6 +31,7 @@ import {
   manualWorkspaceSelection,
   setManualWorkspaceSelection,
   setError,
+  setSessionUsageLimit,
 } from '../lib/state';
 import { handleWorkspaceSelectionFailure } from '../lib/workspace-selection';
 import { startNewChatDraft } from '../lib/new-chat-draft';
@@ -265,6 +266,7 @@ afterEach(() => {
   setState('inlineProblems', []);
   setState('issuesEnabled', true);
   setState('enableProblemsContext', true);
+  setState('debugShowQuotaWarning', false);
   setState('editorContext', {
     databaseContext: undefined,
     extensionContexts: undefined,
@@ -1490,6 +1492,61 @@ describe('ChatInput', () => {
     expect(dropdown?.querySelector('button')).toBeNull();
   });
 
+  it('shows weekly quota warnings above the composer and gives hard-limit notices priority', () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', Date.now())]);
+    setState('providerLimits', {
+      'openai:gpt-4o': {
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+        status: 'available',
+        source: 'provider',
+        checkedAt: Date.now(),
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-hour limit',
+            unit: 'unknown',
+            remaining: 90,
+            limit: 100,
+            resetAt: Date.now() + 60_000,
+          },
+          {
+            id: 'seven_day',
+            label: 'Weekly limit',
+            unit: 'unknown',
+            remaining: 8,
+            limit: 100,
+            resetAt: Date.now() + 86_400_000,
+          },
+        ],
+      },
+    });
+    cleanup = render(() => ChatInput(), container!);
+    const warning = container?.querySelector('.chat-quota-warning');
+    expect(warning?.textContent).toContain('Weekly limit: 8% left');
+    expect(warning?.textContent).not.toContain('5-hour limit');
+    expect(warning?.nextElementSibling?.classList.contains('chat-input-shell')).toBe(true);
+    expect(container?.querySelector<HTMLAnchorElement>('.chat-quota-warning-usage')?.href).toBe(
+      'https://chatgpt.com/#settings/Usage'
+    );
+
+    setSessionUsageLimit('session-1', {
+      source: 'status',
+      statusCode: 429,
+      message: 'messages exhausted',
+      unit: 'messages',
+      retryAt: null,
+      attempt: 1,
+      sessionID: 'session-1',
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+    });
+    expect(container?.querySelector('.chat-quota-warning')).toBeNull();
+    expect(container?.querySelector('.chat-usage-limit-banner')).not.toBeNull();
+  });
+
   it('shows all available provider-limit windows under the fixed threshold', async () => {
     setState('providers', [
       {
@@ -1542,6 +1599,13 @@ describe('ChatInput', () => {
     expect(chip).not.toBeNull();
     expect(chip?.textContent).toContain('41%');
     expect(chip?.textContent).toContain('80%');
+    expect(container?.querySelector('.chat-quota-warning')).toBeNull();
+    setState('debugShowQuotaWarning', true);
+    expect(container?.querySelector('.chat-quota-warning')?.textContent).toContain(
+      '5-Hour Limit: 41% left'
+    );
+    setState('debugShowQuotaWarning', false);
+    expect(container?.querySelector('.chat-quota-warning')).toBeNull();
 
     const checkedAt = Date.now() - 120_000;
     setState('providerLimits', 'openai:gpt-4o', {

@@ -517,6 +517,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.fontSize') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.showTurnTimer') ||
+        event.affectsConfiguration('varro.debug.showQuotaWarning') ||
         event.affectsConfiguration('varro.chat.enableProblemsContext') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
         event.affectsConfiguration('varro.chat.defaultPermissionMode') ||
@@ -882,6 +883,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 {
                   ...endpointServer,
                   resolveCommand: () => this.server.resolveCommand(),
+                  get apiVersion() {
+                    return server.apiVersion;
+                  },
                   get isAttachOnly() {
                     return server.isAttachOnly;
                   },

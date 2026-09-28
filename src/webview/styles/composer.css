@@ -2410,6 +2410,91 @@
   background: color-mix(in srgb, var(--color-vscode-error) 10%, transparent);
 }
 
+.chat-quota-warning {
+  --quota-warning-color: var(--color-vscode-warning);
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 7px 9px;
+  box-shadow: inset 0 0 0 0.5px
+    color-mix(in srgb, var(--quota-warning-color) 26%, var(--color-vscode-border));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--quota-warning-color) 8%, var(--color-vscode-surface-softer));
+  color: var(--color-vscode-fg);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.chat-quota-warning.error {
+  --quota-warning-color: var(--color-vscode-error);
+}
+
+.interactive-input-part > .chat-quota-warning:has(+ .chat-input-shell) {
+  /* Extend behind the composer's rounded top corners to join the two surfaces. */
+  margin-bottom: calc(-1 * (var(--chat-input-part-gap) + var(--radius-control)));
+  padding-bottom: calc(6px + var(--radius-control));
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+}
+
+.chat-quota-warning-copy {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-quota-warning-row {
+  color: color-mix(in srgb, var(--quota-warning-color) 70%, var(--color-vscode-fg));
+}
+
+.chat-quota-warning-reset {
+  color: var(--color-vscode-fg-soft);
+}
+
+.chat-quota-warning-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.chat-quota-warning-usage,
+.chat-quota-warning-close {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-vscode-fg-soft);
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-chip);
+}
+
+.chat-quota-warning-usage {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chat-quota-warning-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.chat-quota-warning-usage:hover,
+.chat-quota-warning-close:hover {
+  color: var(--color-vscode-fg);
+  background: var(--color-vscode-hover);
+}
+
+.chat-quota-warning-usage:focus-visible,
+.chat-quota-warning-close:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 2px;
+}
+
 .chat-usage-limit-banner {
   display: flex;
   align-items: flex-start;
