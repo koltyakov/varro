@@ -1490,6 +1490,9 @@ describe('MessageList history pagination', () => {
 
   it('permanently yields pending history restoration to an explicit bottom-follow request', async () => {
     const harness = await mountDeferredHistory();
+    // Finish initial positioning so the explicit return exercises ordinary eased following.
+    settleBottomFollow(harness.animationFrames, harness.list);
+    harness.animationFrames.flush();
     await harness.startLoad(20);
 
     requestMessageListScrollToBottom();

@@ -29,7 +29,7 @@ import type {
   RalphSelectedModel,
 } from '../../shared/ralph';
 import { MAX_RALPH_ITERATIONS, normalizeRalphWorkspaceDirectory } from '../../shared/ralph';
-import { asRecord } from '../../shared/type-utils';
+import { asRecord, isString } from '../../shared/type-utils';
 import {
   parseModelPreferences,
   parseRequiredModelPreferences,
@@ -286,12 +286,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (!messages) {
         return null;
       }
-      return {
+      const update: Extract<WebviewMessage, { type: 'queued-messages/update' }> = {
         type,
-        payload: {
-          messages,
-        },
+        payload: { messages },
       };
+      if (isString(payload?.mutationId)) update.payload.mutationId = payload.mutationId;
+      return update;
     }
 
     case 'queued-messages/claim': {

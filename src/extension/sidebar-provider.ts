@@ -1035,8 +1035,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         openNewWindow: () => this.openNewWindow(),
         editorRouteChanged: (route) => this.editorRouteChanged(webviewContext.viewId, route),
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
-        updateQueuedMessages: ({ messages }) =>
-          this.updateQueuedMessages(webviewContext.viewId, messages),
+        updateQueuedMessages: ({ messages, mutationId }) =>
+          this.updateQueuedMessages(webviewContext.viewId, messages, mutationId),
         claimQueuedMessage: (payload) => this.claimQueuedMessage(webviewContext.viewId, payload),
         releaseQueuedMessage: (payload) =>
           this.queuedMessages.releaseDispatchClaim(
@@ -2908,18 +2908,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       ?.filter((message) => (message.ownerViewId ?? 'sidebar') === viewId);
   }
 
+  private readonly queuedMessageMutationIds = new Map<string, string>();
+
   private postQueuedMessageSnapshots() {
     for (const endpoint of this.endpoints) {
       endpoint.bridge.post({
         type: 'queued-messages/sync',
-        payload: { messages: this.queuedMessagesFor(endpoint.viewId) ?? [] },
+        payload: {
+          messages: this.queuedMessagesFor(endpoint.viewId) ?? [],
+          mutationId: this.queuedMessageMutationIds.get(endpoint.viewId),
+        },
       });
     }
   }
 
-  private updateQueuedMessages(viewId: string, messages: QueuedMessageSnapshot[]): Promise<void> {
+  private updateQueuedMessages(
+    viewId: string,
+    messages: QueuedMessageSnapshot[],
+    mutationId?: string
+  ): Promise<void> {
     const endpoint = [...this.endpoints].find((item) => item.viewId === viewId);
     if (!endpoint?.ready) return Promise.resolve();
+    if (mutationId) this.queuedMessageMutationIds.set(viewId, mutationId);
     const nextPdfPaths = new Set(
       messages.flatMap((message) =>
         (message.nativePdfs ?? []).flatMap((pdf) => (pdf.contextFile ? [pdf.contextFile.path] : []))

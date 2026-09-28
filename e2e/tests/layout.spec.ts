@@ -700,6 +700,9 @@ for (const delayedDelivery of [false, true]) {
     await page.clock.pauseAt(new Date('2030-01-01T00:00:00Z'));
     await page.goto('/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1');
     const summaries = page.locator('.assistant-activity-summary');
+    // Initial positioning needs animation frames before it reveals hydrated history.
+    await expect(summaries.last()).toBeAttached();
+    await page.clock.runFor(200);
     await expect(summaries.last()).toBeVisible();
     await page.evaluate(() => {
       const sessionId = 'session-tool-cards';
@@ -3401,7 +3404,9 @@ test('virtualized long sticky preview yields while scrolling at narrow width', a
   await expect(nextPrompt).toContainText('Continue if you have next steps');
 });
 
-test('sticky preview yields before a synthetic compaction boundary', async ({ page }) => {
+test('sticky preview retains the real prompt across a synthetic compaction boundary', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 480, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=sticky-preview-large-transcript');
 
@@ -3471,6 +3476,7 @@ test('sticky preview yields before a synthetic compaction boundary', async ({ pa
     );
     const initialCompaction = document.querySelector<HTMLElement>(selector);
     let sawSticky = !!initialOverlay;
+    const initialText = initialOverlay?.textContent;
     let lastSafeGap =
       initialOverlay && initialCompaction
         ? initialCompaction.getBoundingClientRect().top -
@@ -3485,12 +3491,17 @@ test('sticky preview yields before a synthetic compaction boundary', async ({ pa
       const compaction = document.querySelector<HTMLElement>(selector);
       if (!compaction) return { overlap: true, sawSticky, lastSafeGap, reason: 'unmounted' };
       if (!overlay) {
-        if (sawSticky) return { overlap: false, sawSticky, lastSafeGap };
+        if (sawSticky)
+          return { overlap: true, sawSticky, lastSafeGap, reason: 'sticky disappeared' };
         continue;
       }
       sawSticky = true;
+      if (overlay.textContent !== initialText)
+        return { overlap: true, sawSticky, lastSafeGap, reason: 'prompt changed' };
       const gap = compaction.getBoundingClientRect().top - overlay.getBoundingClientRect().bottom;
-      if (gap < 0) return { overlap: true, sawSticky, lastSafeGap, gap };
+      if (compaction.getBoundingClientRect().bottom < element.getBoundingClientRect().top) {
+        return { overlap: false, sawSticky, lastSafeGap, reason: 'compaction crossed' };
+      }
       lastSafeGap = gap;
     }
     return { overlap: false, sawSticky, lastSafeGap, reason: 'sticky remained' };
@@ -3499,7 +3510,7 @@ test('sticky preview yields before a synthetic compaction boundary', async ({ pa
   expect(result.sawSticky, JSON.stringify(result)).toBe(true);
   expect(result.overlap, JSON.stringify(result)).toBe(false);
   expect(result.lastSafeGap, JSON.stringify(result)).not.toBeNull();
-  expect(Math.abs(result.lastSafeGap ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(24);
+  expect(result.reason).toBe('compaction crossed');
 });
 
 test('sticky and visible-row geometry survive inline-file-change values and width reflow', async ({

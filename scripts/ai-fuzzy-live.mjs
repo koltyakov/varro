@@ -1637,6 +1637,8 @@ async function openRunSession(cdp, sessionId, title) {
   const deadline = Date.now() + 5_000;
   let opened = false;
   while (Date.now() < deadline && !opened) {
+    await cdp.click('[aria-label="Back to sub-agent sessions"]');
+    await cdp.click('[aria-label^="Clear Sub-agents"]');
     await cdp.click('[aria-label="Back to sessions"]');
     await new Promise((resolve) => setTimeout(resolve, 250));
     opened = await cdp.clickSession(sessionId);
@@ -1666,7 +1668,9 @@ export async function restoreSidebarSessionFromPicker(cdp, sessionId, title) {
     }
   }
   await new Promise((resolve) => setTimeout(resolve, 250));
-  if (!(await cdp.key('.session-list-view', 'Escape'))) return false;
+  // A pending route can remove the picker between the snapshot and the click.
+  // Judge restoration by the resulting route even when the picker is already gone.
+  await cdp.key('.session-list-view', 'Escape');
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -3064,7 +3068,10 @@ async function runMultiWebviewScenario({
     ) {
       throw new Error('AI-18 child edit turn did not preserve the exact recorded fixture state');
     }
-    await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
+    // The palette only offers Show when inline diffs are currently disabled.
+    if (!(await editor.point('.file-change-inline-diffs', 'center', childEditScope))) {
+      await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
+    }
     const inlineBefore = await waitForScopedCount(
       editor,
       '.file-change-inline-diffs',
@@ -3918,8 +3925,20 @@ async function runLive(options) {
       } else {
         await openRunSession(cdp, tracked.id, tracked.title);
       }
+      // Numbered navigation can leave the host wide. Restore the live fixture width
+      // before spending a model turn on height-dependent sticky/activity gates.
+      if (scenario === 'AI-07' || scenario === 'AI-08') {
+        await resizeVscodeSidebar(launch.remoteDebuggingPort, 486);
+        const width = await cdp.evaluate('innerWidth');
+        if (Math.abs(width - 486) > 8) throw new Error(`Live sidebar width remained ${width}`);
+      }
       if (scenario === 'AI-08' && manifest.hostState?.fileDiffsEnabled !== true) {
-        await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
+        const diffsVisible = await cdp.evaluate(
+          `!!document.querySelector('.file-change-inline-diffs')`
+        );
+        if (!diffsVisible) {
+          await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
+        }
         await new Promise((resolve) => setTimeout(resolve, 300));
         manifest.hostState = {
           ...manifest.hostState,

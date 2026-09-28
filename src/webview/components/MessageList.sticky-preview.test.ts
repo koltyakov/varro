@@ -2309,6 +2309,8 @@ describe('MessageList sticky prompt preview', () => {
     Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 9_600 });
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 6_400 });
 
+    // Transfer ownership from initial bottom-follow to the reader before sampling geometry.
+    list?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
     list?.dispatchEvent(new Event('scroll'));
     animationFrames.flush();
     await Promise.resolve();
@@ -2358,6 +2360,8 @@ describe('MessageList sticky prompt preview', () => {
     Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 9_600 });
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 6_400 });
 
+    // Transfer ownership from initial bottom-follow to the reader before sampling geometry.
+    list?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
     list?.dispatchEvent(new Event('scroll'));
     animationFrames.flush();
     await Promise.resolve();

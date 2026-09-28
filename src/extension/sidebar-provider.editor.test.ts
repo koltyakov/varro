@@ -2791,6 +2791,7 @@ describe('SidebarProvider editor panels', () => {
     first.receive({
       type: 'queued-messages/update',
       payload: {
+        mutationId: 'enqueue-1',
         messages: [
           {
             id: 'queue-1',
@@ -2806,7 +2807,10 @@ describe('SidebarProvider editor panels', () => {
     await vi.waitFor(() =>
       expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
         type: 'queued-messages/sync',
-        payload: { messages: [expect.objectContaining({ id: 'queue-1' })] },
+        payload: {
+          messages: [expect.objectContaining({ id: 'queue-1' })],
+          mutationId: 'enqueue-1',
+        },
       })
     );
     second.panel.webview.postMessage.mockClear();

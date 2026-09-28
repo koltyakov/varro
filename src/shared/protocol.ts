@@ -957,7 +957,10 @@ export type ExtensionMessage =
       payload: { requestId: number; status: 'opened' | 'unavailable' };
     }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
-  | { type: 'queued-messages/sync'; payload: { messages: QueuedMessageSnapshot[] } }
+  | {
+      type: 'queued-messages/sync';
+      payload: { messages: QueuedMessageSnapshot[]; mutationId?: string };
+    }
   | {
       type: 'queued-messages/session-status';
       payload: { sessionId: string; status: 'busy' | 'idle' };
@@ -1108,7 +1111,10 @@ export type WebviewMessage =
   | { type: 'composer/images-update'; payload: { images: ClipboardImageSnapshot[] } }
   | { type: 'files/remove'; payload: { path: string; sentSessionId?: string } }
   | { type: 'files/clear'; payload?: { sentSessionId: string } }
-  | { type: 'queued-messages/update'; payload: { messages: QueuedMessageSnapshot[] } }
+  | {
+      type: 'queued-messages/update';
+      payload: { messages: QueuedMessageSnapshot[]; mutationId?: string };
+    }
   | {
       type: 'queued-messages/claim';
       payload: {

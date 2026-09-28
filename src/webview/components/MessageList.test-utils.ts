@@ -38,6 +38,8 @@ export function installMessageListTestEnvironment(
   let originalIntersectionObserver: typeof globalThis.IntersectionObserver | undefined;
   let originalRequestAnimationFrame: typeof globalThis.requestAnimationFrame | undefined;
   let originalCancelAnimationFrame: typeof globalThis.cancelAnimationFrame | undefined;
+  let originalWindowRequestAnimationFrame: typeof window.requestAnimationFrame;
+  let originalWindowCancelAnimationFrame: typeof window.cancelAnimationFrame;
   let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView | undefined;
 
   beforeEach(() => {
@@ -48,6 +50,8 @@ export function installMessageListTestEnvironment(
     originalIntersectionObserver = globalThis.IntersectionObserver;
     originalRequestAnimationFrame = globalThis.requestAnimationFrame;
     originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+    originalWindowRequestAnimationFrame = window.requestAnimationFrame;
+    originalWindowCancelAnimationFrame = window.cancelAnimationFrame;
     originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     globalThis.ResizeObserver = class ResizeObserver implements globalThis.ResizeObserver {
       readonly box = 'content-box';
@@ -141,6 +145,9 @@ export function installMessageListTestEnvironment(
       });
     }
     vi.restoreAllMocks();
+    // Queued frame fixtures replace window methods too, and assertions can skip restore().
+    window.requestAnimationFrame = originalWindowRequestAnimationFrame;
+    window.cancelAnimationFrame = originalWindowCancelAnimationFrame;
   });
 }
 

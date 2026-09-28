@@ -416,7 +416,7 @@ export function handleExtensionMessageWithDependencies(
       deps.setProviderRefreshPending?.(msg.payload.pending);
       break;
     case 'queued-messages/sync':
-      applyQueuedMessagesSnapshot(msg.payload.messages);
+      applyQueuedMessagesSnapshot(msg.payload.messages, msg.payload.mutationId);
       break;
     case 'queued-messages/claim-result':
       applyQueuedMessageClaimResult(msg.payload);
