@@ -939,6 +939,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       return false;
     }
     if (message.info.role !== 'assistant') return false;
+    const latest = deps.getMessages().findLast((entry) => entry.info.sessionID === sessionId);
+    // Completing an older named step must not make a newer prompt or reply idle.
+    if (latest && latest.info.id !== message.info.id) return false;
+    // A delayed terminal event can name an unloaded legacy counterpart. Its
+    // fallback must not complete an assistant created after that step ended.
+    if (message.info.time.created > completedAt) return false;
     if (hasUnsettledToolPart(message.parts)) return false;
     const assistantInfo = message.info;
     let nextInfo: AssistantMessage | null = null;

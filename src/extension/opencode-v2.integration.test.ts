@@ -129,6 +129,11 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
         model: 'fixture/fixture',
         command: { 'fixture-note': { template: 'Reply with the fixture response.' } },
         agent: {
+          ask: {
+            mode: 'primary',
+            prompt: 'ASK_MODE_FIXTURE: This turn is read-only. Do not modify files.',
+            permission: { '*': 'deny', read: 'allow', glob: 'allow', grep: 'allow' },
+          },
           'icon-legacy-json': { mode: 'primary', icon: 'binocular' },
           'icon-options-json': { mode: 'primary', options: { icon: 'cube-scan-solid' } },
           'icon-vision-json': { mode: 'subagent', icon: 'eye' },
@@ -579,6 +584,54 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     },
     30000
   );
+
+  it('uses the current agent instructions after repeated Ask and Build turns', async () => {
+    const session = asRecord(
+      await transport.request('POST', '/session', { title: 'Agent switches' })
+    );
+    const id = String(session?.id);
+    for (const [index, agent] of ['ask', 'build', 'ask', 'build'].entries()) {
+      const marker = `AGENT_SWITCH_${index}`;
+      const start = providerPrompts.length;
+      await transport.request('POST', `/session/${id}/prompt_async`, {
+        agent,
+        system: `CURRENT_AGENT_FIXTURE: ${agent}`,
+        model: { providerID: 'fixture', modelID: 'fixture' },
+        parts: [{ type: 'text', text: `${marker}: Say the fixture response.` }],
+      });
+      await vi.waitFor(
+        async () => {
+          const messages = await transport.request('GET', `/session/${id}/message`);
+          expect(JSON.stringify(messages)).toContain(marker);
+          const status = asRecord(await transport.request('GET', '/session/status'));
+          expect(asRecord(status?.[id])?.type ?? 'idle').toBe('idle');
+          expect(providerPrompts.length).toBeGreaterThan(start);
+        },
+        { timeout: 15000, interval: 100 }
+      );
+      const prompt = providerPrompts
+        .slice(start)
+        .find((messages) => JSON.stringify(messages).includes(marker));
+      expect(prompt).toBeDefined();
+      const system = prompt?.map(asRecord).filter((message) => message?.role === 'system');
+      if (agent === 'ask') expect(JSON.stringify(system)).toContain('ASK_MODE_FIXTURE');
+      else expect(JSON.stringify(system)).not.toContain('ASK_MODE_FIXTURE');
+      // V2 keeps the original context for caching and appends a superseding system-update.
+      // The latest mode declaration must match the admitted prompt on either backend.
+      const declarations = JSON.stringify(prompt).match(/CURRENT_AGENT_FIXTURE: (ask|build)/g);
+      expect(declarations?.at(-1)).toBe(`CURRENT_AGENT_FIXTURE: ${agent}`);
+      const request = modelRequests
+        .map(asRecord)
+        .findLast(
+          (value) => value?.stream === true && JSON.stringify(value.messages).includes(marker)
+        );
+      const tools = Array.isArray(request?.tools) ? request.tools.map(asRecord) : [];
+      const canEdit = tools.some((tool) =>
+        ['edit', 'write', 'patch', 'apply_patch'].includes(String(asRecord(tool?.function)?.name))
+      );
+      expect(canEdit).toBe(agent === 'build');
+    }
+  }, 60000);
 
   it('streams a real prompt and projects stable history', async () => {
     let release: (() => void) | undefined;

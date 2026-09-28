@@ -4035,6 +4035,42 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    'does not settle a newer assistant from a delayed terminal step (older loaded: %s)',
+    (olderLoaded) => {
+      const handlers = installHandlers();
+      const setSessionStatusEntry = vi.fn();
+      const assistantEntry = createAssistantEntry();
+      assistantEntry.info.time.created = 10;
+      const olderEntry = createAssistantEntry();
+      olderEntry.info.id = 'older-assistant';
+      upsertMessageInfo.mockClear();
+      finishMessageStreaming.mockClear();
+      stopLoading.mockClear();
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          getMessages: () => (olderLoaded ? [olderEntry, assistantEntry] : [assistantEntry]),
+          setSessionStatusEntry,
+        })
+      );
+
+      handlers.get('session.next.step.ended')?.({
+        properties: {
+          sessionID: 'session-1',
+          assistantMessageID: 'older-assistant',
+          finish: 'stop',
+          timestamp: 3,
+        },
+      });
+
+      expect(upsertMessageInfo).not.toHaveBeenCalled();
+      expect(finishMessageStreaming).not.toHaveBeenCalled();
+      expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+      expect(stopLoading).not.toHaveBeenCalled();
+    }
+  );
+
   it('settles terminal v2 step ends against the latest legacy assistant when ids differ', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();

@@ -36,6 +36,27 @@ function sessionInWorkspace(id: string) {
 }
 
 describe('sendMessage', () => {
+  it('keeps the latest Build selection when older Ask confirmations arrive before send', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session()]);
+    for (const agent of ['ask', 'build', 'ask', 'build']) {
+      stateModule.setSelectedAgent(agent, { sessionId: 'session-1' });
+    }
+    stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Implement the change');
+
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ agent: 'build' }),
+      { directory: '/repo' }
+    );
+  });
+
   it('updates permissions in the new workspace session directory before sending', async () => {
     const { stateModule, hookModule } = await loadModules();
     stateModule.setState('editorContext', {

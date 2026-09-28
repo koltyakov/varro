@@ -2,6 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { isEditorContext, parseExtensionMessage } from './extension-message';
 
 describe('parseExtensionMessage', () => {
+  it('preserves successful and failed agent selection acknowledgements', () => {
+    for (const agent of ['build', undefined]) {
+      const message = {
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', agent, selectionId: 'selection-4' },
+      };
+      expect(parseExtensionMessage(message)).toEqual(message);
+      for (const selectionId of ['', 'x'.repeat(129), 4, null]) {
+        expect(
+          parseExtensionMessage({ ...message, payload: { ...message.payload, selectionId } })
+        ).toBeNull();
+      }
+    }
+  });
   it('validates problem-context commands', () => {
     const message = {
       type: 'command/attach-problems',

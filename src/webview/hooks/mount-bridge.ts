@@ -443,8 +443,12 @@ export function handleExtensionMessageWithDependencies(
       if (msg.payload.skippedAt !== undefined) {
         applySessionPlanStateUpdate(msg.payload.sessionId, msg.payload.skippedAt);
       }
-      if (msg.payload.agent !== undefined) {
-        applySessionSelectedAgentUpdate(msg.payload.sessionId, msg.payload.agent);
+      if (msg.payload.agent !== undefined || msg.payload.selectionId !== undefined) {
+        applySessionSelectedAgentUpdate(
+          msg.payload.sessionId,
+          msg.payload.agent,
+          msg.payload.selectionId
+        );
       }
       break;
     case 'model-preferences/sync':

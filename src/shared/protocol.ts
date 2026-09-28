@@ -990,7 +990,12 @@ export type ExtensionMessage =
     }
   | {
       type: 'session-plan-state/update';
-      payload: { sessionId: string; skippedAt?: number | null; agent?: string };
+      payload: {
+        sessionId: string;
+        skippedAt?: number | null;
+        agent?: string;
+        selectionId?: string;
+      };
     }
   | { type: 'model-preferences/sync'; payload: ModelPreferences }
   | {
@@ -1065,7 +1070,12 @@ export type WebviewMessage =
     }
   | {
       type: 'session-plan-state/update';
-      payload: { sessionId: string; skippedAt?: number | null; agent?: string };
+      payload: {
+        sessionId: string;
+        skippedAt?: number | null;
+        agent?: string;
+        selectionId?: string;
+      };
     }
   | {
       type: 'session-unread-state/update';

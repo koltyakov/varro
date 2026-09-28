@@ -9,6 +9,113 @@ import {
 } from './sidebar-provider.test-support';
 
 describe('session selection metadata', () => {
+  it('acknowledges each rapid agent switch with its originating selection id', async () => {
+    let metadata = {};
+    const request = vi.fn(async (method: string, _path: string, body?: unknown) => {
+      if (method === 'PATCH') metadata = asRecord(asRecord(body)?.metadata) ?? {};
+      return { id: 'session-1', directory: '/repo', metadata };
+    });
+    const { provider } = await createSidebarProviderInstance({ server: createServer({ request }) });
+    const { posted } = attachTestView(provider);
+    const selections = ['ask', 'build', 'ask', 'build'].map((agent, index) => ({
+      sessionId: 'session-1',
+      agent,
+      selectionId: `selection-${index}`,
+    }));
+    await Promise.all(
+      selections.map((payload) =>
+        provider.handleMessage({ type: 'session-plan-state/update', payload })
+      )
+    );
+    expect(
+      posted.filter((message) => asRecord(message)?.type === 'session-plan-state/update')
+    ).toEqual(selections.map((payload) => ({ type: 'session-plan-state/update', payload })));
+    expect(asRecord(asRecord(metadata)?.varro)?.agent).toBe('build');
+  });
+
+  it('settles a failed agent selection without publishing it as confirmed', async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === 'PATCH') throw new Error('metadata unavailable');
+      return { id: 'session-1', directory: '/repo' };
+    });
+    const { provider } = await createSidebarProviderInstance({ server: createServer({ request }) });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'session-1', agent: 'build', selectionId: 'selection-4' },
+    });
+    expect(
+      posted.filter((message) => asRecord(message)?.type === 'session-plan-state/update')
+    ).toEqual([
+      {
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', selectionId: 'selection-4' },
+      },
+    ]);
+  });
+
+  it('does not restore an older in-flight session response over a confirmed model selection', async () => {
+    let session: Session = {
+      id: 'session-1',
+      projectID: 'project-1',
+      directory: '/repo',
+      title: 'Shared session',
+      version: '1',
+      time: { created: 1, updated: 2 },
+      metadata: { varro: { model: { provider: 'openai', model: 'old-model' } } },
+    };
+    const oldSession = session;
+    let finishRead: ((value: Session) => void) | undefined;
+    const delayedRead = new Promise<Session>((resolve) => {
+      finishRead = resolve;
+    });
+    let delayNextRead = true;
+    const request = vi.fn(async (method: string, _path: string, body?: unknown) => {
+      if (method === 'GET' && delayNextRead) {
+        delayNextRead = false;
+        return delayedRead;
+      }
+      if (method === 'PATCH')
+        session = {
+          ...session,
+          metadata: asRecord(asRecord(body)?.metadata) ?? {},
+          time: { created: 1, updated: 3 },
+        };
+      return session;
+    });
+    const server = createServer({ request });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const pending = provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 1, method: 'GET', path: '/session/session-1' },
+    });
+    await vi.waitFor(() => expect(request).toHaveBeenCalled());
+    const model = { providerID: 'openai', modelID: 'new-model' };
+    await provider.handleMessage({
+      type: 'session-model/update',
+      payload: { sessionId: 'session-1', model },
+    });
+    finishRead?.(oldSession);
+    await pending;
+    expect(
+      posted.filter((message) => asRecord(message)?.type === 'session-models/sync').at(-1)
+    ).toEqual({
+      type: 'session-models/sync',
+      payload: { models: { 'session-1': model } },
+    });
+    // A later authoritative change from another client must still be restored.
+    session = { ...oldSession, time: { created: 1, updated: 4 } };
+    const eventHandler = server.on.mock.calls.find(([event]) => event === 'event')?.[1];
+    eventHandler?.({ type: 'session.updated', properties: { info: session } });
+    expect(
+      posted.filter((message) => asRecord(message)?.type === 'session-models/sync').at(-1)
+    ).toEqual({
+      type: 'session-models/sync',
+      payload: { models: { 'session-1': { providerID: 'openai', modelID: 'old-model' } } },
+    });
+  });
+
   it('serializes model, reasoning, agent and permission writes and restores another instance read-only', async () => {
     let session: Session = {
       id: 'session-1',

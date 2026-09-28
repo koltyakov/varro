@@ -3702,17 +3702,45 @@ export async function executeActivityScenario({
   };
   try {
     if (!scope?.messageIds?.length) throw new Error('Marked activity scope is unavailable');
-    evidence.actions = await runActions(
-      cdp,
-      [
-        { step: 1, action: 'expand disclosure' },
-        { step: 2, action: 'wheel transcript', delta: -96 },
-      ],
-      '',
-      null,
-      { scope, marker, sessionId, isActive: () => client.isBusy(sessionId) }
-    );
-    if (evidence.actions.length !== 2 || evidence.actions.some((action) => !action.executed)) {
+    let initial = await cdp.captureActionState(scope);
+    // Sticky preparation can leave retained disclosures expanded above the
+    // viewport. Reveal one with native input before requesting its transition.
+    for (
+      let attempt = 0;
+      attempt < 8 &&
+      initial.disclosures.length > 0 &&
+      !initial.disclosures.some((item) => item.visible);
+      attempt += 1
+    ) {
+      const revealed = await runActions(
+        cdp,
+        [{ step: evidence.actions.length + 1, action: 'wheel transcript', delta: -180 }],
+        '',
+        null,
+        { scope, marker, sessionId, isActive: () => client.isBusy(sessionId) }
+      );
+      evidence.actions.push(...revealed);
+      if (revealed.length !== 1 || !revealed[0].executed) {
+        throw new Error('Could not reveal a retained disclosure');
+      }
+      initial = await cdp.captureActionState(scope);
+    }
+    const resetDisclosure =
+      !initial.disclosures.some((item) => item.visible && !item.expanded) &&
+      initial.disclosures.some((item) => item.visible && item.expanded);
+    const plan = [
+      ...(resetDisclosure ? [{ action: 'collapse disclosure' }] : []),
+      { action: 'expand disclosure' },
+      { action: 'wheel transcript', delta: -96 },
+    ].map((action, index) => ({ step: evidence.actions.length + index + 1, ...action }));
+    const actions = await runActions(cdp, plan, '', null, {
+      scope,
+      marker,
+      sessionId,
+      isActive: () => client.isBusy(sessionId),
+    });
+    evidence.actions.push(...actions);
+    if (actions.length !== plan.length || actions.some((action) => !action.executed)) {
       throw new Error('Required disclosure or outer wheel action failed');
     }
     phase = 'detached-completions';

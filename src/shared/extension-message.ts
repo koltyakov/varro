@@ -568,13 +568,20 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       }
       const agent = payload?.agent;
       if (agent !== undefined && (!isString(agent) || !agent.trim())) return null;
-      if (skippedAt === undefined && agent === undefined) return null;
+      const selectionId = payload?.selectionId;
+      if (
+        selectionId !== undefined &&
+        (!isString(selectionId) || !selectionId || selectionId.length > 128)
+      )
+        return null;
+      if (skippedAt === undefined && agent === undefined && selectionId === undefined) return null;
       const result: Extract<ExtensionMessage, { type: 'session-plan-state/update' }> = {
         type,
         payload: { sessionId },
       };
       if (skippedAt !== undefined) result.payload.skippedAt = skippedAt;
       if (agent !== undefined) result.payload.agent = agent;
+      if (selectionId !== undefined) result.payload.selectionId = selectionId;
       return result;
     }
 
