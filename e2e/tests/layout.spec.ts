@@ -1959,6 +1959,7 @@ test('image previews reserve stable 16:9 frames before loading', async ({ page }
   expect(imageBoxes).toEqual(beforeLoad);
 
   await page.setViewportSize({ width: 1000, height: 800 });
+  await expect.poll(async () => (await measureFrames())[0]?.width ?? 0).toBeGreaterThan(498);
   const resizedFrames = await measureFrames();
   const resizedFrame = resizedFrames[0];
   if (!resizedFrame) throw new Error('Image preview frame is missing');

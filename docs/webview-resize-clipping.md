@@ -10,8 +10,10 @@ it does not identify the responsible VS Code/Electron component.
 
 Promoting the plain root with `translateZ(0)`, `will-change: transform`, and
 `contain: layout paint`, while allowing visible overflow, did not eliminate it.
-There is no verified Varro-side workaround. Changing message-list anchoring or
-hiding the transcript during resize would not address the demonstrated cause.
+Varro now limits root expansion for four animation frames in `src/webview/index.tsx`.
+The content remains inside the previous painted width while the host surface catches up.
+Shrinking and browser zoom apply immediately; repeated drag events do not restart the
+pending expansion. Message-list anchoring and transcript visibility remain independent.
 
 A fresh isolated-host retest on September 28 retained 169 compositor frames across
 the baseline, `overflow: visible`, and `overflow: clip` experiments. The visible
@@ -25,6 +27,18 @@ clipped, across 144 retained frames. For example, `software-resize/resize-baseli
 shows the expanded sidebar with the plain document clipped to its old 360px width.
 Evidence is under `artifacts/ai-fuzzy/20260928-48267/`. Disabling GPU acceleration
 does not establish a workaround either.
+
+Run 94312 verified the root-width mitigation in a fresh real editor. The unmodified
+plain control clipped or lost all five cards in 11 of 66 captured frames. A two-frame
+delay still clipped one frame in the built application. The final four-frame version
+kept all five cards intact across 100 resize actions, 285 compositor frames and 1,425
+card samples. The real long-history AI-02 resize/zoom sequence also passed its anchor
+checks. Evidence is under `artifacts/ai-fuzzy/20260928-94312/`, including
+`all-cards-resize-comparison.json` and `resize-source-four/`.
+
+This is an application mitigation, not a repair to VS Code's compositor. Expansion
+intentionally follows the host by four frames. The host-level plain-body reproduction
+remains useful when changing or removing the mitigation.
 
 ## Reduced reproduction
 

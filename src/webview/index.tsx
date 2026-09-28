@@ -84,6 +84,51 @@ function trackEditorLayoutSettling() {
   };
 }
 
+function trackWebviewWidth(root: HTMLElement) {
+  const previousMaxWidth = root.style.maxWidth;
+  let width = window.innerWidth;
+  let pixelRatio = window.devicePixelRatio;
+  let frame: number | undefined;
+  const applyWidth = () => {
+    width = window.innerWidth;
+    root.style.maxWidth = `${width}px`;
+  };
+  const handleResize = () => {
+    // Zoom changes CSS pixels without resizing the host's painted surface.
+    if (pixelRatio !== window.devicePixelRatio) {
+      pixelRatio = window.devicePixelRatio;
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+      frame = undefined;
+      applyWidth();
+      return;
+    }
+    if (window.innerWidth < width) applyWidth();
+    if (window.innerWidth === width || frame !== undefined) return;
+    // VS Code can paint a wider layout through the previous, narrower webview
+    // surface for a frame. Keep cards inside that surface until it catches up.
+    // Do not restart the wait on every drag event: continuous resizing must grow.
+    // Four frames allow for cross-process resize delivery as well as painting.
+    let remainingFrames = 4;
+    const grow = () => {
+      remainingFrames -= 1;
+      if (remainingFrames > 0) {
+        frame = window.requestAnimationFrame(grow);
+      } else {
+        frame = undefined;
+        applyWidth();
+      }
+    };
+    frame = window.requestAnimationFrame(grow);
+  };
+  applyWidth();
+  window.addEventListener('resize', handleResize);
+  return () => {
+    if (frame !== undefined) window.cancelAnimationFrame(frame);
+    window.removeEventListener('resize', handleResize);
+    root.style.maxWidth = previousMaxWidth;
+  };
+}
+
 export function showBootstrapFailure(root: HTMLElement) {
   const fallback = document.createElement('div');
   fallback.setAttribute('role', 'alert');
@@ -118,6 +163,7 @@ export function bootstrap(root: HTMLElement) {
   }
   document.documentElement.classList.toggle(EDITOR_SURFACE_CLASS, isEditorSurface);
   const stopTrackingEditorLayout = isEditorSurface ? trackEditorLayoutSettling() : undefined;
+  const stopTrackingWidth = trackWebviewWidth(root);
   let dispose: (() => void) | undefined;
   let failed = false;
   const disposeWebview = () => {
@@ -158,6 +204,7 @@ export function bootstrap(root: HTMLElement) {
     }
     disposeWebview();
     stopTrackingEditorLayout?.();
+    stopTrackingWidth();
     document.documentElement.classList.remove(EDITOR_SURFACE_CLASS);
   };
 }

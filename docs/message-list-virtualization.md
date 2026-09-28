@@ -138,6 +138,9 @@ the shared invariants below remain true.
 - A resize batch is a pure width reflow only when every reported inline size changed or the container
   font changed. Concurrent streaming, expansion, or content mutation makes it a content resize and
   uses normal height-correction ownership.
+- The webview root caps expansion for four animation frames while the VS Code painted surface catches
+  up. During that interval, `window.innerWidth` can exceed the content width. Measure the actual
+  container for reflow and anchor calculations. Shrinking and zoom bypass the expansion delay.
 - Width measurements may be deferred only while the mounted range still brackets the viewport.
   Publish pending metrics early if stale prefixes could leave uncovered space above or below the
   rendered range.
