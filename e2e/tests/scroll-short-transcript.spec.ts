@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { ServerEvent } from '../../src/shared/protocol';
+import type { ServerEvent, WebviewMessage } from '../../src/shared/protocol';
 import type { AssistantMessage, MessageEntry, ToolPart } from '../../src/webview/types';
 
 for (const width of [480, 1280]) {
@@ -8,29 +8,13 @@ for (const width of [480, 1280]) {
     await page.goto('/e2e/harness/index.html?scenario=blank');
     await page.evaluate(() => {
       // SAFETY: Only the isolated fixture transport is intercepted to keep the first turn working.
-      const harness = window as typeof window & {
-        __sendToExtension?: (message: {
-          type: string;
-          payload?: { path?: string };
-        }) => void | Promise<void>;
+      const harness = window as {
+        __sendToExtension?: (message: WebviewMessage) => void | Promise<void>;
       };
       const send = harness.__sendToExtension;
       harness.__sendToExtension = (message) => {
-        if (
-          message &&
-          typeof message === 'object' &&
-          'type' in message &&
-          message.type === 'api/request'
-        ) {
-          const payload = 'payload' in message ? message.payload : undefined;
-          if (
-            payload &&
-            typeof payload === 'object' &&
-            'path' in payload &&
-            typeof payload.path === 'string' &&
-            payload.path.endsWith('/prompt_async')
-          )
-            return;
+        if (message.type === 'api/request' && message.payload.path.endsWith('/prompt_async')) {
+          return;
         }
         return send?.(message);
       };
