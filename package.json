@@ -509,6 +509,12 @@
           "default": false,
           "description": "Debug only: make Varro behave as if no providers are configured"
         },
+        "varro.debug.showQuotaWarning": {
+          "deprecationMessage": "Debug only setting. Not intended for regular use.",
+          "type": "boolean",
+          "default": false,
+          "description": "Debug only: show the quota warning for available provider quotas regardless of remaining allowance or saved dismissals. Closing this preview does not save a dismissal."
+        },
         "varro.debug.simulateUpgradeFailure": {
           "deprecationMessage": "Debug only setting. Not intended for regular use.",
           "type": "string",

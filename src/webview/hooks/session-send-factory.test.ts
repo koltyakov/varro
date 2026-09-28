@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExtensionContext } from '../../shared/extension-context';
-import { error, replaceClipboardImages, replaceContextFiles } from '../lib/state';
+import {
+  error,
+  replaceClipboardImages,
+  replaceContextFiles,
+  setClipboardImageContextFile,
+} from '../lib/state';
 import type * as BridgeModule from '../lib/bridge';
 
 const { postMessage } = vi.hoisted(() => ({
@@ -517,6 +522,50 @@ describe('SessionSendOperations', () => {
       'session-second',
     ]);
   });
+
+  it.each([false, true])(
+    'handles image storage completing during send preparation, failure=%s',
+    async (fail) => {
+      appStore.setState('activeSessionId', 'session-1');
+      const image = {
+        id: 'pasted-image',
+        url: 'data:image/png;base64,AA==',
+        mime: 'image/png',
+        filename: 'Image 1',
+        size: 1,
+      };
+      composerStore.addClipboardImage(image);
+      const contextFile = {
+        path: '/repo/image.png',
+        relativePath: 'image.png',
+        type: 'file' as const,
+      };
+      let draftImageIdsDuringSend: string[] | undefined;
+      const operations = createOperations(
+        vi.fn(async () => {
+          draftImageIdsDuringSend = appStore.state.clipboardImages.map((item) => item.id);
+          if (fail) throw new Error('Send failed');
+        })
+      );
+      const send = operations.prepareSendMessage('Look at [Image 1]');
+      setClipboardImageContextFile(image.id, contextFile);
+
+      expect(await send()).toBe(!fail);
+      expect(draftImageIdsDuringSend).toEqual([]);
+      if (fail) {
+        expect(appStore.state.clipboardImages).toEqual([
+          expect.objectContaining({ ...image, contextFile }),
+        ]);
+      } else {
+        expect(appStore.state.clipboardImages).toEqual([]);
+        expect(postMessage).toHaveBeenCalledWith({
+          type: 'images/release',
+          payload: { paths: [contextFile.path], deferred: true, sessionId: 'session-1' },
+        });
+        expect(composerStore.addClipboardImage({ ...image, id: 'next-paste' })).toBe(true);
+      }
+    }
+  );
 
   it('clears sent attachments restored without inline sequences', async () => {
     appStore.setState('activeSessionId', 'session-1');

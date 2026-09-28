@@ -122,6 +122,7 @@ export interface AppState {
   currentDocumentEnabled: boolean;
   issuesEnabled: boolean;
   enableProblemsContext: boolean;
+  debugShowQuotaWarning: boolean;
   draftCurrentDocumentEnabled: boolean | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
@@ -375,6 +376,7 @@ export function createAppState(): AppStateInstance {
         ? storedInlineProblems.filter(isInlineProblem)
         : [],
     enableProblemsContext: initialWebviewState.enableProblemsContext ?? true,
+    debugShowQuotaWarning: initialWebviewState.debugShowQuotaWarning ?? false,
     emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
     currentDocumentEnabled: currentDocumentWorkspace
       ? (projectCurrentDocumentEnabled[currentDocumentWorkspace] ?? true)

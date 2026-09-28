@@ -5633,10 +5633,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       <Show when={!hasExpandedDiffOverlay() && !visibleUsageLimit() && !composerEditingMessage()}>
         <ProviderQuotaWarning
           limit={currentProviderLimit()}
+          forceShow={state.debugShowQuotaWarning}
           modelID={currentModel().modelID}
           modelName={currentModel().modelName}
           providerName={currentModel().providerName}
-          onOpenUsage={() => closePopups()}
           onRefresh={() => {
             const model = currentModel();
             if (model.providerID) void refreshProviderLimit(model.providerID, model.modelID);

@@ -245,6 +245,15 @@ describe('SidebarProvider local config routing', () => {
       type: 'config/update',
       payload: expect.objectContaining({ showTurnTimer: true }),
     });
+
+    await vscodeMock.workspace.getConfiguration('varro').update('debug.showQuotaWarning', true);
+    listener?.({
+      affectsConfiguration: (key: string) => key === 'varro.debug.showQuotaWarning',
+    });
+    expect(posted).toContainEqual({
+      type: 'config/update',
+      payload: expect.objectContaining({ debugShowQuotaWarning: true }),
+    });
   });
 
   it('reads model routing from project opencode.json', async () => {

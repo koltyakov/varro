@@ -733,14 +733,16 @@ function clearCapturedComposerAttachments(
 
   for (const sent of captured.snapshot.clipboardImages) {
     const current = appStore.state.clipboardImages.find((image) => image.id === sent.id);
+    // Storage can finish after capture without changing the attached image.
+    const storedSnapshot = { ...sent, contextFile: sent.contextFile ?? current?.contextFile };
     if (
       !current ||
       current !== captured.clipboardImageIdentities.get(sent.id) ||
-      !areClipboardImagesEqual(current, sent)
+      !areClipboardImagesEqual(current, storedSnapshot)
     ) {
       continue;
     }
-    cleared.clipboardImages.push(sent);
+    cleared.clipboardImages.push(storedSnapshot);
     composerStore.removeSentClipboardImage(current.id);
   }
 

@@ -426,7 +426,13 @@ The composer can show model and session metadata:
 - Context usage, based on token totals from assistant messages and the selected model's context window.
 - Reported session cost in the context popup, when OpenCode supplies cost data.
 
-If a provider or model hits a usage limit, Varro shows a usage-limit banner with actions to stop retrying or switch providers.
+When an applicable provider quota has 25% or less remaining, a warning above the composer shows the percentage left in each low window and its reset time. The warning becomes critical at 10% remaining. A low weekly or monthly allowance appears even when the 5-hour allowance is healthy. **View usage** opens the provider's usage page in your browser and is hidden when its URL is unknown.
+
+Closing a yellow warning hides each displayed quota until it becomes critical at 10% remaining or resets. Closing a red warning hides critical quotas until they reset. Each window is tracked independently, including when yellow and red quotas appear together. Dismissals persist across session switches and reloads, with a one-hour fallback when the reset time is unknown. A newly low window can still warn independently.
+
+For UI debugging, set `varro.debug.showQuotaWarning` to `true` to show available quotas regardless of remaining allowance or saved dismissals. The setting updates live. Closing the debug preview does not save a dismissal; toggle the setting off and on to show it again.
+
+If a provider or model hits a usage limit, Varro shows a usage-limit banner with actions to stop retrying or switch providers. This error notice takes priority over quota warnings.
 
 Provider and configuration changes are revalidated without interrupting running agents. When applying a refresh must wait, the Models view shows a queued configuration update and applies it after active work finishes. Embedded reauthentication can refresh an authentication-only change immediately.
 

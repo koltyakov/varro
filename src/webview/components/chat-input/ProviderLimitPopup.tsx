@@ -13,15 +13,13 @@ import {
   getProviderLimitWindowUsedPercent,
 } from '../../lib/format';
 import { postMessage } from '../../lib/bridge';
+import { getProviderUsageLink } from '../../lib/provider-usage';
 import { isFunction } from '../../lib/runtime-values';
 import { navArrowRightIcon, openNewWindowIcon } from '../../lib/ui-icons';
 import { UiIcon } from '../UiIcon';
 
 const PROVIDER_LIMIT_WARNING_PERCENT = 75;
 const PROVIDER_LIMIT_ERROR_PERCENT = 90;
-const OPENAI_USAGE_URL = 'https://chatgpt.com/#settings/Usage';
-const ZAI_USAGE_URL = 'https://z.ai/manage-apikey/coding-plan/personal/usage';
-const XAI_USAGE_URL = 'https://grok.com/?_s=usage';
 
 export function ProviderLimitPopup(props: {
   ref?: HTMLDivElement | ((el: HTMLDivElement) => void);
@@ -40,18 +38,7 @@ export function ProviderLimitPopup(props: {
     const resets = props.limit.usageLimitResets;
     return resets && resets.availableCount > 0 ? resets : null;
   };
-  const resetCreditsUsageLink = () => {
-    if (props.limit?.providerID === 'openai') {
-      return { label: 'ChatGPT Usage', url: OPENAI_USAGE_URL };
-    }
-    if (props.limit?.providerID === 'xai') {
-      return { label: 'Grok Usage', url: XAI_USAGE_URL };
-    }
-    if (props.limit?.providerID === 'zai' || props.limit?.providerID === 'zai-coding-plan') {
-      return { label: 'Z.ai Usage', url: ZAI_USAGE_URL };
-    }
-    return null;
-  };
+  const resetCreditsUsageLink = () => getProviderUsageLink(props.limit?.providerID);
   let popupEl: HTMLDivElement | undefined;
 
   const setRef = (el: HTMLDivElement) => {
@@ -143,6 +130,7 @@ export function ProviderLimitPopup(props: {
                         href={link().url}
                         onClick={(event) => {
                           event.preventDefault();
+                          event.stopPropagation();
                           postMessage({
                             type: 'vscode/open-external',
                             payload: { url: link().url },

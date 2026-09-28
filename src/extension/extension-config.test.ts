@@ -42,6 +42,7 @@ describe('readExtensionConfigState', () => {
     expect(readExtensionConfigState()).toMatchObject({
       expandThinking: false,
       showTurnTimer: true,
+      debugShowQuotaWarning: false,
       enableProblemsContext: true,
       chatFontSize: 13,
       chatEditorFontSize: 12,
@@ -59,6 +60,11 @@ describe('readExtensionConfigState', () => {
     mocks.values.set('varro.chat.showTurnTimer', false);
 
     expect(readExtensionConfigState().showTurnTimer).toBe(false);
+  });
+
+  it('reads the quota-warning debug setting', () => {
+    mocks.values.set('varro.debug.showQuotaWarning', true);
+    expect(readExtensionConfigState().debugShowQuotaWarning).toBe(true);
   });
 
   it('reads the Problems context opt-out', () => {
