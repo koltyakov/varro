@@ -6,7 +6,7 @@ import { getScrollMetrics, waitForAnimationFrames } from './helpers';
 // Headless Chromium hides native scrollbars by default, making thumb drags inert.
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
-for (const phase of ['exiting', 'retained', 'held-pointer'] as const) {
+for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointer'] as const) {
   test(`scrollbar dragging releases the ${phase} activity-collapse anchor`, async ({
     page,
   }, testInfo) => {
@@ -21,13 +21,12 @@ for (const phase of ['exiting', 'retained', 'held-pointer'] as const) {
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThanOrEqual(1);
-    const pauseExit =
-      phase === 'exiting'
-        ? await page.addStyleTag({
-            content:
-              '.assistant-active-activity-item.is-exiting { animation-play-state: paused !important; }',
-          })
-        : null;
+    const pauseExit = phase.startsWith('exiting')
+      ? await page.addStyleTag({
+          content:
+            '.assistant-active-activity-item.is-exiting { animation-play-state: paused !important; }',
+        })
+      : null;
     await page.evaluate(() => {
       // SAFETY: The isolated fixture installs this typed message store and event transport.
       const harness = (
@@ -58,7 +57,7 @@ for (const phase of ['exiting', 'retained', 'held-pointer'] as const) {
         });
       }
     });
-    if (phase === 'exiting') {
+    if (phase.startsWith('exiting')) {
       await expect(page.locator('.assistant-active-activity-item.is-exiting')).toHaveCount(2);
     } else {
       await expect(items).toHaveCount(0);
@@ -82,6 +81,14 @@ for (const phase of ['exiting', 'retained', 'held-pointer'] as const) {
     });
     await page.mouse.move(thumb.x, thumb.y);
     await page.mouse.down();
+    if (phase === 'exiting-bottom-event') {
+      // Reproduce a layout-driven bottom event after the pointer releases the exit
+      // anchor, before native dragging moves away. It must not reclaim ownership.
+      await list.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event('scroll'));
+      });
+    }
     // Pointer ownership must survive the short keyboard/input-intent timeout.
     if (phase === 'held-pointer') await page.waitForTimeout(650);
     await page.mouse.move(thumb.x, thumb.y - 100, { steps: 12 });

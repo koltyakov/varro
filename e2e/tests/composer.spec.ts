@@ -1002,7 +1002,9 @@ test('sending from mid transcript snaps back to bottom and keeps following new t
   await composer.fill('First follow mode regression check');
   await sendButton.click();
 
-  await expect(page.getByText('First follow mode regression check', { exact: true })).toBeVisible();
+  await expect(
+    list.locator('.user-message-text').filter({ hasText: /^First follow mode regression check$/ })
+  ).toBeVisible();
   await expect(page.locator('.chat-turn-assistant').last()).toContainText(
     'Mock assistant response for: First follow mode regression check'
   );
@@ -1014,7 +1016,7 @@ test('sending from mid transcript snaps back to bottom and keeps following new t
   await sendButton.click();
 
   await expect(
-    page.getByText('Second follow mode regression check', { exact: true })
+    list.locator('.user-message-text').filter({ hasText: /^Second follow mode regression check$/ })
   ).toBeVisible();
   await expect(page.locator('.chat-turn-assistant').last()).toContainText(
     'Mock assistant response for: Second follow mode regression check'

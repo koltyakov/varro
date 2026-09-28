@@ -1,5 +1,7 @@
 import { createSignal } from 'solid-js';
 import cubeIcon from 'iconoir/icons/cube.svg';
+import binocularSvg from 'iconoir/icons/binocular.svg?raw';
+import cubeScanSolidSvg from 'iconoir/icons/cube-scan-solid.svg?raw';
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebviewMessage } from '../../../shared/protocol';
@@ -15,6 +17,21 @@ import {
   VariantPicker,
   WorkspacePicker,
 } from './ToolbarPickers';
+
+// Exercise the lazy catalog update without transforming every Iconoir SVG in
+// this component test. The real catalog is covered in agent-icon-catalog.test.ts.
+// oxlint-disable-next-line anti-slop/no-module-mocking -- Keep the lazy asset boundary while limiting this component test to two real SVG fixtures.
+vi.mock('../../lib/agent-icon-catalog', () => ({
+  getCatalogIcon(name: string): string | undefined {
+    const svg =
+      name === 'binocular'
+        ? binocularSvg
+        : name === 'cube-scan-solid'
+          ? cubeScanSolidSvg
+          : undefined;
+    return svg === undefined ? undefined : `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  },
+}));
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -901,7 +918,7 @@ describe('ToolbarPickers', () => {
     }
   );
 
-  it('updates configured icons in the compact value and picker options', () => {
+  it('updates configured icons in the compact value and picker options after loading', async () => {
     const [icon, setIcon] = createSignal('binocular');
     cleanup = render(
       () => (
@@ -922,17 +939,21 @@ describe('ToolbarPickers', () => {
       container!
     );
 
-    for (const name of ['binocular', 'cube-scan-solid']) {
+    await vi.dynamicImportSettled();
+
+    for (const [name, svg] of [
+      ['binocular', binocularSvg],
+      ['cube-scan-solid', cubeScanSolidSvg],
+    ] as const) {
       setIcon(name);
-      const sources = [
-        container?.querySelector<HTMLElement>('.agent-picker-value-icon'),
-        container?.querySelector<HTMLElement>('.agent-picker-option-icon'),
-      ].map((element) => element?.style.getPropertyValue('--ui-icon-mask'));
-      const path = name.endsWith('-solid')
-        ? `/solid/${name.slice(0, -6)}.svg`
-        : `/regular/${name}.svg`;
-      expect(sources[0]).toContain(path);
-      expect(sources[1]).toBe(sources[0]);
+      await vi.waitFor(() => {
+        const sources = [
+          container?.querySelector<HTMLElement>('.agent-picker-value-icon'),
+          container?.querySelector<HTMLElement>('.agent-picker-option-icon'),
+        ].map((element) => element?.style.getPropertyValue('--ui-icon-mask'));
+        expect(sources[0]).toBe(toCssUrl(`data:image/svg+xml,${encodeURIComponent(svg)}`));
+        expect(sources[1]).toBe(sources[0]);
+      });
     }
   });
 

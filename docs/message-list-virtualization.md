@@ -241,6 +241,7 @@ the shared invariants below remain true.
 - Grabbing the scrollbar or beginning a touch scroll also releases the activity-exit target, retained
   summary anchor, and queued collapse correction without shrinking the scroll range. Bottom-follow
   yields while the pointer owns scrolling, including beyond the input-intent timeout.
+  A layout-driven bottom scroll event during that gesture must not recapture the exit anchor.
   `scroll-scrollbar-activity.spec.ts` uses native thumb drags during and after collapse, then checks
   detached streaming and explicit return to latest.
 - Non-append insertion, removal, filtering, or view replacement may use a bounded structural owner.

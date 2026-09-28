@@ -5558,11 +5558,13 @@ export function MessageList() {
       pinnedToBottom &&
       distance <= 1 &&
       activityExitBottomTarget === null &&
+      !pointerScrollOwnershipActive &&
       !editingMessage() &&
       !diffFocusPauseActive
     ) {
       // An exit that began while detached has no reserve. Protect its remaining height when
-      // native input reaches the bottom before the animation finishes.
+      // native input reaches the bottom before the animation finishes. A held scrollbar
+      // already owns scrolling; layout-driven bottom events must not reclaim its exit anchor.
       reserveCollapsedActivityTraySpace(exitingActivityPartKeys(), true);
     }
     if (!autoScroll() && !widthResizeActive && !stickyNavigationOwnsScroll() && !editingMessage()) {
