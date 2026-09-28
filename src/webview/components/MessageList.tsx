@@ -350,7 +350,7 @@ function numberPrompts(messages: readonly MessageEntry[], previousNumber = 0) {
     if (message.info.role !== 'user') continue;
     if (isSessionResumeMessage(message.parts)) continue;
     const parsed = parseUserMessageContent(message.parts);
-    if (parsed.automaticActions.length > 0 && !hasUserMessageContent(parsed)) continue;
+    if (!hasUserMessageContent(parsed)) continue;
     promptNumber += 1;
     numbers.set(message.info.id, promptNumber);
   }
