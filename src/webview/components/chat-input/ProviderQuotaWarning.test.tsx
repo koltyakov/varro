@@ -17,7 +17,10 @@ function quota(
   return { id, label: id, unit: 'unknown', remaining, limit: 100, resetAt };
 }
 
-function snapshot(windows: ProviderLimitWindow[], providerID = 'openai'): ProviderLimitStatus {
+function snapshot(
+  windows: ProviderLimitWindow[],
+  providerID = 'openai'
+): Extract<ProviderLimitStatus, { status: 'available' }> {
   return { providerID, status: 'available', source: 'provider', checkedAt: Date.now(), windows };
 }
 
@@ -348,7 +351,10 @@ describe('ProviderQuotaWarning', () => {
     ['openai', 'https://chatgpt.com/#settings/Usage'],
     ['anthropic', 'https://claude.ai/settings/usage'],
   ])('opens %s usage in the external browser', (providerID, url) => {
-    mount(snapshot([quota('extra_usage', 4), quota('five_hour', 90)], providerID));
+    mount({
+      ...snapshot([quota('extra_usage', 4), quota('five_hour', 90)], providerID),
+      usageLimitResets: { availableCount: 2, credits: null },
+    });
     const link = container.querySelector<HTMLAnchorElement>('.chat-quota-warning-usage')!;
     expect(link.href).toBe(url);
     link.click();
@@ -360,12 +366,25 @@ describe('ProviderQuotaWarning', () => {
     expect(container.querySelector('.provider-limit-popup')).toBeNull();
   });
 
-  it('hides View usage for unknown providers after switching providers', () => {
+  it('updates available resets and hides missing or zero counts', () => {
     const { setLimit } = mount(snapshot([quota('weekly', 8)]));
-    expect(container.querySelector('.chat-quota-warning-usage')).not.toBeNull();
-    setLimit(snapshot([quota('weekly', 8)], 'custom-provider'));
-    expect(banner()).not.toBeNull();
     expect(container.querySelector('.chat-quota-warning-usage')).toBeNull();
+    for (const count of [1, 3, 0]) {
+      setLimit({
+        ...snapshot([quota('weekly', 8)]),
+        usageLimitResets: { availableCount: count, credits: null },
+      });
+      const link = container.querySelector('.chat-quota-warning-usage');
+      if (count === 0) expect(link).toBeNull();
+      else expect(link?.textContent).toBe(`${count} ${count === 1 ? 'reset' : 'resets'} available`);
+    }
+    setLimit({
+      ...snapshot([quota('weekly', 8)], 'custom-provider'),
+      usageLimitResets: { availableCount: 2, credits: null },
+    });
+    expect(banner()?.textContent).toContain('2 resets available');
+    expect(container.querySelector('.chat-quota-warning-usage')).toBeNull();
+    expect(banner()?.textContent).not.toContain('View usage');
   });
 
   it('removes warnings when quota recovers or becomes unavailable', () => {

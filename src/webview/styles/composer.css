@@ -2417,7 +2417,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 10px;
-  padding: 7px 9px;
+  padding: 3px 9px;
   box-shadow: inset 0 0 0 0.5px
     color-mix(in srgb, var(--quota-warning-color) 26%, var(--color-vscode-border));
   border-radius: var(--radius-control);
@@ -2434,7 +2434,7 @@
 .interactive-input-part > .chat-quota-warning:has(+ .chat-input-shell) {
   /* Extend behind the composer's rounded top corners to join the two surfaces. */
   margin-bottom: calc(-1 * (var(--chat-input-part-gap) + var(--radius-control)));
-  padding-bottom: calc(6px + var(--radius-control));
+  padding-bottom: calc(3px + var(--radius-control));
   border-radius: var(--radius-control) var(--radius-control) 0 0;
 }
 
@@ -2455,7 +2455,7 @@
 .chat-quota-warning-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
   margin-left: auto;
 }
 
@@ -2471,8 +2471,7 @@
 }
 
 .chat-quota-warning-usage {
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration: none;
 }
 
 .chat-quota-warning-close {
@@ -2486,10 +2485,18 @@
 .chat-quota-warning-usage:hover,
 .chat-quota-warning-close:hover {
   color: var(--color-vscode-fg);
+}
+
+.chat-quota-warning-close:hover {
   background: var(--color-vscode-hover);
 }
 
-.chat-quota-warning-usage:focus-visible,
+.chat-quota-warning-usage:focus,
+.chat-quota-warning-usage:focus-visible {
+  outline: none;
+  color: var(--color-vscode-fg);
+}
+
 .chat-quota-warning-close:focus-visible {
   outline: 1px solid var(--color-vscode-accent);
   outline-offset: 2px;

@@ -55,6 +55,12 @@ export function ProviderQuotaWarning(props: {
     )
   );
   const usageLink = createMemo(() => getProviderUsageLink(props.limit?.providerID));
+  const availableResets = createMemo(() => {
+    const limit = props.limit;
+    return limit?.status === 'available' ? (limit.usageLimitResets?.availableCount ?? 0) : 0;
+  });
+  const resetLabel = () =>
+    `${availableResets()} ${availableResets() === 1 ? 'reset' : 'resets'} available`;
   const isCritical = createMemo(() =>
     visibleWindows().some((window) => getProviderLimitTone(props.limit, window) === 'error')
   );
@@ -108,21 +114,23 @@ export function ProviderQuotaWarning(props: {
           </For>
         </div>
         <div class="chat-quota-warning-actions">
-          <Show when={usageLink()}>
-            {(link) => (
-              <a
-                class="chat-quota-warning-usage"
-                href={link().url}
-                onClick={(event) => {
-                  event.preventDefault();
-                  // VS Code's window-level link handler also opens clicks with default prevented.
-                  event.stopPropagation();
-                  postMessage({ type: 'vscode/open-external', payload: { url: link().url } });
-                }}
-              >
-                View usage
-              </a>
-            )}
+          <Show when={availableResets() > 0}>
+            <Show when={usageLink()} fallback={<span>{resetLabel()}</span>}>
+              {(link) => (
+                <a
+                  class="chat-quota-warning-usage"
+                  href={link().url}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    // VS Code's window-level link handler also opens clicks with default prevented.
+                    event.stopPropagation();
+                    postMessage({ type: 'vscode/open-external', payload: { url: link().url } });
+                  }}
+                >
+                  {resetLabel()}
+                </a>
+              )}
+            </Show>
           </Show>
           <button
             type="button"
