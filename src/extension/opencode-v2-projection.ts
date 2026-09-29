@@ -404,6 +404,8 @@ export function projectV2Message(
     },
   };
   if (message.type === 'user') {
+    const delivery = message.metadata?.varroDelivery;
+    if (delivery === 'steer' || delivery === 'queue') info.delivery = delivery;
     return {
       info,
       parts: [

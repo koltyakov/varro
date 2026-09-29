@@ -79,6 +79,8 @@ import {
   type SessionProgress,
 } from '../lib/session-pauses';
 import { isSessionResumeMessage, readSessionPauses } from '../../shared/session-pauses';
+import { collectSteeringMessages } from '../lib/message-steering';
+import type { SteeringMessages } from '../lib/message-steering';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
 import {
   hasUserMessageContent,
@@ -344,27 +346,42 @@ export function getPromptNumberMap(messages: readonly MessageEntry[]) {
   return numberPrompts(messages).numbers;
 }
 
-/** Carry the open user group across history segment boundaries. */
-function numberPrompts(
-  messages: readonly MessageEntry[],
-  previous?: { lastNumber: number; openGroup: boolean }
-) {
+type PromptNumbers = {
+  numbers: Map<string, number>;
+  labels: Map<string, string>;
+  lastNumber: number;
+  turnsBySessionId: Map<string, { number: number; steeringCount: number }>;
+  steering: SteeringMessages;
+};
+
+/** Carry turn identities and steering ordinals across history segment boundaries. */
+function numberPrompts(messages: readonly MessageEntry[], previous?: PromptNumbers): PromptNumbers {
   const numbers = new Map<string, number>();
+  const labels = new Map<string, string>();
   let promptNumber = previous?.lastNumber ?? 0;
-  let openGroup = previous?.openGroup ?? false;
+  const turnsBySessionId = new Map(previous?.turnsBySessionId);
+  const steering = collectSteeringMessages(messages, previous?.steering);
   for (const message of messages) {
-    if (message.info.role !== 'user') {
-      openGroup = false;
-      continue;
-    }
+    if (message.info.role !== 'user' || message.info.pendingDelivery) continue;
     if (isSessionResumeMessage(message.parts)) continue;
     const parsed = parseUserMessageContent(message.parts);
     if (!hasUserMessageContent(parsed)) continue;
-    if (!openGroup) promptNumber += 1;
-    openGroup = true;
+    if (steering.ids.has(message.info.id)) {
+      const turn = turnsBySessionId.get(message.info.sessionID);
+      // A partial page cannot invent a new turn for steering whose root is not loaded yet.
+      if (!turn) continue;
+      const steeringCount = turn.steeringCount + 1;
+      turnsBySessionId.set(message.info.sessionID, { ...turn, steeringCount });
+      numbers.set(message.info.id, turn.number);
+      labels.set(message.info.id, `${turn.number}.${steeringCount}`);
+      continue;
+    }
+    promptNumber += 1;
+    turnsBySessionId.set(message.info.sessionID, { number: promptNumber, steeringCount: 0 });
     numbers.set(message.info.id, promptNumber);
+    labels.set(message.info.id, String(promptNumber));
   }
-  return { numbers, lastNumber: promptNumber, openGroup };
+  return { numbers, labels, lastNumber: promptNumber, turnsBySessionId, steering };
 }
 
 export function getActiveTurnMessageId(
@@ -1171,18 +1188,31 @@ export function MessageList() {
   const historyPromptNumbers = chainHistorySegments<ReturnType<typeof numberPrompts>>(
     (segment, previous) => createMemo(() => numberPrompts(segment.entries(), previous?.()))
   );
-  const promptNumberMap = createMemo(() => {
+  const promptNumbers = createMemo(() => {
     const olderPrompts = olderPromptsOutsideTranscript();
-    if (olderPrompts) return getPromptNumberMap(mergeOlderHistory(messages(), olderPrompts));
-    const history = historyPromptNumbers.map((numbers) => numbers());
-    return [
-      ...history.map(({ numbers }) => numbers),
-      numberPrompts(tailMessages(), history.at(-1)).numbers,
-    ].reduce<Map<string, number>>(
-      (merged, numbers) => mergeSegmentMaps(merged, numbers),
-      new Map()
-    );
+    const history = olderPrompts ? [] : historyPromptNumbers.map((numbers) => numbers());
+    const segments = olderPrompts
+      ? [numberPrompts(mergeOlderHistory(messages(), olderPrompts))]
+      : [...history, numberPrompts(tailMessages(), history.at(-1))];
+    return {
+      numbers: segments.reduce(
+        (merged, segment) => mergeSegmentMaps(merged, segment.numbers),
+        new Map<string, number>()
+      ),
+      labels: segments.reduce(
+        (merged, segment) => mergeSegmentMaps(merged, segment.labels),
+        new Map<string, string>()
+      ),
+      steeringIds: new Set(segments.flatMap((segment) => [...segment.steering.ids])),
+    };
   });
+  const promptNumberMap = createMemo(() => promptNumbers().numbers);
+  const promptNumberLabels = createMemo(() => promptNumbers().labels);
+  const steeringMessageIds = createMemo<ReadonlySet<string>>(
+    () => promptNumbers().steeringIds,
+    new Set(),
+    { equals: sameKeys }
+  );
   const promptGroupFirstMessageIds = createMemo(() => {
     const firstIds = new Map<number, string>();
     const groups = new Map<string, string>();
@@ -9244,6 +9274,7 @@ export function MessageList() {
             {(preview) => (
               <StickyUserMessagePreviewCard
                 preview={preview()}
+                steering={steeringMessageIds().has(preview().id)}
                 parts={messages()[messageIndexById().get(preview().id) ?? -1]?.parts}
                 sentAt={messages()[messageIndexById().get(preview().id) ?? -1]?.info.time.created}
                 showSentTimestamp={
@@ -9251,7 +9282,7 @@ export function MessageList() {
                 }
                 suppressTimestampAnimation={suppressTimestampAnimations()}
                 promptNumber={
-                  promptNumbersVisible() ? promptNumberMap().get(preview().id) : undefined
+                  promptNumbersVisible() ? promptNumberLabels().get(preview().id) : undefined
                 }
                 promptContinuation={promptGroupFirstMessageIds().get(preview().id) !== preview().id}
                 loading={pendingStickyJump()?.preview.id === preview().id}
@@ -9330,6 +9361,8 @@ export function MessageList() {
               modelChangeMap={modelChangeMap()}
               sessionPauseMap={rowSessionPauseMap()}
               promptNumberMap={promptNumberMap()}
+              promptNumberLabels={promptNumberLabels()}
+              steeringMessageIds={steeringMessageIds()}
               promptGroupFirstMessageIds={promptGroupFirstMessageIds()}
               messagePromptGroupIds={messagePromptGroupIds()}
               hoveredTurnId={hoveredTurnId()}

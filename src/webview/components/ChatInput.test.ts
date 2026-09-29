@@ -4,7 +4,14 @@ import { reconcile } from 'solid-js/store';
 import packageJson from '../../../package.json';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import type { ProviderLimitStatus, WebviewMessage } from '../../shared/protocol';
-import type { AssistantMessage, MessageEntry, Session, TextPart, UserMessage } from '../types';
+import type {
+  AssistantMessage,
+  MessageEntry,
+  Part,
+  Session,
+  TextPart,
+  UserMessage,
+} from '../types';
 import { ChatInput, sendDroppedContent } from './ChatInput';
 import {
   state,
@@ -1289,7 +1296,15 @@ describe('ChatInput', () => {
         agent: 'build',
         model: { providerID: 'openai', modelID: 'gpt-4o' },
       },
-      parts: [],
+      parts: [
+        {
+          id: 'prompt-text',
+          messageID: 'user-1',
+          sessionID: 'session-1',
+          type: 'text',
+          text: 'Fix the scrollbar regression',
+        },
+      ],
     } satisfies MessageEntry<UserMessage>;
     const assistantMessage = assistantMessageEntry({ input: 0, output: 0 });
     assistantMessage.info.time.created = 70_000;
@@ -1365,7 +1380,15 @@ describe('ChatInput', () => {
           agent: 'build',
           model: { providerID: 'openai', modelID: 'gpt-4o' },
         },
-        parts: [],
+        parts: [
+          {
+            id: 'prompt-text',
+            messageID: 'user-1',
+            sessionID: 'session-1',
+            type: 'text',
+            text: 'Fix the scrollbar regression',
+          },
+        ],
       } satisfies MessageEntry<UserMessage>;
       const assistant = assistantMessageEntry({ input: 0, output: 0 });
       assistant.info.time = { created: 71_000 };
@@ -1418,6 +1441,130 @@ describe('ChatInput', () => {
       expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
     }
   );
+
+  it.each([
+    'background notice',
+    'compaction',
+    'continuation',
+    'recovery',
+    'pending steer',
+    'delivered steer',
+  ])('keeps timing the original prompt through a %s', async (kind) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_188_000);
+    setShowTurnTimer(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 100_000)]);
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    const prompt: MessageEntry<UserMessage> = {
+      info: {
+        id: 'user-1',
+        sessionID: 'session-1',
+        role: 'user',
+        time: { created: 100_000 },
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+      },
+      parts: [
+        {
+          id: 'prompt-text',
+          messageID: 'user-1',
+          sessionID: 'session-1',
+          type: 'text',
+          text: 'Fix the scrollbar regression',
+        },
+      ],
+    };
+    const assistant: MessageEntry<AssistantMessage> = assistantMessageEntry({
+      input: 0,
+      output: 0,
+    });
+    assistant.info.time.created = 101_000;
+    assistant.info.time.completed = 200_000;
+    assistant.info.finish = 'tool_calls';
+    setState('messages', [prompt, assistant]);
+    cleanup = render(() => ChatInput(), container!);
+    const timer = container?.querySelector('.toolbar-turn-timer');
+    expect(timer?.textContent).toBe('18m 8s');
+
+    const notice: MessageEntry<UserMessage> = {
+      info: {
+        ...prompt.info,
+        id: 'notice',
+        time: { created: 1_154_000 },
+        pendingDelivery: kind === 'pending steer' ? 'steer' : undefined,
+      },
+      parts: [],
+    };
+    setState('messages', [prompt, assistant, notice]);
+    expect(timer?.textContent).toBe('18m 8s');
+
+    const identity = { id: 'notice-part', messageID: 'notice', sessionID: 'session-1' };
+    const part: Part =
+      kind === 'compaction'
+        ? { ...identity, type: 'compaction', auto: true, status: 'running' }
+        : {
+            ...identity,
+            type: 'text',
+            synthetic: kind !== 'pending steer' && kind !== 'delivered steer',
+            text:
+              kind === 'background notice'
+                ? '<shell id="test" state="completed">Done</shell>'
+                : kind === 'recovery'
+                  ? 'The previous response was interrupted. Continue working.'
+                  : kind === 'continuation'
+                    ? 'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.'
+                    : 'Run the remaining tests',
+          };
+    setState('messages', [prompt, assistant, { ...notice, parts: [part] }]);
+    expect(timer?.textContent).toBe('18m 8s');
+    const resumed = {
+      ...assistant,
+      info: { ...assistant.info, id: 'assistant-resumed', time: { created: Date.now() } },
+    };
+    setState('messages', [prompt, assistant, { ...notice, parts: [part] }, resumed]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(timer?.textContent).toBe('18m 10s');
+    expect(container?.querySelector('.toolbar-turn-timer')).toBe(timer);
+
+    cleanup();
+    cleanup = render(() => ChatInput(), container!);
+    expect(container?.querySelector('.toolbar-turn-timer')?.textContent).toBe('18m 10s');
+
+    const completed = {
+      ...resumed,
+      info: {
+        ...resumed.info,
+        finish: 'stop',
+        time: { ...resumed.info.time, completed: Date.now() },
+      },
+    };
+    const history = [prompt, assistant, { ...notice, parts: [part] }, completed];
+    setState('messages', history);
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
+
+    const nextPrompt = {
+      ...prompt,
+      info: { ...prompt.info, id: 'next-prompt', time: { created: Date.now() } },
+      parts: [{ ...prompt.parts[0]!, id: 'next-prompt-text', messageID: 'next-prompt' }],
+    };
+    const nextAssistant = {
+      ...resumed,
+      info: {
+        ...resumed.info,
+        id: 'next-assistant',
+        parentID: 'next-prompt',
+        time: { created: Date.now() },
+      },
+    };
+    setState('messages', [...history, nextPrompt, nextAssistant]);
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    // A stale loading clock from the prior turn must not carry into the new turn.
+    setLoadingStartedAt(100_000);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(container?.querySelector('.toolbar-turn-timer')?.textContent).toBe('10s');
+  });
 
   it('hides the active-turn timer in the new-session composer', () => {
     vi.useFakeTimers();

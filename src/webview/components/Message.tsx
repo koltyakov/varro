@@ -122,8 +122,9 @@ function isCompactActivityExpanded(group: AssistantActivityGroupInfo) {
 export function Message(props: {
   info: MessageType;
   parts: Part[];
-  promptNumber?: number;
+  promptNumber?: number | string;
   promptContinuation?: boolean;
+  steering?: boolean;
   showPromptNumber?: boolean;
   showSentTimestamp?: boolean;
   userMessageSeriesEndId?: string;
@@ -581,8 +582,14 @@ export function Message(props: {
     return isPlanImplementation() || (parsed ? isWrapperlessUserMessageContent(parsed) : false);
   });
   const isEditingUserMessage = () => isUser() && editingMessageId() === props.info.id;
+  const isSteeringMessage = () =>
+    isUser() &&
+    (props.steering ||
+      (props.info.role === 'user' &&
+        (props.info.delivery === 'steer' || props.info.pendingDelivery === 'steer')));
   const canEditUserMessage = () =>
     isUser() &&
+    !isSteeringMessage() &&
     !isPlanImplementation() &&
     hasUserContent() &&
     props.info.sessionID === state.activeSessionId &&
@@ -647,10 +654,15 @@ export function Message(props: {
             <div
               class={`value chat-turn-content ${
                 isUser()
-                  ? `chat-turn-card user-message-card${props.promptContinuation ? ' user-message-continuation' : ''}${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}${isPlanImplementation() ? ' plan-implementation-action' : ''}`
+                  ? `chat-turn-card user-message-card${isSteeringMessage() ? ' user-message-steering' : ''}${props.promptContinuation ? ' user-message-continuation' : ''}${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}${isPlanImplementation() ? ' plan-implementation-action' : ''}`
                   : assistantContainerClass()
               } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
               onClick={handleUserCardClick}
+              title={
+                isSteeringMessage()
+                  ? 'Steering message. Sent instructions cannot be edited.'
+                  : undefined
+              }
               onMouseEnter={() => notifyUserMessageHoverChange(true)}
               onMouseLeave={() => notifyUserMessageHoverChange(false)}
             >

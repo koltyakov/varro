@@ -215,6 +215,7 @@ import {
 } from '../lib/composer-history';
 import { getSessionHistoryPrompts } from '../lib/message-window';
 import { recordSessionPause } from '../lib/session-pauses';
+import { isSessionResumeMessage } from '../../shared/session-pauses';
 import { setError } from '../lib/app-state';
 import {
   detachDiscardableActiveBlankSession,
@@ -242,7 +243,7 @@ import {
   QueuedMessages,
   type QueuedMessageItem,
 } from './chat-input/QueuedMessages';
-import { parseUserMessageContent } from './message/UserMessageContent';
+import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
 import { ProviderQuotaWarning } from './chat-input/ProviderQuotaWarning';
 import {
@@ -4950,25 +4951,45 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (props.newSession || !showTurnTimer()) return null;
     const entries = currentSessionMessageEntries();
     let latestAssistant: ReturnType<typeof getLatestAssistantMessageInfo> = null;
+    let startedAt: number | null = null;
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       const entry = entries[index];
       if (!entry) continue;
-      if (!latestAssistant && isAssistantMessage(entry.info)) latestAssistant = entry.info;
+      if (isAssistantMessage(entry.info) && entry.info.mode !== 'subagent') {
+        if (
+          startedAt !== null &&
+          !entry.info.retry &&
+          (entry.info.time.completed || entry.info.error) &&
+          (!isContinuationAssistantFinish(entry.info.finish) || entry.info.error)
+        ) {
+          break;
+        }
+        if (!latestAssistant) latestAssistant = entry.info;
+      }
       if (entry.info.role !== 'user') continue;
+      // Automatic records continue the existing turn, even when their parts arrive later.
+      if (
+        entry.info.pendingDelivery ||
+        entry.info.delivery === 'steer' ||
+        (!isSessionResumeMessage(entry.parts) &&
+          !hasUserMessageContent(parseUserMessageContent(entry.parts)))
+      )
+        continue;
 
-      const terminalAssistantSettled =
-        latestAssistant &&
-        (!!latestAssistant.time.completed || !!latestAssistant.error) &&
-        (!isContinuationAssistantFinish(latestAssistant.finish) || !!latestAssistant.error);
-      if (terminalAssistantSettled && !composerBackgroundPending()) return null;
-
-      const incompleteAssistant =
-        latestAssistant && !latestAssistant.time.completed && !latestAssistant.error;
-      return isComposerDisplayBusy() || isLoading() || incompleteAssistant
-        ? entry.info.time.created
-        : null;
+      // Delivered steering joins the unfinished turn rather than restarting its clock.
+      startedAt = entry.info.time.created;
     }
-    return isComposerDisplayBusy() || isLoading() ? loadingStartedAt() : null;
+    const terminalAssistantSettled =
+      latestAssistant &&
+      !latestAssistant.retry &&
+      (!!latestAssistant.time.completed || !!latestAssistant.error) &&
+      (!isContinuationAssistantFinish(latestAssistant.finish) || !!latestAssistant.error);
+    if (terminalAssistantSettled && !composerBackgroundPending()) return null;
+
+    const incompleteAssistant =
+      latestAssistant && !latestAssistant.time.completed && !latestAssistant.error;
+    if (!isComposerDisplayBusy() && !isLoading() && !incompleteAssistant) return null;
+    return startedAt ?? loadingStartedAt();
   });
 
   const contextUsage = createMemo(() => {

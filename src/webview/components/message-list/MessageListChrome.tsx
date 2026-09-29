@@ -87,8 +87,9 @@ function bindStickyTextOverflowFade(
 export function StickyUserMessagePreviewCard(props: {
   preview: StickyUserMessagePreview;
   parts?: Part[];
-  promptNumber?: number;
+  promptNumber?: number | string;
   promptContinuation?: boolean;
+  steering?: boolean;
   sentAt?: number;
   showSentTimestamp?: boolean;
   suppressTimestampAnimation?: boolean;
@@ -149,7 +150,7 @@ export function StickyUserMessagePreviewCard(props: {
             )}
           </Show>
           <div
-            class={`latest-user-message-sticky${isClickable() ? ' latest-user-message-sticky-clickable' : ''}${props.loading ? ' is-loading' : ''}`}
+            class={`latest-user-message-sticky${props.steering ? ' user-message-steering' : ''}${isClickable() ? ' latest-user-message-sticky-clickable' : ''}${props.loading ? ' is-loading' : ''}`}
             title={props.loading ? 'Loading message' : undefined}
             onMouseEnter={() => notifyUserMessageHoverChange(true)}
             onMouseLeave={() => notifyUserMessageHoverChange(false)}

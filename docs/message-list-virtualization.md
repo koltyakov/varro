@@ -546,11 +546,13 @@ Direct input acquires ownership only when it can affect the transcript:
 
 ### Sticky Prompts
 
-- Consecutive real user prompts share one prompt number until an assistant entry intervenes.
-  Automatic user entries do not consume numbers or split a group. Carry the open group across
-  transcript segments and retain assistant boundaries in prefetched prompt history. Later bubbles
-  use muted Option/Alt badges. The left navigation has one dot per group and targets its first bubble;
-  each bubble retains its own message identity for editing and sticky previews.
+- Steering messages belong to the original turn even when assistant activity intervenes. They do not
+  increment the turn counter or create navigation dots. Option/Alt shows the original prompt as `1`
+  and its steering messages as `1.1`, `1.2`, etc.; the next ordinary turn is `2`. Reset the steering
+  ordinal at each new turn, and carry turn identities and ordinals across transcript segments and
+  prefetched history. Automatic user entries do not consume numbers or split a group. The left
+  navigation has one dot per turn and targets its original prompt; each steering bubble retains its
+  own message identity for sticky previews. Steering badges remain muted, including image captions.
 - The navigation rail keeps fixed-size dots within its available height, using earlier/later controls
   when the full set does not fit. Keep visible groups in the displayed navigation window.
   Wheel and trackpad input over an overflowing rail move its dot window, with delta-mode normalization
@@ -612,6 +614,13 @@ Direct input acquires ownership only when it can affect the transcript:
 - Row-local actions and adjacency derive from the same visible message collection as the renderer.
   Hidden child-session messages must not change the visible parent's Retry action, latest plan action,
   model transition, or preceding file-event context.
+- Steering bubbles use neutral request colors, including image-text bubbles and sticky previews.
+  Retain explicit delivery mode in new V2 prompt metadata; infer it from the session's unfinished turn
+  for older history, continuing that classification across history segments. Queued follow-ups after
+  a terminal response remain ordinary prompts. Delivered
+  steering is read-only: inline editing deletes later history and resends a root prompt, which would
+  detach the instruction from its original turn. Keep unsent queued drafts editable and pending inbox
+  steers in their existing read-only queue. Styling must not change row geometry or prompt identities.
 - All-tree messages may be used only by features that intentionally aggregate the tree, such as
   subagent dialog summaries and token statistics.
 - Switching a view mode must preserve stable message IDs and invalidate only the heights whose

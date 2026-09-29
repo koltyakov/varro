@@ -1971,6 +1971,35 @@ describe('Message user editing', () => {
     expect(container?.textContent).toContain('original prompt');
   });
 
+  it.each([false, true])(
+    'renders delivered steering as read-only with attachments=%s',
+    (withImage) => {
+      setAppState('activeSessionId', 'session-1');
+      setAppState('sessionStatus', {});
+      const parts: Part[] = [textPart('steer-text', 'Change direction')];
+      if (withImage)
+        parts.push({
+          id: 'steer-image',
+          sessionID: 'session-1',
+          messageID: 'steer',
+          type: 'file',
+          mime: 'image/png',
+          url: 'data:image/png;base64,test',
+        });
+      cleanup = render(
+        () => Message({ info: userMessage('steer'), parts, steering: true }),
+        container!
+      );
+      const card = container!.querySelector<HTMLElement>('.user-message-card')!;
+      expect(card.classList).toContain('user-message-steering');
+      expect(card.classList).not.toContain('user-message-card-editable');
+      expect(card.title).toContain('cannot be edited');
+      card.click();
+      expect(editingMessage()).toBeNull();
+      if (withImage) expect(card.querySelector('.user-message-image-text-bubble')).not.toBeNull();
+    }
+  );
+
   it('opens mixed-message image previews without starting a message edit', () => {
     setAppState('activeSessionId', 'session-1');
     cleanup = render(

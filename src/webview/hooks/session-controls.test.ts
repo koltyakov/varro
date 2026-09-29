@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Message, Session } from '../types';
+import { setSessionHistoryPrompts } from '../lib/message-window';
 import {
   abortSessionWithDependencies,
   compactSessionWithDependencies,
@@ -81,6 +82,7 @@ function completedTaskPart(id: string, sessionId = id) {
 }
 
 describe('session-controls helpers', () => {
+  afterEach(() => setSessionHistoryPrompts('session-1', []));
   it('sends the review prompt so the send path can create a session', async () => {
     const sendMessage = vi.fn(async () => {});
 
@@ -292,6 +294,64 @@ describe('session-controls helpers', () => {
       ['session-1', 'user-1'],
     ]);
   });
+
+  it.each([false, true])(
+    'blocks a delivered steering edit before side effects, prefetched history=%s',
+    async (prefetched) => {
+      const startLoading = vi.fn();
+      const abortSession = vi.fn(async () => {});
+      const deleteMessage = vi.fn(async () => {});
+      const sendEditedMessage = vi.fn(async () => true);
+      const setError = vi.fn();
+      if (prefetched)
+        setSessionHistoryPrompts('session-1', [
+          {
+            info: userMessage('user-1'),
+            parts: [
+              {
+                id: 'prompt-text',
+                messageID: 'user-1',
+                sessionID: 'session-1',
+                type: 'text',
+                text: 'Original task',
+              },
+            ],
+          },
+          { info: assistantMessage('assistant-1'), parts: [] },
+        ]);
+      const result = await editMessageWithDependencies(
+        {
+          getActiveSessionId: () => 'session-1',
+          getMessages: () =>
+            prefetched
+              ? [{ info: userMessage('steer') }]
+              : [
+                  { info: userMessage('user-1') },
+                  { info: assistantMessage('assistant-1') },
+                  { info: userMessage('steer') },
+                ],
+          isSessionWorking: () => false,
+          startLoading,
+          abortSession,
+          deleteMessage,
+          sendEditedMessage,
+          syncSessionMessages: vi.fn(async () => {}),
+          stopLoading: vi.fn(),
+          setError,
+        },
+        'steer',
+        'Revised instruction'
+      );
+      expect(result).toBe(false);
+      expect(setError).toHaveBeenCalledWith(
+        expect.stringContaining('steering messages cannot be edited')
+      );
+      expect(startLoading).not.toHaveBeenCalled();
+      expect(abortSession).not.toHaveBeenCalled();
+      expect(deleteMessage).not.toHaveBeenCalled();
+      expect(sendEditedMessage).not.toHaveBeenCalled();
+    }
+  );
 
   it('aborts and recycles task child trees before deleting their launch history', async () => {
     const order: string[] = [];

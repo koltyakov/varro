@@ -824,6 +824,10 @@ export class OpenCodeV2Adapter {
             // Keep the prompt with pending context, including Plan mode's synthetic reminder.
             // Queuing by default lets the reminder run as a separate provider turn.
             delivery: input.delivery === 'queue' ? 'queue' : 'steer',
+            metadata:
+              input.delivery === 'steer' || input.delivery === 'queue'
+                ? { varroDelivery: input.delivery }
+                : undefined,
             resume: input.noReply ? false : undefined,
           };
           if (action === 'command') {

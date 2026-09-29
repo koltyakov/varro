@@ -52,6 +52,8 @@ export type MessageRowSharedProps = {
   presentation?: StreamingPresentation;
   modelChangeMap: Map<string, ModelChangeInfo>;
   promptNumberMap: ReadonlyMap<string, number>;
+  promptNumberLabels?: ReadonlyMap<string, string>;
+  steeringMessageIds?: ReadonlySet<string>;
   promptGroupFirstMessageIds?: ReadonlyMap<string, string>;
   messagePromptGroupIds?: ReadonlyMap<string, string>;
   hoveredTurnId?: string | null;
@@ -277,7 +279,11 @@ export function MessageRow(
           <MessageComponent
             info={props.msg.info}
             parts={props.msg.parts}
-            promptNumber={props.promptNumberMap.get(props.msg.info.id)}
+            steering={props.steeringMessageIds?.has(props.msg.info.id)}
+            promptNumber={
+              props.promptNumberLabels?.get(props.msg.info.id) ??
+              props.promptNumberMap.get(props.msg.info.id)
+            }
             promptContinuation={
               !!props.promptGroupFirstMessageIds?.has(props.msg.info.id) &&
               props.promptGroupFirstMessageIds.get(props.msg.info.id) !== props.msg.info.id
