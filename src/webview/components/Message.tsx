@@ -121,6 +121,7 @@ export function Message(props: {
   parts: Part[];
   promptNumber?: number;
   showPromptNumber?: boolean;
+  onPromptNumberClick?: (messageId: string) => void;
   showSentTimestamp?: boolean;
   userMessageSeriesEndId?: string;
   suppressTimestampAnimation?: boolean;
@@ -625,7 +626,18 @@ export function Message(props: {
             >
               <Show when={!hasImageTextBubble() ? visiblePromptNumber() : undefined}>
                 {(promptNumber) => (
-                  <span class="prompt-number-badge" aria-hidden="true">
+                  <span
+                    class={`prompt-number-badge${props.onPromptNumberClick ? ' prompt-number-badge-clickable' : ''}`}
+                    aria-hidden="true"
+                    onClick={
+                      props.onPromptNumberClick
+                        ? (event) => {
+                            event.stopPropagation();
+                            props.onPromptNumberClick?.(props.info.id);
+                          }
+                        : undefined
+                    }
+                  >
                     {promptNumber()}
                   </span>
                 )}
@@ -637,6 +649,11 @@ export function Message(props: {
                     props.info.role === 'user' && props.info.agent === 'plan' ? 'plan' : undefined
                   }
                   promptNumber={hasImageTextBubble() ? visiblePromptNumber() : undefined}
+                  onPromptNumberClick={
+                    props.onPromptNumberClick
+                      ? () => props.onPromptNumberClick?.(props.info.id)
+                      : undefined
+                  }
                   onMessageHoverChange={notifyUserMessageHoverChange}
                 />
               </Show>

@@ -974,6 +974,7 @@ export function UserMessageContent(props: {
   parts: Part[];
   leadingAgent?: string;
   promptNumber?: number;
+  onPromptNumberClick?: () => void;
   onMessageHoverChange?: (hovering: boolean) => void;
 }) {
   const parsed = createMemo(() => parseUserMessageContent(props.parts));
@@ -1215,7 +1216,18 @@ export function UserMessageContent(props: {
           >
             <Show when={props.promptNumber}>
               {(promptNumber) => (
-                <span class="prompt-number-badge" aria-hidden="true">
+                <span
+                  class={`prompt-number-badge${props.onPromptNumberClick ? ' prompt-number-badge-clickable' : ''}`}
+                  aria-hidden="true"
+                  onClick={
+                    props.onPromptNumberClick
+                      ? (event) => {
+                          event.stopPropagation();
+                          props.onPromptNumberClick?.();
+                        }
+                      : undefined
+                  }
+                >
                   {promptNumber()}
                 </span>
               )}

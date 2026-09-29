@@ -264,6 +264,8 @@ export function VirtualizedContent(
         virtualHeight={virtualHeight()}
         virtualPlaceholder={virtualPlaceholder()}
         renderEmpty={props.renderEmptyMessageIds?.has(messageId)}
+        hideAssistantMessages={props.hideAssistantMessages}
+        onPromptNumberClick={props.onPromptNumberClick}
         userMessageSeriesEndId={getUserMessageSeriesEndId(props.messages, absoluteIndex())}
         followsVisibleUserRequest={followsVisibleUserRequest()}
         followsVisibleAssistantResponse={followsVisibleAssistantResponse()}

@@ -50,6 +50,8 @@ export type MessageRowSharedProps = {
   revealedWorkedSummaryPromptMessageId?: string | null;
   showWorkedSummaryTimes?: boolean;
   suppressTimestampAnimations?: boolean;
+  hideAssistantMessages?: boolean;
+  onPromptNumberClick?: (messageId: string) => void;
   lastAssistantID: string | null;
   assistantRetryStates?: ReadonlyMap<string, AssistantRetryState>;
   nearViewport?: boolean;
@@ -154,6 +156,8 @@ export function MessageRow(
   const allowInitialAssistantItemReveal = animateEntrance || props.msg.parts.length === 0;
   const isOffCore = () => !!props.outerListVirtualized && props.nearViewport === false;
   const isVirtualPlaceholder = () => isOffCore() && !!props.virtualPlaceholder;
+  const hideAssistantContent = () =>
+    !!props.hideAssistantMessages && isAssistantMessage(props.msg.info);
   const [entrancePending, setEntrancePending] = createSignal(animateEntrance);
   const modelChange = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const isEditingThisMessage = () =>
@@ -231,7 +235,7 @@ export function MessageRow(
         isEditingThisMessage() ? ' interactive-request-editing' : ''
       }${props.followsVisibleUserRequest ? ' interactive-response-follows-request' : ''}${props.followsVisibleAssistantResponse ? ' interactive-response-follows-response' : ''}${props.followsBorderedBlock ? ' interactive-item-follows-bordered-block' : ''}${props.continuesVisibleActivityGroup ? ' interactive-response-continues-activity-group' : ''}${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}
     >
-      <Show when={!isVirtualPlaceholder()}>
+      <Show when={!isVirtualPlaceholder() && !hideAssistantContent()}>
         <Show when={modelChange()}>
           {(change) => (
             <div class="model-change-indicator">
@@ -262,6 +266,7 @@ export function MessageRow(
             parts={props.msg.parts}
             promptNumber={props.promptNumberMap.get(props.msg.info.id)}
             showPromptNumber={props.showPromptNumbers}
+            onPromptNumberClick={props.onPromptNumberClick}
             showSentTimestamp={
               props.showSentTimestamps || props.revealedSentTimestampMessageId === props.msg.info.id
             }

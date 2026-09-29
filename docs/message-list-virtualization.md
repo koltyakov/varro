@@ -599,6 +599,16 @@ Direct input acquires ownership only when it can affect the transcript:
   subagent dialog summaries and token statistics.
 - Switching a view mode must preserve stable message IDs and invalidate only the heights whose
   rendered content can change.
+- The "hide AI responses" transient view mode reuses the render-empty classification instead of
+  filtering `messages()`. While active, every assistant message ID joins `knownZeroHeightMessageIds`
+  (zero virtual height) and `MessageRow` suppresses its content, so the CSS row box and the virtual
+  prefix agree on zero. Message IDs and order stay unchanged, so no structural anchor or index
+  renumbering is involved. The state is component-local and resets on session switch; clicking a
+  numbered navigation marker re-enables it before navigating. The trailing loading row and dialog
+  summary are likewise suppressed while active. While active, prompt numbers are shown on user
+  message cards and the sticky preview regardless of Alt, so a number click (a rail marker or the
+  card badge) re-enables the mode and navigates to that user message; the badge is absolutely
+  positioned and toggling it does not change row height or virtual prefixes.
 - Inline file-edit retention is a session-view layout input. Edits from the active or awaiting trailing
   turn remain inline, including when that turn completes while open. Reopening may compact them, and
   the transition invalidates every affected owner row.

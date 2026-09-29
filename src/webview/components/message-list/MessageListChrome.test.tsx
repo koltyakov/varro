@@ -247,6 +247,129 @@ describe('MessageListChrome', () => {
     expect(onSelect).toHaveBeenCalledWith(turns[0]);
   });
 
+  it('renders prompt numbers on markers when a number map is provided', () => {
+    const turns = [
+      { id: 'msg-1', index: 0, text: 'First prompt', attachmentCount: 0, imageCount: 0 },
+      { id: 'msg-2', index: 2, text: 'Second prompt', attachmentCount: 0, imageCount: 0 },
+      { id: 'msg-3', index: 4, text: 'Third prompt', attachmentCount: 0, imageCount: 0 },
+    ];
+    const promptNumberMap = new Map<string, number>([
+      ['msg-1', 2],
+      ['msg-2', 3],
+      ['msg-3', 5],
+    ]);
+    const onSelect = vi.fn();
+    cleanup = render(
+      () => (
+        <TurnNavigationRail
+          turns={turns}
+          activeTurnId="msg-2"
+          onSelect={onSelect}
+          promptNumberMap={promptNumberMap}
+        />
+      ),
+      container!
+    );
+
+    const markers = container?.querySelectorAll<HTMLButtonElement>('.turn-navigation-marker');
+    expect(markers).toHaveLength(3);
+    expect(markers?.[0]?.querySelector('.turn-navigation-marker-index')?.textContent).toBe('2');
+    expect(markers?.[0]?.getAttribute('aria-label')).toBe('Go to turn 2: First prompt');
+    expect(markers?.[1]?.querySelector('.turn-navigation-marker-index')?.textContent).toBe('3');
+    expect(markers?.[2]?.querySelector('.turn-navigation-marker-index')?.textContent).toBe('5');
+    // Numbered markers suppress the dot; numbering is stable regardless of array index.
+    expect(markers?.[0]?.classList.contains('has-number')).toBe(true);
+  });
+
+  it('falls back to a dot and index-based label when a turn has no prompt number', () => {
+    const turns = [
+      { id: 'msg-1', index: 0, text: 'First prompt', attachmentCount: 0, imageCount: 0 },
+      { id: 'msg-2', index: 3, text: 'Second prompt', attachmentCount: 0, imageCount: 0 },
+    ];
+    const promptNumberMap = new Map<string, number>([['msg-1', 1]]);
+    cleanup = render(
+      () => (
+        <TurnNavigationRail
+          turns={turns}
+          activeTurnId={null}
+          onSelect={vi.fn()}
+          promptNumberMap={promptNumberMap}
+        />
+      ),
+      container!
+    );
+
+    const markers = container?.querySelectorAll<HTMLButtonElement>('.turn-navigation-marker');
+    expect(markers?.[0]?.querySelector('.turn-navigation-marker-index')?.textContent).toBe('1');
+    expect(markers?.[0]?.classList.contains('has-number')).toBe(true);
+    expect(markers?.[1]?.querySelector('.turn-navigation-marker-index')).toBeNull();
+    expect(markers?.[1]?.classList.contains('has-number')).toBe(false);
+    expect(markers?.[1]?.getAttribute('aria-label')).toBe('Go to turn 2: Second prompt');
+  });
+
+  it('marks in-view markers independently of the active marker', () => {
+    const turns = [
+      { id: 'msg-1', index: 0, text: 'First prompt', attachmentCount: 0, imageCount: 0 },
+      { id: 'msg-2', index: 1, text: 'Second prompt', attachmentCount: 0, imageCount: 0 },
+      { id: 'msg-3', index: 2, text: 'Third prompt', attachmentCount: 0, imageCount: 0 },
+    ];
+    cleanup = render(
+      () => (
+        <TurnNavigationRail
+          turns={turns}
+          activeTurnId="msg-1"
+          visibleTurnIds={new Set(['msg-1', 'msg-2'])}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const markers = container?.querySelectorAll<HTMLButtonElement>('.turn-navigation-marker');
+    expect(markers?.[0]?.classList.contains('is-in-view')).toBe(true);
+    expect(markers?.[1]?.classList.contains('is-in-view')).toBe(true);
+    expect(markers?.[2]?.classList.contains('is-in-view')).toBe(false);
+    expect(markers?.[0]?.classList.contains('is-active')).toBe(true);
+    expect(markers?.[1]?.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('renders a hide-AI toggle and reports its pressed state', () => {
+    const turns = [{ id: 'msg-1', index: 0, text: 'First', attachmentCount: 0, imageCount: 0 }];
+    const onToggle = vi.fn();
+    const [hidden, setHidden] = createSignal(false);
+    cleanup = render(
+      () => (
+        <TurnNavigationRail
+          turns={turns}
+          activeTurnId={null}
+          onSelect={vi.fn()}
+          assistantMessagesHidden={hidden()}
+          onToggleAssistantMessages={onToggle}
+        />
+      ),
+      container!
+    );
+
+    const toggle = container?.querySelector<HTMLButtonElement>('.turn-navigation-hide-ai');
+    expect(toggle).not.toBeNull();
+    expect(toggle?.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle?.classList.contains('is-active')).toBe(false);
+    toggle?.click();
+    expect(onToggle).toHaveBeenCalledTimes(1);
+
+    setHidden(true);
+    expect(
+      container
+        ?.querySelector<HTMLButtonElement>('.turn-navigation-hide-ai')
+        ?.getAttribute('aria-pressed')
+    ).toBe('true');
+    expect(
+      container
+        ?.querySelector<HTMLButtonElement>('.turn-navigation-hide-ai')
+        ?.classList.contains('is-active')
+    ).toBe(true);
+  });
+
   it('reveals the reserved sticky timestamp without mounting new content', () => {
     vi.useFakeTimers();
     const now = new Date();

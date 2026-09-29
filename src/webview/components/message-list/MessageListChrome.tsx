@@ -5,7 +5,13 @@ import { logError } from '../../lib/log';
 import { formatMessageSentTime } from '../../lib/message-time';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { loadingLastActivityAt, loadingStartedAt, state, stopLoading } from '../../lib/state';
-import { attachmentIcon, hourglassIcon, mediaImageIcon } from '../../lib/ui-icons';
+import {
+  attachmentIcon,
+  eyeClosedIcon,
+  eyeIcon,
+  hourglassIcon,
+  mediaImageIcon,
+} from '../../lib/ui-icons';
 import type { Part, Permission, QuestionRequest } from '../../types';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
@@ -231,38 +237,68 @@ export function StickyUserMessagePreviewCard(props: {
 export function TurnNavigationRail(props: {
   turns: readonly StickyUserMessagePreview[];
   activeTurnId: string | null;
+  visibleTurnIds?: ReadonlySet<string>;
   loadingTurnId?: string | null;
   onSelect: (turn: StickyUserMessagePreview) => void;
+  promptNumberMap?: ReadonlyMap<string, number>;
+  assistantMessagesHidden?: boolean;
+  onToggleAssistantMessages?: () => void;
 }) {
   return (
     <nav class="turn-navigation" aria-label="Conversation turns">
-      <For each={props.turns}>
-        {(turn, index) => {
-          const active = () => turn.id === props.activeTurnId;
-          const loading = () => turn.id === props.loadingTurnId;
-          const label = () => {
-            if (turn.format) {
-              const format = `${turn.format.kind.toUpperCase()} content`;
-              return turn.formatPrefix ? `${turn.formatPrefix} ${format}` : format;
-            }
-            const text = turn.text.replaceAll(/\s+/g, ' ').trim();
-            return text.length > 80 ? `${text.slice(0, 77)}...` : text;
-          };
-          return (
-            <button
-              type="button"
-              class={`turn-navigation-marker${active() ? ' is-active' : ''}${
-                loading() ? ' is-loading' : ''
-              }`}
-              aria-label={`Go to turn ${index() + 1}: ${label()}`}
-              aria-current={active() ? 'step' : undefined}
-              title={`Turn ${index() + 1}: ${label()}`}
-              disabled={loading()}
-              onClick={() => props.onSelect(turn)}
-            />
-          );
-        }}
-      </For>
+      <Show when={props.onToggleAssistantMessages}>
+        <button
+          type="button"
+          class={`turn-navigation-hide-ai${props.assistantMessagesHidden ? ' is-active' : ''}`}
+          aria-pressed={props.assistantMessagesHidden ? 'true' : 'false'}
+          title={props.assistantMessagesHidden ? 'Show AI responses' : 'Hide AI responses'}
+          onClick={props.onToggleAssistantMessages}
+        >
+          <UiIcon
+            source={props.assistantMessagesHidden ? eyeClosedIcon : eyeIcon}
+            width="14"
+            height="14"
+            aria-hidden="true"
+          />
+        </button>
+      </Show>
+      <div class="turn-navigation-markers">
+        <For each={props.turns}>
+          {(turn, index) => {
+            const active = () => turn.id === props.activeTurnId;
+            const inView = () => props.visibleTurnIds?.has(turn.id) === true;
+            const loading = () => turn.id === props.loadingTurnId;
+            const promptNumber = () => props.promptNumberMap?.get(turn.id);
+            const label = () => {
+              if (turn.format) {
+                const format = `${turn.format.kind.toUpperCase()} content`;
+                return turn.formatPrefix ? `${turn.formatPrefix} ${format}` : format;
+              }
+              const text = turn.text.replaceAll(/\s+/g, ' ').trim();
+              return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+            };
+            return (
+              <button
+                type="button"
+                class={`turn-navigation-marker${active() ? ' is-active' : ''}${
+                  loading() ? ' is-loading' : ''
+                }${inView() ? ' is-in-view' : ''}${promptNumber() !== undefined ? ' has-number' : ''}`}
+                aria-label={`Go to turn ${promptNumber() ?? index() + 1}: ${label()}`}
+                aria-current={active() ? 'step' : undefined}
+                title={`Turn ${promptNumber() ?? index() + 1}: ${label()}`}
+                disabled={loading()}
+                onClick={() => props.onSelect(turn)}
+              >
+                <Show when={promptNumber() !== undefined}>
+                  <span class="turn-navigation-marker-index" aria-hidden="true">
+                    {promptNumber()}
+                  </span>
+                </Show>
+              </button>
+            );
+          }}
+        </For>
+      </div>
     </nav>
   );
 }
