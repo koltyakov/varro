@@ -783,6 +783,50 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it('preserves multiple image-heavy queue items without consuming the JSON text budget', () => {
+    const size = 5 * 1024 * 1024;
+    const image = {
+      id: 'image-1',
+      mime: 'image/png',
+      filename: 'image.png',
+      size,
+      url: `data:image/png;base64,${Buffer.alloc(size).toString('base64')}`,
+    };
+    const messages = ['queue-1', 'queue-2'].map((id) => ({
+      id,
+      sessionId: 'session-1',
+      text: 'Review these images',
+      droppedFiles: [],
+      clipboardImages: Array.from({ length: 5 }, (_, index) => ({
+        ...image,
+        id: `image-${index}`,
+      })),
+      terminalSelection: null,
+    }));
+    const parsed = parseQueuedMessageUpdate(messages);
+    expect(parsed?.type).toBe('queued-messages/update');
+    if (parsed?.type !== 'queued-messages/update') throw new Error('Queue update rejected');
+    expect(parsed.payload.messages).toMatchObject(messages);
+    expect(
+      parseQueuedMessageUpdate([{ ...messages[0], text: 'x'.repeat(8 * 1024 * 1024 + 1) }])
+    ).toBeNull();
+    expect(
+      parseQueuedMessageUpdate([
+        { ...messages[0], clipboardImages: [{ ...image, size: size + 1 }] },
+      ])
+    ).toBeNull();
+    expect(
+      parseQueuedMessageUpdate([
+        { ...messages[0], clipboardImages: Array.from({ length: 6 }, () => ({ ...image })) },
+      ])
+    ).toBeNull();
+    expect(
+      parseQueuedMessageUpdate([
+        { ...messages[0], clipboardImages: [{ ...image, url: 'data:image/png;base64,AAAA' }] },
+      ])
+    ).toBeNull();
+  });
+
   it('validates manual queued-message dispatch claims', () => {
     const claim = {
       type: 'queued-messages/claim',

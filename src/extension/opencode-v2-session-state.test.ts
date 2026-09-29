@@ -66,6 +66,50 @@ describe('OpenCodeV2SessionState', () => {
     expect(await store.read('ses_fixture')).toEqual({});
   });
 
+  it('preserves concurrent updates from separate stores sharing the annotation directory', async () => {
+    const stores = [new OpenCodeV2SessionState(directory), new OpenCodeV2SessionState(directory)];
+    const patches = Array.from({ length: 20 }, (_, index) => ({ [`field${index}`]: index }));
+    await Promise.all(
+      patches.map((patch, index) => stores[index % 2]!.update('ses_fixture', patch))
+    );
+    expect(await stores[0]!.read('ses_fixture')).toEqual(Object.assign({ time: {} }, ...patches));
+    expect(existsSync(join(directory, 'ses_fixture.json.lock'))).toBe(false);
+  });
+
+  it('recovers an abandoned lock without removing a live owner', async () => {
+    const lock = join(directory, 'ses_fixture.json.lock');
+    await mkdir(lock);
+    await writeFile(join(lock, '2147483647-00000000-0000-0000-0000-000000000000'), '');
+    const store = new OpenCodeV2SessionState(directory);
+    await store.update('ses_fixture', { time: { archived: 100 } });
+    expect(await store.read('ses_fixture')).toEqual({ time: { archived: 100 } });
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it('cancels a contender while another store holds the lock', async () => {
+    const first = new OpenCodeV2SessionState(directory);
+    const second = new OpenCodeV2SessionState(directory);
+    const entered = deferred();
+    const resume = deferred();
+    const read = first.read.bind(first);
+    vi.spyOn(first, 'read').mockImplementationOnce(async (id) => {
+      entered.resolve();
+      await resume.promise;
+      return read(id);
+    });
+    const update = first.update('ses_fixture', { metadata: { original: true } });
+    await entered.promise;
+    const controller = new AbortController();
+    const cancelled = second.update('ses_fixture', { time: { archived: 100 } }, controller.signal);
+    const rejection = expect(cancelled).rejects.toThrow();
+    controller.abort(new Error('Cancelled contender'));
+    await rejection;
+    expect(existsSync(join(directory, 'ses_fixture.json.lock'))).toBe(true);
+    resume.resolve();
+    await update;
+    expect(await second.read('ses_fixture')).toEqual({ metadata: { original: true }, time: {} });
+  });
+
   it('does not persist an update cancelled while waiting for an earlier write', async () => {
     const store = new OpenCodeV2SessionState(directory);
     const entered = deferred();
