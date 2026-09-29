@@ -6,9 +6,24 @@ export function isPlanningAssistantMessage(info: AssistantMessage): boolean {
   return info.agent === 'plan';
 }
 
+const PLAN_IMPLEMENTATION_PROMPT =
+  'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
+
+export function isPlanImplementationMessage(info: Message, parts: readonly Part[]): boolean {
+  return (
+    info.role === 'user' &&
+    info.agent === 'build' &&
+    parts.length === 1 &&
+    parts[0]?.type === 'text' &&
+    !parts[0].synthetic &&
+    !parts[0].ignored &&
+    parts[0].text === PLAN_IMPLEMENTATION_PROMPT
+  );
+}
+
 export function buildPlanImplementationPrompt(parts: Part[]) {
   void parts;
-  return 'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
+  return PLAN_IMPLEMENTATION_PROMPT;
 }
 
 export function buildPlanDocumentContent(parts: Part[]) {

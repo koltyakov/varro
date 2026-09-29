@@ -77,6 +77,46 @@ it('retains the hover class when virtual row classes change', () => {
 });
 
 describe('AssistantDialogSummaryForMessage', () => {
+  it('uses themed plan actions with shared button states and preserves loading availability', () => {
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 10, outputTokens: 5, agentCount: 0 }}
+          msg={{
+            info: assistantMessage('plan-1', { sessionID: 'session-1', agent: 'plan' }),
+            parts: [],
+          }}
+          hasBuildAgent={true}
+          latestPlanImplementationMessageId="plan-1"
+        />
+      ),
+      container
+    );
+
+    const actions = container.querySelectorAll<HTMLButtonElement>(
+      '.assistant-dialog-summary-actions button'
+    );
+    expect([...actions].map((button) => button.textContent)).toEqual([
+      'Open plan',
+      'Implement the plan',
+      'Skip for now',
+    ]);
+    for (const button of actions) {
+      expect(button.classList).toContain('question-btn');
+      expect(button.classList).toContain('assistant-dialog-summary-action');
+      expect(button.disabled).toBe(false);
+    }
+    for (const [index, variant] of ['open', 'implement', 'skip'].entries()) {
+      expect(actions[index]?.classList).toContain(`assistant-dialog-summary-action-${variant}`);
+      expect(actions[index]?.querySelector('span')?.textContent).toBe(actions[index]?.textContent);
+    }
+
+    startLoading();
+    expect([...actions].map((button) => button.disabled)).toEqual([true, true, false]);
+    stopLoading();
+    expect([...actions].map((button) => button.disabled)).toEqual([false, false, false]);
+  });
+
   it('shows only the turn cost without a parenthesized total', () => {
     cleanup = render(
       () => (

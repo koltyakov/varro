@@ -630,26 +630,26 @@ function AssistantDialogSummary(props: {
         <div class="assistant-dialog-summary-actions">
           <button
             type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-neutral"
+            class="assistant-dialog-summary-action assistant-dialog-summary-action-open question-btn"
             disabled={isLoading()}
             onClick={() => props.onOpenPlan?.()}
           >
-            Open plan
+            <span>Open plan</span>
           </button>
           <button
             type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-implement"
+            class="assistant-dialog-summary-action assistant-dialog-summary-action-implement question-btn"
             disabled={isLoading()}
             onClick={() => props.onImplementPlan?.()}
           >
-            Implement the plan
+            <span>Implement the plan</span>
           </button>
           <button
             type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-danger"
+            class="assistant-dialog-summary-action assistant-dialog-summary-action-skip question-btn"
             onClick={() => props.onSkipPlan?.()}
           >
-            Skip for now
+            <span>Skip for now</span>
           </button>
         </div>
       </Show>

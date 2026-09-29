@@ -71,6 +71,9 @@ import {
   parseUserMessageContent,
 } from './message/UserMessageContent';
 import { isString } from '../lib/runtime-values';
+import { playIcon } from '../lib/ui-icons';
+import { UiIcon } from './UiIcon';
+import { isPlanImplementationMessage } from './message-list/plan-actions';
 import { getPresentationPartKey } from './message-list/streaming-presentation';
 import type { StreamingPresentation } from './message-list/streaming-presentation';
 import type { AssistantRetryState } from './message-list/assistant-retry';
@@ -546,6 +549,9 @@ export function Message(props: {
   const parsedUserContent = createMemo(() =>
     isUser() ? parseUserMessageContent(normalizedParts()) : null
   );
+  const isPlanImplementation = createMemo(() =>
+    isPlanImplementationMessage(props.info, normalizedParts())
+  );
   const automaticParts = () => parsedUserContent()?.automaticParts ?? [];
   const hasVisibleAutomaticActions = () =>
     automaticParts().some((part) => {
@@ -561,7 +567,9 @@ export function Message(props: {
     );
   });
   const visiblePromptNumber = () =>
-    isUser() && props.showPromptNumber !== false ? props.promptNumber : undefined;
+    isUser() && !isPlanImplementation() && props.showPromptNumber !== false
+      ? props.promptNumber
+      : undefined;
   const hasUserContent = createMemo(() => {
     const parsed = parsedUserContent();
     return parsed ? hasUserMessageContent(parsed) : false;
@@ -570,18 +578,19 @@ export function Message(props: {
     props.info.role === 'user' && props.info.summary?.diffsOmitted === true;
   const isWrapperlessUserMessage = createMemo(() => {
     const parsed = parsedUserContent();
-    return parsed ? isWrapperlessUserMessageContent(parsed) : false;
+    return isPlanImplementation() || (parsed ? isWrapperlessUserMessageContent(parsed) : false);
   });
   const isEditingUserMessage = () => isUser() && editingMessageId() === props.info.id;
   const canEditUserMessage = () =>
     isUser() &&
+    !isPlanImplementation() &&
     hasUserContent() &&
     props.info.sessionID === state.activeSessionId &&
     !isManagedSubagentSession() &&
     !isActiveSessionWorking() &&
     hasUserMessageEditableContent(normalizedParts());
   const handleUserCardClick = (event: MouseEvent) => {
-    if (props.info.role !== 'user' || !hasUserContent()) return;
+    if (props.info.role !== 'user' || !hasUserContent() || isPlanImplementation()) return;
     const target = event.target;
     if (target instanceof Element && target.closest('.user-message-leading-content')) return;
     if (target instanceof Element && target.closest('button, a, textarea')) return;
@@ -638,7 +647,7 @@ export function Message(props: {
             <div
               class={`value chat-turn-content ${
                 isUser()
-                  ? `chat-turn-card user-message-card${props.promptContinuation ? ' user-message-continuation' : ''}${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}`
+                  ? `chat-turn-card user-message-card${props.promptContinuation ? ' user-message-continuation' : ''}${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}${isPlanImplementation() ? ' plan-implementation-action' : ''}`
                   : assistantContainerClass()
               } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
               onClick={handleUserCardClick}
@@ -653,14 +662,24 @@ export function Message(props: {
                 )}
               </Show>
               <Show when={isUser() && hasUserContent()}>
-                <UserMessageContent
-                  parts={normalizedParts()}
-                  leadingAgent={
-                    props.info.role === 'user' && props.info.agent === 'plan' ? 'plan' : undefined
+                <Show
+                  when={!isPlanImplementation()}
+                  fallback={
+                    <span class="plan-implementation-action-label" role="note">
+                      <UiIcon source={playIcon} width={14} height={14} />
+                      Implement the plan
+                    </span>
                   }
-                  promptNumber={hasImageTextBubble() ? visiblePromptNumber() : undefined}
-                  onMessageHoverChange={notifyUserMessageHoverChange}
-                />
+                >
+                  <UserMessageContent
+                    parts={normalizedParts()}
+                    leadingAgent={
+                      props.info.role === 'user' && props.info.agent === 'plan' ? 'plan' : undefined
+                    }
+                    promptNumber={hasImageTextBubble() ? visiblePromptNumber() : undefined}
+                    onMessageHoverChange={notifyUserMessageHoverChange}
+                  />
+                </Show>
               </Show>
               <Show when={!isUser() && assistant()}>
                 <AssistantMessageContent
@@ -707,7 +726,7 @@ export function Message(props: {
               outerListVirtualized={props.outerListVirtualized}
             />
           </Show>
-          <Show when={isUser() && hasUserContent()}>
+          <Show when={isUser() && hasUserContent() && !isPlanImplementation()}>
             <time
               class={`message-sent-time${timestampVisible() ? ' is-visible' : ''}${timestampTransitionActive() ? ' is-transition-active' : ''}${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}
               dateTime={new Date(props.info.time.created).toISOString()}

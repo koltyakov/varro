@@ -25,6 +25,7 @@ import { resetToolCallExpansionState } from './ToolCall';
 import { fixture } from '../test-fixtures';
 import type { UnknownRecord } from '../../shared/type-utils';
 import { projectV2Message } from '../../extension/opencode-v2-projection';
+import { buildPlanImplementationPrompt } from './message-list/plan-actions';
 
 const retryMessageMock = vi.hoisted(() => vi.fn());
 const selectSessionMock = vi.hoisted(() => vi.fn());
@@ -432,6 +433,52 @@ describe('stripCompactionBoundaryMarkdown', () => {
 });
 
 describe('Message user prompt rendering', () => {
+  it('renders the plan implementation prompt as a compact, non-editable action', () => {
+    const parts = [textPart('text-1', buildPlanImplementationPrompt([]))];
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...userMessage('message-1'), agent: 'build' },
+          parts,
+          promptNumber: 2,
+          showSentTimestamp: true,
+        }),
+      container!
+    );
+
+    const action = container?.querySelector<HTMLElement>('.plan-implementation-action');
+    expect(action?.textContent?.trim()).toBe('Implement the plan');
+    expect(action?.classList).toContain('user-message-card-wrapperless');
+    expect(action?.classList).not.toContain('user-message-card-editable');
+    expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
+    expect(container?.querySelector('.prompt-number-badge')).toBeNull();
+    expect(container?.querySelector('.message-sent-time')).toBeNull();
+    expect(parts[0]?.text).toBe(buildPlanImplementationPrompt([]));
+  });
+
+  it('does not hide attachments or custom implementation requests', () => {
+    cleanup = render(
+      () => [
+        Message({
+          info: { ...userMessage('message-1'), agent: 'build' },
+          parts: [
+            textPart('text-1', buildPlanImplementationPrompt([])),
+            filePart('file-1', 'plan.pdf'),
+          ],
+        }),
+        Message({
+          info: { ...userMessage('message-2'), agent: 'build' },
+          parts: [textPart('text-2', 'Implement the plan with my changes')],
+        }),
+      ],
+      container!
+    );
+
+    expect(container?.querySelector('.plan-implementation-action')).toBeNull();
+    expect(container?.textContent).toContain('plan.pdf');
+    expect(container?.textContent).toContain('Implement the plan with my changes');
+  });
+
   it('wraps user prompt text in a scroll container', () => {
     cleanup = render(
       () =>

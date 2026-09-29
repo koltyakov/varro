@@ -19,6 +19,7 @@ import {
   projectAutomaticActionMessage,
 } from '../message/UserMessageContent';
 import { getPresentationPartKey } from './streaming-presentation';
+import { isPlanImplementationMessage } from './plan-actions';
 
 export type StreamingLayoutProjection = {
   partId: string | null;
@@ -100,14 +101,15 @@ export function getMessageBlockBoundaryMap(
       const parsed = parseUserMessageContent(message.parts);
       const hasContent =
         hasUserMessageContent(parsed) || message.info.summary?.diffsOmitted === true;
+      const hasBorder = hasContent && !isPlanImplementationMessage(message.info, message.parts);
       const interruptedStart = options.modelChangeMessageIds?.has(messageId) ?? false;
       const interruptedEnd =
         (options.dialogSummaryMessageIds?.has(messageId) ?? false) ||
         parsed.automaticActions.length > 0;
       boundaries.set(messageId, {
-        startsBordered: hasContent && !interruptedStart,
-        endsBordered: hasContent && !interruptedEnd,
-        signature: `user:${hasContent ? 'content' : 'empty'}:${hasContent && !interruptedStart ? 'b' : 'u'}:${hasContent && !interruptedEnd ? 'b' : 'u'}${parsed.automaticActions.length ? `:${parsed.automaticActions.join('|')}` : ''}`,
+        startsBordered: hasBorder && !interruptedStart,
+        endsBordered: hasBorder && !interruptedEnd,
+        signature: `user:${hasContent ? 'content' : 'empty'}:${hasBorder && !interruptedStart ? 'b' : 'u'}:${hasBorder && !interruptedEnd ? 'b' : 'u'}${parsed.automaticActions.length ? `:${parsed.automaticActions.join('|')}` : ''}`,
       });
       continue;
     }

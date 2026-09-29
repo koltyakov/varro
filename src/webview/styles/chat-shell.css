@@ -897,6 +897,22 @@ input:focus-visible {
   border-color: transparent;
 }
 
+.user-message-card.plan-implementation-action {
+  align-self: flex-start;
+  max-width: 100%;
+  border: 0;
+  border-radius: 0;
+  color: var(--color-vscode-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.plan-implementation-action-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .user-message-card-editable {
   cursor: pointer;
 }
