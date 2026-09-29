@@ -21,7 +21,7 @@ The protocol values are `default`, `auto`, and `full`. The UI labels them `Defau
 | --- | --- | --- |
 | `default` | No Varro session override; use OpenCode configuration and agent rules | Reply once to `todowrite` and `question` asks; show other asks as actionable prompts |
 | `auto` | Ask by default with known read-only and subagent-launch allowances | Hide briefly while Varro judges; reply or fall back to a prompt |
-| `full` | Allow every permission, including unknown permission names | Reply `always` to any already-pending request and resync |
+| `full` | Allow every permission, including unknown permission names | Reply `once` to any already-pending request and resync |
 
 `Default` is the OpenCode-managed mode. New sessions omit a session-level permission override, and
 switching an existing session to default clears Varro's prior mode rules. OpenCode's global, project,
@@ -104,7 +104,7 @@ The normal lifecycle is:
    `permission.updated` event.
 2. Both layers normalize the payload and retain the request ID and owning session ID.
 3. The webview resolves the effective mode for the request's session tree.
-4. Default reveals it, auto starts a bounded judge attempt, and full starts an automatic `always`
+4. Default reveals it, auto starts a bounded judge attempt, and full starts an automatic `once`
    response.
 5. Varro sends `once`, `always`, or `reject` to OpenCode's permission reply route.
 6. Local UI is removed only after the reply is acknowledged, an authoritative reply event arrives,
@@ -461,6 +461,9 @@ failures must not overwrite the latest user
 selection. A webview may present the selected mode while its request is pending, but failure rolls
 that selection back to the last confirmed snapshot.
 
+Metadata restoration rejects session snapshots older than the last confirmed mode update. A delayed
+session-list response must not restore Full access after the user has confirmed Default.
+
 Metadata writes preserve unrelated session metadata. Preconfigured sessions save the explicit mode
 without appending rules again. Local fallback recovery still suppresses automation until confirmed;
 incoming metadata cannot bypass an active local mode update or recovery.
@@ -473,6 +476,8 @@ incoming metadata cannot bypass an active local mode update or recovery.
   verdict must not approve after the switch.
 - Switching to full first installs allow-all rules, then responds to locally known pending requests,
   then fetches the authoritative pending list to catch hidden or missed requests.
+  Those replies use `once`: the session rules already allow subsequent work. Using `always` would
+  save approvals outside this session and let them survive a later return to Default.
 - A failed mode update rolls back only state still owned by that update. It must not undo a newer
   selection.
 

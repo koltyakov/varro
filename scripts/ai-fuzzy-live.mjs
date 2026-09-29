@@ -810,6 +810,9 @@ export class CdpController {
           clientHeight: transcript.clientHeight,
         } : null,
         markerMessageId,
+        markerBottom: markerRow && transcript
+          ? markerRow.getBoundingClientRect().bottom - transcript.getBoundingClientRect().top
+          : null,
         turnMessageIds: turnRows.map((row) => row.getAttribute('data-msg-id')).filter(Boolean),
         turnPartIds: [...new Set(queryAll('[data-activity-part-id]').map((element) =>
           element.getAttribute('data-activity-part-id')
@@ -818,6 +821,7 @@ export class CdpController {
           element.getAttribute('data-assistant-render-key')
         ).filter(Boolean))],
         stickyMessageId: marker && stickyMessageId !== markerMessageId ? null : stickyMessageId,
+        observedStickyMessageId: stickyMessageId,
         activeActivityCount: queryAll('.assistant-active-activity-item').length,
         nestedActivityScroller: nested ? {
           scrollTop: nested.scrollTop,
@@ -905,7 +909,7 @@ export class CdpController {
                 const top = visibleTop + 8;
                 const bottom = visibleBottom - 8;
                 if (right <= left || bottom <= top) return null;
-                const controls = 'button, a, input, textarea, select, summary, [role="button"], [contenteditable="true"], [tabindex]';
+                const controls = 'button, a, input, textarea, select, summary, .session-item, [role="button"], [contenteditable="true"], [tabindex]';
                 const xs = [left, right, (left + right) / 2];
                 const ys = [(top + bottom) / 2, top, bottom, top + (bottom - top) / 4, bottom - (bottom - top) / 4];
                 for (const x of xs) {
@@ -1637,6 +1641,8 @@ async function openRunSession(cdp, sessionId, title) {
   const deadline = Date.now() + 5_000;
   let opened = false;
   while (Date.now() < deadline && !opened) {
+    await cdp.click('[aria-label="Back to sub-agent sessions"]');
+    await cdp.click('[aria-label^="Clear Sub-agents"]');
     await cdp.click('[aria-label="Back to sessions"]');
     await new Promise((resolve) => setTimeout(resolve, 250));
     opened = await cdp.clickSession(sessionId);
@@ -1666,7 +1672,9 @@ export async function restoreSidebarSessionFromPicker(cdp, sessionId, title) {
     }
   }
   await new Promise((resolve) => setTimeout(resolve, 250));
-  if (!(await cdp.key('.session-list-view', 'Escape'))) return false;
+  // A pending route can remove the picker between the snapshot and the click.
+  // Judge restoration by the resulting route even when the picker is already gone.
+  await cdp.key('.session-list-view', 'Escape');
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -1686,7 +1694,7 @@ export async function waitForLiveGate({
 }) {
   const deadline = Date.now() + timeoutMs;
   let sawBusy = false;
-  let stickyNudgeAttempts = 0;
+  let stickyPreparationAttempts = 0;
   let best = null;
   let latest = null;
   const observations = [];
@@ -1720,16 +1728,26 @@ export async function waitForLiveGate({
       };
     }
     if (
-      stickyNudgeAttempts < 12 &&
+      stickyPreparationAttempts < 12 &&
       busy &&
-      snapshot.nestedActivityScroller?.hasRange &&
       missing.length === 1 &&
       missing[0] === 'sticky latest prompt'
     ) {
-      stickyNudgeAttempts += 1;
-      if (await cdp.wheel('.interactive-list', -96, 'right')) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
+      stickyPreparationAttempts += 1;
+      // Compact tool output may be shorter than the viewport. Scrolling upward
+      // moves the new prompt back into view and can expose the previous turn's
+      // sticky instead. Expand this turn's output, then navigate toward its end.
+      const expanded = await cdp.click('.assistant-activity-summary[aria-expanded="false"]', {
+        messageIds: snapshot.turnMessageIds,
+      });
+      const navigated = await cdp.key('.interactive-list', 'End');
+      observations.push({
+        action: 'prepare-sticky',
+        attempt: stickyPreparationAttempts,
+        expanded,
+        navigated,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
       continue;
     }
     if (sawBusy && !busy) break;
@@ -2789,12 +2807,31 @@ async function runMultiWebviewScenario({
   const existingChild = recordedChild
     ? sessions.find((session) => session.id === recordedChild.id && session.parentID === tracked.id)
     : null;
-  const child =
-    existingChild ??
-    (await client.request('POST', '/session', {
-      title: childTitle,
-      parentID: tracked.id,
-    }));
+  let child = existingChild;
+  if (!child) {
+    // V2's compatibility parent annotation is private to the creating client.
+    // Use real delegation so the editor and controller see the same ancestry.
+    await sidebar.selectExactModel(requestedModel);
+    await sidebar.selectPermissionMode('auto');
+    markModelMayEdit();
+    if (
+      !(await sendComposerPromptWithRetry(
+        sidebar,
+        `[VFZ:${manifest.seed}:AI-18:CHILD] Launch exactly one general subagent using ${requestedModel}. Ask it to reply AI18-CHILD-READY without tools, edits or further delegation. Wait for it and finish AI18-PARENT-READY. Do not use any other tools or change files.`
+      ))
+    )
+      throw new Error('AI-18 could not request its real child');
+    child = await waitForObservation(
+      async () =>
+        (await client.listSessions()).find(
+          (session) =>
+            session.parentID === tracked.id &&
+            !sessions.some((existing) => existing.id === session.id)
+        ),
+      (session) => !!session,
+      timeoutMs
+    );
+  }
   if (!child?.id || child.parentID !== tracked.id) {
     throw new Error('OpenCode did not create the requested AI-18 child session');
   }
@@ -2808,6 +2845,12 @@ async function runMultiWebviewScenario({
       createdBy: 'AI-18',
     });
     await writeJsonAtomic(manifestPath, manifest);
+    await client.request('PATCH', `/session/${encodeURIComponent(child.id)}`, {
+      title: childTitle,
+    });
+    if (!(await waitForSessionQuiescence(client, sidebar, tracked.id, timeoutMs * 3))) {
+      throw new Error('AI-18 child preparation did not settle');
+    }
   }
 
   const evidence = {
@@ -3039,7 +3082,10 @@ async function runMultiWebviewScenario({
     ) {
       throw new Error('AI-18 child edit turn did not preserve the exact recorded fixture state');
     }
-    await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
+    // The palette only offers Show when inline diffs are currently disabled.
+    if (!(await editor.point('.file-change-inline-diffs', 'center', childEditScope))) {
+      await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
+    }
     const inlineBefore = await waitForScopedCount(
       editor,
       '.file-change-inline-diffs',
@@ -3453,6 +3499,12 @@ async function runLifecycleScenario({
     if (!(await waitForBusy(client, tracked.id, Math.min(timeoutMs, 15_000)))) {
       throw new Error('AI-19 did not observe the root stream become busy');
     }
+    const editorBusy = await waitForObservation(
+      () => editor.evaluate(`!!document.querySelector('.stop-button')`),
+      (busy) => busy === true,
+      Math.min(timeoutMs, 15_000)
+    );
+    if (!editorBusy) throw new Error('AI-19 editor did not display the active stream');
     if (
       !(await sendComposerPromptWithRetry(
         editor,
@@ -3650,17 +3702,45 @@ export async function executeActivityScenario({
   };
   try {
     if (!scope?.messageIds?.length) throw new Error('Marked activity scope is unavailable');
-    evidence.actions = await runActions(
-      cdp,
-      [
-        { step: 1, action: 'expand disclosure' },
-        { step: 2, action: 'wheel transcript', delta: -96 },
-      ],
-      '',
-      null,
-      { scope, marker, sessionId, isActive: () => client.isBusy(sessionId) }
-    );
-    if (evidence.actions.length !== 2 || evidence.actions.some((action) => !action.executed)) {
+    let initial = await cdp.captureActionState(scope);
+    // Sticky preparation can leave retained disclosures expanded above the
+    // viewport. Reveal one with native input before requesting its transition.
+    for (
+      let attempt = 0;
+      attempt < 8 &&
+      initial.disclosures.length > 0 &&
+      !initial.disclosures.some((item) => item.visible);
+      attempt += 1
+    ) {
+      const revealed = await runActions(
+        cdp,
+        [{ step: evidence.actions.length + 1, action: 'wheel transcript', delta: -180 }],
+        '',
+        null,
+        { scope, marker, sessionId, isActive: () => client.isBusy(sessionId) }
+      );
+      evidence.actions.push(...revealed);
+      if (revealed.length !== 1 || !revealed[0].executed) {
+        throw new Error('Could not reveal a retained disclosure');
+      }
+      initial = await cdp.captureActionState(scope);
+    }
+    const resetDisclosure =
+      !initial.disclosures.some((item) => item.visible && !item.expanded) &&
+      initial.disclosures.some((item) => item.visible && item.expanded);
+    const plan = [
+      ...(resetDisclosure ? [{ action: 'collapse disclosure' }] : []),
+      { action: 'expand disclosure' },
+      { action: 'wheel transcript', delta: -96 },
+    ].map((action, index) => ({ step: evidence.actions.length + index + 1, ...action }));
+    const actions = await runActions(cdp, plan, '', null, {
+      scope,
+      marker,
+      sessionId,
+      isActive: () => client.isBusy(sessionId),
+    });
+    evidence.actions.push(...actions);
+    if (actions.length !== plan.length || actions.some((action) => !action.executed)) {
       throw new Error('Required disclosure or outer wheel action failed');
     }
     phase = 'detached-completions';
@@ -3893,8 +3973,20 @@ async function runLive(options) {
       } else {
         await openRunSession(cdp, tracked.id, tracked.title);
       }
+      // Numbered navigation can leave the host wide. Restore the live fixture width
+      // before spending a model turn on height-dependent sticky/activity gates.
+      if (scenario === 'AI-07' || scenario === 'AI-08') {
+        await resizeVscodeSidebar(launch.remoteDebuggingPort, 486);
+        const width = await cdp.evaluate('innerWidth');
+        if (Math.abs(width - 486) > 8) throw new Error(`Live sidebar width remained ${width}`);
+      }
       if (scenario === 'AI-08' && manifest.hostState?.fileDiffsEnabled !== true) {
-        await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
+        const diffsVisible = await cdp.evaluate(
+          `!!document.querySelector('.file-change-inline-diffs')`
+        );
+        if (!diffsVisible) {
+          await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
+        }
         await new Promise((resolve) => setTimeout(resolve, 300));
         manifest.hostState = {
           ...manifest.hostState,
@@ -3930,6 +4022,9 @@ async function runLive(options) {
         await cdp.startSessionEventCapture();
       }
       if (scenario === 'AI-17') {
+        if (!(await waitForSessionQuiescence(client, cdp, tracked.id, timeoutMs * 3))) {
+          throw new Error('AI-17 session and queue did not become quiescent before observation');
+        }
         const tokens = [
           ...Array.from(
             { length: 20 },

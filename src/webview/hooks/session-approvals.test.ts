@@ -321,8 +321,8 @@ describe('session-approvals helpers', () => {
       [permission('perm-1'), permission('perm-2')]
     );
 
-    expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-1', 'always');
-    expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-2', 'always');
+    expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-1', 'once');
+    expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-2', 'once');
   });
 
   it('updates permission mode and auto-approves full-access sessions', async () => {

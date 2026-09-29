@@ -29,7 +29,7 @@ import type {
   RalphSelectedModel,
 } from '../../shared/ralph';
 import { MAX_RALPH_ITERATIONS, normalizeRalphWorkspaceDirectory } from '../../shared/ralph';
-import { asRecord } from '../../shared/type-utils';
+import { asRecord, isString } from '../../shared/type-utils';
 import {
   parseModelPreferences,
   parseRequiredModelPreferences,
@@ -286,12 +286,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (!messages) {
         return null;
       }
-      return {
+      const update: Extract<WebviewMessage, { type: 'queued-messages/update' }> = {
         type,
-        payload: {
-          messages,
-        },
+        payload: { messages },
       };
+      if (isString(payload?.mutationId)) update.payload.mutationId = payload.mutationId;
+      return update;
     }
 
     case 'queued-messages/claim': {
@@ -415,6 +415,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const rawAgent = payload?.agent;
       const agent = rawAgent === undefined ? undefined : getString(rawAgent);
       if (rawAgent !== undefined && !agent?.trim()) return null;
+      const selectionId = payload?.selectionId;
+      if (
+        selectionId !== undefined &&
+        (!agent || typeof selectionId !== 'string' || !selectionId || selectionId.length > 128)
+      )
+        return null;
       if (skippedAt === undefined && agent === undefined) return null;
       const result: Extract<WebviewMessage, { type: 'session-plan-state/update' }> = {
         type,
@@ -422,6 +428,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       };
       if (skippedAt !== undefined) result.payload.skippedAt = skippedAt as number | null;
       if (agent) result.payload.agent = agent;
+      if (selectionId !== undefined) result.payload.selectionId = selectionId;
       return result;
     }
 

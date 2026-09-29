@@ -63,6 +63,36 @@ installMessageListTestEnvironment({
 });
 
 describe('getStickyUserMessagePreview', () => {
+  it.each(['notice', 'compaction'] as const)(
+    'keeps the real prompt when a %s is the first visible row',
+    (kind) => {
+      expect(
+        getStickyUserMessagePreview(
+          [
+            { info: userMessage('user-1'), parts: [textPart('text-1', 'Run the tests')] },
+            { info: assistantMessage('assistant-1'), parts: [] },
+            {
+              info: userMessage('notice-1'),
+              parts:
+                kind === 'notice'
+                  ? [textPart('notice-text', 'Background command completed', { synthetic: true })]
+                  : [
+                      {
+                        id: 'compaction',
+                        messageID: 'notice-1',
+                        sessionID: 'session-1',
+                        type: 'compaction',
+                        auto: true,
+                      },
+                    ],
+            },
+          ],
+          2
+        )?.id
+      ).toBe('user-1');
+    }
+  );
+
   it('returns the preceding user prompt for the first visible assistant message', () => {
     expect(
       getStickyUserMessagePreview(
@@ -2177,6 +2207,68 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
+  it.each(['notice', 'compaction'] as const)(
+    'does not hide the sticky prompt when a %s crosses the overlay',
+    async (kind) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('prompt-text', 'Run the tests')] },
+        {
+          info: assistantMessage('assistant-1'),
+          parts: [textPart('answer-text', 'Running tests')],
+        },
+        {
+          info: userMessage('notice-1'),
+          parts:
+            kind === 'notice'
+              ? [textPart('notice-text', 'Background command completed', { synthetic: true })]
+              : [
+                  {
+                    id: 'compaction',
+                    messageID: 'notice-1',
+                    sessionID: 'session-1',
+                    type: 'compaction',
+                    auto: true,
+                  },
+                ],
+        },
+        { info: assistantMessage('assistant-2'), parts: [textPart('result-text', 'Tests passed')] },
+      ]);
+      let noticeTop = 200;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        if (this.classList.contains('latest-user-message-sticky-overlay')) {
+          return new DOMRect(0, 0, 500, 80);
+        }
+        const id = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+        if (id === 'assistant-1') return new DOMRect(0, noticeTop - 200, 500, 200);
+        if (id === 'notice-1') return new DOMRect(0, noticeTop, 500, 40);
+        if (id === 'assistant-2') return new DOMRect(0, noticeTop + 40, 500, 300);
+        return new DOMRect(0, -600, 500, 40);
+      });
+      cleanup = render(() => MessageList(), container!);
+      await Promise.resolve();
+      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 2_000 });
+      Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 600 });
+      for (const top of [200, 20, -20]) {
+        noticeTop = top;
+        list.scrollTop = 800 - top;
+        list.dispatchEvent(new Event('scroll'));
+        animationFrames.flush();
+        await Promise.resolve();
+        expect(container!.querySelector('.latest-user-message-sticky')?.textContent).toContain(
+          'Run the tests'
+        );
+      }
+      animationFrames.restore();
+    }
+  );
+
   it('uses mounted row geometry when virtual metrics point at a later turn', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
@@ -2217,6 +2309,8 @@ describe('MessageList sticky prompt preview', () => {
     Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 9_600 });
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 6_400 });
 
+    // Transfer ownership from initial bottom-follow to the reader before sampling geometry.
+    list?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
     list?.dispatchEvent(new Event('scroll'));
     animationFrames.flush();
     await Promise.resolve();
@@ -2266,6 +2360,8 @@ describe('MessageList sticky prompt preview', () => {
     Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 9_600 });
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 6_400 });
 
+    // Transfer ownership from initial bottom-follow to the reader before sampling geometry.
+    list?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
     list?.dispatchEvent(new Event('scroll'));
     animationFrames.flush();
     await Promise.resolve();

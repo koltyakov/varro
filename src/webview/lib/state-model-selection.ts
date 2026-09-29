@@ -12,6 +12,7 @@ import { writeStoredSelectedModelForWorkspace } from './state-stored-values';
 
 export const LARGE_MODEL_CATALOG_THRESHOLD = 50;
 const MANAGED_MODEL_CATALOG_MARKER = '*';
+const pendingAgentSelections = new Map<string, string>();
 
 export function getSelectedModelForSession(
   sessionId: string | null | undefined
@@ -206,9 +207,11 @@ export function setSelectedAgent(
       writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...state.sessionSelectedAgents });
     }
     if (agent && options?.publishHost !== false) {
+      const selectionId = crypto.randomUUID();
+      pendingAgentSelections.set(sessionId, selectionId);
       postMessage({
         type: 'session-plan-state/update',
-        payload: { sessionId, agent },
+        payload: { sessionId, agent, selectionId },
       });
     }
   }
@@ -218,6 +221,7 @@ export function hydrateSessionSelectedAgents(agents: Record<string, string>) {
   const nextAgents = { ...state.sessionSelectedAgents };
   let changed = false;
   for (const [sessionId, agent] of Object.entries(agents)) {
+    if (pendingAgentSelections.has(sessionId)) continue;
     if (nextAgents[sessionId] === agent) continue;
     nextAgents[sessionId] = agent;
     changed = true;
@@ -228,7 +232,17 @@ export function hydrateSessionSelectedAgents(agents: Record<string, string>) {
   writeStored(STORAGE_KEYS.sessionSelectedAgents, nextAgents);
 }
 
-export function applySessionSelectedAgentUpdate(sessionId: string, agent: string) {
+export function applySessionSelectedAgentUpdate(
+  sessionId: string,
+  agent: string | undefined,
+  selectionId?: string
+) {
+  // Matching by agent is insufficient for Ask -> Build -> Ask -> Build switches.
+  // Only the acknowledgement of the latest local selection may release this guard.
+  const pending = pendingAgentSelections.get(sessionId);
+  if (pending && pending !== selectionId) return;
+  pendingAgentSelections.delete(sessionId);
+  if (agent === undefined) return;
   setSelectedAgent(agent, {
     sessionId,
     persistGlobal: false,
@@ -238,6 +252,7 @@ export function applySessionSelectedAgentUpdate(sessionId: string, agent: string
 }
 
 export function clearSelectedAgentForSession(sessionId: string) {
+  pendingAgentSelections.delete(sessionId);
   if (!state.sessionSelectedAgents[sessionId]) return;
   setState(
     'sessionSelectedAgents',

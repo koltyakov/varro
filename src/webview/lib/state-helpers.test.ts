@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebviewMessage } from '../../shared/protocol';
+import { parseExtensionMessage } from '../../shared/extension-message';
 import type { AssistantMessage, Part, Provider, UserMessage } from '../types';
 
 type TestBridgeWindow = Window & {
@@ -1548,7 +1549,7 @@ describe('state helpers', () => {
     expect(stateModule.getPersistedSelectedAgent()).toBe('build');
     expect(sent).toContainEqual({
       type: 'session-plan-state/update',
-      payload: { sessionId: 'session-1', agent: 'plan' },
+      payload: { sessionId: 'session-1', agent: 'plan', selectionId: expect.any(String) },
     });
 
     sent.length = 0;
@@ -1558,7 +1559,7 @@ describe('state helpers', () => {
     expect(sent).toEqual([
       {
         type: 'session-plan-state/update',
-        payload: { sessionId: 'session-1', agent: 'plan' },
+        payload: { sessionId: 'session-1', agent: 'plan', selectionId: expect.any(String) },
       },
     ]);
 
@@ -1605,7 +1606,7 @@ describe('state helpers', () => {
     expect(sent).toEqual([
       {
         type: 'session-plan-state/update',
-        payload: { sessionId: 'session-1', agent: 'build' },
+        payload: { sessionId: 'session-1', agent: 'build', selectionId: expect.any(String) },
       },
     ]);
     delete bridgeWindow.__sendToExtension;
@@ -1652,6 +1653,66 @@ describe('state helpers', () => {
     expect(JSON.parse(window.localStorage.getItem('varro.sessionSelectedAgents')!)).toEqual({
       'session-1': 'build',
     });
+  });
+
+  it('ignores stale agent echoes and snapshots until the latest selection is acknowledged', async () => {
+    const stateModule = await loadState();
+    stateModule.setState('activeSessionId', 'session-1');
+    const sent: unknown[] = [];
+    const bridgeWindow = getTestBridgeWindow();
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    try {
+      for (const agent of ['ask', 'build', 'ask', 'build']) {
+        stateModule.setSelectedAgent(agent, { sessionId: 'session-1' });
+      }
+      const selections = sent.flatMap((message) => {
+        const parsed = parseExtensionMessage(message);
+        return parsed?.type === 'session-plan-state/update' && parsed.payload.selectionId
+          ? [parsed.payload.selectionId]
+          : [];
+      });
+      for (const [index, selectionId] of selections.slice(0, -1).entries()) {
+        stateModule.applySessionSelectedAgentUpdate(
+          'session-1',
+          index % 2 === 0 ? 'ask' : 'build',
+          selectionId
+        );
+        expect(stateModule.state.selectedAgent).toBe('build');
+      }
+      stateModule.hydrateSessionSelectedAgents({ 'session-1': 'ask' });
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
+      expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
+      const latest = selections.at(-1)!;
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'build', latest);
+
+      // Once settled, changes from another webview must still synchronize.
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'ask', 'another-webview');
+      expect(stateModule.state.selectedAgent).toBe('ask');
+    } finally {
+      delete bridgeWindow.__sendToExtension;
+    }
+  });
+
+  it('releases agent synchronization after a failed selection write', async () => {
+    const stateModule = await loadState();
+    stateModule.setState('activeSessionId', 'session-1');
+    const sent: unknown[] = [];
+    const bridgeWindow = getTestBridgeWindow();
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    try {
+      stateModule.setSelectedAgent('build', { sessionId: 'session-1' });
+      const selection = sent
+        .map(parseExtensionMessage)
+        .find((message) => message?.type === 'session-plan-state/update');
+      const selectionId = selection?.payload.selectionId;
+      if (!selectionId) throw new Error('Missing selection acknowledgement id');
+      stateModule.applySessionSelectedAgentUpdate('session-1', undefined, selectionId);
+      expect(stateModule.state.selectedAgent).toBe('build');
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
+      expect(stateModule.state.selectedAgent).toBe('ask');
+    } finally {
+      delete bridgeWindow.__sendToExtension;
+    }
   });
 
   it('keeps the visible agent when a host update targets another session', async () => {

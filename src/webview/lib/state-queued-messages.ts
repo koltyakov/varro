@@ -6,6 +6,7 @@ import { STORAGE_KEYS, writeStored } from './state-storage';
 import { readWebviewInstanceContext } from './state-stored-values';
 
 let nextQueueClaimRequestId = 0;
+let pendingQueueMutationId: string | undefined;
 const pendingQueueClaims = new Map<
   number,
   {
@@ -133,7 +134,15 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       queuedContext,
     })
   );
-  postMessage({ type: 'queued-messages/update', payload: { messages: hostPersisted } });
+  pendingQueueMutationId = crypto.randomUUID();
+  if (
+    !postMessage({
+      type: 'queued-messages/update',
+      payload: { messages: hostPersisted, mutationId: pendingQueueMutationId },
+    })
+  ) {
+    pendingQueueMutationId = undefined;
+  }
 }
 
 function reconcileQueuedMessageState(messages: QueuedMessage[], preserveMissingEdit = false) {
@@ -177,7 +186,10 @@ export function enqueueMessage(message: QueuedMessage) {
   commitQueuedMessages([...state.queuedMessages, ownedMessage]);
 }
 
-export function applyQueuedMessagesSnapshot(messages: QueuedMessage[]) {
+export function applyQueuedMessagesSnapshot(messages: QueuedMessage[], mutationId?: string) {
+  // An older persistence echo must not erase a newer local enqueue, edit, or removal.
+  if (pendingQueueMutationId && mutationId && mutationId !== pendingQueueMutationId) return;
+  pendingQueueMutationId = undefined;
   setState('queuedMessages', messages);
   reconcileQueuedMessageState(messages, true);
   const browserPersisted = messages

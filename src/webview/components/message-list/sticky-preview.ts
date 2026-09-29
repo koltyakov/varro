@@ -1,3 +1,4 @@
+import { isSessionResumeMessage } from '../../../shared/session-pauses';
 import {
   getUserMessageMarkupSuffix,
   getUserMessagePreviewText,
@@ -59,14 +60,23 @@ export function getStickyUserMessagePreview(
   if (firstVisibleMessageIndex === null || firstVisibleMessageIndex < 0) return null;
   const firstVisibleEntry = messages[firstVisibleMessageIndex];
   if (!firstVisibleEntry) return null;
-  if (firstVisibleEntry.info.role === 'user') return null;
-  const parentUserMessageId = firstVisibleEntry.info.parentID;
+  if (
+    firstVisibleEntry.info.role === 'user' &&
+    !isSessionResumeMessage(firstVisibleEntry.parts) &&
+    !subagentSessionIds.has(firstVisibleEntry.info.sessionID) &&
+    getUserMessagePreviewText(firstVisibleEntry.parts) !== EMPTY_USER_MESSAGE_PREVIEW
+  ) {
+    return null;
+  }
+  const parentUserMessageId =
+    firstVisibleEntry.info.role === 'assistant' ? firstVisibleEntry.info.parentID : undefined;
   let fallback: StickyUserMessagePreview | null = null;
 
   for (let i = firstVisibleMessageIndex; i >= 0; i--) {
     const entry = messages[i];
     if (!entry) continue;
     if (entry.info.role !== 'user') continue;
+    if (isSessionResumeMessage(entry.parts)) continue;
     if (subagentSessionIds.has(entry.info.sessionID)) continue;
     const text = getUserMessagePreviewText(entry.parts);
     if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
@@ -92,6 +102,7 @@ export function getUserMessageNavigationPreviews(
   for (const [position, entry] of messages.entries()) {
     const index = indexOffset + position;
     if (entry.info.role !== 'user' || subagentSessionIds.has(entry.info.sessionID)) continue;
+    if (isSessionResumeMessage(entry.parts)) continue;
     const text = getUserMessagePreviewText(entry.parts);
     if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
     previews.push({

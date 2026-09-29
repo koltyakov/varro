@@ -31,6 +31,7 @@ import {
   setSessionHistoryPrompts,
 } from '../lib/message-window';
 import { client } from '../lib/client';
+import { SESSION_RESUME_PROMPT } from '../../shared/session-pauses';
 import {
   assistantMessage,
   entry,
@@ -119,14 +120,62 @@ describe('MessageList prompt numbers', () => {
 
   it('numbers user prompts in transcript order', () => {
     const numbers = getPromptNumberMap([
-      { info: userMessage('user-1'), parts: [] },
+      { info: userMessage('user-1'), parts: [textPart('first', 'First prompt')] },
       { info: assistantMessage('assistant-1'), parts: [] },
-      { info: userMessage('user-2'), parts: [] },
+      { info: userMessage('user-2'), parts: [textPart('second', 'Second prompt')] },
     ]);
 
     expect([...numbers]).toEqual([
       ['user-1', 1],
       ['user-2', 2],
+    ]);
+  });
+
+  it('skips compaction, empty, and resume entries without consuming numbers or navigation dots', () => {
+    const messages: MessageEntry[] = [
+      { info: userMessage('user-1'), parts: [textPart('first', 'First prompt')] },
+      {
+        info: userMessage('compaction'),
+        parts: [
+          {
+            id: 'compact',
+            sessionID: 'session-1',
+            messageID: 'compaction',
+            type: 'compaction',
+            auto: true,
+          },
+        ],
+      },
+      { info: userMessage('empty'), parts: [] },
+      { info: userMessage('blank'), parts: [textPart('blank-text', '  ')] },
+      { info: userMessage('resume'), parts: [textPart('resume-text', SESSION_RESUME_PROMPT)] },
+      {
+        info: userMessage('image'),
+        parts: [
+          {
+            id: 'image-file',
+            sessionID: 'session-1',
+            messageID: 'image',
+            type: 'file',
+            mime: 'image/png',
+            url: 'file:///image.png',
+          },
+        ],
+      },
+      { info: userMessage('user-2'), parts: [textPart('second', 'Second prompt')] },
+    ];
+
+    expect([...getPromptNumberMap(messages)]).toEqual([
+      ['user-1', 1],
+      ['image', 2],
+      ['user-2', 3],
+    ]);
+    expect(
+      getUserMessageNavigationPreviews(messages).map(({ id, index }) => ({ id, index }))
+    ).toEqual([
+      { id: 'user-1', index: 0 },
+      { id: 'image', index: 5 },
+      { id: 'user-2', index: 6 },
     ]);
   });
 

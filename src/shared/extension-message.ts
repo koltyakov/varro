@@ -312,6 +312,12 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (isBoolean(payload.showTurnTimer)) config.showTurnTimer = payload.showTurnTimer;
       if (isBoolean(payload.debugShowQuotaWarning))
         config.debugShowQuotaWarning = payload.debugShowQuotaWarning;
+      if (
+        isNumber(payload.debugResetWarningDays) &&
+        Number.isFinite(payload.debugResetWarningDays) &&
+        payload.debugResetWarningDays >= 5
+      )
+        config.debugResetWarningDays = payload.debugResetWarningDays;
       if (isBoolean(payload.enableProblemsContext))
         config.enableProblemsContext = payload.enableProblemsContext;
       return { type, payload: config };
@@ -392,6 +398,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
     case 'queued-messages/sync': {
       const payload = asRecord(record.payload);
       if (!payload || !Array.isArray(payload.messages)) return null;
+      if (payload.mutationId !== undefined && !isString(payload.mutationId)) return null;
       for (const message of payload.messages) {
         const item = asRecord(message);
         const queuedContext = asRecord(item?.queuedContext);
@@ -423,6 +430,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
             ExtensionMessage,
             { type: 'queued-messages/sync' }
           >['payload']['messages'],
+          mutationId: payload.mutationId,
         },
       };
     }
@@ -566,13 +574,20 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       }
       const agent = payload?.agent;
       if (agent !== undefined && (!isString(agent) || !agent.trim())) return null;
-      if (skippedAt === undefined && agent === undefined) return null;
+      const selectionId = payload?.selectionId;
+      if (
+        selectionId !== undefined &&
+        (!isString(selectionId) || !selectionId || selectionId.length > 128)
+      )
+        return null;
+      if (skippedAt === undefined && agent === undefined && selectionId === undefined) return null;
       const result: Extract<ExtensionMessage, { type: 'session-plan-state/update' }> = {
         type,
         payload: { sessionId },
       };
       if (skippedAt !== undefined) result.payload.skippedAt = skippedAt;
       if (agent !== undefined) result.payload.agent = agent;
+      if (selectionId !== undefined) result.payload.selectionId = selectionId;
       return result;
     }
 

@@ -566,7 +566,7 @@ describe('registerSessionEventHandlers', () => {
     });
 
     await vi.waitFor(() => {
-      expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-1', 'always', {
+      expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-1', 'once', {
         rethrow: true,
       });
     });
@@ -854,9 +854,214 @@ describe('registerSessionEventHandlers', () => {
       });
 
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(continueInterruptedSession).toHaveBeenCalledWith('session-1');
+      expect(continueInterruptedSession).toHaveBeenCalledWith('session-1', {
+        messageID: expect.stringMatching(/^msg_/),
+      });
     } finally {
       for (const cleanup of cleanups) cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it('backs off provider failures and stops after three automatic retries', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const handlers = installHandlers();
+    const continueInterruptedSession = vi.fn().mockResolvedValue(undefined);
+    const deps = createDefaultDeps({
+      getActiveSessionId: () => 'session-1',
+      continueInterruptedSession,
+    });
+    const cleanups = registerSessionEventHandlers(deps);
+    const fail = () =>
+      handlers.get('session.error')?.({
+        properties: {
+          sessionID: 'session-1',
+          error: {
+            name: 'APIError',
+            data: { message: 'Not Found', statusCode: 404, isRetryable: false },
+          },
+        },
+      });
+    try {
+      fail();
+      for (const [index, delay] of [5_000, 10_000, 20_000].entries()) {
+        expect(deps.getSessionStatus('session-1')).toMatchObject({
+          type: 'retry',
+          attempt: index + 1,
+          next: Date.now() + delay,
+        });
+        await vi.advanceTimersByTimeAsync(delay - 1);
+        // Duplicate error notifications must not postpone the retry or consume its budget.
+        fail();
+        expect(continueInterruptedSession).toHaveBeenCalledTimes(index);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(continueInterruptedSession).toHaveBeenCalledTimes(index + 1);
+        fail();
+      }
+      expect(deps.getSessionStatus('session-1')).toEqual({ type: 'idle' });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(continueInterruptedSession).toHaveBeenCalledTimes(3);
+      handlers.get('message.updated')?.({
+        properties: { info: createUserEntry({ id: 'new-request' }).info },
+      });
+      fail();
+      expect(deps.getSessionStatus('session-1')).toMatchObject({ type: 'retry', attempt: 1 });
+    } finally {
+      cleanups.forEach((cleanup) => cleanup());
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['abort', 'new request', 'server retry', 'ownership loss', 'dispose'])(
+    'cancels a pending provider retry on %s',
+    async (reason) => {
+      vi.useFakeTimers();
+      const handlers = installHandlers();
+      const continueInterruptedSession = vi.fn().mockResolvedValue(undefined);
+      let aborted = false;
+      let owner = true;
+      const deps = createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        continueInterruptedSession,
+        hasPendingAbort: () => aborted,
+        isPermissionAutomationOwner: () => owner,
+      });
+      const cleanups = registerSessionEventHandlers(deps);
+      try {
+        handlers.get('session.error')?.({
+          properties: {
+            sessionID: 'session-1',
+            error: {
+              name: 'APIError',
+              data: { message: 'Not Found', statusCode: 404, isRetryable: true },
+            },
+          },
+        });
+        if (reason === 'abort') {
+          aborted = true;
+          handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+        } else if (reason === 'new request') {
+          handlers.get('message.updated')?.({ properties: { info: createUserEntry().info } });
+        } else if (reason === 'server retry') {
+          handlers.get('session.status')?.({
+            properties: {
+              sessionID: 'session-1',
+              status: {
+                type: 'retry',
+                attempt: 1,
+                next: Date.now() + 60_000,
+                message: 'Server retry',
+              },
+            },
+          });
+        } else if (reason === 'ownership loss') owner = false;
+        else cleanups.forEach((cleanup) => cleanup());
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(continueInterruptedSession).not.toHaveBeenCalled();
+      } finally {
+        cleanups.forEach((cleanup) => cleanup());
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('keeps the retry budget across automatically submitted continuation messages', async () => {
+    vi.useFakeTimers();
+    const handlers = installHandlers();
+    let messages: MessageEntry[] = [createAssistantEntry()];
+    const continueInterruptedSession = vi.fn(
+      async (_sessionId: string, options?: { messageID: string }) => {
+        expect(options?.messageID).toBeTruthy();
+        const user = createUserEntry({ id: options!.messageID });
+        messages = [...messages, user];
+        handlers.get('message.updated')?.({ properties: { info: user.info } });
+      }
+    );
+    const deps = createDefaultDeps({ getMessages: () => messages, continueInterruptedSession });
+    const cleanups = registerSessionEventHandlers(deps);
+    try {
+      for (const [index, delay] of [5_000, 10_000, 20_000].entries()) {
+        handlers.get('session.error')?.({
+          properties: {
+            sessionID: 'session-1',
+            error: {
+              name: 'APIError',
+              data: { message: 'Not Found', statusCode: 404, isRetryable: true },
+            },
+          },
+        });
+        expect(deps.getSessionStatus('session-1')).toMatchObject({
+          type: 'retry',
+          attempt: index + 1,
+        });
+        await vi.advanceTimersByTimeAsync(delay);
+        messages = [...messages, createAssistantEntry({ id: `attempt-${index}` })];
+      }
+      handlers.get('session.error')?.({
+        properties: {
+          sessionID: 'session-1',
+          error: {
+            name: 'APIError',
+            data: { message: 'Not Found', statusCode: 404, isRetryable: true },
+          },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(continueInterruptedSession).toHaveBeenCalledTimes(3);
+    } finally {
+      cleanups.forEach((cleanup) => cleanup());
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds failed retry submissions', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const handlers = installHandlers();
+    const continueInterruptedSession = vi.fn().mockRejectedValue(new Error('Connection refused'));
+    const deps = createDefaultDeps({ continueInterruptedSession });
+    const cleanups = registerSessionEventHandlers(deps);
+    try {
+      handlers.get('session.error')?.({
+        properties: {
+          sessionID: 'session-1',
+          error: {
+            name: 'APIError',
+            data: { message: 'Not Found', statusCode: 404, isRetryable: true },
+          },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(continueInterruptedSession).toHaveBeenCalledTimes(3);
+      expect(deps.getSessionStatus('session-1')).toEqual({ type: 'idle' });
+    } finally {
+      cleanups.forEach((cleanup) => cleanup());
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not automatically retry authentication failures', async () => {
+    vi.useFakeTimers();
+    const handlers = installHandlers();
+    const continueInterruptedSession = vi.fn().mockResolvedValue(undefined);
+    const cleanups = registerSessionEventHandlers(
+      createDefaultDeps({ continueInterruptedSession })
+    );
+    try {
+      handlers.get('session.error')?.({
+        properties: {
+          sessionID: 'session-1',
+          error: {
+            name: 'APIError',
+            data: { message: 'Unauthorized', statusCode: 401, isRetryable: true },
+          },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(continueInterruptedSession).not.toHaveBeenCalled();
+    } finally {
+      cleanups.forEach((cleanup) => cleanup());
       vi.useRealTimers();
     }
   });
@@ -972,7 +1177,7 @@ describe('registerSessionEventHandlers', () => {
     });
 
     await vi.waitFor(() => {
-      expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-2', 'always', {
+      expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-2', 'once', {
         rethrow: true,
       });
     });
@@ -3422,6 +3627,48 @@ describe('registerSessionEventHandlers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
+  it('reconciles final server text after local completion without reviving busy state', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const message = createCompletedAssistantEntry(1, 2);
+    loadingStartedAt.mockReturnValue(null);
+    upsertPart.mockClear();
+    startLoading.mockClear();
+    const cleanups = registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [message],
+        setSessionStatusEntry,
+        syncSessionMessages,
+      })
+    );
+    emitServerEvent(handlers, 'session.next.text.ended', {
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: message.info.id,
+        textID: 'text-final',
+        text: 'Complete response including FINAL_MARKER',
+      },
+      seq: 1,
+    });
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageID: message.info.id,
+        id: 'text-final',
+        text: 'Complete response including FINAL_MARKER',
+      })
+    );
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'session-1', assistantMessageID: message.info.id, finish: 'stop' },
+      seq: 2,
+    });
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
+    expect(startLoading).not.toHaveBeenCalled();
+    for (const cleanup of cleanups) cleanup();
+  });
+
   it('does not mark active full assistant completion updates idle', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
@@ -3992,6 +4239,42 @@ describe('registerSessionEventHandlers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    'does not settle a newer assistant from a delayed terminal step (older loaded: %s)',
+    (olderLoaded) => {
+      const handlers = installHandlers();
+      const setSessionStatusEntry = vi.fn();
+      const assistantEntry = createAssistantEntry();
+      assistantEntry.info.time.created = 10;
+      const olderEntry = createAssistantEntry();
+      olderEntry.info.id = 'older-assistant';
+      upsertMessageInfo.mockClear();
+      finishMessageStreaming.mockClear();
+      stopLoading.mockClear();
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          getMessages: () => (olderLoaded ? [olderEntry, assistantEntry] : [assistantEntry]),
+          setSessionStatusEntry,
+        })
+      );
+
+      handlers.get('session.next.step.ended')?.({
+        properties: {
+          sessionID: 'session-1',
+          assistantMessageID: 'older-assistant',
+          finish: 'stop',
+          timestamp: 3,
+        },
+      });
+
+      expect(upsertMessageInfo).not.toHaveBeenCalled();
+      expect(finishMessageStreaming).not.toHaveBeenCalled();
+      expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+      expect(stopLoading).not.toHaveBeenCalled();
+    }
+  );
 
   it('settles terminal v2 step ends against the latest legacy assistant when ids differ', () => {
     const handlers = installHandlers();

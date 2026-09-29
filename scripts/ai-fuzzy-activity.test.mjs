@@ -30,6 +30,7 @@ function harness({ stale = false, settledEarly = false, attached = false } = {})
     },
   };
   const cdp = {
+    captureActionState: async () => ({ disclosures: [] }),
     snapshot: async () => ({
       jumpToLatest: !attached,
       transcript: { scrollTop: attached ? 900 : 500, scrollHeight: 1000, clientHeight: 100 },
@@ -75,6 +76,44 @@ test('AI07 executes disclosure, outer wheel, two detached completions, and live 
   assert.deepEqual(result.completedWhileDetached, ['one', 'two']);
   assert.deepEqual(result.runningAtReturn, ['final']);
   assert.equal(result.visualVerification, 'NEEDS_AI_REVIEW');
+});
+
+test('AI07 collapses an already-open disclosure before verifying native expansion', async () => {
+  const { options, calls } = harness();
+  options.cdp.captureActionState = async () => ({
+    disclosures: [{ visible: true, expanded: true }],
+  });
+  const result = await executeActivityScenario(options);
+  assert.equal(result.executed, true, result.reason);
+  assert.deepEqual(calls, [
+    'collapse disclosure',
+    'expand disclosure',
+    'wheel transcript',
+    '[aria-label="Scroll to latest message"]',
+  ]);
+  assert.deepEqual(result.completedWhileDetached, ['one', 'two']);
+});
+
+test('AI07 reveals an offscreen expanded disclosure before interacting with it', async () => {
+  const { options, calls } = harness();
+  let snapshots = 0;
+  options.cdp.captureActionState = async () => ({
+    disclosures: [{ visible: ++snapshots > 1, expanded: true }],
+  });
+  const result = await executeActivityScenario(options);
+  assert.equal(result.executed, true, result.reason);
+  assert.deepEqual(calls, [
+    'wheel transcript',
+    'collapse disclosure',
+    'expand disclosure',
+    'wheel transcript',
+    '[aria-label="Scroll to latest message"]',
+  ]);
+  assert.equal(result.actions[0].delta, -180);
+  assert.deepEqual(
+    result.actions.slice(0, 4).map((action) => action.step),
+    [1, 2, 3, 4]
+  );
 });
 
 test('AI07 waits for measured bottom when the jump control disappears before scrolling settles', async () => {

@@ -3,6 +3,7 @@ import {
   formatProviderErrorDetails,
   formatProviderErrorMessage,
   friendlyErrorName,
+  getProviderErrorDetailRows,
   isAbortedAssistantError,
   isAbortedToolError,
   isPermissionRejectedToolError,
@@ -251,6 +252,12 @@ describe('formatProviderErrorDetails', () => {
     expect(details).toContain('Bad Request');
     expect(details?.endsWith('...')).toBe(true);
     expect(details?.length).toBeLessThan(body.length);
+    expect(
+      getProviderErrorDetailRows({
+        name: 'APIError',
+        data: { responseBody: body },
+      }).find((row) => row.label === 'Response')?.value
+    ).toBe(body);
   });
 
   it('marks an empty response body and includes only diagnostic headers', () => {

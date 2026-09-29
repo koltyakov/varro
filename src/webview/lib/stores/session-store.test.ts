@@ -99,6 +99,44 @@ describe('sessionStore', () => {
     resetProviderConnectionState();
   });
 
+  it('preserves a scheduled provider retry across idle snapshots until cancellation', () => {
+    const retry = {
+      type: 'retry' as const,
+      attempt: 1,
+      message: 'Not Found',
+      next: Date.now() + 5000,
+    };
+    sessionStore.retainProviderRetryStatus('session-1', retry, () => {
+      sessionStore.retainProviderRetryStatus('session-1', null);
+      sessionStore.setSessionStatusEntry('session-1', { type: 'idle' });
+    });
+    sessionStore.setSessionStatusEntry('session-1', retry);
+    sessionStore.setSessionStatuses({});
+    expect(state.sessionStatus['session-1']).toEqual(retry);
+    sessionStore.setSessionStatuses({}, { snapshotStartedAt: captureSessionStatusSnapshotTime() });
+    expect(state.sessionStatus['session-1']).toEqual(retry);
+    sessionStore.setSessionStatusEntry('session-1', { type: 'idle' });
+    expect(state.sessionStatus['session-1']).toEqual(retry);
+    sessionStore.cancelProviderRetry('session-1');
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
+    expect(sessionStore.isProviderRetryScheduled('session-1')).toBe(false);
+    sessionStore.setSessionStatuses({});
+    expect(state.sessionStatus['session-1']?.type).not.toBe('retry');
+  });
+
+  it('allows resumed backend work to supersede a local retry countdown', () => {
+    const retry = {
+      type: 'retry' as const,
+      attempt: 1,
+      message: 'Not Found',
+      next: Date.now() + 5000,
+    };
+    sessionStore.retainProviderRetryStatus('session-1', retry);
+    sessionStore.setSessionStatusEntry('session-1', retry);
+    sessionStore.setSessionStatuses({ 'session-1': { type: 'busy' } });
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
+  });
+
   it('recovers provider models from successful history without mounting message rows', () => {
     markProviderAuthFailure('openai', 'old-error', 0);
     setMessagesIncremental([{ info: completedAssistantMessage(), parts: [] }]);

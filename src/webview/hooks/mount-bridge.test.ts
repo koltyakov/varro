@@ -231,7 +231,19 @@ describe('mount bridge helpers', () => {
     });
 
     expect(applySessionPlanStateUpdate).toHaveBeenCalledWith('session-1', 200);
-    expect(applySessionSelectedAgentUpdate).toHaveBeenCalledWith('session-1', 'build');
+    expect(applySessionSelectedAgentUpdate).toHaveBeenCalledWith('session-1', 'build', undefined);
+  });
+
+  it('settles an agent selection when host persistence fails', () => {
+    handleExtensionMessageWithDependencies(createMessageDependencies(), {
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'session-1', selectionId: 'selection-4' },
+    });
+    expect(applySessionSelectedAgentUpdate).toHaveBeenCalledWith(
+      'session-1',
+      undefined,
+      'selection-4'
+    );
   });
 
   it('replays persisted agent selections when a webview becomes ready', () => {

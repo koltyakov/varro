@@ -1503,6 +1503,7 @@ describe('ChatInput', () => {
         status: 'available',
         source: 'provider',
         checkedAt: Date.now(),
+        usageLimitResets: { availableCount: 1, credits: null },
         windows: [
           {
             id: 'five_hour',
@@ -3662,6 +3663,7 @@ describe('ChatInput', () => {
       type: 'queued-messages/update',
       payload: {
         messages: [expect.objectContaining({ id: 'owned', ownerViewId: 'editor-a' })],
+        mutationId: expect.any(String),
       },
     });
   });
@@ -5462,6 +5464,9 @@ describe('ChatInput', () => {
   });
 
   it('clears an edited draft when ownership transfer removes its queued row', async () => {
+    const sendToExtension = vi.fn(defaultBridgeSend);
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+      sendToExtension;
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
     setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'edit this follow-up' }]);
@@ -5471,6 +5476,11 @@ describe('ChatInput', () => {
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     syncQueuedMessages();
+    const update = sendToExtension.mock.calls.at(-1)?.[0];
+    if (update?.type !== 'queued-messages/update') throw new Error('Queue update missing');
+    // Acknowledge persistence before the host transfers ownership away from this view.
+    applyQueuedMessagesSnapshot(update.payload.messages, update.payload.mutationId);
+    await flushAsyncWork();
     cleanup();
     resetDefaultAppState();
     setIsLoading(true);

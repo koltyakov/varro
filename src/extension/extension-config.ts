@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { ExtensionConfigState } from '../shared/provider-limit-config';
+import { DEFAULT_RESET_WARNING_DAYS } from '../shared/provider-limit-config';
 import { isPermissionMode } from '../shared/protocol';
 import { isNumber, isString } from '../shared/type-utils';
 
@@ -17,6 +18,7 @@ export function readExtensionConfigState(
     showChangedFiles: config.get<boolean>('chat.showChangedFiles', false),
     showTurnTimer: config.get<boolean>('chat.showTurnTimer', true),
     debugShowQuotaWarning: config.get<boolean>('debug.showQuotaWarning', false),
+    debugResetWarningDays: readResetWarningDays(config),
     enableProblemsContext: config.get<boolean>('chat.enableProblemsContext', true),
     desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),
     defaultPermissionMode: readDefaultPermissionMode(config),
@@ -27,6 +29,13 @@ export function readExtensionConfigState(
     ),
     chatFontFamily: readChatFontFamily(chatConfig),
   };
+}
+
+function readResetWarningDays(config: vscode.WorkspaceConfiguration): number {
+  const value = config.get<unknown>('debug.resetWarningDays');
+  return isNumber(value) && Number.isFinite(value) && value >= DEFAULT_RESET_WARNING_DAYS
+    ? value
+    : DEFAULT_RESET_WARNING_DAYS;
 }
 
 function readDefaultPermissionMode(config: vscode.WorkspaceConfiguration) {

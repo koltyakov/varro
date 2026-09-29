@@ -1,27 +1,30 @@
 import cubeIcon from 'iconoir/icons/cube.svg';
+import { createSignal } from 'solid-js';
 import { isString } from '../../shared/type-utils';
 import type { Agent } from '../types';
+import type * as AgentIconCatalog from './agent-icon-catalog';
 import { calendarCheckIcon, chatBubbleQuestionIcon, toolsIcon } from './ui-icons';
 
-// Keep the full catalog as local assets rather than embedding every SVG in the JS bundle.
-const icons = new Map(
-  Object.entries(
-    import.meta.glob<string>('/node_modules/iconoir/icons/{regular,solid}/*.svg', {
-      eager: true,
-      exhaustive: true,
-      query: '?url&no-inline',
-      import: 'default',
-    })
-  ).map(([path, url]) => {
-    const name = path.slice(path.lastIndexOf('/') + 1, -4);
-    return [path.includes('/solid/') ? `${name}-solid` : name, url];
-  })
-);
+const [catalog, setCatalog] = createSignal<typeof AgentIconCatalog>();
+let catalogRequested = false;
+
+async function loadCatalog(): Promise<void> {
+  try {
+    setCatalog(await import('./agent-icon-catalog'));
+  } catch (error) {
+    // oxlint-disable-next-line no-console
+    console.warn('Failed to load agent icons', error);
+  }
+}
 
 export function getAgentIcon(agent: Pick<Agent, 'name' | 'options'>): string {
   const icon = agent.options?.icon;
   if (isString(icon) && icon.trim()) {
-    return icons.get(icon.trim()) ?? cubeIcon;
+    if (!catalogRequested) {
+      catalogRequested = true;
+      void loadCatalog();
+    }
+    return catalog()?.getCatalogIcon(icon.trim()) ?? cubeIcon;
   }
   if (agent.name.toLowerCase() === 'build') return toolsIcon;
   if (agent.name.toLowerCase() === 'ask') return chatBubbleQuestionIcon;

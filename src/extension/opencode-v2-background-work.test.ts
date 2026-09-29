@@ -20,7 +20,7 @@ const shell: ShellInfo = {
 afterEach(() => vi.useRealTimers());
 
 describe('v2 background completion', () => {
-  it('waits after a final answer and through shell exit until the follow-up turn', () => {
+  it('settles a completed execution even while its preview server is running', () => {
     const adapter = new OpenCodeV2Adapter(async () => ({ data: [] }));
     adapter.observe('shell.created', { info: shell }, undefined, '/repo');
     adapter.observe('session.step.ended', { sessionID: 'ses_one', finish: 'stop' });
@@ -38,11 +38,11 @@ describe('v2 background completion', () => {
         { type: 'session.execution.succeeded', data: { sessionID: 'ses_one' } },
         adapter.eventContext('ses_one')
       )
-    ).toMatchObject([{ properties: { status: { type: 'busy', background: true } } }]);
+    ).toMatchObject([{ properties: { status: { type: 'idle' } } }]);
     adapter.observe('shell.exited', { id: shell.id, status: 'exited', exit: 0 });
-    expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(true);
+    expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(false);
     adapter.observe('session.execution.started', { sessionID: 'ses_one' });
-    expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(true);
+    expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(false);
     adapter.observe('session.step.started', { sessionID: 'ses_one' });
     expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(false);
     adapter.observe('session.execution.succeeded', { sessionID: 'ses_one' });
@@ -54,7 +54,7 @@ describe('v2 background completion', () => {
     ).toMatchObject([{ properties: { status: { type: 'idle' } } }]);
   });
 
-  it('keeps Waiting while another background command is still running', async () => {
+  it('does not resurrect a completed turn while another background command is running', async () => {
     vi.useFakeTimers();
     const other = { ...shell, id: 'sh_second' };
     const adapter = new OpenCodeV2Adapter(async (_method, path) => ({
@@ -67,12 +67,10 @@ describe('v2 background completion', () => {
     vi.advanceTimersByTime(60_000);
     expect(
       await adapter.request('GET', '/session/status', undefined, { directory: '/repo' })
-    ).toEqual({
-      ses_one: { type: 'busy', background: true, backgroundStartedAt: 1 },
-    });
+    ).toEqual({});
   });
 
-  it('restores Waiting from running shells when opening an idle session', async () => {
+  it('keeps an idle session idle when opening it with a running preview server', async () => {
     const wire = vi.fn(async (_method: string, path: string) => ({
       data: path === '/api/session/active' ? { ses_other: { type: 'running' } } : [shell],
     }));
@@ -80,7 +78,6 @@ describe('v2 background completion', () => {
     expect(
       await adapter.request('GET', '/session/status', undefined, { directory: '/repo' })
     ).toEqual({
-      ses_one: { type: 'busy', background: true, backgroundStartedAt: 1 },
       ses_other: { type: 'busy' },
     });
     expect(wire).toHaveBeenCalledWith(
@@ -112,7 +109,7 @@ describe('v2 background completion', () => {
       data: path === '/api/session/active' ? {} : [],
     }));
     adapter.observe('shell.created', { info: shell }, undefined, '/repo');
-    adapter.observe('session.execution.succeeded', { sessionID: 'ses_one' });
+    adapter.observe('session.step.ended', { sessionID: 'ses_one', finish: 'stop' });
     adapter.observe('shell.exited', { id: shell.id, status: 'exited' });
     expect(
       await adapter.request('GET', '/session/status', undefined, { directory: '/repo' })
@@ -137,6 +134,21 @@ describe('v2 background completion', () => {
     }
   );
 
+  it('recovers a missed completion event even when the preview server never exits', async () => {
+    vi.useFakeTimers();
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => ({
+      data: path === '/api/session/active' ? {} : [shell],
+    }));
+    adapter.observe('shell.created', { info: shell }, undefined, '/repo');
+    adapter.observe('session.step.ended', { sessionID: 'ses_one', finish: 'stop' });
+    await adapter.request('GET', '/session/status', undefined, { directory: '/repo' });
+    vi.advanceTimersByTime(2_000);
+    expect(
+      await adapter.request('GET', '/session/status', undefined, { directory: '/repo' })
+    ).toEqual({});
+    expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(false);
+  });
+
   it('stops only the waiting session shells when Stop is requested', async () => {
     const wire = vi.fn(async (_method: string, _path: string) => ({}));
     const adapter = new OpenCodeV2Adapter(wire);
@@ -147,7 +159,7 @@ describe('v2 background completion', () => {
       undefined,
       '/repo'
     );
-    adapter.observe('session.execution.succeeded', { sessionID: 'ses_one' });
+    adapter.observe('session.step.ended', { sessionID: 'ses_one', finish: 'stop' });
     await adapter.request('POST', '/session/ses_one/abort', {}, { directory: '/repo' });
     expect(wire.mock.calls.map(([method, path]) => [method, path])).toEqual([
       ['DELETE', '/api/shell/sh_test?location%5Bdirectory%5D=%2Frepo'],

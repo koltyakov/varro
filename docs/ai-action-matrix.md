@@ -51,6 +51,9 @@ full Cartesian product. Record the exact combinations tested and any omitted one
 | ACT-17 | Fork, undo/redo, rename, and archive a disposable session where supported | Correct branch and history are retained; route/title/list state agrees with the server; capability differences are recorded |
 
 Queue editing means changing and saving the text, not merely opening an edit box.
+Include rapid consecutive enqueues: delayed persistence snapshots must acknowledge the latest local
+mutation before replacing optimistic queue state. After acknowledgement, ownership transfers and
+authoritative removals must still apply.
 Subagent coverage requires model delegation and actual child work, not an empty
 child created by the controller. Permission mode synchronization alone does not
 count as a permission lifecycle pass.

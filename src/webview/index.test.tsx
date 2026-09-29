@@ -137,6 +137,68 @@ describe('webview bootstrap', () => {
     );
   });
 
+  it('keeps cards within the previous host width during expansion without starving a drag', () => {
+    vi.useFakeTimers();
+    let width = 360;
+    const widthSpy = vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => width);
+    root.style.maxWidth = '90%';
+    try {
+      cleanup = bootstrap(root);
+      expect(root.style.maxWidth).toBe('360px');
+      width = 486;
+      window.dispatchEvent(new Event('resize'));
+      vi.advanceTimersToNextFrame();
+      expect(root.style.maxWidth).toBe('360px');
+      width = 720;
+      window.dispatchEvent(new Event('resize'));
+      vi.advanceTimersToNextFrame();
+      vi.advanceTimersToNextFrame();
+      vi.advanceTimersToNextFrame();
+      expect(root.style.maxWidth).toBe('720px');
+      width = 360;
+      window.dispatchEvent(new Event('resize'));
+      expect(root.style.maxWidth).toBe('360px');
+      width = 486;
+      window.dispatchEvent(new Event('resize'));
+      cleanup();
+      cleanup = undefined;
+      vi.runAllTimers();
+      window.dispatchEvent(new Event('resize'));
+      expect(root.style.maxWidth).toBe('90%');
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+      widthSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('applies zoom width immediately and cancels a pending expansion', () => {
+    vi.useFakeTimers();
+    let width = 360;
+    let ratio = 1;
+    const widthSpy = vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => width);
+    const ratioSpy = vi.spyOn(window, 'devicePixelRatio', 'get').mockImplementation(() => ratio);
+    try {
+      cleanup = bootstrap(root);
+      width = 486;
+      window.dispatchEvent(new Event('resize'));
+      vi.advanceTimersToNextFrame();
+      ratio = 0.8;
+      width = 607;
+      window.dispatchEvent(new Event('resize'));
+      expect(root.style.maxWidth).toBe('607px');
+      vi.runAllTimers();
+      expect(root.style.maxWidth).toBe('607px');
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+      widthSpy.mockRestore();
+      ratioSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('hides editor content until a revealed tab finishes resizing', async () => {
     let visibilityState: DocumentVisibilityState = 'visible';
     const visibilityStateSpy = vi

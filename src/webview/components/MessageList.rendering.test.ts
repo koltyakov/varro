@@ -158,6 +158,38 @@ describe('session pause dividers', () => {
 });
 
 describe('automatic retry notices', () => {
+  it.each(['APIError', 'ProviderAuthError'] as const)(
+    'hides the previous %s action as soon as a new prompt is sent',
+    (name) => {
+      const frames = installQueuedAnimationFrameMocks();
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('prompt', 'First request')] },
+        {
+          info: assistantMessage('failed', {
+            parentID: 'user-1',
+            error: {
+              name,
+              data: {
+                message: name === 'ProviderAuthError' ? 'Token refresh failed: 401' : 'Not Found',
+              },
+            },
+          }),
+          parts: [],
+        },
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      expect(container!.querySelector('.assistant-message-flow-item-error-action')).not.toBeNull();
+      upsertMessage({
+        info: userMessage('user-2'),
+        parts: [textPart('next-prompt', 'New request')],
+      });
+      expect(container!.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
+      expect(container!.querySelector('.assistant-message-flow-item-error')).not.toBeNull();
+      frames.restore();
+    }
+  );
+
   it.each(['busy', 'retry'] as const)(
     'keeps partial failed attempts out of Worked while %s',
     (status) => {
@@ -240,16 +272,18 @@ describe('automatic retry notices', () => {
     });
     expect(notice()?.textContent).toContain('Recovered after an automatic retry. Work continued.');
     notice()?.querySelector<HTMLButtonElement>('button')?.click();
-    expect(notice()?.querySelector('pre')?.textContent).toContain(
-      'WebSocket closed with code 1006'
-    );
+    expect(
+      notice()?.querySelector('.assistant-message-flow-item-error-details')?.textContent
+    ).toContain('WebSocket closed with code 1006');
 
     cleanup();
     container!.replaceChildren();
     setState('sessionStatus', 'session-1', { type: 'idle' });
     cleanup = render(() => MessageList(), container!);
     expect(notice()?.textContent).toContain('Recovered after an automatic retry. Work continued.');
-    expect(notice()?.querySelector('pre')?.textContent).toContain('provider.transport');
+    expect(
+      notice()?.querySelector('.assistant-message-flow-item-error-details')?.textContent
+    ).toContain('provider.transport');
     frames.restore();
   });
 });
@@ -547,6 +581,7 @@ describe('MessageList entrance animation', () => {
 
 describe('MessageList loading states', () => {
   it('keeps loading visible through populated hydration on consecutive session openings', async () => {
+    const frames = installQueuedAnimationFrameMocks();
     setSessions([
       session('session-1', { time: { created: 1, updated: 2 } }),
       session('session-2', { time: { created: 1, updated: 2 } }),
@@ -598,9 +633,34 @@ describe('MessageList loading states', () => {
       setState('messagesLoading', false);
       await Promise.resolve();
       expect(container!.querySelector(`[data-msg-id="${messageId}"]`)).toBe(row);
+      expect(row!.closest('.is-session-hydrating')).not.toBeNull();
+      expectVisibleLoading();
+      frames.flush();
+      frames.flush();
       expect(row!.closest('.is-session-hydrating')).toBeNull();
       expect(container!.querySelector('[aria-label="Loading messages"]')).toBeNull();
     }
+    frames.restore();
+  });
+
+  it('reveals an active restored turn without waiting for streaming to settle', async () => {
+    const frames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    replaceMessages([
+      { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Continue working')] },
+      {
+        info: assistantMessage('reply', { time: { created: 2 } }),
+        parts: [textPart('reply-text', 'Work in progress')],
+      },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    expect(container!.querySelector('.is-session-hydrating')).not.toBeNull();
+    await Promise.resolve();
+    frames.flush();
+    expect(container!.querySelector('.is-session-hydrating')).toBeNull();
+    expect(container!.querySelector('[aria-label="Loading messages"]')).toBeNull();
+    frames.restore();
   });
 
   it('hides the previous transcript while a cross-workspace session activation is pending', async () => {

@@ -1,9 +1,11 @@
 import { batch } from 'solid-js';
 import {
   isAbortedAssistantError,
+  isProviderAuthFailure,
   isTransientProviderConnectionError,
 } from '../../../shared/error-classification';
 import type { ServerEvent } from '../../../shared/protocol';
+import { createOpenCodeMessageID } from '../../../shared/opencode-id';
 import { serverEvents } from '../../lib/client';
 import {
   hasUnsettledToolPart,
@@ -20,6 +22,7 @@ import {
   resetSessionMessageWindowForRefetch,
 } from '../../lib/message-window';
 import { hasStreamedFinalResponse } from './session-watchdog';
+import { buildInterruptedSessionMessageID } from '../connection-bootstrap';
 import { parseUsageLimitNotice, type UsageLimitNotice } from '../../lib/usage-limit';
 import { validateFileDiffs } from '../../lib/validate-diffs';
 import { appStore } from '../../lib/stores/app-store';
@@ -98,6 +101,7 @@ const MAX_TOOL_EXECUTION_TIMES = 1_024;
 const DIRTY_GAP_RETRY_MIN_MS = 100;
 const DIRTY_GAP_RETRY_MAX_MS = 30_000;
 const TRANSIENT_CONNECTION_RETRY_DELAY_MS = 5_000;
+const MAX_PROVIDER_RETRIES = 3;
 
 type SequenceStatus = 'unknown' | 'ok' | 'gap';
 
@@ -180,7 +184,10 @@ type EventHandlerDependencies = {
   respondAutomaticPermission?: EventHandlerDependencies['respondPermission'];
   setDiffs(diffs: FileDiff[]): void;
   abortRemoteSession(sessionId: string): Promise<void | boolean | object>;
-  continueInterruptedSession?(sessionId: string): Promise<void | boolean | object>;
+  continueInterruptedSession?(
+    sessionId: string,
+    options?: { messageID: string }
+  ): Promise<void | boolean | object>;
   logError(context: string, cause: unknown): void;
   isPermissionAutomationOwner?(): boolean;
 };
@@ -301,6 +308,7 @@ export class SessionEventHandlerOperations {
       setDiffs: sessionStore.setDiffs,
       abortRemoteSession: this.deps.abortRemoteSession,
       continueInterruptedSession: this.deps.continueInterruptedSession,
+      isPermissionAutomationOwner: this.deps.isPermissionAutomationOwner,
       logError: this.deps.logError,
     });
   };
@@ -313,6 +321,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const pendingMissingPartDeltas = new Map<string, MissingPartRecovery>();
   const toolExecutionTimes = new Map<string, ToolExecutionTime>();
   const transientConnectionRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const providerRetryAttempts = new Map<string, number>();
+  const providerRetryMessageIDs = new Map<string, string>();
+  const cancelledProviderRetries = new Set<string>();
   // Per-session debounce timers for the optimistic streamed-completion settle.
   const streamedCompletionTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const settledIdleSessions = new Set<string>();
@@ -339,6 +350,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     const retryTimer = transientConnectionRetryTimers.get(sessionId);
     if (retryTimer !== undefined) clearTimeout(retryTimer);
     transientConnectionRetryTimers.delete(sessionId);
+    sessionStore.retainProviderRetryStatus(sessionId, null);
+    providerRetryAttempts.delete(sessionId);
+    providerRetryMessageIDs.delete(sessionId);
+    cancelledProviderRetries.delete(sessionId);
     const dirtyGap = dirtyGaps.get(sessionId);
     if (dirtyGap?.retryTimer !== undefined) clearTimeout(dirtyGap.retryTimer);
     dirtyGaps.delete(sessionId);
@@ -802,33 +817,92 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     const timer = transientConnectionRetryTimers.get(sessionId);
     if (timer) clearTimeout(timer);
     transientConnectionRetryTimers.delete(sessionId);
+    sessionStore.retainProviderRetryStatus(sessionId, null);
+    if (timer && deps.getSessionStatus(sessionId)?.type === 'retry') {
+      deps.setSessionStatusEntry(sessionId, { type: 'idle' });
+      if (sessionId === deps.getActiveSessionId() && !isActiveTreeWorking()) uiStore.stopLoading();
+    }
   };
   const scheduleTransientConnectionRetry = (sessionId: string, message: string) => {
     if (
+      disposed ||
       !deps.continueInterruptedSession ||
+      deps.isPermissionAutomationOwner?.() === false ||
       deps.hasPendingAbort(sessionId) ||
+      cancelledProviderRetries.has(sessionId) ||
+      deps.getSessionStatus(sessionId)?.type === 'busy' ||
       transientConnectionRetryTimers.has(sessionId)
     )
       return;
-    const retryAt = Date.now() + TRANSIENT_CONNECTION_RETRY_DELAY_MS;
-    deps.setSessionStatusEntry(sessionId, {
+    const attempt = (providerRetryAttempts.get(sessionId) ?? 0) + 1;
+    if (attempt > MAX_PROVIDER_RETRIES) {
+      deps.setSessionStatusEntry(sessionId, { type: 'idle' });
+      if (sessionId === deps.getActiveSessionId()) uiStore.stopLoading();
+      return;
+    }
+    const delay = TRANSIENT_CONNECTION_RETRY_DELAY_MS * 2 ** (attempt - 1);
+    const retryAt = Date.now() + delay;
+    const latestMessage = messagesForSession(sessionId).at(-1);
+    const latestMessageID = latestMessage?.info.id;
+    const retryStatus: Extract<SessionStatus, { type: 'retry' }> = {
       type: 'retry',
-      attempt: 1,
+      attempt,
       message,
       next: retryAt,
+    };
+    sessionStore.retainProviderRetryStatus(sessionId, retryStatus, () => {
+      cancelledProviderRetries.add(sessionId);
+      cancelTransientConnectionRetry(sessionId);
     });
+    deps.setSessionStatusEntry(sessionId, retryStatus);
     if (sessionId === deps.getActiveSessionId()) uiStore.startLoading();
     const timer = setTimeout(() => {
       transientConnectionRetryTimers.delete(sessionId);
-      if (deps.hasPendingAbort(sessionId)) return;
-      void deps.continueInterruptedSession!(sessionId).catch((err) => {
+      sessionStore.retainProviderRetryStatus(sessionId, null);
+      if (
+        disposed ||
+        deps.hasPendingAbort(sessionId) ||
+        deps.isPermissionAutomationOwner?.() === false ||
+        deps.getSessionStatus(sessionId)?.type === 'busy' ||
+        messagesForSession(sessionId).at(-1)?.info.id !== latestMessageID
+      ) {
+        const status = deps.getSessionStatus(sessionId);
+        if (status?.type === 'retry' && status.next === retryAt) {
+          deps.setSessionStatusEntry(sessionId, { type: 'idle' });
+          if (sessionId === deps.getActiveSessionId()) uiStore.stopLoading();
+        }
+        return;
+      }
+      providerRetryAttempts.set(sessionId, attempt);
+      deps.setSessionStatusEntry(sessionId, { type: 'busy' });
+      const options = {
+        messageID: latestMessage
+          ? buildInterruptedSessionMessageID(sessionId, latestMessage)
+          : createOpenCodeMessageID(),
+      };
+      providerRetryMessageIDs.set(sessionId, options.messageID);
+      const operation = deps.continueInterruptedSession!(sessionId, options);
+      void operation.catch((err) => {
         deps.logError('continueInterruptedSession after connection failure', err);
+        if (
+          disposed ||
+          deps.hasPendingAbort(sessionId) ||
+          cancelledProviderRetries.has(sessionId) ||
+          providerRetryMessageIDs.get(sessionId) !== options.messageID
+        )
+          return;
+        deps.setSessionStatusEntry(sessionId, { type: 'idle' });
         scheduleTransientConnectionRetry(sessionId, message);
       });
-    }, TRANSIENT_CONNECTION_RETRY_DELAY_MS);
+    }, delay);
     transientConnectionRetryTimers.set(sessionId, timer);
   };
   const markSessionError = (sessionId: string, error: AssistantMessage['error'] | undefined) => {
+    const aborted = deps.hasPendingAbort(sessionId);
+    if (aborted || isAbortedAssistantError(error)) cancelledProviderRetries.add(sessionId);
+    const serverRetry =
+      deps.getSessionStatus(sessionId)?.type === 'retry' &&
+      !transientConnectionRetryTimers.has(sessionId);
     if (error) {
       const messages = deps.getMessages();
       for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -841,7 +915,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         break;
       }
     }
-    deps.setSessionStatusEntry(sessionId, { type: 'idle' });
+    if (!serverRetry && !transientConnectionRetryTimers.has(sessionId)) {
+      deps.setSessionStatusEntry(sessionId, { type: 'idle' });
+    }
     deps.clearPendingAbort(sessionId);
     if (error && isAbortedAssistantError(error)) {
       sessionStore.setSessionFailed(sessionId, false);
@@ -860,7 +936,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
     }
     if (sessionId === deps.getActiveSessionId() && !isActiveTreeWorking()) uiStore.stopLoading();
-    if (isTransientProviderConnectionError(error)) {
+    const retryable =
+      !isProviderAuthFailure(error) &&
+      !isAbortedAssistantError(error) &&
+      !parseUsageLimitNotice(error?.data?.message || error?.name) &&
+      (isTransientProviderConnectionError(error) ||
+        (error?.name === 'APIError' &&
+          (error.data?.isRetryable === true || error.data?.statusCode === 404)));
+    if (!aborted && !serverRetry && retryable) {
       scheduleTransientConnectionRetry(sessionId, error?.data?.message || 'Connection lost');
     } else {
       cancelTransientConnectionRetry(sessionId);
@@ -939,6 +1022,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       return false;
     }
     if (message.info.role !== 'assistant') return false;
+    const latest = deps.getMessages().findLast((entry) => entry.info.sessionID === sessionId);
+    // Completing an older named step must not make a newer prompt or reply idle.
+    if (latest && latest.info.id !== message.info.id) return false;
+    // A delayed terminal event can name an unloaded legacy counterpart. Its
+    // fallback must not complete an assistant created after that step ended.
+    if (message.info.time.created > completedAt) return false;
     if (hasUnsettledToolPart(message.parts)) return false;
     const assistantInfo = message.info;
     let nextInfo: AssistantMessage | null = null;
@@ -1252,7 +1341,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       if (deps.shouldIgnorePendingAbortStatus(sessionID, status)) return;
       const abortedRetry = deps.hasPendingAbort(sessionID);
       if (status.type === 'idle') {
-        if (abortedRetry) cancelTransientConnectionRetry(sessionID);
+        if (abortedRetry) {
+          cancelledProviderRetries.add(sessionID);
+          cancelTransientConnectionRetry(sessionID);
+        }
         if (transientConnectionRetryTimers.has(sessionID)) return;
         handleSessionIdle(sessionID, abortedRetry);
         return;
@@ -1275,7 +1367,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (!isActiveTreeWorking()) uiStore.stopLoading();
         return;
       }
-      if (status.type === 'busy') cancelTransientConnectionRetry(sessionID);
+      if (status.type === 'busy' || status.type === 'retry')
+        cancelTransientConnectionRetry(sessionID);
       settledIdleSessions.delete(sessionID);
       deps.setSessionStatusEntry(sessionID, status);
       if (status.type === 'busy') {
@@ -1300,7 +1393,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const sid = getEventString(data.properties, 'sessionID');
       if (!sid) return;
       const abortedRetry = deps.hasPendingAbort(sid);
-      if (abortedRetry) cancelTransientConnectionRetry(sid);
+      if (abortedRetry) {
+        cancelledProviderRetries.add(sid);
+        cancelTransientConnectionRetry(sid);
+      }
       if (!transientConnectionRetryTimers.has(sid)) handleSessionIdle(sid, abortedRetry);
     })
   );
@@ -1354,7 +1450,20 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         partialMessage.role === 'assistant' &&
         !partialMessage.error &&
         !!partialMessage.time?.completed;
-      if (assistantCompleted) cancelTransientConnectionRetry(sessionID);
+      if (assistantCompleted) {
+        cancelTransientConnectionRetry(sessionID);
+        providerRetryAttempts.delete(sessionID);
+        providerRetryMessageIDs.delete(sessionID);
+      }
+      if (
+        partialMessage.role === 'user' &&
+        partialMessage.id !== providerRetryMessageIDs.get(sessionID)
+      ) {
+        cancelTransientConnectionRetry(sessionID);
+        providerRetryAttempts.delete(sessionID);
+        providerRetryMessageIDs.delete(sessionID);
+        cancelledProviderRetries.delete(sessionID);
+      }
       // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       const agent = (partialMessage as { agent?: unknown }).agent;
       if (isString(agent) && agent) {
@@ -1537,8 +1646,23 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
             : ignoreStaleProgressAfterFinishedAssistant(sessionID))
         ) {
           // A completed assistant does not mean later shell or skill records are already loaded.
+          // Local idle settlement can precede the final server payload. Reconcile
+          // authoritative text without restarting the completed session's spinner.
+          const completedMessage = assistantMessageID
+            ? findMessageById(assistantMessageID)?.info
+            : null;
+          const locallyCompleted =
+            completedMessage?.role === 'assistant' &&
+            !completedMessage.finish &&
+            !completedMessage.error;
+          if (locallyCompleted && eventName === 'session.next.text.ended') {
+            if (handleProjectedSessionEvent(eventName, p)) {
+              recordSessionMessageSnapshotMutation(sessionID);
+            }
+          }
           if (
-            TRANSCRIPT_SYNC_SESSION_EVENTS.has(eventName) &&
+            (TRANSCRIPT_SYNC_SESSION_EVENTS.has(eventName) ||
+              (locallyCompleted && eventName === 'session.next.step.ended')) &&
             seqStatus !== 'gap' &&
             isSessionInActiveTree(sessionID)
           ) {
@@ -1691,7 +1815,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   );
 
   cleanups.push(() => {
-    for (const timer of transientConnectionRetryTimers.values()) clearTimeout(timer);
+    for (const [sessionId, timer] of transientConnectionRetryTimers) {
+      clearTimeout(timer);
+      sessionStore.retainProviderRetryStatus(sessionId, null);
+    }
     transientConnectionRetryTimers.clear();
   });
   return cleanups;

@@ -45,7 +45,11 @@ export class SessionStatusOperations {
   readonly setSessionStatusEntry = (sessionId: string, status: SessionStatus) => {
     const previousStatus = appStore.state.sessionStatus[sessionId];
     sessionStore.setSessionStatusEntry(sessionId, status);
-    if (isRunningSessionStatus(previousStatus) && status.type === 'idle') {
+    if (
+      isRunningSessionStatus(previousStatus) &&
+      status.type === 'idle' &&
+      !sessionStore.isProviderRetryScheduled(sessionId)
+    ) {
       this.deps.onSessionSettled?.(sessionId);
     }
   };
@@ -72,6 +76,7 @@ export class SessionStatusOperations {
   };
 
   readonly markPendingAbortTree = (sessionIds: string[]) => {
+    for (const sessionId of sessionIds) sessionStore.cancelProviderRetry(sessionId);
     markPendingAbortTreeWithDependencies(
       {
         pendingAbortRetryAttempts: this.deps.pendingAbortRetryAttempts,
@@ -82,6 +87,7 @@ export class SessionStatusOperations {
   };
 
   readonly markPendingAbort = (sessionId: string) => {
+    sessionStore.cancelProviderRetry(sessionId);
     markPendingAbortWithDependencies(
       {
         pendingAbortRetryAttempts: this.deps.pendingAbortRetryAttempts,
@@ -172,6 +178,7 @@ export class SessionStatusOperations {
         loadingStartedAt: uiStore.loadingStartedAt,
         isActiveSession: this.deps.isActiveSession,
         getCurrentSessionStatus: (id) => appStore.state.sessionStatus[id],
+        isProviderRetryScheduled: sessionStore.isProviderRetryScheduled,
         getMessages: this.deps.getMessages,
         logError: this.deps.logError,
       },
@@ -330,6 +337,7 @@ export async function recheckSessionStatusWithDependencies(
     clearPendingAbort(sessionId: string | null | undefined): void;
     stopLoading(): void;
     setSessionStatusEntry?(sessionId: string, status: SessionStatus): void;
+    isProviderRetryScheduled?(sessionId: string): boolean;
     setSessionStatuses(
       statuses: Record<string, SessionStatus>,
       options?: SessionStatusSnapshotOptions
@@ -365,6 +373,10 @@ export async function recheckSessionStatusWithDependencies(
       : incomingStatus;
 
     const abortedRetry = deps.hasPendingAbort(sessionId);
+    if (!abortedRetry && deps.isProviderRetryScheduled?.(sessionId)) {
+      if (deps.isActiveSession(sessionId)) deps.startLoading();
+      return;
+    }
     if (!(abortedRetry && (!reconciledStatus || reconciledStatus.type === 'idle'))) {
       deps.updateUsageLimitState(sessionId, reconciledStatus);
     }

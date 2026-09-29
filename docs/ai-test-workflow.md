@@ -58,6 +58,10 @@ recreate a rendering boundary already available in a capture.
 3. Start the isolated host using the existing launcher. Use its CDP target for native mouse and keyboard
    events. The controller can use this without asking the user to manipulate the editor. Bind by surface,
    viewId, and session route. Re-read geometry when a target changes; do not keep retrying stale selectors.
+   Select and verify the scenario's agent as well as its model. New chats can inherit the preceding
+   test's Plan selection; configuring Build read permissions does not make a Plan read ask for approval.
+   After widening, wait for the measured content width before asserting settled layout. The root
+   deliberately delays expansion by four frames to avoid host-surface clipping; `innerWidth` changes first.
 4. Run independent cases even after another case fails. AI-08 establishes its own live gates. AI-18/19
    establish their own action state. None requires an AI-07 scrolling verdict. Dirty fixture reuse still
    requires exact commit, status, paths, and content hash from the latest exit evidence.
@@ -80,6 +84,11 @@ message IDs. It dispatches one native input, then waits for that message to be v
 and for geometry to settle across samples, with a 30-second deadline and diagnostic samples on failure.
 The disappearing jump button is not proof of arrival. A 110-turn reproduction took about 2.4 seconds
 to reach the final marker, so a fixed 400 ms sleep produced false failures.
+
+During a confirmed active text stream, pass `streaming: true`. This checks the same session and visible
+latest row, non-reversing follow movement, and a bottom gap of at most 64 CSS pixels throughout the
+observation window. It permits smooth-follow lag while new lines arrive. Keep the default stationary
+check for settled history and final arrival; streaming arrival does not prove final settlement.
 
 `runAi01` in the same module owns the seeded wheel, native scrollbar, Option-counter, and return-to-latest
 sequence. Call it with a bound `CdpController` after selecting an isolated long history; the caller owns

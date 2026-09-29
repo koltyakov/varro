@@ -1859,6 +1859,19 @@ describe('parseWebviewMessage rejection paths', () => {
     });
   });
 
+  it('preserves bounded agent selection acknowledgements', () => {
+    const message = {
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'session-1', agent: 'build', selectionId: 'selection-4' },
+    };
+    expect(parseWebviewMessage(message)).toEqual(message);
+    for (const selectionId of ['', 'x'.repeat(129), 4, null]) {
+      expect(
+        parseWebviewMessage({ ...message, payload: { ...message.payload, selectionId } })
+      ).toBeNull();
+    }
+  });
+
   it('rejects invalid shared read timestamps', () => {
     for (const seenAt of [-1, NaN, Infinity, '100', null, undefined]) {
       expect(

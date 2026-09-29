@@ -138,6 +138,9 @@ the shared invariants below remain true.
 - A resize batch is a pure width reflow only when every reported inline size changed or the container
   font changed. Concurrent streaming, expansion, or content mutation makes it a content resize and
   uses normal height-correction ownership.
+- The webview root caps expansion for four animation frames while the VS Code painted surface catches
+  up. During that interval, `window.innerWidth` can exceed the content width. Measure the actual
+  container for reflow and anchor calculations. Shrinking and zoom bypass the expansion delay.
 - Width measurements may be deferred only while the mounted range still brackets the viewport.
   Publish pending metrics early if stale prefixes could leave uncovered space above or below the
   rendered range.
@@ -241,6 +244,7 @@ the shared invariants below remain true.
 - Grabbing the scrollbar or beginning a touch scroll also releases the activity-exit target, retained
   summary anchor, and queued collapse correction without shrinking the scroll range. Bottom-follow
   yields while the pointer owns scrolling, including beyond the input-intent timeout.
+  A layout-driven bottom scroll event during that gesture must not recapture the exit anchor.
   `scroll-scrollbar-activity.spec.ts` uses native thumb drags during and after collapse, then checks
   detached streaming and explicit return to latest.
 - Non-append insertion, removal, filtering, or view replacement may use a bounded structural owner.
@@ -280,6 +284,12 @@ Direct input acquires ownership only when it can affect the transcript:
 - Bottom follow remains active frame by frame while streaming or geometry is unsettled. It may stop
   only after track height, bottom target, and distance from bottom stabilize; stream observation
   requires consecutive stable frames.
+- Initial positioning also requires consecutive stable frames. Keep initial measurement corrections
+  immediate until then, so row sizing delivered after the first frame does not start animated follow.
+- Keep the transcript hidden behind its loading indicator through initial positioning and any initial
+  viewport-filling history fetch. Reaching the end of the first page is not a ready-to-paint state when
+  compact tool rows leave that page shorter than the viewport. Reveal only after the final bottom
+  position settles; direct user ownership releases this initial visibility hold.
 - User-detached follow reattaches after genuine downward movement reaches the reattachment threshold, or
   an explicit outer downward wheel at the physical bottom. That wheel resumes disclosure-paused follow
   even when the expanded transcript still fits and the browser cannot emit a scroll event. It respects
@@ -537,6 +547,8 @@ Direct input acquires ownership only when it can affect the transcript:
   sticky UI below the minimum supported viewport height.
 - A sticky prompt is a derived overlay for a real user message. Its message ID must remain the sole
   navigation identity.
+- Automatic notices and child-session handoffs do not end that prompt. If one is the first visible
+  row, retain the preceding real prompt; collision checks consider mounted user-message cards only.
 - Navigation aligns the real `.user-message-card`, not an estimated row position or attachment
   summary.
 - The destination uses the same top gap as the sticky box.

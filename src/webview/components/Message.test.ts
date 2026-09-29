@@ -2878,7 +2878,7 @@ describe('Message assistant final answer rendering', () => {
     expect(diffSummary).toBeNull();
   });
 
-  it('renders terse provider API errors with provider and model context', () => {
+  it('keeps the provider explanation in the expanded error details', () => {
     cleanup = render(
       () =>
         Message({
@@ -2896,7 +2896,15 @@ describe('Message assistant final answer rendering', () => {
 
     const errorText = container?.querySelector('.assistant-message-flow-item-error');
 
-    expect(errorText?.textContent).toContain(
+    const header = errorText?.querySelector<HTMLButtonElement>(
+      '.assistant-message-flow-item-notice-header'
+    );
+    expect(header?.textContent).toBe('Not Found');
+    expect(errorText?.textContent).not.toContain('The provider-1 provider');
+    header?.click();
+    expect(
+      errorText?.querySelector('.assistant-message-flow-item-error-details')?.textContent
+    ).toContain(
       'The provider-1 provider returned "Not Found". The model or API endpoint may be unavailable.'
     );
   });
@@ -2928,7 +2936,8 @@ describe('Message assistant final answer rendering', () => {
       '.assistant-message-flow-item-error-details-toggle'
     );
     expect(detailsToggle).toBeInstanceOf(HTMLButtonElement);
-    expect(detailsToggle?.textContent).toContain('Details');
+    expect(detailsToggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(detailsToggle?.querySelector('.assistant-message-flow-item-error-icon')).not.toBeNull();
     expect(container?.querySelector('.assistant-message-flow-item-error-details')).toBeNull();
 
     detailsToggle?.click();
@@ -2944,7 +2953,9 @@ describe('Message assistant final answer rendering', () => {
     const detailsId = detailsToggle?.getAttribute('aria-controls');
     expect(detailsId).toBeTruthy();
     expect(details?.id).toBe(detailsId);
-    expect(detailsToggle?.textContent).toContain('Hide details');
+    detailsToggle?.click();
+    expect(detailsToggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('.assistant-message-flow-item-error-details')).toBeNull();
   });
 
   it('keeps provider error details open when the message remounts', () => {
@@ -3036,6 +3047,43 @@ describe('Message assistant final answer rendering', () => {
     retryButton?.click();
 
     expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
+  });
+
+  it('shows a live countdown on the latest provider retry button', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const { setState } = await import('../lib/state');
+    const info = {
+      ...assistantMessage('retry-countdown'),
+      error: {
+        name: 'APIError' as const,
+        data: { message: 'Not Found', statusCode: 404, isRetryable: true },
+      },
+    };
+    try {
+      setState('sessionStatus', 'session-1', {
+        type: 'retry',
+        attempt: 1,
+        message: 'Not Found',
+        next: 5000,
+      });
+      cleanup = render(() => Message({ info, parts: [], isLastAssistant: true }), container!);
+      const button = container?.querySelector<HTMLButtonElement>(
+        '.assistant-message-flow-item-error-action'
+      );
+      expect(button?.textContent).toContain('(5s)');
+      expect(button?.disabled).toBe(true);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(button?.textContent).toContain('(3s)');
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      expect(button?.textContent).toBe('Retry');
+      expect(button?.disabled).toBe(false);
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+      setState('sessionStatus', {});
+      vi.useRealTimers();
+    }
   });
 
   it('hides the latest usage-limit error card while the usage-limit banner is active', async () => {
@@ -3133,6 +3181,7 @@ describe('Message assistant final answer rendering', () => {
     expect(errorBlock?.textContent).not.toContain('Token refresh failed: 401');
     expect(reauthenticateButton).toBeInstanceOf(HTMLButtonElement);
     expect(reauthenticateButton?.textContent).toContain('Re-authenticate');
+    expect(reauthenticateButton?.closest('.assistant-message-flow-item-error-card')).toBeNull();
 
     reauthenticateButton?.click();
 
@@ -3169,6 +3218,33 @@ describe('Message assistant final answer rendering', () => {
     expect(
       container?.querySelector('.assistant-message-flow-item-error-action')?.textContent
     ).toContain('Re-authenticate');
+  });
+
+  it('hides re-authentication when a different provider is selected', () => {
+    const info = {
+      ...assistantMessage('auth-provider-switch'),
+      providerID: 'openai',
+      error: {
+        name: 'ProviderAuthError' as const,
+        data: { providerID: 'openai', message: 'Token refresh failed: 401' },
+      },
+    };
+    try {
+      setAppState('selectedModel', { providerID: 'openai', modelID: 'gpt-6' });
+      cleanup = render(() => Message({ info, parts: [], isLastAssistant: true }), container!);
+      expect(
+        container?.querySelector('.assistant-message-flow-item-error-action')?.textContent
+      ).toBe('Re-authenticate');
+      setAppState('selectedModel', { providerID: 'anthropic', modelID: 'claude' });
+      expect(container?.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
+      expect(container?.querySelector('.assistant-message-flow-item-error')).not.toBeNull();
+      setAppState('selectedModel', { providerID: 'openai', modelID: 'gpt-6' });
+      expect(
+        container?.querySelector('.assistant-message-flow-item-error-action')?.textContent
+      ).toBe('Re-authenticate');
+    } finally {
+      setAppState('selectedModel', null);
+    }
   });
 
   it('preserves resolved authentication when history replaces the error with a generic failure', () => {

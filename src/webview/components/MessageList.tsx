@@ -350,7 +350,7 @@ function numberPrompts(messages: readonly MessageEntry[], previousNumber = 0) {
     if (message.info.role !== 'user') continue;
     if (isSessionResumeMessage(message.parts)) continue;
     const parsed = parseUserMessageContent(message.parts);
-    if (parsed.automaticActions.length > 0 && !hasUserMessageContent(parsed)) continue;
+    if (!hasUserMessageContent(parsed)) continue;
     promptNumber += 1;
     numbers.set(message.info.id, promptNumber);
   }
@@ -633,6 +633,9 @@ export function MessageList() {
   let lastObservedScrollTop = 0;
   let pendingInitialScrollSessionId: string | null = null;
   let pendingInitialHistoryFillSessionId: string | null = null;
+  const [initialPositioningSessionId, setInitialPositioningSessionId] = createSignal<string | null>(
+    null
+  );
   let initialScrollRafId = 0;
   let appendScrollRafId = 0;
   let appendScrollSessionId: string | null = null;
@@ -952,6 +955,9 @@ export function MessageList() {
     equals: sameEntries,
   });
   const tailMessages = createMemo(() => messages().slice(historySegmentEnd()));
+  const errorActionMessageID = createMemo(
+    () => tailMessages().findLast((message) => isAssistantMessage(message.info))?.info.id ?? null
+  );
   const frozenSegmentBoundary = createMemo<FrozenSegmentBoundary>(
     (previous) => getFrozenSegmentBoundary(messages(), historySegmentEnd(), previous),
     { entry: null, index: 0 },
@@ -2664,7 +2670,7 @@ export function MessageList() {
     if (
       !preview &&
       firstVisibleMessageIndex !== null &&
-      visibleMessages[firstVisibleMessageIndex]?.info.role === 'assistant'
+      visibleMessages[firstVisibleMessageIndex]
     ) {
       const loadedMessageIds = new Set(visibleMessages.map((entry) => entry.info.id));
       const boundaryPrompts = getSessionHistoryPrompts(state.activeSessionId)
@@ -3981,7 +3987,11 @@ export function MessageList() {
       const nextMessage = currentMessages[index];
       if (nextMessage?.info.role !== 'user') continue;
 
-      const nextElement = getStickyUserMessageSourceElement(nextMessage.info.id);
+      const nextRow = mountedMessageRows.get(nextMessage.info.id);
+      if (!nextRow) return null;
+      // Automatic notices and child-session handoffs are user-role rows without a prompt card.
+      const nextElement = nextRow.querySelector<HTMLElement>('.user-message-card');
+      if (!nextElement) continue;
       const nextRect = nextElement?.getBoundingClientRect();
       if (!nextRect) return null;
 
@@ -3999,7 +4009,8 @@ export function MessageList() {
     if (!containerRef) return null;
     for (const row of containerRef.querySelectorAll<HTMLElement>('.interactive-request')) {
       if (row.dataset.msgId === messageId) continue;
-      const source = row.querySelector<HTMLElement>('.user-message-card') ?? row;
+      const source = row.querySelector<HTMLElement>('.user-message-card');
+      if (!source) continue;
       const rect = source.getBoundingClientRect();
       if (rect.bottom <= containerRect.top) continue;
       return rect.top - containerRect.top;
@@ -5092,6 +5103,7 @@ export function MessageList() {
   }
 
   function disengageBottomFollow() {
+    setInitialPositioningSessionId(null);
     pendingInitialScrollSessionId = null;
     pendingScrollToBottomRequest = false;
     pendingExpansionScrollAnchor = null;
@@ -5185,6 +5197,9 @@ export function MessageList() {
         !!state.streamingText.length || !!state.streamingPartId || presentation.pending();
       const isWorking = !!visibleRunningToolPart() || activeSessionWorking();
       if (isStreaming) bottomFollowObservedStreaming = true;
+      // A live turn may never settle while new output arrives. Its snapshot is already
+      // positioned; show it now and let ordinary follow own subsequent growth.
+      if (isStreaming || isWorking) setInitialPositioningSessionId(null);
       const stable =
         Math.abs(currentHeight - lastAutoScrolledTrackHeight) <= 1 &&
         Math.abs(currentBottomScrollTop - lastAutoScrolledBottomScrollTop) <= 1 &&
@@ -5195,8 +5210,14 @@ export function MessageList() {
         bottomFollowSettleFrames = 0;
       }
 
+      // Initial row measurements can arrive after the first stable frame. Keep their
+      // corrections immediate until consecutive frames agree on the hydrated layout.
       const settleFrameCount =
-        bottomFollowObservedStreaming || isWorking ? BOTTOM_FOLLOW_SETTLE_FRAME_COUNT : 1;
+        pendingInitialHistoryFillSessionId === sessionId ||
+        bottomFollowObservedStreaming ||
+        isWorking
+          ? BOTTOM_FOLLOW_SETTLE_FRAME_COUNT
+          : 1;
       if (bottomFollowSettleFrames >= settleFrameCount) {
         const shouldFillInitialViewport =
           pendingInitialHistoryFillSessionId === sessionId &&
@@ -5226,6 +5247,7 @@ export function MessageList() {
         expectedScrollTop = -1;
         followModeLocked = false;
         activeFollowLoopSessionId = null;
+        setInitialPositioningSessionId(null);
         return;
       }
 
@@ -5558,11 +5580,13 @@ export function MessageList() {
       pinnedToBottom &&
       distance <= 1 &&
       activityExitBottomTarget === null &&
+      !pointerScrollOwnershipActive &&
       !editingMessage() &&
       !diffFocusPauseActive
     ) {
       // An exit that began while detached has no reserve. Protect its remaining height when
-      // native input reaches the bottom before the animation finishes.
+      // native input reaches the bottom before the animation finishes. A held scrollbar
+      // already owns scrolling; layout-driven bottom events must not reclaim its exit anchor.
       reserveCollapsedActivityTraySpace(exitingActivityPartKeys(), true);
     }
     if (!autoScroll() && !widthResizeActive && !stickyNavigationOwnsScroll() && !editingMessage()) {
@@ -6863,6 +6887,11 @@ export function MessageList() {
     setMeasurementVersion((version) => version + 1);
     pendingInitialScrollSessionId = editingAtSessionStart ? null : sessionId;
     pendingInitialHistoryFillSessionId = editingAtSessionStart ? null : sessionId;
+    setInitialPositioningSessionId(
+      !editingAtSessionStart && untrack(() => state.messagesLoading || messages().length > 0)
+        ? sessionId
+        : null
+    );
     cancelPendingScroll();
     pendingScrollToBottomRequest = false;
     deferredScrollToBottomRequestKey = null;
@@ -6889,7 +6918,11 @@ export function MessageList() {
   createEffect(() => {
     const sessionId = state.activeSessionId;
     const msgs = messages();
-    if (state.messagesLoading || msgs.length === 0) return;
+    if (state.messagesLoading) return;
+    if (msgs.length === 0) {
+      setInitialPositioningSessionId(null);
+      return;
+    }
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;
       scheduleVisibleMeasurement();
@@ -7546,12 +7579,20 @@ export function MessageList() {
       )
     )
   );
-  const errorDetailsLayoutSignatures = createMemo(() =>
-    mergeSegmentMaps(
+  const errorDetailsLayoutSignatures = createMemo(() => {
+    const signatures = mergeSegmentMaps(
       historyErrorDetailsLayoutSignatures(),
       getErrorDetailsLayoutSegment(tailMessages(), tailAssistantRetryScan().states)
-    )
-  );
+    );
+    const actionMessageID = errorActionMessageID();
+    if (actionMessageID && signatures.has(actionMessageID)) {
+      signatures.set(
+        actionMessageID,
+        `${signatures.get(actionMessageID)}:action:${state.selectedModel?.providerID ?? ''}`
+      );
+    }
+    return signatures;
+  });
   let previousErrorDetailsLayoutSignatures = new Map<string, string>();
   createEffect(() => {
     const current = errorDetailsLayoutSignatures();
@@ -9071,9 +9112,13 @@ export function MessageList() {
     }
   }
 
+  const hydratingSession = () =>
+    state.messagesLoading ||
+    (!!state.activeSessionId && initialPositioningSessionId() === state.activeSessionId);
+
   return (
     <div class="interactive-list-shell min-h-0 flex-1">
-      <Show when={state.messagesLoading}>
+      <Show when={hydratingSession()}>
         <div class="chat-messages-loading" role="status" aria-label="Loading messages">
           <span class="chat-messages-loading-dot" />
           <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
@@ -9082,7 +9127,7 @@ export function MessageList() {
       </Show>
       <div
         ref={containerRef}
-        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${autoScroll() || shouldMeasureRows() || loadingOlderHistory() || exitingActivityPartKeys().size > 0 ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}${state.messagesLoading && messages().length > 0 ? ' is-session-hydrating' : ''}`}
+        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${autoScroll() || shouldMeasureRows() || loadingOlderHistory() || exitingActivityPartKeys().size > 0 ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}${hydratingSession() && messages().length > 0 ? ' is-session-hydrating' : ''}`}
         role="log"
         tabIndex={0}
         aria-live="polite"
@@ -9192,6 +9237,7 @@ export function MessageList() {
               showWorkedSummaryTimes={showPromptNumbers()}
               suppressTimestampAnimations={suppressTimestampAnimations()}
               lastAssistantID={lastAssistantID()}
+              errorActionMessageID={errorActionMessageID()}
               assistantRetryStates={assistantRetryStates()}
               outerListVirtualized={shouldVirtualize()}
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}

@@ -579,6 +579,27 @@ describe('RestProxy handleRequest', () => {
     );
   });
 
+  it('grounds each prompt in its captured agent after repeated mode switches', async () => {
+    const { proxy, callbacks } = createProxy();
+    for (const [id, agent] of ['ask', 'build', 'ask', 'build'].entries()) {
+      await proxy.handleRequest(
+        makePayload(id, 'POST', '/session/session-1/prompt_async?directory=%2Frepo', {
+          agent,
+          parts: [{ type: 'text', text: 'Continue' }],
+        })
+      );
+      expect(callbacks.server.request).toHaveBeenLastCalledWith(
+        'POST',
+        '/session/session-1/prompt_async?directory=%2Frepo',
+        expect.objectContaining({
+          agent,
+          system: expect.stringContaining(`The selected agent for this turn is "${agent}".`),
+        }),
+        withSignal({ directory: '/repo' })
+      );
+    }
+  });
+
   it('persists inherited workspace metadata when OpenCode omits it from a fork', async () => {
     const { proxy, callbacks } = createProxy();
     const metadata = {

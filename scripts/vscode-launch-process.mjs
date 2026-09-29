@@ -289,18 +289,35 @@ export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
       `(${focusedPalette}) && (${commandRow})?.getBoundingClientRect().height > 0`,
       'did not find the requested command'
     );
-    const response = await requests.call('Runtime.evaluate', {
-      expression: `(() => { const row = ${commandRow}; if (!row) return null; const rect = row.getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; })()`,
-      returnByValue: true,
-    });
-    const point = response.result?.value;
-    if (!point) throw new Error(`VS Code command disappeared before selection: ${commandLabel}`);
-    for (const type of ['mousePressed', 'mouseReleased']) {
-      await requests.call('Input.dispatchMouseEvent', {
+    // Search results can move between measuring a row and clicking it. Select the
+    // exact focused result with native keys so a neighboring command cannot run.
+    let selected = false;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const response = await requests.call('Runtime.evaluate', {
+        expression: `(${commandRow})?.classList.contains('focused') === true`,
+        returnByValue: true,
+      });
+      if (response.result?.value === true) {
+        selected = true;
+        break;
+      }
+      for (const type of ['keyDown', 'keyUp']) {
+        await requests.call('Input.dispatchKeyEvent', {
+          type,
+          key: 'ArrowDown',
+          code: 'ArrowDown',
+          windowsVirtualKeyCode: 40,
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (!selected) throw new Error(`VS Code command could not be selected: ${commandLabel}`);
+    for (const type of ['keyDown', 'keyUp']) {
+      await requests.call('Input.dispatchKeyEvent', {
         type,
-        ...point,
-        button: 'left',
-        clickCount: 1,
+        key: 'Enter',
+        code: 'Enter',
+        windowsVirtualKeyCode: 13,
       });
     }
   } finally {

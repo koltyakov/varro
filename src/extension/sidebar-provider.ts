@@ -260,6 +260,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly editorPanels = new Map<string, EditorEndpoint>();
   private lastFocusedContextViewId: string | null = null;
   private readonly permissionModeQueues = new Map<string, Promise<unknown>>();
+  private readonly sessionSelectionUpdatedAt = new Map<string, number>();
   private permissionModeFallbackReconciliation: Promise<void> | null = null;
   private permissionModeFallbackReconciliationRequested = false;
   private permissionModeFallbackRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -379,7 +380,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           if (typeof session.id !== 'string' || this.permissionModeQueues.has(session.id)) return;
           if (this.sessionPermissionModes.restoreSessionMetadata(session))
             this.postPermissionModes();
-          this.restoreSessionSelections(session.id, asRecord(session.metadata) ?? undefined);
+          const updatedAt = asRecord(session.time)?.updated;
+          this.restoreSessionSelections(
+            session.id,
+            asRecord(session.metadata) ?? undefined,
+            typeof updatedAt === 'number' ? updatedAt : undefined
+          );
         },
         onSessionDirectoryChange: () => this.scheduleSessionDirectoryReconciliation(),
       },
@@ -518,6 +524,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.showTurnTimer') ||
         event.affectsConfiguration('varro.debug.showQuotaWarning') ||
+        event.affectsConfiguration('varro.debug.resetWarningDays') ||
         event.affectsConfiguration('varro.chat.enableProblemsContext') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
         event.affectsConfiguration('varro.chat.defaultPermissionMode') ||
@@ -1035,8 +1042,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         openNewWindow: () => this.openNewWindow(),
         editorRouteChanged: (route) => this.editorRouteChanged(webviewContext.viewId, route),
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
-        updateQueuedMessages: ({ messages }) =>
-          this.updateQueuedMessages(webviewContext.viewId, messages),
+        updateQueuedMessages: ({ messages, mutationId }) =>
+          this.updateQueuedMessages(webviewContext.viewId, messages, mutationId),
         claimQueuedMessage: (payload) => this.claimQueuedMessage(webviewContext.viewId, payload),
         releaseQueuedMessage: (payload) =>
           this.queuedMessages.releaseDispatchClaim(
@@ -1082,11 +1089,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         },
         updateSessionPlanState: async (payload) => {
           if (payload.agent) {
-            await this.updateSessionSelections(
-              payload.sessionId,
-              { agent: payload.agent },
-              this.sessionState.directoryFor(payload.sessionId) ?? endpointServer.getWorkspaceCwd()
-            );
+            try {
+              await this.updateSessionSelections(
+                payload.sessionId,
+                { agent: payload.agent },
+                this.sessionState.directoryFor(payload.sessionId) ??
+                  endpointServer.getWorkspaceCwd(),
+                payload.selectionId
+              );
+            } catch (error) {
+              // Settle the originating selection even when persistence fails.
+              if (payload.selectionId) {
+                this.post({
+                  type: 'session-plan-state/update',
+                  payload: { sessionId: payload.sessionId, selectionId: payload.selectionId },
+                });
+              }
+              throw error;
+            }
           }
           if (payload.skippedAt !== undefined) {
             await this.sessionPlanState.set(payload.sessionId, payload.skippedAt);
@@ -1756,6 +1776,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (event.type !== 'session.deleted') return;
     const sessionId = event.properties?.info?.id || event.properties?.sessionID;
     if (!sessionId) return;
+    this.sessionSelectionUpdatedAt.delete(sessionId);
     const cleanup = Promise.all([
       this.sessionPermissionModes.removeSession(sessionId),
       this.sessionSelectedModels.removeSession(sessionId),
@@ -2310,7 +2331,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           throw err;
         }
         try {
-          const modes = await this.sessionPermissionModes.set(sessionID, mode);
+          const modes = await this.sessionPermissionModes.set(
+            sessionID,
+            mode,
+            asRecord(session) ?? undefined
+          );
           this.postPermissionModes(modes);
         } catch (err) {
           logger.warn(
@@ -2318,14 +2343,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           );
           this.postPermissionModes();
           try {
-            await this.patchSessionPermissionMode(
+            const recovered = await this.patchSessionPermissionMode(
               sessionID,
               'default',
               directory,
               getSafeDefaultPermissionRules(),
               recoverFallback
             );
-            await this.sessionPermissionModes.set(sessionID, 'default');
+            await this.sessionPermissionModes.set(
+              sessionID,
+              'default',
+              asRecord(recovered) ?? undefined
+            );
             this.postPermissionModes();
           } catch (recoveryError) {
             logger.warn(
@@ -2349,15 +2378,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return operation;
   }
 
-  private restoreSessionSelections(sessionId: string, metadata: Session['metadata']) {
+  private restoreSessionSelections(
+    sessionId: string,
+    metadata: Session['metadata'],
+    updatedAt?: number
+  ) {
     const model = readSessionModelMetadata(metadata);
+    const agent = readSessionAgentMetadata(metadata);
+    if (!model && !agent) return;
+    // A GET started before a confirmed selection write can return after the
+    // write queue has drained. Do not restore its older model or agent.
+    const confirmedAt = this.sessionSelectionUpdatedAt.get(sessionId);
+    if (updatedAt !== undefined && Number.isFinite(updatedAt)) {
+      if (confirmedAt !== undefined && updatedAt < confirmedAt) return;
+      this.sessionSelectionUpdatedAt.set(sessionId, updatedAt);
+    }
     if (model && this.sessionSelectedModels.restore(sessionId, model)) {
       this.post({
         type: 'session-models/sync',
         payload: { models: this.sessionSelectedModels.list() },
       });
     }
-    const agent = readSessionAgentMetadata(metadata);
     if (agent && this.sessionPlanState.restoreAgent(sessionId, agent)) {
       this.post({ type: 'session-plan-state/update', payload: { sessionId, agent } });
     }
@@ -2366,7 +2407,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private updateSessionSelections(
     sessionId: string,
     selection: SessionSelectionMetadata,
-    directory?: string
+    directory?: string,
+    selectionId?: string
   ): Promise<void> {
     // Share the permission update queue so concurrent selections cannot overwrite each other's metadata.
     const previous = this.permissionModeQueues.get(sessionId) ?? Promise.resolve();
@@ -2386,8 +2428,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             currentModel.variant !== model.variant);
         const agentChanged =
           selection.agent && readSessionAgentMetadata(session.metadata) !== selection.agent;
+        let updatedAt = asRecord(session.time)?.updated;
         if (modelChanged || agentChanged) {
-          await this.server.request('PATCH', path, { metadata }, { directory });
+          const updatedSession = asRecord(
+            await this.server.request('PATCH', path, { metadata }, { directory })
+          );
+          updatedAt = asRecord(updatedSession?.time)?.updated ?? updatedAt;
         }
         if (selection.model) {
           await this.sessionSelectedModels.set(sessionId, selection.model);
@@ -2399,12 +2445,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         if (selection.agent) {
           await this.sessionPlanState.setAgent(sessionId, selection.agent);
           this.sessionState.setSessionAgent(sessionId, selection.agent);
-          this.post({
+          const update: Extract<ExtensionMessage, { type: 'session-plan-state/update' }> = {
             type: 'session-plan-state/update',
             payload: { sessionId, agent: selection.agent },
-          });
+          };
+          if (selectionId) update.payload.selectionId = selectionId;
+          this.post(update);
         }
-        this.restoreSessionSelections(sessionId, metadata);
+        this.restoreSessionSelections(
+          sessionId,
+          metadata,
+          typeof updatedAt === 'number' ? updatedAt : undefined
+        );
       });
     this.permissionModeQueues.set(sessionId, operation);
     const clearQueue = () => {
@@ -2574,8 +2626,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
         this.postPermissionModes();
         try {
-          await this.patchSessionPermissionMode(sessionID, mode, directory);
-          const modes = await this.sessionPermissionModes.set(sessionID, mode);
+          const session = await this.patchSessionPermissionMode(sessionID, mode, directory);
+          const modes = await this.sessionPermissionModes.set(
+            sessionID,
+            mode,
+            asRecord(session) ?? undefined
+          );
           this.postPermissionModes(modes);
         } catch (err) {
           this.postPermissionModes();
@@ -2896,18 +2952,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       ?.filter((message) => (message.ownerViewId ?? 'sidebar') === viewId);
   }
 
+  private readonly queuedMessageMutationIds = new Map<string, string>();
+
   private postQueuedMessageSnapshots() {
     for (const endpoint of this.endpoints) {
       endpoint.bridge.post({
         type: 'queued-messages/sync',
-        payload: { messages: this.queuedMessagesFor(endpoint.viewId) ?? [] },
+        payload: {
+          messages: this.queuedMessagesFor(endpoint.viewId) ?? [],
+          mutationId: this.queuedMessageMutationIds.get(endpoint.viewId),
+        },
       });
     }
   }
 
-  private updateQueuedMessages(viewId: string, messages: QueuedMessageSnapshot[]): Promise<void> {
+  private updateQueuedMessages(
+    viewId: string,
+    messages: QueuedMessageSnapshot[],
+    mutationId?: string
+  ): Promise<void> {
     const endpoint = [...this.endpoints].find((item) => item.viewId === viewId);
     if (!endpoint?.ready) return Promise.resolve();
+    if (mutationId) this.queuedMessageMutationIds.set(viewId, mutationId);
     const nextPdfPaths = new Set(
       messages.flatMap((message) =>
         (message.nativePdfs ?? []).flatMap((pdf) => (pdf.contextFile ? [pdf.contextFile.path] : []))

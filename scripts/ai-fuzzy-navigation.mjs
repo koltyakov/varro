@@ -10,6 +10,7 @@ export async function goToLatest(
     timeoutMs = 30_000,
     pollMs = 50,
     settleMs = 150,
+    streaming = false,
     now = Date.now,
     wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   } = {}
@@ -40,15 +41,19 @@ export async function goToLatest(
     const sample = { at: now(), route: route.routeSessionId, geometry };
     samples.push(sample);
     if (samples.length > 100) samples.shift();
+    // Smooth following may trail incoming lines. Streaming arrival requires a
+    // visible latest row and a bounded 64px gap throughout the observation window.
     const arrived =
       sample.route === sessionId &&
       geometry?.visibleIds.includes(messageId) &&
-      Math.abs(geometry.height - geometry.client - geometry.top) <= 2;
+      Math.abs(geometry.height - geometry.client - geometry.top) <= (streaming ? 64 : 2);
     const stationary =
       arrived &&
       previous &&
-      Math.abs(geometry.top - previous.top) <= 0.5 &&
-      Math.abs(geometry.height - previous.height) <= 0.5 &&
+      (streaming
+        ? geometry.top >= previous.top - 0.5 && geometry.height >= previous.height
+        : Math.abs(geometry.top - previous.top) <= 0.5 &&
+          Math.abs(geometry.height - previous.height) <= 0.5) &&
       geometry.client === previous.client;
     stableSince = stationary ? (stableSince ?? sample.at) : null;
     if (stableSince !== null && sample.at - stableSince >= settleMs) return { samples };
@@ -56,7 +61,7 @@ export async function goToLatest(
     await wait(pollMs);
   }
   const error = new Error(
-    `Latest message ${messageId} did not become visible and settled within ${timeoutMs}ms`
+    `Latest message ${messageId} did not become visible and ${streaming ? 'followed' : 'settled'} within ${timeoutMs}ms`
   );
   error.samples = samples;
   throw error;

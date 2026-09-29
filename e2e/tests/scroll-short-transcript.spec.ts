@@ -1,8 +1,71 @@
 import { expect, test } from '@playwright/test';
-import type { ServerEvent } from '../../src/shared/protocol';
+import type { ServerEvent, WebviewMessage } from '../../src/shared/protocol';
 import type { AssistantMessage, MessageEntry, ToolPart } from '../../src/webview/types';
 
 for (const width of [480, 1280]) {
+  test(`keeps a short first send free of empty-space overflow at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1272 });
+    await page.goto('/e2e/harness/index.html?scenario=blank');
+    await page.evaluate(() => {
+      // SAFETY: Only the isolated fixture transport is intercepted to keep the first turn working.
+      const harness = window as {
+        __sendToExtension?: (message: WebviewMessage) => void | Promise<void>;
+      };
+      const send = harness.__sendToExtension;
+      harness.__sendToExtension = (message) => {
+        if (message.type === 'api/request' && message.payload.path.endsWith('/prompt_async')) {
+          return;
+        }
+        return send?.(message);
+      };
+    });
+    const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+    await composer.fill(
+      "Check in v1 and v2 if I switch from Ask to Build mode and back and force, when a prompt ends up in build, agent should not be still thinking it's in ask mode."
+    );
+    await composer.evaluate(async (node) => {
+      const dataTransfer = new DataTransfer();
+      const canvas = document.createElement('canvas');
+      canvas.width = 16;
+      canvas.height = 16;
+      const context = canvas.getContext('2d')!;
+      for (let index = 0; index < 3; index += 1) {
+        // Image deduplication uses content, so each fixture needs distinct pixels.
+        context.fillStyle = `rgb(${index * 100}, 0, 0)`;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        const blob = await new Promise<Blob>((resolve, reject) => {
+          canvas.toBlob((value) => {
+            if (value) resolve(value);
+            else reject(new Error('Could not create PNG fixture'));
+          }, 'image/png');
+        });
+        dataTransfer.items.add(new File([blob], `image-${index}.png`, { type: 'image/png' }));
+      }
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: dataTransfer });
+      node.dispatchEvent(event);
+    });
+    await expect(composer.locator('[data-chip-type="image"]')).toHaveCount(3);
+    await page.getByLabel('Send (Enter)').click();
+    const list = page.locator('.interactive-list');
+    await expect(list.locator('.user-message-card')).toBeVisible();
+    const samples = await list.evaluate(async (element) => {
+      const result = [];
+      for (let frame = 0; frame < 180; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        result.push({
+          frame,
+          overflow: element.scrollHeight - element.clientHeight,
+          top: element.scrollTop,
+          reserve:
+            element.querySelector<HTMLElement>('.append-scroll-bottom-reserve')?.offsetHeight ?? 0,
+        });
+      }
+      return result;
+    });
+    expect(samples.filter((sample) => sample.overflow > 0).slice(0, 5)).toEqual([]);
+  });
+
   test(`keeps a short streaming transcript free of transient overflow at ${width}px`, async ({
     page,
   }) => {

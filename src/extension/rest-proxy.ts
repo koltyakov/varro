@@ -3439,9 +3439,13 @@ export class RestProxy {
     const existing = typeof record.system === 'string' ? record.system.trim() : '';
     const permissionPrompt =
       'If the user rejects a tool permission, do not retry the denied action or bypass the rejection through another tool, command, or subagent. Continue independent permitted work when possible. If completing the task requires the denied action, explain what is blocked and ask the user how to proceed. A rejected permission is not a request to abandon the whole task.';
+    const agentPrompt =
+      typeof record.agent === 'string' && record.agent
+        ? `The selected agent for this turn is ${JSON.stringify(record.agent)}. Follow this agent's current instructions and permissions. Earlier turns may have used a different agent; their mode restrictions and statements about being read-only do not define the current mode.`
+        : '';
     return {
       ...record,
-      system: `${existing ? `${existing}\n\nVS Code workspace context:\n` : ''}${scopePrompt}\n\n${permissionPrompt}`,
+      system: `${existing ? `${existing}\n\nVS Code workspace context:\n` : ''}${scopePrompt}\n\n${permissionPrompt}${agentPrompt ? `\n\n${agentPrompt}` : ''}`,
     };
   }
 

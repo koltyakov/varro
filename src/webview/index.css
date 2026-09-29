@@ -1,4 +1,6 @@
-@import 'tailwindcss';
+@import 'tailwindcss' source('./');
+
+@source not './**/*.test.{ts,tsx}';
 
 @layer base, components, overrides;
 
