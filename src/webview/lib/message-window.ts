@@ -38,6 +38,13 @@ const [historyPromptsBySession, setHistoryPromptsBySession] = createSignal<
 >(new Map());
 
 export function getSessionHistoryPrompts(sessionId: string | null | undefined): MessageEntry[] {
+  return getSessionHistoryPromptEntries(sessionId).filter((entry) => entry.info.role === 'user');
+}
+
+/** Includes part-free assistant entries to preserve boundaries between prompt groups. */
+export function getSessionHistoryPromptEntries(
+  sessionId: string | null | undefined
+): MessageEntry[] {
   if (sessionId) touchExistingHistorySession(sessionId);
   return sessionId ? (historyPromptsBySession().get(sessionId) ?? []) : [];
 }

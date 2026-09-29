@@ -2083,6 +2083,33 @@ async function revealMixedImageTileRow(page: Page): Promise<Locator> {
   return row;
 }
 
+test('dot hover highlights the visible text bubble of an image prompt', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=mixed-image-tiles');
+  const row = await revealMixedImageTileRow(page);
+  const bubble = row.locator('.user-message-image-text-bubble');
+  const wrapper = row.locator('.user-message-card');
+  const dot = page.getByRole('button', { name: /^Go to turn \d+: Ten image tiles/ });
+  await page.mouse.move(600, 0);
+  const restingBorder = await bubble.evaluate((element) => getComputedStyle(element).borderColor);
+  const restingBox = await bubble.boundingBox();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await dot.hover();
+    await expect(row).toHaveClass(/interactive-item-turn-hovered/);
+    await expect
+      .poll(() => bubble.evaluate((element) => getComputedStyle(element).borderColor))
+      .not.toBe(restingBorder);
+    expect(await wrapper.evaluate((element) => getComputedStyle(element).boxShadow)).toBe('none');
+    expect(await bubble.boundingBox()).toEqual(restingBox);
+    await page.mouse.move(600, 0);
+    await expect
+      .poll(() => bubble.evaluate((element) => getComputedStyle(element).borderColor))
+      .toBe(restingBorder);
+  }
+  await bubble.hover();
+  await expect(dot).toHaveClass(/is-hovered/);
+});
+
 test('anchors prompt numbers to the text bubble below image attachments', async ({ page }) => {
   await page.setViewportSize({ width: 486, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=mixed-image-tiles');

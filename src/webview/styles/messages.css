@@ -187,6 +187,13 @@
   animation: turn-navigation-destination 720ms ease-out;
 }
 
+.interactive-item-turn-hovered
+  .user-message-card:not(.user-message-card-wrapperless):not(:has(.user-message-image-text-bubble)),
+.interactive-item-turn-hovered .user-message-image-text-bubble {
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 55%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-vscode-accent) 22%, transparent);
+}
+
 @keyframes turn-navigation-destination {
   0% {
     border-color: color-mix(in srgb, var(--color-vscode-accent) 85%, transparent);
@@ -238,6 +245,12 @@
   line-height: 1;
   white-space: nowrap;
   pointer-events: none;
+}
+
+.user-message-continuation .prompt-number-badge,
+.prompt-number-badge-continuation {
+  background: #999;
+  color: #333;
 }
 
 .assistant-turn-content {

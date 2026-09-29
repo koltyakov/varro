@@ -11,6 +11,7 @@ export type StickyUserMessagePreview = {
   id: string;
   index: number;
   text: string;
+  sentAt?: number;
   format?: UserMessageMarkupFormat;
   formatPrefix?: string;
   attachmentCount: number;
@@ -107,6 +108,7 @@ export function getUserMessageNavigationPreviews(
     if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
     previews.push({
       id: entry.info.id,
+      sentAt: entry.info.time.created,
       index,
       text,
       ...getStickyUserMessageCounts(entry.parts),

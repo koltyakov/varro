@@ -110,7 +110,7 @@ describe('MessageList prompt numbers', () => {
     ];
     expect([...getPromptNumberMap(messages)]).toEqual([
       ['user-1', 1],
-      ['user-2', 2],
+      ['user-2', 1],
     ]);
     expect(getUserMessageNavigationPreviews(messages).map((preview) => preview.id)).toEqual([
       'user-1',
@@ -167,8 +167,8 @@ describe('MessageList prompt numbers', () => {
 
     expect([...getPromptNumberMap(messages)]).toEqual([
       ['user-1', 1],
-      ['image', 2],
-      ['user-2', 3],
+      ['image', 1],
+      ['user-2', 1],
     ]);
     expect(
       getUserMessageNavigationPreviews(messages).map(({ id, index }) => ({ id, index }))
@@ -224,14 +224,75 @@ describe('MessageList prompt numbers', () => {
     ).toBe(true);
   });
 
+  it('shares numbers and one navigation target across consecutive user bubbles', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('first', 'First prompt')] },
+      { info: userMessage('steer-1'), parts: [textPart('steer', 'Also do this')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('answer', 'Response')] },
+      { info: userMessage('user-2'), parts: [textPart('second', 'Next prompt')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => {
+      const badges = [...container!.querySelectorAll('.user-message-card .prompt-number-badge')];
+      expect(badges.map((badge) => badge.textContent)).toEqual(['1', '1', '2']);
+      expect(badges.map((badge) => !!badge.closest('.user-message-continuation'))).toEqual([
+        false,
+        true,
+        false,
+      ]);
+    });
+    expect(
+      [...container!.querySelectorAll('.turn-navigation-marker')].map((dot) =>
+        dot.getAttribute('aria-label')
+      )
+    ).toEqual(['Go to turn 1: First prompt', 'Go to turn 2: Next prompt']);
+    const firstDot = container!.querySelector<HTMLButtonElement>('.turn-navigation-marker')!;
+    firstDot.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(container!.querySelector('[data-msg-id="user-1"]')!.classList).toContain(
+      'interactive-item-turn-hovered'
+    );
+    expect(container!.querySelector('[data-msg-id="steer-1"]')!.classList).toContain(
+      'interactive-item-turn-hovered'
+    );
+    expect(firstDot.classList).toContain('is-hovered');
+    container!
+      .querySelector('[data-msg-id="user-1"] .user-message-card')!
+      .dispatchEvent(new MouseEvent('mouseleave'));
+    expect(container!.querySelector('[data-msg-id="user-1"]')!.classList).toContain(
+      'interactive-item-turn-hovered'
+    );
+    firstDot.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(container!.querySelector('.interactive-item-turn-hovered')).toBeNull();
+    const steer = container!.querySelector('[data-msg-id="steer-1"]')!;
+    steer.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(firstDot.classList.contains('is-hovered')).toBe(false);
+    steer.dispatchEvent(new MouseEvent('mouseleave'));
+    const response = container!.querySelector('[data-msg-id="assistant-1"] .chat-turn-content')!;
+    response.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(firstDot.classList).toContain('is-hovered');
+    expect(container!.querySelector('.interactive-item-turn-hovered')).toBeNull();
+    response.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(firstDot.classList.contains('is-hovered')).toBe(false);
+    const bubble = steer.querySelector('.user-message-card')!;
+    bubble.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(firstDot.classList).toContain('is-hovered');
+    bubble.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(firstDot.classList.contains('is-hovered')).toBe(false);
+  });
+
   it('includes prefetched prompts outside the loaded message window', async () => {
     setState('activeSessionId', 'session-1');
     setSessionHistoryPrompts(
       'session-1',
-      Array.from({ length: 12 }, (_, index) => ({
-        info: userMessage(`user-${index + 1}`),
-        parts: [textPart(`user-text-${index + 1}`, `Prompt ${index + 1}`)],
-      }))
+      Array.from({ length: 12 }, (_, index) => [
+        {
+          info: userMessage(`user-${index + 1}`),
+          parts: [textPart(`user-text-${index + 1}`, `Prompt ${index + 1}`)],
+        },
+        { info: assistantMessage(`assistant-${index + 1}`), parts: [] },
+      ]).flat()
     );
     replaceMessages([
       { info: userMessage('user-13'), parts: [textPart('user-text-13', 'Prompt 13')] },
@@ -253,16 +314,54 @@ describe('MessageList prompt numbers', () => {
     });
   });
 
+  it('keeps a group open across the prefetched history boundary', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPrompts('session-1', [
+      { info: userMessage('user-1'), parts: [textPart('first', 'First prompt')] },
+      { info: assistantMessage('assistant-1'), parts: [] },
+      { info: userMessage('user-2'), parts: [textPart('second', 'Second prompt')] },
+    ]);
+    replaceMessages([
+      { info: userMessage('steer-2'), parts: [textPart('steer', 'Also do this')] },
+      { info: assistantMessage('assistant-2'), parts: [] },
+      { info: userMessage('user-3'), parts: [textPart('third', 'Third prompt')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => {
+      expect(
+        [...container!.querySelectorAll('.user-message-card .prompt-number-badge')].map(
+          (badge) => badge.textContent
+        )
+      ).toEqual(['2', '3']);
+    });
+    expect(
+      container!.querySelector('[data-msg-id="steer-2"] .user-message-continuation')
+    ).not.toBeNull();
+    expect(
+      [...container!.querySelectorAll('.turn-navigation-marker')].map((dot) =>
+        dot.getAttribute('aria-label')
+      )
+    ).toEqual([
+      'Go to turn 1: First prompt',
+      'Go to turn 2: Second prompt',
+      'Go to turn 3: Third prompt',
+    ]);
+  });
+
   it('loads every older prompt page before showing absolute counters', async () => {
     const promptPage = (start: number, end: number, nextCursor?: string) => {
       // SAFETY: The fixture provides the complete domain shape read by this statement.
       const page = Array.from({ length: end - start + 1 }, (_, index) => {
         const promptNumber = start + index;
-        return {
-          info: userMessage(`user-${promptNumber}`),
-          parts: [textPart(`user-text-${promptNumber}`, `Prompt ${promptNumber}`)],
-        };
-      }) as Awaited<ReturnType<typeof client.session.messages>>;
+        return [
+          {
+            info: userMessage(`user-${promptNumber}`),
+            parts: [textPart(`user-text-${promptNumber}`, `Prompt ${promptNumber}`)],
+          },
+          { info: assistantMessage(`assistant-${promptNumber}`), parts: [] },
+        ];
+      }).flat() as Awaited<ReturnType<typeof client.session.messages>>;
       page.nextCursor = nextCursor;
       return page;
     };
@@ -363,7 +462,7 @@ describe('MessageList prompt numbers', () => {
         [...(container?.querySelectorAll('.user-message-card .prompt-number-badge') ?? [])].map(
           (badge) => badge.textContent
         )
-      ).toEqual(['2']);
+      ).toEqual(['1']);
     });
     expect(messagesSpy).toHaveBeenCalledOnce();
   });
@@ -395,7 +494,7 @@ describe('MessageList prompt numbers', () => {
     resolvePage(olderPage);
 
     await vi.waitFor(() =>
-      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('2')
+      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('1')
     );
     expect(messagesSpy).toHaveBeenCalledOnce();
   });
@@ -432,7 +531,7 @@ describe('MessageList prompt numbers', () => {
         [...(container?.querySelectorAll('.user-message-card .prompt-number-badge') ?? [])].map(
           (badge) => badge.textContent
         )
-      ).toEqual(['2']);
+      ).toEqual(['1']);
     });
   });
 
@@ -449,7 +548,7 @@ describe('MessageList prompt numbers', () => {
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     await vi.waitFor(() => {
-      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('3');
+      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('1');
     });
     window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
 
@@ -470,7 +569,7 @@ describe('MessageList prompt numbers', () => {
         limit: 200,
         before: 'cursor-reloaded',
       });
-      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('3');
+      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('1');
     });
   });
 
@@ -487,7 +586,7 @@ describe('MessageList prompt numbers', () => {
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     await vi.waitFor(() => {
-      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('3');
+      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('1');
     });
 
     resetSessionMessageWindowForRefetch('session-1');

@@ -465,7 +465,7 @@ describe('ProviderQuotaWarning', () => {
   });
 
   it.each([
-    ['openai', 'https://chatgpt.com/#settings/Usage'],
+    ['openai', 'https://chatgpt.com/settings/usage?tab=overview'],
     ['anthropic', 'https://claude.ai/settings/usage'],
   ])('opens %s usage in the external browser', (providerID, url) => {
     mount({

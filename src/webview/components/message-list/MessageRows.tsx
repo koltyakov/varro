@@ -44,6 +44,11 @@ export type MessageRowSharedProps = {
   presentation?: StreamingPresentation;
   modelChangeMap: Map<string, ModelChangeInfo>;
   promptNumberMap: ReadonlyMap<string, number>;
+  promptGroupFirstMessageIds?: ReadonlyMap<string, string>;
+  messagePromptGroupIds?: ReadonlyMap<string, string>;
+  hoveredTurnId?: string | null;
+  onTurnHoverChange?: (messageId: string, hovering: boolean) => void;
+  onResponseHoverChange?: (messageId: string, hovering: boolean) => void;
   showPromptNumbers: boolean;
   showSentTimestamps: boolean;
   revealedSentTimestampMessageId?: string | null;
@@ -147,6 +152,8 @@ export function MessageRow(
   let rowRef: HTMLDivElement | undefined;
   let disposeEntrance: (() => void) | undefined;
   const messageId = props.msg.info.id;
+  const isTurnHovered = () =>
+    !!props.hoveredTurnId && props.messagePromptGroupIds?.get(messageId) === props.hoveredTurnId;
   const claimedEntrance = props.claimMessageEntrance?.(messageId) ?? false;
   const hasImage = props.msg.parts.some(
     (part) => part.type === 'file' && part.mime.startsWith('image/')
@@ -214,6 +221,7 @@ export function MessageRow(
   }, isVirtualPlaceholder());
   onCleanup(() => {
     disposeEntrance?.();
+    props.onTurnHoverChange?.(messageId, false);
     if (rowRef) props.observeMeasuredRow?.(rowRef, messageId, false);
   });
 
@@ -228,7 +236,7 @@ export function MessageRow(
         projectAutomaticActionMessage(props.msg).info.role === 'user'
           ? 'interactive-request'
           : 'interactive-response'
-      } ${entrancePending() ? 'interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
+      } ${isTurnHovered() ? 'interactive-item-turn-hovered ' : ''}${entrancePending() ? 'interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
       }${props.followsVisibleUserRequest ? ' interactive-response-follows-request' : ''}${props.followsVisibleAssistantResponse ? ' interactive-response-follows-response' : ''}${props.followsBorderedBlock ? ' interactive-item-follows-bordered-block' : ''}${props.continuesVisibleActivityGroup ? ' interactive-response-continues-activity-group' : ''}${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}
     >
@@ -262,6 +270,10 @@ export function MessageRow(
             info={props.msg.info}
             parts={props.msg.parts}
             promptNumber={props.promptNumberMap.get(props.msg.info.id)}
+            promptContinuation={
+              !!props.promptGroupFirstMessageIds?.has(props.msg.info.id) &&
+              props.promptGroupFirstMessageIds.get(props.msg.info.id) !== props.msg.info.id
+            }
             showPromptNumber={props.showPromptNumbers}
             showSentTimestamp={
               props.showSentTimestamps || props.revealedSentTimestampMessageId === props.msg.info.id
@@ -269,6 +281,8 @@ export function MessageRow(
             userMessageSeriesEndId={props.userMessageSeriesEndId}
             onAssistantDiffSettledEmpty={props.onAssistantDiffSettledEmpty}
             onUserMessageHoverChange={props.onUserMessageHoverChange}
+            onTurnHoverChange={props.onTurnHoverChange}
+            onResponseHoverChange={props.onResponseHoverChange}
             suppressTimestampAnimation={props.suppressTimestampAnimations}
             isLastAssistant={props.msg.info.id === props.lastAssistantID}
             hideErrorAction={

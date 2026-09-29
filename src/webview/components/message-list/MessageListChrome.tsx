@@ -1,15 +1,22 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { recheckSessionStatus } from '../../hooks/useOpenCode';
 import { useSecondClock } from '../../lib/clock';
 import { logError } from '../../lib/log';
 import { formatMessageSentTime } from '../../lib/message-time';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { loadingLastActivityAt, loadingStartedAt, state, stopLoading } from '../../lib/state';
-import { attachmentIcon, hourglassIcon, mediaImageIcon } from '../../lib/ui-icons';
+import {
+  attachmentIcon,
+  hourglassIcon,
+  mediaImageIcon,
+  navArrowUpIcon,
+  navArrowDownIcon,
+} from '../../lib/ui-icons';
 import type { Part, Permission, QuestionRequest } from '../../types';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
 import { UiIcon } from '../UiIcon';
+import { Tooltip } from '../Tooltip';
 import {
   UserMessagePreviewContent,
   formatUserMessageMarkupSize,
@@ -81,6 +88,7 @@ export function StickyUserMessagePreviewCard(props: {
   preview: StickyUserMessagePreview;
   parts?: Part[];
   promptNumber?: number;
+  promptContinuation?: boolean;
   sentAt?: number;
   showSentTimestamp?: boolean;
   suppressTimestampAnimation?: boolean;
@@ -131,7 +139,11 @@ export function StickyUserMessagePreviewCard(props: {
         <div class="latest-user-message-sticky-shell">
           <Show when={props.promptNumber}>
             {(promptNumber) => (
-              <span class="prompt-number-badge" aria-hidden="true">
+              <span
+                class="prompt-number-badge"
+                classList={{ 'prompt-number-badge-continuation': props.promptContinuation }}
+                aria-hidden="true"
+              >
                 {promptNumber()}
               </span>
             )}
@@ -231,38 +243,175 @@ export function StickyUserMessagePreviewCard(props: {
 export function TurnNavigationRail(props: {
   turns: readonly StickyUserMessagePreview[];
   activeTurnId: string | null;
+  visibleTurnIds?: ReadonlySet<string>;
+  hoveredTurnId?: string | null;
+  onTurnHoverChange?: (messageId: string, hovering: boolean) => void;
   loadingTurnId?: string | null;
   onSelect: (turn: StickyUserMessagePreview) => void;
 }) {
+  let rail: HTMLElement | undefined;
+  const [capacity, setCapacity] = createSignal(20);
+  const [start, setStart] = createSignal(0);
+  const paginated = () => props.turns.length > capacity();
+  const windowStart = () => Math.min(start(), Math.max(0, props.turns.length - capacity()));
+  const windowTurns = createMemo(() =>
+    props.turns.slice(windowStart(), windowStart() + capacity())
+  );
+  const turnsById = createMemo(() => new Map(props.turns.map((turn) => [turn.id, turn])));
+  onMount(() => {
+    if (!rail) return;
+    const update = () => {
+      if (rail!.clientHeight > 0)
+        setCapacity(Math.max(1, Math.floor((rail!.clientHeight - 40) / 11)));
+    };
+    update();
+    const stop = observeSettledResize(rail, update);
+    const element = rail;
+    let wheelRemainder = 0;
+    const handleWheel = (event: WheelEvent) => {
+      if (!paginated() || event.ctrlKey || event.deltaY === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const delta =
+        event.deltaY * (event.deltaMode === 1 ? 11 : event.deltaMode === 2 ? capacity() * 11 : 1);
+      if (Math.sign(delta) !== Math.sign(wheelRemainder)) wheelRemainder = 0;
+      wheelRemainder += delta;
+      const steps = Math.trunc(wheelRemainder / 11);
+      wheelRemainder -= steps * 11;
+      const next = Math.max(0, Math.min(props.turns.length - capacity(), windowStart() + steps));
+      setStart(next);
+      if ((next === 0 && delta < 0) || (next === props.turns.length - capacity() && delta > 0))
+        wheelRemainder = 0;
+    };
+    element.addEventListener('wheel', handleWheel, { passive: false });
+    onCleanup(() => {
+      stop();
+      element.removeEventListener('wheel', handleWheel);
+    });
+  });
+  createEffect(() => {
+    const count = props.turns.length;
+    const size = capacity();
+    const activeIndex = props.turns.findIndex((turn) => turn.id === props.activeTurnId);
+    const visibleIndexes = props.turns.flatMap((turn, index) =>
+      props.visibleTurnIds?.has(turn.id) ? [index] : []
+    );
+    const firstVisible = visibleIndexes[0] ?? activeIndex;
+    const lastVisible = visibleIndexes.at(-1) ?? activeIndex;
+    setStart((previous) => {
+      const bounded = Math.min(previous, Math.max(0, count - size));
+      if (firstVisible < 0 || (firstVisible >= bounded && lastVisible < bounded + size))
+        return bounded;
+      return Math.max(
+        0,
+        Math.min(
+          firstVisible - Math.max(0, Math.floor((size - (lastVisible - firstVisible + 1)) / 2)),
+          count - size
+        )
+      );
+    });
+  });
   return (
-    <nav class="turn-navigation" aria-label="Conversation turns">
-      <For each={props.turns}>
-        {(turn, index) => {
-          const active = () => turn.id === props.activeTurnId;
-          const loading = () => turn.id === props.loadingTurnId;
+    <nav
+      ref={(element) => {
+        rail = element;
+      }}
+      class="turn-navigation"
+      aria-label="Conversation turns"
+      style={{ '--turn-count': props.turns.length }}
+    >
+      <Show when={paginated()}>
+        <button
+          type="button"
+          class="turn-navigation-page"
+          aria-label="Earlier turns"
+          disabled={windowStart() === 0}
+          onClick={() => setStart(Math.max(0, windowStart() - capacity() + 1))}
+        >
+          <UiIcon source={navArrowUpIcon} width="12" height="12" aria-hidden="true" />
+        </button>
+      </Show>
+      <For each={windowTurns().map((turn) => turn.id)}>
+        {(id, index) => {
+          const initialTurn = turnsById().get(id)!;
+          const turn = () => turnsById().get(id) ?? initialTurn;
+          const sentTimestamp = createMemo(() => {
+            const sentAt = turn().sentAt;
+            return sentAt === undefined ? null : formatMessageSentTime(sentAt);
+          });
+          const active = () => id === props.activeTurnId;
+          const highlighted = () => props.visibleTurnIds?.has(id) || active();
+          const loading = () => id === props.loadingTurnId;
+          let pointerOver = false;
+          let ownsHover = false;
+          const notifyHover = (hovering: boolean) => {
+            ownsHover = hovering;
+            props.onTurnHoverChange?.(id, hovering);
+          };
+          onCleanup(() => {
+            if (ownsHover) props.onTurnHoverChange?.(id, false);
+          });
           const label = () => {
-            if (turn.format) {
-              const format = `${turn.format.kind.toUpperCase()} content`;
-              return turn.formatPrefix ? `${turn.formatPrefix} ${format}` : format;
+            const preview = turn();
+            if (preview.format) {
+              const format = `${preview.format.kind.toUpperCase()} content`;
+              return preview.formatPrefix ? `${preview.formatPrefix} ${format}` : format;
             }
-            const text = turn.text.replaceAll(/\s+/g, ' ').trim();
+            const text = preview.text.replaceAll(/\s+/g, ' ').trim();
             return text.length > 80 ? `${text.slice(0, 77)}...` : text;
           };
           return (
-            <button
-              type="button"
-              class={`turn-navigation-marker${active() ? ' is-active' : ''}${
-                loading() ? ' is-loading' : ''
-              }`}
-              aria-label={`Go to turn ${index() + 1}: ${label()}`}
-              aria-current={active() ? 'step' : undefined}
-              title={`Turn ${index() + 1}: ${label()}`}
-              disabled={loading()}
-              onClick={() => props.onSelect(turn)}
-            />
+            <Tooltip
+              placement="right"
+              delay={150}
+              content={
+                <>
+                  <div>{`Turn ${windowStart() + index() + 1} of ${props.turns.length}`}</div>
+                  <Show when={sentTimestamp()}>
+                    {(timestamp) => <div class="turn-navigation-tooltip-time">{timestamp()}</div>}
+                  </Show>
+                </>
+              }
+            >
+              <button
+                type="button"
+                class={`turn-navigation-marker${highlighted() ? ' is-active' : ''}${props.hoveredTurnId === id ? ' is-hovered' : ''}${
+                  loading() ? ' is-loading' : ''
+                }`}
+                aria-label={`Go to turn ${windowStart() + index() + 1}: ${label()}`}
+                aria-current={active() ? 'step' : undefined}
+                onMouseEnter={() => {
+                  pointerOver = true;
+                  notifyHover(true);
+                }}
+                onMouseLeave={() => {
+                  pointerOver = false;
+                  notifyHover(false);
+                }}
+                onFocus={() => notifyHover(true)}
+                onBlur={() => {
+                  if (!pointerOver) notifyHover(false);
+                }}
+                disabled={loading()}
+                onClick={() => props.onSelect(turn())}
+              />
+            </Tooltip>
           );
         }}
       </For>
+      <Show when={paginated()}>
+        <button
+          type="button"
+          class="turn-navigation-page"
+          aria-label="Later turns"
+          disabled={windowStart() + capacity() >= props.turns.length}
+          onClick={() =>
+            setStart(Math.min(props.turns.length - capacity(), windowStart() + capacity() - 1))
+          }
+        >
+          <UiIcon source={navArrowDownIcon} width="12" height="12" aria-hidden="true" />
+        </button>
+      </Show>
     </nav>
   );
 }

@@ -2895,7 +2895,7 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
-  it('updates the active turn marker after a completed marker jump and later scroll', async () => {
+  it('highlights all visible groups and updates the primary marker after jumping and scrolling', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
@@ -2942,8 +2942,18 @@ describe('MessageList sticky prompt preview', () => {
       },
     });
 
+    scrollTopValue = 300;
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(
+      [...container!.querySelectorAll('.turn-navigation-marker.is-active')].map((dot) =>
+        dot.getAttribute('aria-label')
+      )
+    ).toEqual(['Go to turn 1: Prompt 1', 'Go to turn 2: Prompt 2']);
+
     container
-      ?.querySelector<HTMLButtonElement>('.turn-navigation-marker[title^="Turn 2:"]')
+      ?.querySelector<HTMLButtonElement>('.turn-navigation-marker[aria-label^="Go to turn 2:"]')
       ?.click();
     animationFrames.flush();
     await Promise.resolve();
@@ -2953,8 +2963,8 @@ describe('MessageList sticky prompt preview', () => {
     expect(
       container
         ?.querySelector('.turn-navigation-marker[aria-current="step"]')
-        ?.getAttribute('title')
-    ).toContain('Turn 2:');
+        ?.getAttribute('aria-label')
+    ).toContain('turn 2:');
     expect(
       container?.querySelector('[data-msg-id="user-2"] .user-message-card')?.classList
     ).toContain('turn-navigation-destination');
@@ -2971,8 +2981,9 @@ describe('MessageList sticky prompt preview', () => {
     expect(
       container
         ?.querySelector('.turn-navigation-marker[aria-current="step"]')
-        ?.getAttribute('title')
-    ).toContain('Turn 1:');
+        ?.getAttribute('aria-label')
+    ).toContain('turn 1:');
+    expect(container!.querySelectorAll('.turn-navigation-marker.is-active')).toHaveLength(1);
     animationFrames.restore();
   });
 

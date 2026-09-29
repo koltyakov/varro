@@ -120,11 +120,14 @@ export function Message(props: {
   info: MessageType;
   parts: Part[];
   promptNumber?: number;
+  promptContinuation?: boolean;
   showPromptNumber?: boolean;
   showSentTimestamp?: boolean;
   userMessageSeriesEndId?: string;
   suppressTimestampAnimation?: boolean;
   onUserMessageHoverChange?: (messageId: string, hovering: boolean) => void;
+  onTurnHoverChange?: (messageId: string, hovering: boolean) => void;
+  onResponseHoverChange?: (messageId: string, hovering: boolean) => void;
   onAssistantDiffSettledEmpty?: (messageId: string) => void;
   isLastAssistant?: boolean;
   hideErrorAction?: boolean;
@@ -209,6 +212,8 @@ export function Message(props: {
     !!props.showSentTimestamp ||
     (isUserMessageHoverActive() && hoverTimestampMessageId() === props.info.id);
   const notifyUserMessageHoverChange = (hovering: boolean) => {
+    if (isUser()) props.onTurnHoverChange?.(props.info.id, hovering);
+    else props.onResponseHoverChange?.(props.info.id, hovering);
     if (hoverIntentTimer) {
       clearTimeout(hoverIntentTimer);
       hoverIntentTimer = undefined;
@@ -249,6 +254,8 @@ export function Message(props: {
     if (hoverIntentTimer) clearTimeout(hoverIntentTimer);
     if (timestampTransitionTimer) clearTimeout(timestampTransitionTimer);
     if (hoveredUserMessageId) onUserMessageHoverChange?.(hoveredUserMessageId, false);
+    if (isUser()) props.onTurnHoverChange?.(props.info.id, false);
+    else props.onResponseHoverChange?.(props.info.id, false);
   });
   const sentTimestamp = createMemo(() => formatMessageSentTime(props.info.time.created));
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
@@ -631,7 +638,7 @@ export function Message(props: {
             <div
               class={`value chat-turn-content ${
                 isUser()
-                  ? `chat-turn-card user-message-card${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}`
+                  ? `chat-turn-card user-message-card${props.promptContinuation ? ' user-message-continuation' : ''}${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}`
                   : assistantContainerClass()
               } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
               onClick={handleUserCardClick}

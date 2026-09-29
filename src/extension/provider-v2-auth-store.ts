@@ -46,7 +46,10 @@ try {
     const value = JSON.parse(row.value);
     if (value?.type === 'key') auth[row.integration_id] = { type: 'api', key: value.key };
     else if (value?.type === 'oauth') {
-      auth[row.integration_id] = { ...value, accountId: value.metadata?.accountId };
+      auth[row.integration_id] = {
+        ...value,
+        accountId: value.metadata?.accountID ?? value.metadata?.accountId,
+      };
     }
   }
   parentPort.postMessage(JSON.stringify(auth));

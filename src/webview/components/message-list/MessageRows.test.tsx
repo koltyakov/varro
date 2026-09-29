@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import { createSignal } from 'solid-js';
 import type * as UseOpenCodeModule from '../../hooks/useOpenCode';
 import { formatClockTime } from '../../lib/message-time';
 import { setState, startLoading, stopLoading } from '../../lib/state';
 import { copyIcon, gitForkIcon } from '../../lib/ui-icons';
-import { assistantMessage, textPart } from '../MessageList.test-utils';
+import { assistantMessage, textPart, userMessage } from '../MessageList.test-utils';
 import { toCssUrl } from '../UiIcon';
 import {
   AssistantDialogSummaryForMessage,
+  MessageRow,
   getForkBoundaryMessageId,
   getUserMessageSeriesEndId,
 } from './MessageRows';
@@ -36,6 +38,42 @@ afterEach(() => {
   stopLoading();
   setState('messages', []);
   container.remove();
+});
+
+it('retains the hover class when virtual row classes change', () => {
+  const [nearViewport, setNearViewport] = createSignal(true);
+  cleanup = render(
+    () => (
+      <MessageRow
+        msg={{ info: userMessage('user-1'), parts: [textPart('prompt', 'Prompt')] }}
+        hoveredTurnId="user-1"
+        messagePromptGroupIds={new Map([['user-1', 'user-1']])}
+        outerListVirtualized={true}
+        nearViewport={nearViewport()}
+        modelChangeMap={new Map()}
+        promptNumberMap={new Map([['user-1', 1]])}
+        showPromptNumbers={false}
+        showSentTimestamps={false}
+        lastAssistantID={null}
+        previousTrailingFileEventSignatureMap={new Map()}
+        assistantDialogSummaryMap={new Map()}
+        isFinalAssistantMessage={() => false}
+        hasBuildAgent={false}
+        latestPlanImplementationMessageId={null}
+        questionRequestForTool={() => null}
+        permissionMatchForTool={() => null}
+      />
+    ),
+    container
+  );
+  const row = container.querySelector('[data-msg-id="user-1"]')!;
+  expect(row.classList).toContain('interactive-item-turn-hovered');
+  setNearViewport(false);
+  expect(row.classList).toContain('interactive-item-off-core');
+  expect(row.classList).toContain('interactive-item-turn-hovered');
+  setNearViewport(true);
+  expect(row.classList.contains('interactive-item-off-core')).toBe(false);
+  expect(row.classList).toContain('interactive-item-turn-hovered');
 });
 
 describe('AssistantDialogSummaryForMessage', () => {

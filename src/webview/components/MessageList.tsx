@@ -5,6 +5,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  on,
   onCleanup,
   onMount,
   untrack,
@@ -91,6 +92,7 @@ import {
   getSessionHistoryCursor,
   getSessionHistoryPromptCursor,
   getSessionHistoryPrompts,
+  getSessionHistoryPromptEntries,
   getSessionMessageWindowStateVersion,
   isSessionHistoryLoadFailed,
   isSessionHistoryTruncated,
@@ -342,19 +344,27 @@ export function getPromptNumberMap(messages: readonly MessageEntry[]) {
   return numberPrompts(messages).numbers;
 }
 
-/** Numbers prompts after `previousNumber` earlier prompts. */
-function numberPrompts(messages: readonly MessageEntry[], previousNumber = 0) {
+/** Carry the open user group across history segment boundaries. */
+function numberPrompts(
+  messages: readonly MessageEntry[],
+  previous?: { lastNumber: number; openGroup: boolean }
+) {
   const numbers = new Map<string, number>();
-  let promptNumber = previousNumber;
+  let promptNumber = previous?.lastNumber ?? 0;
+  let openGroup = previous?.openGroup ?? false;
   for (const message of messages) {
-    if (message.info.role !== 'user') continue;
+    if (message.info.role !== 'user') {
+      openGroup = false;
+      continue;
+    }
     if (isSessionResumeMessage(message.parts)) continue;
     const parsed = parseUserMessageContent(message.parts);
     if (!hasUserMessageContent(parsed)) continue;
-    promptNumber += 1;
+    if (!openGroup) promptNumber += 1;
+    openGroup = true;
     numbers.set(message.info.id, promptNumber);
   }
-  return { numbers, lastNumber: promptNumber };
+  return { numbers, lastNumber: promptNumber, openGroup };
 }
 
 export function getActiveTurnMessageId(
@@ -1150,7 +1160,7 @@ export function MessageList() {
   const olderPromptsOutsideTranscript = createMemo(() => {
     const indexes = messageIndexById();
     const visible = messages();
-    const olderPrompts = getSessionHistoryPrompts(state.activeSessionId);
+    const olderPrompts = getSessionHistoryPromptEntries(state.activeSessionId);
     return olderPrompts.some((prompt) => {
       const index = indexes.get(prompt.info.id);
       return index === undefined || visible[index]?.info.sessionID !== prompt.info.sessionID;
@@ -1159,8 +1169,7 @@ export function MessageList() {
       : null;
   });
   const historyPromptNumbers = chainHistorySegments<ReturnType<typeof numberPrompts>>(
-    (segment, previous) =>
-      createMemo(() => numberPrompts(segment.entries(), previous?.().lastNumber ?? 0))
+    (segment, previous) => createMemo(() => numberPrompts(segment.entries(), previous?.()))
   );
   const promptNumberMap = createMemo(() => {
     const olderPrompts = olderPromptsOutsideTranscript();
@@ -1168,18 +1177,27 @@ export function MessageList() {
     const history = historyPromptNumbers.map((numbers) => numbers());
     return [
       ...history.map(({ numbers }) => numbers),
-      numberPrompts(tailMessages(), history.at(-1)?.lastNumber ?? 0).numbers,
+      numberPrompts(tailMessages(), history.at(-1)).numbers,
     ].reduce<Map<string, number>>(
       (merged, numbers) => mergeSegmentMaps(merged, numbers),
       new Map()
     );
+  });
+  const promptGroupFirstMessageIds = createMemo(() => {
+    const firstIds = new Map<number, string>();
+    const groups = new Map<string, string>();
+    for (const [id, number] of promptNumberMap()) {
+      if (!firstIds.has(number)) firstIds.set(number, id);
+      groups.set(id, firstIds.get(number)!);
+    }
+    return groups;
   });
   const historyNavigationPreviews = mapHistorySegments((segment) =>
     createMemo(() =>
       getUserMessageNavigationPreviews(segment.entries(), subagentSessionIds(), segment.offset())
     )
   );
-  const turnNavigationPreviews = createMemo(() => {
+  const ungroupedNavigationPreviews = createMemo(() => {
     const olderPrompts = olderPromptsOutsideTranscript();
     if (olderPrompts) {
       return getUserMessageNavigationPreviews(
@@ -1196,6 +1214,63 @@ export function MessageList() {
       ),
     ];
   });
+
+  const turnNavigationPreviews = createMemo(() =>
+    ungroupedNavigationPreviews().filter(
+      (preview) => promptGroupFirstMessageIds().get(preview.id) === preview.id
+    )
+  );
+
+  const messagePromptGroupIds = createMemo(() => {
+    const older = olderPromptsOutsideTranscript();
+    const entries = older ? mergeOlderHistory(messages(), older) : messages();
+    const groups = promptGroupFirstMessageIds();
+    const result = new Map<string, string>();
+    let groupId: string | undefined;
+    for (const entry of entries) {
+      groupId = groups.get(entry.info.id) ?? groupId;
+      if (groupId) result.set(entry.info.id, groupId);
+    }
+    return result;
+  });
+  const [hoveredTurnMessageId, setHoveredTurnMessageId] = createSignal<string | null>(null);
+  const [hoveredDotTurnId, setHoveredDotTurnId] = createSignal<string | null>(null);
+  const [hoveredResponseMessageId, setHoveredResponseMessageId] = createSignal<string | null>(null);
+  const hoveredTurnId = createMemo(() => {
+    const id = hoveredTurnMessageId();
+    return hoveredDotTurnId() ?? (id ? (messagePromptGroupIds().get(id) ?? null) : null);
+  });
+  const handleTurnHoverChange = (messageId: string, hovering: boolean) => {
+    setHoveredTurnMessageId((current) =>
+      hovering ? messageId : current === messageId ? null : current
+    );
+  };
+  const handleDotHoverChange = (messageId: string, hovering: boolean) => {
+    setHoveredDotTurnId((current) =>
+      hovering ? messageId : current === messageId ? null : current
+    );
+  };
+  const hoveredNavigationTurnId = createMemo(() => {
+    const responseId = hoveredResponseMessageId();
+    return (
+      hoveredTurnId() ?? (responseId ? (messagePromptGroupIds().get(responseId) ?? null) : null)
+    );
+  });
+  const handleResponseHoverChange = (messageId: string, hovering: boolean) => {
+    setHoveredResponseMessageId((current) =>
+      hovering ? messageId : current === messageId ? null : current
+    );
+  };
+  createEffect(
+    on(
+      () => state.activeSessionId,
+      () => {
+        setHoveredTurnMessageId(null);
+        setHoveredDotTurnId(null);
+        setHoveredResponseMessageId(null);
+      }
+    )
+  );
 
   function clearObservedVisibleMessages() {
     observedVisibleMessageBounds.clear();
@@ -8456,13 +8531,18 @@ export function MessageList() {
     trackLayoutVersion();
     return distanceFromBottom() > JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX;
   });
-  const activeTurnMessageId = createMemo(() => {
+  const activeTurnState = createMemo(() => {
     scrollTop();
     stickyPreviewGeometryVersion();
+    viewportHeight();
+    measurementVersion();
+    trackLayoutVersion();
+    const visibleIds = new Set<string>();
+    const groupIds = messagePromptGroupIds();
     const navigationTargetId = activeTurnNavigationTargetId();
     const sticky = stickyUserMessagePreviewCandidate();
     const visibleMessages = messages();
-    if (visibleMessages.length === 0) return null;
+    if (visibleMessages.length === 0) return { primary: null, visibleIds };
     const container = containerRef;
     let firstVisibleIndex: number | null = null;
     if (container) {
@@ -8482,8 +8562,9 @@ export function MessageList() {
         if (!bubble) continue;
         const bounds = bubble.getBoundingClientRect();
         if (bounds.bottom <= visibleTop || bounds.top >= containerBottom) continue;
-        firstVisibleIndex = index;
-        break;
+        firstVisibleIndex ??= index;
+        const groupId = groupIds.get(entry.info.id);
+        if (groupId) visibleIds.add(groupId);
       }
     }
     if (firstVisibleIndex === null && shouldVirtualize()) {
@@ -8498,11 +8579,14 @@ export function MessageList() {
       sticky?.id ?? null,
       turnNavigationPreviews()[0]?.id ?? null
     );
-    return getActiveTurnNavigationMessageId(
+    const primary = getActiveTurnNavigationMessageId(
       turnNavigationPreviews(),
-      viewportTurnId,
+      viewportTurnId ? (promptGroupFirstMessageIds().get(viewportTurnId) ?? viewportTurnId) : null,
       navigationTargetId
+        ? (promptGroupFirstMessageIds().get(navigationTargetId) ?? navigationTargetId)
+        : null
     );
+    return { primary, visibleIds };
   });
 
   async function waitForMessageRow(
@@ -9154,6 +9238,7 @@ export function MessageList() {
                 promptNumber={
                   promptNumbersVisible() ? promptNumberMap().get(preview().id) : undefined
                 }
+                promptContinuation={promptGroupFirstMessageIds().get(preview().id) !== preview().id}
                 loading={pendingStickyJump()?.preview.id === preview().id}
                 onClick={handleStickyPreviewClick}
                 onGeometryChange={handleStickyPreviewGeometryChange}
@@ -9230,6 +9315,11 @@ export function MessageList() {
               modelChangeMap={modelChangeMap()}
               sessionPauseMap={rowSessionPauseMap()}
               promptNumberMap={promptNumberMap()}
+              promptGroupFirstMessageIds={promptGroupFirstMessageIds()}
+              messagePromptGroupIds={messagePromptGroupIds()}
+              hoveredTurnId={hoveredTurnId()}
+              onTurnHoverChange={handleTurnHoverChange}
+              onResponseHoverChange={handleResponseHoverChange}
               showPromptNumbers={promptNumbersVisible()}
               showSentTimestamps={showPromptNumbers()}
               revealedSentTimestampMessageId={workedSummaryPromptMessageId()}
@@ -9349,7 +9439,10 @@ export function MessageList() {
       >
         <TurnNavigationRail
           turns={turnNavigationPreviews()}
-          activeTurnId={activeTurnMessageId()}
+          activeTurnId={activeTurnState().primary}
+          visibleTurnIds={activeTurnState().visibleIds}
+          hoveredTurnId={hoveredNavigationTurnId()}
+          onTurnHoverChange={handleDotHoverChange}
           loadingTurnId={pendingStickyJump()?.preview.id}
           onSelect={handleStickyPreviewClick}
         />

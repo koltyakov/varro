@@ -221,8 +221,8 @@ describe('getUserMessageNavigationPreviews', () => {
         user('u2', 'Second'),
       ])
     ).toEqual([
-      { id: 'u1', index: 0, text: 'First', attachmentCount: 0, imageCount: 0 },
-      { id: 'u2', index: 3, text: 'Second', attachmentCount: 0, imageCount: 0 },
+      { id: 'u1', index: 0, text: 'First', sentAt: 0, attachmentCount: 0, imageCount: 0 },
+      { id: 'u2', index: 3, text: 'Second', sentAt: 0, attachmentCount: 0, imageCount: 0 },
     ]);
   });
 

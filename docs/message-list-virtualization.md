@@ -542,6 +542,19 @@ Direct input acquires ownership only when it can affect the transcript:
 
 ### Sticky Prompts
 
+- Consecutive real user prompts share one prompt number until an assistant entry intervenes.
+  Automatic user entries do not consume numbers or split a group. Carry the open group across
+  transcript segments and retain assistant boundaries in prefetched prompt history. Later bubbles
+  use muted Option/Alt badges. The left navigation has one dot per group and targets its first bubble;
+  each bubble retains its own message identity for editing and sticky previews.
+- The navigation rail keeps fixed-size dots within its available height, using earlier/later controls
+  when the full set does not fit. Keep visible groups in the displayed navigation window.
+  Wheel and trackpad input over an overflowing rail move its dot window, with delta-mode normalization
+  and fractional accumulation. Consume that input at both ends so it never scrolls the transcript.
+  Highlight all groups with visible prompt or response content, while retaining one primary turn for
+  accessible current-step navigation. Determine visibility from mounted row geometry within the core
+  range, and map response rows to their prompt group without rescanning history on scroll.
+
 - Sticky selection uses current painted row geometry. Intersection-observer bounds and virtual metrics
   are fallbacks for anchoring or hydration, not proof of a row's current viewport position. Suppress
   sticky UI below the minimum supported viewport height.

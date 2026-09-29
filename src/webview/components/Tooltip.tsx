@@ -18,7 +18,7 @@ type TooltipPosition = {
   top: number;
   arrowLeft: number;
   arrowTop?: number;
-  placement: 'top' | 'bottom' | 'left';
+  placement: 'top' | 'bottom' | 'left' | 'right';
 };
 
 export function Tooltip(props: {
@@ -26,7 +26,7 @@ export function Tooltip(props: {
   children?: JSX.Element;
   /** Attach to an existing editor-owned element without reparenting it. */
   target?: HTMLElement;
-  placement?: 'top' | 'bottom' | 'left';
+  placement?: 'top' | 'bottom' | 'left' | 'right';
   delay?: number;
   disabled?: boolean;
 }) {
@@ -55,8 +55,11 @@ export function Tooltip(props: {
     const tooltipBox = tooltip.getBoundingClientRect();
     const viewportMargin = 8;
     const gap = 6;
-    if (props.placement === 'left') {
-      const left = Math.max(viewportMargin, triggerBox.left - tooltipBox.width - gap);
+    if (props.placement === 'left' || props.placement === 'right') {
+      const left =
+        props.placement === 'right'
+          ? Math.min(window.innerWidth - tooltipBox.width - viewportMargin, triggerBox.right + gap)
+          : Math.max(viewportMargin, triggerBox.left - tooltipBox.width - gap);
       const top = Math.min(
         Math.max(viewportMargin, window.innerHeight - tooltipBox.height - viewportMargin),
         Math.max(viewportMargin, triggerBox.top + (triggerBox.height - tooltipBox.height) / 2)
@@ -64,9 +67,9 @@ export function Tooltip(props: {
       setPosition({
         left: Math.round(left),
         top: Math.round(top),
-        arrowLeft: tooltipBox.width,
+        arrowLeft: props.placement === 'right' ? 0 : tooltipBox.width,
         arrowTop: Math.round(triggerBox.top + triggerBox.height / 2 - top),
-        placement: 'left',
+        placement: props.placement,
       });
       return;
     }
@@ -194,6 +197,7 @@ export function Tooltip(props: {
               top: position()?.placement === 'top',
               bottom: position()?.placement === 'bottom',
               left: position()?.placement === 'left',
+              right: position()?.placement === 'right',
             }}
             role="tooltip"
             style={{ left: `${position()?.left ?? 0}px`, top: `${position()?.top ?? 0}px` }}

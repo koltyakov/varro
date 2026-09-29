@@ -1530,7 +1530,7 @@ describe('ChatInput', () => {
     expect(warning?.textContent).not.toContain('5-hour limit');
     expect(warning?.nextElementSibling?.classList.contains('chat-input-shell')).toBe(true);
     expect(container?.querySelector<HTMLAnchorElement>('.chat-quota-warning-usage')?.href).toBe(
-      'https://chatgpt.com/#settings/Usage'
+      'https://chatgpt.com/settings/usage?tab=overview'
     );
 
     setSessionUsageLimit('session-1', {
@@ -1767,7 +1767,7 @@ describe('ChatInput', () => {
     expect(rows?.textContent).toContain('Expiration details unavailable for 1 reset.');
     const usageLink = container?.querySelector<HTMLAnchorElement>('.provider-limit-reset-link');
     expect(usageLink?.textContent).toContain('ChatGPT Usage');
-    expect(usageLink?.href).toBe('https://chatgpt.com/#settings/Usage');
+    expect(usageLink?.href).toBe('https://chatgpt.com/settings/usage?tab=overview');
     expect(container?.querySelector('button')?.textContent).not.toContain('Use reset');
 
     setState('providerLimits', {

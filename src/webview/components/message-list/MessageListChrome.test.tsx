@@ -234,17 +234,181 @@ describe('MessageListChrome', () => {
     ];
     const onSelect = vi.fn();
     cleanup = render(
-      () => <TurnNavigationRail turns={turns} activeTurnId="msg-2" onSelect={onSelect} />,
+      () => (
+        <TurnNavigationRail
+          turns={turns}
+          activeTurnId="msg-2"
+          visibleTurnIds={new Set(['msg-1', 'msg-2'])}
+          onSelect={onSelect}
+        />
+      ),
       container!
     );
 
     const markers = container?.querySelectorAll<HTMLButtonElement>('.turn-navigation-marker');
     expect(markers).toHaveLength(2);
+    expect(container?.querySelectorAll('.turn-navigation-marker.is-active')).toHaveLength(2);
+    expect(
+      container
+        ?.querySelector<HTMLElement>('.turn-navigation')
+        ?.style.getPropertyValue('--turn-count')
+    ).toBe('2');
     expect(markers?.[1]?.getAttribute('aria-current')).toBe('step');
     expect(markers?.[0]?.getAttribute('aria-label')).toBe('Go to turn 1: First prompt');
 
     markers?.[0]?.click();
     expect(onSelect).toHaveBeenCalledWith(turns[0]);
+  });
+
+  it('shows the counter tooltip to the right of a hovered active dot', async () => {
+    vi.useFakeTimers();
+    const sentAt = Date.now();
+    const onTurnHoverChange = vi.fn();
+    cleanup = render(
+      () => (
+        <TurnNavigationRail
+          turns={[
+            { id: 'msg-1', index: 0, text: 'Prompt', sentAt, attachmentCount: 0, imageCount: 0 },
+          ]}
+          activeTurnId="msg-1"
+          hoveredTurnId="msg-1"
+          onTurnHoverChange={onTurnHoverChange}
+          onSelect={() => {}}
+        />
+      ),
+      container!
+    );
+    const dot = container!.querySelector<HTMLButtonElement>('.turn-navigation-marker')!;
+    vi.spyOn(dot, 'getBoundingClientRect').mockReturnValue(new DOMRect(8, 100, 12, 11));
+    dot.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(150);
+    const tooltip = document.body.querySelector<HTMLElement>('[role="tooltip"]')!;
+    expect(tooltip.firstElementChild?.textContent).toBe('Turn 1 of 1');
+    expect(tooltip.querySelector('.turn-navigation-tooltip-time')?.textContent).toBe(
+      new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(sentAt)
+    );
+    expect(tooltip.classList).toContain('right');
+    expect(parseFloat(tooltip.style.left)).toBe(26);
+    expect(dot.classList).toContain('is-active');
+    expect(dot.classList).toContain('is-hovered');
+    expect(dot.hasAttribute('title')).toBe(false);
+    expect(onTurnHoverChange).toHaveBeenCalledWith('msg-1', true);
+    dot.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
+    expect(onTurnHoverChange).toHaveBeenLastCalledWith('msg-1', false);
+  });
+
+  it('preserves dot hover across preview refreshes and blur while the pointer stays over it', () => {
+    const [turns, setTurns] = createSignal([
+      { id: 'msg-1', index: 0, text: 'Original prompt', attachmentCount: 0, imageCount: 0 },
+    ]);
+    const onTurnHoverChange = vi.fn();
+    const onSelect = vi.fn();
+    cleanup = render(
+      () => (
+        <TurnNavigationRail
+          turns={turns()}
+          activeTurnId="msg-1"
+          onTurnHoverChange={onTurnHoverChange}
+          onSelect={onSelect}
+        />
+      ),
+      container!
+    );
+    const dot = container!.querySelector<HTMLButtonElement>('.turn-navigation-marker')!;
+    dot.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(onTurnHoverChange).toHaveBeenLastCalledWith('msg-1', true);
+    setTurns([{ ...turns()[0]!, text: 'Updated prompt', index: 3 }]);
+    expect(container!.querySelector('.turn-navigation-marker')).toBe(dot);
+    expect(dot.getAttribute('aria-label')).toBe('Go to turn 1: Updated prompt');
+    expect(onTurnHoverChange).toHaveBeenCalledTimes(1);
+    dot.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    expect(onTurnHoverChange).toHaveBeenCalledTimes(1);
+    dot.click();
+    expect(onSelect).toHaveBeenCalledWith(turns()[0]);
+    dot.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(onTurnHoverChange).toHaveBeenLastCalledWith('msg-1', false);
+  });
+
+  it('pages a long rail without losing absolute turn numbers or selection targets', () => {
+    const turns = Array.from({ length: 120 }, (_, index) => ({
+      id: `msg-${index + 1}`,
+      index,
+      text: `Prompt ${index + 1}`,
+      attachmentCount: 0,
+      imageCount: 0,
+    }));
+    const onSelect = vi.fn();
+    cleanup = render(
+      () => <TurnNavigationRail turns={turns} activeTurnId="msg-120" onSelect={onSelect} />,
+      container!
+    );
+    const markers = () => [
+      ...container!.querySelectorAll<HTMLButtonElement>('.turn-navigation-marker'),
+    ];
+    expect(markers()).toHaveLength(20);
+    expect(markers()[0]!.getAttribute('aria-label')).toBe('Go to turn 101: Prompt 101');
+    expect(markers().at(-1)!.getAttribute('aria-label')).toBe('Go to turn 120: Prompt 120');
+    const earlier = container!.querySelector<HTMLButtonElement>('[aria-label="Earlier turns"]')!;
+    const later = container!.querySelector<HTMLButtonElement>('[aria-label="Later turns"]')!;
+    expect(later.disabled).toBe(true);
+    earlier.click();
+    expect(markers()[0]!.getAttribute('aria-label')).toBe('Go to turn 82: Prompt 82');
+    markers()[0]!.click();
+    expect(onSelect).toHaveBeenCalledWith(turns[81]);
+    later.click();
+    expect(markers().at(-1)!.getAttribute('aria-label')).toBe('Go to turn 120: Prompt 120');
+  });
+
+  it('scrolls the dot window with pixel, line, and page wheel input without scrolling the conversation', () => {
+    const turns = Array.from({ length: 120 }, (_, index) => ({
+      id: `msg-${index + 1}`,
+      index,
+      text: `Prompt ${index + 1}`,
+      attachmentCount: 0,
+      imageCount: 0,
+    }));
+    const onSelect = vi.fn();
+    cleanup = render(
+      () => <TurnNavigationRail turns={turns} activeTurnId="msg-1" onSelect={onSelect} />,
+      container!
+    );
+    const rail = container!.querySelector<HTMLElement>('.turn-navigation')!;
+    const firstTitle = () =>
+      rail.querySelector<HTMLButtonElement>('.turn-navigation-marker')!.getAttribute('aria-label');
+    const bubble = vi.fn();
+    container!.addEventListener('wheel', bubble);
+    const wheel = (deltaY: number, deltaMode = 0, ctrlKey = false) => {
+      const event = new WheelEvent('wheel', {
+        deltaY,
+        deltaMode,
+        ctrlKey,
+        bubbles: true,
+        cancelable: true,
+      });
+      rail.dispatchEvent(event);
+      return event;
+    };
+    expect(wheel(5).defaultPrevented).toBe(true);
+    expect(firstTitle()).toBe('Go to turn 1: Prompt 1');
+    wheel(6);
+    expect(firstTitle()).toBe('Go to turn 2: Prompt 2');
+    wheel(3, 1);
+    expect(firstTitle()).toBe('Go to turn 5: Prompt 5');
+    wheel(1, 2);
+    expect(firstTitle()).toBe('Go to turn 25: Prompt 25');
+    wheel(-10000);
+    expect(firstTitle()).toBe('Go to turn 1: Prompt 1');
+    wheel(-100);
+    wheel(11);
+    expect(firstTitle()).toBe('Go to turn 2: Prompt 2');
+    wheel(10000);
+    expect(firstTitle()).toBe('Go to turn 101: Prompt 101');
+    expect(bubble).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(wheel(-100, 0, true).defaultPrevented).toBe(false);
+    expect(firstTitle()).toBe('Go to turn 101: Prompt 101');
+    container!.removeEventListener('wheel', bubble);
   });
 
   it('reveals the reserved sticky timestamp without mounting new content', () => {
