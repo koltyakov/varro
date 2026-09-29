@@ -411,6 +411,47 @@ describe('MessageListChrome', () => {
     container!.removeEventListener('wheel', bubble);
   });
 
+  it('keeps a manually paged destination mounted when previews and equivalent visibility refresh', () => {
+    const [turns, setTurns] = createSignal(
+      Array.from({ length: 120 }, (_, index) => ({
+        id: `msg-${index + 1}`,
+        index,
+        text: `Prompt ${index + 1}`,
+        attachmentCount: 0,
+        imageCount: 0,
+      }))
+    );
+    const [visibleIds, setVisibleIds] = createSignal(new Set(['msg-120']));
+    const [activeId, setActiveId] = createSignal('msg-120');
+    const onSelect = vi.fn();
+    cleanup = render(
+      () => (
+        <TurnNavigationRail
+          turns={turns()}
+          activeTurnId={activeId()}
+          visibleTurnIds={visibleIds()}
+          onSelect={onSelect}
+        />
+      ),
+      container!
+    );
+    const earlier = container!.querySelector<HTMLButtonElement>('[aria-label="Earlier turns"]')!;
+    earlier.click();
+    const destination = container!.querySelector<HTMLButtonElement>(
+      '[aria-label^="Go to turn 82:"]'
+    )!;
+    expect(destination).not.toBeNull();
+    setTurns(turns().map((turn) => ({ ...turn, text: `${turn.text} refreshed` })));
+    setVisibleIds(new Set(['msg-120']));
+    expect(destination.isConnected).toBe(true);
+    expect(container!.querySelector('[aria-label^="Go to turn 82:"]')).toBe(destination);
+    destination.click();
+    expect(onSelect).toHaveBeenCalledWith(turns()[81]);
+    setActiveId('msg-1');
+    setVisibleIds(new Set(['msg-1']));
+    expect(container!.querySelector('[aria-label^="Go to turn 1:"]')).not.toBeNull();
+  });
+
   it('reveals the reserved sticky timestamp without mounting new content', () => {
     vi.useFakeTimers();
     const now = new Date();
