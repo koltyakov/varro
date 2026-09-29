@@ -8,7 +8,7 @@ import {
   untrack,
 } from 'solid-js';
 import {
-  formatProviderErrorDetails,
+  getProviderErrorDetailRows,
   formatProviderErrorMessage,
   friendlyErrorName,
   isAbortedAssistantError,
@@ -127,6 +127,7 @@ export function Message(props: {
   onUserMessageHoverChange?: (messageId: string, hovering: boolean) => void;
   onAssistantDiffSettledEmpty?: (messageId: string) => void;
   isLastAssistant?: boolean;
+  hideErrorAction?: boolean;
   retryState?: AssistantRetryState;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
@@ -316,11 +317,6 @@ export function Message(props: {
       return 'You are signed out of this provider. Re-authenticate to continue.';
     }
     const message = error?.data?.message?.trim();
-    const info = assistant();
-    const providerMessage = formatProviderErrorMessage(error, {
-      providerID: info?.providerID,
-    });
-    if (providerMessage) return providerMessage;
     if (message) return message;
     return friendlyErrorName(error?.name);
   });
@@ -332,23 +328,42 @@ export function Message(props: {
     )
       return null;
     const info = assistant();
-    return formatProviderErrorDetails(info?.error, {
+    const providerMessage = formatProviderErrorMessage(info?.error, {
+      providerID: info?.providerID,
+    });
+    const rows = getProviderErrorDetailRows(info?.error, {
       providerID: info?.providerID,
       modelID: info?.modelID,
     });
+    return rows.length ? { summary: providerMessage, rows } : null;
+  });
+  const assistantRetryAt = createMemo(() => {
+    if (
+      props.hideErrorAction ||
+      !props.isLastAssistant ||
+      !assistant()?.error ||
+      providerAuthRequired()
+    )
+      return undefined;
+    const status = state.sessionStatus[props.info.sessionID];
+    return status?.type === 'retry' ? status.next : undefined;
   });
   const canRetryAssistant = createMemo(() => {
     const error = assistant()?.error;
     return (
       !!error &&
-      !props.retryState &&
+      (!props.retryState ||
+        (props.retryState === 'retrying' && assistantRetryAt() !== undefined)) &&
       !isAbortedAssistantError(error) &&
       !(providerAuthRequired() && providerAuthRestored())
     );
   });
   const assistantErrorAction = createMemo(() => {
-    if (!(props.isLastAssistant ?? false) || !canRetryAssistant()) return undefined;
+    if (props.hideErrorAction || !(props.isLastAssistant ?? false) || !canRetryAssistant())
+      return undefined;
     if (providerAuthRequired() && !providerAuthRestored()) {
+      const selectedProviderID = state.selectedModel?.providerID;
+      if (selectedProviderID && selectedProviderID !== providerAuthProviderID()) return undefined;
       return {
         label: 'Re-authenticate',
         run: () => requestProviderConnection(providerAuthProviderID()!),
@@ -651,6 +666,7 @@ export function Message(props: {
                     !!props.retryState || (providerAuthRequired() && providerAuthRestored())
                   }
                   errorAction={assistantErrorAction()}
+                  errorRetryAt={assistantRetryAt()}
                   highlightFinalAnswer={props.highlightFinalAnswer}
                   highlightPlanningAnswer={props.highlightPlanningAnswer}
                   suppressHighlightedCardMetaParts={!!props.highlightFinalAnswer}

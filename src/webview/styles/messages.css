@@ -1089,29 +1089,21 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
 
 .assistant-message-flow-item-error {
   min-width: 0;
+  color: var(--color-vscode-fg);
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+
+.assistant-message-flow-item-error-card {
+  overflow: hidden;
+  border: 1px solid var(--color-vscode-border-soft);
+  border-radius: var(--radius-card);
+  background: var(--color-vscode-surface-subtle-alt);
+}
+
+.assistant-message-flow-item-error-icon {
+  flex-shrink: 0;
   color: var(--color-vscode-error);
-}
-
-.assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-error {
-  padding: 12px 14px 14px;
-  border-radius: var(--radius-bubble);
-  border: 1px solid color-mix(in srgb, var(--color-vscode-error) 46%, var(--color-vscode-border));
-  background: color-mix(
-    in srgb,
-    var(--color-vscode-error) 16%,
-    var(--color-vscode-surface-subtle-alt)
-  );
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--color-vscode-error) 18%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--color-vscode-error) 10%, transparent);
-}
-
-body.vscode-light
-  .assistant-turn-content.assistant-turn-content-plain
-  .assistant-message-flow-item-error {
-  background: color-mix(in srgb, var(--color-vscode-error) 18%, var(--color-vscode-widget-bg));
-  border-color: color-mix(in srgb, var(--color-vscode-error) 30%, var(--color-vscode-border));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-error) 16%, transparent);
 }
 
 .assistant-message-flow-item-error > :first-child {
@@ -1128,57 +1120,124 @@ body.vscode-light
   margin-top: 10px;
 }
 
-.assistant-message-flow-item-error-details-toggle {
-  margin-top: 8px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  opacity: 0.75;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.assistant-message-flow-item-error-details-toggle:hover {
-  opacity: 1;
-}
-
 .assistant-message-flow-item-error-details {
-  margin: 8px 0 0;
-  padding: 8px 10px;
-  max-height: 180px;
+  margin: 0;
+  padding: 12px;
+  max-height: 320px;
   overflow: auto;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--color-vscode-error) 10%, transparent);
-  color: inherit;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 12px;
+  border-top: 1px solid var(--color-vscode-border-soft);
+  background: var(--color-vscode-surface-subtle-alt);
+  color: var(--color-vscode-fg-muted);
+  font-size: var(--varro-chat-editor-font-size, 12px);
   line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   user-select: text;
 }
 
-.assistant-message-flow-item-error-action {
-  font: inherit;
+.assistant-error-explanation {
+  margin: 0 0 12px;
+  color: var(--color-vscode-fg);
 }
 
-.assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-error-notice,
-body.vscode-light
-  .assistant-turn-content.assistant-turn-content-plain
-  .assistant-message-flow-item-error-notice {
-  padding: 0;
-  border-radius: var(--radius-card);
-  font-size: 12.5px;
-  line-height: 1.2;
-  color: var(--color-vscode-muted);
-  border-color: var(--color-vscode-border-soft);
+.assistant-error-fields {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+}
+
+.assistant-error-field {
+  display: grid;
+  grid-template-columns: 95px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+}
+
+.assistant-error-field dt {
+  font-size: 11px;
+  color: var(--color-vscode-fg-muted);
+}
+
+.assistant-error-field dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--color-vscode-fg);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+}
+
+.assistant-error-field-response dd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assistant-error-response-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-error-field-response .tool-copy-button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border: none;
+  border-radius: var(--radius-xs);
   background: transparent;
-  box-shadow: none;
+  color: var(--color-vscode-fg-muted);
+  cursor: pointer;
+}
+
+.assistant-error-field-response .tool-copy-button:hover {
+  color: var(--color-vscode-fg);
+  background: var(--color-vscode-surface-subtle);
+}
+
+.assistant-error-field-response .tool-copy-button:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 1px;
+}
+
+.assistant-message-flow-item-error-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 4px 9px;
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-vscode-surface-subtle-alt);
+  color: var(--color-vscode-fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.assistant-message-flow-item-error-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-vscode-fg) 8%, var(--color-vscode-surface-subtle-alt));
+}
+
+.assistant-message-flow-item-error-action:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 2px;
+}
+
+.assistant-message-flow-item-error-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.assistant-message-flow-item-error-countdown {
+  font-variant-numeric: tabular-nums;
+}
+
+.assistant-message-flow-item-error-notice {
+  color: var(--color-vscode-muted);
 }
 
 .assistant-message-flow-item-notice-header {
@@ -1230,13 +1289,6 @@ body.vscode-light
 .assistant-message-flow-item-notice-header:focus-visible {
   outline: 1px solid var(--color-vscode-accent);
   outline-offset: -1px;
-}
-
-.assistant-message-flow-item-error-notice .assistant-message-flow-item-error-details {
-  margin: 0;
-  border-top: 1px solid var(--color-vscode-border-soft);
-  border-radius: 0;
-  background: var(--color-vscode-surface-subtle);
 }
 
 .assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item {

@@ -143,7 +143,9 @@ function sanitizeDiagnosticUrl(value: string) {
   }
 }
 
-export function formatProviderErrorDetails(
+export type ProviderErrorDetailRow = { label: string; value: string };
+
+export function getProviderErrorDetailRows(
   error:
     | {
         name?: string | null;
@@ -158,29 +160,28 @@ export function formatProviderErrorDetails(
       }
     | undefined,
   context: ApiErrorMessageContext = {}
-): string | null {
-  if (!error || isAbortedAssistantError(error)) return null;
+): ProviderErrorDetailRow[] {
+  if (!error || isAbortedAssistantError(error)) return [];
   const providerID = context.providerID?.trim();
   const modelID = context.modelID?.trim();
   const name = error.name?.trim() || 'Error';
   const statusCode = error.data?.statusCode;
-  const lines: string[] = [];
+  const rows: ProviderErrorDetailRow[] = [];
   const subject = [providerID, modelID].filter(Boolean).join(' / ');
-  if (subject) lines.push(subject);
-  lines.push(statusCode ? `${name} (HTTP ${statusCode})` : name);
+  if (subject) rows.push({ label: 'Provider / model', value: subject });
+  rows.push({ label: 'Error', value: statusCode ? `${name} (HTTP ${statusCode})` : name });
   const url = error.data?.url?.trim() || error.data?.metadata?.url?.trim();
-  if (url) lines.push(sanitizeDiagnosticUrl(url));
+  if (url) rows.push({ label: 'Endpoint', value: sanitizeDiagnosticUrl(url) });
   const message = error.data?.message?.trim();
-  if (message) lines.push(message);
+  if (message) rows.push({ label: 'Message', value: message });
   const responseBody = error.data?.responseBody?.trim();
   if (responseBody) {
-    lines.push(
-      responseBody.length > MAX_ERROR_DETAILS_LENGTH
-        ? `${responseBody.slice(0, MAX_ERROR_DETAILS_LENGTH)}\n...`
-        : responseBody
-    );
+    rows.push({
+      label: 'Response',
+      value: responseBody,
+    });
   } else if (error.data?.responseBody != null) {
-    lines.push('(empty response body)');
+    rows.push({ label: 'Response', value: '(empty response body)' });
   }
   const responseHeaders = error.data?.responseHeaders;
   if (responseHeaders) {
@@ -190,9 +191,24 @@ export function formatProviderErrorDetails(
       )
       .toSorted(([a], [b]) => a.localeCompare(b))
       .map(([key, value]) => `${key}: ${value}`);
-    if (headerLines.length > 0) lines.push(headerLines.join('\n'));
+    if (headerLines.length > 0) rows.push({ label: 'Headers', value: headerLines.join('\n') });
   }
-  return lines.join('\n');
+  return rows;
+}
+
+export function formatProviderErrorDetails(
+  error: Parameters<typeof getProviderErrorDetailRows>[0],
+  context: ApiErrorMessageContext = {}
+): string | null {
+  return (
+    getProviderErrorDetailRows(error, context)
+      .map((row) =>
+        row.label === 'Response' && row.value.length > MAX_ERROR_DETAILS_LENGTH
+          ? `${row.value.slice(0, MAX_ERROR_DETAILS_LENGTH)}\n...`
+          : row.value
+      )
+      .join('\n') || null
+  );
 }
 
 function normalizeAbortText(value: string | null | undefined) {

@@ -9,6 +9,7 @@ import {
   onMount,
 } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import type { ProviderErrorDetailRow } from '../../../shared/error-classification';
 import {
   getAssistantActivityCountItems,
   getAssistantActivityPartKey,
@@ -25,6 +26,7 @@ import {
   editPencilIcon,
   emptyPageIcon,
   expandIcon,
+  fingerprintCircleIcon,
   helpCircleIcon,
   languageIcon,
   lightBulbIcon,
@@ -32,6 +34,8 @@ import {
   searchIcon,
   sparksIcon,
   terminalIcon,
+  undoIcon,
+  warningCircleIcon,
   wrenchIcon,
   xmarkIcon,
 } from '../../lib/ui-icons';
@@ -58,6 +62,7 @@ import { MarkdownRenderer } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { UiIcon } from '../UiIcon';
+import { CopyIconButton } from '../CopyIconButton';
 
 type AssistantRenderItem =
   | { kind: 'part'; key: string; part: Part }
@@ -442,9 +447,10 @@ export function AssistantMessageContent(props: {
   info: AssistantMessage;
   parts: Part[];
   errorMessage?: string | null;
-  errorDetails?: string | null;
+  errorDetails?: { summary: string | null; rows: ProviderErrorDetailRow[] } | null;
   errorIsNotice?: boolean;
   errorAction?: { label: string; run: () => void } | undefined;
+  errorRetryAt?: number;
   onRetry?: (() => void) | undefined;
   highlightFinalAnswer?: boolean;
   highlightPlanningAnswer?: boolean;
@@ -472,6 +478,18 @@ export function AssistantMessageContent(props: {
     () => new Map(partEntries().map((entry) => [entry.part.id, entry.key]))
   );
   const [readModeOpen, setReadModeOpen] = createSignal(false);
+  const [retrySeconds, setRetrySeconds] = createSignal<number>();
+  createEffect(() => {
+    const retryAt = props.errorRetryAt;
+    if (retryAt === undefined) {
+      setRetrySeconds(undefined);
+      return;
+    }
+    const update = () => setRetrySeconds(Math.max(0, Math.ceil((retryAt - Date.now()) / 1000)));
+    update();
+    const timer = setInterval(update, 250);
+    onCleanup(() => clearInterval(timer));
+  });
   const errorDetailsExpansionKey = () => getAssistantErrorDetailsExpansionKey(props.info.id);
   const [errorDetailsOpen, setErrorDetailsOpen] = createSignal(
     getMessageBlockExpanded(errorDetailsExpansionKey()) ?? false
@@ -1184,18 +1202,31 @@ export function AssistantMessageContent(props: {
       </Show>
       <Show when={props.errorMessage}>
         <div
-          class="assistant-message-flow-item-error assistant-message-flow-item-error-rendered-markdown assistant-flow-block-starts-bordered assistant-flow-block-ends-bordered rendered-markdown"
+          class="assistant-message-flow-item-error assistant-flow-block-starts-bordered assistant-flow-block-ends-bordered"
           classList={{ 'assistant-message-flow-item-error-notice': props.errorIsNotice }}
         >
-          <Show when={props.errorIsNotice} fallback={<p>{props.errorMessage!}</p>}>
+          <div class="assistant-message-flow-item-error-card">
             <button
               type="button"
               class="assistant-message-flow-item-notice-header"
+              classList={{
+                'assistant-message-flow-item-error-details-toggle':
+                  !props.errorIsNotice && !!props.errorDetails,
+              }}
               disabled={!props.errorDetails}
               aria-expanded={props.errorDetails ? errorDetailsOpen() : undefined}
               aria-controls={props.errorDetails ? errorDetailsId() : undefined}
               onClick={toggleErrorDetails}
             >
+              <Show when={!props.errorIsNotice}>
+                <UiIcon
+                  source={warningCircleIcon}
+                  class="assistant-message-flow-item-error-icon"
+                  width="12"
+                  height="12"
+                  aria-hidden="true"
+                />
+              </Show>
               <span class="assistant-message-flow-item-notice-label">{props.errorMessage!}</span>
               <Show when={props.errorDetails}>
                 <UiIcon
@@ -1207,34 +1238,57 @@ export function AssistantMessageContent(props: {
                 />
               </Show>
             </button>
-          </Show>
-          <Show when={props.errorDetails}>
-            <Show when={!props.errorIsNotice}>
-              <button
-                type="button"
-                class="assistant-message-flow-item-error-details-toggle"
-                aria-expanded={errorDetailsOpen()}
-                aria-controls={errorDetailsId()}
-                onClick={toggleErrorDetails}
-              >
-                {errorDetailsOpen() ? 'Hide details' : 'Details'}
-              </button>
+            <Show when={props.errorDetails && errorDetailsOpen()}>
+              <div id={errorDetailsId()} class="assistant-message-flow-item-error-details">
+                <Show when={props.errorDetails?.summary}>
+                  <p class="assistant-error-explanation">{props.errorDetails!.summary}</p>
+                </Show>
+                <dl class="assistant-error-fields">
+                  <For each={props.errorDetails?.rows}>
+                    {(row) => (
+                      <div
+                        class="assistant-error-field"
+                        classList={{ 'assistant-error-field-response': row.label === 'Response' }}
+                      >
+                        <dt>{row.label}</dt>
+                        <dd>
+                          <Show when={row.label === 'Response'} fallback={row.value}>
+                            <span class="assistant-error-response-value">{row.value}</span>
+                            <CopyIconButton text={row.value} label="response" />
+                          </Show>
+                        </dd>
+                      </div>
+                    )}
+                  </For>
+                </dl>
+              </div>
             </Show>
-            <Show when={errorDetailsOpen()}>
-              <pre id={errorDetailsId()} class="assistant-message-flow-item-error-details">
-                {props.errorDetails!}
-              </pre>
-            </Show>
-          </Show>
+          </div>
           <Show when={props.errorAction || props.onRetry}>
             <div class="assistant-message-flow-item-error-actions">
               <button
                 type="button"
-                class="assistant-dialog-summary-action assistant-dialog-summary-action-implement assistant-message-flow-item-error-action"
-                disabled={isLoading()}
+                class="assistant-message-flow-item-error-action"
+                disabled={isLoading() || props.errorRetryAt !== undefined}
                 onClick={() => (props.errorAction ? props.errorAction.run() : props.onRetry?.())}
               >
+                <Show when={!props.errorAction || props.errorAction.label === 'Retry'}>
+                  <UiIcon source={undoIcon} width="13" height="13" aria-hidden="true" />
+                </Show>
+                <Show when={props.errorAction?.label === 'Re-authenticate'}>
+                  <UiIcon
+                    source={fingerprintCircleIcon}
+                    width="13"
+                    height="13"
+                    aria-hidden="true"
+                  />
+                </Show>
                 {props.errorAction?.label || 'Retry'}
+                <Show when={retrySeconds() !== undefined}>
+                  <span class="assistant-message-flow-item-error-countdown">
+                    ({retrySeconds()}s)
+                  </span>
+                </Show>
               </button>
             </div>
           </Show>

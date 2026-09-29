@@ -955,6 +955,9 @@ export function MessageList() {
     equals: sameEntries,
   });
   const tailMessages = createMemo(() => messages().slice(historySegmentEnd()));
+  const errorActionMessageID = createMemo(
+    () => tailMessages().findLast((message) => isAssistantMessage(message.info))?.info.id ?? null
+  );
   const frozenSegmentBoundary = createMemo<FrozenSegmentBoundary>(
     (previous) => getFrozenSegmentBoundary(messages(), historySegmentEnd(), previous),
     { entry: null, index: 0 },
@@ -7576,12 +7579,20 @@ export function MessageList() {
       )
     )
   );
-  const errorDetailsLayoutSignatures = createMemo(() =>
-    mergeSegmentMaps(
+  const errorDetailsLayoutSignatures = createMemo(() => {
+    const signatures = mergeSegmentMaps(
       historyErrorDetailsLayoutSignatures(),
       getErrorDetailsLayoutSegment(tailMessages(), tailAssistantRetryScan().states)
-    )
-  );
+    );
+    const actionMessageID = errorActionMessageID();
+    if (actionMessageID && signatures.has(actionMessageID)) {
+      signatures.set(
+        actionMessageID,
+        `${signatures.get(actionMessageID)}:action:${state.selectedModel?.providerID ?? ''}`
+      );
+    }
+    return signatures;
+  });
   let previousErrorDetailsLayoutSignatures = new Map<string, string>();
   createEffect(() => {
     const current = errorDetailsLayoutSignatures();
@@ -9226,6 +9237,7 @@ export function MessageList() {
               showWorkedSummaryTimes={showPromptNumbers()}
               suppressTimestampAnimations={suppressTimestampAnimations()}
               lastAssistantID={lastAssistantID()}
+              errorActionMessageID={errorActionMessageID()}
               assistantRetryStates={assistantRetryStates()}
               outerListVirtualized={shouldVirtualize()}
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}

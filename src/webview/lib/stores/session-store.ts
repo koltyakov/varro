@@ -58,6 +58,8 @@ export type SessionStatusSnapshotOptions = {
 };
 
 const sessionStatusLocalUpdatedAt = new Map<string, number>();
+const scheduledProviderRetries = new Map<string, Extract<SessionStatus, { type: 'retry' }>>();
+const providerRetryCancellations = new Map<string, () => void>();
 // Once a snapshot acknowledges local markers, older snapshots must not apply after they are pruned.
 let latestAppliedSessionStatusSnapshotStartedAt = Number.NEGATIVE_INFINITY;
 
@@ -67,11 +69,29 @@ export function captureSessionStatusSnapshotTime() {
 
 export function resetSessionStatusSnapshotTracking() {
   sessionStatusLocalUpdatedAt.clear();
+  scheduledProviderRetries.clear();
+  providerRetryCancellations.clear();
   latestAppliedSessionStatusSnapshotStartedAt = Number.NEGATIVE_INFINITY;
   resetSessionStateClock();
 }
 
 export const sessionStore = {
+  isProviderRetryScheduled(sessionId: string) {
+    return scheduledProviderRetries.has(sessionId);
+  },
+  cancelProviderRetry(sessionId: string) {
+    providerRetryCancellations.get(sessionId)?.();
+  },
+  retainProviderRetryStatus(
+    sessionId: string,
+    status: Extract<SessionStatus, { type: 'retry' }> | null,
+    cancel?: () => void
+  ) {
+    if (status) scheduledProviderRetries.set(sessionId, status);
+    else scheduledProviderRetries.delete(sessionId);
+    if (cancel) providerRetryCancellations.set(sessionId, cancel);
+    else providerRetryCancellations.delete(sessionId);
+  },
   persistActiveSessionId,
   getPersistedActiveSessionId,
   persistLastOpenedView,
@@ -136,15 +156,25 @@ export const sessionStore = {
       latestAppliedSessionStatusSnapshotStartedAt = snapshotStartedAt;
     }
 
-    let reconciledStatuses = statuses;
+    // The backend is idle during a client-owned backoff. Its snapshots must not
+    // remove the countdown or the stop control while that timer still owns the turn.
+    const effectiveStatuses = { ...statuses };
+    for (const [sessionId, retry] of scheduledProviderRetries) {
+      if (!statuses[sessionId] || statuses[sessionId]?.type === 'idle') {
+        effectiveStatuses[sessionId] = retry;
+      }
+    }
+    let reconciledStatuses = effectiveStatuses;
     batch(() => {
       setState('sessionStatus', (current) => {
         if (snapshotStartedAt === undefined) {
-          reconciledStatuses = areEqualSessionStatusRecords(current, statuses) ? current : statuses;
+          reconciledStatuses = areEqualSessionStatusRecords(current, effectiveStatuses)
+            ? current
+            : effectiveStatuses;
           return reconciledStatuses;
         }
 
-        const next = { ...statuses };
+        const next = { ...effectiveStatuses };
         for (const [sessionId, updatedAt] of sessionStatusLocalUpdatedAt) {
           if (updatedAt <= snapshotStartedAt) {
             sessionStatusLocalUpdatedAt.delete(sessionId);
@@ -182,6 +212,7 @@ export const sessionStore = {
     return reconciledStatuses;
   },
   setSessionStatusEntry(sessionId: string, status: SessionStatus) {
+    if (status.type === 'idle') status = scheduledProviderRetries.get(sessionId) ?? status;
     const prev = state.sessionStatus[sessionId];
     sessionStatusLocalUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
     recordStatusCompletionTransition(sessionId, prev, status);
@@ -195,6 +226,8 @@ export const sessionStore = {
     });
   },
   clearSessionStatusEntry(sessionId: string) {
+    sessionStore.cancelProviderRetry(sessionId);
+    scheduledProviderRetries.delete(sessionId);
     sessionStatusLocalUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
     batch(() => {
       setState(

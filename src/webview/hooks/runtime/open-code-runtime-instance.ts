@@ -2271,8 +2271,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     recheckSessionStatus,
   });
 
-  async function continueInterruptedSession(sessionId: string) {
-    await connectionBootstrapOperations.continueInterruptedSession(sessionId);
+  async function continueInterruptedSession(sessionId: string, options?: { messageID: string }) {
+    await connectionBootstrapOperations.continueInterruptedSession(sessionId, options);
   }
 
   const sessionSendOperations = new SessionSendOperations({

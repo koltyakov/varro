@@ -51,6 +51,7 @@ export type MessageRowSharedProps = {
   showWorkedSummaryTimes?: boolean;
   suppressTimestampAnimations?: boolean;
   lastAssistantID: string | null;
+  errorActionMessageID?: string | null;
   assistantRetryStates?: ReadonlyMap<string, AssistantRetryState>;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
@@ -270,6 +271,10 @@ export function MessageRow(
             onUserMessageHoverChange={props.onUserMessageHoverChange}
             suppressTimestampAnimation={props.suppressTimestampAnimations}
             isLastAssistant={props.msg.info.id === props.lastAssistantID}
+            hideErrorAction={
+              props.errorActionMessageID !== undefined &&
+              props.msg.info.id !== props.errorActionMessageID
+            }
             retryState={props.assistantRetryStates?.get(props.msg.info.id)}
             nearViewport={props.nearViewport}
             outerListVirtualized={props.outerListVirtualized}

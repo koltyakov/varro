@@ -158,6 +158,38 @@ describe('session pause dividers', () => {
 });
 
 describe('automatic retry notices', () => {
+  it.each(['APIError', 'ProviderAuthError'] as const)(
+    'hides the previous %s action as soon as a new prompt is sent',
+    (name) => {
+      const frames = installQueuedAnimationFrameMocks();
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('prompt', 'First request')] },
+        {
+          info: assistantMessage('failed', {
+            parentID: 'user-1',
+            error: {
+              name,
+              data: {
+                message: name === 'ProviderAuthError' ? 'Token refresh failed: 401' : 'Not Found',
+              },
+            },
+          }),
+          parts: [],
+        },
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      expect(container!.querySelector('.assistant-message-flow-item-error-action')).not.toBeNull();
+      upsertMessage({
+        info: userMessage('user-2'),
+        parts: [textPart('next-prompt', 'New request')],
+      });
+      expect(container!.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
+      expect(container!.querySelector('.assistant-message-flow-item-error')).not.toBeNull();
+      frames.restore();
+    }
+  );
+
   it.each(['busy', 'retry'] as const)(
     'keeps partial failed attempts out of Worked while %s',
     (status) => {
@@ -240,16 +272,18 @@ describe('automatic retry notices', () => {
     });
     expect(notice()?.textContent).toContain('Recovered after an automatic retry. Work continued.');
     notice()?.querySelector<HTMLButtonElement>('button')?.click();
-    expect(notice()?.querySelector('pre')?.textContent).toContain(
-      'WebSocket closed with code 1006'
-    );
+    expect(
+      notice()?.querySelector('.assistant-message-flow-item-error-details')?.textContent
+    ).toContain('WebSocket closed with code 1006');
 
     cleanup();
     container!.replaceChildren();
     setState('sessionStatus', 'session-1', { type: 'idle' });
     cleanup = render(() => MessageList(), container!);
     expect(notice()?.textContent).toContain('Recovered after an automatic retry. Work continued.');
-    expect(notice()?.querySelector('pre')?.textContent).toContain('provider.transport');
+    expect(
+      notice()?.querySelector('.assistant-message-flow-item-error-details')?.textContent
+    ).toContain('provider.transport');
     frames.restore();
   });
 });
