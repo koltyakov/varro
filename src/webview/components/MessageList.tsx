@@ -5127,11 +5127,26 @@ export function MessageList() {
         return;
       }
 
+      const currentReserve = untrack(appendBottomReserve);
+      if (
+        containerRef.scrollTop <= 0.5 &&
+        containerRef.scrollHeight - currentReserve <= containerRef.clientHeight
+      ) {
+        // A first turn that fits needs no synthetic scroll destination. Track min-height
+        // hides a small reserve, so an unreachable alignment target would accumulate on
+        // later reconciliations until empty space creates overflow.
+        appendBottomReserveTarget = 0;
+        if (currentReserve > 0.5) setAppendBottomReserve(0);
+        pendingNewTurnMessageId = null;
+        performScroll({ force: true, immediate: true });
+        startFollowLoop(sessionId);
+        return;
+      }
+
       const containerRect = containerRef.getBoundingClientRect();
       const offset =
         card.getBoundingClientRect().top - containerRect.top - getMessageJumpTopInset();
       const targetScrollTop = Math.max(0, containerRef.scrollTop + offset);
-      const currentReserve = untrack(appendBottomReserve);
       const unreservedBottom = Math.max(
         0,
         containerRef.scrollHeight - currentReserve - containerRef.clientHeight

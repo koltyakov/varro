@@ -308,6 +308,10 @@ Direct input acquires ownership only when it can affect the transcript:
   enough trailing reserve to make that destination reachable. Assistant growth consumes that reserve
   while direct transcript input cancels destination settling. Measured appends retain their
   viewport-only transition so provisional row reconciliation cannot create a large jump.
+- A first turn that already fits at scroll position zero keeps that position without an alignment
+  reserve. Track `min-height` can hide a small unreachable target, and repeated reconciliation then
+  accumulates blank reserve until the scrollbar appears. `scroll-short-transcript.spec.ts` covers
+  the native first send, its initial settling, and subsequent activity every frame.
 - Send-time composer collapse eases its held minimum height over 220 ms. Before each shrinking frame,
   reserve only the scroll-range shortfall at the current painted scroll position. Reserving the whole
   height delta makes bottom-follow chase temporary space and leaves an unnecessary trailing reserve.
