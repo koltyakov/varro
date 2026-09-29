@@ -73,3 +73,20 @@ export function shouldShowPlanImplementationAction(args: {
   const session = state.sessions.find((item) => item.id === args.info.sessionID);
   return !session || !isSkippedPlanSession(args.info.sessionID, session.time.updated);
 }
+
+export function shouldShowPlanSkippedNotice(args: {
+  info: Message;
+  latestPlanImplementationMessageId: string | null;
+}): boolean {
+  if (
+    !isAssistantMessage(args.info) ||
+    !isPlanningAssistantMessage(args.info) ||
+    !!args.info.error ||
+    args.info.id !== args.latestPlanImplementationMessageId
+  ) {
+    return false;
+  }
+
+  const session = state.sessions.find((item) => item.id === args.info.sessionID);
+  return !!session && isSkippedPlanSession(args.info.sessionID, session.time.updated);
+}

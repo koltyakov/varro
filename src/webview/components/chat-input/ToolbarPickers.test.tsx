@@ -988,53 +988,56 @@ describe('ToolbarPickers', () => {
     );
   });
 
-  it('shows model-style agent details after the right-side hover delay', async () => {
-    vi.useFakeTimers();
-    const description =
-      'Investigates the codebase and provides a detailed review without changing files';
-    cleanup = render(
-      () => (
-        <AgentPicker
-          agents={[createAgent({ name: 'reviewer', description })]}
-          selectedAgent="reviewer"
-          selectedLabel="Reviewer"
-          focusIndex={0}
-          showPicker={true}
-          getLabel={(agent) => agent.name}
-          getDetail={(agent) => agent.description ?? 'No description'}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-          onFocusIndex={vi.fn()}
-        />
-      ),
-      container!
-    );
+  it.each([
+    ['mouseenter', 'mouseleave', 1024],
+    ['focus', 'blur', 1024],
+    ['mouseenter', 'mouseleave', 200],
+    ['focus', 'blur', 200],
+  ] as const)(
+    'shows agent details immediately on %s and hides on %s at viewport width %i',
+    (showEvent, hideEvent, viewportWidth) => {
+      vi.useFakeTimers();
+      vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(viewportWidth);
+      const description =
+        'Investigates the codebase and provides a detailed review without changing files';
+      cleanup = render(
+        () => (
+          <AgentPicker
+            agents={[createAgent({ name: 'reviewer', description })]}
+            selectedAgent="reviewer"
+            selectedLabel="Reviewer"
+            focusIndex={0}
+            showPicker={true}
+            getLabel={(agent) => agent.name}
+            getDetail={(agent) => agent.description ?? 'No description'}
+            onToggle={vi.fn()}
+            onSelect={vi.fn()}
+            onFocusIndex={vi.fn()}
+          />
+        ),
+        container!
+      );
 
-    const option = container?.querySelector<HTMLButtonElement>(
-      '.agent-popover .toolbar-popover-item'
-    );
-    const detail = option?.querySelector<HTMLElement>('.text-vscode-muted');
-    Object.defineProperties(detail!, {
-      clientWidth: { configurable: true, value: 120 },
-      scrollWidth: { configurable: true, value: 300 },
-    });
-    option?.dispatchEvent(new MouseEvent('mouseenter'));
+      const option = container?.querySelector<HTMLButtonElement>(
+        '.agent-popover .toolbar-popover-item'
+      );
+      const detail = option?.querySelector<HTMLElement>('.text-vscode-muted');
+      Object.defineProperties(detail!, {
+        clientWidth: { configurable: true, value: 120 },
+        scrollWidth: { configurable: true, value: 300 },
+      });
+      option?.dispatchEvent(new Event(showEvent));
 
-    expect(document.querySelector('.agent-picker-details')).toBeNull();
-    vi.advanceTimersByTime(499);
-    expect(document.querySelector('.agent-picker-details')).toBeNull();
-    vi.advanceTimersByTime(1);
-    await flushMicrotasks();
+      const details = document.querySelector('.agent-picker-details');
+      expect(details?.querySelector('.agent-picker-details-description')?.textContent).toBe(
+        description
+      );
+      expect(details?.querySelector('dl')).toBeNull();
 
-    const details = document.querySelector('.agent-picker-details');
-    expect(details?.querySelector('.agent-picker-details-description')?.textContent).toBe(
-      description
-    );
-    expect(details?.querySelector('dl')).toBeNull();
-
-    option?.dispatchEvent(new MouseEvent('mouseleave'));
-    expect(document.querySelector('.agent-picker-details')).toBeNull();
-  });
+      option?.dispatchEvent(new Event(hideEvent));
+      expect(document.querySelector('.agent-picker-details')).toBeNull();
+    }
+  );
 
   it('does not show agent details when its description fits', () => {
     cleanup = render(

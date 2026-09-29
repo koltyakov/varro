@@ -16,7 +16,14 @@ import {
   isAssistantMessage,
 } from '../../lib/message-metrics';
 import { formatMessageSentTime } from '../../lib/message-time';
-import { checkIcon, clockIcon, coinsIcon, copyIcon, dollarCircleIcon } from '../../lib/ui-icons';
+import {
+  checkIcon,
+  clockIcon,
+  coinsIcon,
+  copyIcon,
+  dollarCircleIcon,
+  xmarkCircleIcon,
+} from '../../lib/ui-icons';
 import { writeClipboard } from '../../lib/write-clipboard';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type { MessageEntry, QuestionRequest, ToolPart } from '../../types';
@@ -32,6 +39,7 @@ import {
   buildPlanImplementationPrompt,
   isPlanningAssistantMessage,
   shouldShowPlanImplementationAction,
+  shouldShowPlanSkippedNotice,
 } from './plan-actions';
 import type { AssistantDialogSummaryInfo } from './assistant-dialog';
 import type { StreamingPresentation } from './streaming-presentation';
@@ -360,6 +368,11 @@ export function AssistantDialogSummaryForMessage(
         info: props.msg.info,
         latestPlanImplementationMessageId: props.latestPlanImplementationMessageId,
       })}
+      showPlanSkippedNotice={shouldShowPlanSkippedNotice({
+        info: props.msg.info,
+        latestPlanImplementationMessageId: props.latestPlanImplementationMessageId,
+      })}
+      hasBuildAgent={props.hasBuildAgent}
       onImplementPlan={() =>
         void implementPlan(buildPlanImplementationPrompt(props.msg.parts), props.msg.info.sessionID)
       }
@@ -407,6 +420,8 @@ function AssistantDialogSummary(props: {
   pause?: SessionPause;
   messageId: string;
   showImplementPlanAction?: boolean;
+  showPlanSkippedNotice?: boolean;
+  hasBuildAgent?: boolean;
   onOpenPlan?: () => void;
   onImplementPlan?: () => void;
   onSkipPlan?: () => void;
@@ -651,6 +666,37 @@ function AssistantDialogSummary(props: {
           >
             <span>Skip for now</span>
           </button>
+        </div>
+      </Show>
+      <Show when={props.showPlanSkippedNotice}>
+        <div
+          class="assistant-dialog-summary-plan-skipped"
+          tabindex={props.hasBuildAgent ? 0 : undefined}
+        >
+          <span class="assistant-dialog-summary-plan-skipped-label" role="status">
+            <UiIcon source={xmarkCircleIcon} width={14} height={14} />
+            Plan skipped
+          </span>
+          <Show when={props.hasBuildAgent}>
+            <div class="assistant-dialog-summary-plan-skipped-actions">
+              <button
+                type="button"
+                class="assistant-dialog-summary-action assistant-dialog-summary-action-open question-btn"
+                disabled={isLoading()}
+                onClick={() => props.onOpenPlan?.()}
+              >
+                <span>Open plan</span>
+              </button>
+              <button
+                type="button"
+                class="assistant-dialog-summary-action assistant-dialog-summary-action-implement question-btn"
+                disabled={isLoading()}
+                onClick={() => props.onImplementPlan?.()}
+              >
+                <span>Implement the plan</span>
+              </button>
+            </div>
+          </Show>
         </div>
       </Show>
     </div>

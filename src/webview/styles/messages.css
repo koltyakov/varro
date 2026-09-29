@@ -1443,7 +1443,10 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   margin-top: 0;
 }
 
-.model-change-indicator.assistant-dialog-summary:has(.assistant-dialog-summary-actions) {
+.model-change-indicator.assistant-dialog-summary:has(
+    .assistant-dialog-summary-actions,
+    .assistant-dialog-summary-plan-skipped
+  ) {
   height: auto;
 }
 
@@ -1619,6 +1622,39 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   flex-direction: row;
   margin-top: 8px;
   width: 100%;
+}
+
+.assistant-dialog-summary-plan-skipped {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 26px;
+  margin-top: 8px;
+  width: 100%;
+  color: var(--color-vscode-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.assistant-dialog-summary-plan-skipped-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assistant-dialog-summary-plan-skipped-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+  visibility: hidden;
+}
+
+.assistant-dialog-summary-plan-skipped:hover .assistant-dialog-summary-plan-skipped-actions,
+.assistant-dialog-summary-plan-skipped:focus-within .assistant-dialog-summary-plan-skipped-actions {
+  visibility: visible;
 }
 
 .question-btn.assistant-dialog-summary-action {

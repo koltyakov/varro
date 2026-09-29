@@ -157,23 +157,73 @@ test('implementing a plan sends the build prompt', async ({ page }) => {
   });
 });
 
-test('skipping a plan hides the plan actions', async ({ page }) => {
+test('skipping a plan replaces the plan actions with a confirmation', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
 
   await page.getByRole('button', { name: 'Skip for now' }).click();
 
-  await expect(page.getByRole('button', { name: 'Open plan' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Implement the plan' })).toHaveCount(0);
+  await page.mouse.move(0, 0);
+  await expect(page.getByRole('button', { name: 'Open plan' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Implement the plan' })).toBeHidden();
+  await expect(page.locator('.assistant-dialog-summary-plan-skipped-label')).toHaveText(
+    'Plan skipped'
+  );
 });
 
 test('keeps skipped plan actions hidden after reload', async ({ page }) => {
+  // Reload must retain the same plan revision rather than regenerate a newer session timestamp.
+  await page.clock.setFixedTime(new Date('2026-09-29T12:00:00Z'));
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
 
   await page.getByRole('button', { name: 'Skip for now' }).click();
-  await expect(page.getByRole('button', { name: 'Open plan' })).toHaveCount(0);
+  await page.mouse.move(0, 0);
+  await expect(page.getByRole('button', { name: 'Open plan' })).toBeHidden();
 
   await page.reload();
 
-  await expect(page.getByRole('button', { name: 'Open plan' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Implement the plan' })).toHaveCount(0);
+  await expect(page.locator('.assistant-dialog-summary-plan-skipped-label')).toHaveText(
+    'Plan skipped'
+  );
+  await expect(page.getByRole('button', { name: 'Open plan' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Implement the plan' })).toBeHidden();
+});
+
+test('skipped plan actions appear on hover and keyboard focus without moving the row', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=plan-ready');
+  await page.getByRole('button', { name: 'Skip for now' }).click();
+  await page.mouse.move(0, 0);
+
+  const row = page.locator('.assistant-dialog-summary-plan-skipped');
+  const open = row.getByRole('button', { name: 'Open plan' });
+  const implement = row.getByRole('button', { name: 'Implement the plan' });
+  await expect(open).toBeHidden();
+  const before = await row.boundingBox();
+  await row.hover();
+  await expect(open).toBeVisible();
+  await expect(implement).toBeVisible();
+  expect(await row.boundingBox()).toEqual(before);
+  await open.click();
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (window as Window & { __varroE2E?: { planOpenRequests: string[] } })
+          .__varroE2E;
+        return value?.planOpenRequests.length ?? 0;
+      })
+    )
+    .toBe(1);
+
+  await page.mouse.move(0, 0);
+  await page.getByRole('textbox', { name: 'Message composer' }).click();
+  await expect(open).toBeHidden();
+  await row.focus();
+  await expect(open).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(open).toBeFocused();
+  await implement.click();
+  await expect(page.locator('.plan-implementation-action')).toHaveText('Implement the plan');
+  await expect(row).toHaveCount(0);
+  await expect(page.locator('.assistant-dialog-summary-plan-skipped-actions')).toHaveCount(0);
 });
