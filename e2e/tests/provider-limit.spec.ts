@@ -53,7 +53,10 @@ test('provider limit popup expands OpenAI usage-limit reset details', async ({ p
   await expect(page.getByRole('button', { name: 'Use reset' })).toHaveCount(0);
 
   const usageLink = page.getByRole('link', { name: 'ChatGPT Usage' });
-  await expect(usageLink).toHaveAttribute('href', 'https://chatgpt.com/#settings/Usage');
+  await expect(usageLink).toHaveAttribute(
+    'href',
+    'https://chatgpt.com/settings/usage?tab=overview'
+  );
   await usageLink.click();
   await expect
     .poll(() =>
@@ -66,7 +69,7 @@ test('provider limit popup expands OpenAI usage-limit reset details', async ({ p
         return value?.externalUrls?.[0] || null;
       })
     )
-    .toBe('https://chatgpt.com/#settings/Usage');
+    .toBe('https://chatgpt.com/settings/usage?tab=overview');
 });
 
 test('provider limit chip is absent for scenarios without a rate-limited provider', async ({

@@ -1,4 +1,29 @@
 import type { Locator, Page } from '@playwright/test';
+import { expect } from '@playwright/test';
+
+export async function selectConversationTurn(page: Page, turnNumber: number) {
+  const rail = page.getByRole('navigation', { name: 'Conversation turns' });
+  await expect(rail).toBeVisible();
+  const target = rail.getByRole('button', { name: new RegExp(`^Go to turn ${turnNumber}:`) });
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (await target.count()) {
+      await target.click();
+      return;
+    }
+    const first = rail.locator('.turn-navigation-marker').first();
+    const label = await first.getAttribute('aria-label');
+    const firstNumber = Number(label?.match(/^Go to turn (\d+):/)?.[1]);
+    if (!Number.isFinite(firstNumber)) throw new Error(`Invalid turn navigation label: ${label}`);
+    const direction = rail.getByRole('button', {
+      name: firstNumber > turnNumber ? 'Earlier turns' : 'Later turns',
+      exact: true,
+    });
+    await expect(direction).toBeEnabled();
+    await direction.click();
+    await expect(first).not.toHaveAttribute('aria-label', label!);
+  }
+  throw new Error(`Turn ${turnNumber} was not found after paging the navigation rail 20 times`);
+}
 
 export interface VisibleMessageAnchor {
   id: string;
