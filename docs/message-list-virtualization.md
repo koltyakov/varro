@@ -555,8 +555,8 @@ Direct input acquires ownership only when it can affect the transcript:
   and its steering messages as `1.1`, `1.2`, etc.; the next ordinary turn is `2`. Reset the steering
   ordinal at each new turn, and carry turn identities and ordinals across transcript segments and
   prefetched history. Automatic user entries do not consume numbers or split a group. The left
-  navigation has one dot per turn and targets its original prompt; each steering bubble retains its
-  own message identity for sticky previews. Steering badges remain muted, including image captions.
+  navigation has one dot per turn and targets its original prompt. Only original turn prompts receive
+  sticky previews; steering messages never replace them. Steering badges remain muted, including image captions.
 - The navigation rail keeps fixed-size dots within its available height, using earlier/later controls
   when the full set does not fit. Keep visible groups in the displayed navigation window.
   Wheel and trackpad input over an overflowing rail move its dot window, with delta-mode normalization
@@ -571,7 +571,8 @@ Direct input acquires ownership only when it can affect the transcript:
 - A sticky prompt is a derived overlay for a real user message. Its message ID must remain the sole
   navigation identity.
 - Automatic notices and child-session handoffs do not end that prompt. If one is the first visible
-  row, retain the preceding real prompt; collision checks consider mounted user-message cards only.
+  row, retain the preceding real prompt; collision checks consider mounted turn-start cards only.
+  Steering cards never hide the sticky prompt, even when they overlap it.
 - Navigation aligns the real `.user-message-card`, not an estimated row position or attachment
   summary.
 - The destination uses the same top gap as the sticky box.
@@ -618,7 +619,7 @@ Direct input acquires ownership only when it can affect the transcript:
 - Row-local actions and adjacency derive from the same visible message collection as the renderer.
   Hidden child-session messages must not change the visible parent's Retry action, latest plan action,
   model transition, or preceding file-event context.
-- Steering bubbles use neutral request colors, including image-text bubbles and sticky previews.
+- Steering bubbles use neutral request colors, including image-text bubbles.
   Retain explicit delivery mode in new V2 prompt metadata; infer it from the session's unfinished turn
   for older history, continuing that classification across history segments. Queued follow-ups after
   a terminal response remain ordinary prompts. Delivered

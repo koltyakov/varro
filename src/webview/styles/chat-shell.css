@@ -898,6 +898,7 @@ input:focus-visible {
     var(--color-vscode-widget-bg)
   );
   --color-vscode-request-border: var(--color-vscode-border);
+  border-color: transparent;
 }
 
 .user-message-card.user-message-card-wrapperless {

@@ -63,6 +63,41 @@ installMessageListTestEnvironment({
 });
 
 describe('getStickyUserMessagePreview', () => {
+  it.each([2, 3])(
+    'keeps the turn prompt when steering or its response is visible at %s',
+    (index) => {
+      const messages: MessageEntry[] = [
+        { info: userMessage('turn-1'), parts: [textPart('prompt', 'Original prompt')] },
+        {
+          info: assistantMessage('assistant-1', { time: { created: 2 } }),
+          parts: [],
+        },
+        {
+          info: { ...userMessage('steer-1'), time: { created: 3 } },
+          parts: [textPart('steer', 'Steered instruction')],
+        },
+        { info: assistantMessage('assistant-2', { parentID: 'steer-1' }), parts: [] },
+      ];
+
+      expect(getStickyUserMessagePreview(messages, index)?.id).toBe('turn-1');
+    }
+  );
+
+  it('does not make an explicit steer sticky when its turn prompt is unloaded', () => {
+    expect(
+      getStickyUserMessagePreview(
+        [
+          {
+            info: { ...userMessage('steer-1'), delivery: 'steer' },
+            parts: [textPart('steer', 'Steered instruction')],
+          },
+          { info: assistantMessage('assistant-1', { parentID: 'steer-1' }), parts: [] },
+        ],
+        1
+      )
+    ).toBeNull();
+  });
+
   it.each(['notice', 'compaction'] as const)(
     'keeps the real prompt when a %s is the first visible row',
     (kind) => {
@@ -2207,7 +2242,7 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
-  it.each(['notice', 'compaction'] as const)(
+  it.each(['notice', 'compaction', 'steer', 'legacy steer'] as const)(
     'does not hide the sticky prompt when a %s crosses the overlay',
     async (kind) => {
       const animationFrames = installQueuedAnimationFrameMocks();
@@ -2215,23 +2250,31 @@ describe('MessageList sticky prompt preview', () => {
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('prompt-text', 'Run the tests')] },
         {
-          info: assistantMessage('assistant-1'),
+          info: assistantMessage(
+            'assistant-1',
+            kind === 'legacy steer' ? { time: { created: 1 } } : undefined
+          ),
           parts: [textPart('answer-text', 'Running tests')],
         },
         {
-          info: userMessage('notice-1'),
+          info: {
+            ...userMessage('notice-1'),
+            ...(kind === 'steer' ? { delivery: 'steer' as const } : {}),
+          },
           parts:
             kind === 'notice'
               ? [textPart('notice-text', 'Background command completed', { synthetic: true })]
-              : [
-                  {
-                    id: 'compaction',
-                    messageID: 'notice-1',
-                    sessionID: 'session-1',
-                    type: 'compaction',
-                    auto: true,
-                  },
-                ],
+              : kind === 'compaction'
+                ? [
+                    {
+                      id: 'compaction',
+                      messageID: 'notice-1',
+                      sessionID: 'session-1',
+                      type: 'compaction',
+                      auto: true,
+                    },
+                  ]
+                : [textPart('steer-text', 'Steered instruction')],
         },
         { info: assistantMessage('assistant-2'), parts: [textPart('result-text', 'Tests passed')] },
       ]);
@@ -2255,7 +2298,7 @@ describe('MessageList sticky prompt preview', () => {
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
       Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 2_000 });
       Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 600 });
-      for (const top of [200, 20, -20]) {
+      for (const top of [200, 20, -20, 20, 200]) {
         noticeTop = top;
         list.scrollTop = 800 - top;
         list.dispatchEvent(new Event('scroll'));

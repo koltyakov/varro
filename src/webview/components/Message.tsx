@@ -216,8 +216,9 @@ export function Message(props: {
     !!props.showSentTimestamp ||
     (isUserMessageHoverActive() && hoverTimestampMessageId() === props.info.id);
   const notifyUserMessageHoverChange = (hovering: boolean) => {
-    if (isUser()) props.onTurnHoverChange?.(props.info.id, hovering);
-    else props.onResponseHoverChange?.(props.info.id, hovering);
+    if (isUser()) {
+      if (!isSteeringMessage()) props.onTurnHoverChange?.(props.info.id, hovering);
+    } else props.onResponseHoverChange?.(props.info.id, hovering);
     if (hoverIntentTimer) {
       clearTimeout(hoverIntentTimer);
       hoverIntentTimer = undefined;
@@ -258,8 +259,9 @@ export function Message(props: {
     if (hoverIntentTimer) clearTimeout(hoverIntentTimer);
     if (timestampTransitionTimer) clearTimeout(timestampTransitionTimer);
     if (hoveredUserMessageId) onUserMessageHoverChange?.(hoveredUserMessageId, false);
-    if (isUser()) props.onTurnHoverChange?.(props.info.id, false);
-    else props.onResponseHoverChange?.(props.info.id, false);
+    if (isUser()) {
+      if (!isSteeringMessage()) props.onTurnHoverChange?.(props.info.id, false);
+    } else props.onResponseHoverChange?.(props.info.id, false);
   });
   const sentTimestamp = createMemo(() => formatMessageSentTime(props.info.time.created));
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
@@ -658,11 +660,6 @@ export function Message(props: {
                   : assistantContainerClass()
               } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
               onClick={handleUserCardClick}
-              title={
-                isSteeringMessage()
-                  ? 'Steering message. Sent instructions cannot be edited.'
-                  : undefined
-              }
               onMouseEnter={() => notifyUserMessageHoverChange(true)}
               onMouseLeave={() => notifyUserMessageHoverChange(false)}
             >

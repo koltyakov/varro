@@ -1974,6 +1974,7 @@ describe('Message user editing', () => {
   it.each([false, true])(
     'renders delivered steering as read-only with attachments=%s',
     (withImage) => {
+      const onTurnHoverChange = vi.fn();
       setAppState('activeSessionId', 'session-1');
       setAppState('sessionStatus', {});
       const parts: Part[] = [textPart('steer-text', 'Change direction')];
@@ -1987,13 +1988,15 @@ describe('Message user editing', () => {
           url: 'data:image/png;base64,test',
         });
       cleanup = render(
-        () => Message({ info: userMessage('steer'), parts, steering: true }),
+        () => Message({ info: userMessage('steer'), parts, steering: true, onTurnHoverChange }),
         container!
       );
       const card = container!.querySelector<HTMLElement>('.user-message-card')!;
       expect(card.classList).toContain('user-message-steering');
       expect(card.classList).not.toContain('user-message-card-editable');
-      expect(card.title).toContain('cannot be edited');
+      expect(card.hasAttribute('title')).toBe(false);
+      card.dispatchEvent(new MouseEvent('mouseenter'));
+      expect(onTurnHoverChange).not.toHaveBeenCalled();
       card.click();
       expect(editingMessage()).toBeNull();
       if (withImage) expect(card.querySelector('.user-message-image-text-bubble')).not.toBeNull();
