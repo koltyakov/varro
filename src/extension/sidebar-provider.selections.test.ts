@@ -94,7 +94,7 @@ describe('session selection metadata', () => {
     const model = { providerID: 'openai', modelID: 'new-model' };
     await provider.handleMessage({
       type: 'session-model/update',
-      payload: { sessionId: 'session-1', model },
+      payload: { sessionId: 'session-1', model, selectionId: 'model-selection-1' },
     });
     finishRead?.(oldSession);
     await pending;
@@ -102,7 +102,10 @@ describe('session selection metadata', () => {
       posted.filter((message) => asRecord(message)?.type === 'session-models/sync').at(-1)
     ).toEqual({
       type: 'session-models/sync',
-      payload: { models: { 'session-1': model } },
+      payload: {
+        models: { 'session-1': model },
+        acknowledgement: { sessionId: 'session-1', selectionId: 'model-selection-1' },
+      },
     });
     // A later authoritative change from another client must still be restored.
     session = { ...oldSession, time: { created: 1, updated: 4 } };

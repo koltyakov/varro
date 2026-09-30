@@ -541,10 +541,10 @@ test('Windows status discovery requires one matching listener and database owner
     platform: 'win32',
   };
   const evidence = { listeners: [listener], databaseOwners: [123] };
-  const execute = async (command, args, options) => {
+  const execute = async (command, args, executionOptions) => {
     if (command === 'netstat.exe') {
       assert.deepEqual(args, ['-ano']);
-      assert.equal(options.timeout, 5_000);
+      assert.equal(executionOptions.timeout, 5_000);
       return {
         stdout: evidence.listeners
           .map(
@@ -555,7 +555,7 @@ test('Windows status discovery requires one matching listener and database owner
       };
     }
     assert.equal(command, 'powershell.exe');
-    assert.equal(options.timeout, 90_000);
+    assert.equal(executionOptions.timeout, 90_000);
     assert.ok(args.includes('-NonInteractive'));
     assert.equal(args.at(-1), await realpath(f.sourceDatabase));
     return { stdout: JSON.stringify({ databaseOwners: evidence.databaseOwners }) };

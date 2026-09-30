@@ -2699,6 +2699,7 @@ describe('header status badges', () => {
   it.each([false, true])(
     'marks only filtered completed sessions as read with desktop layout %s',
     async (desktopLayout) => {
+      const warn = vi.spyOn(console, 'warn');
       desktopMediaQueryMatches = desktopLayout;
       const future = Date.now() + 10_000;
       const send = vi.fn<(message: WebviewMessage) => void>();
@@ -2769,6 +2770,7 @@ describe('header status badges', () => {
         expect(container?.querySelector('[aria-label="Mark all as read"]')).not.toBeNull();
         sessionStore.markSessionSeen('completed-1', future + 1_000);
         expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
+        expect(warn).not.toHaveBeenCalled();
       } finally {
         bridgeWindow.__sendToExtension = previousSend;
       }
@@ -2776,6 +2778,7 @@ describe('header status badges', () => {
   );
 
   it('marks plans as read without skipping them', async () => {
+    const warn = vi.spyOn(console, 'warn');
     setState('sessions', [session('plan-1', 400), session('plan-2', 300), session('other', 200)]);
     setState('sessionSelectedAgents', { 'plan-1': 'plan', 'plan-2': 'plan' });
     setShowSessionPicker(true);
@@ -2792,9 +2795,11 @@ describe('header status badges', () => {
     expect(state.skippedPlanSessions['plan-2']).toBeUndefined();
     expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
     expect(container?.querySelectorAll('.session-item')).toHaveLength(2);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('acknowledges child failures without clearing failure status', async () => {
+    const warn = vi.spyOn(console, 'warn');
     const failedAt = Date.now() + 10_000;
     setState('sessions', [
       session('root', 400),
@@ -2817,6 +2822,7 @@ describe('header status badges', () => {
     expect(state.failedSessionIds).toEqual(['child', 'failed']);
     expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
     expect(container?.querySelectorAll('.session-item')).toHaveLength(2);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('does not offer mark all as read for pending questions', async () => {

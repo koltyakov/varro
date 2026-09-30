@@ -1148,8 +1148,9 @@ function ModelCatalogDialog(props: { provider: ModelProvider; onClose: () => voi
       );
     }
 
-    const selected = selectedModelIDs();
-    return models.toSorted((a, b) => Number(selected.has(b.id)) - Number(selected.has(a.id)));
+    return models.toSorted(
+      (a, b) => Number(initialModelIDs.has(b.id)) - Number(initialModelIDs.has(a.id))
+    );
   });
   const visibleModels = createMemo(() => matchingModels().slice(0, MODEL_CATALOG_RESULT_LIMIT));
   let searchInputRef: HTMLInputElement | undefined;
@@ -1166,13 +1167,13 @@ function ModelCatalogDialog(props: { provider: ModelProvider; onClose: () => voi
         if (!refreshedProvider) {
           throw new Error(`${props.provider.name} is no longer available`);
         }
-        setCatalogProvider(refreshedProvider);
         if (!isLargeModelCatalog(refreshedProvider)) {
           for (const model of getListedProviderModels(refreshedProvider)) {
             initialModelIDs.add(model.id);
           }
           setSelectedModelIDs(new Set(initialModelIDs));
         }
+        setCatalogProvider(refreshedProvider);
         setState(
           'providers',
           state.providers.map((provider) =>

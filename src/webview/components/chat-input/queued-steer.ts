@@ -2,6 +2,9 @@ import { createSignal } from 'solid-js';
 import {
   claimQueuedMessageDispatch,
   getSelectedModelForSession,
+  getSelectedAgentForSession,
+  isActiveSessionWorking,
+  isSessionTreeStatusWorking,
   ownsQueuedMessage,
   releaseQueuedMessageDispatch,
   removeQueuedMessage,
@@ -15,6 +18,25 @@ import { createOpenCodeMessageID } from '../../../shared/opencode-id';
 import { queuedMessageWasAdmitted } from './queued-message-history';
 import type { ChatModelSelection, QueuedContextSnapshot } from '../../../shared/protocol';
 import type { Provider } from '../../types';
+import { matchesActiveTurnSelection } from './active-turn-selection';
+
+export function canSteerQueuedMessage(
+  item: Pick<(typeof state.queuedMessages)[number], 'sessionId' | 'agent' | 'queuedContext'>
+) {
+  const busy =
+    item.sessionId === state.activeSessionId
+      ? isActiveSessionWorking()
+      : isSessionTreeStatusWorking(item.sessionId);
+  if (!busy) return true;
+  return matchesActiveTurnSelection(
+    state.messages,
+    item.sessionId,
+    item.agent ?? getSelectedAgentForSession(item.sessionId) ?? state.selectedAgent,
+    item.queuedContext?.editorContext.queuedModel?.selection ??
+      getSelectedModelForSession(item.sessionId) ??
+      state.selectedModel
+  );
+}
 
 const [steeringQueuedMessageIds, setSteeringQueuedMessageIds] = createSignal<ReadonlySet<string>>(
   new Set()
@@ -142,6 +164,7 @@ export function acceptQueuedSteer(sessionId: string, promptText: string | null) 
 
 export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[number]) {
   if (!ownsQueuedMessage(item)) return;
+  if (!canSteerQueuedMessage(item)) return;
   if (state.messagesLoading && state.activeSessionId === item.sessionId) return;
   if (steeringQueuedMessageIds().has(item.id)) return;
   updateQueuedSteerId(setSteeringQueuedMessageIds, item.id, true);
@@ -172,6 +195,7 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
     dispatchLease = await claimQueuedMessageDispatch(item, 'steer');
     if (dispatchLease === null) return;
     if (state.messagesLoading && state.activeSessionId === item.sessionId) return;
+    if (!canSteerQueuedMessage(item)) return;
     sent = await sendWithQueuedModelSnapshot(item, async (selectedModel) => {
       const options: NonNullable<Parameters<typeof sendMessage>[1]> & {
         selectedModel?: ChatModelSelection;

@@ -373,7 +373,14 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message?.payload);
       const sessionId = payload?.sessionId;
       if (!isSafePersistedSessionId(sessionId)) return null;
-      if (payload?.model === null) return { type, payload: { sessionId, model: null } };
+      const selectionId =
+        payload?.selectionId === undefined
+          ? undefined
+          : getBoundedString(payload.selectionId, MAX_RALPH_ID_LENGTH);
+      if (payload?.selectionId !== undefined && !selectionId) return null;
+      const acknowledgement = selectionId ? { selectionId } : {};
+      if (payload?.model === null)
+        return { type, payload: { sessionId, model: null, ...acknowledgement } };
       const model = asRecord(payload?.model);
       const providerID = getBoundedString(model?.providerID, MAX_RALPH_ID_LENGTH);
       const modelID = getBoundedString(model?.modelID, MAX_RALPH_ID_LENGTH);
@@ -388,6 +395,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         payload: {
           sessionId,
           model: variant ? { providerID, modelID, variant } : { providerID, modelID },
+          ...acknowledgement,
         },
       };
     }

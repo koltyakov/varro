@@ -401,6 +401,67 @@ describe('ModelsPanel', () => {
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.addedModels)!)).toEqual([]);
   });
 
+  it.each([3, 51])(
+    'keeps a %i-model catalog in its opening order until saved and reopened',
+    async (count) => {
+      const models = createModels(count);
+      setState('providers', [{ id: 'openai', name: 'OpenAI', source: 'api', models }]);
+      setState('addedModels', ['openai:*', 'openai:model-1']);
+      setState(
+        'removedModels',
+        Object.keys(models)
+          .filter((id) => id !== 'model-1')
+          .map((id) => `openai:${id}`)
+      );
+      cleanup = render(() => ModelsPanel(), container!);
+
+      const openCatalog = async () => {
+        findButton(container, 'Add models')?.click();
+        await Promise.resolve();
+        await Promise.resolve();
+        const dialog = document.body.querySelector<HTMLElement>('.models-model-catalog-dialog')!;
+        const search = dialog.querySelector<HTMLInputElement>(
+          '[aria-label="Search OpenAI models"]'
+        )!;
+        search.value = 'Model ';
+        search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+        return dialog;
+      };
+      const rows = (dialog: HTMLElement) =>
+        Array.from(dialog.querySelectorAll<HTMLElement>('.models-model-catalog-row'));
+      const checkbox = (dialog: HTMLElement, id: string) =>
+        rows(dialog)
+          .find((row) => row.querySelector('.models-model-catalog-id')?.textContent === `(${id})`)!
+          .querySelector<HTMLInputElement>('input')!;
+
+      const dialog = await openCatalog();
+      const openingRows = rows(dialog);
+      expect(openingRows[0]?.querySelector('.models-model-catalog-id')?.textContent).toBe(
+        '(model-1)'
+      );
+      expect(checkbox(dialog, 'model-1').checked).toBe(true);
+      expect(checkbox(dialog, 'model-2').checked).toBe(false);
+
+      checkbox(dialog, 'model-1').click();
+      expect(rows(dialog)).toEqual(openingRows);
+      expect(checkbox(dialog, 'model-1').checked).toBe(false);
+      checkbox(dialog, 'model-2').click();
+      expect(rows(dialog)).toEqual(openingRows);
+      expect(checkbox(dialog, 'model-2').checked).toBe(true);
+      expect(dialog.textContent).toContain('2 unsaved changes');
+
+      findButton(dialog, 'Save changes')?.click();
+      expect(document.body.querySelector('.models-model-catalog-dialog')).toBeNull();
+      const reopenedDialog = await openCatalog();
+      expect(rows(reopenedDialog)[0]?.querySelector('.models-model-catalog-id')?.textContent).toBe(
+        '(model-2)'
+      );
+      expect(checkbox(reopenedDialog, 'model-2').checked).toBe(true);
+      expect(checkbox(reopenedDialog, 'model-1').checked).toBe(false);
+      expect(findButton(reopenedDialog, 'Save changes')?.disabled).toBe(true);
+    }
+  );
+
   it('discards pending model catalog changes when cancelled', async () => {
     const template = {
       capabilities: { toolcall: true },
@@ -495,6 +556,9 @@ describe('ModelsPanel', () => {
         ?.querySelector<HTMLInputElement>('input');
     expect(checkbox('new-model')?.checked).toBe(true);
     expect(checkbox('gpt-5-mini')?.checked).toBe(false);
+    expect(rows.at(-1)?.querySelector('.models-model-catalog-id')?.textContent).toBe(
+      '(gpt-5-mini)'
+    );
     expect(findButton(dialog, 'Save changes')?.disabled).toBe(true);
   });
 

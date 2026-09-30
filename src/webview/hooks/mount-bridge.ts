@@ -432,7 +432,7 @@ export function handleExtensionMessageWithDependencies(
       deps.permissionModesSynced?.();
       break;
     case 'session-models/sync':
-      applySessionSelectedModelsSnapshot(msg.payload.models);
+      applySessionSelectedModelsSnapshot(msg.payload.models, msg.payload.acknowledgement);
       break;
     case 'session-plan-state/sync':
       for (const [sessionId, skippedAt] of Object.entries(msg.payload.state)) {

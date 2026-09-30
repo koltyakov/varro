@@ -528,7 +528,31 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
             : { providerID: model.providerID, modelID: model.modelID },
         ]);
       }
-      return { type, payload: { models: Object.fromEntries(entries) } };
+      const acknowledgement = asRecord(payload?.acknowledgement);
+      if (payload?.acknowledgement !== undefined) {
+        if (
+          !acknowledgement ||
+          !isSafePersistedSessionId(acknowledgement.sessionId) ||
+          !isString(acknowledgement.selectionId)
+        )
+          return null;
+        return {
+          type,
+          payload: {
+            models: Object.fromEntries(entries),
+            acknowledgement: {
+              sessionId: acknowledgement.sessionId,
+              selectionId: acknowledgement.selectionId,
+            },
+          },
+        };
+      }
+      return {
+        type,
+        payload: {
+          models: Object.fromEntries(entries),
+        },
+      };
     }
 
     case 'session-plan-state/sync': {

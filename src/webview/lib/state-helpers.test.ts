@@ -1490,6 +1490,53 @@ describe('state helpers', () => {
     });
   });
 
+  it('keeps local model choices until the latest selection is acknowledged', async () => {
+    const stateModule = await loadState();
+    stateModule.setState('activeSessionId', 'session-1');
+    const model = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
+    const older = { ...model, variant: 'medium' };
+    stateModule.setSelectedModel(model, { sessionId: 'session-1', selectionId: 'first' });
+    stateModule.setSelectedModel(older, { sessionId: 'session-1', selectionId: 'second' });
+    stateModule.setSelectedModel(model, { sessionId: 'session-1', selectionId: 'latest' });
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': older, 'session-2': older });
+    expect(stateModule.state.selectedModel).toEqual(model);
+    expect(stateModule.getSelectedModelForSession('session-2')).toEqual(older);
+    stateModule.applySessionSelectedModelsSnapshot(
+      { 'session-1': older },
+      { sessionId: 'session-1', selectionId: 'first' }
+    );
+    expect(stateModule.state.selectedModel).toEqual(model);
+    stateModule.applySessionSelectedModelsSnapshot(
+      { 'session-1': model },
+      { sessionId: 'session-1', selectionId: 'latest' }
+    );
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': older });
+    expect(stateModule.state.selectedModel).toEqual(older);
+  });
+
+  it('preserves acknowledged composer selections through active-turn snapshots and hydration', async () => {
+    const stateModule = await loadState();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+    const selected = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'xhigh' };
+    const running = { ...selected, variant: 'high' };
+    stateModule.setSelectedModel({ ...selected }, { sessionId: 'session-1', selectionId: 'local' });
+    stateModule.applySessionSelectedModelsSnapshot(
+      { 'session-1': selected },
+      { sessionId: 'session-1', selectionId: 'local' }
+    );
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': running });
+    expect(stateModule.state.selectedModel).toEqual(selected);
+    expect(stateModule.getSelectedModelForSession('session-1')).toEqual(selected);
+    stateModule.setSelectedModel(running, { sessionId: 'session-1', persistGlobal: false });
+    expect(stateModule.state.selectedModel).toEqual(selected);
+    stateModule.setSelectedModel(running, { persistGlobal: false });
+    expect(stateModule.state.selectedModel).toEqual(selected);
+    stateModule.setState('sessionStatus', 'session-1', { type: 'idle' });
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': running });
+    expect(stateModule.state.selectedModel).toEqual(running);
+  });
+
   it('does not apply a session model snapshot to the new-chat composer', async () => {
     const stateModule = await loadState();
     const draftModel = { providerID: 'openai', modelID: 'gpt-5.6-sol' };

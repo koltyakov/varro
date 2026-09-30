@@ -617,6 +617,11 @@
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-accent) 10%, transparent);
 }
 
+.toolbar-picker:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .toolbar-picker.plan-agent-selected {
   --plan-picker-color: color-mix(
     in srgb,
@@ -644,29 +649,20 @@
 
 .toolbar-picker.maximum-reasoning-selected,
 .toolbar-picker.fast-model-selected {
-  border-color: color-mix(
-    in srgb,
-    var(--color-vscode-error) 34%,
-    var(--color-vscode-border-default)
-  );
-  background: color-mix(in srgb, var(--color-vscode-error) 10%, var(--color-vscode-input-surface));
+  background: color-mix(in srgb, var(--color-vscode-error) 5%, var(--color-vscode-input-surface));
 }
 
 .toolbar-picker.maximum-reasoning-selected:hover,
 .toolbar-picker.maximum-reasoning-selected[aria-expanded='true'],
 .toolbar-picker.fast-model-selected:hover,
 .toolbar-picker.fast-model-selected[aria-expanded='true'] {
-  border-color: color-mix(
-    in srgb,
-    var(--color-vscode-error) 46%,
-    var(--color-vscode-border-strong)
-  );
+  border-color: var(--color-vscode-border-strong);
   background: color-mix(
     in srgb,
-    var(--color-vscode-error) 15%,
+    var(--color-vscode-error) 7%,
     var(--color-vscode-input-surface-hover)
   );
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-error) 10%, transparent);
+  box-shadow: none;
 }
 
 .model-selection-cost-warning {
@@ -1411,7 +1407,8 @@
   color: var(--color-vscode-muted);
 }
 
-.model-picker-tooltip {
+.model-picker-tooltip,
+.reasoning-picker-tooltip {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1419,6 +1416,12 @@
 
 .model-picker-tooltip-detail {
   color: var(--color-vscode-muted);
+}
+
+.toolbar-picker-tooltip-separator {
+  width: 100%;
+  border-top: 1px solid var(--color-vscode-border-strong);
+  margin: 3px 0;
 }
 
 .toolbar-popover-item {

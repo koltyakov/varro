@@ -9,10 +9,25 @@ import { postMessage } from './bridge';
 import { providerRequiresReconnection } from './provider-connection-state';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 import { writeStoredSelectedModelForWorkspace } from './state-stored-values';
+import { isActiveSessionWorking, isSessionTreeStatusWorking } from './state-session-lifecycle';
 
 export const LARGE_MODEL_CATALOG_THRESHOLD = 50;
 const MANAGED_MODEL_CATALOG_MARKER = '*';
 const pendingAgentSelections = new Map<string, string>();
+const pendingModelSelections = new Map<string, string>();
+const activeTurnComposerModels = new Map<string, SelectedModel>();
+
+function getActiveTurnComposerModel(sessionId: string) {
+  const working =
+    sessionId === state.activeSessionId
+      ? isActiveSessionWorking()
+      : isSessionTreeStatusWorking(sessionId);
+  if (!working) {
+    activeTurnComposerModels.delete(sessionId);
+    return null;
+  }
+  return activeTurnComposerModels.get(sessionId) ?? null;
+}
 
 export function getSelectedModelForSession(
   sessionId: string | null | undefined
@@ -57,10 +72,20 @@ export function setSelectedModel(
     sessionId?: string | null;
     persistGlobal?: boolean;
     rememberVariant?: string | null;
+    selectionId?: string;
   }
 ) {
   const persistGlobal = options?.persistGlobal ?? true;
   const sessionId = options?.sessionId;
+  if (sessionId && options?.selectionId) pendingModelSelections.set(sessionId, options.selectionId);
+  if (sessionId) {
+    const activeTurnModel = getActiveTurnComposerModel(sessionId);
+    if (options?.selectionId && model) activeTurnComposerModels.set(sessionId, { ...model });
+    else if (!persistGlobal && activeTurnModel) model = { ...activeTurnModel };
+  } else if (!persistGlobal && !showSessionPicker() && state.activeSessionId) {
+    const activeTurnModel = getActiveTurnComposerModel(state.activeSessionId);
+    if (activeTurnModel) model = { ...activeTurnModel };
+  }
   const currentSessionModel = sessionId ? state.sessionSelectedModels[sessionId] : undefined;
   const previousSessionModel: SelectedModel | null = currentSessionModel
     ? { ...currentSessionModel }
@@ -104,6 +129,8 @@ export function setSelectedModel(
 }
 
 export function clearSelectedModelForSession(sessionId: string) {
+  pendingModelSelections.delete(sessionId);
+  activeTurnComposerModels.delete(sessionId);
   if (!state.sessionSelectedModels[sessionId]) return;
   setState(
     'sessionSelectedModels',
@@ -114,7 +141,27 @@ export function clearSelectedModelForSession(sessionId: string) {
   writeStored(STORAGE_KEYS.sessionSelectedModels, { ...state.sessionSelectedModels });
 }
 
-export function applySessionSelectedModelsSnapshot(models: Record<string, SelectedModel>) {
+export function applySessionSelectedModelsSnapshot(
+  models: Record<string, SelectedModel>,
+  acknowledgement?: { sessionId: string; selectionId: string }
+) {
+  if (
+    acknowledgement &&
+    pendingModelSelections.get(acknowledgement.sessionId) === acknowledgement.selectionId
+  ) {
+    pendingModelSelections.delete(acknowledgement.sessionId);
+  }
+  models = { ...models };
+  // Session metadata describes the running turn, not the next composer choice.
+  // Keep a local choice through streaming snapshots even after its write is acknowledged.
+  for (const sessionId of activeTurnComposerModels.keys()) {
+    const selected = getActiveTurnComposerModel(sessionId);
+    if (selected) models[sessionId] = { ...selected };
+  }
+  for (const sessionId of pendingModelSelections.keys()) {
+    const pending = state.sessionSelectedModels[sessionId];
+    if (pending) models[sessionId] = { ...pending };
+  }
   if (!selectedModelRecordsEqual(state.sessionSelectedModels, models)) {
     setState('sessionSelectedModels', reconcile(models));
     writeStored(STORAGE_KEYS.sessionSelectedModels, models);
