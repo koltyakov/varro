@@ -1246,50 +1246,60 @@ describe('sendMessage', () => {
     expect(stateModule.getSelectedModelForSession('session-2')).toBeNull();
   });
 
-  it('restores the active turn agent when switching back to a busy session', async () => {
-    const { stateModule, hookModule } = await loadModules();
+  it.each([
+    { selection: 'persisted', publishHost: false, expectedAgent: 'build' },
+    { selection: 'pending', publishHost: true, expectedAgent: 'plan' },
+  ])(
+    'reconciles the $selection agent choice when switching back to a busy session',
+    async ({ publishHost, expectedAgent }) => {
+      const { stateModule, hookModule } = await loadModules();
 
-    stateModule.setState('agents', [
-      {
-        name: 'build',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-      {
-        name: 'plan',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-    ]);
-    stateModule.setSelectedAgent('build');
-    stateModule.setSelectedAgent('plan', { sessionId: 'session-1', persistGlobal: false });
-
-    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
-    clientMocks.sessionMessages.mockResolvedValue([
-      {
-        info: {
-          id: 'user-1',
-          sessionID: 'session-1',
-          role: 'user',
-          time: { created: 0 },
-          agent: 'build',
-          model: { providerID: 'openai', modelID: 'gpt-4o' },
+      stateModule.setState('agents', [
+        {
+          name: 'build',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
         },
-        parts: [],
-      },
-    ]);
-    clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'busy' } });
+        {
+          name: 'plan',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
+        },
+      ]);
+      stateModule.setSelectedAgent('build');
+      stateModule.setSelectedAgent('plan', {
+        sessionId: 'session-1',
+        persistGlobal: false,
+        publishHost,
+      });
 
-    await hookModule.selectSession('session-1');
+      clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+      clientMocks.sessionMessages.mockResolvedValue([
+        {
+          info: {
+            id: 'user-1',
+            sessionID: 'session-1',
+            role: 'user',
+            time: { created: 0 },
+            agent: 'build',
+            model: { providerID: 'openai', modelID: 'gpt-4o' },
+          },
+          parts: [],
+        },
+      ]);
+      clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'busy' } });
 
-    expect(stateModule.state.selectedAgent).toBe('build');
-    expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
-    expect(stateModule.getPersistedSelectedAgent()).toBe('build');
-  });
+      await hookModule.selectSession('session-1');
+
+      expect(stateModule.state.selectedAgent).toBe(expectedAgent);
+      expect(stateModule.getSelectedAgentForSession('session-1')).toBe(expectedAgent);
+      expect(stateModule.getPersistedSelectedAgent()).toBe('build');
+    }
+  );
 
   it('preserves the next-turn agent after the previous turn has settled', async () => {
     const { stateModule, hookModule } = await loadModules();

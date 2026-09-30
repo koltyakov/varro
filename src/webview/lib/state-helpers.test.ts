@@ -1740,6 +1740,63 @@ describe('state helpers', () => {
     }
   });
 
+  it('keeps a pending agent choice when session loading applies older metadata', async () => {
+    const stateModule = await loadState();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setSelectedAgent('build', { sessionId: 'session-1' });
+
+    stateModule.setSelectedAgent('ask', {
+      sessionId: 'session-1',
+      persistGlobal: false,
+      publishHost: false,
+    });
+
+    expect(stateModule.state.selectedAgent).toBe('build');
+    expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
+  });
+
+  it('preserves an acknowledged composer agent through active-turn metadata updates', async () => {
+    const stateModule = await loadState();
+    const { syncSessionAgent } = await import('../hooks/session/session-event-utils');
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+    const sent: unknown[] = [];
+    const bridgeWindow = getTestBridgeWindow();
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    try {
+      stateModule.setSelectedAgent('build', { sessionId: 'session-1' });
+      const selection = sent
+        .map(parseExtensionMessage)
+        .find((message) => message?.type === 'session-plan-state/update');
+      const selectionId = selection?.payload.selectionId;
+      if (!selectionId) throw new Error('Missing selection acknowledgement id');
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'build', selectionId);
+
+      syncSessionAgent({ id: 'session-1', agent: 'ask' });
+      stateModule.hydrateSessionSelectedAgents({ 'session-1': 'ask', 'session-2': 'plan' });
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
+      stateModule.setSelectedAgent('ask', {
+        sessionId: 'session-1',
+        persistGlobal: false,
+        publishHost: false,
+      });
+      expect(stateModule.state.selectedAgent).toBe('build');
+      expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
+      expect(stateModule.getSelectedAgentForSession('session-2')).toBe('plan');
+
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'plan', 'another-webview');
+      expect(stateModule.state.selectedAgent).toBe('plan');
+      stateModule.hydrateSessionSelectedAgents({ 'session-1': 'ask' });
+      expect(stateModule.getSelectedAgentForSession('session-1')).toBe('plan');
+
+      stateModule.setState('sessionStatus', 'session-1', { type: 'idle' });
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
+      expect(stateModule.state.selectedAgent).toBe('ask');
+    } finally {
+      delete bridgeWindow.__sendToExtension;
+    }
+  });
+
   it('releases agent synchronization after a failed selection write', async () => {
     const stateModule = await loadState();
     stateModule.setState('activeSessionId', 'session-1');

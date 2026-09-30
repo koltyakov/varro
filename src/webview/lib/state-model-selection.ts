@@ -16,6 +16,17 @@ const MANAGED_MODEL_CATALOG_MARKER = '*';
 const pendingAgentSelections = new Map<string, string>();
 const pendingModelSelections = new Map<string, string>();
 const activeTurnComposerModels = new Map<string, SelectedModel>();
+const activeTurnComposerAgents = new Map<string, string>();
+
+function getProtectedSessionAgent(sessionId: string) {
+  if (pendingAgentSelections.has(sessionId)) return state.sessionSelectedAgents[sessionId];
+  const working =
+    sessionId === state.activeSessionId
+      ? isActiveSessionWorking()
+      : isSessionTreeStatusWorking(sessionId);
+  if (!working) activeTurnComposerAgents.delete(sessionId);
+  return activeTurnComposerAgents.get(sessionId);
+}
 
 function getActiveTurnComposerModel(sessionId: string) {
   const working =
@@ -229,6 +240,15 @@ export function setSelectedAgent(
 ) {
   const persistGlobal = options?.persistGlobal ?? true;
   const sessionId = options?.sessionId;
+  const selectionId =
+    sessionId && agent && options?.publishHost !== false ? crypto.randomUUID() : undefined;
+  if (sessionId && selectionId && agent) {
+    pendingAgentSelections.set(sessionId, selectionId);
+    activeTurnComposerAgents.set(sessionId, agent);
+  } else if (sessionId && options?.publishHost === false) {
+    // Loaded metadata describes the running turn, not a newer composer choice.
+    agent = getProtectedSessionAgent(sessionId) ?? agent;
+  }
   const previousSessionAgent = sessionId ? state.sessionSelectedAgents[sessionId] : undefined;
 
   if (options?.updateSelection !== false && state.selectedAgent !== agent) {
@@ -253,9 +273,7 @@ export function setSelectedAgent(
       }
       writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...state.sessionSelectedAgents });
     }
-    if (agent && options?.publishHost !== false) {
-      const selectionId = crypto.randomUUID();
-      pendingAgentSelections.set(sessionId, selectionId);
+    if (agent && selectionId) {
       postMessage({
         type: 'session-plan-state/update',
         payload: { sessionId, agent, selectionId },
@@ -268,7 +286,7 @@ export function hydrateSessionSelectedAgents(agents: Record<string, string>) {
   const nextAgents = { ...state.sessionSelectedAgents };
   let changed = false;
   for (const [sessionId, agent] of Object.entries(agents)) {
-    if (pendingAgentSelections.has(sessionId)) continue;
+    if (getProtectedSessionAgent(sessionId)) continue;
     if (nextAgents[sessionId] === agent) continue;
     nextAgents[sessionId] = agent;
     changed = true;
@@ -289,7 +307,15 @@ export function applySessionSelectedAgentUpdate(
   const pending = pendingAgentSelections.get(sessionId);
   if (pending && pending !== selectionId) return;
   pendingAgentSelections.delete(sessionId);
-  if (agent === undefined) return;
+  if (agent === undefined) {
+    activeTurnComposerAgents.delete(sessionId);
+    return;
+  }
+  // Explicit writes from another view remain authoritative. Unversioned snapshots
+  // must not replace a choice made while the current turn is still running.
+  if (selectionId && activeTurnComposerAgents.has(sessionId)) {
+    activeTurnComposerAgents.set(sessionId, agent);
+  }
   setSelectedAgent(agent, {
     sessionId,
     persistGlobal: false,
@@ -300,6 +326,7 @@ export function applySessionSelectedAgentUpdate(
 
 export function clearSelectedAgentForSession(sessionId: string) {
   pendingAgentSelections.delete(sessionId);
+  activeTurnComposerAgents.delete(sessionId);
   if (!state.sessionSelectedAgents[sessionId]) return;
   setState(
     'sessionSelectedAgents',
