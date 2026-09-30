@@ -277,7 +277,8 @@ describe('MessageList prompt numbers', () => {
     expect(firstDot.classList.contains('is-hovered')).toBe(false);
     const bubble = steer.querySelector('.user-message-card')!;
     bubble.dispatchEvent(new MouseEvent('mouseenter'));
-    expect(firstDot.classList).toContain('is-hovered');
+    expect(firstDot.classList.contains('is-hovered')).toBe(false);
+    expect(container!.querySelector('.interactive-item-turn-hovered')).toBeNull();
     bubble.dispatchEvent(new MouseEvent('mouseleave'));
     expect(firstDot.classList.contains('is-hovered')).toBe(false);
   });
