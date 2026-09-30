@@ -49,6 +49,80 @@ installMessageListTestEnvironment({
 });
 
 describe('MessageList auto-scroll', () => {
+  it.each([
+    { enabled: true, detached: false, interrupted: false },
+    { enabled: false, detached: false, interrupted: false },
+    { enabled: true, detached: true, interrupted: false },
+    { enabled: false, detached: true, interrupted: false },
+    { enabled: true, detached: false, interrupted: true },
+    { enabled: false, detached: false, interrupted: true },
+  ])(
+    'reconciles diff view immediately with enabled=$enabled, detached=$detached, interrupted=$interrupted',
+    async ({ enabled, detached, interrupted }) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      let height = enabled ? 1200 : 2400;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          this.classList.contains('interactive-list-track') ? height : 400
+        );
+      });
+      setShowFileDiffs(!enabled);
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+      expect(list.scrollTop).toBe(height - 400);
+      if (detached) {
+        list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        list.scrollTop = 200;
+        list.dispatchEvent(new Event('scroll'));
+      }
+
+      height = enabled ? 2400 : 1200;
+      setShowFileDiffs(enabled);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(list.scrollTop).toBe(detached ? 200 : height - 400);
+      expect(container?.querySelector('.append-scroll-bottom-reserve')).toBeNull();
+      if (interrupted) {
+        list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        list.scrollTop = 200;
+        list.dispatchEvent(new Event('scroll'));
+      }
+      for (let frame = 0; frame < 4; frame += 1) animationFrames.flush();
+      if (interrupted) expect(list.scrollTop).toBe(200);
+
+      const previousTop = list.scrollTop;
+      height += 200;
+      startLoading();
+      await Promise.resolve();
+      animationFrames.flush();
+      if (detached || interrupted) {
+        expect(list.scrollTop).toBe(previousTop);
+      } else {
+        expect(list.scrollTop).toBeGreaterThanOrEqual(previousTop);
+        expect(list.scrollTop).toBeLessThan(height - 400);
+        settleBottomFollow(animationFrames, list);
+        expect(list.scrollTop).toBe(height - 400);
+      }
+      animationFrames.restore();
+    }
+  );
+
   it('positions initial layout corrections immediately after the first stable frame', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let height = 1200;

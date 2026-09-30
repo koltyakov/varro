@@ -119,6 +119,10 @@ the shared invariants below remain true.
   state, and any future lightweight rendering mode.
 - An unmounted height invalidated by a view change becomes provisional. It must not remain marked as
   an exact measurement from the old view.
+- Toggling inline file diffs while bottom-follow owns the viewport positions at the new physical bottom
+  before paint, without streaming easing or retaining removed content as trailing reserve. Bounded
+  settling covers virtual row hydration and yields to direct input, session replacement, editing, and
+  diff focus. Detached readers keep their visible anchor instead of returning to latest.
 - Width reflow owns a stable visible message captured before the first changed-height batch is
   applied. Deferring prefix publication must not make later resize batches classify rows against an
   already-adjusted `scrollTop` and stale prefixes.

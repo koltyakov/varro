@@ -1901,6 +1901,7 @@ export function MessageList() {
   );
   let previousInlinePreviewLayoutSignatures = new Map<string, string>();
   let previousCompactActivityLayoutSignatures = new Map<string, string>();
+  let inlinePreviewBottomFollow: { sessionId: string; inputEpoch: number } | null = null;
   // Bootstrap exact heights once, then keep virtualization active as new rows arrive. Newly added
   // rows use provisional heights until mounted instead of remounting the full transcript.
   const shouldMeasureRows = createMemo(() => messages().length >= VIRTUALIZE_THRESHOLD);
@@ -2086,6 +2087,70 @@ export function MessageList() {
     scheduleChangedLayoutRowMeasurements(previousInlinePreviewLayoutSignatures, current);
 
     previousInlinePreviewLayoutSignatures = new Map(current);
+  });
+
+  createEffect((previous: boolean | undefined) => {
+    const enabled = showFileDiffs();
+    if (previous === undefined || previous === enabled) return enabled;
+    untrack(() => {
+      const sessionId = state.activeSessionId;
+      if (
+        !sessionId ||
+        !autoScroll() ||
+        editingMessage() ||
+        diffFocusPauseActive ||
+        stickyNavigationOwnsScroll() ||
+        pointerScrollOwnershipActive
+      )
+        return;
+
+      const owner = { sessionId, inputEpoch: directScrollInputEpoch };
+      inlinePreviewBottomFollow = owner;
+      let frameId = 0;
+      let attempts = 0;
+      let stableFrames = 0;
+      let previousHeight = -1;
+      const settle = () => {
+        frameId = 0;
+        if (
+          disposed ||
+          inlinePreviewBottomFollow !== owner ||
+          state.activeSessionId !== sessionId ||
+          directScrollInputEpoch !== owner.inputEpoch ||
+          !autoScroll() ||
+          editingMessage() ||
+          diffFocusPauseActive ||
+          stickyNavigationOwnsScroll() ||
+          pointerScrollOwnershipActive
+        ) {
+          if (inlinePreviewBottomFollow === owner) inlinePreviewBottomFollow = null;
+          return;
+        }
+        // View replacement should use its new physical bottom, not retain disappearing content.
+        clearActivityExitReserve();
+        appendBottomReserveTarget = 0;
+        setAppendBottomReserve(0);
+        performScroll({ force: true, immediate: true });
+        const height = containerRef?.scrollHeight ?? 0;
+        stableFrames =
+          height === previousHeight && distanceFromBottom() <= 1 ? stableFrames + 1 : 0;
+        previousHeight = height;
+        attempts += 1;
+        if (stableFrames >= 2 || attempts >= 12) {
+          inlinePreviewBottomFollow = null;
+          startFollowLoop(sessionId);
+          return;
+        }
+        frameId = requestAnimationFrame(settle);
+      };
+      // Let the preference's DOM replacement and row measurements finish before positioning.
+      queueMicrotask(settle);
+      onCleanup(() => {
+        if (frameId) cancelAnimationFrame(frameId);
+        if (inlinePreviewBottomFollow === owner) inlinePreviewBottomFollow = null;
+      });
+    });
+    return enabled;
   });
 
   function invalidateChangedZeroHeightRows(
@@ -4862,6 +4927,10 @@ export function MessageList() {
     // and browser clamp corrections still synchronize immediately.
     const smooth =
       !options?.immediate &&
+      !(
+        inlinePreviewBottomFollow?.sessionId === state.activeSessionId &&
+        inlinePreviewBottomFollow?.inputEpoch === directScrollInputEpoch
+      ) &&
       bottomScrollTop() > lastAutoScrolledBottomScrollTop + 1 &&
       !userScrollRecentlyActive() &&
       !reducedMotion() &&

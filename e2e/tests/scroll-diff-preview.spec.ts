@@ -116,6 +116,9 @@ test.describe('diff preview anchoring', () => {
         );
         const messageId = `message-diff-preview-assistant-${turnCount - 1}`;
         await updateDiffPreview(page, messageId, 12, true);
+        await expect(page.locator(`[data-msg-id="${messageId}"] .file-change-card`)).toHaveCount(
+          12
+        );
         const setDiffView = async (showFileDiffs: boolean) =>
           page.evaluate((value) => {
             window.postMessage(
