@@ -24,11 +24,11 @@ test('live tests cannot silently select production or a redirect-capable remote 
   assert.equal(testServerOrigin('http://127.0.0.1:49001/'), 'http://127.0.0.1:49001');
 });
 
-// Five native ownership probes can each take up to 30 seconds on Windows.
+// Five native ownership probes each allow 90 seconds for Restart Manager on Windows.
 test(
   'requires a distinct test database held by the actual listener and rejects production aliases',
   {
-    timeout: process.platform === 'win32' ? 180_000 : 60_000,
+    timeout: process.platform === 'win32' ? 480_000 : 60_000,
   },
   async (t) => {
     const temporary = await mkdtemp(path.join(os.tmpdir(), 'test-isolation-'));

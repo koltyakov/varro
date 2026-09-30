@@ -64,7 +64,4 @@ public static class VarroDatabaseOwners {
 
 # Read-only ownership inspection. Never call Restart Manager shutdown/restart APIs.
 $owners = @([VarroDatabaseOwners]::Read($Database))
-$listeners = @(Get-NetTCPConnection -State Listen | ForEach-Object {
-  @{ address = $_.LocalAddress; port = $_.LocalPort; pid = $_.OwningProcess }
-})
-@{ databaseOwners = $owners; listeners = $listeners } | ConvertTo-Json -Depth 3 -Compress
+@{ databaseOwners = $owners } | ConvertTo-Json -Depth 3 -Compress

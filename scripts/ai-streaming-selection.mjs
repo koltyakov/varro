@@ -26,6 +26,41 @@ const WEIGHTS = {
 };
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
+async function readWindowsOwnership(database, execute) {
+  const { stdout } = await execute('netstat.exe', ['-ano'], { timeout: 5_000 }).catch((error) => {
+    throw new Error(`Cannot inspect Windows TCP listener ownership: ${error.message}`);
+  });
+  const listeners = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const columns = line.trim().split(/\s+/);
+    if (columns[0] !== 'TCP' || columns[3] !== 'LISTENING') continue;
+    const address = /^(?:\[([^\]]+)\]|([^:]+)):(\d+)$/.exec(columns[1]);
+    if (!address || columns.length !== 5 || !/^\d+$/.test(columns[4])) {
+      throw new Error('Invalid Windows listener ownership evidence');
+    }
+    listeners.push({
+      address: address[1] ?? address[2],
+      port: Number(address[3]),
+      pid: Number(columns[4]),
+    });
+  }
+  const ownership = await execute(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-File',
+      fileURLToPath(new URL('./windows-database-ownership.ps1', import.meta.url)),
+      '-Database',
+      database,
+    ],
+    { timeout: 90_000 }
+  ).catch((error) => {
+    throw new Error(`Cannot inspect Windows Restart Manager database ownership: ${error.message}`);
+  });
+  return { ...JSON.parse(ownership.stdout), listeners };
+}
+
 function hasForeignSessionReference(value, sessionId) {
   if (!value || typeof value !== 'object') return false;
   return Object.entries(value).some(([key, child]) =>
@@ -65,24 +100,7 @@ export async function readActiveSessions(
   }
   const canonicalDatabase = await realpath(sourceDatabase);
   const windows =
-    platform === 'win32'
-      ? JSON.parse(
-          (
-            await execute(
-              'powershell.exe',
-              [
-                '-NoProfile',
-                '-NonInteractive',
-                '-File',
-                fileURLToPath(new URL('./windows-database-ownership.ps1', import.meta.url)),
-                '-Database',
-                canonicalDatabase,
-              ],
-              { timeout: 30_000 }
-            )
-          ).stdout
-        )
-      : undefined;
+    platform === 'win32' ? await readWindowsOwnership(canonicalDatabase, execute) : undefined;
   const { stdout } = windows
     ? { stdout: '' }
     : await execute(
