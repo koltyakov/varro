@@ -4382,6 +4382,8 @@ export function MessageList() {
       Number.isFinite(maxVisibleItems) &&
       remainingItems.length > maxVisibleItems
     ) {
+      // The tray keeps its height; a held thumb must not gain a target that pulls it back.
+      if (pointerScrollOwnershipActive) return;
       preserveCurrentBottomTarget();
       const target = activityExitBottomTarget;
       requestAnimationFrame(() => {
@@ -4442,6 +4444,10 @@ export function MessageList() {
       }
     }
     if (reserve <= 0.5) return;
+    if (pointerScrollOwnershipActive) {
+      reserveHeldScrollbarRange(reserve);
+      return;
+    }
 
     preserveCurrentBottomTarget();
     captureActivityExitSummaryAnchor();
@@ -4621,6 +4627,10 @@ export function MessageList() {
     options?: { captureSummary?: boolean }
   ) {
     if (!containerRef || reserve <= 0.5) return;
+    if (pointerScrollOwnershipActive) {
+      reserveHeldScrollbarRange(reserve);
+      return;
+    }
 
     const collapseTarget =
       targetScrollTop ??
@@ -4815,7 +4825,8 @@ export function MessageList() {
         }
       }
     }
-    if (animated) {
+    if (pointerScrollOwnershipActive) reserveHeldScrollbarRange(reserve);
+    else if (animated) {
       activityExitBottomTarget ??= containerRef.scrollTop;
       captureActivityExitSummaryAnchor();
       if (activityExitSummaryAnchor) {
@@ -4824,6 +4835,16 @@ export function MessageList() {
       }
       setActivityExitBottomReserve((current) => current + reserve);
     } else reserveBottomCollapseSpace(reserve);
+  }
+
+  // A held thumb owns scrolling, and a downward drag leaves bottom-follow pinned. Keep only the
+  // range a collapse removes: an exit target or summary anchor armed here would capture the grab
+  // position and restore it against the drag, then again after release.
+  function reserveHeldScrollbarRange(reserve: number) {
+    // At the top, removed flow content cannot clamp the thumb backward.
+    if (!containerRef || reserve <= 0.5 || containerRef.scrollTop <= 0) return;
+    appendBottomReserveTarget = Math.max(appendBottomReserveTarget, containerRef.scrollTop);
+    setAppendBottomReserve((current) => current + reserve);
   }
 
   function clearActivityExitReserve() {

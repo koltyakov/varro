@@ -251,6 +251,15 @@ the shared invariants below remain true.
   A layout-driven bottom scroll event during that gesture must not recapture the exit anchor.
   `scroll-scrollbar-activity.spec.ts` uses native thumb drags during and after collapse, then checks
   detached streaming and explicit return to latest.
+- While the thumb is held, tray exits, grouped activity, and other bottom collapses must not arm an
+  exit target, summary anchor, or collapse settle. A downward drag is not upward intent, so
+  bottom-follow stays pinned and every arming check still passes. An owner armed then captures the
+  grab position, restores it against the thumb on each frame and track mutation, and snaps back after
+  release (issue #35). Keep only the range the collapse removes, as append reserve at the current
+  position. The same trap applies to any new bottom-pinned owner: pinned bookkeeping is not evidence
+  that the viewport is at the physical bottom while an owner freezes the bottom target.
+  `scroll-scrollbar-activity.spec.ts` drags down from a held exit with growth below it while tools keep
+  finishing, then checks every held frame and the frames after release for reversal.
 - Non-append insertion, removal, filtering, or view replacement may use a bounded structural owner.
   Capture before publishing the changed visible collection and restore after row reconciliation only
   when no stronger owner exists. Pure appends belong to bottom-follow or append-transition ownership.
@@ -267,7 +276,7 @@ The effective ownership order is:
 | Expansion anchoring | expanding a disclosure or diff | outer wheel, transcript keyboard, touch/scrollbar/pointer movement, or expiry |
 | Structural reconciliation | non-append visible collection change | direct movement, stronger owner, session/order change, or bounded completion |
 | Width resize | changed row inline size or container font | direct movement, structural change, navigation, or settled publication |
-| Activity exit reserve | a bottom-pinned compact activity begins exiting | direct user movement, session change, transition cancellation, or completion |
+| Activity exit reserve | a bottom-pinned compact activity begins exiting, never under a held scrollbar thumb | direct user movement, session change, transition cancellation, or completion |
 | Bottom follow | initial load, send, or explicit jump to latest | upward user movement, sticky navigation, editing, or expansion ownership |
 
 Direct input acquires ownership only when it can affect the transcript:
