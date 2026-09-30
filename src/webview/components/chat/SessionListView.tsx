@@ -1362,7 +1362,7 @@ export function SessionListView(props: {
           }
         });
     props.onMarkAllReadChange?.(
-      unreadSessions.length > 0
+      unreadSessions.length >= 2
         ? () => {
             batch(() => {
               for (const session of unreadSessions) {

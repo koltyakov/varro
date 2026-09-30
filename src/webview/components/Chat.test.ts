@@ -2737,6 +2737,12 @@ describe('header status badges', () => {
           '[aria-label="Mark all as read"]'
         );
         expect(markAllRead).toBeInstanceOf(HTMLButtonElement);
+        expect(markAllRead!.textContent?.trim()).toBe('Mark all as read');
+        expect(header?.querySelector('.chat-header-filter-chip')?.nextElementSibling).toBe(
+          markAllRead
+        );
+        expect(markAllRead!.closest('.chat-header-left')).not.toBeNull();
+        expect(markAllRead!.querySelector('.ui-icon')).toBeNull();
         markAllRead!.click();
 
         expect(state.lastSeenSessions['completed-1']).toBeGreaterThanOrEqual(future + 500);
@@ -2758,7 +2764,11 @@ describe('header status badges', () => {
         }
 
         setState('completedSessionResponses', 'completed-1', future + 1_000);
+        expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
+        setState('completedSessionResponses', 'completed-2', future + 1_000);
         expect(container?.querySelector('[aria-label="Mark all as read"]')).not.toBeNull();
+        sessionStore.markSessionSeen('completed-1', future + 1_000);
+        expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
       } finally {
         bridgeWindow.__sendToExtension = previousSend;
       }
@@ -2827,6 +2837,33 @@ describe('header status badges', () => {
     expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
     expect(state.questions).toEqual(questions);
   });
+
+  it.each(['plan-ready', 'failed'])(
+    'hides mark all as read with one unread session in the %s filter',
+    async (filter) => {
+      setState('sessions', [session('first', 400), session('second', 300)]);
+      if (filter === 'plan-ready') {
+        setState('sessionSelectedAgents', { first: 'plan', second: 'plan' });
+      } else {
+        setState('failedSessionIds', ['first', 'second']);
+        setState('failedSessionUpdatedAt', { first: 400, second: 300 });
+      }
+      setShowSessionPicker(true);
+      cleanup = render(() => Chat(), container!);
+      container
+        ?.querySelector<HTMLButtonElement>(
+          filter === 'plan-ready' ? '.chat-header-plan-badge' : '.chat-header-failed-badge'
+        )!
+        .click();
+      await Promise.resolve();
+      expect(container?.querySelector('[aria-label="Mark all as read"]')).not.toBeNull();
+
+      sessionStore.markSessionSeen('first');
+
+      expect(container?.querySelectorAll('.session-item')).toHaveLength(2);
+      expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
+    }
+  );
 
   it('opens completed sessions when the desktop sidebar badge only counts the active session', async () => {
     setState('sessions', [session('active-completed', 500), session('other', 400)]);
