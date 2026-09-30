@@ -62,6 +62,15 @@ describe('getComposerHistoryAction', () => {
 });
 
 describe('createComposerHistory', () => {
+  it('records image compression as an undoable attachment change with stable identity', () => {
+    const history = createComposerHistory();
+    const original = image('one');
+    const compressed = { ...original, url: 'data:image/png;base64,compressed', size: 5 };
+    history.reset(snap('[one.png]', 9, { images: [original] }));
+    history.record(snap('[one.png]', 9, { images: [compressed] }));
+    expect(history.undo()?.images).toEqual([original]);
+    expect(history.redo()?.images).toEqual([compressed]);
+  });
   it('undoes and redoes text edits', () => {
     const history = createComposerHistory();
     history.record(snap('hello'));

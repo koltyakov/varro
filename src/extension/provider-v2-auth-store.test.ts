@@ -49,6 +49,31 @@ describe(
       expect(await readFile(path)).toEqual(before);
     });
 
+    it.each([
+      { accountID: 'account-current' },
+      { accountId: 'account-current' },
+      { accountID: 'account-current', accountId: 'account-legacy' },
+    ])('preserves the OAuth account identity from metadata %j', async (metadata) => {
+      const db = new DatabaseSync(path);
+      db.exec(
+        'CREATE TABLE credential (id TEXT, integration_id TEXT, value TEXT, active INTEGER, time_created INTEGER)'
+      );
+      db.prepare('INSERT INTO credential VALUES (?, ?, ?, ?, ?)').run(
+        'active',
+        'openai',
+        JSON.stringify({ type: 'oauth', access: 'token', metadata }),
+        1,
+        1
+      );
+      db.close();
+      const before = await readFile(path);
+
+      await expect(readOpenCodeV2AuthStore(path)).resolves.toEqual({
+        openai: { type: 'oauth', access: 'token', accountId: 'account-current' },
+      });
+      expect(await readFile(path)).toEqual(before);
+    });
+
     it('does not create a missing database', async () => {
       await expect(readOpenCodeV2AuthStore(path)).rejects.toThrow();
       await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });

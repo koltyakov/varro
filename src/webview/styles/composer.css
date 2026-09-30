@@ -2923,3 +2923,54 @@
     display: none;
   }
 }
+.chip-image-size {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 2px;
+}
+
+.chat-attachment-chip.image-size-warning,
+.interactive-session .chat-input-container .chat-attachment-chip.image-size-warning,
+.rich-composer .inline-chip.image-size-warning {
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 45%, var(--color-vscode-border));
+  background: color-mix(
+    in srgb,
+    var(--color-vscode-warning) 12%,
+    var(--color-vscode-surface-softer)
+  );
+}
+
+.image-compression-menu {
+  width: 280px;
+  min-width: 0;
+  max-width: calc(100vw - 16px);
+  max-height: none;
+  overflow: visible;
+}
+
+.image-compression-menu button span {
+  display: block;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.image-compression-menu p {
+  margin: 6px 8px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.image-compression-menu .image-compression-current {
+  color: var(--color-vscode-fg);
+}
+
+.image-compression-transparency {
+  display: block;
+}
+
+.image-compression-menu button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

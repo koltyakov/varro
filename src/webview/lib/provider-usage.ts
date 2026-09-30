@@ -3,7 +3,7 @@ export function getProviderUsageLink(
 ): { label: string; url: string } | null {
   switch (providerID) {
     case 'openai':
-      return { label: 'ChatGPT Usage', url: 'https://chatgpt.com/#settings/Usage' };
+      return { label: 'ChatGPT Usage', url: 'https://chatgpt.com/settings/usage?tab=overview' };
     case 'anthropic':
       return { label: 'Claude Usage', url: 'https://claude.ai/settings/usage' };
     case 'copilot':

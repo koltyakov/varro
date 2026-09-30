@@ -2696,6 +2696,175 @@ describe('header status badges', () => {
     expect(activeIndicator?.classList.contains('is-completed')).toBe(true);
   });
 
+  it.each([false, true])(
+    'marks only filtered completed sessions as read with desktop layout %s',
+    async (desktopLayout) => {
+      desktopMediaQueryMatches = desktopLayout;
+      const future = Date.now() + 10_000;
+      const send = vi.fn<(message: WebviewMessage) => void>();
+      // SAFETY: The fixture provides the bridge callback used by postMessage.
+      const bridgeWindow = window as {
+        __sendToExtension?: (message: WebviewMessage) => void;
+      };
+      const previousSend = bridgeWindow.__sendToExtension;
+      bridgeWindow.__sendToExtension = send;
+      try {
+        setState('sessions', [
+          session('completed-1', future),
+          session('completed-2', 300),
+          session('running', 250),
+          session('plan', 200),
+          session('child', 150, { parentID: 'completed-1' }),
+        ]);
+        setState('sessionStatus', { running: { type: 'busy' } });
+        setState('sessionSelectedAgents', { plan: 'plan' });
+        setState('completedSessionResponses', {
+          'completed-1': future + 500,
+          'completed-2': 300,
+          running: 250,
+          child: 150,
+        });
+        setShowSessionPicker(true);
+        cleanup = render(() => Chat(), container!);
+        expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
+
+        requestOpenCompletedSessions();
+        await Promise.resolve();
+        const header = container?.querySelector(
+          desktopLayout ? '.chat-session-sidebar-header' : '.interactive-session > .chat-header'
+        );
+        const markAllRead = header?.querySelector<HTMLButtonElement>(
+          '[aria-label="Mark all as read"]'
+        );
+        expect(markAllRead).toBeInstanceOf(HTMLButtonElement);
+        expect(markAllRead!.textContent?.trim()).toBe('Mark all as read');
+        expect(header?.querySelector('.chat-header-filter-chip')?.nextElementSibling).toBe(
+          markAllRead
+        );
+        expect(markAllRead!.closest('.chat-header-left')).not.toBeNull();
+        expect(markAllRead!.querySelector('.ui-icon')).toBeNull();
+        markAllRead!.click();
+
+        expect(state.lastSeenSessions['completed-1']).toBeGreaterThanOrEqual(future + 500);
+        expect(state.lastSeenSessions['completed-2']).toBeGreaterThanOrEqual(300);
+        for (const id of ['running', 'plan', 'child']) {
+          expect(state.lastSeenSessions[id]).toBeUndefined();
+        }
+        expect(state.activeSessionId).toBeNull();
+        expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
+          'Completed'
+        );
+        expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
+        expect(container?.querySelector('.session-item')).toBeNull();
+        for (const id of ['completed-1', 'completed-2']) {
+          expect(send).toHaveBeenCalledWith({
+            type: 'session-read-state/update',
+            payload: { sessionId: id, seenAt: state.lastSeenSessions[id] },
+          });
+        }
+
+        setState('completedSessionResponses', 'completed-1', future + 1_000);
+        expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
+        setState('completedSessionResponses', 'completed-2', future + 1_000);
+        expect(container?.querySelector('[aria-label="Mark all as read"]')).not.toBeNull();
+        sessionStore.markSessionSeen('completed-1', future + 1_000);
+        expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
+      } finally {
+        bridgeWindow.__sendToExtension = previousSend;
+      }
+    }
+  );
+
+  it('marks plans as read without skipping them', async () => {
+    setState('sessions', [session('plan-1', 400), session('plan-2', 300), session('other', 200)]);
+    setState('sessionSelectedAgents', { 'plan-1': 'plan', 'plan-2': 'plan' });
+    setShowSessionPicker(true);
+    cleanup = render(() => Chat(), container!);
+    container?.querySelector<HTMLButtonElement>('.chat-header-plan-badge')!.click();
+    await Promise.resolve();
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Mark all as read"]')!.click();
+
+    expect(state.lastSeenSessions['plan-1']).toBeGreaterThanOrEqual(400);
+    expect(state.lastSeenSessions['plan-2']).toBeGreaterThanOrEqual(300);
+    expect(state.lastSeenSessions.other).toBeUndefined();
+    expect(state.skippedPlanSessions['plan-1']).toBeUndefined();
+    expect(state.skippedPlanSessions['plan-2']).toBeUndefined();
+    expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
+    expect(container?.querySelectorAll('.session-item')).toHaveLength(2);
+  });
+
+  it('acknowledges child failures without clearing failure status', async () => {
+    const failedAt = Date.now() + 10_000;
+    setState('sessions', [
+      session('root', 400),
+      session('child', failedAt, { parentID: 'root' }),
+      session('failed', 300),
+      session('other', 200),
+    ]);
+    setState('failedSessionIds', ['child', 'failed']);
+    setState('failedSessionUpdatedAt', { child: failedAt, failed: 300 });
+    setShowSessionPicker(true);
+    cleanup = render(() => Chat(), container!);
+    container?.querySelector<HTMLButtonElement>('.chat-header-failed-badge')!.click();
+    await Promise.resolve();
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Mark all as read"]')!.click();
+
+    expect(state.lastSeenSessions.root).toBeGreaterThanOrEqual(failedAt);
+    expect(state.lastSeenSessions.failed).toBeGreaterThanOrEqual(300);
+    expect(state.lastSeenSessions.other).toBeUndefined();
+    expect(state.failedSessionIds).toEqual(['child', 'failed']);
+    expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
+    expect(container?.querySelectorAll('.session-item')).toHaveLength(2);
+  });
+
+  it('does not offer mark all as read for pending questions', async () => {
+    setState('sessions', [session('attention-1', 400), session('attention-2', 300)]);
+    const questions = [
+      { id: 'question-1', sessionID: 'attention-1', questions: [] },
+      { id: 'question-2', sessionID: 'attention-2', questions: [] },
+    ];
+    setState('questions', questions);
+    setShowSessionPicker(true);
+    cleanup = render(() => Chat(), container!);
+    container?.querySelector<HTMLButtonElement>('.chat-header-attention-badge')!.click();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
+      'Needs attention'
+    );
+    expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
+    expect(state.questions).toEqual(questions);
+  });
+
+  it.each(['plan-ready', 'failed'])(
+    'hides mark all as read with one unread session in the %s filter',
+    async (filter) => {
+      setState('sessions', [session('first', 400), session('second', 300)]);
+      if (filter === 'plan-ready') {
+        setState('sessionSelectedAgents', { first: 'plan', second: 'plan' });
+      } else {
+        setState('failedSessionIds', ['first', 'second']);
+        setState('failedSessionUpdatedAt', { first: 400, second: 300 });
+      }
+      setShowSessionPicker(true);
+      cleanup = render(() => Chat(), container!);
+      container
+        ?.querySelector<HTMLButtonElement>(
+          filter === 'plan-ready' ? '.chat-header-plan-badge' : '.chat-header-failed-badge'
+        )!
+        .click();
+      await Promise.resolve();
+      expect(container?.querySelector('[aria-label="Mark all as read"]')).not.toBeNull();
+
+      sessionStore.markSessionSeen('first');
+
+      expect(container?.querySelectorAll('.session-item')).toHaveLength(2);
+      expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
+    }
+  );
+
   it('opens completed sessions when the desktop sidebar badge only counts the active session', async () => {
     setState('sessions', [session('active-completed', 500), session('other', 400)]);
     setState('activeSessionId', 'active-completed');

@@ -41,6 +41,35 @@ const original: SessionMessageUser = {
 };
 
 describe('v2 pending steering history', () => {
+  it.each([undefined, 'steer', 'queue'])(
+    'retains explicit delivery metadata for %s after reload',
+    async (delivery) => {
+      const wire = vi.fn(async () => ({ data: {} }));
+      const adapter = new OpenCodeV2Adapter(wire);
+      await adapter.request('POST', '/session/ses_one/prompt_async', {
+        messageID: 'msg_sent',
+        delivery,
+        parts: [{ type: 'text', text: 'Check the timer' }],
+      });
+      expect(wire).toHaveBeenCalledWith(
+        'POST',
+        '/api/session/ses_one/prompt',
+        expect.objectContaining({
+          metadata: delivery ? { varroDelivery: delivery } : undefined,
+        }),
+        expect.anything()
+      );
+      const projected = projectV2Message(
+        { ...delivered, metadata: delivery ? { varroDelivery: delivery } : undefined },
+        'ses_one'
+      );
+      expect(projected.info.role).toBe('user');
+      if (projected.info.role === 'user') {
+        expect(projected.info.delivery).toBe(delivery);
+        expect(projected.info.pendingDelivery).toBeUndefined();
+      }
+    }
+  );
   it('restores pending prompts on reopen and keeps their identities after delivery', async () => {
     let consumed = false;
     const wire = vi.fn(async (_method: string, path: string) => {

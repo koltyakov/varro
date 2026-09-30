@@ -11,7 +11,12 @@ import {
   waitForAnimationFrames,
 } from './helpers';
 
-async function updateDiffPreview(page: Page, messageId: string, fileCount: number) {
+async function updateDiffPreview(
+  page: Page,
+  messageId: string,
+  fileCount: number,
+  completed = false
+) {
   const patchText = [
     '*** Begin Patch',
     ...Array.from({ length: fileCount }, (_, index) =>
@@ -24,7 +29,7 @@ async function updateDiffPreview(page: Page, messageId: string, fileCount: numbe
     ),
     '*** End Patch',
   ].join('\n');
-  await updateDiffPreviewWithPatch(page, messageId, patchText);
+  await updateDiffPreviewWithPatch(page, messageId, patchText, completed);
 }
 
 async function updateExpandableDiffPreview(page: Page, messageId: string) {
@@ -52,11 +57,16 @@ function makeWideDiffPatch(lineCount: number) {
   ].join('\n');
 }
 
-async function updateDiffPreviewWithPatch(page: Page, messageId: string, patchText: string) {
+async function updateDiffPreviewWithPatch(
+  page: Page,
+  messageId: string,
+  patchText: string,
+  completed = false
+) {
   const partId = `${messageId}-patch`;
 
   await page.evaluate(
-    ({ id, part, patch }) => {
+    ({ id, part, patch, complete }) => {
       const nextPart = {
         id: part,
         sessionID: 'session-diff-preview-large-transcript',
@@ -65,11 +75,12 @@ async function updateDiffPreviewWithPatch(page: Page, messageId: string, patchTe
         callID: `${part}-call`,
         tool: 'apply_patch',
         state: {
-          status: 'running' as const,
+          status: complete ? ('completed' as const) : ('running' as const),
           input: { patchText: patch },
+          output: 'Done',
           title: 'apply_patch',
           metadata: {},
-          time: { start: 1 },
+          time: { start: 1, end: complete ? 2 : undefined },
         },
       };
       const harnessWindow = window as typeof window & {
@@ -89,11 +100,105 @@ async function updateDiffPreviewWithPatch(page: Page, messageId: string, patchTe
         '*'
       );
     },
-    { id: messageId, part: partId, patch: patchText }
+    { id: messageId, part: partId, patch: patchText, complete: completed }
   );
 }
 
 test.describe('diff preview anchoring', () => {
+  for (const turnCount of [1, 60]) {
+    for (const enabled of [false, true]) {
+      test(`positions diff view immediately when ${enabled ? 'enabled' : 'disabled'} in ${turnCount} turns without trailing reserve`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 486, height: 794 });
+        await page.goto(
+          `/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1&diffPreviewTurns=${turnCount}&diffPreviewInline=0&diffPreviewCompleted=1`
+        );
+        const messageId = `message-diff-preview-assistant-${turnCount - 1}`;
+        await updateDiffPreview(page, messageId, 12, true);
+        await expect(page.locator(`[data-msg-id="${messageId}"] .file-change-card`)).toHaveCount(
+          12
+        );
+        const setDiffView = async (showFileDiffs: boolean) =>
+          page.evaluate((value) => {
+            window.postMessage(
+              {
+                type: 'config/update',
+                payload: {
+                  desktopSessionPaneSide: 'left',
+                  defaultPermissionMode: 'default',
+                  chatFontSize: 13,
+                  chatEditorFontSize: 12,
+                  chatFontFamily: 'default',
+                  showFileDiffs: value,
+                },
+              },
+              '*'
+            );
+          }, showFileDiffs);
+        await setDiffView(!enabled);
+        const preview = page.locator(`[data-msg-id="${messageId}"] .file-change-inline-diffs`);
+        await expect(preview).toHaveCount(enabled ? 0 : 1);
+        await expect
+          .poll(() =>
+            getScrollMetrics(page, '.interactive-list').then((value) => value.distanceFromBottom)
+          )
+          .toBeLessThanOrEqual(1);
+        await page.waitForTimeout(1_000);
+        await waitForAnimationFrames(page, 12);
+
+        const samples = await page.evaluate(
+          async ({ value, id }) => {
+            const list = document.querySelector<HTMLElement>('.interactive-list')!;
+            window.postMessage(
+              {
+                type: 'config/update',
+                payload: {
+                  desktopSessionPaneSide: 'left',
+                  defaultPermissionMode: 'default',
+                  chatFontSize: 13,
+                  chatEditorFontSize: 12,
+                  chatFontFamily: 'default',
+                  showFileDiffs: value,
+                },
+              },
+              '*'
+            );
+            const result: Array<{
+              visible: boolean;
+              distance: number;
+              reserve: number;
+              height: number;
+            }> = [];
+            for (let frame = 0; frame < 18; frame += 1) {
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+              result.push({
+                visible: !!list.querySelector(`[data-msg-id="${id}"] .file-change-inline-diffs`),
+                distance: list.scrollHeight - list.clientHeight - list.scrollTop,
+                height: list.scrollHeight,
+                reserve:
+                  list.querySelector<HTMLElement>('.append-scroll-bottom-reserve')?.offsetHeight ??
+                  0,
+              });
+            }
+            return result;
+          },
+          { value: enabled, id: messageId }
+        );
+        const changed = samples.filter((sample) => sample.visible === enabled);
+        expect(changed.length).toBeGreaterThan(0);
+        expect(
+          changed.every((sample) => sample.distance <= 1),
+          JSON.stringify(samples)
+        ).toBe(true);
+        expect(
+          changed.every((sample) => sample.reserve === 0),
+          JSON.stringify(samples)
+        ).toBe(true);
+      });
+    }
+  }
+
   test('upward wheel wins when a focused diff blurs before its scroll event', async ({ page }) => {
     await page.setViewportSize({ width: 486, height: 794 });
     await page.goto(

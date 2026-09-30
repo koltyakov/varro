@@ -1379,7 +1379,8 @@ export function sanitizeQueuedMessages(
   value: unknown
 ): Extract<WebviewMessage, { type: 'queued-messages/update' }>['payload']['messages'] | null {
   if (!Array.isArray(value) || value.length > 1_000) return null;
-  const withoutPdfs: unknown[] = [];
+  const withoutMedia: unknown[] = [];
+  const imagesByIndex: NonNullable<ReturnType<typeof sanitizeClipboardImages>>[] = [];
   const pdfsByIndex: Array<
     Extract<
       WebviewMessage,
@@ -1390,6 +1391,8 @@ export function sanitizeQueuedMessages(
   for (const item of value) {
     const record = asRecord(item);
     if (!record) return null;
+    const images = sanitizeClipboardImages(record.clipboardImages);
+    if (!images) return null;
     const nativePdfs = record.nativePdfs === undefined ? [] : record.nativePdfs;
     if (!Array.isArray(nativePdfs)) return null;
     const validPdfs = nativePdfs.filter(isNativePdfAttachment);
@@ -1398,10 +1401,13 @@ export function sanitizeQueuedMessages(
     if (queuedPdfBytes > MAX_NATIVE_PDF_TOTAL_BYTES) return null;
     const copy = { ...record };
     delete copy.nativePdfs;
-    withoutPdfs.push(copy);
+    // Media has its own per-attachment limits, not the aggregate JSON text budget.
+    copy.clipboardImages = [];
+    withoutMedia.push(copy);
     pdfsByIndex.push(validPdfs);
+    imagesByIndex.push(images);
   }
-  const sanitized = sanitizeApiRequestBody(withoutPdfs);
+  const sanitized = sanitizeApiRequestBody(withoutMedia);
   if (sanitized === INVALID_JSON_VALUE || !Array.isArray(sanitized)) return null;
   const messages: Extract<
     WebviewMessage,
@@ -1412,6 +1418,7 @@ export function sanitizeQueuedMessages(
     if (!record || !isValidQueuedMessageRouting(record)) return null;
     messages.push({
       ...(record as unknown as (typeof messages)[number]),
+      clipboardImages: imagesByIndex[index]!,
       nativePdfs: pdfsByIndex[index]!,
     });
   }

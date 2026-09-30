@@ -1511,6 +1511,7 @@ function createOptimisticUserMessage(
       sessionID: sessionId,
       role: 'user',
       pendingDelivery: body.delivery === 'steer' ? 'steer' : undefined,
+      delivery: body.delivery,
       time: { created },
       agent,
       model: optimisticModel,

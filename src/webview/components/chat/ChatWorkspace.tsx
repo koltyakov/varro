@@ -114,6 +114,8 @@ export function ChatWorkspace(props: {
   const [visiblePrimarySessionsCount, setVisiblePrimarySessionsCount] = createSignal(
     props.primarySessionsCount
   );
+  const [markAllRead, setMarkAllRead] = createSignal<(() => void) | null>(null);
+  const updateMarkAllRead = (action: (() => void) | null) => setMarkAllRead(() => action);
   const showActiveSessionCue = () => {
     if (!chatContentRef) return;
     const header = chatContentRef.querySelector<HTMLElement>(':scope > .chat-header-chat-desktop');
@@ -164,6 +166,7 @@ export function ChatWorkspace(props: {
         useSidebarCounts ? props.sessionSidebarRunningCount : props.runningSessionsCount
       }
       showNewChatButton
+      onMarkAllRead={props.showSessionPicker ? markAllRead() : null}
       onBack={useSidebarCounts ? props.onOpenTopLevelSidebarSessions : props.onOpenParentSession}
       onClearFilter={
         useSidebarCounts ? props.onOpenTopLevelSidebarSessions : props.onClearSessionListView
@@ -218,6 +221,7 @@ export function ChatWorkspace(props: {
         onOpenSubagents={props.onOpenSidebarSubagentSessions}
         onActiveSessionReselect={showActiveSessionCue}
         onPrimarySessionsCountChange={setVisiblePrimarySessionsCount}
+        onMarkAllReadChange={updateMarkAllRead}
       />
     </aside>
   );
@@ -342,6 +346,7 @@ export function ChatWorkspace(props: {
               subagentParentId={props.subagentParentId}
               onOpenSubagents={props.onOpenSubagentSessions}
               onPrimarySessionsCountChange={setVisiblePrimarySessionsCount}
+              onMarkAllReadChange={updateMarkAllRead}
             />
             <div class="session-list-new-session">
               <ChatInput newSession onBeforeSend={props.onSendFromPicker} />

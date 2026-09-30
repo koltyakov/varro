@@ -3,6 +3,8 @@ import type { QueuedAttachmentSnapshot } from './session-send';
 import type { UsageLimitNotice } from '../../lib/usage-limit';
 import { resolveTaskSessionId } from '../../lib/task-session';
 import { flushMessagePresentation } from '../../lib/message-list-layout';
+import { collectSteeringMessages } from '../../lib/message-steering';
+import { getSessionHistoryPromptEntries } from '../../lib/message-window';
 
 type ResolvedModel = { providerID: string; modelID: string; variant?: string };
 type SessionUsageLimitSnapshot =
@@ -162,6 +164,20 @@ export async function editMessageWithDependencies(
   );
   const target = messages[targetIndex];
   if (!target || target.info.role !== 'user' || target.info.sessionID !== sessionId) return false;
+  const loadedIds = new Set(messages.map((entry) => entry.info.id));
+  const earlier = collectSteeringMessages(
+    getSessionHistoryPromptEntries(sessionId).filter((entry) => !loadedIds.has(entry.info.id))
+  );
+  if (
+    target.info.pendingDelivery === 'steer' ||
+    target.info.delivery === 'steer' ||
+    collectSteeringMessages(messages, earlier).ids.has(messageId)
+  ) {
+    deps.setError(
+      'Sent steering messages cannot be edited. Send another steering message to correct the instruction.'
+    );
+    return false;
+  }
 
   const messagesToDelete = messages
     .slice(targetIndex)

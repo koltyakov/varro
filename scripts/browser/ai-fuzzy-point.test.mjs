@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { after as afterAll, before as beforeAll, test } from 'node:test';
 import { chromium } from '@playwright/test';
 
@@ -26,6 +25,29 @@ async function fixture(t, nested = false) {
       .interactive-list { position: absolute; inset: 20px 20px 20px 60px; overflow: auto; }
       .content { height: 4000px; }
       .anchor { height: 20px; }
+      /* Controller fixtures need a scrollable owner, independent of the paged UI. */
+      .turn-navigation {
+        position: absolute;
+        top: 50%;
+        left: 8px;
+        z-index: 10;
+        display: flex;
+        max-height: min(50%, 240px);
+        flex-direction: column;
+        align-items: center;
+        padding: 4px 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        transform: translateY(-50%);
+        scrollbar-width: none;
+      }
+      .turn-navigation-marker {
+        flex: 0 0 auto;
+        width: 12px;
+        height: 11px;
+        padding: 0;
+        border: 0;
+      }
     </style>
     <div class="interactive-list"><div class="content"><div class="anchor">Anchor</div>
       ${nested ? `<div class="turn-navigation">${markers}</div>` : ''}
@@ -33,15 +55,6 @@ async function fixture(t, nested = false) {
     </div></div>
     ${nested ? '' : `<div class="turn-navigation">${markers}</div>`}
   `);
-  await page.addStyleTag({
-    content: await readFile(
-      new URL('../../src/webview/styles/chat-shell.css', import.meta.url),
-      'utf8'
-    ),
-  });
-  await page.addStyleTag({
-    content: '.interactive-list { position: absolute; } .turn-navigation { z-index: 10; }',
-  });
   const session = await page.context().newCDPSession(page);
   const wheels = [];
   const controller = Object.create(CdpController.prototype);
@@ -78,10 +91,11 @@ test('native End returns a slightly detached transcript to bottom without a jump
     if (method === 'Input.dispatchKeyEvent') keys.push(params);
     return session.send(method, params);
   };
-  const atBottom = () => page.waitForFunction(() => {
-    const list = document.querySelector('.interactive-list');
-    return list.scrollHeight - list.clientHeight - list.scrollTop <= 2;
-  });
+  const atBottom = () =>
+    page.waitForFunction(() => {
+      const list = document.querySelector('.interactive-list');
+      return list.scrollHeight - list.clientHeight - list.scrollTop <= 2;
+    });
   assert.equal(await controller.key('.interactive-list', 'End'), true);
   await atBottom();
   assert.equal(await controller.wheel('.interactive-list', -96, 'right'), true);
@@ -93,10 +107,15 @@ test('native End returns a slightly detached transcript to bottom without a jump
   assert.equal(await page.locator('[aria-label="Scroll to latest message"]').count(), 0);
   assert.equal(await controller.key('.interactive-list', 'End'), true);
   await atBottom();
-  assert.deepEqual(keys.map(({ type, key }) => ({ type, key })), [
-    { type: 'keyDown', key: 'End' }, { type: 'keyUp', key: 'End' },
-    { type: 'keyDown', key: 'End' }, { type: 'keyUp', key: 'End' },
-  ]);
+  assert.deepEqual(
+    keys.map(({ type, key }) => ({ type, key })),
+    [
+      { type: 'keyDown', key: 'End' },
+      { type: 'keyUp', key: 'End' },
+      { type: 'keyDown', key: 'End' },
+      { type: 'keyUp', key: 'End' },
+    ]
+  );
   assert.equal(await controller.key('.interactive-list', 'Home'), true);
   await page.waitForFunction(() => document.querySelector('.interactive-list').scrollTop === 0);
   assert.equal(await controller.key('.interactive-list', 'PageDown'), true);
@@ -300,12 +319,24 @@ test('expands a painted disclosure instead of a hidden retained summary in the s
   const session = await page.context().newCDPSession(page);
   controller.call = (method, params) => session.send(method, params);
   const before = await controller.captureActionState({ messageIds: ['current'] });
-  assert.deepEqual(before.disclosures.map((item) => item.visible), [false, true]);
-  const actions = await executeActionPlan(controller, [{ step: 9, action: 'expand disclosure' }], 'test', 0, {
-    scope: { messageIds: ['current'] },
-  });
+  assert.deepEqual(
+    before.disclosures.map((item) => item.visible),
+    [false, true]
+  );
+  const actions = await executeActionPlan(
+    controller,
+    [{ step: 9, action: 'expand disclosure' }],
+    'test',
+    0,
+    {
+      scope: { messageIds: ['current'] },
+    }
+  );
   assert.equal(actions[0].executed, true);
-  assert.equal(await page.locator('[data-activity-summary-group-key="painted"]').getAttribute('aria-expanded'), 'true');
+  assert.equal(
+    await page.locator('[data-activity-summary-group-key="painted"]').getAttribute('aria-expanded'),
+    'true'
+  );
   assert.equal(wheels.length, 0);
 });
 
@@ -318,15 +349,29 @@ test('refreshes disclosure targeting when the first retained summary is occluded
         <div style="height:1000px"></div>
         <button class="assistant-activity-summary" data-activity-summary-group-key="reachable" aria-expanded="false" onclick="this.setAttribute('aria-expanded','true')">Explored</button>
       </div>`;
-    document.body.insertAdjacentHTML('beforeend', '<div style="position:fixed;inset:0 0 auto;height:100px;z-index:100">Sticky overlay</div>');
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div style="position:fixed;inset:0 0 auto;height:100px;z-index:100">Sticky overlay</div>'
+    );
   });
   const session = await page.context().newCDPSession(page);
   controller.call = (method, params) => session.send(method, params);
-  const actions = await executeActionPlan(controller, [{ step: 9, action: 'expand disclosure' }], 'test', 0, { scope: { messageIds: ['current'] } });
+  const actions = await executeActionPlan(
+    controller,
+    [{ step: 9, action: 'expand disclosure' }],
+    'test',
+    0,
+    { scope: { messageIds: ['current'] } }
+  );
   assert.equal(actions[0].executed, true);
   assert.deepEqual(actions[0].targetingAttempts, [
     { key: 'occluded', dispatched: false },
     { key: 'reachable', dispatched: true },
   ]);
-  assert.equal(await page.locator('[data-activity-summary-group-key="occluded"]').getAttribute('aria-expanded'), 'false');
+  assert.equal(
+    await page
+      .locator('[data-activity-summary-group-key="occluded"]')
+      .getAttribute('aria-expanded'),
+    'false'
+  );
 });

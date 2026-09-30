@@ -71,6 +71,9 @@ import {
   parseUserMessageContent,
 } from './message/UserMessageContent';
 import { isString } from '../lib/runtime-values';
+import { playIcon } from '../lib/ui-icons';
+import { UiIcon } from './UiIcon';
+import { isPlanImplementationMessage } from './message-list/plan-actions';
 import { getPresentationPartKey } from './message-list/streaming-presentation';
 import type { StreamingPresentation } from './message-list/streaming-presentation';
 import type { AssistantRetryState } from './message-list/assistant-retry';
@@ -119,12 +122,16 @@ function isCompactActivityExpanded(group: AssistantActivityGroupInfo) {
 export function Message(props: {
   info: MessageType;
   parts: Part[];
-  promptNumber?: number;
+  promptNumber?: number | string;
+  promptContinuation?: boolean;
+  steering?: boolean;
   showPromptNumber?: boolean;
   showSentTimestamp?: boolean;
   userMessageSeriesEndId?: string;
   suppressTimestampAnimation?: boolean;
   onUserMessageHoverChange?: (messageId: string, hovering: boolean) => void;
+  onTurnHoverChange?: (messageId: string, hovering: boolean) => void;
+  onResponseHoverChange?: (messageId: string, hovering: boolean) => void;
   onAssistantDiffSettledEmpty?: (messageId: string) => void;
   isLastAssistant?: boolean;
   hideErrorAction?: boolean;
@@ -209,6 +216,8 @@ export function Message(props: {
     !!props.showSentTimestamp ||
     (isUserMessageHoverActive() && hoverTimestampMessageId() === props.info.id);
   const notifyUserMessageHoverChange = (hovering: boolean) => {
+    if (isUser()) props.onTurnHoverChange?.(props.info.id, hovering);
+    else props.onResponseHoverChange?.(props.info.id, hovering);
     if (hoverIntentTimer) {
       clearTimeout(hoverIntentTimer);
       hoverIntentTimer = undefined;
@@ -249,6 +258,8 @@ export function Message(props: {
     if (hoverIntentTimer) clearTimeout(hoverIntentTimer);
     if (timestampTransitionTimer) clearTimeout(timestampTransitionTimer);
     if (hoveredUserMessageId) onUserMessageHoverChange?.(hoveredUserMessageId, false);
+    if (isUser()) props.onTurnHoverChange?.(props.info.id, false);
+    else props.onResponseHoverChange?.(props.info.id, false);
   });
   const sentTimestamp = createMemo(() => formatMessageSentTime(props.info.time.created));
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
@@ -539,6 +550,9 @@ export function Message(props: {
   const parsedUserContent = createMemo(() =>
     isUser() ? parseUserMessageContent(normalizedParts()) : null
   );
+  const isPlanImplementation = createMemo(() =>
+    isPlanImplementationMessage(props.info, normalizedParts())
+  );
   const automaticParts = () => parsedUserContent()?.automaticParts ?? [];
   const hasVisibleAutomaticActions = () =>
     automaticParts().some((part) => {
@@ -554,7 +568,9 @@ export function Message(props: {
     );
   });
   const visiblePromptNumber = () =>
-    isUser() && props.showPromptNumber !== false ? props.promptNumber : undefined;
+    isUser() && !isPlanImplementation() && props.showPromptNumber !== false
+      ? props.promptNumber
+      : undefined;
   const hasUserContent = createMemo(() => {
     const parsed = parsedUserContent();
     return parsed ? hasUserMessageContent(parsed) : false;
@@ -563,18 +579,25 @@ export function Message(props: {
     props.info.role === 'user' && props.info.summary?.diffsOmitted === true;
   const isWrapperlessUserMessage = createMemo(() => {
     const parsed = parsedUserContent();
-    return parsed ? isWrapperlessUserMessageContent(parsed) : false;
+    return isPlanImplementation() || (parsed ? isWrapperlessUserMessageContent(parsed) : false);
   });
   const isEditingUserMessage = () => isUser() && editingMessageId() === props.info.id;
+  const isSteeringMessage = () =>
+    isUser() &&
+    (props.steering ||
+      (props.info.role === 'user' &&
+        (props.info.delivery === 'steer' || props.info.pendingDelivery === 'steer')));
   const canEditUserMessage = () =>
     isUser() &&
+    !isSteeringMessage() &&
+    !isPlanImplementation() &&
     hasUserContent() &&
     props.info.sessionID === state.activeSessionId &&
     !isManagedSubagentSession() &&
     !isActiveSessionWorking() &&
     hasUserMessageEditableContent(normalizedParts());
   const handleUserCardClick = (event: MouseEvent) => {
-    if (props.info.role !== 'user' || !hasUserContent()) return;
+    if (props.info.role !== 'user' || !hasUserContent() || isPlanImplementation()) return;
     const target = event.target;
     if (target instanceof Element && target.closest('.user-message-leading-content')) return;
     if (target instanceof Element && target.closest('button, a, textarea')) return;
@@ -631,10 +654,15 @@ export function Message(props: {
             <div
               class={`value chat-turn-content ${
                 isUser()
-                  ? `chat-turn-card user-message-card${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}`
+                  ? `chat-turn-card user-message-card${isSteeringMessage() ? ' user-message-steering' : ''}${props.promptContinuation ? ' user-message-continuation' : ''}${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}${isPlanImplementation() ? ' plan-implementation-action' : ''}`
                   : assistantContainerClass()
               } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
               onClick={handleUserCardClick}
+              title={
+                isSteeringMessage()
+                  ? 'Steering message. Sent instructions cannot be edited.'
+                  : undefined
+              }
               onMouseEnter={() => notifyUserMessageHoverChange(true)}
               onMouseLeave={() => notifyUserMessageHoverChange(false)}
             >
@@ -646,14 +674,24 @@ export function Message(props: {
                 )}
               </Show>
               <Show when={isUser() && hasUserContent()}>
-                <UserMessageContent
-                  parts={normalizedParts()}
-                  leadingAgent={
-                    props.info.role === 'user' && props.info.agent === 'plan' ? 'plan' : undefined
+                <Show
+                  when={!isPlanImplementation()}
+                  fallback={
+                    <span class="plan-implementation-action-label" role="note">
+                      <UiIcon source={playIcon} width={14} height={14} />
+                      Implement the plan
+                    </span>
                   }
-                  promptNumber={hasImageTextBubble() ? visiblePromptNumber() : undefined}
-                  onMessageHoverChange={notifyUserMessageHoverChange}
-                />
+                >
+                  <UserMessageContent
+                    parts={normalizedParts()}
+                    leadingAgent={
+                      props.info.role === 'user' && props.info.agent === 'plan' ? 'plan' : undefined
+                    }
+                    promptNumber={hasImageTextBubble() ? visiblePromptNumber() : undefined}
+                    onMessageHoverChange={notifyUserMessageHoverChange}
+                  />
+                </Show>
               </Show>
               <Show when={!isUser() && assistant()}>
                 <AssistantMessageContent
@@ -700,7 +738,7 @@ export function Message(props: {
               outerListVirtualized={props.outerListVirtualized}
             />
           </Show>
-          <Show when={isUser() && hasUserContent()}>
+          <Show when={isUser() && hasUserContent() && !isPlanImplementation()}>
             <time
               class={`message-sent-time${timestampVisible() ? ' is-visible' : ''}${timestampTransitionActive() ? ' is-transition-active' : ''}${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}
               dateTime={new Date(props.info.time.created).toISOString()}

@@ -1,7 +1,7 @@
 import { For, Show, batch, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { splitExternalLinkText } from '../../lib/external-link';
-import { emptyPageIcon, folderIcon } from '../../lib/ui-icons';
+import { emptyPageIcon, folderIcon, gymIcon } from '../../lib/ui-icons';
 import { getFileTypeIcon } from '../FileTypeIcon';
 import {
   createMaterialChipIconElement,
@@ -54,6 +54,8 @@ export type RichComposerChip = {
   disabled?: boolean;
   previewImage?: { url: string; alt: string };
   textMarker: string;
+  compressible?: boolean;
+  compressionHint?: string;
 };
 
 export type RichComposerPasteInsertion = {
@@ -91,6 +93,7 @@ export function RichComposerArea(props: {
   isChipExpandable?: (chipId: string) => boolean;
   onExpandChip?: (chipId: string) => void;
   onHistory?: (action: 'undo' | 'redo') => void;
+  onCompressImage?: (chipId: string, event: MouseEvent) => void;
 }) {
   let editorEl: HTMLDivElement | undefined;
   let isComposing = false;
@@ -147,7 +150,14 @@ export function RichComposerArea(props: {
       event.target instanceof Element
         ? event.target.closest<HTMLElement>('.inline-chip[data-chip-id]')?.dataset.chipId
         : undefined;
-    if (!chipId || !props.isChipExpandable?.(chipId)) return;
+    if (!chipId) return;
+    if (props.chips.some((chip) => chip.id === chipId && chip.compressible)) {
+      event.preventDefault();
+      hidePreview();
+      props.onCompressImage?.(chipId, event);
+      return;
+    }
+    if (!props.isChipExpandable?.(chipId)) return;
     event.preventDefault();
     setChipMenu({ chipId, x: event.clientX, y: event.clientY });
   }
@@ -161,9 +171,11 @@ export function RichComposerArea(props: {
 
   createEffect(() => {
     const current = preview();
-    if (current && !props.chips.some((chip) => chip.id === current.chipId && chip.previewImage)) {
-      hidePreview();
-    }
+    if (!current) return;
+    const image = props.chips.find((chip) => chip.id === current.chipId)?.previewImage;
+    if (!image) hidePreview();
+    else if (image.url !== current.image.url || image.alt !== current.image.alt)
+      setPreview({ ...current, image });
   });
 
   onMount(() => {
@@ -244,6 +256,7 @@ export function RichComposerArea(props: {
         ? 'composer-session-reference'
         : 'composer-external-link'
       : `inline-chip${chip.disabled ? ' disabled' : ''}`;
+    if (chip.compressionHint) span.classList.add('image-size-warning');
     if (chip.type !== 'external-link' && chip.type !== 'mention-session') {
       span.contentEditable = 'false';
     }
@@ -253,7 +266,8 @@ export function RichComposerArea(props: {
     if (!isInlineReference) span.dataset.chipId = chip.id;
     span.dataset.chipType = chip.type;
     if (chip.previewImage) span.dataset.previewImage = 'true';
-    if (!chip.problemDetails) span.setAttribute('title', chip.title || chip.label);
+    if (!chip.problemDetails)
+      span.setAttribute('title', chip.compressionHint || chip.title || chip.label);
 
     const hasFormatIcon =
       chip.icon === 'file' || (chip.icon === 'image' && /\.[^./]+$/.test(chip.path || chip.label));
@@ -317,6 +331,15 @@ export function RichComposerArea(props: {
       labelSpan.className = 'inline-chip-label';
       labelSpan.textContent = chip.label;
       span.appendChild(labelSpan);
+      if (chip.compressionHint) {
+        const indicator = document.createElement('span');
+        indicator.className = 'chip-image-size';
+        indicator.title = chip.compressionHint;
+        indicator.setAttribute('role', 'img');
+        indicator.setAttribute('aria-label', chip.compressionHint);
+        indicator.appendChild(createUiIconElement(gymIcon, { width: 12, height: 12 }));
+        span.appendChild(indicator);
+      }
     }
 
     if (chip.detail) {
@@ -789,6 +812,8 @@ export function RichComposerArea(props: {
           chip.textMarker,
           chip.severity,
           chip.problemDetails,
+          chip.compressible,
+          chip.compressionHint,
         ])
     );
     if (!editorEl) return;

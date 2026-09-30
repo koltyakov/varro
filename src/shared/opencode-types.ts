@@ -21,6 +21,8 @@ export type UserMessage = {
   role: 'user';
   /** The prompt is waiting in OpenCode's inbox, outside the transcript. */
   pendingDelivery?: 'steer' | 'queue';
+  /** Original delivery mode, retained after the prompt leaves the inbox. */
+  delivery?: 'steer' | 'queue';
   time: { created: number };
   format?: OutputFormat;
   summary?: {

@@ -16,7 +16,14 @@ import {
   isAssistantMessage,
 } from '../../lib/message-metrics';
 import { formatMessageSentTime } from '../../lib/message-time';
-import { checkIcon, clockIcon, coinsIcon, copyIcon, dollarCircleIcon } from '../../lib/ui-icons';
+import {
+  checkIcon,
+  clockIcon,
+  coinsIcon,
+  copyIcon,
+  dollarCircleIcon,
+  xmarkCircleIcon,
+} from '../../lib/ui-icons';
 import { writeClipboard } from '../../lib/write-clipboard';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type { MessageEntry, QuestionRequest, ToolPart } from '../../types';
@@ -32,6 +39,7 @@ import {
   buildPlanImplementationPrompt,
   isPlanningAssistantMessage,
   shouldShowPlanImplementationAction,
+  shouldShowPlanSkippedNotice,
 } from './plan-actions';
 import type { AssistantDialogSummaryInfo } from './assistant-dialog';
 import type { StreamingPresentation } from './streaming-presentation';
@@ -44,6 +52,13 @@ export type MessageRowSharedProps = {
   presentation?: StreamingPresentation;
   modelChangeMap: Map<string, ModelChangeInfo>;
   promptNumberMap: ReadonlyMap<string, number>;
+  promptNumberLabels?: ReadonlyMap<string, string>;
+  steeringMessageIds?: ReadonlySet<string>;
+  promptGroupFirstMessageIds?: ReadonlyMap<string, string>;
+  messagePromptGroupIds?: ReadonlyMap<string, string>;
+  hoveredTurnId?: string | null;
+  onTurnHoverChange?: (messageId: string, hovering: boolean) => void;
+  onResponseHoverChange?: (messageId: string, hovering: boolean) => void;
   showPromptNumbers: boolean;
   showSentTimestamps: boolean;
   revealedSentTimestampMessageId?: string | null;
@@ -147,6 +162,8 @@ export function MessageRow(
   let rowRef: HTMLDivElement | undefined;
   let disposeEntrance: (() => void) | undefined;
   const messageId = props.msg.info.id;
+  const isTurnHovered = () =>
+    !!props.hoveredTurnId && props.messagePromptGroupIds?.get(messageId) === props.hoveredTurnId;
   const claimedEntrance = props.claimMessageEntrance?.(messageId) ?? false;
   const hasImage = props.msg.parts.some(
     (part) => part.type === 'file' && part.mime.startsWith('image/')
@@ -214,6 +231,7 @@ export function MessageRow(
   }, isVirtualPlaceholder());
   onCleanup(() => {
     disposeEntrance?.();
+    props.onTurnHoverChange?.(messageId, false);
     if (rowRef) props.observeMeasuredRow?.(rowRef, messageId, false);
   });
 
@@ -228,7 +246,7 @@ export function MessageRow(
         projectAutomaticActionMessage(props.msg).info.role === 'user'
           ? 'interactive-request'
           : 'interactive-response'
-      } ${entrancePending() ? 'interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
+      } ${isTurnHovered() ? 'interactive-item-turn-hovered ' : ''}${entrancePending() ? 'interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
       }${props.followsVisibleUserRequest ? ' interactive-response-follows-request' : ''}${props.followsVisibleAssistantResponse ? ' interactive-response-follows-response' : ''}${props.followsBorderedBlock ? ' interactive-item-follows-bordered-block' : ''}${props.continuesVisibleActivityGroup ? ' interactive-response-continues-activity-group' : ''}${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}
     >
@@ -261,7 +279,15 @@ export function MessageRow(
           <MessageComponent
             info={props.msg.info}
             parts={props.msg.parts}
-            promptNumber={props.promptNumberMap.get(props.msg.info.id)}
+            steering={props.steeringMessageIds?.has(props.msg.info.id)}
+            promptNumber={
+              props.promptNumberLabels?.get(props.msg.info.id) ??
+              props.promptNumberMap.get(props.msg.info.id)
+            }
+            promptContinuation={
+              !!props.promptGroupFirstMessageIds?.has(props.msg.info.id) &&
+              props.promptGroupFirstMessageIds.get(props.msg.info.id) !== props.msg.info.id
+            }
             showPromptNumber={props.showPromptNumbers}
             showSentTimestamp={
               props.showSentTimestamps || props.revealedSentTimestampMessageId === props.msg.info.id
@@ -269,6 +295,8 @@ export function MessageRow(
             userMessageSeriesEndId={props.userMessageSeriesEndId}
             onAssistantDiffSettledEmpty={props.onAssistantDiffSettledEmpty}
             onUserMessageHoverChange={props.onUserMessageHoverChange}
+            onTurnHoverChange={props.onTurnHoverChange}
+            onResponseHoverChange={props.onResponseHoverChange}
             suppressTimestampAnimation={props.suppressTimestampAnimations}
             isLastAssistant={props.msg.info.id === props.lastAssistantID}
             hideErrorAction={
@@ -346,6 +374,11 @@ export function AssistantDialogSummaryForMessage(
         info: props.msg.info,
         latestPlanImplementationMessageId: props.latestPlanImplementationMessageId,
       })}
+      showPlanSkippedNotice={shouldShowPlanSkippedNotice({
+        info: props.msg.info,
+        latestPlanImplementationMessageId: props.latestPlanImplementationMessageId,
+      })}
+      hasBuildAgent={props.hasBuildAgent}
       onImplementPlan={() =>
         void implementPlan(buildPlanImplementationPrompt(props.msg.parts), props.msg.info.sessionID)
       }
@@ -393,6 +426,8 @@ function AssistantDialogSummary(props: {
   pause?: SessionPause;
   messageId: string;
   showImplementPlanAction?: boolean;
+  showPlanSkippedNotice?: boolean;
+  hasBuildAgent?: boolean;
   onOpenPlan?: () => void;
   onImplementPlan?: () => void;
   onSkipPlan?: () => void;
@@ -616,27 +651,58 @@ function AssistantDialogSummary(props: {
         <div class="assistant-dialog-summary-actions">
           <button
             type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-neutral"
+            class="assistant-dialog-summary-action assistant-dialog-summary-action-open question-btn"
             disabled={isLoading()}
             onClick={() => props.onOpenPlan?.()}
           >
-            Open plan
+            <span>Open plan</span>
           </button>
           <button
             type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-implement"
+            class="assistant-dialog-summary-action assistant-dialog-summary-action-implement question-btn"
             disabled={isLoading()}
             onClick={() => props.onImplementPlan?.()}
           >
-            Implement the plan
+            <span>Implement the plan</span>
           </button>
           <button
             type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-danger"
+            class="assistant-dialog-summary-action assistant-dialog-summary-action-skip question-btn"
             onClick={() => props.onSkipPlan?.()}
           >
-            Skip for now
+            <span>Skip for now</span>
           </button>
+        </div>
+      </Show>
+      <Show when={props.showPlanSkippedNotice}>
+        <div
+          class="assistant-dialog-summary-plan-skipped"
+          tabindex={props.hasBuildAgent ? 0 : undefined}
+        >
+          <span class="assistant-dialog-summary-plan-skipped-label" role="status">
+            <UiIcon source={xmarkCircleIcon} width={14} height={14} />
+            Plan skipped
+          </span>
+          <Show when={props.hasBuildAgent}>
+            <div class="assistant-dialog-summary-plan-skipped-actions">
+              <button
+                type="button"
+                class="assistant-dialog-summary-action assistant-dialog-summary-action-open question-btn"
+                disabled={isLoading()}
+                onClick={() => props.onOpenPlan?.()}
+              >
+                <span>Open plan</span>
+              </button>
+              <button
+                type="button"
+                class="assistant-dialog-summary-action assistant-dialog-summary-action-implement question-btn"
+                disabled={isLoading()}
+                onClick={() => props.onImplementPlan?.()}
+              >
+                <span>Implement the plan</span>
+              </button>
+            </div>
+          </Show>
         </div>
       </Show>
     </div>

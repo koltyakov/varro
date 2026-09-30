@@ -3630,8 +3630,11 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       new URLSearchParams(window.location.search).get('activeTurnCollapse') === '1';
     const includeSpacingBoundary =
       new URLSearchParams(window.location.search).get('spacingBoundary') === '1';
+    const turnCount = Number(
+      new URLSearchParams(window.location.search).get('diffPreviewTurns') ?? 60
+    );
 
-    for (let index = 0; index < 60; index += 1) {
+    for (let index = 0; index < turnCount; index += 1) {
       const createdAt = BASE_TIME - (200 - index) * 1000;
       const user = makeUserMessage(
         session.id,
@@ -3655,7 +3658,11 @@ function createScenarioState(name: ScenarioName): ScenarioState {
             ].join('\n')
           : `*** Begin Patch\n*** Update File: src/report-${index}.ts\n@@\n-export const status = 'pending';\n+export const status = 'ready';\n*** End Patch`;
       const patchPart = makeApplyPatchToolPart(session.id, assistantId, patchId, patchText);
-      if ((includeActiveTurnCollapse || includeSpacingBoundary) && index === 59) {
+      if (
+        ((includeActiveTurnCollapse || includeSpacingBoundary) && index === 59) ||
+        (index === turnCount - 1 &&
+          new URLSearchParams(window.location.search).get('diffPreviewCompleted') === '1')
+      ) {
         patchPart.state = {
           status: 'completed',
           input: patchPart.state.input,
@@ -3738,12 +3745,15 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     }
 
     state.sessions = [session];
-    state.sessionStatuses[session.id] = includeActiveTurnCollapse
-      ? { type: 'busy' }
-      : { type: 'idle' };
+    state.sessionStatuses[session.id] =
+      includeActiveTurnCollapse ||
+      new URLSearchParams(window.location.search).get('diffPreviewCompleted') === '1'
+        ? { type: 'busy' }
+        : { type: 'idle' };
     state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
-    state.showFileDiffs = true;
+    state.showFileDiffs =
+      new URLSearchParams(window.location.search).get('diffPreviewInline') !== '0';
     state.nextSequence = 392;
     return state;
   }

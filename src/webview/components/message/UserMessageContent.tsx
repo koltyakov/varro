@@ -973,7 +973,7 @@ export function getUserMessagePreviewText(parts: Part[]): string {
 export function UserMessageContent(props: {
   parts: Part[];
   leadingAgent?: string;
-  promptNumber?: number;
+  promptNumber?: number | string;
   onMessageHoverChange?: (hovering: boolean) => void;
 }) {
   const parsed = createMemo(() => parseUserMessageContent(props.parts));

@@ -187,6 +187,13 @@
   animation: turn-navigation-destination 720ms ease-out;
 }
 
+.interactive-item-turn-hovered
+  .user-message-card:not(.user-message-card-wrapperless):not(:has(.user-message-image-text-bubble)),
+.interactive-item-turn-hovered .user-message-image-text-bubble {
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 55%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-vscode-accent) 22%, transparent);
+}
+
 @keyframes turn-navigation-destination {
   0% {
     border-color: color-mix(in srgb, var(--color-vscode-accent) 85%, transparent);
@@ -238,6 +245,12 @@
   line-height: 1;
   white-space: nowrap;
   pointer-events: none;
+}
+
+.user-message-continuation .prompt-number-badge,
+.prompt-number-badge-continuation {
+  background: #999;
+  color: #333;
 }
 
 .assistant-turn-content {
@@ -1430,7 +1443,10 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   margin-top: 0;
 }
 
-.model-change-indicator.assistant-dialog-summary:has(.assistant-dialog-summary-actions) {
+.model-change-indicator.assistant-dialog-summary:has(
+    .assistant-dialog-summary-actions,
+    .assistant-dialog-summary-plan-skipped
+  ) {
   height: auto;
 }
 
@@ -1601,62 +1617,85 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   flex-direction: row;
   margin-top: 8px;
   width: 100%;
 }
 
-.assistant-dialog-summary-action {
-  appearance: none;
-  border: 1px solid var(--assistant-summary-fork-border);
-  background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
-  color: var(--color-vscode-fg);
-  border-radius: var(--radius-pill);
+.assistant-dialog-summary-plan-skipped {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 26px;
+  margin-top: 8px;
+  width: 100%;
+  color: var(--color-vscode-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.assistant-dialog-summary-plan-skipped-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assistant-dialog-summary-plan-skipped-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+  visibility: hidden;
+}
+
+.assistant-dialog-summary-plan-skipped:hover .assistant-dialog-summary-plan-skipped-actions,
+.assistant-dialog-summary-plan-skipped:focus-within .assistant-dialog-summary-plan-skipped-actions {
+  visibility: visible;
+}
+
+.question-btn.assistant-dialog-summary-action {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid
+    color-mix(in srgb, var(--plan-action-color) 35%, var(--assistant-summary-fork-border));
+  background: color-mix(in srgb, var(--plan-action-color) 7%, transparent);
+  color: color-mix(in srgb, var(--plan-action-color) 32%, var(--color-vscode-fg));
+  font-family: var(--font-sans);
   font-size: 11px;
-  line-height: 1.2;
-  padding: 3px 10px;
-  cursor: pointer;
+  font-weight: 400;
+  line-height: 16px;
 }
 
-.assistant-dialog-summary-action:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
+.assistant-dialog-summary-action > span {
+  display: block;
+  line-height: 16px;
 }
 
-.assistant-dialog-summary-action-implement {
-  color: var(--color-vscode-fg);
-  border-color: color-mix(in srgb, var(--color-vscode-success) 42%, var(--color-vscode-border));
-  background: color-mix(in srgb, var(--color-vscode-success) 18%, transparent);
+.assistant-dialog-summary-action-open {
+  --plan-action-color: var(--color-vscode-fg-muted);
 }
 
-.assistant-dialog-summary-action-implement:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-vscode-success) 26%, transparent);
+.question-btn.assistant-dialog-summary-action-implement {
+  --plan-action-color: var(--color-vscode-success);
+  background: color-mix(in srgb, var(--plan-action-color) 12%, transparent);
+  font-weight: 500;
 }
 
-.assistant-dialog-summary-action-neutral {
-  color: var(--color-vscode-fg);
-  border-color: color-mix(in srgb, var(--color-vscode-border) 85%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
+.assistant-dialog-summary-action-skip {
+  --plan-action-color: var(--color-vscode-error);
 }
 
-.assistant-dialog-summary-action-neutral:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
-}
-
-.assistant-dialog-summary-action-danger {
-  color: var(--color-vscode-fg);
-  border-color: color-mix(in srgb, var(--color-vscode-error) 42%, var(--color-vscode-border));
-  background: color-mix(in srgb, var(--color-vscode-error) 18%, transparent);
-}
-
-.assistant-dialog-summary-action-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-vscode-error) 26%, transparent);
-}
-
-.assistant-dialog-summary-action:disabled {
-  opacity: 0.6;
-  cursor: default;
+.question-btn.assistant-dialog-summary-action:hover:not(:disabled) {
+  border-color: color-mix(
+    in srgb,
+    var(--plan-action-color) 60%,
+    var(--assistant-summary-fork-border)
+  );
+  background: color-mix(in srgb, var(--plan-action-color) 18%, transparent);
 }
 
 .assistant-file-edit-stack {

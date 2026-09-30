@@ -1,6 +1,6 @@
 import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
-import { xmarkIcon } from '../../lib/ui-icons';
+import { gymIcon, xmarkIcon } from '../../lib/ui-icons';
 import { AttachmentLabel } from '../AttachmentLabel';
 import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
@@ -22,6 +22,8 @@ export function AttachmentChip(props: {
   onRemove?: () => void;
   previewImage?: { url: string; alt: string };
   title?: string;
+  onCompress?: (event: MouseEvent) => void;
+  compressionHint?: string;
 }) {
   const [previewStyle, setPreviewStyle] = createSignal<Record<string, string> | null>(null);
   const [showTitle, setShowTitle] = createSignal(props.title !== props.label);
@@ -81,6 +83,7 @@ export function AttachmentChip(props: {
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
     if (!props.onClick) return;
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
@@ -89,8 +92,8 @@ export function AttachmentChip(props: {
 
   return (
     <span
-      class={`chat-attachment-chip${props.disabled ? ' disabled' : ''}${props.onClick ? ' clickable' : ''}`}
-      title={showTitle() ? props.title : undefined}
+      class={`chat-attachment-chip${props.disabled ? ' disabled' : ''}${props.onClick ? ' clickable' : ''}${props.compressionHint ? ' image-size-warning' : ''}`}
+      title={props.compressionHint ?? (showTitle() ? props.title : undefined)}
       aria-disabled={props.disabled && !(props.toggle && props.onClick) ? 'true' : undefined}
       aria-pressed={
         props.onClick && props.toggle ? (!props.disabled ? 'true' : 'false') : undefined
@@ -103,6 +106,12 @@ export function AttachmentChip(props: {
       onMouseLeave={hidePreview}
       onFocus={(event) => showPreview(event.currentTarget)}
       onBlur={hidePreview}
+      onContextMenu={(event) => {
+        if (!props.onCompress) return;
+        event.preventDefault();
+        hidePreview();
+        props.onCompress(event);
+      }}
     >
       <Show when={props.onRemove}>
         <button
@@ -140,6 +149,16 @@ export function AttachmentChip(props: {
       />
       <Show when={props.detail}>
         <span class="chip-detail">{props.detail}</span>
+      </Show>
+      <Show when={props.compressionHint}>
+        <span
+          class="chip-image-size"
+          role="img"
+          title={props.compressionHint}
+          aria-label={props.compressionHint}
+        >
+          <UiIcon source={gymIcon} width={12} height={12} />
+        </span>
       </Show>
       <Portal>
         <Show when={props.previewImage && previewStyle()}>

@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { getE2EState, getVisibleMessageAnchor, sampleMessageTopAcrossFrames } from './helpers';
+import {
+  getE2EState,
+  getVisibleMessageAnchor,
+  sampleMessageTopAcrossFrames,
+  selectConversationTurn,
+} from './helpers';
 
 test('toggling /thinking hides and shows reasoning blocks', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready&expandedActivity=1');
@@ -130,7 +135,7 @@ test('thinking visibility keeps a distant user-card anchor mounted across large 
 
   const list = page.locator('.interactive-list');
   const anchor = page.locator('[data-msg-id="message-heterogeneous-user-101"] .user-message-card');
-  await page.getByRole('button', { name: /^Go to turn 102:/ }).click();
+  await selectConversationTurn(page, 102);
   await expect(anchor).toBeInViewport();
   await page.evaluate(
     () =>
@@ -208,7 +213,7 @@ test('Thinking invalidation keeps one painted anchor through every measurement f
     '/e2e/harness/index.html?scenario=heterogeneous-large-transcript&expandedActivity=1&tallThinkingAnchor=1'
   );
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-  await page.getByRole('button', { name: /^Go to turn 61:/ }).click();
+  await selectConversationTurn(page, 61);
   const list = page.locator('.interactive-list');
   const bounds = await list.boundingBox();
   await page.mouse.move(bounds!.x + bounds!.width - 20, bounds!.y + bounds!.height / 2);

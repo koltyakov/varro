@@ -395,6 +395,7 @@ export function SessionPickerHeader(props: {
   showNewChatButton?: boolean;
   onBack?: () => void;
   onClearFilter: () => void;
+  onMarkAllRead?: (() => void) | null;
   onOpenFailedSessions: () => void;
   onOpenAttentionSessions: () => void;
   onOpenPlanReadySessions: () => void;
@@ -447,6 +448,16 @@ export function SessionPickerHeader(props: {
                   </button>
                 </Tooltip>
               </span>
+              <Show when={props.onMarkAllRead}>
+                <button
+                  type="button"
+                  class="chat-header-mark-all-read"
+                  onClick={() => props.onMarkAllRead?.()}
+                  aria-label="Mark all as read"
+                >
+                  Mark all as read
+                </button>
+              </Show>
             </>
           )}
         </Show>

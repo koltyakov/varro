@@ -119,6 +119,10 @@ the shared invariants below remain true.
   state, and any future lightweight rendering mode.
 - An unmounted height invalidated by a view change becomes provisional. It must not remain marked as
   an exact measurement from the old view.
+- Toggling inline file diffs while bottom-follow owns the viewport positions at the new physical bottom
+  before paint, without streaming easing or retaining removed content as trailing reserve. Bounded
+  settling covers virtual row hydration and yields to direct input, session replacement, editing, and
+  diff focus. Detached readers keep their visible anchor instead of returning to latest.
 - Width reflow owns a stable visible message captured before the first changed-height batch is
   applied. Deferring prefix publication must not make later resize batches classify rows against an
   already-adjusted `scrollTop` and stale prefixes.
@@ -308,6 +312,10 @@ Direct input acquires ownership only when it can affect the transcript:
   enough trailing reserve to make that destination reachable. Assistant growth consumes that reserve
   while direct transcript input cancels destination settling. Measured appends retain their
   viewport-only transition so provisional row reconciliation cannot create a large jump.
+- A first turn that already fits at scroll position zero keeps that position without an alignment
+  reserve. Track `min-height` can hide a small unreachable target, and repeated reconciliation then
+  accumulates blank reserve until the scrollbar appears. `scroll-short-transcript.spec.ts` covers
+  the native first send, its initial settling, and subsequent activity every frame.
 - Send-time composer collapse eases its held minimum height over 220 ms. Before each shrinking frame,
   reserve only the scroll-range shortfall at the current painted scroll position. Reserving the whole
   height delta makes bottom-follow chase temporary space and leaves an unnecessary trailing reserve.
@@ -542,6 +550,21 @@ Direct input acquires ownership only when it can affect the transcript:
 
 ### Sticky Prompts
 
+- Steering messages belong to the original turn even when assistant activity intervenes. They do not
+  increment the turn counter or create navigation dots. Option/Alt shows the original prompt as `1`
+  and its steering messages as `1.1`, `1.2`, etc.; the next ordinary turn is `2`. Reset the steering
+  ordinal at each new turn, and carry turn identities and ordinals across transcript segments and
+  prefetched history. Automatic user entries do not consume numbers or split a group. The left
+  navigation has one dot per turn and targets its original prompt; each steering bubble retains its
+  own message identity for sticky previews. Steering badges remain muted, including image captions.
+- The navigation rail keeps fixed-size dots within its available height, using earlier/later controls
+  when the full set does not fit. Keep visible groups in the displayed navigation window.
+  Wheel and trackpad input over an overflowing rail move its dot window, with delta-mode normalization
+  and fractional accumulation. Consume that input at both ends so it never scrolls the transcript.
+  Highlight all groups with visible prompt or response content, while retaining one primary turn for
+  accessible current-step navigation. Determine visibility from mounted row geometry within the core
+  range, and map response rows to their prompt group without rescanning history on scroll.
+
 - Sticky selection uses current painted row geometry. Intersection-observer bounds and virtual metrics
   are fallbacks for anchoring or hydration, not proof of a row's current viewport position. Suppress
   sticky UI below the minimum supported viewport height.
@@ -595,6 +618,13 @@ Direct input acquires ownership only when it can affect the transcript:
 - Row-local actions and adjacency derive from the same visible message collection as the renderer.
   Hidden child-session messages must not change the visible parent's Retry action, latest plan action,
   model transition, or preceding file-event context.
+- Steering bubbles use neutral request colors, including image-text bubbles and sticky previews.
+  Retain explicit delivery mode in new V2 prompt metadata; infer it from the session's unfinished turn
+  for older history, continuing that classification across history segments. Queued follow-ups after
+  a terminal response remain ordinary prompts. Delivered
+  steering is read-only: inline editing deletes later history and resends a root prompt, which would
+  detach the instruction from its original turn. Keep unsent queued drafts editable and pending inbox
+  steers in their existing read-only queue. Styling must not change row geometry or prompt identities.
 - All-tree messages may be used only by features that intentionally aggregate the tree, such as
   subagent dialog summaries and token statistics.
 - Switching a view mode must preserve stable message IDs and invalidate only the heights whose

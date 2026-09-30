@@ -18,7 +18,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 86 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.33`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.18`, with 14 platform- or family-specific skips. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 86 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.33`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.20`, with 14 platform- or family-specific skips. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -76,6 +76,45 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.20 compatibility review
+
+Reviewed v2.0.19 to v2.0.20, `f02c30eb55` through `8d8a7bc844`.
+The API adds credential list/create routes, optional connection authentication
+status, and optional provider response bodies on structured errors. Existing
+HTTP routes, SSE names, session/message records, forms, and configuration keys
+consumed by Varro remain compatible. Varro already reads diagnostic messages
+and refreshes catalogs on integration updates. No adapter changes are required.
+
+Runtime changes add ChatGPT token-sharing authentication, improve Console SSO
+and expired-credential diagnostics, restrict database file permissions, and
+apply rejection feedback to parallel permission requests. Provider updates
+cover cache controls, Bedrock thinking signatures, Mistral reasoning streaming,
+and Cloudflare Workers AI variants. CLI credential import/export and optional
+shared-service disabling do not change Varro's managed `serve` startup.
+Dedicated connection-status UI and token-sharing dialogs are optional parity work.
+
+The tested v2 client is `2.0.20`; v1 remains at `1.18.33`.
+Support floors remain v2 `2.0.5` and v1 `1.16.0`.
+
+### 2.0.19 compatibility review
+
+Reviewed v2.0.18 to v2.0.19, `39021dfd67` through `f02c30eb55`.
+The client, protocol, schema, HTTP routes, and SSE contracts are unchanged.
+Session/message records, permissions, forms, and configuration keys consumed by
+Varro remain compatible. No adapter changes are required.
+
+Compaction now sizes requests against the model window and retries oversized
+requests with shorter history. Native compaction no longer falls back to a local
+summary. The default buffer becomes 10% of the window, with a 16,000-token minimum
+for windows of at least 32,000 tokens; explicit buffer settings still apply.
+Provider updates improve cache affinity for child and forked sessions, Gemini
+tool-call replay, Cloudflare configuration, and xAI reasoning variants. Shell
+tools receive agent and session environment variables. CLI authentication, TUI,
+and AI media changes require no Varro adaptation.
+
+The tested v2 client is `2.0.19`; v1 remains at `1.18.33`.
+Support floors remain v2 `2.0.5` and v1 `1.16.0`.
 
 ### 1.18.33 compatibility review
 

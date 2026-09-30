@@ -272,6 +272,13 @@ export function VirtualizedContent(
         modelChangeMap={props.modelChangeMap}
         sessionPauseMap={props.sessionPauseMap}
         promptNumberMap={props.promptNumberMap}
+        promptNumberLabels={props.promptNumberLabels}
+        steeringMessageIds={props.steeringMessageIds}
+        promptGroupFirstMessageIds={props.promptGroupFirstMessageIds}
+        messagePromptGroupIds={props.messagePromptGroupIds}
+        hoveredTurnId={props.hoveredTurnId}
+        onTurnHoverChange={props.onTurnHoverChange}
+        onResponseHoverChange={props.onResponseHoverChange}
         showPromptNumbers={props.showPromptNumbers}
         showSentTimestamps={props.showSentTimestamps}
         revealedSentTimestampMessageId={props.revealedSentTimestampMessageId}

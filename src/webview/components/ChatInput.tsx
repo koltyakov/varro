@@ -215,6 +215,7 @@ import {
 } from '../lib/composer-history';
 import { getSessionHistoryPrompts } from '../lib/message-window';
 import { recordSessionPause } from '../lib/session-pauses';
+import { isSessionResumeMessage } from '../../shared/session-pauses';
 import { setError } from '../lib/app-state';
 import {
   detachDiscardableActiveBlankSession,
@@ -229,6 +230,13 @@ import { preloadInlineImageDimensions } from './InlineMessageImage';
 import { UiIcon } from './UiIcon';
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
+import { ImageCompressionMenu } from './chat-input/ImageCompressionMenu';
+import {
+  analyzeImageCompression,
+  formatImageBytes,
+  hasMeaningfulImageSavings,
+} from '../lib/image-compression';
+import type { CompressedImage, ImageCompressionAnalysis } from '../lib/image-compression';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
 import { dismissComposerOverlays } from './chat-input/composer-overlay-dismiss';
 import {
@@ -242,7 +250,7 @@ import {
   QueuedMessages,
   type QueuedMessageItem,
 } from './chat-input/QueuedMessages';
-import { parseUserMessageContent } from './message/UserMessageContent';
+import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
 import { ProviderQuotaWarning } from './chat-input/ProviderQuotaWarning';
 import {
@@ -1030,7 +1038,30 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   // Guards async attachment follow-ups against landing in a torn-down composer.
   const pendingPasteTransactions: PasteTransaction[] = [];
   const pasteTransactionsByEvent = new Map<ClipboardEvent, PasteTransaction>();
-  const pendingImageStores = new Set<string>();
+  const pendingImageStores = new Map<string, string>();
+  const [imageStoreRevision, setImageStoreRevision] = createSignal(0);
+  const [imageAnalyses, setImageAnalyses] = createSignal(
+    new Map<string, { url: string; analysis: ImageCompressionAnalysis | null }>()
+  );
+  const [originalImages, setOriginalImages] = createSignal(new Map<string, ClipboardImage>());
+  const [compressionMenu, setCompressionMenu] = createSignal<{
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [compressionBusy, setCompressionBusy] = createSignal(false);
+  const [compressionError, setCompressionError] = createSignal<string | null>(null);
+  let compressionEpoch = 0;
+  let imageAnalysisQueue = Promise.resolve();
+  const pendingImageAnalyses = new Set<string>();
+  const compressionOwner = createMemo(() =>
+    JSON.stringify([
+      composerSessionId(),
+      getFileSearchScopeKey(),
+      getNewChatDraftGeneration(),
+      composerEditingMessage()?.messageId,
+    ])
+  );
   const pendingTableAttachments = new Map<
     string,
     {
@@ -1620,6 +1651,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           icon: 'image',
           previewImage: { url: image.url, alt: image.filename },
           textMarker: marker,
+          compressible: canCompressImage(image.id),
+          compressionHint: imageCompressionHint(image.id),
         });
       }
     }
@@ -1734,6 +1767,178 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       (sending?.sessionId === composerSessionId() && sending.ids.has(id))
     );
   };
+
+  function canCompressImage(id: string): boolean {
+    const image = state.clipboardImages.find((item) => item.id === id);
+    if (!image) return false;
+    const original = originalImages().get(id);
+    const entry = imageAnalyses().get(id);
+    return (
+      !!(original && original.url !== image.url) ||
+      !!(entry?.url === image.url && (entry.analysis?.recommended || entry.analysis?.smaller))
+    );
+  }
+
+  function imageCompressionHint(id: string): string | undefined {
+    const image = state.clipboardImages.find((item) => item.id === id);
+    const entry = imageAnalyses().get(id);
+    if (
+      !image ||
+      entry?.url !== image.url ||
+      !(entry.analysis?.recommended || entry.analysis?.smaller)
+    )
+      return undefined;
+    return `Large image · ${formatImageBytes(image.size)} · Right-click for compression options to shrink it.`;
+  }
+
+  function openImageCompression(id: string, event: MouseEvent) {
+    if (!canCompressImage(id)) return;
+    dismissComposerOverlays();
+    const target =
+      event.target instanceof Element
+        ? event.target
+            .closest<HTMLElement>('.inline-chip, .chat-attachment-chip')
+            ?.getBoundingClientRect()
+        : null;
+    setCompressionError(null);
+    setCompressionMenu({
+      id,
+      x: target?.left ?? event.clientX,
+      y: target?.top ?? event.clientY,
+    });
+  }
+
+  function closeImageCompression(restoreFocus = false) {
+    setCompressionMenu(null);
+    if (restoreFocus) richEditorRef?.focus();
+  }
+
+  createEffect(() => {
+    void compressionOwner();
+    compressionEpoch += 1;
+    setOriginalImages(new Map());
+    setImageAnalyses(new Map());
+    setCompressionMenu(null);
+    setCompressionBusy(false);
+  });
+
+  createEffect(() => {
+    void compressionOwner();
+    const images = composerClipboardImages().map((image) => ({ ...image }));
+    const epoch = compressionEpoch;
+    const current = untrack(imageAnalyses);
+    setImageAnalyses(
+      new Map(
+        [...current].filter(([id, entry]) =>
+          images.some((image) => image.id === id && image.url === entry.url)
+        )
+      )
+    );
+    const menu = untrack(compressionMenu);
+    if (menu && !images.some((image) => image.id === menu.id)) setCompressionMenu(null);
+    for (const image of images) {
+      const key = `${epoch}:${image.id}:${image.url}`;
+      if (current.get(image.id)?.url === image.url || pendingImageAnalyses.has(key)) continue;
+      pendingImageAnalyses.add(key);
+      imageAnalysisQueue = imageAnalysisQueue
+        .then(async () => {
+          if (
+            composerDisposed ||
+            compressionEpoch !== epoch ||
+            !state.clipboardImages.some((item) => item.id === image.id && item.url === image.url)
+          )
+            return;
+          let analysis: ImageCompressionAnalysis | null = null;
+          try {
+            analysis = await analyzeImageCompression(image);
+          } catch (error) {
+            logError('chat-input:analyzeImageCompression', error);
+          }
+          if (
+            composerDisposed ||
+            compressionEpoch !== epoch ||
+            !state.clipboardImages.some((item) => item.id === image.id && item.url === image.url)
+          )
+            return;
+          setImageAnalyses((entries) =>
+            new Map(entries).set(image.id, { url: image.url, analysis })
+          );
+        })
+        .finally(() => pendingImageAnalyses.delete(key));
+    }
+  });
+
+  function replaceCompressedImage(id: string, replacement: ClipboardImage) {
+    const previous = state.clipboardImages.find((image) => image.id === id);
+    if (
+      !previous ||
+      pendingImageStores.has(id) ||
+      sendingAttachments()?.ids.has(`img:${id}`) ||
+      workspaceSendPending()
+    ) {
+      setCompressionError('Wait for the current image operation to finish, then try again.');
+      return;
+    }
+    if (previous.contextFile && previous.contextFile.path !== replacement.contextFile?.path) {
+      postMessage({
+        type: 'images/release',
+        payload: {
+          paths: [previous.contextFile.path],
+          deferred: true,
+          sessionId: composerSessionId() ?? undefined,
+        },
+      });
+    }
+    replaceClipboardImages(
+      state.clipboardImages.map((image) => (image.id === id ? replacement : { ...image }))
+    );
+    closeImageCompression(true);
+  }
+
+  function applyImageCompression(compressed: CompressedImage) {
+    const menu = compressionMenu();
+    const image = state.clipboardImages.find((item) => item.id === menu?.id);
+    if (!menu || !image || compressionBusy()) return;
+    const snapshot = { ...image };
+    const epoch = compressionEpoch;
+    setCompressionBusy(true);
+    setCompressionError(null);
+    try {
+      if (
+        composerDisposed ||
+        epoch !== compressionEpoch ||
+        compressionMenu() !== menu ||
+        !state.clipboardImages.some((item) => item.id === snapshot.id && item.url === snapshot.url)
+      )
+        return;
+      if (!hasMeaningfulImageSavings(snapshot.size, compressed.size))
+        throw new Error('This option no longer meaningfully reduces the image size.');
+      if (
+        pendingImageStores.has(snapshot.id) ||
+        sendingAttachments()?.ids.has(`img:${snapshot.id}`) ||
+        workspaceSendPending()
+      )
+        throw new Error('Wait for the current image operation to finish, then try again.');
+      setOriginalImages((entries) =>
+        new Map(entries).set(snapshot.id, entries.get(snapshot.id) ?? snapshot)
+      );
+      replaceCompressedImage(snapshot.id, {
+        ...snapshot,
+        url: compressed.url,
+        mime: compressed.mime,
+        size: compressed.size,
+        contentKey: snapshot.contentKey ?? snapshot.url,
+        contextFile: undefined,
+      });
+    } catch (error) {
+      if (epoch === compressionEpoch && compressionMenu() === menu)
+        setCompressionError(
+          error instanceof Error ? error.message : 'Could not compress the image'
+        );
+    } finally {
+      if (epoch === compressionEpoch) setCompressionBusy(false);
+    }
+  }
 
   const visibleFiles = createMemo(() =>
     composerFiles()
@@ -4479,13 +4684,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         return;
       }
       if (msg.type === 'images/stored') {
+        const storedUrl = pendingImageStores.get(msg.payload.id);
         pendingImageStores.delete(msg.payload.id);
-        if (!setClipboardImageContextFile(msg.payload.id, msg.payload.contextFile)) {
+        const current = state.clipboardImages.find((image) => image.id === msg.payload.id);
+        if (
+          (storedUrl !== undefined && current?.url !== storedUrl) ||
+          !setClipboardImageContextFile(msg.payload.id, msg.payload.contextFile)
+        ) {
           postMessage({
             type: 'images/release',
             payload: { paths: [msg.payload.contextFile.path], deferred: false },
           });
         }
+        setImageStoreRevision((revision) => revision + 1);
         return;
       }
       if (msg.type === 'database/attached') {
@@ -4838,13 +5049,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     canDelegateCurrentImages();
 
   createEffect(() => {
+    void imageStoreRevision();
     const images = composerClipboardImages();
     if (!images.some((image) => !image.contextFile)) return;
     if (currentModelSupportsVision() || !currentModelSupportsTools()) return;
     if (!canDelegateCurrentImages()) return;
     for (const image of images) {
       if (image.contextFile || pendingImageStores.has(image.id)) continue;
-      pendingImageStores.add(image.id);
+      pendingImageStores.set(image.id, image.url);
       postMessage({
         type: 'images/store',
         payload: {
@@ -4950,25 +5162,45 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (props.newSession || !showTurnTimer()) return null;
     const entries = currentSessionMessageEntries();
     let latestAssistant: ReturnType<typeof getLatestAssistantMessageInfo> = null;
+    let startedAt: number | null = null;
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       const entry = entries[index];
       if (!entry) continue;
-      if (!latestAssistant && isAssistantMessage(entry.info)) latestAssistant = entry.info;
+      if (isAssistantMessage(entry.info) && entry.info.mode !== 'subagent') {
+        if (
+          startedAt !== null &&
+          !entry.info.retry &&
+          (entry.info.time.completed || entry.info.error) &&
+          (!isContinuationAssistantFinish(entry.info.finish) || entry.info.error)
+        ) {
+          break;
+        }
+        if (!latestAssistant) latestAssistant = entry.info;
+      }
       if (entry.info.role !== 'user') continue;
+      // Automatic records continue the existing turn, even when their parts arrive later.
+      if (
+        entry.info.pendingDelivery ||
+        entry.info.delivery === 'steer' ||
+        (!isSessionResumeMessage(entry.parts) &&
+          !hasUserMessageContent(parseUserMessageContent(entry.parts)))
+      )
+        continue;
 
-      const terminalAssistantSettled =
-        latestAssistant &&
-        (!!latestAssistant.time.completed || !!latestAssistant.error) &&
-        (!isContinuationAssistantFinish(latestAssistant.finish) || !!latestAssistant.error);
-      if (terminalAssistantSettled && !composerBackgroundPending()) return null;
-
-      const incompleteAssistant =
-        latestAssistant && !latestAssistant.time.completed && !latestAssistant.error;
-      return isComposerDisplayBusy() || isLoading() || incompleteAssistant
-        ? entry.info.time.created
-        : null;
+      // Delivered steering joins the unfinished turn rather than restarting its clock.
+      startedAt = entry.info.time.created;
     }
-    return isComposerDisplayBusy() || isLoading() ? loadingStartedAt() : null;
+    const terminalAssistantSettled =
+      latestAssistant &&
+      !latestAssistant.retry &&
+      (!!latestAssistant.time.completed || !!latestAssistant.error) &&
+      (!isContinuationAssistantFinish(latestAssistant.finish) || !!latestAssistant.error);
+    if (terminalAssistantSettled && !composerBackgroundPending()) return null;
+
+    const incompleteAssistant =
+      latestAssistant && !latestAssistant.time.completed && !latestAssistant.error;
+    if (!isComposerDisplayBusy() && !isLoading() && !incompleteAssistant) return null;
+    return startedAt ?? loadingStartedAt();
   });
 
   const contextUsage = createMemo(() => {
@@ -5755,7 +5987,41 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               onRemoveNativePdf={removeNativePdfWithCleanup}
               onOpenFile={openContextFileInEditor}
               onPreviewImage={(image) => setPreviewImageId(image.id)}
+              canCompressImage={canCompressImage}
+              imageCompressionHint={imageCompressionHint}
+              onCompressImage={openImageCompression}
             />
+          </Show>
+
+          <Show when={compressionMenu()} keyed>
+            {(menu) => {
+              const image = () => state.clipboardImages.find((item) => item.id === menu.id);
+              return (
+                <ImageCompressionMenu
+                  x={menu.x}
+                  y={menu.y}
+                  size={image()?.size ?? 0}
+                  mime={image()?.mime ?? ''}
+                  analysis={
+                    imageAnalyses().get(menu.id)?.url === image()?.url
+                      ? (imageAnalyses().get(menu.id)?.analysis ?? null)
+                      : null
+                  }
+                  canRestore={
+                    !!originalImages().get(menu.id) &&
+                    originalImages().get(menu.id)?.url !== image()?.url
+                  }
+                  busy={compressionBusy()}
+                  error={compressionError()}
+                  onClose={closeImageCompression}
+                  onApply={applyImageCompression}
+                  onRestore={() => {
+                    const original = originalImages().get(menu.id);
+                    if (original) replaceCompressedImage(menu.id, { ...original });
+                  }}
+                />
+              );
+            }}
           </Show>
 
           <RichComposerArea
@@ -5777,6 +6043,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             pendingPaste={pendingPasteInsertion()}
             cursorOffset={caretPosition()}
             chips={inlineChips()}
+            onCompressImage={(id, event) => openImageCompression(id.slice(4), event)}
             isFocused={isFocused()}
             showCompletionMenu={showCompletionMenu()}
             completionItems={composerCompletions()}

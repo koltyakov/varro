@@ -244,14 +244,19 @@ for (const outcome of ['recovered', 'failed'] as const) {
     });
     await disclosure.click();
     await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
-    await expect(notice.locator('pre')).toContainText('provider.transport');
-    await expect(notice.locator('pre')).toContainText('WebSocket closed with code 1006');
+    const details = notice.locator('.assistant-message-flow-item-error-details');
+    await expect(details).toBeVisible();
+    await expect(details.getByRole('definition')).toHaveText([
+      'copilot / gpt-5-mini',
+      'provider.transport',
+      'WebSocket closed with code 1006',
+    ]);
     expect(await notice.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
       true
     );
     await disclosure.click();
     await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-    await expect(notice.locator('pre')).toHaveCount(0);
+    await expect(details).toHaveCount(0);
     if (outcome === 'failed') {
       const failure = page.locator(
         '[data-msg-id="retry-continuation"] .assistant-message-flow-item-error'

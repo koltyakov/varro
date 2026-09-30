@@ -4,7 +4,14 @@ import { reconcile } from 'solid-js/store';
 import packageJson from '../../../package.json';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import type { ProviderLimitStatus, WebviewMessage } from '../../shared/protocol';
-import type { AssistantMessage, MessageEntry, Session, TextPart, UserMessage } from '../types';
+import type {
+  AssistantMessage,
+  MessageEntry,
+  Part,
+  Session,
+  TextPart,
+  UserMessage,
+} from '../types';
 import { ChatInput, sendDroppedContent } from './ChatInput';
 import {
   state,
@@ -58,6 +65,7 @@ import { toCssUrl } from './UiIcon';
 import { getMaterialChipIcon } from './MaterialChipIcon';
 import { getVisibleThreadMessages } from './message-list/thread-visibility';
 import { upsertMessageInfo } from '../lib/state-messages';
+import * as imageCompression from '../lib/image-compression';
 
 interface SessionEventProperties extends UnknownRecord {
   sessionID: string;
@@ -696,6 +704,169 @@ function availableProviderLimit(
 }
 
 describe('ChatInput', () => {
+  describe('image compression', () => {
+    const original = {
+      id: 'compress-one',
+      filename: 'image.png',
+      mime: 'image/png',
+      url: 'data:image/png;base64,original',
+      size: 3 * 1024 * 1024,
+      attachmentSequence: 7,
+    };
+    const compressed = {
+      url: 'data:image/png;base64,compressed',
+      mime: 'image/png',
+      size: 100_000,
+      width: 2048,
+      height: 1024,
+    };
+    beforeEach(() => {
+      vi.spyOn(imageCompression, 'analyzeImageCompression').mockImplementation(async (image) =>
+        image.url === original.url
+          ? {
+              width: 4000,
+              height: 2000,
+              recommended: compressed,
+              smaller: { ...compressed, width: 1280, height: 640 },
+            }
+          : null
+      );
+      setupModelState();
+      setState('activeSessionId', 'session-1');
+      setState('clipboardImages', [{ ...original }]);
+      setInputText('[image.png]');
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+    it('compresses and restores an inline image without changing its name, identity, marker or order', async () => {
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      container!
+        .querySelector('.inline-chip')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      expect(document.querySelector('.image-compression-menu')?.textContent).toContain(
+        '2048 × 1024'
+      );
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.image-compression-menu button'))
+        .find((button) => button.textContent?.startsWith('Recommended'))!
+        .click();
+      expect(state.clipboardImages[0]).toMatchObject({
+        ...original,
+        url: compressed.url,
+        size: compressed.size,
+        contentKey: original.url,
+      });
+      expect(inputText()).toBe('[image.png]');
+      await flushAsyncWork();
+      container!
+        .querySelector('.inline-chip')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.image-compression-menu button'))
+        .find((button) => button.textContent === 'Restore original')!
+        .click();
+      expect(state.clipboardImages[0]).toMatchObject(original);
+    });
+    it('supports the attachment-row chip and refuses compression during image storage', async () => {
+      setupVisionDelegationModelState();
+      setInputText('@vision Look at this');
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      container!
+        .querySelector('.chat-attachment-chip')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      document.querySelector<HTMLButtonElement>('.image-compression-menu button')!.click();
+      await flushAsyncWork();
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+        'Wait for the current image operation'
+      );
+      expect(state.clipboardImages[0]).toMatchObject(original);
+    });
+    it('discards image analysis after the session changes', async () => {
+      let complete:
+        | ((result: imageCompression.ImageCompressionAnalysis | null) => void)
+        | undefined;
+      vi.mocked(imageCompression.analyzeImageCompression).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            complete = resolve;
+          })
+      );
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      setState('activeSessionId', 'session-2');
+      complete?.({ width: 4000, height: 2000, recommended: compressed, smaller: null });
+      await flushAsyncWork();
+      expect(state.clipboardImages[0]?.url).not.toBe(compressed.url);
+      expect(document.querySelector('.image-compression-menu')).toBeNull();
+      expect(container!.querySelector('.chip-image-size')).toBeNull();
+    });
+    it('does not mutate a queued image snapshot while compressing the draft', async () => {
+      const queuedImage = { ...original };
+      setState('queuedMessages', [
+        {
+          id: 'queue-compression',
+          sessionId: 'session-1',
+          text: 'queued',
+          clipboardImages: [queuedImage],
+        },
+      ]);
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      container!
+        .querySelector('.inline-chip')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      document.querySelector<HTMLButtonElement>('.image-compression-menu button')!.click();
+      expect(state.clipboardImages[0]?.url).toBe(compressed.url);
+      expect(state.queuedMessages[0]?.clipboardImages?.[0]?.url).toBe(original.url);
+    });
+    it('rejects a stale image-store acknowledgement after undo restores the original', async () => {
+      setupVisionDelegationModelState();
+      setState('clipboardImages', [
+        {
+          ...original,
+          contextFile: { path: '/repo/original.png', relativePath: 'original.png', type: 'file' },
+        },
+      ]);
+      setInputText('@vision inspect [image.png]');
+      const posted = vi.fn();
+      fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+        posted;
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      container!
+        .querySelector('.inline-chip[data-chip-type="image"]')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      document.querySelector<HTMLButtonElement>('.image-compression-menu button')!.click();
+      expect(posted).toHaveBeenCalledWith(expect.objectContaining({ type: 'images/store' }));
+      container!
+        .querySelector('.rich-composer')!
+        .dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
+        );
+      expect(state.clipboardImages[0]?.url).toBe(original.url);
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'images/stored',
+            payload: {
+              id: original.id,
+              contextFile: {
+                path: '/repo/compressed.png',
+                relativePath: 'compressed.png',
+                type: 'file',
+              },
+            },
+          },
+        })
+      );
+      expect(state.clipboardImages[0]?.contextFile?.path).toBe('/repo/original.png');
+      expect(posted).toHaveBeenCalledWith({
+        type: 'images/release',
+        payload: { paths: ['/repo/compressed.png'], deferred: false },
+      });
+    });
+  });
   it('attaches PDFs picked by the extension', async () => {
     setupModelState();
     cleanup = render(() => ChatInput(), container!);
@@ -1289,7 +1460,15 @@ describe('ChatInput', () => {
         agent: 'build',
         model: { providerID: 'openai', modelID: 'gpt-4o' },
       },
-      parts: [],
+      parts: [
+        {
+          id: 'prompt-text',
+          messageID: 'user-1',
+          sessionID: 'session-1',
+          type: 'text',
+          text: 'Fix the scrollbar regression',
+        },
+      ],
     } satisfies MessageEntry<UserMessage>;
     const assistantMessage = assistantMessageEntry({ input: 0, output: 0 });
     assistantMessage.info.time.created = 70_000;
@@ -1365,7 +1544,15 @@ describe('ChatInput', () => {
           agent: 'build',
           model: { providerID: 'openai', modelID: 'gpt-4o' },
         },
-        parts: [],
+        parts: [
+          {
+            id: 'prompt-text',
+            messageID: 'user-1',
+            sessionID: 'session-1',
+            type: 'text',
+            text: 'Fix the scrollbar regression',
+          },
+        ],
       } satisfies MessageEntry<UserMessage>;
       const assistant = assistantMessageEntry({ input: 0, output: 0 });
       assistant.info.time = { created: 71_000 };
@@ -1418,6 +1605,130 @@ describe('ChatInput', () => {
       expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
     }
   );
+
+  it.each([
+    'background notice',
+    'compaction',
+    'continuation',
+    'recovery',
+    'pending steer',
+    'delivered steer',
+  ])('keeps timing the original prompt through a %s', async (kind) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_188_000);
+    setShowTurnTimer(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 100_000)]);
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    const prompt: MessageEntry<UserMessage> = {
+      info: {
+        id: 'user-1',
+        sessionID: 'session-1',
+        role: 'user',
+        time: { created: 100_000 },
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+      },
+      parts: [
+        {
+          id: 'prompt-text',
+          messageID: 'user-1',
+          sessionID: 'session-1',
+          type: 'text',
+          text: 'Fix the scrollbar regression',
+        },
+      ],
+    };
+    const assistant: MessageEntry<AssistantMessage> = assistantMessageEntry({
+      input: 0,
+      output: 0,
+    });
+    assistant.info.time.created = 101_000;
+    assistant.info.time.completed = 200_000;
+    assistant.info.finish = 'tool_calls';
+    setState('messages', [prompt, assistant]);
+    cleanup = render(() => ChatInput(), container!);
+    const timer = container?.querySelector('.toolbar-turn-timer');
+    expect(timer?.textContent).toBe('18m 8s');
+
+    const notice: MessageEntry<UserMessage> = {
+      info: {
+        ...prompt.info,
+        id: 'notice',
+        time: { created: 1_154_000 },
+        pendingDelivery: kind === 'pending steer' ? 'steer' : undefined,
+      },
+      parts: [],
+    };
+    setState('messages', [prompt, assistant, notice]);
+    expect(timer?.textContent).toBe('18m 8s');
+
+    const identity = { id: 'notice-part', messageID: 'notice', sessionID: 'session-1' };
+    const part: Part =
+      kind === 'compaction'
+        ? { ...identity, type: 'compaction', auto: true, status: 'running' }
+        : {
+            ...identity,
+            type: 'text',
+            synthetic: kind !== 'pending steer' && kind !== 'delivered steer',
+            text:
+              kind === 'background notice'
+                ? '<shell id="test" state="completed">Done</shell>'
+                : kind === 'recovery'
+                  ? 'The previous response was interrupted. Continue working.'
+                  : kind === 'continuation'
+                    ? 'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.'
+                    : 'Run the remaining tests',
+          };
+    setState('messages', [prompt, assistant, { ...notice, parts: [part] }]);
+    expect(timer?.textContent).toBe('18m 8s');
+    const resumed = {
+      ...assistant,
+      info: { ...assistant.info, id: 'assistant-resumed', time: { created: Date.now() } },
+    };
+    setState('messages', [prompt, assistant, { ...notice, parts: [part] }, resumed]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(timer?.textContent).toBe('18m 10s');
+    expect(container?.querySelector('.toolbar-turn-timer')).toBe(timer);
+
+    cleanup();
+    cleanup = render(() => ChatInput(), container!);
+    expect(container?.querySelector('.toolbar-turn-timer')?.textContent).toBe('18m 10s');
+
+    const completed = {
+      ...resumed,
+      info: {
+        ...resumed.info,
+        finish: 'stop',
+        time: { ...resumed.info.time, completed: Date.now() },
+      },
+    };
+    const history = [prompt, assistant, { ...notice, parts: [part] }, completed];
+    setState('messages', history);
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
+
+    const nextPrompt = {
+      ...prompt,
+      info: { ...prompt.info, id: 'next-prompt', time: { created: Date.now() } },
+      parts: [{ ...prompt.parts[0]!, id: 'next-prompt-text', messageID: 'next-prompt' }],
+    };
+    const nextAssistant = {
+      ...resumed,
+      info: {
+        ...resumed.info,
+        id: 'next-assistant',
+        parentID: 'next-prompt',
+        time: { created: Date.now() },
+      },
+    };
+    setState('messages', [...history, nextPrompt, nextAssistant]);
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    // A stale loading clock from the prior turn must not carry into the new turn.
+    setLoadingStartedAt(100_000);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(container?.querySelector('.toolbar-turn-timer')?.textContent).toBe('10s');
+  });
 
   it('hides the active-turn timer in the new-session composer', () => {
     vi.useFakeTimers();
@@ -1530,7 +1841,7 @@ describe('ChatInput', () => {
     expect(warning?.textContent).not.toContain('5-hour limit');
     expect(warning?.nextElementSibling?.classList.contains('chat-input-shell')).toBe(true);
     expect(container?.querySelector<HTMLAnchorElement>('.chat-quota-warning-usage')?.href).toBe(
-      'https://chatgpt.com/#settings/Usage'
+      'https://chatgpt.com/settings/usage?tab=overview'
     );
 
     setSessionUsageLimit('session-1', {
@@ -1767,7 +2078,7 @@ describe('ChatInput', () => {
     expect(rows?.textContent).toContain('Expiration details unavailable for 1 reset.');
     const usageLink = container?.querySelector<HTMLAnchorElement>('.provider-limit-reset-link');
     expect(usageLink?.textContent).toContain('ChatGPT Usage');
-    expect(usageLink?.href).toBe('https://chatgpt.com/#settings/Usage');
+    expect(usageLink?.href).toBe('https://chatgpt.com/settings/usage?tab=overview');
     expect(container?.querySelector('button')?.textContent).not.toContain('Use reset');
 
     setState('providerLimits', {
