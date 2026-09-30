@@ -1,4 +1,5 @@
 import {
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -215,13 +216,14 @@ export function ProviderQuotaWarning(props: {
             onClick={() => {
               if (props.forceShow) setDebugDismissed(true);
               else {
+                const providerID = props.limit!.providerID;
+                const windows = visibleWindows();
                 const expirations = expiringResets().map(([expiresAt]) => expiresAt);
-                quotaWarningDismissals.dismiss(
-                  props.limit!.providerID,
-                  visibleWindows(),
-                  Date.now()
-                );
-                resetWarningDismissals.dismiss(props.limit!.providerID, expirations, Date.now());
+                const dismissedAt = Date.now();
+                batch(() => {
+                  quotaWarningDismissals.dismiss(providerID, windows, dismissedAt);
+                  resetWarningDismissals.dismiss(providerID, expirations, dismissedAt);
+                });
               }
             }}
           >

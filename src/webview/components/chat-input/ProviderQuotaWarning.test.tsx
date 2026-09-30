@@ -165,8 +165,8 @@ describe('ProviderQuotaWarning', () => {
     expect(banner()?.textContent).not.toContain('Reset expires');
   });
 
-  it('rotates quota and reset warnings in one panel and dismisses both', () => {
-    const { setLimit, remount } = mount({
+  it('rotates quota and reset warnings in one panel', () => {
+    mount({
       ...withResets([NOW + 4 * 24 * HOUR]),
       windows: [quota('weekly', 0)],
     });
@@ -182,8 +182,38 @@ describe('ProviderQuotaWarning', () => {
     vi.advanceTimersByTime(15_000);
     expect(banner()?.textContent).toContain('weekly: 0% left');
     expect(banner()?.classList.contains('error')).toBe(true);
+  });
+
+  it.each([
+    { phase: 'quota', elapsed: 0, text: 'weekly: 0% left' },
+    { phase: 'reset expiration', elapsed: 15_000, text: 'Reset expires in' },
+  ])('dismisses both warnings from the $phase phase without rotating back', ({ elapsed, text }) => {
+    const expiresAt = NOW + 4 * 24 * HOUR;
+    const limit = {
+      ...withResets([expiresAt, expiresAt + HOUR]),
+      windows: [quota('weekly', 0), quota('five_hour', 20)],
+    };
+    const { setLimit, remount } = mount(limit);
+    vi.advanceTimersByTime(elapsed);
+    expect(banner()?.textContent).toContain(text);
     dismiss();
+    expect(banner()).toBeNull();
+    expect(quotaWarningDismissals.read().map((entry) => entry.windowID)).toEqual([
+      'weekly',
+      'five_hour',
+    ]);
+    expect(resetWarningDismissals.read().map((entry) => entry.expiresAt)).toEqual([
+      expiresAt,
+      expiresAt + HOUR,
+    ]);
+    vi.advanceTimersByTime(30_000);
+    expect(banner()).toBeNull();
+    quotaWarningDismissals.reload();
+    resetWarningDismissals.reload();
+    setLimit({ ...limit, checkedAt: Date.now() });
     remount();
+    expect(banner()).toBeNull();
+    vi.advanceTimersByTime(15_000);
     expect(banner()).toBeNull();
     setLimit(withResets([NOW + HOUR]));
     expect(banner()?.textContent).toContain('Reset expires in');
