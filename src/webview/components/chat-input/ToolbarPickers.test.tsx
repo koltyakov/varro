@@ -1383,6 +1383,7 @@ describe('ToolbarPickers', () => {
       expect(button?.getAttribute('aria-label')).toBe(`${providerName} / ${modelName}`);
       expect(button?.className).not.toContain('fast-model-selected');
       expect(container?.querySelector('.model-name-text')?.textContent).toBe(formattedName);
+      expect(container?.querySelector('.model-speed-label')).toBeNull();
       expect(
         container
           ?.querySelector<HTMLElement>('.model-speed-icon')
@@ -1427,6 +1428,7 @@ describe('ToolbarPickers', () => {
         modelName.replace('Ultrafast', '')
       );
       expect(container?.querySelectorAll('.model-speed-icon')).toHaveLength(3);
+      expect(container?.querySelector('.model-speed-label')).toBeNull();
       expect(
         container
           ?.querySelector<HTMLElement>('.model-speed-icon')

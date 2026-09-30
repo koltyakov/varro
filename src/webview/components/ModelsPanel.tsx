@@ -1294,7 +1294,7 @@ function ModelCatalogDialog(props: { provider: ModelProvider; onClose: () => voi
                           onChange={(event) => toggleModel(model.id, event.currentTarget.checked)}
                         />
                         <span class="models-model-catalog-name">
-                          <FormattedModelName name={model.name} />
+                          <FormattedModelName name={model.name} showSpeedLabel />
                           <span class="models-model-catalog-id">({model.id})</span>
                         </span>
                       </label>
@@ -1661,6 +1661,7 @@ function ProviderSection(props: {
                       <span class="models-model-name">
                         <FormattedModelName
                           name={getModelDisplayName(props.provider.id, model.id, model.name)}
+                          showSpeedLabel
                         />
                       </span>
                       <Show when={state.modelDisplayNames[`${props.provider.id}:${model.id}`]}>

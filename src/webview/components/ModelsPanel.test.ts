@@ -635,15 +635,19 @@ describe('ModelsPanel', () => {
     );
   });
 
-  it('labels the Claude Fast flash icon on hover', async () => {
-    setState('providers', 0, 'models', 'gpt-5', 'name', 'Claude Opus 5 Fast');
+  it.each(['Fast', 'Ultrafast'])('shows a dimmed %s label after the flash icons', async (speed) => {
+    setState('providers', 0, 'models', 'gpt-5', 'name', `Claude Opus 5 ${speed}`);
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
     const fastSymbol = container?.querySelector(
       '.models-model-name [aria-label="Fast mode may consume usage limits faster and cost more."]'
     );
-    expect(fastSymbol?.querySelectorAll('.model-speed-icon')).toHaveLength(1);
+    expect(fastSymbol?.querySelectorAll('.model-speed-icon')).toHaveLength(
+      speed === 'Ultrafast' ? 3 : 1
+    );
+    expect(fastSymbol?.nextElementSibling?.classList.contains('model-speed-label')).toBe(true);
+    expect(fastSymbol?.nextElementSibling?.textContent).toBe(speed);
   });
 
   it('hides providers without matching search results', async () => {

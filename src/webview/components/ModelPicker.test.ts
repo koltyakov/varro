@@ -325,10 +325,10 @@ describe('ModelPicker', () => {
     expect(onSelect).toHaveBeenCalledWith({ providerID: 'openai', modelID: 'gpt-5' });
   });
 
-  it('labels the Claude Fast lightning symbol on hover', async () => {
+  it.each(['Fast', 'Ultrafast'])('shows a dimmed %s label after the flash icons', async (speed) => {
     setState('providers', [
       createProvider('anthropic', 'Anthropic', {
-        fast: createModel('fast', 'Claude Opus 5 Fast'),
+        fast: createModel('fast', `Claude Opus 5 ${speed}`),
         standard: createModel('standard', 'Claude Opus 5'),
       }),
     ]);
@@ -337,12 +337,16 @@ describe('ModelPicker', () => {
     await flushMicrotasks();
 
     const fastLabel = Array.from(container?.querySelectorAll('.dropdown-name') ?? []).find(
-      (item) => item.textContent === 'Claude Opus 5 '
+      (item) => item.textContent === `Claude Opus 5 ${speed}`
     );
     const fastSymbol = fastLabel?.querySelector(
       '[aria-label="Fast mode may consume usage limits faster and cost more."]'
     );
-    expect(fastSymbol?.querySelectorAll('.model-speed-icon')).toHaveLength(1);
+    expect(fastSymbol?.querySelectorAll('.model-speed-icon')).toHaveLength(
+      speed === 'Ultrafast' ? 3 : 1
+    );
+    expect(fastSymbol?.nextElementSibling?.classList.contains('model-speed-label')).toBe(true);
+    expect(fastSymbol?.nextElementSibling?.textContent).toBe(speed);
     expect(
       container?.querySelectorAll(
         '[aria-label="Fast mode may consume usage limits faster and cost more."]'

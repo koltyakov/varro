@@ -1453,6 +1453,11 @@
   margin-left: -3px;
 }
 
+.model-speed-label {
+  margin-left: 4px;
+  color: var(--color-vscode-muted);
+}
+
 .toolbar-picker-tooltip-separator {
   width: 100%;
   border-top: 1px solid var(--color-vscode-border-strong);

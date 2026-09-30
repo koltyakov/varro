@@ -586,7 +586,7 @@ export function ModelPicker(props: {
                               >
                                 <span class="dropdown-name-wrap">
                                   <span class="dropdown-name">
-                                    <FormattedModelName name={entry.item.name} />
+                                    <FormattedModelName name={entry.item.name} showSpeedLabel />
                                   </span>
                                   <Show when={pinned()}>
                                     <span class="model-picker-provider-name">{provider.name}</span>

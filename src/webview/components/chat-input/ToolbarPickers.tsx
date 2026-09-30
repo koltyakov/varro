@@ -1021,19 +1021,28 @@ function ModelSpeedIcons(props: { count: number }) {
   );
 }
 
-export function FormattedModelName(props: { name: string; showFastTooltip?: boolean }) {
+export function FormattedModelName(props: {
+  name: string;
+  showFastTooltip?: boolean;
+  showSpeedLabel?: boolean;
+}) {
   return (
     <For each={formatModelName(props.name).split(/(⚡+)/)}>
       {(part) =>
         part.startsWith('⚡') ? (
-          <Show
-            when={props.showFastTooltip !== false}
-            fallback={<ModelSpeedIcons count={part === '⚡⚡⚡' ? 3 : 1} />}
-          >
-            <Tooltip content={FAST_MODE_COST_WARNING} delay={300}>
-              <ModelSpeedIcons count={part === '⚡⚡⚡' ? 3 : 1} />
-            </Tooltip>
-          </Show>
+          <>
+            <Show
+              when={props.showFastTooltip !== false}
+              fallback={<ModelSpeedIcons count={part === '⚡⚡⚡' ? 3 : 1} />}
+            >
+              <Tooltip content={FAST_MODE_COST_WARNING} delay={300}>
+                <ModelSpeedIcons count={part === '⚡⚡⚡' ? 3 : 1} />
+              </Tooltip>
+            </Show>
+            <Show when={props.showSpeedLabel}>
+              <span class="model-speed-label">{part === '⚡⚡⚡' ? 'Ultrafast' : 'Fast'}</span>
+            </Show>
+          </>
         ) : (
           part
         )
