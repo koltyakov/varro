@@ -1,7 +1,6 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import type { SelectedModel } from '../../lib/app-state-types';
 import {
-  formatModelName,
   formatProviderLimitTitle,
   formatVariantLabel,
   getProviderLimitCompactBadges,
@@ -31,7 +30,7 @@ import {
   estimateNestedContextBreakdown,
 } from '../../../shared/context-breakdown';
 import { ProviderLimitPopup } from '../chat-input/ProviderLimitPopup';
-import { ProviderLimitChip } from '../chat-input/ToolbarPickers';
+import { FormattedModelName, ProviderLimitChip } from '../chat-input/ToolbarPickers';
 import {
   getLatestAssistantMessageInfoWithTokens,
   groupMessageEntriesBySession,
@@ -209,7 +208,7 @@ export function ManagedSubagentFooter(props: {
               <Show when={currentModel().modelName}>
                 <span
                   class="toolbar-picker model-picker-btn managed-subagent-info-chip"
-                  title={`${currentModel().providerName} / ${formatModelName(currentModel().modelName)}`}
+                  title={`${currentModel().providerName} / ${currentModel().modelName}`}
                 >
                   <span class="toolbar-picker-label model-name">
                     <Show
@@ -223,7 +222,9 @@ export function ManagedSubagentFooter(props: {
                         />
                       )}
                     </Show>
-                    <span class="model-name-text">{formatModelName(currentModel().modelName)}</span>
+                    <span class="model-name-text">
+                      <FormattedModelName name={currentModel().modelName} showFastTooltip={false} />
+                    </span>
                   </span>
                 </span>
               </Show>

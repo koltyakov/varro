@@ -6,13 +6,14 @@ import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelPricing, WebviewMessage } from '../../../shared/protocol';
 import type { Agent, Provider } from '../../types';
-import { openNewWindowIcon } from '../../lib/ui-icons';
+import { flashSolidIcon, openNewWindowIcon } from '../../lib/ui-icons';
 import { client } from '../../lib/client';
 import { toCssUrl } from '../UiIcon';
 import { DEFAULT_TOOLTIP_DELAY } from '../Tooltip';
 import { QUEUE_ONLY_SELECTION_TOOLTIP } from './active-turn-selection';
 import {
   AgentPicker,
+  FormattedModelName,
   ModelPickerButton,
   PermissionModePicker,
   ProviderLimitChip,
@@ -1359,8 +1360,8 @@ describe('ToolbarPickers', () => {
   });
 
   it.each([
-    ['anthropic', 'Anthropic', 'Claude Opus 5 Fast', 'Claude Opus 5 ⚡'],
-    ['openai', 'OpenAI', 'GPT-6.1 Sol Fast', 'GPT-6.1 Sol ⚡'],
+    ['anthropic', 'Anthropic', 'Claude Opus 5 Fast', 'Claude Opus 5 '],
+    ['openai', 'OpenAI', 'GPT-6.1 Sol Fast', 'GPT-6.1 Sol '],
   ])(
     'renders %s Fast models with regular styling and the cost tooltip',
     async (providerID, providerName, modelName, formattedName) => {
@@ -1382,6 +1383,12 @@ describe('ToolbarPickers', () => {
       expect(button?.getAttribute('aria-label')).toBe(`${providerName} / ${modelName}`);
       expect(button?.className).not.toContain('fast-model-selected');
       expect(container?.querySelector('.model-name-text')?.textContent).toBe(formattedName);
+      expect(
+        container
+          ?.querySelector<HTMLElement>('.model-speed-icon')
+          ?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(flashSolidIcon));
+      expect(container?.querySelectorAll('.model-speed-icon')).toHaveLength(1);
 
       button?.dispatchEvent(new MouseEvent('mouseenter'));
       await vi.advanceTimersByTimeAsync(1_500);
@@ -1395,6 +1402,64 @@ describe('ToolbarPickers', () => {
       );
     }
   );
+
+  it.each(['GPT-6 Astra Ultrafast', 'Claude Opus 5 Ultrafast'])(
+    'renders %s with three solid flash icons and the original fast warning styling',
+    async (modelName) => {
+      vi.useFakeTimers();
+      cleanup = render(
+        () => (
+          <ModelPickerButton
+            providerID="openai"
+            providerName="OpenAI"
+            modelName={modelName}
+            canEllipsize={false}
+            onToggle={vi.fn()}
+          />
+        ),
+        container!
+      );
+      const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+      expect(button?.classList.contains('ultrafast-model-selected')).toBe(true);
+      expect(button?.classList.contains('fast-model-selected')).toBe(false);
+      expect(button?.getAttribute('aria-label')).toBe(`OpenAI / ${modelName}`);
+      expect(container?.querySelector('.model-name-text')?.textContent).toBe(
+        modelName.replace('Ultrafast', '')
+      );
+      expect(container?.querySelectorAll('.model-speed-icon')).toHaveLength(3);
+      expect(
+        container
+          ?.querySelector<HTMLElement>('.model-speed-icon')
+          ?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(flashSolidIcon));
+      button?.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+        'Fast mode may consume usage limits faster and cost more.'
+      );
+    }
+  );
+
+  it('groups three ultrafast solid flash icons under one cost tooltip in model lists', async () => {
+    vi.useFakeTimers();
+    cleanup = render(() => <FormattedModelName name="GPT-6 Astra Ultrafast" />, container!);
+    const symbols = container?.querySelectorAll(
+      '[aria-label="Fast mode may consume usage limits faster and cost more."]'
+    );
+    expect(symbols).toHaveLength(1);
+    expect(symbols?.[0]?.classList.contains('model-speed-icons')).toBe(true);
+    expect(symbols?.[0]?.querySelectorAll('.model-speed-icon')).toHaveLength(3);
+    expect(
+      container
+        ?.querySelector<HTMLElement>('.model-speed-icon')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(flashSolidIcon));
+    symbols?.[0]?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'Fast mode may consume usage limits faster and cost more.'
+    );
+  });
 
   it.each([
     [10, 30, 0, 0, true],

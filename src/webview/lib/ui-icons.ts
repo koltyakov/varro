@@ -30,6 +30,7 @@ import emptyPageIcon from 'iconoir/icons/empty-page.svg';
 import expandIcon from 'iconoir/icons/expand.svg';
 import eyeIcon from 'iconoir/icons/eye.svg';
 import fingerprintCircleIcon from 'iconoir/icons/fingerprint-circle.svg';
+import flashSolidIcon from 'iconoir/icons/flash-solid.svg';
 import folderIcon from 'iconoir/icons/folder.svg';
 import folderPlusIcon from 'iconoir/icons/folder-plus.svg';
 import folderSettingsIcon from 'iconoir/icons/folder-settings.svg';
@@ -88,6 +89,7 @@ export {
   dollarIcon,
   infoCircleIcon,
   fingerprintCircleIcon,
+  flashSolidIcon,
   archiveIcon,
   appNotificationIcon,
   arrowLeftIcon,

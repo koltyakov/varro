@@ -12,6 +12,7 @@ import { getProviderIcon } from '../../lib/provider-icons';
 import { getAgentIcon } from '../../lib/agent-icons';
 import {
   checkIcon,
+  flashSolidIcon,
   folderSettingsIcon,
   navArrowDownIcon,
   openNewWindowIcon,
@@ -44,7 +45,7 @@ function isFastModelName(name: string) {
 function modelIdentityWithoutFast(value: string) {
   return value
     .toLowerCase()
-    .replace(/\bfast\b/g, '')
+    .replace(/\b(?:ultrafast|fast)\b/g, '')
     .replace(/[\s_-]+/g, ' ')
     .trim();
 }
@@ -56,7 +57,7 @@ function getNonFastModel(
 ) {
   if (!provider || !isFastModelName(modelName)) return undefined;
   const models = Object.values(provider.models).filter(
-    (model) => !isFastModelName(model.name) && !/\bfast\b/i.test(model.id)
+    (model) => !isFastModelName(model.name) && !/\b(?:ultrafast|fast)\b/i.test(model.id)
   );
   return (
     (modelID
@@ -918,6 +919,7 @@ export function ModelPickerButton(props: {
   const label = () =>
     props.modelName ? `${props.providerName} / ${props.modelName}` : 'Choose model';
   const isFastModel = () => isFastModelName(props.modelName);
+  const isUltrafastModel = () => formatModelName(props.modelName).includes('⚡⚡⚡');
   const baseModel = createMemo(() =>
     getNonFastModel(
       props.providers?.find((provider) => provider.id === props.providerID),
@@ -976,7 +978,7 @@ export function ModelPickerButton(props: {
     <Tooltip content={tooltipContent()}>
       <button
         ref={props.buttonRef}
-        class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''} ${showCostWarning() ? 'fast-model-selected' : ''}`}
+        class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''} ${isUltrafastModel() ? 'ultrafast-model-selected' : showCostWarning() ? 'fast-model-selected' : ''}`}
         data-provider-id={props.providerID ?? undefined}
         data-model-id={props.modelID ?? undefined}
         disabled={props.disabled}
@@ -1009,17 +1011,27 @@ export function ModelPickerButton(props: {
   );
 }
 
+function ModelSpeedIcons(props: { count: number }) {
+  return (
+    <span class="model-speed-icons" role="img" aria-label={FAST_MODE_COST_WARNING}>
+      <For each={Array.from({ length: props.count }, (_, index) => index)}>
+        {() => <UiIcon source={flashSolidIcon} class="model-speed-icon" width={12} height={12} />}
+      </For>
+    </span>
+  );
+}
+
 export function FormattedModelName(props: { name: string; showFastTooltip?: boolean }) {
   return (
-    <For each={formatModelName(props.name).split(/(⚡)/)}>
+    <For each={formatModelName(props.name).split(/(⚡+)/)}>
       {(part) =>
-        part === '⚡' ? (
+        part.startsWith('⚡') ? (
           <Show
             when={props.showFastTooltip !== false}
-            fallback={<span aria-label={FAST_MODE_COST_WARNING}>{part}</span>}
+            fallback={<ModelSpeedIcons count={part === '⚡⚡⚡' ? 3 : 1} />}
           >
             <Tooltip content={FAST_MODE_COST_WARNING} delay={300}>
-              <span aria-label={FAST_MODE_COST_WARNING}>{part}</span>
+              <ModelSpeedIcons count={part === '⚡⚡⚡' ? 3 : 1} />
             </Tooltip>
           </Show>
         ) : (

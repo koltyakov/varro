@@ -337,12 +337,12 @@ describe('ModelPicker', () => {
     await flushMicrotasks();
 
     const fastLabel = Array.from(container?.querySelectorAll('.dropdown-name') ?? []).find(
-      (item) => item.textContent === 'Claude Opus 5 ⚡'
+      (item) => item.textContent === 'Claude Opus 5 '
     );
     const fastSymbol = fastLabel?.querySelector(
       '[aria-label="Fast mode may consume usage limits faster and cost more."]'
     );
-    expect(fastSymbol?.textContent).toBe('⚡');
+    expect(fastSymbol?.querySelectorAll('.model-speed-icon')).toHaveLength(1);
     expect(
       container?.querySelectorAll(
         '[aria-label="Fast mode may consume usage limits faster and cost more."]'

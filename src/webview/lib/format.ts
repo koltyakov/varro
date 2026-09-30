@@ -31,7 +31,9 @@ export function formatContextLimit(value: number) {
 
 export function formatModelName(name: string) {
   if (!/^\s*(?:gpt-|claude\b)/i.test(name)) return name;
-  return name.replace(/\bfast\b/gi, '⚡');
+  return name.replace(/\b(ultrafast|fast)\b/gi, (mode) =>
+    mode.toLowerCase() === 'ultrafast' ? '⚡⚡⚡' : '⚡'
+  );
 }
 
 export function formatModelReleaseDate(value: string | undefined) {
