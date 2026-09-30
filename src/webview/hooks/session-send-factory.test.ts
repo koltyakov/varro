@@ -177,6 +177,59 @@ describe('SessionSendOperations', () => {
     appStore.resetDefaultAppState();
   });
 
+  it.each([
+    { newSession: false, explicitDefault: false },
+    { newSession: true, explicitDefault: false },
+    { newSession: false, explicitDefault: true },
+  ])(
+    'preserves reasoning when sending with newSession=$newSession and explicitDefault=$explicitDefault',
+    async ({ newSession, explicitDefault }) => {
+      const model = { providerID: 'openai', modelID: 'gpt-6.1-sol' };
+      const selected = explicitDefault ? model : { ...model, variant: 'high' };
+      appStore.setState('activeSessionId', newSession ? null : 'session-1');
+      appStore.setState('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-6.1-sol': {
+              id: 'gpt-6.1-sol',
+              name: 'GPT-6.1 Sol',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+              variants: { high: {} },
+            },
+          },
+        },
+      ]);
+      routingStore.setSelectedModel(model, { rememberVariant: 'high' });
+      if (explicitDefault) {
+        routingStore.setSelectedModel(model, { sessionId: 'session-1', persistGlobal: false });
+      }
+      const createSession = vi.fn<
+        ConstructorParameters<typeof SessionSendOperations>[0]['createSession']
+      >(async () => {
+        appStore.setState('activeSessionId', 'session-1');
+        return 'session-1';
+      });
+      const sendAsync = vi.fn<SendAsync>(async () => {});
+      const operations = createOperations(sendAsync, undefined, { createSession });
+
+      expect(await operations.sendMessage('First prompt')).toBe(true);
+      expect(appStore.state.selectedModel).toEqual(selected);
+      expect(routingStore.getSelectedModelForSession('session-1')).toEqual(selected);
+      if (newSession) {
+        expect(createSession).toHaveBeenCalledWith(expect.any(String), undefined, selected);
+      }
+      expect(await operations.sendMessage('Follow-up prompt')).toBe(true);
+      expect(sendAsync).toHaveBeenCalledTimes(2);
+      for (const [, body] of sendAsync.mock.calls) {
+        expect(body.variant).toBe(explicitDefault ? undefined : 'high');
+      }
+    }
+  );
+
   it('builds the payload from stores and clears sent composer attachments', async () => {
     appStore.setState('activeSessionId', 'session-1');
     appStore.setState('editorContext', {
