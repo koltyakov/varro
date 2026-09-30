@@ -22,6 +22,7 @@ export type AssistantDialogSummaryInfo = {
   promptMessageId?: string;
   inputTokens: number;
   outputTokens: number;
+  tokensPerSecond?: number;
   cost?: number;
   agentCount: number;
   interrupted?: boolean;
@@ -207,6 +208,7 @@ export function getAssistantDialogSummaryMap(
       promptMessageId: currentUserRequestId ?? undefined,
       inputTokens: tokens.input,
       outputTokens: tokens.output,
+      tokensPerSecond: getAssistantDialogTokensPerSecond(currentMessages, entriesById),
       cost: tokens.cost,
       agentCount,
       interrupted: interrupted ? true : undefined,
@@ -263,6 +265,73 @@ export function getAssistantDialogSummaryMap(
   const nextUserRequestCreated = options?.range?.nextUserRequestCreated;
   flush(nextUserRequestCreated === undefined ? { trailing: true } : { nextUserRequestCreated });
   return result;
+}
+
+/**
+ * Estimate generation speed only for primary responses with matching token counts and
+ * explicit timing for every generated text/reasoning part. Missing or invalid timing
+ * returns no metric; request/response duration includes initial latency and must never
+ * be used as a fallback. Tool execution, permission waits, and child-session work are
+ * not generation time for these tokens.
+ *
+ * These checks validate part intervals, not complete token-level measurement. Part or
+ * chunk timestamps do not prove when each token was generated, whether events were
+ * missed, or whether the interval contains other waits. The result remains an estimate.
+ * OpenCode V2 saved text content currently has no generation timestamps, so ordinary
+ * V2 text responses cannot qualify, even when reasoning or message timing is present.
+ *
+ * Before supporting live V2 TPS, require either a documented provider/server generation
+ * metric or a complete recorded stream with explicit timing semantics. Stream timing
+ * must cover all counted output and reasoning tokens, reject gaps/reconnects, and exclude
+ * tool/user waits. Receiving some timestamped deltas is not proof of complete coverage;
+ * chunk-based measurement must still be labeled as an estimate, not exact token TPS.
+ */
+function getAssistantDialogTokensPerSecond(
+  messages: readonly AssistantMessage[],
+  entriesById: ReadonlyMap<string, MessageEntry>
+): number | undefined {
+  let tokens = 0;
+  let durationMs = 0;
+  for (const message of messages) {
+    if (!message.time.completed || message.error) continue;
+    const parts = entriesById.get(message.id)?.parts;
+    // Tool-call argument tokens have no matching generation timestamps.
+    if (!parts || parts.some((part) => part.type === 'tool')) continue;
+    const generatedParts = parts.filter(
+      (part) =>
+        part.type === 'reasoning' || (part.type === 'text' && !part.synthetic && !part.ignored)
+    );
+    if (generatedParts.length === 0) continue;
+    const intervals = generatedParts.flatMap((part) => {
+      if (part.type !== 'text' && part.type !== 'reasoning') return [];
+      const time = part.time;
+      return time &&
+        time.end !== undefined &&
+        Number.isFinite(time.start) &&
+        Number.isFinite(time.end) &&
+        time.end > time.start
+        ? [{ start: time.start, end: time.end }]
+        : [];
+    });
+    const count = message.tokens.output + message.tokens.reasoning;
+    if (!Number.isFinite(count) || count <= 0) continue;
+    const start = Math.min(...intervals.map((interval) => interval.start));
+    const end = Math.max(...intervals.map((interval) => interval.end));
+    const hasGenerationTiming =
+      intervals.length === generatedParts.length &&
+      (message.tokens.reasoning === 0 ||
+        generatedParts.some((part) => part.type === 'reasoning')) &&
+      (message.tokens.output === 0 || generatedParts.some((part) => part.type === 'text')) &&
+      start >= message.time.created &&
+      end <= message.time.completed;
+    // Response duration includes latency and is not a substitute for generation timing.
+    if (!hasGenerationTiming) continue;
+    const elapsed = end - start;
+    if (!Number.isFinite(elapsed) || elapsed <= 0) continue;
+    tokens += count;
+    durationMs += elapsed;
+  }
+  return durationMs > 0 ? (tokens * 1000) / durationMs : undefined;
 }
 
 function sumAssistantDialogTokens(

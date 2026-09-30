@@ -19,6 +19,7 @@ import clockIcon from 'iconoir/icons/clock.svg';
 import codeBracketsSquareIcon from 'iconoir/icons/code-brackets-square.svg';
 import coinsIcon from 'iconoir/icons/coins.svg';
 import copyIcon from 'iconoir/icons/copy.svg';
+import dashboardDotsIcon from 'iconoir/icons/dashboard-dots.svg';
 import databaseBackupIcon from 'iconoir/icons/database-backup.svg';
 import databaseScriptPlusIcon from 'iconoir/icons/database-script-plus.svg';
 import downloadIcon from 'iconoir/icons/download.svg';
@@ -107,6 +108,7 @@ export {
   codeBracketsSquareIcon,
   coinsIcon,
   copyIcon,
+  dashboardDotsIcon,
   databaseBackupIcon,
   databaseScriptPlusIcon,
   downloadIcon,

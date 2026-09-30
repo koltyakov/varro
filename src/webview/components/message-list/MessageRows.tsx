@@ -21,6 +21,7 @@ import {
   clockIcon,
   coinsIcon,
   copyIcon,
+  dashboardDotsIcon,
   dollarCircleIcon,
   xmarkCircleIcon,
 } from '../../lib/ui-icons';
@@ -444,6 +445,12 @@ function AssistantDialogSummary(props: {
       : '';
   const agentSuffix = () =>
     props.summary.agentCount > 0 ? `Agents ${formatNumber(props.summary.agentCount)}` : '';
+  const tokensPerSecond = () => {
+    const value = props.summary.tokensPerSecond;
+    return value !== undefined && Number.isFinite(value) && value > 0
+      ? `${value.toFixed(1)} tok/s`
+      : '';
+  };
   const statusSuffix = () =>
     props.summary.permissionRejected
       ? 'Permission rejected'
@@ -600,6 +607,25 @@ function AssistantDialogSummary(props: {
                         aria-label="US dollars"
                       />
                       {cost()}
+                    </span>
+                  </>
+                )}
+              </Show>
+              <Show when={tokensPerSecond()}>
+                {(speed) => (
+                  <>
+                    {' '}
+                    <span
+                      class="assistant-dialog-summary-metric assistant-dialog-summary-tps"
+                      title="Estimated generation speed for timed text and reasoning responses. Excludes initial latency, tool calls, and subagents."
+                    >
+                      <UiIcon
+                        source={dashboardDotsIcon}
+                        width="12"
+                        height="12"
+                        aria-label="Tokens per second"
+                      />
+                      {speed()}
                     </span>
                   </>
                 )}

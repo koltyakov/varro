@@ -382,6 +382,9 @@ export function projectV2Message(
           ? projectTool(content, sessionID, message.id, options.stripToolAttachments === true)
           : part(ordinals[content.type]++, content.type, {
               text: content.text,
+              // V2 saved text has no generation timing. Do not synthesize it from message
+              // creation/completion: that interval includes latency, not just generation.
+              // Reasoning timing alone cannot establish TPS for output + reasoning tokens.
               time:
                 content.type === 'reasoning'
                   ? {
