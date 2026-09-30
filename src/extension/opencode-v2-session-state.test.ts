@@ -1,8 +1,41 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+/* oxlint-disable anti-slop/no-module-mocking -- Translate native filesystem contention errors to their Windows equivalents while retaining real locking operations. */
+import { mkdir, mkdtemp, rename, rm, rmdir, writeFile } from 'node:fs/promises';
+import type * as FsPromises from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
+import { asRecord } from '../shared/type-utils';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromises>();
+  const renameMock = vi.fn(actual.rename);
+  const rmdirMock = vi.fn(actual.rmdir);
+  const filesystem = { ...actual, rename: renameMock, rmdir: rmdirMock };
+  return { ...filesystem, default: filesystem };
+});
+
+async function simulateWindowsContention(): Promise<void> {
+  const actual = await vi.importActual<typeof FsPromises>('node:fs/promises');
+  vi.mocked(rename).mockImplementation(async (source, destination) => {
+    try {
+      await actual.rename(source, destination);
+    } catch (error) {
+      if (['EEXIST', 'ENOTEMPTY'].includes(String(asRecord(error)?.code)))
+        throw Object.assign(new Error('Windows directory rename contention'), { code: 'EPERM' });
+      throw error;
+    }
+  });
+  vi.mocked(rmdir).mockImplementation(async (path) => {
+    try {
+      await actual.rmdir(path);
+    } catch (error) {
+      if (['EEXIST', 'ENOTEMPTY'].includes(String(asRecord(error)?.code)))
+        throw Object.assign(new Error('Windows nonempty directory removal'), { code: 'EPERM' });
+      throw error;
+    }
+  });
+}
 
 function deferred() {
   let release!: () => void;
@@ -16,12 +49,15 @@ describe('OpenCodeV2SessionState', () => {
   let directory: string;
 
   beforeEach(async () => {
+    vi.mocked(rename).mockReset();
+    vi.mocked(rmdir).mockReset();
     const parent = resolve('artifacts/ai-test-data');
     await mkdir(parent, { recursive: true });
     directory = await mkdtemp(join(parent, 'annotation-order-'));
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await rm(directory, { recursive: true, force: true });
   });
 
@@ -66,24 +102,69 @@ describe('OpenCodeV2SessionState', () => {
     expect(await store.read('ses_fixture')).toEqual({});
   });
 
-  it('preserves concurrent updates from separate stores sharing the annotation directory', async () => {
-    const stores = [new OpenCodeV2SessionState(directory), new OpenCodeV2SessionState(directory)];
-    const patches = Array.from({ length: 20 }, (_, index) => ({ [`field${index}`]: index }));
-    await Promise.all(
-      patches.map((patch, index) => stores[index % 2]!.update('ses_fixture', patch))
-    );
-    expect(await stores[0]!.read('ses_fixture')).toEqual(Object.assign({ time: {} }, ...patches));
-    expect(existsSync(join(directory, 'ses_fixture.json.lock'))).toBe(false);
+  it.each(['native', 'Windows'])(
+    'preserves concurrent updates with %s contention errors',
+    async (platform) => {
+      if (platform === 'Windows') await simulateWindowsContention();
+      const stores = [new OpenCodeV2SessionState(directory), new OpenCodeV2SessionState(directory)];
+      const patches = Array.from({ length: 20 }, (_, index) => ({ [`field${index}`]: index }));
+      const results = await Promise.allSettled(
+        patches.map((patch, index) => stores[index % 2]!.update('ses_fixture', patch))
+      );
+      expect(results.every((result) => result.status === 'fulfilled')).toBe(true);
+      expect(await stores[0]!.read('ses_fixture')).toEqual(Object.assign({ time: {} }, ...patches));
+      expect(existsSync(join(directory, 'ses_fixture.json.lock'))).toBe(false);
+    }
+  );
+
+  it.each(['native', 'Windows'])(
+    'recovers an abandoned lock with %s contention errors',
+    async (platform) => {
+      if (platform === 'Windows') await simulateWindowsContention();
+      const lock = join(directory, 'ses_fixture.json.lock');
+      await mkdir(lock);
+      await writeFile(join(lock, '2147483647-00000000-0000-0000-0000-000000000000'), '');
+      const store = new OpenCodeV2SessionState(directory);
+      await store.update('ses_fixture', { time: { archived: 100 } });
+      expect(await store.read('ses_fixture')).toEqual({ time: { archived: 100 } });
+      expect(existsSync(lock)).toBe(false);
+    }
+  );
+
+  it('does not remove a replacement owner when Windows refuses to remove its directory', async () => {
+    const lock = join(directory, 'ses_fixture.json.lock');
+    const owner = `${process.pid}-00000000-0000-0000-0000-000000000000`;
+    vi.mocked(rmdir).mockImplementationOnce(async (path) => {
+      expect(path).toBe(lock);
+      await writeFile(join(lock, owner), '');
+      throw Object.assign(new Error('Windows nonempty directory removal'), { code: 'EPERM' });
+    });
+
+    const store = new OpenCodeV2SessionState(directory);
+    await store.update('ses_fixture', { preserved: true });
+
+    expect(existsSync(join(lock, owner))).toBe(true);
+    expect(await store.read('ses_fixture')).toEqual({ preserved: true, time: {} });
   });
 
-  it('recovers an abandoned lock without removing a live owner', async () => {
-    const lock = join(directory, 'ses_fixture.json.lock');
-    await mkdir(lock);
-    await writeFile(join(lock, '2147483647-00000000-0000-0000-0000-000000000000'), '');
+  it('reports an actual permission failure when removing an empty lock', async () => {
+    const error = Object.assign(new Error('Access denied'), { code: 'EPERM' });
+    vi.mocked(rmdir).mockRejectedValueOnce(error);
     const store = new OpenCodeV2SessionState(directory);
-    await store.update('ses_fixture', { time: { archived: 100 } });
-    expect(await store.read('ses_fixture')).toEqual({ time: { archived: 100 } });
-    expect(existsSync(lock)).toBe(false);
+
+    await expect(store.update('ses_fixture', { preserved: true })).rejects.toBe(error);
+  });
+
+  it('bounds rename retries when the lock disappears and preserves the permission error', async () => {
+    const error = Object.assign(new Error('Access denied'), { code: 'EPERM' });
+    vi.mocked(rename).mockRejectedValue(error);
+    vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(10_000);
+    const store = new OpenCodeV2SessionState(directory);
+
+    await expect(store.update('ses_fixture', { preserved: true })).rejects.toMatchObject({
+      message: 'Timed out waiting to update Varro session annotations',
+      cause: error,
+    });
   });
 
   it('cancels a contender while another store holds the lock', async () => {

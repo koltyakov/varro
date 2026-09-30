@@ -141,23 +141,29 @@ export class LegacySessionImport {
         eval: true,
         workerData: { databasePath: this.databasePath, directory, sessionID },
       });
+      let result: UnknownRecord | undefined;
+      let failure: Error | undefined;
       const timer = setTimeout(() => {
-        void worker.terminate();
-        reject(new Error('Reading v1 history timed out'));
+        failure ??= new Error('Reading v1 history timed out');
+        void worker.terminate().catch(reject);
       }, 10_000);
       worker.once('message', (value: unknown) => {
-        clearTimeout(timer);
-        const result = asRecord(value);
-        if (isString(result?.error)) reject(new Error(result.error));
-        else resolve(result?.data);
+        result = asRecord(value) ?? undefined;
       });
       worker.once('error', (error) => {
-        clearTimeout(timer);
-        reject(error);
+        failure ??=
+          error instanceof Error
+            ? error
+            : new Error('Legacy history reader failed', { cause: error });
       });
       worker.once('exit', (code) => {
         clearTimeout(timer);
-        if (code !== 0) reject(new Error(`Legacy history reader exited with code ${code}`));
+        if (failure) reject(failure);
+        else if (code !== 0) reject(new Error(`Legacy history reader exited with code ${code}`));
+        else if (!result) reject(new Error('Legacy history reader exited without a result'));
+        else if (isString(result.error)) reject(new Error(result.error));
+        // A result message can arrive before SQLite closes its Windows file handles.
+        else resolve(result.data);
       });
     });
   }

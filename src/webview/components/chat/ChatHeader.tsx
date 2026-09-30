@@ -11,7 +11,7 @@ import { client } from '../../lib/client';
 import { useSecondClock } from '../../lib/clock';
 import { formatDuration } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
-import { cableTagIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
+import { cableTagIcon, checkIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
 import { NavArrowLeftControlIcon } from '../ControlIcons';
 import {
   setError,
@@ -395,6 +395,7 @@ export function SessionPickerHeader(props: {
   showNewChatButton?: boolean;
   onBack?: () => void;
   onClearFilter: () => void;
+  onMarkAllRead?: (() => void) | null;
   onOpenFailedSessions: () => void;
   onOpenAttentionSessions: () => void;
   onOpenPlanReadySessions: () => void;
@@ -453,6 +454,18 @@ export function SessionPickerHeader(props: {
       </div>
       <div class="chat-header-actions">
         <SiblingWorkspaceAlertsButton />
+        <Show when={props.filterLabel && props.onMarkAllRead}>
+          <Tooltip content="Mark all as read">
+            <button
+              type="button"
+              class="chat-header-btn"
+              onClick={() => props.onMarkAllRead?.()}
+              aria-label="Mark all as read"
+            >
+              <UiIcon source={checkIcon} width={14} height={14} />
+            </button>
+          </Tooltip>
+        </Show>
         <Show when={props.showFailedBadge}>
           <FailedSessionsBadge count={props.failedCount} onClick={props.onOpenFailedSessions} />
         </Show>

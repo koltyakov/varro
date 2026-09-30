@@ -4,12 +4,14 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.30.x - September 2026
 
-- Added persistent session pause and resume for OpenCode v2, with `/pause`, parked queued messages, and a Resume action in the transcript. Paused time is excluded from worked-duration summaries and usage reports.
-- Turned large text pastes into compact inline chips with previews and an **Expand to text** action. Pasted text survives draft and queue restoration, and joined user messages retain file attachment chips and editable context.
-- Displayed generated context, continuations, and loaded agent instructions as compact automatic action notices. Resume prompts stay hidden from conversation history.
-- Limited streaming activity previews to two cards and grouped completed tools sooner so answers appear promptly. Kept streamed answers visible through background notices and stabilized scrolling as activity cards collapse.
-- Added project-specific file and folder icons to tool calls and removed duplicate session controls when the sessions sidebar is visible.
-- Used stateless title and commit-message generation when supported by the connected v2 server, with helper-session fallback for older servers and unsupported models.
+- Added persistent OpenCode v2 pause and resume with `/pause` and parked queued messages. Paused time is excluded from duration and usage reports.
+- Added compact text-paste chips with previews and expansion, plus reversible image compression with size previews and undo/redo.
+- Added **Mark all as read** for filtered session lists and composer warnings for low provider quota and expiring reset credits.
+- Grouped consecutive prompts into navigable turns with paging. Steering messages retain their original turn and timer.
+- Collapsed generated context, agent instructions, and plan implementation into compact notices. Skipped plans remain available to open or implement.
+- Reduced streaming activity clutter, added project-specific tool icons, and removed duplicate session controls. Improved answer visibility and scrolling during sends and resizing.
+- Improved retries, attachment restoration, concurrent session updates, and Windows history cleanup.
+- Added stateless title and commit-message generation on supported v2 servers, with fallback for older servers and unsupported models.
 
 ## 0.29.x - September 2026
 

@@ -11,6 +11,7 @@ import {
   isSessionCompletedResponseUnread,
   isSessionUnread,
   isSkippedPlanSession,
+  markSessionSeen,
   setPersistentShowSessionPicker as setShowSessionPicker,
   setError,
   setState,
@@ -29,6 +30,7 @@ import {
   createUniqueId,
   on,
   untrack,
+  batch,
 } from 'solid-js';
 import {
   selectSession,
@@ -1046,6 +1048,7 @@ export function SessionListView(props: {
   onOpenSubagents?: (parentSessionId: string) => void;
   onActiveSessionReselect?: () => void;
   onPrimarySessionsCountChange?: (count: number) => void;
+  onMarkAllReadChange?: (action: (() => void) | null) => void;
   embedded?: boolean;
   class?: string;
 }) {
@@ -1342,6 +1345,42 @@ export function SessionListView(props: {
         )
       : []
   );
+  createEffect(() => {
+    const filter = props.sessionFilter;
+    const unreadSessions = props.subagentParentId
+      ? []
+      : filteredSessions().filter((session) => {
+          switch (filter) {
+            case 'completed':
+              return isSessionCompletedResponseUnread(session.id);
+            case 'plan-ready':
+              return isSessionUnread(session.id, session.time.updated);
+            case 'failed':
+              return isSessionFailureUnread(session.id);
+            default:
+              return false;
+          }
+        });
+    props.onMarkAllReadChange?.(
+      unreadSessions.length > 0
+        ? () => {
+            batch(() => {
+              for (const session of unreadSessions) {
+                markSessionSeen(
+                  session.id,
+                  Math.max(
+                    Date.now(),
+                    session.time.updated,
+                    state.completedSessionResponses[session.id] ?? 0,
+                    getSessionTreeFailedUpdated(session.id) ?? getSessionTreeUpdated(session.id)
+                  )
+                );
+              }
+            });
+          }
+        : null
+    );
+  });
   const defaultSurfacedSessions = createMemo(() =>
     sortSessionsForDisplay(recentSessions(), ageNow())
   );

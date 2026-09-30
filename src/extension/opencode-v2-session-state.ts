@@ -88,13 +88,16 @@ export class OpenCodeV2SessionState {
     const owner = `${process.pid}-${randomUUID()}`;
     const candidate = `${lock}.${owner}`;
     const deadline = Date.now() + 10_000;
+    let contentionError: unknown;
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     while (true) {
       signal?.throwIfAborted();
+      let publishing = false;
       try {
         // Publish a nonempty directory atomically, so contenders always see its owner.
         await mkdir(candidate, { mode: 0o700 });
         await writeFile(join(candidate, owner), '', { flag: 'wx', mode: 0o600 });
+        publishing = true;
         await rename(candidate, lock);
         return async () => {
           await unlink(join(lock, owner));
@@ -102,15 +105,24 @@ export class OpenCodeV2SessionState {
           await removeEmptyLock(lock);
         };
       } catch (error) {
-        if (!['EEXIST', 'ENOTEMPTY'].includes(String(asRecord(error)?.code))) throw error;
+        const code = asRecord(error)?.code;
+        if (code === 'EPERM' && publishing) {
+          // Windows reports an existing destination directory as EPERM on rename.
+          // Confirm that it is a readable lock, or has just been released.
+          try {
+            await readdir(lock);
+          } catch (inspectionError) {
+            if (asRecord(inspectionError)?.code !== 'ENOENT') throw error;
+          }
+        } else if (!['EEXIST', 'ENOTEMPTY'].includes(String(code))) throw error;
+        contentionError = error;
       } finally {
         await rm(candidate, { recursive: true, force: true });
       }
       try {
         const owners = await readdir(lock);
         if (owners.length === 0) {
-          await rmdir(lock);
-          continue;
+          await removeEmptyLock(lock);
         }
         const oldOwner = owners[0];
         if (owners.length === 1 && oldOwner && /^\d+-[a-f0-9-]{36}$/.test(oldOwner)) {
@@ -119,15 +131,15 @@ export class OpenCodeV2SessionState {
             // Remove only this dead owner's marker. Never delete a replacement lock.
             await unlink(join(lock, oldOwner));
             await removeEmptyLock(lock);
-            continue;
           }
         }
       } catch (error) {
-        if (asRecord(error)?.code === 'ENOENT') continue;
-        if (!['ENOTEMPTY', 'EEXIST'].includes(String(asRecord(error)?.code))) throw error;
+        if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(String(asRecord(error)?.code))) throw error;
       }
       if (Date.now() >= deadline)
-        throw new Error('Timed out waiting to update Varro session annotations');
+        throw new Error('Timed out waiting to update Varro session annotations', {
+          cause: contentionError,
+        });
       await delay(25, undefined, { signal });
     }
   }
@@ -152,6 +164,13 @@ async function removeEmptyLock(path: string): Promise<void> {
     await rmdir(path);
   } catch (error) {
     // Another contender may already have replaced or removed the empty directory.
+    if (asRecord(error)?.code === 'EPERM') {
+      try {
+        if ((await readdir(path)).length > 0) return;
+      } catch (inspectionError) {
+        if (asRecord(inspectionError)?.code === 'ENOENT') return;
+      }
+    }
     if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(String(asRecord(error)?.code))) throw error;
   }
 }
