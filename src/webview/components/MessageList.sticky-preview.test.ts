@@ -2247,6 +2247,8 @@ describe('MessageList sticky prompt preview', () => {
     async (kind) => {
       const animationFrames = installQueuedAnimationFrameMocks();
       setState('activeSessionId', 'session-1');
+      const notice = userMessage('notice-1');
+      if (kind === 'steer') notice.delivery = 'steer';
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('prompt-text', 'Run the tests')] },
         {
@@ -2257,10 +2259,7 @@ describe('MessageList sticky prompt preview', () => {
           parts: [textPart('answer-text', 'Running tests')],
         },
         {
-          info: {
-            ...userMessage('notice-1'),
-            ...(kind === 'steer' ? { delivery: 'steer' as const } : {}),
-          },
+          info: notice,
           parts:
             kind === 'notice'
               ? [textPart('notice-text', 'Background command completed', { synthetic: true })]

@@ -166,16 +166,18 @@ for (const theme of ['dark', 'light']) {
         element.scrollTop +=
           card.getBoundingClientRect().bottom - element.getBoundingClientRect().top + 12;
       });
-      const sticky = page.locator('[data-sticky-msg-id="steer"] .latest-user-message-sticky');
-      await expect(sticky).toHaveClass(/user-message-steering/);
+      const sticky = page.locator('[data-sticky-msg-id="prompt"] .latest-user-message-sticky');
+      await expect(sticky).not.toHaveClass(/user-message-steering/);
       await expect(sticky).toBeVisible();
+      await expect(page.locator('[data-sticky-msg-id="steer-first"]')).toHaveCount(0);
+      await expect(page.locator('[data-sticky-msg-id="steer"]')).toHaveCount(0);
       await page.keyboard.down('Alt');
-      await expect(page.locator('[data-sticky-msg-id="steer"] .prompt-number-badge')).toHaveText(
-        '1.2'
+      await expect(page.locator('[data-sticky-msg-id="prompt"] .prompt-number-badge')).toHaveText(
+        '1'
       );
       await page.keyboard.up('Alt');
       expect(await sticky.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(
-        steeringColor
+        ordinaryColor
       );
 
       const queued = page.locator('[data-msg-id="queued-follow-up"] .user-message-card');
