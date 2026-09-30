@@ -267,6 +267,23 @@ describe('sessionStore', () => {
     expect(state.questionResponsePendingSessionIds).toEqual(['child-2']);
   });
 
+  it('reports status snapshots that predate a local event or an applied snapshot as stale', () => {
+    const snapshotStartedAt = captureSessionStatusSnapshotTime();
+    sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
+
+    expect(sessionStore.isSessionStatusSnapshotStale('session-1', snapshotStartedAt)).toBe(true);
+    expect(sessionStore.isSessionStatusSnapshotStale('session-2', snapshotStartedAt)).toBe(false);
+    expect(
+      sessionStore.isSessionStatusSnapshotStale('session-1', captureSessionStatusSnapshotTime())
+    ).toBe(false);
+
+    sessionStore.setSessionStatuses(
+      { 'session-1': { type: 'busy' } },
+      { snapshotStartedAt: captureSessionStatusSnapshotTime() }
+    );
+    expect(sessionStore.isSessionStatusSnapshotStale('session-2', snapshotStartedAt)).toBe(true);
+  });
+
   it('prunes acknowledged local markers and ignores older snapshots afterward', () => {
     const localUpdateTime = Date.now() + 1000;
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(localUpdateTime);

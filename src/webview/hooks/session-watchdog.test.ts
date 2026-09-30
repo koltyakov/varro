@@ -211,6 +211,30 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     expect(timers.has('s1')).toBe(false);
   });
 
+  it('does not settle a newer local turn from a server snapshot requested before it', async () => {
+    const streamed = assistant('a1', 's1');
+    streamed.parts = [textPart('t1', 's1', 'The full final answer.')];
+    const staleSnapshot = {};
+    let stale = true;
+    const deps = baseReconcileDeps({
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }),
+      getMessages: () => [streamed],
+      loadSessionStatuses: async () => (stale ? staleSnapshot : {}),
+      isStaleServerStatus: (sessionId, statuses) =>
+        sessionId === 's1' && statuses === staleSnapshot,
+    });
+    const timers = new Map<string, number>();
+
+    await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
+    expect(timers.has('s1')).toBe(false);
+
+    // A snapshot requested after the local busy event still recovers a missed finish at once.
+    stale = false;
+    await reconcileStuckSessionsWithDependencies(deps, timers, 1100);
+    expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
+  });
+
   it('still waits for the grace window when only a busy status is stuck (no streamed text)', async () => {
     const deps = baseReconcileDeps({
       getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }),

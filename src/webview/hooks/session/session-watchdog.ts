@@ -28,6 +28,12 @@ export const STUCK_SESSION_STREAMED_GRACE_MS = 0;
 export type StuckSessionReconcileDeps = {
   /** Server-authoritative statuses (REST `/session/status`), independent of the SSE stream. */
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
+  /**
+   * True when the loaded statuses were requested before the session's latest local status change.
+   * A shared or recently cached request can predate the busy event that made the session a
+   * candidate, so its idle report is not confirmation.
+   */
+  isStaleServerStatus?(sessionId: string, statuses: Record<string, SessionStatus>): boolean;
   /** The webview's current view of per-session status. */
   getLocalSessionStatuses(): Record<string, SessionStatus>;
   /** The currently focused session, whose spinner may be driven by `isLoading`. */
@@ -101,6 +107,8 @@ export async function reconcileStuckSessionsWithDependencies(
   for (const sessionId of candidates) {
     if (deps.hasPendingAbort(sessionId) || deps.isAwaitingInput(sessionId)) continue;
     if (isRunningSessionStatus(serverStatuses[sessionId])) continue;
+    // Newer local evidence restarts the grace window instead of settling the new turn.
+    if (deps.isStaleServerStatus?.(sessionId, serverStatuses)) continue;
 
     // When local evidence says the turn is already done (settled assistant, or
     // streamed final text with no tools in flight), collapse the grace so we
