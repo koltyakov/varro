@@ -789,6 +789,50 @@ test('keeps pre-input panel space reserved while the @ selector is open', async 
   await expect(todo).toBeVisible();
 });
 
+test('centers queued message labels without font-specific offsets', async ({ page }) => {
+  await page.setViewportSize({ width: 500, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=todo-queue');
+
+  const text = 'Test with OpenCode v2, it can make a difference. '.repeat(4);
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill(text);
+  await page.getByLabel('Add to queue (Enter)').click();
+
+  const row = page.getByRole('list', { name: 'Queued messages' }).getByRole('listitem');
+  const label = row.locator('.chat-queue-label');
+  await expect(label).toHaveText(text.trim());
+  await expect(label).toHaveCSS('text-overflow', 'ellipsis');
+  await expect(label).toHaveCSS('white-space', 'nowrap');
+
+  for (const fontFamily of ['system-ui', 'Arial, sans-serif', 'monospace']) {
+    const geometry = await row.evaluate((element, font) => {
+      element.style.fontFamily = font;
+      const labelElement = element.querySelector<HTMLElement>('.chat-queue-label');
+      const handle = element.querySelector('.chat-queue-drag-handle');
+      if (!labelElement || !handle) throw new Error('Queued message label or handle is missing');
+      const rowBox = element.getBoundingClientRect();
+      const labelBox = labelElement.getBoundingClientRect();
+      const handleBox = handle.getBoundingClientRect();
+      return {
+        rowHeight: rowBox.height,
+        rowCenter: rowBox.top + rowBox.height / 2,
+        labelCenter: labelBox.top + labelBox.height / 2,
+        handleCenter: handleBox.top + handleBox.height / 2,
+        truncated: labelElement.scrollWidth > labelElement.clientWidth,
+      };
+    }, fontFamily);
+
+    expect(geometry.rowHeight).toBe(28);
+    expect(Math.abs(geometry.labelCenter - geometry.rowCenter), fontFamily).toBeLessThanOrEqual(
+      0.5
+    );
+    expect(Math.abs(geometry.labelCenter - geometry.handleCenter), fontFamily).toBeLessThanOrEqual(
+      0.5
+    );
+    expect(geometry.truncated, fontFamily).toBe(true);
+  }
+});
+
 test('reorders and edits queued follow-up messages in place', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=todo-queue');
 

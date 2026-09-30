@@ -2346,7 +2346,6 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   line-height: 1.2;
-  transform: translateY(1px);
   color: var(--color-vscode-fg-soft);
 }
 
