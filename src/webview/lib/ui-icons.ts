@@ -1,4 +1,5 @@
 import archiveIcon from 'iconoir/icons/archive.svg';
+import gymIcon from 'iconoir/icons/gym.svg';
 import appNotificationIcon from 'iconoir/icons/app-notification.svg';
 import arrowLeftIcon from 'iconoir/icons/arrow-left.svg';
 import arrowUpIcon from 'iconoir/icons/arrow-up.svg';
@@ -81,6 +82,7 @@ import xmarkIcon from 'iconoir/icons/xmark.svg';
 import xmarkCircleIcon from 'iconoir/icons/xmark-circle.svg';
 
 export {
+  gymIcon,
   dollarCircleIcon,
   dollarIcon,
   infoCircleIcon,

@@ -98,7 +98,9 @@ export function createComposerHistory(options?: {
 
   function record(snapshot: ComposerSnapshot) {
     const current = stack[index]!;
-    const attachmentsChanged = getAttachmentSignature(snapshot) !== getAttachmentSignature(current);
+    const attachmentsChanged =
+      getAttachmentSignature(snapshot) !== getAttachmentSignature(current) ||
+      snapshot.images.some((image, imageIndex) => image.url !== current.images[imageIndex]?.url);
 
     if (snapshot.text === current.text && !attachmentsChanged) {
       // Caret-only movement: keep the entry but track the latest caret so

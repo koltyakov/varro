@@ -53,6 +53,9 @@ export function AttachmentStrip(props: {
   onRemoveNativePdf: (id: string) => void;
   onOpenFile?: (file: DroppedFile) => void;
   onPreviewImage?: (image: ClipboardImage) => void;
+  canCompressImage?: (id: string) => boolean;
+  imageCompressionHint?: (id: string) => string | undefined;
+  onCompressImage?: (id: string, event: MouseEvent) => void;
 }) {
   const orderedAttachments = (): AttachmentStripItem[] =>
     [
@@ -198,6 +201,12 @@ export function AttachmentStrip(props: {
                 }
                 onRemove={() => props.onRemoveClipboardImage(item.value.id)}
                 previewImage={{ url: item.value.url, alt: item.value.filename }}
+                compressionHint={props.imageCompressionHint?.(item.value.id)}
+                onCompress={
+                  props.canCompressImage?.(item.value.id)
+                    ? (event) => props.onCompressImage?.(item.value.id, event)
+                    : undefined
+                }
               />
             );
           return (

@@ -61,6 +61,7 @@ function renderComposer(props: {
   onPasteInsertion?: Parameters<typeof RichComposerArea>[0]['onPasteInsertion'];
   onChipClick?: (chipId: string) => void;
   onRemoveChip?: (chipId: string) => void;
+  onCompressImage?: (chipId: string, event: MouseEvent) => void;
 }) {
   cleanup = render(
     () =>
@@ -86,12 +87,47 @@ function renderComposer(props: {
         onSelectCompletion: () => {},
         onChipClick: props.onChipClick,
         onRemoveChip: props.onRemoveChip,
+        onCompressImage: props.onCompressImage,
       }),
     container!
   );
 }
 
 describe('RichComposerArea', () => {
+  it('shows a non-interactive gym indicator and opens image compression only from right click', () => {
+    const onCompressImage = vi.fn();
+    const onChipClick = vi.fn();
+    renderComposer({
+      value: '[image.png]',
+      cursorOffset: 0,
+      chips: [
+        {
+          id: 'img:one',
+          type: 'image',
+          label: 'image.png',
+          textMarker: '[image.png]',
+          compressible: true,
+          compressionHint: 'Large image · 3.0 MB · Right-click to shrink it.',
+        },
+      ],
+      onCompressImage,
+      onChipClick,
+    });
+    const chip = container!.querySelector<HTMLElement>('.inline-chip')!;
+    const indicator = chip.querySelector<HTMLElement>('.chip-image-size')!;
+    expect(indicator.tagName).toBe('SPAN');
+    expect(indicator.title).toContain('3.0 MB');
+    expect(chip.classList.contains('image-size-warning')).toBe(true);
+    indicator.click();
+    expect(onCompressImage).not.toHaveBeenCalled();
+    expect(onChipClick).toHaveBeenCalledWith('img:one');
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    chip.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(onCompressImage).toHaveBeenCalledTimes(1);
+    expect(onCompressImage).toHaveBeenCalledWith('img:one', expect.any(MouseEvent));
+    expect(extractText(container!.querySelector('.rich-composer')!)).toBe('[image.png]');
+  });
   it('uses a stable accessible label alongside the dynamic placeholder', () => {
     renderComposer({ value: '', cursorOffset: 0, chips: [] });
 

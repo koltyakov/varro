@@ -1,6 +1,6 @@
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getFileTypeIcon } from '../FileTypeIcon';
 import { AttachmentChip } from './AttachmentChip';
 import { dismissComposerOverlays } from './composer-overlay-dismiss';
@@ -20,6 +20,33 @@ afterEach(() => {
 });
 
 describe('AttachmentChip', () => {
+  it('shows a non-interactive large-image warning and opens compression only on right click', () => {
+    const onClick = vi.fn();
+    const onCompress = vi.fn();
+    cleanup = render(
+      () => (
+        <AttachmentChip
+          label="image.png"
+          icon="image"
+          onClick={onClick}
+          onCompress={onCompress}
+          compressionHint="Large image · 3.0 MB · Right-click to shrink it."
+        />
+      ),
+      container
+    );
+    const indicator = container.querySelector<HTMLElement>('.chip-image-size')!;
+    expect(indicator.tagName).toBe('SPAN');
+    expect(indicator.title).toContain('3.0 MB');
+    expect(container.querySelector('.image-size-warning')).not.toBeNull();
+    indicator.click();
+    expect(onCompress).not.toHaveBeenCalled();
+    expect(onClick).toHaveBeenCalledTimes(1);
+    container
+      .querySelector('.chat-attachment-chip')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(onCompress).toHaveBeenCalledTimes(1);
+  });
   it('keeps an off current-document toggle operable without announcing it as disabled', () => {
     const [enabled, setEnabled] = createSignal(false);
     cleanup = render(
