@@ -4978,6 +4978,36 @@ describe('ChatInput', () => {
     expect(list?.classList.contains('has-more-below')).toBe(false);
   });
 
+  it.each([
+    ['all', 'copy'],
+    ['uninitialized', 'copy'],
+    ['copy', 'copy'],
+    ['copyMove', 'copy'],
+    ['copyLink', 'copy'],
+    ['move', 'move'],
+    ['link', 'link'],
+    ['linkMove', 'link'],
+    ['none', 'none'],
+  ] as const)('uses an allowed attachment drop effect for %s drags', (allowed, expected) => {
+    cleanup = render(() => ChatInput(), container!);
+    const dataTransfer = createDragDataTransfer();
+    dataTransfer.effectAllowed = allowed;
+    const composer = container!.querySelector('.chat-input-container')!;
+
+    for (const target of [document, composer]) {
+      for (const type of ['dragenter', 'dragover']) {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperties(event, {
+          dataTransfer: { value: dataTransfer },
+          shiftKey: { value: true },
+        });
+        target.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(true);
+        expect(dataTransfer.dropEffect).toBe(expected);
+      }
+    }
+  });
+
   it('reorders queued rows by dragging the left handle without showing the file-drop overlay', () => {
     setIsLoading(true);
     setState('activeSessionId', 'session-1');

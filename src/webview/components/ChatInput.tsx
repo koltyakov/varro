@@ -470,6 +470,26 @@ function isInternalDrag(event: DragEvent) {
   );
 }
 
+function setAttachmentDropEffect(transfer: DataTransfer | null) {
+  if (!transfer) return;
+  // Chromium suppresses drop when the requested effect is not allowed by the
+  // source. Prefer copy, but accept move-only Windows/Shift drags as well.
+  switch (transfer.effectAllowed) {
+    case 'move':
+      transfer.dropEffect = 'move';
+      break;
+    case 'link':
+    case 'linkMove':
+      transfer.dropEffect = 'link';
+      break;
+    case 'none':
+      transfer.dropEffect = 'none';
+      break;
+    default:
+      transfer.dropEffect = 'copy';
+  }
+}
+
 function activeContextEnabled(sessionId?: string | null) {
   return getCurrentDocumentEnabled(sessionId);
 }
@@ -4809,7 +4829,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const beginDropTarget = (e: DragEvent) => {
       if (isInternalDrag(e)) return;
       e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      setAttachmentDropEffect(e.dataTransfer);
       setIsDraggingOver(true);
     };
 
@@ -5974,14 +5994,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             if (isInternalDrag(e)) return;
             e.preventDefault();
             e.stopPropagation();
-            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            setAttachmentDropEffect(e.dataTransfer);
             setIsDraggingOver(true);
           }}
           onDragOver={(e) => {
             if (isInternalDrag(e)) return;
             e.preventDefault();
             e.stopPropagation();
-            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            setAttachmentDropEffect(e.dataTransfer);
             setIsDraggingOver(true);
           }}
           onDragLeave={(e) => {
