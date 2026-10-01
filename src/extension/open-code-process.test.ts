@@ -55,6 +55,13 @@ vi.mock('@opencode/client/service', () => ({ Service: { discover: vi.fn() } }));
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 vi.mock('cross-spawn', () => ({ default: spawnMock, spawn: spawnMock }));
+vi.mock('./windows-process-inspector', () => ({
+  WindowsProcessInspector: class {
+    async read() {
+      throw new Error('Native inspection unavailable in CIM fallback fixtures');
+    }
+  },
+}));
 vi.mock('fs/promises', async () => {
   const actual = await vi.importActual<typeof FsPromises>('fs/promises');
   if (process.platform !== 'win32') return actual;

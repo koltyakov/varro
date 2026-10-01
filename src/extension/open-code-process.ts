@@ -1126,6 +1126,12 @@ export class OpenCodeProcess {
     }
   }
 
+  get connectionVerificationExpiresAt(): number {
+    return this.ownershipLeaseCandidate || this.ownershipLease
+      ? this.lastConnectionVerification + 1000
+      : Number.POSITIVE_INFINITY;
+  }
+
   async persistManagedServerCredentials(secrets: Pick<vscode.SecretStorage, 'store'>) {
     const lease = this.ownershipLease;
     if (!lease?.password || lease.port !== this._port) return;

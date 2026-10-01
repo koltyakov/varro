@@ -19,6 +19,10 @@ export class ServerConnectionAdmission {
     return this.external;
   }
 
+  get verificationExpiresAt(): number {
+    return this.admitted ? this.checkedAt + 1000 : 0;
+  }
+
   reset() {
     this.generation += 1;
     this.admitted = null;

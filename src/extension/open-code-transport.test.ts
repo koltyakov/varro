@@ -184,6 +184,62 @@ function createClosedEventResponse() {
 describe('transport connection admission', () => {
   beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
   it.each([1, 2])(
+    'reuses only the existing admission window across a v%s request',
+    async (version) => {
+      const authorizeConnection = vi.fn(async () => ({ expiresAt: Date.now() + 1000 }));
+      const transport = createTransport({ authorizeConnection });
+      (transport as unknown as { apiVersion: number }).apiVersion = version;
+      vi.mocked(fetch).mockResolvedValue(Response.json({ data: [] }));
+      await transport.request('GET', '/api/example');
+      expect(authorizeConnection).toHaveBeenCalledOnce();
+      await transport.request('GET', '/api/example');
+      expect(authorizeConnection).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it('shares admission across adapter wire requests without extending its expiry', async () => {
+    vi.useFakeTimers();
+    const authorizeConnection = vi.fn(async () => ({ expiresAt: Date.now() + 1000 }));
+    const transport = createTransport({ authorizeConnection });
+    (transport as unknown as { apiVersion: number }).apiVersion = 2;
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ data: [] }));
+    await transport.request('GET', '/provider/auth');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(authorizeConnection).toHaveBeenCalledOnce();
+
+    vi.mocked(fetch).mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 1001);
+      return Response.json({ data: [] });
+    });
+    await transport.request('GET', '/provider/auth');
+    expect(authorizeConnection).toHaveBeenCalledTimes(3);
+  });
+
+  it('blocks subsequent adapter traffic when expired verification detects a replacement', async () => {
+    vi.useFakeTimers();
+    const authorizeConnection = vi
+      .fn()
+      .mockResolvedValueOnce({ expiresAt: Date.now() + 1000 })
+      .mockRejectedValue(new Error('listener changed'));
+    const transport = createTransport({ authorizeConnection });
+    (transport as unknown as { apiVersion: number }).apiVersion = 2;
+    vi.mocked(fetch).mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 1001);
+      return Response.json({ data: [] });
+    });
+    await expect(transport.request('GET', '/provider/auth')).rejects.toThrow('listener changed');
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('does not restart an admission window after a slow verification', async () => {
+    const authorizeConnection = vi.fn(async () => ({ expiresAt: Date.now() - 1 }));
+    const transport = createTransport({ authorizeConnection });
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ data: [] }));
+    await transport.request('GET', '/api/example');
+    expect(authorizeConnection).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([1, 2])(
     'tracks and drains a cancelled v%s request waiting for admission',
     async (version) => {
       let approve!: () => void;

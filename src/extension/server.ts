@@ -305,6 +305,12 @@ export class OpenCodeServer extends EventEmitter {
             ),
             this.admission.verify(reconnect),
           ]);
+          return {
+            expiresAt: Math.min(
+              this.processManager.connectionVerificationExpiresAt,
+              this.admission.verificationExpiresAt
+            ),
+          };
         } catch (error) {
           if (this._status.state === 'running') {
             this.stopEventStream();

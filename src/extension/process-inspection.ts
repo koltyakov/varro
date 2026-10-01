@@ -6,6 +6,7 @@ import { readFile, readdir, readlink, realpath } from 'fs/promises';
 import { uptime } from 'os';
 import { join } from 'path';
 import { logger } from './logger';
+import { WindowsProcessInspector } from './windows-process-inspector';
 
 type CommandResult = {
   stdout: string;
@@ -25,6 +26,7 @@ const WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS = 10_000;
 const WINDOWS_PROCESS_INSPECTION_ATTEMPTS = 2;
 export const PROCESS_STOP_TIMEOUT_MS = 5000;
 const PROCESS_COMMAND_MAX_OUTPUT_CHARS = 1_000_000;
+const windowsInspector = new WindowsProcessInspector();
 
 export type LocalServerAccount = {
   kind: 'same-user' | 'different-user' | 'unknown';
@@ -396,6 +398,17 @@ function isCommandUnavailable(result: CommandResult) {
 }
 
 async function readWindowsProcessDetails(pid: number, includeAccount = false) {
+  try {
+    const details = await windowsInspector.read(pid);
+    if (
+      !includeAccount ||
+      (/^S-\d+(?:-\d+)+$/.test(details.listenerSid) && /^S-\d+(?:-\d+)+$/.test(details.hostSid))
+    )
+      return details;
+  } catch {
+    // Restricted native APIs/helper startup can fail. Inspect a fresh CIM
+    // snapshot instead; never substitute a cached or partially observed identity.
+  }
   // A transient CIM/PowerShell failure must not immediately interrupt a live
   // connection. Retry a fresh snapshot, never the last successful identity.
   for (let attempt = 0; attempt < WINDOWS_PROCESS_INSPECTION_ATTEMPTS; attempt += 1) {
@@ -491,6 +504,11 @@ export async function readWindowsProcessIdentity(
 
 export async function readProcessExecutable(pid: number, procRoot = '/proc') {
   if (process.platform === 'win32') {
+    try {
+      return (await windowsInspector.read(pid)).executable;
+    } catch {
+      // Native helper unavailable; retain the independent executable fallback.
+    }
     const script = `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").ExecutablePath`;
     return (
       await runProcess(
@@ -545,6 +563,11 @@ async function readLinuxProcessStat(pid: number, procRoot: string) {
 
 export async function readProcessBirthIdentity(pid: number, procRoot = '/proc') {
   if (process.platform === 'win32') {
+    try {
+      return (await windowsInspector.read(pid)).birthIdentity;
+    } catch {
+      // Birth identity can remain visible even when executable access is denied.
+    }
     const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($p) { $p.CreationDate.ToUniversalTime().Ticks }`;
     const value = (
       await runProcess(

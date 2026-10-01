@@ -13,6 +13,28 @@ logical API operations can also authorize again for each underlying wire request
 Concurrent callers already share in-flight inspection. Do not assume every concurrent
 request launches its own PowerShell, or that warm isolated timing represents VS Code.
 
+The native Windows inspector now keeps one read-only PowerShell helper per extension
+host, compiling its Windows API bridge once. Warm reads use process handles and token
+SIDs, not CIM/WMI. Concurrent executable/account reads share only the in-flight result;
+the next read obtains a new observation. Handles are closed on every path, the process
+must remain alive through observation, and creation ticks retain CIM's microsecond
+precision for existing leases. Missing token evidence is never same-user proof.
+The helper has a five-second request bound, is retired after 60 idle seconds, and exits
+on stdin EOF when the host disappears. Failed native inspection falls back to fresh,
+bounded CIM inspection rather than reusing old evidence.
+
+Logical REST requests carry an internal admission ticket through their adapter wire
+requests. Its expiry is the **earlier original** account/ownership verification expiry,
+not one second after both checks finish. Expired tickets require verification again;
+unrelated requests cannot reuse a ticket. Cancellation, failed admission, and stream
+reconnect invalidate tickets. SSE always performs its own fresh reconnect check.
+This eliminates duplicate admission without extending either trust window.
+
+Commit-message preparation has a separate bounded deadline from model generation.
+Git history and server preparation run concurrently, and model selection is reused
+when one-shot generation falls back to a helper session. Preparation timeout reports
+the connection phase instead of misreporting a model-generation timeout.
+
 VS Code SecretStorage is another asynchronous editor-host round trip. An unavailable
 or slow credential vault must not gate startup when a verified private ownership lease
 already supplied credentials. The lease remains the cross-window credential source;

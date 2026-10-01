@@ -56,7 +56,7 @@ export type OpenCodeRescopeResult = {
 const EVENT_STREAM_PATH = CURRENT_OPENCODE_ENDPOINTS.eventStream;
 
 interface OpenCodeTransportOptions {
-  authorizeConnection?: (reconnect?: boolean) => Promise<void>;
+  authorizeConnection?: (reconnect?: boolean) => Promise<void | { expiresAt: number }>;
   openExternal?: (url: string) => Promise<boolean>;
   sessionStateDirectory?: string;
   getAuthorization?: () => string | undefined;
@@ -105,6 +105,7 @@ export class OpenCodeTransport {
   private healthFailure: string | undefined;
   private healthPid: { url: string; pid: number } | undefined;
   private authorizationRefresh: Promise<void> | null = null;
+  private requestAdmissions = new WeakMap<AbortSignal, { url: string; expiresAt: number }>();
   private readonly v2: OpenCodeV2Adapter;
 
   get healthError(): string | undefined {
@@ -164,7 +165,7 @@ export class OpenCodeTransport {
       try {
         scopeOpenCodeRequest(url, path);
         signal.throwIfAborted();
-        await this.options.authorizeConnection();
+        await this.authorizeRequest(signal);
         signal.throwIfAborted();
         if (url !== this.options.getUrl())
           throw new Error('OpenCode endpoint changed during request admission');
@@ -197,6 +198,8 @@ export class OpenCodeTransport {
       const signal = options?.signal
         ? AbortSignal.any([options.signal, controller.signal])
         : controller.signal;
+      const admission = options?.signal && this.requestAdmissions.get(options.signal);
+      if (admission) this.requestAdmissions.set(signal, admission);
       try {
         const result =
           method === 'GET' && path === CURRENT_OPENCODE_ENDPOINTS.health
@@ -231,7 +234,7 @@ export class OpenCodeTransport {
       this.options.authorizeConnection &&
       !(method === 'GET' && path === CURRENT_OPENCODE_ENDPOINTS.health)
     ) {
-      await this.options.authorizeConnection();
+      await this.authorizeRequest(options?.signal);
       options?.signal?.throwIfAborted();
     }
     const scoped = scopeOpenCodeRequest(
@@ -342,6 +345,28 @@ export class OpenCodeTransport {
         for (const resolve of this.requestSettlementWaiters) resolve();
         this.requestSettlementWaiters.clear();
       }
+    }
+  }
+
+  private async authorizeRequest(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    const url = this.options.getUrl();
+    const admission = signal && this.requestAdmissions.get(signal);
+    if (admission?.url === url && Date.now() < admission.expiresAt) return;
+    let verification;
+    try {
+      verification = await this.options.authorizeConnection?.();
+    } catch (error) {
+      this.requestAdmissions = new WeakMap();
+      throw error;
+    }
+    signal?.throwIfAborted();
+    if (url !== this.options.getUrl())
+      throw new Error('OpenCode endpoint changed during request admission');
+    if (signal && verification) {
+      // The earlier of account/ownership expiry, not a new one-second window.
+      // Only descendants of this admitted request can reuse its verification.
+      this.requestAdmissions.set(signal, { url, expiresAt: verification.expiresAt });
     }
   }
 
@@ -567,6 +592,7 @@ export class OpenCodeTransport {
     eventStreamDirectory = this.requestWorkspaceDirectory,
     promoteDirectoryImmediately = true
   ) {
+    this.requestAdmissions = new WeakMap();
     await this.options.authorizeConnection?.(true);
     const serverUrl = this.options.getUrl();
     if (this.eventStreamServerUrl !== serverUrl) this.lastEventId = '';
@@ -789,6 +815,7 @@ export class OpenCodeTransport {
   }
 
   abortRequests() {
+    this.requestAdmissions = new WeakMap();
     for (const controller of this.requestControllers) {
       controller.abort();
     }

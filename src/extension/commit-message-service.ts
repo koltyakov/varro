@@ -95,6 +95,7 @@ const GIT_STATUS_UNTRACKED = 7;
 const MAX_HISTORY_ENTRIES = 50;
 const MAX_HISTORY_EXAMPLES = 8;
 const GENERATION_TIMEOUT_MS = 30_000;
+const PREPARATION_TIMEOUT_MS = 60_000;
 const REPLACE = 'Replace';
 const CANCEL = 'Cancel';
 const REPLACE_ANYWAY = 'Replace Anyway';
@@ -168,7 +169,12 @@ export class CommitMessageService {
     } catch (err) {
       if (err instanceof GenerationCancelledError) return;
       if (err instanceof GenerationTimeoutError) {
-        await vscode.window.showErrorMessage('Generating commit message timed out.');
+        logger.warn(err.message);
+        await vscode.window.showErrorMessage(
+          err.phase === 'preparation'
+            ? 'Preparing commit message timed out. Check the Varro connection.'
+            : 'Generating commit message timed out.'
+        );
         return;
       }
 
@@ -353,15 +359,25 @@ export class CommitMessageService {
     const cancellation = token.onCancellationRequested(cancel);
     if (token.isCancellationRequested) cancel();
 
-    const timeout = setTimeout(() => {
-      if (attempt.controller.signal.aborted) return;
-      this.abortAttempt(attempt);
-      rejectInterruption(new GenerationTimeoutError());
-    }, GENERATION_TIMEOUT_MS);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const setDeadline = (phase: 'preparation' | 'generation') => {
+      clearTimeout(timeout);
+      timeout = setTimeout(
+        () => {
+          if (attempt.controller.signal.aborted) return;
+          this.abortAttempt(attempt);
+          rejectInterruption(new GenerationTimeoutError(phase));
+        },
+        phase === 'preparation' ? PREPARATION_TIMEOUT_MS : GENERATION_TIMEOUT_MS
+      );
+    };
+    setDeadline('preparation');
 
     const generation = attempt.controller.signal.aborted
       ? Promise.reject(new GenerationCancelledError())
-      : this.runHelperGeneration(repository, changePatch, changePaths, scope, attempt);
+      : this.runHelperGeneration(repository, changePatch, changePaths, scope, attempt, () =>
+          setDeadline('generation')
+        );
     try {
       return await Promise.race([generation, interruption]);
     } finally {
@@ -375,19 +391,22 @@ export class CommitMessageService {
     changePatch: string,
     changePaths: string[],
     scope: ChangeScope,
-    attempt: GenerationAttempt
+    attempt: GenerationAttempt,
+    beginGeneration: () => void
   ): Promise<string> {
-    const history = await loadCommitHistory(repository);
+    const [history] = await Promise.all([
+      loadCommitHistory(repository),
+      this.ensureServerStarted(),
+    ]);
     throwIfCancelled(attempt);
-    await this.ensureServerStarted();
+    const route = await this.resolveCommitModel(attempt.directory);
     throwIfCancelled(attempt);
 
     if (this.server.apiVersion === 2) {
-      const model = await this.resolveCommitModel(attempt.directory);
-      throwIfCancelled(attempt);
+      beginGeneration();
       const generated = await tryGenerateOneShot(this.server, {
         prompt: `${buildSystemPrompt()}\nReturn exactly one JSON object with a required string "subject" (at most 72 characters) and optional string "body" (at most 4000 characters). No other properties.\n\n${buildUserPrompt(changePatch, changePaths, scope, history)}`,
-        model,
+        model: route,
         directory: attempt.directory,
         signal: attempt.controller.signal,
       });
@@ -411,8 +430,6 @@ export class CommitMessageService {
       if (!attempt.sessionID) throw new Error('OpenCode did not create a helper session.');
       throwIfCancelled(attempt);
 
-      const route = await this.resolveCommitModel(attempt.directory);
-      throwIfCancelled(attempt);
       const request: CommitMessageRequest = {
         system: buildSystemPrompt(),
         parts: [
@@ -427,6 +444,7 @@ export class CommitMessageService {
         request.model = { providerID: route.providerID, modelID: route.modelID };
         if (route.variant) request.variant = route.variant;
       }
+      beginGeneration();
       const response = await this.server.request(
         'POST',
         scopedPath(`/session/${encodeURIComponent(attempt.sessionID)}/message`, attempt.directory),
@@ -508,8 +526,8 @@ class GenerationCancelledError extends Error {
 }
 
 class GenerationTimeoutError extends Error {
-  constructor() {
-    super('Commit message generation timed out');
+  constructor(readonly phase: 'preparation' | 'generation') {
+    super(`Commit message ${phase} timed out`);
   }
 }
 

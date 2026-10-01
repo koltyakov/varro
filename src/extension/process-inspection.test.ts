@@ -1,9 +1,17 @@
 /* oxlint-disable anti-slop/no-module-mocking -- OS account inspection is tested without invoking real process commands. */
 import { EventEmitter } from 'events';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
+const { spawnMock, nativeReadMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+  nativeReadMock: vi.fn(),
+}));
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
+vi.mock('./windows-process-inspector', () => ({
+  WindowsProcessInspector: class {
+    read = nativeReadMock;
+  },
+}));
 vi.mock('./logger', () => ({ logger: { warn: vi.fn() } }));
 import { logger } from './logger';
 import {
@@ -16,6 +24,10 @@ const originalPlatform = process.platform;
 const originalGeteuid = Object.getOwnPropertyDescriptor(process, 'geteuid');
 const hostUid = 1000;
 const listenerPid = 1_072_000_000 + process.pid;
+
+beforeEach(() => {
+  nativeReadMock.mockRejectedValue(new Error('Native inspection unavailable'));
+});
 
 function mockCommands(
   platform: NodeJS.Platform,
@@ -152,6 +164,43 @@ describe('Windows listener and process inspection', () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
+  it('uses native identity and account reads without starting a CIM inspection', async () => {
+    commandOutput(() => ({
+      stdout: `TCP 127.0.0.1:4096 0.0.0.0:0 LISTENING ${listenerPid}`,
+      code: 0,
+    }));
+    nativeReadMock.mockResolvedValue({
+      executable: 'C:\\OpenCode\\opencode.exe',
+      birthIdentity: 'win32:123',
+      listenerSid: 'S-1-5-21-1',
+      hostSid: 'S-1-5-21-1',
+    });
+    await expect(readWindowsProcessIdentity(listenerPid)).resolves.toEqual({
+      executable: 'C:\\OpenCode\\opencode.exe',
+      birthIdentity: 'win32:123',
+    });
+    await expect(inspectLocalServerAccount(4096)).resolves.toEqual({
+      kind: 'same-user',
+      identity: `${listenerPid}:win32:123:S-1-5-21-1`,
+    });
+    expect(spawnMock.mock.calls.map(([command]) => command)).toEqual(['netstat.exe']);
+  });
+
+  it('does not treat missing native account evidence as same-user proof', async () => {
+    commandOutput((command) => ({
+      stdout:
+        command === 'netstat.exe' ? `TCP 127.0.0.1:4096 0.0.0.0:0 LISTENING ${listenerPid}` : '',
+      code: 0,
+    }));
+    nativeReadMock.mockResolvedValue({
+      executable: 'C:\\OpenCode\\opencode.exe',
+      birthIdentity: 'win32:123',
+      listenerSid: '',
+      hostSid: '',
+    });
+    await expect(inspectLocalServerAccount(4096)).resolves.toEqual({ kind: 'unknown' });
+  });
+
   it('does not launch PowerShell for a successfully inspected empty port', async () => {
     commandOutput(() => ({ stdout: '', code: 0 }));
     await expect(findListeningPids(4096)).resolves.toEqual([]);
@@ -242,6 +291,7 @@ describe('Windows listener and process inspection', () => {
     });
     try {
       const inspection = readWindowsProcessIdentity(listenerPid);
+      await Promise.resolve();
       children[0]!.stdout.emit(
         'data',
         Buffer.from('VARRO_EXECUTABLE=C:\\Old\\opencode.exe\nVARRO_BIRTH=123456')

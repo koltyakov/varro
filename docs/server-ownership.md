@@ -186,14 +186,16 @@ decision on reconnect. Concurrent callers share the decision; disposal invalidat
 late answers. Refusal blocks subsequent requests rather than starting retry prompts.
 
 On Windows, ordinary listener checks use `netstat` first, with PowerShell networking
-discovery only when `netstat` fails. Executable/start identity and account/start
-identity checks each use one PowerShell invocation. Each snapshot rechecks the
-process creation ticks before returning, so batching does not remove PID-reuse
-protection. The one-second admission cache and fresh reconnect checks are unchanged.
-Failed or incomplete Windows executable/account snapshots get one fresh retry before
-blocking a connection or reporting unknown ownership. Failures are logged in Varro
-output. A retry retains the creation-tick check and never reuses a previous identity;
-persistent inspection failures still block managed requests and retain ownership records.
+discovery only when `netstat` fails. A shared read-only helper obtains executable,
+creation identity, and token SIDs using Windows APIs, holding the process handle
+through its final liveness check. Concurrent reads share only their in-flight
+observation; no PID-only identity cache is introduced. Creation ticks match existing
+CIM leases. The one-second admission cache and fresh reconnect checks are unchanged.
+If native inspection is unavailable, fresh PID-reuse-checked CIM snapshots remain
+the bounded fallback, with one retry for failed or incomplete executable/account
+reads. Persistent inspection failures still block managed requests and retain records.
+Internal request admission tickets expire at the earlier original verification expiry;
+adapter wire requests cannot extend trust or transfer approval to another endpoint.
 
 Manual servers and consented foreign or unverifiable connections remain attach-only even
 with auto-start enabled. They cannot be adopted or restarted and do not run automatic

@@ -1222,6 +1222,50 @@ describe('CommitMessageService', () => {
     }
   });
 
+  it('gives generation its full deadline after slow server preparation', async () => {
+    vi.useFakeTimers();
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const startup = deferred<void>();
+    const response = deferred<unknown>();
+    const request = createRequest({ messageResponse: () => response.promise });
+    const { service, ensureServerStarted } = createService(request);
+    ensureServerStarted.mockReturnValue(startup.promise);
+    const generation = service.generate();
+    await waitFor(() => ensureServerStarted.mock.calls.length > 0);
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(mocks.window.showErrorMessage).not.toHaveBeenCalled();
+    startup.resolve();
+    await waitFor(() => request.mock.calls.some(([, path]) => path.includes('/message?')));
+    await vi.advanceTimersByTimeAsync(29_000);
+    response.resolve({
+      info: { structured: { subject: 'fix: keep Windows requests responsive' } },
+    });
+    await generation;
+    expect(repository.inputBox.value).toBe('fix: keep Windows requests responsive');
+    expect(mocks.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('bounds stalled preparation and reports the connection phase without creating a helper', async () => {
+    vi.useFakeTimers();
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const startup = deferred<void>();
+    const { service, request, ensureServerStarted } = createService();
+    ensureServerStarted.mockReturnValue(startup.promise);
+    const generation = service.generate();
+    await waitFor(() => ensureServerStarted.mock.calls.length > 0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await generation;
+    expect(mocks.window.showErrorMessage).toHaveBeenCalledWith(
+      'Preparing commit message timed out. Check the Varro connection.'
+    );
+    startup.resolve();
+    await flush();
+    expect(request).not.toHaveBeenCalled();
+    expect(repository.inputBox.value).toBe('');
+  });
+
   it('prevents duplicate in-flight generation for the same root', async () => {
     const repository = createRepository();
     setGitRepositories([repository]);
