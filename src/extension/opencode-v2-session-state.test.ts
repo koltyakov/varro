@@ -1,18 +1,26 @@
 /* oxlint-disable anti-slop/no-module-mocking -- Translate native filesystem contention errors to their Windows equivalents while retaining real locking operations. */
-import { mkdir, mkdtemp, rename, rm, rmdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import type * as FsPromises from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
+import * as os from 'os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { asRecord } from '../shared/type-utils';
 
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof os>();
+  const homedir = vi.fn(actual.homedir);
+  return { ...actual, default: { ...actual, homedir }, homedir };
+});
+
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof FsPromises>();
+  const readdirMock = vi.fn(actual.readdir);
   const renameMock = vi.fn(actual.rename);
   const rmdirMock = vi.fn(actual.rmdir);
-  const filesystem = { ...actual, rename: renameMock, rmdir: rmdirMock };
+  const filesystem = { ...actual, readdir: readdirMock, rename: renameMock, rmdir: rmdirMock };
   return { ...filesystem, default: filesystem };
 });
 
@@ -50,6 +58,7 @@ describe('OpenCodeV2SessionState', () => {
   let directory: string;
 
   beforeEach(async () => {
+    vi.mocked(readdir).mockReset();
     vi.mocked(rename).mockReset();
     vi.mocked(rmdir).mockReset();
     const parent = resolve('artifacts/ai-test-data');
@@ -67,7 +76,10 @@ describe('OpenCodeV2SessionState', () => {
     vi.stubEnv('VARRO_TEST_STATE_ROOT', undefined);
     vi.stubEnv('VARRO_TEST_SERVER_URL', undefined);
     vi.stubEnv('XDG_STATE_HOME', join(directory, 'normal-editor'));
+    vi.stubEnv('LOCALAPPDATA', join(directory, 'normal-editor-appdata'));
+    vi.mocked(os.homedir).mockReturnValue(join(directory, 'normal-editor-home'));
     const normal = new OpenCodeV2SessionState();
+    expect(normal.directory.startsWith(directory)).toBe(true);
     const entered = deferred();
     const resume = deferred();
     const read = normal.read.bind(normal);
@@ -233,6 +245,64 @@ describe('OpenCodeV2SessionState', () => {
       expect(existsSync(lock)).toBe(false);
     }
   );
+
+  it.each(['rename confirmation', 'owner scan'])(
+    'retries transient Windows EPERM during the lock %s',
+    async (inspection) => {
+      await simulateWindowsContention();
+      const actual = await vi.importActual<typeof FsPromises>('node:fs/promises');
+      const first = new OpenCodeV2SessionState(directory);
+      const second = new OpenCodeV2SessionState(directory);
+      const entered = deferred();
+      const resume = deferred();
+      const read = first.read.bind(first);
+      vi.spyOn(first, 'read').mockImplementationOnce(async (id) => {
+        entered.resolve();
+        await resume.promise;
+        return read(id);
+      });
+      const update = first.update('ses_fixture', { first: true });
+      await entered.promise;
+      if (inspection === 'owner scan') {
+        vi.mocked(readdir).mockImplementationOnce(actual.readdir);
+      }
+      vi.mocked(readdir).mockImplementationOnce(async () => {
+        // Windows can deny a scan while the owning process releases the directory.
+        resume.resolve();
+        throw Object.assign(new Error('Windows delete-pending lock directory'), { code: 'EPERM' });
+      });
+      const results = await Promise.allSettled([
+        update,
+        second.update('ses_fixture', { second: true }),
+      ]);
+
+      expect(results).toEqual([
+        { status: 'fulfilled', value: undefined },
+        { status: 'fulfilled', value: undefined },
+      ]);
+      expect(await second.read('ses_fixture')).toEqual({ first: true, second: true, time: {} });
+      expect(existsSync(join(directory, 'ses_fixture.json.lock'))).toBe(false);
+    }
+  );
+
+  it('bounds persistent Windows lock inspection EPERM without removing its owner', async () => {
+    await simulateWindowsContention();
+    const lock = join(directory, 'ses_fixture.json.lock');
+    const owner = `${process.pid}-00000000-0000-0000-0000-000000000000`;
+    await mkdir(lock);
+    await writeFile(join(lock, owner), '');
+    const error = Object.assign(new Error('Access denied scanning lock'), { code: 'EPERM' });
+    vi.mocked(readdir).mockRejectedValue(error);
+    vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(10_000);
+    const store = new OpenCodeV2SessionState(directory);
+
+    await expect(store.update('ses_fixture', { unexpected: true })).rejects.toMatchObject({
+      message: 'Timed out waiting to update Varro session annotations',
+      cause: error,
+    });
+    expect(existsSync(join(lock, owner))).toBe(true);
+    expect(await store.read('ses_fixture')).toEqual({});
+  });
 
   it('does not remove a replacement owner when Windows refuses to remove its directory', async () => {
     const lock = join(directory, 'ses_fixture.json.lock');

@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These report tests deliberately model malformed external usage responses and imported adapter boundaries. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolve } from 'node:path';
 import type * as vscode from 'vscode';
 
 const mocks = vi.hoisted(() => {
@@ -107,12 +108,14 @@ function reportSection(content: string, title: string): string {
 }
 
 beforeEach(() => {
+  vi.stubEnv('VARRO_TEST_STATE_ROOT', resolve('artifacts/ai-test-data/usage-report-worker'));
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   vi.clearAllMocks();
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.useRealTimers();
 });
 

@@ -50,6 +50,11 @@ export function AttachmentChip(props: {
   };
 
   createEffect(() => {
+    if (props.title !== props.label) setShowTitle(true);
+    else updateTitleVisibility();
+  });
+
+  createEffect(() => {
     if (!props.previewImage) hidePreview();
   });
   onCleanup(hidePreview);

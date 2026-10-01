@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test';
+import { OpenCodeV2BackgroundWork } from '../../src/extension/opencode-v2-background-work';
+import { projectV2Event } from '../../src/extension/opencode-v2-events';
+import { parseServerEvent } from '../../src/shared/protocol';
 import type { ExtensionMessage, ServerEvent } from '../../src/shared/protocol';
+import type { UnknownRecord } from '../../src/shared/type-utils';
 import type { AssistantMessage, MessageEntry, Session } from '../../src/webview/types';
 
 test('shows a background process card until the resumed response finishes', async ({
@@ -87,6 +91,29 @@ test('shows a background process card until the resumed response finishes', asyn
       ).__varroE2E;
       for (const event of batch) harness.replayServerEvent(event);
     }, events);
+  const backgroundWork = new OpenCodeV2BackgroundWork();
+  const replayNative = async (type: string, data: UnknownRecord) => {
+    backgroundWork.observe(type, data, '/workspace');
+    const events = projectV2Event(
+      { type, created: Date.now(), data },
+      {
+        backgroundPending: backgroundWork.isWaiting(session.id),
+        backgroundStartedAt: backgroundWork.startedAt(session.id),
+      }
+    ).flatMap((value) => {
+      const event = parseServerEvent(value);
+      return event ? [event] : [];
+    });
+    await replay(events);
+  };
+  await replayNative('shell.created', {
+    info: {
+      id: 'shell-tests',
+      status: 'running',
+      metadata: { sessionID: session.id },
+      time: { started: Date.now() - 13_000 },
+    },
+  });
   await replay([
     { type: 'session.status', properties: { sessionID: session.id, status: { type: 'busy' } } },
     { type: 'message.updated', properties: { info: assistant } },
@@ -103,19 +130,18 @@ test('shows a background process card until the resumed response finishes', asyn
       },
     },
     {
-      type: 'session.status',
-      properties: {
-        sessionID: session.id,
-        status: { type: 'busy', background: true, backgroundStartedAt: Date.now() - 13_000 },
-      },
-    },
-    {
       type: 'message.updated',
       properties: {
         info: { ...assistant, finish: 'stop', time: { ...assistant.time, completed: Date.now() } },
       },
     },
   ]);
+  await replayNative('session.step.ended', {
+    sessionID: session.id,
+    assistantMessageID: assistant.id,
+    finish: 'stop',
+  });
+  await replayNative('session.execution.succeeded', { sessionID: session.id });
   const card = page.locator('.background-process');
   await expect(card).toBeVisible();
   await expect(card.locator('.tool-invocation-title')).toHaveText('Background process');
@@ -138,6 +164,9 @@ test('shows a background process card until the resumed response finishes', asyn
   expect(layout.durationStart).toBeGreaterThanOrEqual(layout.titleEnd);
   expect(layout.height).toBeGreaterThan(24);
   await expect(page.locator('.assistant-dialog-summary')).toHaveCount(0);
+  const turnTimer = page.locator('.toolbar-turn-timer-value');
+  const durationBefore = await turnTimer.textContent();
+  await expect(turnTimer).not.toHaveText(durationBefore ?? '');
   await page.screenshot({ path: testInfo.outputPath('background-process.png') });
   const before = await card.boundingBox();
   const samples = await page.evaluate(async () => {
@@ -162,6 +191,12 @@ test('shows a background process card until the resumed response finishes', asyn
     )
   ).toBe(true);
   const resumed = { ...assistant, id: 'assistant-resumed', time: { created: Date.now() } };
+  await replayNative('shell.exited', { id: 'shell-tests', status: 'exited', exit: 0 });
+  await expect(card).toBeVisible();
+  await expect(page.locator('.toolbar-turn-timer')).toBeVisible();
+  const elapsedBeforeResume = Number.parseInt(await turnTimer.innerText(), 10);
+  await replayNative('session.execution.started', { sessionID: session.id });
+  backgroundWork.observe('session.step.started', { sessionID: session.id });
   await replay([
     {
       type: 'session.status',
@@ -172,6 +207,9 @@ test('shows a background process card until the resumed response finishes', asyn
   await expect(card).toHaveCount(0);
   await expect(page.locator('.loading-verb')).toBeVisible();
   await expect(page.locator('.toolbar-turn-timer')).toBeVisible();
+  expect(Number.parseInt(await turnTimer.innerText(), 10)).toBeGreaterThanOrEqual(
+    elapsedBeforeResume
+  );
   await expect(page.locator('.assistant-dialog-summary')).toHaveCount(0);
   await replay([
     {
@@ -192,8 +230,8 @@ test('shows a background process card until the resumed response finishes', asyn
         info: { ...resumed, finish: 'stop', time: { ...resumed.time, completed: Date.now() } },
       },
     },
-    { type: 'session.status', properties: { sessionID: session.id, status: { type: 'idle' } } },
   ]);
+  await replayNative('session.execution.succeeded', { sessionID: session.id });
   await expect(
     page.locator('.assistant-dialog-summary').getByLabel('Worked for', { exact: true })
   ).toBeVisible();

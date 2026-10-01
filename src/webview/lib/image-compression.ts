@@ -1,3 +1,5 @@
+import { loadImage } from './image-loading';
+
 export type CompressedImage = {
   url: string;
   mime: string;
@@ -23,33 +25,6 @@ export function scaledImageDimensions(width: number, height: number, maxEdge: nu
 
 export function hasMeaningfulImageSavings(originalSize: number, size: number): boolean {
   return size <= originalSize * 0.9 && originalSize - size >= 32 * 1024;
-}
-
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    const timeout = setTimeout(() => {
-      image.src = '';
-      reject(new Error('Timed out decoding the image'));
-    }, 10_000);
-    image.addEventListener(
-      'load',
-      () => {
-        clearTimeout(timeout);
-        resolve(image);
-      },
-      { once: true }
-    );
-    image.addEventListener(
-      'error',
-      () => {
-        clearTimeout(timeout);
-        reject(new Error('Could not decode the image'));
-      },
-      { once: true }
-    );
-    image.src = url;
-  });
 }
 
 async function encodeImage(

@@ -40,6 +40,7 @@ async function fixture(versions: number[]) {
   const path = join(directory, 'opencode.db');
   vi.stubEnv('OPENCODE_DB', path);
   vi.stubEnv('XDG_STATE_HOME', directory);
+  vi.stubEnv('VARRO_TEST_STATE_ROOT', join(directory, 'varro-state'));
   const database = new DatabaseSync(path);
   if (versions.includes(1)) {
     database.exec(`CREATE TABLE session (id TEXT PRIMARY KEY, time_updated INTEGER);

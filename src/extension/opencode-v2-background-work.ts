@@ -9,7 +9,8 @@ export class OpenCodeV2BackgroundWork {
   >();
   private readonly mutations = new Map<string, number>();
   private readonly sessionMutations = new Map<string, number>();
-  private readonly waiting = new Map<string, number | null>();
+  private readonly waiting = new Map<string, { directory?: string; endedAt: number | null }>();
+  private readonly stoppedSessions = new Set<string>();
   private revision = 0;
 
   observe(type: string, data: UnknownRecord, directory?: string): void {
@@ -24,6 +25,7 @@ export class OpenCodeV2BackgroundWork {
           startedAt: isNumber(startedAt) && Number.isFinite(startedAt) ? startedAt : undefined,
         });
         this.mutations.set(info.id, ++this.revision);
+        this.sessionMutations.set(sessionID, this.revision);
       }
     }
     if ((type === 'shell.exited' || type === 'shell.deleted') && isString(data.id)) {
@@ -31,24 +33,35 @@ export class OpenCodeV2BackgroundWork {
       this.shells.delete(data.id);
       this.mutations.set(data.id, ++this.revision);
       // Keep Waiting through the gap before the completion notification resumes the model.
-      if (sessionID && this.waiting.has(sessionID) && this.shellIDs(sessionID).length === 0)
-        this.waiting.set(sessionID, Date.now());
+      if (sessionID) {
+        this.sessionMutations.set(sessionID, this.revision);
+        const waiting = this.waiting.get(sessionID);
+        if (waiting && this.shellIDs(sessionID).length === 0) waiting.endedAt = Date.now();
+      }
     }
     if (!isString(data.sessionID)) return;
     if (type.startsWith('session.execution.') || type.startsWith('session.step.'))
       this.sessionMutations.set(data.sessionID, ++this.revision);
-    if (type === 'session.step.ended' && data.finish === 'stop') {
-      if (this.shellIDs(data.sessionID).length > 0) this.waiting.set(data.sessionID, null);
-      else this.waiting.delete(data.sessionID);
+    if (
+      (type === 'session.step.ended' && data.finish === 'stop') ||
+      type === 'session.execution.succeeded'
+    ) {
+      const pendingShell = [...this.shells.values()].find(
+        (shell) => shell.sessionID === data.sessionID
+      );
+      if (pendingShell && !this.stoppedSessions.has(data.sessionID))
+        this.waiting.set(data.sessionID, { directory: pendingShell.directory, endedAt: null });
     }
+    if (type === 'session.execution.started' || type === 'session.step.started')
+      this.stoppedSessions.delete(data.sessionID);
     if (
       type === 'session.step.started' ||
-      type === 'session.execution.succeeded' ||
       type === 'session.execution.failed' ||
       type === 'session.execution.interrupted' ||
       type === 'session.deleted'
     ) {
       this.waiting.delete(data.sessionID);
+      if (type !== 'session.step.started') this.stoppedSessions.add(data.sessionID);
     }
   }
 
@@ -92,17 +105,28 @@ export class OpenCodeV2BackgroundWork {
       if (shell) this.shells.set(id, shell);
       else this.shells.delete(id);
     }
-    // A running shell can be a preview server that outlives the completed turn.
-    // Only execution events establish pending work; shell snapshots cannot do so.
-    for (const [sessionID, endedAt] of this.waiting) {
+    // Session-owned shells notify the model on exit, even after execution succeeds.
+    // Restore that pending work after reload; an idle model is not a finished task.
+    for (const shell of this.shells.values()) {
+      if (
+        shell.directory !== directory ||
+        (this.sessionMutations.get(shell.sessionID) ?? 0) > version ||
+        activeSessionIDs.has(shell.sessionID) ||
+        this.stoppedSessions.has(shell.sessionID)
+      )
+        continue;
+      this.waiting.set(shell.sessionID, { directory, endedAt: null });
+    }
+    for (const [sessionID, waiting] of this.waiting) {
+      if (waiting.directory !== directory) continue;
       if ((this.sessionMutations.get(sessionID) ?? 0) > version) continue;
       if (activeSessionIDs.has(sessionID)) {
         this.waiting.delete(sessionID);
-      } else {
+      } else if (this.shellIDs(sessionID).length === 0) {
         // Recover missed continuation events and server restarts without flashing Worked
         // during the normal shell-exit -> notification -> execution-start handoff.
-        if (endedAt === null) this.waiting.set(sessionID, Date.now());
-        else if (Date.now() - endedAt >= 2_000) this.waiting.delete(sessionID);
+        if (waiting.endedAt === null) waiting.endedAt = Date.now();
+        else if (Date.now() - waiting.endedAt >= 2_000) this.waiting.delete(sessionID);
       }
     }
     return [...this.waiting.keys()];
@@ -111,6 +135,7 @@ export class OpenCodeV2BackgroundWork {
   clearSession(sessionID: string): void {
     this.sessionMutations.set(sessionID, ++this.revision);
     this.waiting.delete(sessionID);
+    this.stoppedSessions.add(sessionID);
   }
 
   reset(): void {
@@ -118,6 +143,7 @@ export class OpenCodeV2BackgroundWork {
     this.mutations.clear();
     this.sessionMutations.clear();
     this.waiting.clear();
+    this.stoppedSessions.clear();
     this.revision = 0;
   }
 }

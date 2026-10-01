@@ -300,6 +300,42 @@ describe('SessionStateManager notifications', () => {
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
+  it('does not report completion while a terminal response still has background work', () => {
+    const manager = createManager();
+    markBusy(manager, 'session-1');
+    manager.handleServerEvent({
+      type: 'session.next.step.ended',
+      properties: { sessionID: 'session-1', finish: 'stop', executionContinues: true },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy', background: true } },
+    });
+    manager.handleServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: 'message-1',
+          sessionID: 'session-1',
+          role: 'assistant',
+          finish: 'stop',
+          time: { created: 1, completed: 2 },
+        },
+      },
+    });
+    manager.setSessionUnreadState('session-1', 'completed', true);
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
+    expect(
+      manager.reconcileStaleBusySessions({ 'session-1': { type: 'busy', background: true } }, 0)
+    ).toEqual([]);
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+    expect(manager.completed.has('session-1')).toBe(true);
+  });
+
   it('clears a busy session on the deprecated session.idle event', () => {
     const manager = createManager();
 

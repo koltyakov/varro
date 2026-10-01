@@ -355,6 +355,11 @@ Direct input acquires ownership only when it can affect the transcript:
   and the resumed response settles; preserve the card while the new assistant message is being loaded.
   Use the standard tool-card border and hourglass, with the process's elapsed time aligned on the right.
   Restore this state from the running-shell snapshot on reload, and retain the existing scroll owner.
+  A successful model execution does not clear session-owned running shells. Keep waiting through
+  each command's exit and automatic follow-up; only apply the missed-follow-up grace after the last
+  command exits. Do not guess that a command is detached from its name or elapsed time. Unowned
+  processes do not affect session completion; interrupted or failed executions must not be restored
+  as waiting by a stale shell snapshot.
 - A failed assistant attempt with retry metadata is not a final response while the turn is working,
   even if it has completed partial text and `finish: error`. Keep the loading slot through retry and
   the next empty attempt; do not briefly insert Worked. `automatic-retry.spec.ts` checks that handoff
@@ -550,9 +555,9 @@ Direct input acquires ownership only when it can affect the transcript:
   Each frame starts at the current position, including newer downward user movement. Direct input,
   editing, disclosure ownership, and activity exit still take precedence. Content arriving after
   canonical completion must release the old activity-summary anchor just like a live delta.
-- An explicit return to latest more than four viewport heights away positions immediately rather than
-  traversing every intermediate row at streaming speed. Nearby returns and subsequent growth retain
-  normal easing. A newer direct gesture still cancels the queued return.
+- An explicit return to latest positions immediately at any distance rather than scrolling through
+  intermediate rows. Sends and subsequent growth retain normal easing. A newer direct gesture still
+  cancels the queued return.
 - `MessageList.presentation.test.ts` and `streaming-presentation.test.ts` cover canonical/display
   separation, grouped fast previews, completion, interruption, hydration, and cancellation.
   `e2e/tests/scroll-streaming-presentation.spec.ts` records every-frame preview, text, anchor, and scroll

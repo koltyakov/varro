@@ -1,7 +1,9 @@
 import { isAbsolute, join } from 'node:path';
 
+export type VarroStateKind = 'servers' | 'opencode-v2' | 'provider-quota-v2';
+
 /** Test hosts must not discover or write a production editor's ownership state. */
-export function getVarroTestStateDirectory(kind: 'servers' | 'opencode-v2'): string | undefined {
+export function getVarroTestStateDirectory(kind: VarroStateKind): string | undefined {
   const root = process.env.VARRO_TEST_STATE_ROOT;
   if (root !== undefined) {
     if (!root.trim() || !isAbsolute(root))

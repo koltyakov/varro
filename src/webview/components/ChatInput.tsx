@@ -236,6 +236,7 @@ import {
   hasMeaningfulImageSavings,
 } from '../lib/image-compression';
 import type { CompressedImage, ImageCompressionAnalysis } from '../lib/image-compression';
+import { loadImage } from '../lib/image-loading';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
 import { dismissComposerOverlays } from './chat-input/composer-overlay-dismiss';
 import {
@@ -1069,6 +1070,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const pasteTransactionsByEvent = new Map<ClipboardEvent, PasteTransaction>();
   const pendingImageStores = new Map<string, string>();
   const [imageStoreRevision, setImageStoreRevision] = createSignal(0);
+  const [imageLoadResults, setImageLoadResults] = createSignal(
+    new Map<string, { url: string; error: string | null }>()
+  );
   const [imageAnalyses, setImageAnalyses] = createSignal(
     new Map<string, { url: string; analysis: ImageCompressionAnalysis | null }>()
   );
@@ -1673,7 +1677,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           label: image.filename,
           path: image.filename,
           icon: 'image',
-          previewImage: { url: image.url, alt: image.filename },
+          disabled: !!imageError(image.id),
+          title: imageError(image.id),
+          previewImage: canPreviewImage(image.id)
+            ? { url: image.url, alt: image.filename }
+            : undefined,
           textMarker: marker,
           compressible: canCompressImage(image.id),
           compressionHint: imageCompressionHint(image.id),
@@ -1794,7 +1802,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   function canCompressImage(id: string): boolean {
     const image = state.clipboardImages.find((item) => item.id === id);
-    if (!image) return false;
+    if (!image || imageError(id)) return false;
     const original = originalImages().get(id);
     const entry = imageAnalyses().get(id);
     return (
@@ -1808,6 +1816,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const entry = imageAnalyses().get(id);
     if (
       !image ||
+      imageError(id) ||
       entry?.url !== image.url ||
       !(entry.analysis?.recommended || entry.analysis?.smaller)
     )
@@ -1840,10 +1849,59 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   createEffect(() => {
     void compressionOwner();
     compressionEpoch += 1;
+    setImageLoadResults(new Map());
     setOriginalImages(new Map());
     setImageAnalyses(new Map());
     setCompressionMenu(null);
     setCompressionBusy(false);
+  });
+
+  function imageError(id: string): string | undefined {
+    const image = composerClipboardImages().find((item) => item.id === id);
+    const result = imageLoadResults().get(id);
+    return image && result?.url === image.url ? (result.error ?? undefined) : undefined;
+  }
+
+  function canPreviewImage(id: string): boolean {
+    const image = composerClipboardImages().find((item) => item.id === id);
+    const result = imageLoadResults().get(id);
+    return !!image && result?.url === image.url && result.error === null;
+  }
+
+  const hasPendingImageLoads = () =>
+    composerClipboardImages().some((image) => imageLoadResults().get(image.id)?.url !== image.url);
+
+  createEffect(() => {
+    void compressionOwner();
+    const images = composerClipboardImages().map((image) => ({ ...image }));
+    const epoch = compressionEpoch;
+    const current = untrack(imageLoadResults);
+    let cancelled = false;
+    onCleanup(() => {
+      cancelled = true;
+    });
+    setImageLoadResults(
+      new Map(
+        [...current].filter(([id, result]) =>
+          images.some((image) => image.id === id && image.url === result.url)
+        )
+      )
+    );
+    for (const image of images) {
+      if (current.get(image.id)?.url === image.url) continue;
+      const complete = (error: string | null) => {
+        if (cancelled || composerDisposed || compressionEpoch !== epoch) return;
+        setImageLoadResults((results) => new Map(results).set(image.id, { url: image.url, error }));
+      };
+      void (async () => {
+        try {
+          await loadImage(image.url);
+          complete(null);
+        } catch (error) {
+          complete(error instanceof Error ? error.message : 'Could not decode the image');
+        }
+      })();
+    }
   });
 
   createEffect(() => {
@@ -1991,18 +2049,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
 
   const [previewImageId, setPreviewImageId] = createSignal<string | null>(null);
+  const previewableImages = createMemo(() =>
+    composerClipboardImages().filter((image) => canPreviewImage(image.id))
+  );
   const previewImageIndex = createMemo(() => {
     const id = previewImageId();
     if (!id) return -1;
-    return composerClipboardImages().findIndex((image) => image.id === id);
+    return previewableImages().findIndex((image) => image.id === id);
   });
   const previewImage = (): PreviewImage | null => {
-    const image = composerClipboardImages()[previewImageIndex()];
+    const image = previewableImages()[previewImageIndex()];
     if (!image) return null;
     return { url: image.url, alt: image.filename, title: image.filename, mime: image.mime };
   };
   const stepImagePreview = (delta: number) => {
-    const images = composerClipboardImages();
+    const images = previewableImages();
     const index = previewImageIndex();
     if (images.length <= 1 || index < 0) return;
     setPreviewImageId(images[(index + delta + images.length) % images.length]!.id);
@@ -3074,6 +3135,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       requestAbortSession();
       return;
     }
+    if (hasPendingImageLoads()) {
+      showSessionActionFeedback('Checking image attachments', 'warning');
+      return;
+    }
     if (pendingProblems() || problemsPickerScope()) return;
     if (/^\/(?:problems|promlems)(?:\s|$)/i.test(text.trim()) && state.enableProblemsContext) {
       await runSlashCommand(text);
@@ -3103,6 +3168,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
     const shouldQueue = mode === 'queue' || pendingApproval;
     const sendableText = getSendableInputText(text);
+    const hasBrokenImages = state.clipboardImages.some((image) => imageError(image.id));
     const hasSendableImages = hasSendableClipboardImages();
     if (
       !sendableText.trim() &&
@@ -3118,7 +3184,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     const queuedAttachments = getQueuedAttachmentSnapshot({
       droppedFiles: state.droppedFiles,
-      clipboardImages: state.clipboardImages,
+      clipboardImages: state.clipboardImages.filter((image) => !imageError(image.id)),
       nativePdfs: state.nativePdfs,
       terminalSelection: state.terminalSelection,
       attachedDiagnostics: state.attachedDiagnostics,
@@ -3184,7 +3250,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       let optimisticPublished = false;
       if (editTargetExists) {
         clearUsageLimitsForSessionTree(composerSessionId());
-        sent = await editMessage(editing.messageId, text, {
+        sent = await editMessage(editing.messageId, sendableText, {
           allowEmptyText: hasEditableAttachments,
           queuedAttachments: {
             ...queuedAttachments,
@@ -3393,6 +3459,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               onOptimisticPublish: props.newSession ? props.onBeforeSend : undefined,
             };
       if (capturedTarget !== undefined) sendOptions.targetSessionId = capturedTarget;
+      if (hasBrokenImages) sendOptions.queuedAttachments = queuedAttachments;
       if (queuedEdit)
         sendOptions.queuedAttachments = {
           ...queuedAttachments,
@@ -3400,7 +3467,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             ? captureExtensionContexts(composerExtensionContexts())
             : [],
         };
-      const pendingSend = sendMessage(text, sendOptions);
+      const pendingSend = sendMessage(sendableText, sendOptions);
       sent = await pendingSend;
     } catch {
       sent = false;
@@ -5053,7 +5120,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     !currentModelSupportsPdf() && state.nativePdfs.some((pdf) => !pdf.contextFile);
 
   function hasSendableClipboardImages() {
-    return state.clipboardImages.length > 0 && currentPromptCanHandleImages();
+    return (
+      state.clipboardImages.some((image) => !imageError(image.id)) && currentPromptCanHandleImages()
+    );
   }
 
   function hasSendableComposerContent() {
@@ -5069,15 +5138,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   function getSendableInputText(text = inputText()) {
     if (state.clipboardImages.length === 0) return text;
+    const brokenImages = state.clipboardImages.filter((image) => imageError(image.id));
     return getPromptTextForClipboardImages(
-      text,
+      brokenImages.length ? getPromptTextForClipboardImages(text, brokenImages, false) : text,
       state.clipboardImages,
       currentPromptCanHandleImages(text)
     );
   }
 
   const hasPendingDelegatedImages = () =>
-    state.clipboardImages.some((image) => !image.contextFile) &&
+    state.clipboardImages.some((image) => !imageError(image.id) && !image.contextFile) &&
     !currentModelSupportsVision() &&
     currentModelSupportsTools() &&
     canDelegateCurrentImages();
@@ -5089,7 +5159,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (currentModelSupportsVision() || !currentModelSupportsTools()) return;
     if (!canDelegateCurrentImages()) return;
     for (const image of images) {
-      if (image.contextFile || pendingImageStores.has(image.id)) continue;
+      if (
+        imageError(image.id) ||
+        hasPendingImageLoads() ||
+        image.contextFile ||
+        pendingImageStores.has(image.id)
+      )
+        continue;
       pendingImageStores.set(image.id, image.url);
       postMessage({
         type: 'images/store',
@@ -5112,6 +5188,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       (!state.workspaceCatalogReloadPending &&
         !pendingWorkspacePath() &&
         !hasPendingPdfFallback() &&
+        !hasPendingImageLoads() &&
         pendingTableCount() === 0 &&
         !pendingProblems() &&
         !hasPendingDelegatedImages() &&
@@ -5142,6 +5219,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (pendingWorkspace) return `Waiting for the workspace to switch to ${pendingWorkspace}`;
     if (
       hasPendingPdfFallback() ||
+      hasPendingImageLoads() ||
       hasPendingDelegatedImages() ||
       pendingTableCount() > 0 ||
       pendingProblems()
@@ -6044,6 +6122,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               onRemoveNativePdf={removeNativePdfWithCleanup}
               onOpenFile={openContextFileInEditor}
               onPreviewImage={(image) => setPreviewImageId(image.id)}
+              imageError={imageError}
+              canPreviewImage={canPreviewImage}
               canCompressImage={canCompressImage}
               imageCompressionHint={imageCompressionHint}
               onCompressImage={openImageCompression}
@@ -6231,7 +6311,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
                 if (file) openContextFileInEditor(file);
               } else if (chipId.startsWith('img:')) {
                 const id = chipId.slice(4);
-                if (composerClipboardImages().some((image) => image.id === id)) {
+                if (previewableImages().some((image) => image.id === id)) {
                   setPreviewImageId(id);
                 }
               }
@@ -6671,9 +6751,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           onClose={() => setPreviewImageId(null)}
           onPrevious={() => stepImagePreview(-1)}
           onNext={() => stepImagePreview(1)}
-          showNavigation={composerClipboardImages().length > 1}
+          showNavigation={previewableImages().length > 1}
           position={previewImageIndex() + 1}
-          total={composerClipboardImages().length}
+          total={previewableImages().length}
         />
       </Show>
     </div>

@@ -91,10 +91,48 @@ On macOS or Linux, use `lsof -nP -iTCP:4096 -sTCP:LISTEN` to find the listener. 
 ### Version differences and history
 
 - V2 does not expose session sharing or an OpenCode LSP service. Sharing is disabled on v2. VS Code Problems remain available as explicit context.
-- V2 cannot patch arbitrary session metadata. Varro keeps session annotations under the user's XDG state directory in `varro/opencode-v2/`. These annotations are local to Varro and are not synchronized to other OpenCode clients.
+- V2 cannot patch arbitrary session metadata. Varro keeps session annotations in `opencode-v2/` under its per-user state directory, described below. These annotations are local to Varro and are not synchronized to other OpenCode clients.
 - Changing CLI versions does not synchronize history. After switching to v2, opening a v1 conversation that is still in the session list imports a copy of it and its child sessions when v2 cannot load the original. The copy has new IDs and a title ending in `(v1 copy)`. You can continue it without changing the original v1 history. Imports do not execute recorded tools or send a model request.
 
 See [OpenCode v1 and v2 support](opencode-v2-support.md) for adapter details and verification coverage.
+
+## Local state files
+
+Varro uses one per-user state root for files shared across editor windows and distributions:
+
+- macOS: `~/Library/Application Support/Varro/`
+- Windows: `%LOCALAPPDATA%\Varro\`, defaulting to `~/AppData/Local/Varro/`
+- Linux: `$XDG_STATE_HOME/varro/`, defaulting to `~/.local/state/varro/`
+
+Relative or empty `LOCALAPPDATA` and `XDG_STATE_HOME` values are ignored for new paths.
+The root contains `servers/` for server ownership records, `opencode-v2/` for
+`<sessionID>.json` annotations and session locks, and `provider-quota-v2/` for shared
+quota snapshots and polling locks. Annotation JSON includes `generationTiming`,
+the text/reasoning boundaries used with OpenCode's token counts to estimate tok/s.
+Quota disk sharing remains disabled on Windows until private ACL handling is supported.
+
+Existing annotation directories at `$XDG_STATE_HOME/varro/opencode-v2/` and quota
+directories at `~/.varro-provider-quota-v2/` remain intact. When needed, Varro creates
+a symbolic link at the native path, or a directory junction on Windows, pointing
+to the existing directory. Older and newer writers then share the same files and
+locks, including atomic file replacements. This exposes a consistent native path
+without moving live data. Read-only usage reports can read the old path without
+creating a link. Separate existing directories at both locations are a conflict;
+Varro does not automatically merge or overwrite them.
+
+Update all editor installations before using a fresh state root. Older builds do
+not know the new paths and can create separate legacy directories if launched
+later. To relocate existing data physically, close all editor processes first and
+preserve a compatibility link at the old path if older builds still need access.
+Do not move or delete live server ownership records; existing legacy temporary
+records remain in place until the corresponding server is retired.
+
+These paths belong to the machine running the workspace extension host, including
+SSH, WSL, and container hosts. OpenCode's database, service registration, provider
+credentials, temporary attachments, and VS Code-managed workspace/profile storage
+retain their owners' existing locations. Isolated test hosts use
+`VARRO_TEST_STATE_ROOT` for all three state subdirectories and never use legacy
+production paths.
 
 ## Workspace And Remote Environments
 
