@@ -83,7 +83,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         vi.stubEnv('PATH', [early, later, process.env.PATH].join(delimiter));
         command = '';
       }
-      const leasePath = join(root, 'lease.json');
+      const leasePath = join(root, `varro-opencode-server-${address.port}.json`);
       let server = new OpenCodeServer(address.port, true, command, false, undefined, leasePath);
       let attached: OpenCodeServer | undefined;
       try {
@@ -136,10 +136,14 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             binary,
             false,
             undefined,
-            join(root, 'other-lease.json')
+            join(root, 'varro-opencode-server-4096.json')
           );
           expect(await attached.start()).toBe(url);
-          expect((await attached.readServerInfo()).managedProcess).toBe(false);
+          const sharedInfo = await attached.readServerInfo();
+          expect(sharedInfo.managedProcess).toBe(false);
+          expect(sharedInfo.ownership).toBe('other-host');
+          expect(attached.isAttachOnly).toBe(false);
+          expect(asRecord(JSON.parse(await readFile(leasePath, 'utf8')))?.host).toBe(lease?.host);
           await attached.dispose();
           attached = undefined;
         }

@@ -748,6 +748,10 @@ export class OpenCodeServer extends EventEmitter {
       const sharedServer = this.processManager.discoverSharedServer();
       if (sharedServer && (await sharedServer)) {
         this.throwIfStartCancelled(disposeGeneration, signal);
+        const managedRegistration = await this.processManager.refreshDiscoveredServerRegistration();
+        this.registeredEndpoint = managedRegistration;
+        if (managedRegistration) await this.restoreRegistrationCredentials();
+        this.throwIfStartCancelled(disposeGeneration, signal);
         const health = await this.readHealthInfo();
         this.throwIfStartCancelled(disposeGeneration, signal);
         if (!health.healthy || !isSupportedOpenCodeVersion(health.version)) {
@@ -758,7 +762,7 @@ export class OpenCodeServer extends EventEmitter {
         await this.admission.admit();
         this.throwIfStartCancelled(disposeGeneration, signal);
         this.preserveExistingProcess = true;
-        this.externalEndpoint = true;
+        this.externalEndpoint = !managedRegistration;
         await release();
         this.beginRunningEventStream();
         this.startExistingServerPreparation(disposeGeneration, signal);
@@ -1524,6 +1528,9 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   async readServerInfo(): Promise<OpenCodeServerInfo> {
+    // About/diagnostics must not report a verified lease as unmanaged while its
+    // asynchronous ownership observation or handoff is still being prepared.
+    if (this.existingServerPreparationOperation) await this.existingServerPreparationOperation;
     let cliVersion: string | null = null;
     let cliVersionError: string | null = null;
     let activeAgentCount: number | null = null;

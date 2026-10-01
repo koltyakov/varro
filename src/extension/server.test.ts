@@ -8,6 +8,7 @@ import type * as OsModule from 'os';
 import { dirname, join } from 'path';
 import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
 import type { ServerStatus } from '../shared/protocol';
+import type { ManagedServerOwnershipLease } from '../shared/server-ownership';
 
 type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;
 
@@ -425,6 +426,111 @@ afterEach(async () => {
 });
 
 describe('automatic-port migration and admission', () => {
+  it.each(['current-host', 'other-host'] as const)(
+    'recovers a Varro-registered shared service as %s rather than attach-only',
+    async (ownership) => {
+      const server = new OpenCodeServer('auto', true);
+      const { api, children } = configureManagedStartup(server);
+      const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+      vi.mocked(api.readInstalledCliVersion).mockResolvedValue('2.0.20');
+      vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.20' });
+      vi.spyOn(processManager, 'discoverSharedServer').mockImplementation(() => {
+        processManager.port = 49374;
+        return Promise.resolve(true);
+      });
+      const registration = vi
+        .spyOn(processManager, 'refreshDiscoveredServerRegistration')
+        .mockResolvedValue(true);
+      const privateManager = processManager as unknown as {
+        hasOwnershipLeaseCandidate: boolean;
+        foreignActiveOwnership: boolean;
+        adoptManagedServerOwnership: (lease: ManagedServerOwnershipLease) => void;
+        observeForeignManagedServer: (lease: ManagedServerOwnershipLease) => void;
+      };
+      Object.defineProperty(privateManager, 'hasOwnershipLeaseCandidate', {
+        configurable: true,
+        value: true,
+      });
+      const recovery = vi
+        .spyOn(processManager, 'recoverManagedServerOwnership')
+        .mockImplementation(async () => {
+          const lease: ManagedServerOwnershipLease = {
+            version: 1,
+            pid: 1_073_000_000 + process.pid,
+            port: 49374,
+            executable: '/fixture/opencode',
+            birthIdentity: 'fixture-birth',
+            owner: 'fixture-owner',
+            host: 'another-editor',
+            state: 'active',
+            createdAt: Date.now(),
+          };
+          if (ownership === 'current-host') privateManager.adoptManagedServerOwnership(lease);
+          else {
+            privateManager.observeForeignManagedServer(lease);
+            privateManager.foreignActiveOwnership = true;
+          }
+          return ownership === 'current-host';
+        });
+      vi.spyOn(processManager, 'prepareForHealthyExistingServer').mockResolvedValue(undefined);
+      vi.spyOn(
+        server as unknown as { readActiveAgentCount: () => Promise<number> },
+        'readActiveAgentCount'
+      ).mockResolvedValue(2);
+      await expect(server.start()).resolves.toBe('http://127.0.0.1:49374');
+      const info = await server.readServerInfo();
+      expect(registration).toHaveBeenCalledOnce();
+      expect(recovery).toHaveBeenCalledOnce();
+      expect(info.ownership).toBe(ownership);
+      expect(info.activeAgentCount).toBe(2);
+      expect(server.isAttachOnly).toBe(false);
+      expect(children).toHaveLength(0);
+      await server.disconnect();
+    }
+  );
+
+  it('keeps an unregistered shared service external without claiming it', async () => {
+    const server = new OpenCodeServer('auto', true);
+    const { api, children } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.mocked(api.readInstalledCliVersion).mockResolvedValue('2.0.20');
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.20' });
+    vi.spyOn(processManager, 'discoverSharedServer').mockResolvedValue(true);
+    vi.spyOn(processManager, 'refreshDiscoveredServerRegistration').mockResolvedValue(false);
+    const recovery = vi.spyOn(processManager, 'recoverManagedServerOwnership');
+    const prepare = vi.spyOn(processManager, 'prepareForHealthyExistingServer');
+    await server.start();
+    expect(server.isAttachOnly).toBe(true);
+    expect(recovery).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(children).toHaveLength(0);
+    await server.disconnect();
+  });
+
+  it('waits for ownership preparation before reporting diagnostics, without blocking startup', async () => {
+    const server = new OpenCodeServer('auto', true);
+    const { api } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.20' });
+    const preparation = deferred<void>();
+    vi.spyOn(processManager, 'prepareForHealthyExistingServer').mockImplementation(
+      () => preparation.promise
+    );
+    await expect(server.start()).resolves.toBe(server.url);
+    let reported = false;
+    const info = server.readServerInfo().then((value) => {
+      reported = true;
+      return value;
+    });
+    await flushMicrotasks();
+    expect(reported).toBe(false);
+    preparation.resolve();
+    await info;
+    expect(reported).toBe(true);
+    await server.disconnect();
+  });
+
   it('waits for inherited ownership preparation before an explicit restart', async () => {
     const server = new OpenCodeServer('auto', true);
     const { api } = configureManagedStartup(server);

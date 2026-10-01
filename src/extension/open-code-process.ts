@@ -390,21 +390,20 @@ async function readJsonFile<T>(
   }
 }
 
+function getManagedServerOwnershipDirectory() {
+  const testDirectory = getVarroTestStateDirectory('servers');
+  if (testDirectory) return testDirectory;
+  return process.platform === 'win32'
+    ? join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Varro', 'servers')
+    : process.platform === 'darwin'
+      ? join(homedir(), 'Library', 'Application Support', 'Varro', 'servers')
+      : join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'varro', 'servers');
+}
+
 function getManagedServerOwnershipLeasePath(port: number) {
   const name = `varro-opencode-server-${port}.json`;
-  const testDirectory = getVarroTestStateDirectory('servers');
-  if (testDirectory) return join(testDirectory, name);
-  const directory =
-    process.platform === 'win32'
-      ? join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Varro', 'servers')
-      : process.platform === 'darwin'
-        ? join(homedir(), 'Library', 'Application Support', 'Varro', 'servers')
-        : join(
-            process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
-            'varro',
-            'servers'
-          );
-  const path = join(directory, name);
+  const path = join(getManagedServerOwnershipDirectory(), name);
+  if (getVarroTestStateDirectory('servers')) return path;
   // Keep coordinating at an existing legacy lease until that server is retired.
   // Moving a live lease would split ownership from windows running older builds.
   const legacyPath = join(tmpdir(), name);
@@ -600,7 +599,7 @@ export class OpenCodeProcess {
   private restartOwnershipClaim: ManagedServerOwnershipClaimHandle | null = null;
   private foreignActiveOwnership = false;
   private readonly hostOwner = randomBytes(16).toString('hex');
-  private readonly ownershipLeasePath: string;
+  private ownershipLeasePath: string;
   private serverPassword: string | undefined;
   private serverUsername: string | undefined;
   private credentialUrl: string | undefined;
@@ -730,7 +729,9 @@ export class OpenCodeProcess {
       this.credentialUrl = targetUrl;
     }
   }
-  private readonly ownershipMarkerPath: string;
+  private get ownershipMarkerPath(): string {
+    return `${this.ownershipLeasePath}.managed`;
+  }
 
   constructor(
     port: OpenCodePortSetting,
@@ -752,7 +753,6 @@ export class OpenCodeProcess {
     this.checkOwnershipFiles = ownershipLeasePath === undefined;
     this.ownershipLeasePath =
       ownershipLeasePath ?? getManagedServerOwnershipLeasePath(port === 'auto' ? 4096 : port);
-    this.ownershipMarkerPath = `${this.ownershipLeasePath}.managed`;
     try {
       const rawLease = readFileSync(this.ownershipLeasePath, 'utf-8');
       try {
@@ -885,6 +885,65 @@ export class OpenCodeProcess {
       this.credentialUrl = this.url;
     }
     return true;
+  }
+
+  /** Discovery may find a server registered under another build's fixed-port key. */
+  async refreshDiscoveredServerRegistration(): Promise<boolean> {
+    const port = this._port;
+    if (await this.refreshStartupRegistration()) return true;
+    this._port = port;
+    const directories = new Set([dirname(this.ownershipLeasePath)]);
+    if (this.checkOwnershipFiles) {
+      directories.add(getManagedServerOwnershipDirectory());
+      if (!getVarroTestStateDirectory('servers')) directories.add(tmpdir());
+    }
+    const candidates = new Set<string>();
+    for (const directory of directories) {
+      let entries: Dirent[];
+      try {
+        entries = await readdir(directory, { withFileTypes: true });
+      } catch (error) {
+        if (isMissingPathError(error)) continue;
+        throw error;
+      }
+      for (const entry of entries) {
+        if (!/^varro-opencode-server-\d+\.json(?:\.managed)?$/.test(entry.name)) continue;
+        const path = join(directory, entry.name);
+        const leasePath = path.endsWith('.managed') ? path.slice(0, -'.managed'.length) : path;
+        if (leasePath === this.ownershipLeasePath) continue;
+        const record = await readJsonFile(path, (value) =>
+          path.endsWith('.managed')
+            ? parseInjectedConfigOwner(value)
+            : parseManagedServerOwnershipLease(value)
+        );
+        if (!record || record.port !== port || !record.executable || !record.birthIdentity)
+          continue;
+        await this.validateOwnershipRecord(path);
+        const identity: ManagedServerOwnershipLease = {
+          version: 1,
+          pid: record.pid,
+          port,
+          executable: record.executable,
+          birthIdentity: record.birthIdentity,
+          owner: record.owner,
+          host: 'discovery-verification',
+          state: 'relinquished',
+          createdAt: record.createdAt,
+        };
+        if (await this.matchesOwnershipLease(identity)) candidates.add(leasePath);
+      }
+    }
+    if (candidates.size > 1)
+      throw new Error(
+        'Conflicting Varro registrations identify this OpenCode server; the records were left untouched'
+      );
+    const path = candidates.values().next().value;
+    if (!path) return false;
+    // Use the original lease/marker/claim path. Never copy a live registration
+    // into the automatic key and create a second ownership authority.
+    this.ownershipLeasePath = path;
+    this.clearLocalOwnership();
+    return this.refreshStartupRegistration();
   }
 
   async verifyManagedServerConnection(reconnect = false) {

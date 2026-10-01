@@ -23,6 +23,16 @@ coordination point for that process. It is not moved while older windows may
 still use it. Once that lease is retired, newly constructed managers select the
 per-user directory.
 
+After OpenCode shared-service discovery, Varro rechecks ownership records before
+classifying the endpoint as external. A matching lease or marker under another
+configured-port key is verified against the listening PID, executable, and process
+start identity. Varro keeps using that record's original lease/marker/claim path;
+it does not copy a live registration into the automatic key. A live owning editor
+remains the owner, while other editors report the server as managed by Varro.
+Conflicting matching registrations block recovery rather than creating another
+ownership authority. About/diagnostics wait for the pending ownership preparation
+so they do not show a transient unmanaged result.
+
 ## Editor distributions and test isolation
 
 VS Code, VS Code Nightly/Insiders, VSCodium, and Varro OpenJet coordinate through
