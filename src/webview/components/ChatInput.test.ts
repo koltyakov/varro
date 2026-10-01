@@ -11539,6 +11539,76 @@ describe('ChatInput', () => {
     }
   );
 
+  it.each(['model', 'reasoning'] as const)(
+    'does not flash a switch warning while sent %s metadata is incomplete',
+    (missingMetadata) => {
+      const model = { providerID: 'openai', modelID: 'gpt-5.4', variant: 'high' };
+      setState('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-5.4': {
+              id: 'gpt-5.4',
+              name: 'GPT-5.4',
+              capabilities: { toolcall: true, reasoning: true },
+              cost: { input: 0, output: 0 },
+              variants: { low: {}, high: {} },
+            },
+          },
+        },
+      ]);
+      setState('activeSessionId', 'session-1');
+      setState('selectedModel', model);
+      const previousResponse = assistantMessageEntry({ input: 400, output: 100 });
+      setState('messages', [{ ...previousResponse, info: { ...previousResponse.info, ...model } }]);
+      cleanup = render(() => ChatInput(), container!);
+      const expectNoWarning = () =>
+        expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
+      expectNoWarning();
+
+      // Publish the optimistic send, then deliver canonical metadata and status separately.
+      const prompt: UserMessage = {
+        id: 'user-next',
+        sessionID: 'session-1',
+        role: 'user',
+        time: { created: 3_000 },
+        agent: 'build',
+        model,
+      };
+      upsertMessageInfo(prompt);
+      expectNoWarning();
+      setState('sessionStatus', 'session-1', { type: 'busy' });
+      expectNoWarning();
+      if (missingMetadata === 'model') {
+        upsertMessageInfo({
+          ...prompt,
+          model: { providerID: '', modelID: '' },
+        });
+        expectNoWarning();
+        upsertMessageInfo(prompt);
+        expectNoWarning();
+      }
+      const response: AssistantMessage = {
+        ...previousResponse.info,
+        ...model,
+        id: 'assistant-next',
+        parentID: prompt.id,
+        variant: missingMetadata === 'reasoning' ? undefined : model.variant,
+      };
+      upsertMessageInfo(response);
+      expectNoWarning();
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      expectNoWarning();
+      upsertMessageInfo({ ...response, variant: model.variant });
+      expectNoWarning();
+
+      setState('selectedModel', { ...model, variant: 'low' });
+      expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
+    }
+  );
+
   it('warns when the model or reasoning level changes after a session request', async () => {
     vi.useFakeTimers();
     setSessionUsageLimit('session-1', null);

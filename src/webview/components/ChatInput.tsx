@@ -152,7 +152,6 @@ import {
   reviewSession,
   updatePermissionModeForSession,
 } from '../hooks/useOpenCode';
-import { deriveSelectedModelFromMessages } from '../hooks/routing-state';
 import { normalizeModelVariant } from '../../shared/model-variant';
 import {
   editingMessage,
@@ -5495,11 +5494,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const sessionId = composerSessionId();
     if (!sessionId || state.messagesLoading || composerEditingMessage()) return null;
     const messages = messagesBySession().get(sessionId) || [];
-    const previous = isComposerBusy()
-      ? getActiveTurnSelection(messages, sessionId)?.model
-      : deriveSelectedModelFromMessages(messages);
+    // Status and message metadata arrive separately. Use the same parent-aware
+    // selection while idle and busy, and do not compare an unhydrated model route.
+    const previous = getActiveTurnSelection(messages, sessionId)?.model;
     const current = currentModel();
-    if (!previous || !current.providerID || !current.modelID) return null;
+    if (!previous?.providerID || !previous.modelID || !current.providerID || !current.modelID)
+      return null;
     const changed =
       previous.providerID !== current.providerID ||
       previous.modelID !== current.modelID ||
