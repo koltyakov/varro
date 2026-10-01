@@ -30,6 +30,20 @@ native composer follow-up. This test uses a local fixture provider and separate 
 runner compatibility without consuming provider credentials. It does not replace GPT-6 Luna Fast/Sol scenarios
 run through the OpenAI subscription. Use the OpenAI subscription for all AI test model calls.
 
+## Isolate editor state as well as the backend
+
+Use the existing launchers. They set `VARRO_TEST_STATE_ROOT` to a disposable profile
+directory, separating server claims and v2 annotation locks from production editors.
+They also isolate home, local app-data, state, and temporary directories used by
+older builds. Each independent test profile gets a separate root. Launch metadata
+records `varroTestStateRoot` for the AI launcher.
+
+A custom test host must supply an absolute `VARRO_TEST_STATE_ROOT` alongside
+`VARRO_TEST_SERVER_URL`; otherwise default state access fails closed. Do not copy,
+delete, or repair production lock files to unblock a test. Database isolation and
+verified endpoint checks are still required. See [server ownership](server-ownership.md#editor-distributions-and-test-isolation)
+for mixed-version limitations.
+
 ## Choose the input that exercises the behavior
 
 | Behavior | Input in the isolated VS Code host |

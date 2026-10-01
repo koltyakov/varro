@@ -4,17 +4,15 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, type UnknownRecord } from '../shared/type-utils';
+import { getVarroTestStateDirectory } from './varro-test-state';
 
 /** V2 cannot patch metadata or archive timestamps. These are Varro-owned annotations. */
 export class OpenCodeV2SessionState {
   private readonly operations = new Map<string, Promise<unknown>>();
 
   constructor(
-    readonly directory = join(
-      process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
-      'varro',
-      'opencode-v2'
-    )
+    readonly directory = getVarroTestStateDirectory('opencode-v2') ??
+      join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'varro', 'opencode-v2')
   ) {}
 
   async read(sessionID: string): Promise<UnknownRecord> {

@@ -2,6 +2,7 @@
 import { mkdir, mkdtemp, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import type * as FsPromises from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
@@ -57,8 +58,110 @@ describe('OpenCodeV2SessionState', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
     await rm(directory, { recursive: true, force: true });
+  });
+
+  it('does not contend with a normal editor lock when an AI fixture uses the same session ID', async () => {
+    vi.stubEnv('VARRO_TEST_STATE_ROOT', undefined);
+    vi.stubEnv('VARRO_TEST_SERVER_URL', undefined);
+    vi.stubEnv('XDG_STATE_HOME', join(directory, 'normal-editor'));
+    const normal = new OpenCodeV2SessionState();
+    const entered = deferred();
+    const resume = deferred();
+    const read = normal.read.bind(normal);
+    vi.spyOn(normal, 'read').mockImplementationOnce(async (id) => {
+      entered.resolve();
+      await resume.promise;
+      return read(id);
+    });
+    const pending = normal.update('ses_shared', { normalEditor: true });
+    try {
+      await entered.promise;
+      vi.stubEnv('VARRO_TEST_SERVER_URL', 'http://127.0.0.1:49999');
+      vi.stubEnv('VARRO_TEST_STATE_ROOT', join(directory, 'ai-profile'));
+      const fixture = new OpenCodeV2SessionState();
+      await fixture.update('ses_shared', { aiFixture: true });
+      expect(await fixture.read('ses_shared')).toEqual({ aiFixture: true, time: {} });
+      expect(existsSync(join(normal.directory, 'ses_shared.json.lock'))).toBe(true);
+      expect(fixture.directory).not.toBe(normal.directory);
+    } finally {
+      resume.resolve();
+      await pending;
+    }
+    expect(await normal.read('ses_shared')).toEqual({ normalEditor: true, time: {} });
+  });
+
+  it('serializes independent editor processes using the shared version-independent lock format', async () => {
+    const module = join(directory, 'session-store.mjs');
+    // Compile outside jsdom: esbuild requires the native Node Uint8Array realm.
+    const compilation = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+      import { build } from 'esbuild';
+      await build({ entryPoints: [process.argv[1]], outfile: process.argv[2],
+        bundle: true, platform: 'node', format: 'esm', logLevel: 'silent' });
+    `,
+        resolve('src/extension/opencode-v2-session-state.ts'),
+        module,
+      ],
+      {
+        encoding: 'utf8',
+        timeout: 10_000,
+      }
+    );
+    expect(compilation.status, compilation.stderr).toBe(0);
+    const editors = ['VSCode', 'VSCode-Nightly', 'VSCodium', 'Varro-OpenJet'];
+    const children = editors.map((editor) => {
+      const script = `
+        const { pathToFileURL } = await import('node:url');
+        const { OpenCodeV2SessionState } = await import(pathToFileURL(process.argv[1]).href);
+        const store = new OpenCodeV2SessionState(process.argv[2]);
+        for (let index = 0; index < 10; index++)
+          await store.update('ses_shared', { [process.argv[3] + index]: index });
+      `;
+      const child = spawn(
+        process.execPath,
+        ['--input-type=module', '-e', script, module, directory, editor],
+        {
+          stdio: ['ignore', 'ignore', 'pipe'],
+        }
+      );
+      let stderr = '';
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+      const exited = new Promise<void>((resolveExit, reject) => {
+        child.once('error', reject);
+        child.once('exit', (code) => {
+          if (code === 0) resolveExit();
+          else reject(new Error(`${editor} fixture exited with ${String(code)}: ${stderr}`));
+        });
+      });
+      return { child, exited };
+    });
+    try {
+      await Promise.all(children.map(({ exited }) => exited));
+      const expected = Object.fromEntries(
+        editors.flatMap((editor) =>
+          Array.from({ length: 10 }, (_, index) => [`${editor}${index}`, index])
+        )
+      );
+      expect(await new OpenCodeV2SessionState(directory).read('ses_shared')).toEqual({
+        ...expected,
+        time: {},
+      });
+      expect(existsSync(join(directory, 'ses_shared.json.lock'))).toBe(false);
+    } finally {
+      for (const { child } of children) {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      }
+      await Promise.allSettled(children.map(({ exited }) => exited));
+    }
   });
 
   it('finishes a queued deletion before reading state for a later update', async () => {

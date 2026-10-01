@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These transport tests deliberately model malformed HTTP values, stream readers, and module-boundary logging. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolve as resolvePath } from 'node:path';
 
 const { warnMock, updateEventStreamStateMock, emitEventMock } = vi.hoisted(() => ({
   warnMock: vi.fn(),
@@ -361,6 +362,9 @@ describe('v1 session compatibility', () => {
 });
 
 describe('AI test server isolation', () => {
+  beforeEach(() =>
+    vi.stubEnv('VARRO_TEST_STATE_ROOT', resolvePath('artifacts/ai-test-data/transport-state'))
+  );
   it('blocks metadata mutations, health checks, and event connections to an unverified server', async () => {
     vi.stubEnv('VARRO_TEST_SERVER_URL', 'http://127.0.0.1:49999');
     const fetchSpy = vi.spyOn(globalThis, 'fetch');

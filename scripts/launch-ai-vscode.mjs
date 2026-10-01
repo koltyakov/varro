@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { requireIsolatedTestServer, testServerOrigin } from './ai-test-isolation.mjs';
 import { startAiTestServer } from './ai-test-server.mjs';
 import { copyHostModelPreferences } from './ai-test-host-settings.mjs';
+import { isolateVarroTestState } from './varro-test-state.mjs';
 
 import {
   executeVscodeCommand,
@@ -119,6 +120,7 @@ environment.XDG_CACHE_HOME = path.join(profileRoot, 'cache');
 environment.XDG_CONFIG_HOME = managedServer?.configHome ?? path.join(profileRoot, 'config');
 environment.OPENCODE_DB = isolation?.sourceDatabase ?? path.join(profileRoot, 'opencode.db');
 environment.OPENCODE_PID = '';
+await isolateVarroTestState(environment, profileRoot);
 
 const vscodeArgs = [
   '--no-sandbox',
@@ -149,6 +151,13 @@ const launchArgs =
         path.resolve(executable, '../../..'),
         ...[
           'VARRO_TEST_SERVER_URL',
+          'VARRO_TEST_STATE_ROOT',
+          'HOME',
+          'USERPROFILE',
+          'LOCALAPPDATA',
+          'TMPDIR',
+          'TMP',
+          'TEMP',
           'XDG_DATA_HOME',
           'XDG_STATE_HOME',
           'XDG_CACHE_HOME',
@@ -236,6 +245,7 @@ const metadata = await writeVscodeLaunchMetadata(metadataPath, {
   sidebarWidth,
 });
 metadata.testServerUrl = testServerUrl;
+metadata.varroTestStateRoot = environment.VARRO_TEST_STATE_ROOT;
 metadata.isolation = isolation ?? { kind: 'read-only-replay' };
 if (managedServer) metadata.managedServerRoot = managedServer.root;
 await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 });

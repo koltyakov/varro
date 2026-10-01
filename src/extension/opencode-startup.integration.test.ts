@@ -67,6 +67,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
       vi.stubEnv('OPENCODE_DB', join(root, 'data/test.db'));
       vi.stubEnv('OPENCODE_TEST_HOME', join(root, 'home'));
       vi.stubEnv('VARRO_TEST_SERVER_URL', url);
+      vi.stubEnv('VARRO_TEST_STATE_ROOT', join(root, 'varro-test-state'));
       let command = binary;
       let discoveredCommand: string | undefined;
       if (mode === 'shadowed-discovery') {

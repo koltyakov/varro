@@ -1098,6 +1098,132 @@ describe('OpenCodeProcess server ownership leases', () => {
     }
   );
 
+  it.each([
+    ['candidate', 'present'],
+    ['candidate', 'removed'],
+    ['observed', 'present'],
+    ['observed', 'removed'],
+    ['owned', 'present'],
+    ['owned', 'removed'],
+  ])(
+    'forgets a retired %s lease with its file %s before shared-service attachment',
+    async (cache, record) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-retired-cache-'));
+      const path = join(root, 'lease.json');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: MOCK_LINUX_PID,
+        port: 50001,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+        owner: 'previous-server',
+        host: 'previous-window',
+        state: cache === 'owned' ? 'relinquished' : 'active',
+        createdAt: Date.now(),
+      };
+      await writeFile(path, JSON.stringify(lease));
+      mockLinuxLeaseProcess({ port: lease.port });
+      const manager = new OpenCodeProcess(
+        'auto',
+        true,
+        '',
+        false,
+        undefined,
+        path,
+        join(root, 'proc')
+      );
+      const kill = vi.spyOn(process, 'kill');
+      try {
+        await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
+        if (cache !== 'candidate') {
+          await expect(manager.recoverManagedServerOwnership()).resolves.toBe(cache === 'owned');
+          expect(manager.serverOwnership).toBe(cache === 'owned' ? 'current-host' : 'other-host');
+        }
+        const raw = await readFile(path, 'utf8');
+        if (record === 'removed') await rm(path);
+        mockLinuxLeaseProcess({ pid: MOCK_LINUX_PID + 1, port: 49374 });
+        await expect(manager.refreshStartupRegistration()).resolves.toBe(false);
+        expect(manager.serverOwnership).toBe('unmanaged');
+        expect(manager.hasOwnershipLeaseCandidate).toBe(false);
+        if (record === 'present') expect(await readFile(path, 'utf8')).toBe(raw);
+        else await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+        (
+          manager as unknown as { installedCliVersionCache: { value: string; checkedAt: number } }
+        ).installedCliVersionCache = {
+          value: '2.0.20',
+          checkedAt: Date.now(),
+        };
+        vi.mocked(Service.discover).mockResolvedValue({
+          url: 'http://127.0.0.1:49374',
+          auth: { type: 'basic', username: 'opencode', password: 'new-service-password' },
+        });
+        await expect(manager.discoverSharedServer()).resolves.toBe(true);
+        await expect(manager.verifyManagedServerConnection(true)).resolves.toBeUndefined();
+        expect(manager.serverOwnership).toBe('unmanaged');
+        expect(manager.serverAuthorization).toBe(
+          `Basic ${Buffer.from('opencode:new-service-password').toString('base64')}`
+        );
+        expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['healthy', 'uncertain', 'corrupt'])(
+    'retains cached evidence when a removed lease is %s',
+    async (state) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-live-cache-'));
+      const path = join(root, 'lease.json');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: MOCK_LINUX_PID,
+        port: 50001,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+        owner: 'live-server',
+        host: 'other-window',
+        state: 'active',
+        createdAt: Date.now(),
+      };
+      await writeFile(path, JSON.stringify(lease));
+      mockLinuxLeaseProcess({ port: lease.port });
+      const manager = new OpenCodeProcess(
+        'auto',
+        true,
+        '',
+        false,
+        undefined,
+        path,
+        join(root, 'proc')
+      );
+      try {
+        await manager.refreshStartupRegistration();
+        await manager.recoverManagedServerOwnership();
+        await rm(path);
+        if (state === 'healthy') {
+          await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
+          expect(manager.port).toBe(lease.port);
+          await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+        } else if (state === 'uncertain') {
+          mockLinuxLeaseProcess({ port: lease.port, birthIdentity: () => '' });
+          await expect(manager.refreshStartupRegistration()).rejects.toThrow(
+            'Cannot verify process start identity'
+          );
+        } else {
+          await writeFile(path, '{corrupt replacement');
+          await expect(manager.refreshStartupRegistration()).rejects.toThrow('left untouched');
+          expect(await readFile(path, 'utf8')).toBe('{corrupt replacement');
+        }
+        expect(manager.serverOwnership).toBe('other-host');
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it.each(['auto', 4096] as const)(
     'selects the next launch port after a legacy server exits with setting %s',
     async (port) => {
@@ -1313,6 +1439,34 @@ describe('OpenCodeProcess server ownership leases', () => {
     expect(path).toBe(join(directory, 'varro-opencode-server-49876.json'));
     await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
   });
+
+  it.each(['darwin', 'linux', 'win32'])(
+    'isolates AI claims from persistent and legacy editor records on %s',
+    async (platform) => {
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-test-claims-'));
+      const legacy = join(tmpdir(), 'varro-opencode-server-49879.json');
+      const raw = '{existing editor record must remain untouched}';
+      await writeFile(legacy, raw);
+      vi.stubEnv('VARRO_TEST_SERVER_URL', 'http://127.0.0.1:49879');
+      vi.stubEnv('VARRO_TEST_STATE_ROOT', root);
+      try {
+        const managers = ['VSCode', 'VSCode-Nightly', 'VSCodium', 'Varro-OpenJet'].map(
+          () => new OpenCodeProcess(49879, true)
+        );
+        const expected = join(root, 'servers', 'varro-opencode-server-49879.json');
+        for (const manager of managers)
+          expect((manager as unknown as { ownershipLeasePath: string }).ownershipLeasePath).toBe(
+            expected
+          );
+        await expect(managers[0]!.refreshStartupRegistration()).resolves.toBe(false);
+        expect(await readFile(legacy, 'utf8')).toBe(raw);
+      } finally {
+        await rm(legacy);
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('keeps an existing legacy lease as the coordination point', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });

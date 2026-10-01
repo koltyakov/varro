@@ -72,6 +72,7 @@ import {
 } from './process-inspection';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
 import { runWindowsCliUpdate } from './util/windows-cli-update';
+import { getVarroTestStateDirectory } from './varro-test-state';
 
 const CLI_OUTPUT_MAX_CHARS = 1024 * 1024;
 const CLI_OUTPUT_TRUNCATED_MARKER = '[earlier output truncated]\n';
@@ -391,6 +392,8 @@ async function readJsonFile<T>(
 
 function getManagedServerOwnershipLeasePath(port: number) {
   const name = `varro-opencode-server-${port}.json`;
+  const testDirectory = getVarroTestStateDirectory('servers');
+  if (testDirectory) return join(testDirectory, name);
   const directory =
     process.platform === 'win32'
       ? join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Varro', 'servers')
@@ -782,7 +785,7 @@ export class OpenCodeProcess {
 
   /** Keep the existing default lease/claim path for old windows and rollback. */
   async refreshStartupRegistration(): Promise<boolean> {
-    const lease = await this.readOwnershipLease();
+    let lease = await this.readOwnershipLease();
     if (!lease) {
       await this.validateOwnershipRecord(this.ownershipMarkerPath);
       const marker = await readJsonFile(this.ownershipMarkerPath, parseInjectedConfigOwner);
@@ -842,10 +845,14 @@ export class OpenCodeProcess {
       try {
         await access(this.ownershipLeasePath);
       } catch (error) {
-        if (isMissingPathError(error)) return false;
-        throw error;
+        if (!isMissingPathError(error)) throw error;
+        // Another host may have removed the registration after retirement. Keep
+        // cached evidence until its process is verified, not until file existence.
+        lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
+        if (!lease) return false;
       }
-      throw new Error('Cannot verify the existing OpenCode registration; it was left untouched');
+      if (!lease)
+        throw new Error('Cannot verify the existing OpenCode registration; it was left untouched');
     }
     this.registrationObserved = true;
     if (!(await this.matchesOwnershipLease(lease))) {
@@ -860,7 +867,7 @@ export class OpenCodeProcess {
           );
       }
       // Defer removal to coordinated recovery/publication. Never signal this PID.
-      this.ownershipLeaseCandidate = null;
+      this.clearLocalOwnership(lease.owner, lease.host);
       this._port = this.isAutomaticPort ? lease.port : this.originalPort;
       this.automaticPortSelected = false;
       return false;

@@ -23,6 +23,32 @@ coordination point for that process. It is not moved while older windows may
 still use it. Once that lease is retired, newly constructed managers select the
 per-user directory.
 
+## Editor distributions and test isolation
+
+VS Code, VS Code Nightly/Insiders, VSCodium, and Varro OpenJet coordinate through
+the same production paths for the same OS user and state directory. Editor names
+and Varro patch versions must not create separate ownership authorities for one
+server. Compatible builds retain the version-1 lease and existing legacy paths.
+
+AI and sandbox launchers instead supply an absolute `VARRO_TEST_STATE_ROOT` inside
+their disposable profile. Server records live in its `servers/` directory; v2
+annotations and session locks live in `opencode-v2/`. Test discovery never falls
+back to production or legacy temp records, even for the same port or session ID.
+A test endpoint without an isolated state root fails before default state access.
+This complements, rather than replaces, database isolation and endpoint checks.
+
+Launchers also isolate `HOME`, `USERPROFILE`, `LOCALAPPDATA`, `XDG_STATE_HOME`,
+`TMPDIR`, `TMP`, and `TEMP` so older builds see fixture-only paths. Independent
+AI profiles use independent roots.
+
+Compatible v2 annotation writers share the `<sessionID>.json.lock` directory.
+The owner marker contains a PID and random UUID, not an editor or version label.
+Cross-process locking was introduced in revision `06a9a611`, with package version
+`0.30.11`. Earlier writers ignored these locks. Update those builds before editing
+the same session's annotations concurrently; a newer client cannot stop an old
+binary from ignoring a lock. Do not delete live locks or split production state
+by editor to hide this limitation.
+
 ## Process identity and recovery
 
 A lease records the listening PID, executable, process start identity, a server
@@ -76,6 +102,11 @@ publication. Cancellation and failed startup release it. A live but unhealthy or
 unverifiable registered process blocks replacement. Corrupt or unreadable leases
 are retained and reported, not interpreted as absent. Process identity mismatch
 does not authorize signalling the replacement PID.
+
+Retirement also clears matching in-memory ownership, not just the startup lease
+candidate. Otherwise a previously observed server can reject requests to a newly
+discovered service at another port. Missing files do not prove retirement: cached
+identity is revalidated first. This check does not delete records or stop a process.
 
 After a registered process exits, automatic mode chooses a new random port rather
 than inheriting its old fixed port. Each new launch rechecks the installed CLI and
@@ -161,3 +192,10 @@ disconnect/automatic-mode rediscovery, and explicit restart using isolated datab
 It passes on macOS against released OpenCode 1.16.0, 1.18.33, 2.0.5, and 2.0.20.
 See `artifacts/opencode-adapters/verified.json` for the retained run logs. This is
 not native Windows/Linux, cross-user, rollback-editor, or live-session UI verification.
+
+State-isolation tests cover identical session IDs with a held normal-editor lock,
+four independent annotation writers, per-platform claim paths, and legacy Node
+home/temp resolution. A macOS source-level contention check also ran two writers
+from revision `06a9a611` alongside two current writers and preserved all 100 fields.
+Evidence is in `artifacts/ai-test-data/mixed-version-locks-brIMTg/result.json`.
+These checks do not establish native editor-distribution or Windows/Linux coverage.
