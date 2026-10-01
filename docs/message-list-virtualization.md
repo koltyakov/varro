@@ -48,9 +48,12 @@ the shared invariants below remain true.
   its shallower track observer. Mount and explicit layout measurements must instead align before
   paint, so history and wheel anchors never see integer prefixes paired with fractional row boxes.
   After applying corrections, reconcile the active bottom-follow target as well as width-resize
-  anchoring. Reduced-motion following must not oscillate between virtual ranges while those writes
-  settle. Cancel pending correction writes on disposal. Streamed entrance height updates also defer
-  observer-triggered writes. `scroll-resize-observer.spec.ts` and `scroll-streaming.spec.ts` check
+  and explicit view-change anchoring. Do not add a generic detached anchor that competes with
+  measurement or history compensation. Flush pending rounding before a scrolling key establishes
+  its painted destination. Reduced-motion following must not oscillate
+  between virtual ranges while those writes settle. Cancel pending correction writes on disposal.
+  Streamed entrance height updates also defer observer-triggered writes.
+  `scroll-resize-observer.spec.ts` and `scroll-streaming.spec.ts` check
   browser error events and bottom-follow, including reduced motion.
 - `start/end` define the mounted overscan range. `coreStart/coreEnd` define the rows near the painted
   viewport. Off-core overscan rows remain real message rows; lightweight mode may suppress expensive

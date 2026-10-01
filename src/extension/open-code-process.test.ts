@@ -2376,6 +2376,77 @@ describe('OpenCodeProcess server ownership leases', () => {
     }
   });
 
+  it.each([
+    { birth: '123456', failure: undefined },
+    { birth: '654321', failure: 'The managed OpenCode listener changed' },
+    { birth: undefined, failure: 'Cannot verify executable identity' },
+  ])(
+    'revalidates a Windows managed connection after an inspection failure: %j',
+    async ({ birth, failure }) => {
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'ownership-windows-inspection-'));
+      const path = join(root, 'lease.json');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: MOCK_WINDOWS_PID,
+        port: 4096,
+        executable: 'C:\\OpenCode\\opencode.exe',
+        birthIdentity: 'win32:123456',
+        owner: 'same-server',
+        host: 'old-host',
+        state: 'relinquished',
+        createdAt: Date.now(),
+      };
+      await writeFile(path, JSON.stringify(lease));
+      let inspections = 0;
+      spawnMock.mockImplementation((command: string) => {
+        const child = Object.assign(new EventEmitter(), {
+          stdout: new EventEmitter(),
+          stderr: new EventEmitter(),
+          kill: vi.fn(),
+        });
+        queueMicrotask(() => {
+          if (command === 'netstat.exe') {
+            child.stdout.emit(
+              'data',
+              Buffer.from(`TCP 127.0.0.1:4096 0.0.0.0:0 LISTENING ${lease.pid}`)
+            );
+            child.emit('close', 0);
+            return;
+          }
+          inspections += 1;
+          if (inspections > 1 && birth) {
+            child.stdout.emit(
+              'data',
+              Buffer.from(`VARRO_EXECUTABLE=${lease.executable}\nVARRO_BIRTH=${birth}`)
+            );
+            child.emit('close', 0);
+          } else {
+            child.stderr.emit('data', Buffer.from('CIM temporarily unavailable'));
+            child.emit('close', 1);
+          }
+        });
+        return child;
+      });
+      try {
+        const manager = new OpenCodeProcess(4096, true, '', false, undefined, path);
+        const verification = manager.verifyManagedServerConnection(true);
+        if (failure) await expect(verification).rejects.toThrow(failure);
+        else await expect(verification).resolves.toBeUndefined();
+        expect(inspections).toBe(2);
+        expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(lease);
+        expect(manager.hasOwnershipLeaseCandidate).toBe(true);
+        expect(spawnMock.mock.calls.map(([command]) => command)).toEqual([
+          'netstat.exe',
+          'powershell.exe',
+          'powershell.exe',
+        ]);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('keeps adopted ownership when its listener identity is still alive', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));

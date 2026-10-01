@@ -1709,7 +1709,12 @@ export function MessageList() {
   function flushRowHeightCorrections() {
     rowHeightCorrectionScheduled = false;
     rowHeightCorrectionFrame = 0;
-    if (disposed) return;
+    if (disposed || pendingRowHeightCorrections.size === 0) return;
+    // Rounding is a layout mutation too. Preserve an explicit view-change or
+    // width owner without competing with ordinary measurement compensation.
+    const detachedAnchor = widthResizeCanOwnScroll()
+      ? (pendingThinkingLayoutAnchor ?? widthResizeAnchor)
+      : null;
     let changed = false;
     for (const [element, correction] of pendingRowHeightCorrections) {
       if (!element.isConnected) continue;
@@ -1725,8 +1730,8 @@ export function MessageList() {
       changed = true;
     }
     pendingRowHeightCorrections.clear();
-    if (changed && widthResizeActive && widthResizeAnchor && widthResizeCanOwnScroll()) {
-      restoreVisibleScrollAnchor(widthResizeAnchor);
+    if (changed && detachedAnchor && widthResizeCanOwnScroll()) {
+      restoreVisibleScrollAnchor(detachedAnchor);
     }
     // A deferred correction can finish a virtual range change after the track observer followed.
     // Reconcile its bottom target before the next paint, including immediate reduced-motion follow.
@@ -6046,14 +6051,15 @@ export function MessageList() {
     return false;
   }
 
-  function handleKeyDown(event: KeyboardEvent) {
-    if (event.defaultPrevented) return;
+  function isTranscriptScrollKey(event: KeyboardEvent) {
+    if (event.defaultPrevented) return false;
     const target = event.target;
-    if (!containerRef || !(target instanceof Element) || !containerRef.contains(target)) return;
+    if (!containerRef || !(target instanceof Element) || !containerRef.contains(target))
+      return false;
     if (
       target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
     ) {
-      return;
+      return false;
     }
     // Space activates interactive controls instead of scrolling the list; arming scroll
     // ownership for it would misattribute later programmatic scrolls to user input.
@@ -6062,7 +6068,7 @@ export function MessageList() {
       target !== containerRef &&
       target.closest('button, a, label, summary, [role="button"], [role="tab"], [role="option"]')
     ) {
-      return;
+      return false;
     }
     if (
       event.key !== 'ArrowUp' &&
@@ -6073,8 +6079,25 @@ export function MessageList() {
       event.key !== 'End' &&
       event.key !== ' '
     ) {
-      return;
+      return false;
     }
+    return true;
+  }
+
+  function handleKeyDownCapture(event: KeyboardEvent) {
+    if (!isTranscriptScrollKey(event)) return;
+    if (window.innerWidth !== lastHostViewportWidth || widthResizeActive) {
+      // Host reflow can precede its resize notification. Align mounted rows before
+      // the key establishes a destination, not in a later frame that reverses it.
+      measureVisibleItems();
+    }
+    if (rowHeightCorrectionFrame) cancelAnimationFrame(rowHeightCorrectionFrame);
+    flushRowHeightCorrections();
+  }
+
+  function handleKeyDown(event: KeyboardEvent) {
+    if (!isTranscriptScrollKey(event) || !containerRef) return;
+    const target = event.target;
     pendingExpansionScrollAnchor = null;
     historyAnchorSettleOwner = null;
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
@@ -6699,6 +6722,7 @@ export function MessageList() {
     containerRef.addEventListener('pointerdown', handlePointerDown);
     document.addEventListener('click', handleExternalLayoutClickCapture, true);
     document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDownCapture, true);
     document.addEventListener('pointerup', releasePointerScrollOwnership);
     document.addEventListener('pointercancel', releasePointerScrollOwnership);
     lastContainerClientHeight = containerRef.clientHeight;
@@ -6875,6 +6899,7 @@ export function MessageList() {
       containerRef?.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('click', handleExternalLayoutClickCapture, true);
       document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keydown', handleKeyDownCapture, true);
       document.removeEventListener('pointerup', releasePointerScrollOwnership);
       document.removeEventListener('pointercancel', releasePointerScrollOwnership);
       window.removeEventListener('resize', handleHostViewportResize);

@@ -515,15 +515,27 @@ test('keeps permission actions on one responsive row', async ({ page }) => {
       };
     });
 
-    expect(layout, `Viewport width: ${width}`).toEqual({
+    expect(layout, `Viewport width: ${width}`).toMatchObject({
       oneRow: true,
       contained: true,
       equalButtonWidths: true,
       alwaysLabelLeftAligned: true,
       buttonCount: 3,
-      alwaysLabelFits: width > 300,
       chevronHasSpace: true,
       usesEllipsis: true,
     });
+    // Font metrics vary by platform. A narrow label may fit without needing ellipsis.
+    if (width > 300) expect(layout.alwaysLabelFits, `Viewport width: ${width}`).toBe(true);
   }
+
+  const narrowLabel = page.locator('.permission-always-label .permission-action-label-short');
+  const overflow = await narrowLabel.evaluate((label) => {
+    label.textContent = 'Always allow this permission';
+    return {
+      truncated: label.scrollWidth > label.clientWidth,
+      overflow: getComputedStyle(label).overflow,
+      textOverflow: getComputedStyle(label).textOverflow,
+    };
+  });
+  expect(overflow).toEqual({ truncated: true, overflow: 'hidden', textOverflow: 'ellipsis' });
 });

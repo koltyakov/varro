@@ -11,10 +11,16 @@ for (const history of [false, true]) {
       );
       const mixed = page.locator('[data-msg-id="mixed-user"]');
       await expect(mixed.locator('.user-message-card')).toHaveText('Test message');
-      await expect(mixed.locator('.assistant-activity-summary')).toContainText('3 actions');
+      await expect(mixed.locator('.assistant-activity-summary-text')).toHaveAttribute(
+        'aria-label',
+        'Explored: 3 actions'
+      );
       const owner = page.locator('[data-msg-id="automatic-0"]');
       const summary = owner.locator('.assistant-activity-summary');
-      await expect(summary).toContainText('7 actions');
+      await expect(summary.locator('.assistant-activity-summary-text')).toHaveAttribute(
+        'aria-label',
+        'Explored: 2 commands, 7 actions'
+      );
       await expect(page.locator('[data-msg-id^="automatic-"] .user-message-card')).toHaveCount(0);
       await expect(page.locator('.interactive-list')).not.toContainText('Private file contents');
       await expect(page.locator('.interactive-list')).not.toContainText(

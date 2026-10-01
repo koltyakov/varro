@@ -22,6 +22,7 @@ interface WindowsManagedListenerInspection {
 const PROCESS_COMMAND_TIMEOUT_MS = 2000;
 const PROCESS_COMMAND_KILL_GRACE_MS = 1000;
 const WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS = 10_000;
+const WINDOWS_PROCESS_INSPECTION_ATTEMPTS = 2;
 export const PROCESS_STOP_TIMEOUT_MS = 5000;
 const PROCESS_COMMAND_MAX_OUTPUT_CHARS = 1_000_000;
 
@@ -395,6 +396,16 @@ function isCommandUnavailable(result: CommandResult) {
 }
 
 async function readWindowsProcessDetails(pid: number, includeAccount = false) {
+  // A transient CIM/PowerShell failure must not immediately interrupt a live
+  // connection. Retry a fresh snapshot, never the last successful identity.
+  for (let attempt = 0; attempt < WINDOWS_PROCESS_INSPECTION_ATTEMPTS; attempt += 1) {
+    const details = await readWindowsProcessDetailsOnce(pid, includeAccount);
+    if (details) return details;
+  }
+  return null;
+}
+
+async function readWindowsProcessDetailsOnce(pid: number, includeAccount: boolean) {
   const script = [
     "$ErrorActionPreference = 'Stop'",
     `$listener = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
@@ -425,14 +436,28 @@ async function readWindowsProcessDetails(pid: number, includeAccount = false) {
     ['-NoProfile', '-NonInteractive', '-Command', script],
     WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
   );
-  if (result.code !== 0) return null;
+  if (result.code !== 0) {
+    const failure =
+      result.stderr.trim() ||
+      (result.code === null
+        ? `PowerShell timed out after ${WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS}ms or failed to launch`
+        : `exit code ${String(result.code)}`);
+    logger.warn(
+      `Windows process ${includeAccount ? 'account' : 'executable'} inspection failed for PID ${pid}: ${failure}`
+    );
+    return null;
+  }
   const values = new Map<string, string>();
   for (const line of result.stdout.split(/\r?\n/)) {
     const separator = line.indexOf('=');
     if (separator > 0) values.set(line.slice(0, separator), line.slice(separator + 1).trim());
   }
   const birth = values.get('VARRO_BIRTH');
-  if (!birth || !/^\d+$/.test(birth)) return null;
+  const executable = values.get('VARRO_EXECUTABLE') ?? '';
+  if (!birth || !/^\d+$/.test(birth) || (!includeAccount && !executable)) {
+    logger.warn(`Windows process identity inspection returned incomplete output for PID ${pid}`);
+    return null;
+  }
   const listenerSid = values.get('VARRO_LISTENER_SID');
   const hostSid = values.get('VARRO_HOST_SID');
   if (
@@ -441,10 +466,12 @@ async function readWindowsProcessDetails(pid: number, includeAccount = false) {
       !hostSid ||
       !/^S-\d+(?:-\d+)+$/.test(listenerSid) ||
       !/^S-\d+(?:-\d+)+$/.test(hostSid))
-  )
+  ) {
+    logger.warn(`Windows process account inspection returned incomplete output for PID ${pid}`);
     return null;
+  }
   return {
-    executable: values.get('VARRO_EXECUTABLE') ?? '',
+    executable,
     birthIdentity: `win32:${birth}`,
     listenerSid,
     hostSid,

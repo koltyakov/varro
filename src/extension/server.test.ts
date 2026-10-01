@@ -636,6 +636,12 @@ describe('automatic-port migration and admission', () => {
     const start = expect(server.start()).rejects.toThrow('cancelled');
     await flushMicrotasks();
     expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledOnce();
+    // Modal messages provide their own Cancel button when no close action is supplied.
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('The listening process belongs to another OS user.'),
+      { modal: true },
+      'Connect anyway'
+    );
     const deletion = expect(server.request('DELETE', '/session/foreign')).rejects.toThrow(
       'cancelled'
     );

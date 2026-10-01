@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 vi.mock('./logger', () => ({ logger: { warn: vi.fn() } }));
+import { logger } from './logger';
 import {
   findListeningPids,
   inspectLocalServerAccount,
@@ -190,9 +191,123 @@ describe('Windows listener and process inspection', () => {
     );
   });
 
+  it('retries a failed executable inspection with a fresh PID-reuse-checked snapshot', async () => {
+    let attempts = 0;
+    commandOutput(() =>
+      ++attempts === 1
+        ? { stdout: '', code: 1 }
+        : { stdout: 'VARRO_EXECUTABLE=C:\\OpenCode\\opencode.exe\nVARRO_BIRTH=123456', code: 0 }
+    );
+    await expect(readWindowsProcessIdentity(listenerPid)).resolves.toEqual({
+      executable: 'C:\\OpenCode\\opencode.exe',
+      birthIdentity: 'win32:123456',
+    });
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    for (const [, args] of spawnMock.mock.calls) {
+      expect(args.at(-1)).toContain('$verified.CreationDate.ToUniversalTime().Ticks -ne $birth');
+    }
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('exit code 1'));
+  });
+
+  it('retries missing executable output without accepting birth identity alone', async () => {
+    let attempts = 0;
+    commandOutput(() => ({
+      stdout:
+        ++attempts === 1
+          ? 'VARRO_BIRTH=123456'
+          : 'VARRO_EXECUTABLE=C:\\OpenCode\\opencode.exe\nVARRO_BIRTH=123456',
+      code: 0,
+    }));
+    await expect(readWindowsProcessIdentity(listenerPid)).resolves.toEqual({
+      executable: 'C:\\OpenCode\\opencode.exe',
+      birthIdentity: 'win32:123456',
+    });
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a timed-out inspection without trusting its partial output', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const children: Array<EventEmitter & { stdout: EventEmitter; kill: ReturnType<typeof vi.fn> }> =
+      [];
+    spawnMock.mockImplementation(() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+        exitCode: null,
+      });
+      children.push(child);
+      return child;
+    });
+    try {
+      const inspection = readWindowsProcessIdentity(listenerPid);
+      children[0]!.stdout.emit(
+        'data',
+        Buffer.from('VARRO_EXECUTABLE=C:\\Old\\opencode.exe\nVARRO_BIRTH=123456')
+      );
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(children).toHaveLength(2);
+      expect(children[0]!.kill).toHaveBeenCalled();
+      children[1]!.stdout.emit(
+        'data',
+        Buffer.from('VARRO_EXECUTABLE=C:\\OpenCode\\opencode.exe\nVARRO_BIRTH=654321')
+      );
+      children[1]!.emit('close', 0);
+      await expect(inspection).resolves.toEqual({
+        executable: 'C:\\OpenCode\\opencode.exe',
+        birthIdentity: 'win32:654321',
+      });
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('timed out after 10000ms'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a transient account inspection failure before reporting unknown ownership', async () => {
+    let attempts = 0;
+    commandOutput((command) => {
+      if (command === 'netstat.exe')
+        return { stdout: `TCP 127.0.0.1:4096 0.0.0.0:0 LISTENING ${listenerPid}`, code: 0 };
+      return ++attempts === 1
+        ? { stdout: '', code: 1 }
+        : {
+            stdout: 'VARRO_BIRTH=123\nVARRO_LISTENER_SID=S-1-5-21-1\nVARRO_HOST_SID=S-1-5-21-1',
+            code: 0,
+          };
+    });
+    await expect(inspectLocalServerAccount(4096)).resolves.toEqual({
+      kind: 'same-user',
+      identity: `${listenerPid}:win32:123:S-1-5-21-1`,
+    });
+    expect(spawnMock.mock.calls.map(([command]) => command)).toEqual([
+      'netstat.exe',
+      'powershell.exe',
+      'powershell.exe',
+    ]);
+  });
+
+  it('does not reuse a successful identity when subsequent inspections fail', async () => {
+    let attempts = 0;
+    commandOutput(() =>
+      ++attempts === 1
+        ? { stdout: 'VARRO_EXECUTABLE=C:\\OpenCode\\opencode.exe\nVARRO_BIRTH=123456', code: 0 }
+        : { stdout: '', code: 1 }
+    );
+    await expect(readWindowsProcessIdentity(listenerPid)).resolves.toMatchObject({
+      birthIdentity: 'win32:123456',
+    });
+    await expect(readWindowsProcessIdentity(listenerPid)).resolves.toEqual({
+      executable: '',
+      birthIdentity: '',
+    });
+    expect(spawnMock).toHaveBeenCalledTimes(3);
+  });
+
   it.each([
     { stdout: 'VARRO_EXECUTABLE=C:\\OpenCode\\opencode.exe\nVARRO_BIRTH=123', code: 1 },
     { stdout: 'VARRO_EXECUTABLE=C:\\OpenCode\\opencode.exe', code: 0 },
+    { stdout: 'VARRO_BIRTH=123456', code: 0 },
     { stdout: 'VARRO_BIRTH=invalid', code: 0 },
   ])('does not accept a failed or incomplete process inspection: %j', async (result) => {
     commandOutput((command) =>
@@ -204,6 +319,7 @@ describe('Windows listener and process inspection', () => {
       executable: '',
       birthIdentity: '',
     });
+    expect(spawnMock).toHaveBeenCalledTimes(2);
     await expect(inspectLocalServerAccount(4096)).resolves.toEqual({ kind: 'unknown' });
   });
 

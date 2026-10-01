@@ -146,6 +146,27 @@ function differsByMajorOrMinor(left: string, right: string) {
   return leftMajor !== rightMajor || leftMinor !== rightMinor;
 }
 
+function formatServerUptime(startedAt: number): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - startedAt) / 60_000));
+  const units = [
+    { singular: 'week', plural: 'weeks', minutes: 7 * 24 * 60 },
+    { singular: 'day', plural: 'days', minutes: 24 * 60 },
+    { singular: 'hr.', plural: 'hrs.', minutes: 60 },
+    { singular: 'min.', plural: 'min.', minutes: 1 },
+  ];
+  const index = units.findIndex((unit) => minutes >= unit.minutes);
+  if (index < 0) return 'less than a min.';
+  let remaining = minutes;
+  return units
+    .slice(index, index + 2)
+    .flatMap((unit) => {
+      const value = Math.floor(remaining / unit.minutes);
+      remaining %= unit.minutes;
+      return value > 0 ? [`${value} ${value === 1 ? unit.singular : unit.plural}`] : [];
+    })
+    .join(' ');
+}
+
 interface WebviewEndpoint {
   bridge: SidebarProviderBridge;
   contextFilesState: SidebarProviderContextFiles;
@@ -205,6 +226,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private openCodeUpdateAvailable = false;
   private openCodeCliVersion: string | null = null;
   private openCodeServerVersion: string | null = null;
+  private openCodeServerStartedAt: number | null = null;
+  private openCodeUptimeTimer: ReturnType<typeof setInterval> | null = null;
   private readonly extensionVersion: string;
   private activeChatModel: ChatModelSelection | null = null;
   private readonly fileSearch: FileSearchService;
@@ -2916,6 +2939,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   async dispose() {
     this.providerLimitService.dispose();
     this.disposing = true;
+    if (this.openCodeUptimeTimer) {
+      clearInterval(this.openCodeUptimeTimer);
+      this.openCodeUptimeTimer = null;
+    }
     this.sessionReconcileRerunRequested = false;
     if (this.sessionReconcileTimer) {
       clearInterval(this.sessionReconcileTimer);
@@ -3378,6 +3405,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.openCodeUpdateAvailable = false;
       this.openCodeCliVersion = null;
       this.openCodeServerVersion = null;
+      this.openCodeServerStartedAt = null;
       return;
     }
     if (this.openCodeVersionCheck !== 'idle') return;
@@ -3397,6 +3425,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.openCodeServerVersion = info.health.version
           ? extractVersion(info.health.version)
           : null;
+        const startedAt = info.connections?.startedAt;
+        this.openCodeServerStartedAt =
+          startedAt != null && Number.isFinite(startedAt) && startedAt > 0 ? startedAt : null;
         const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion(
           undefined,
           this.openCodeCliVersion?.startsWith('2.') ? 2 : 1
@@ -3436,6 +3467,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       `OpenCode Server: ${this.openCodeServerVersion ?? 'unknown'}`,
       `Server port: ${serverUrl.port || (serverUrl.protocol === 'https:' ? '443' : '80')}`,
     ];
+    if (this.openCodeServerStartedAt !== null) {
+      versionLines.push(`Server uptime: ${formatServerUptime(this.openCodeServerStartedAt)}`);
+      if (!this.openCodeUptimeTimer && !this.disposing) {
+        this.openCodeUptimeTimer = setInterval(() => this.renderOpenCodeStatusBarItem(), 60_000);
+      }
+    } else if (this.openCodeUptimeTimer) {
+      clearInterval(this.openCodeUptimeTimer);
+      this.openCodeUptimeTimer = null;
+    }
     if (cliVersion && compareVersions(cliVersion, maximumTestedOpenCodeVersion) < 0) {
       versionLines.push(
         '',

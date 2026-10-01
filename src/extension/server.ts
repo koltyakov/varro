@@ -287,8 +287,7 @@ export class OpenCodeServer extends EventEmitter {
           !this.registeredEndpoint &&
           this._status.state !== 'running'
             ? ['Start my server on another port', 'Connect anyway']
-            : ['Connect anyway']),
-          'Cancel'
+            : ['Connect anyway'])
         );
         if (answer === 'Start my server on another port')
           throw new SeparateAutomaticServerRequested();
