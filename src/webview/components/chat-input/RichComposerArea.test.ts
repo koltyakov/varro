@@ -57,6 +57,7 @@ function renderComposer(props: {
   cursorOffset: number;
   chips: RichComposerChip[];
   onInput?: (text: string, cursorOffset: number) => void;
+  onKeyDown?: (e: KeyboardEvent) => void;
   onPaste?: (e: ClipboardEvent) => void;
   onPasteInsertion?: Parameters<typeof RichComposerArea>[0]['onPasteInsertion'];
   onChipClick?: (chipId: string) => void;
@@ -68,15 +69,21 @@ function renderComposer(props: {
       RichComposerArea({
         editorRef: () => {},
         placeholder: 'Compose',
-        value: props.value,
-        cursorOffset: props.cursorOffset,
-        chips: props.chips,
+        get value() {
+          return props.value;
+        },
+        get cursorOffset() {
+          return props.cursorOffset;
+        },
+        get chips() {
+          return props.chips;
+        },
         isFocused: true,
         showCompletionMenu: false,
         completionItems: [],
         completionSelectedIndex: 0,
         onInput: props.onInput || (() => {}),
-        onKeyDown: () => {},
+        onKeyDown: props.onKeyDown || (() => {}),
         onPaste: props.onPaste || (() => {}),
         onPasteInsertion: props.onPasteInsertion,
         onFocus: () => {},
@@ -94,6 +101,149 @@ function renderComposer(props: {
 }
 
 describe('RichComposerArea', () => {
+  it('preserves composing DOM and selection until the committed input is flushed', async () => {
+    const [value, setValue] = createSignal('caf');
+    const [cursor, setCursor] = createSignal(3);
+    const [chips, setChips] = createSignal<RichComposerChip[]>([]);
+    const onInput = vi.fn((text: string, offset: number) => {
+      setValue(text);
+      setCursor(offset);
+    });
+    renderComposer({
+      get value() {
+        return value();
+      },
+      get cursorOffset() {
+        return cursor();
+      },
+      get chips() {
+        return chips();
+      },
+      onInput,
+    });
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    const textNode = editor.firstChild!;
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    textNode.textContent = 'café';
+    setCollapsedSelection(textNode, 4);
+    editor.dispatchEvent(
+      new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertCompositionText',
+        isComposing: true,
+      })
+    );
+    batch(() => {
+      setCursor(0);
+      setChips([{ id: 'file', type: 'mention-file', label: 'file.ts', textMarker: '@file.ts' }]);
+    });
+    await flushAsyncWork();
+
+    expect(onInput).not.toHaveBeenCalled();
+    expect(editor.firstChild).toBe(textNode);
+    expect(editor.textContent).toBe('café');
+    expect(window.getSelection()?.focusNode).toBe(textNode);
+    expect(window.getSelection()?.focusOffset).toBe(4);
+
+    editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'é' }));
+    await flushAsyncWork();
+    expect(onInput).toHaveBeenCalledWith('café', 4);
+    expect(value()).toBe('café');
+    expect(editor.textContent).toBe('café');
+
+    setValue('controlled replacement');
+    await flushAsyncWork();
+    expect(editor.textContent).toBe('controlled replacement');
+  });
+
+  it('recovers on non-composing input when compositionend was dropped', () => {
+    const onInput = vi.fn();
+    renderComposer({ value: '', cursorOffset: 0, chips: [], onInput });
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    editor.textContent = 'é';
+    setCollapsedSelection(editor.firstChild!, 1);
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: false }));
+    expect(onInput).toHaveBeenLastCalledWith('é', 1);
+
+    editor.textContent = 'éx';
+    setCollapsedSelection(editor.firstChild!, 2);
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    expect(onInput).toHaveBeenLastCalledWith('éx', 2);
+  });
+
+  it('flushes a dropped composition before forwarding the next non-composing keydown', () => {
+    const onInput = vi.fn();
+    const onKeyDown = vi.fn(() => onInput.mock.calls.at(-1));
+    renderComposer({ value: '', cursorOffset: 0, chips: [], onInput, onKeyDown });
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    editor.textContent = 'é';
+    setCollapsedSelection(editor.firstChild!, 1);
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(onKeyDown).toHaveBeenCalledOnce();
+    expect(onKeyDown).toHaveReturnedWith(['é', 1]);
+  });
+
+  it.each(['blur', 'focus'])('flushes and resets a pending composition on %s', (type) => {
+    const onInput = vi.fn();
+    renderComposer({ value: '', cursorOffset: 0, chips: [], onInput });
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    editor.textContent = 'ü';
+    setCollapsedSelection(editor.firstChild!, 1);
+    editor.dispatchEvent(new FocusEvent(type));
+    expect(onInput).toHaveBeenLastCalledWith('ü', 1);
+
+    editor.textContent = 'über';
+    setCollapsedSelection(editor.firstChild!, 4);
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    expect(onInput).toHaveBeenLastCalledWith('über', 4);
+  });
+
+  it.each([{ key: 'Enter', isComposing: true }, { key: 'Enter', keyCode: 229 }, { key: 'Dead' }])(
+    'leaves composition keydown $key/$isComposing/$keyCode to the browser',
+    (init) => {
+      const onInput = vi.fn();
+      const onKeyDown = vi.fn();
+      renderComposer({ value: 'caf', cursorOffset: 3, chips: [], onInput, onKeyDown });
+      const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+      editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      editor.firstChild!.textContent = 'café';
+      setCollapsedSelection(editor.firstChild!, 4);
+      const event = new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true });
+      editor.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(onInput).not.toHaveBeenCalled();
+      expect(onKeyDown).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not intercept composition beforeinput inside a session reference', () => {
+    const onInput = vi.fn();
+    const marker = 'session:ses_auth';
+    renderComposer({
+      value: marker,
+      cursorOffset: 0,
+      chips: [{ id: marker, type: 'mention-session', label: 'Session', textMarker: marker }],
+      onInput,
+    });
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    const label = editor.querySelector('.inline-chip-label')!;
+    setCollapsedSelection(label.firstChild!, 1);
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    const event = new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertCompositionText',
+      data: 'é',
+      isComposing: true,
+    });
+    editor.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(onInput).not.toHaveBeenCalled();
+  });
+
   it('shows a non-interactive gym indicator and opens image compression only from right click', () => {
     const onCompressImage = vi.fn();
     const onChipClick = vi.fn();

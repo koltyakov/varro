@@ -67,6 +67,41 @@ test('creates a session and sends a prompt through the mocked bridge', async ({ 
   );
 });
 
+for (const dropCompositionEnd of [false, true]) {
+  test(`continues typing and sends accented text after ${dropCompositionEnd ? 'a dropped' : 'a normal'} compositionend`, async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=blank');
+    const composer = page.getByRole('textbox', { name: 'Message composer' }).first();
+    await composer.fill('caf');
+    await composer.press('End');
+    if (dropCompositionEnd) {
+      await composer.evaluate((editor) => {
+        editor.addEventListener('compositionend', (event) => event.stopImmediatePropagation(), {
+          once: true,
+          capture: true,
+        });
+      });
+    }
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.imeSetComposition', {
+      text: 'é',
+      selectionStart: 1,
+      selectionEnd: 1,
+    });
+    await expect(composer).toHaveText('café');
+    await cdp.send('Input.insertText', { text: 'é' });
+    await page.keyboard.type(' noir');
+    await expect(composer).toHaveText('café noir');
+    await composer.press('Enter');
+    await expect(page.locator('.chat-turn-assistant').last()).toContainText(
+      'Mock assistant response for: café noir'
+    );
+    await expect(composer).toBeEmpty();
+    await cdp.detach();
+  });
+}
+
 test('keeps URL boundaries editable in the composer', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
