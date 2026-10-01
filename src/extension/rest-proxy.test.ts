@@ -3006,6 +3006,84 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it.each([null, { messages: [], descendants: [] }])(
+    'falls back to API history when the local database has no messages: %j',
+    async (local) => {
+      const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async (_method, path) =>
+        path.endsWith('/message')
+          ? [
+              {
+                info: {
+                  role: 'assistant',
+                  time: { created: 1_000, completed: 4_000 },
+                  tokens: { total: 500 },
+                },
+              },
+            ]
+          : []
+      );
+      const { proxy, callbacks } = createProxy({
+        readLocalSessionSummary: vi.fn(async () => local),
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+      });
+
+      await proxy.handleRequest(makePayload(824, 'GET', '/varro/session/session-1/diff-summary'));
+
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 824,
+        data: expect.objectContaining({ tokens: 500, durationMs: 3_000 }),
+      });
+    }
+  );
+
+  it('preserves API history statistics and tool edits when snapshot diffs fail', async () => {
+    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async (_method, path) => {
+      if (path.endsWith('/diff')) throw new Error('500 missing snapshot object');
+      if (path.endsWith('/message')) {
+        return [
+          { info: { role: 'user', time: { created: 1_000 } }, parts: [] },
+          {
+            info: {
+              role: 'assistant',
+              providerID: 'openai',
+              modelID: 'gpt-6-astra',
+              time: { created: 2_000, completed: 4_000 },
+              tokens: { total: 500 },
+            },
+            parts: [
+              {
+                type: 'tool',
+                tool: 'apply_patch',
+                state: {
+                  metadata: { files: [{ relativePath: 'src/a.ts', additions: 4, deletions: 1 }] },
+                },
+              },
+            ],
+          },
+        ];
+      }
+      return [];
+    });
+    const { proxy, callbacks } = createProxy({
+      readLocalSessionSummary: vi.fn(async () => null),
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(825, 'GET', '/varro/session/session-1/diff-summary'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 825,
+      data: expect.objectContaining({
+        files: 1,
+        additions: 4,
+        deletions: 1,
+        tokens: 500,
+        durationMs: 3_000,
+        model: { providerID: 'openai', modelID: 'gpt-6-astra' },
+      }),
+    });
+  });
+
   it('excludes generated dependency files from the session diff summary', async () => {
     const serverRequest = vi.fn((_method: string, path: string) => {
       if (path === '/session?limit=1000000') {

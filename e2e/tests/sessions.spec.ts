@@ -1,5 +1,61 @@
 import { expect, test } from '@playwright/test';
 
+test('keeps session row geometry unchanged with empty and hover-only metadata', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=status-filters');
+  const rows = page.locator('.session-item:visible');
+  await expect(rows).toHaveCount(5);
+  const row = rows.first();
+  const meta = row.locator('.session-item-stats-meta');
+  await row.evaluate((element) => {
+    const sessionId = element.getAttribute('data-session-id');
+    if (!sessionId) throw new Error('Session row has no ID');
+    window.postMessage(
+      {
+        type: 'session-models/sync',
+        payload: {
+          models: { [sessionId]: { providerID: 'openai', modelID: 'gpt-6-astra' } },
+        },
+      },
+      '*'
+    );
+  });
+  await expect(row).toHaveClass(/has-model-details/);
+  const geometry = () =>
+    rows.evaluateAll((elements) =>
+      elements.map((element) => {
+        const box = element.getBoundingClientRect();
+        return { top: box.top, height: box.height };
+      })
+    );
+
+  await meta.evaluate((element) => {
+    element.textContent = '4 files · +35 -13 · 80k tokens · 5m 32s';
+  });
+  const populated = await geometry();
+  await meta.evaluate((element) => element.replaceChildren());
+  expect(await geometry()).toEqual(populated);
+
+  await meta.evaluate((element) => {
+    const details = document.createElement('span');
+    details.className = 'session-item-model-meta';
+    details.textContent = 'GPT-6 Astra · High';
+    element.append(details);
+  });
+  await page.mouse.move(0, 0);
+  expect(await geometry()).toEqual(populated);
+  await row.hover();
+  await expect(meta.locator('.session-item-model-meta')).toBeVisible();
+  expect(await geometry()).toEqual(populated);
+  await page.mouse.move(0, 0);
+  await page.keyboard.down('Alt');
+  await expect(meta.locator('.session-item-model-meta')).toBeVisible();
+  expect(await geometry()).toEqual(populated);
+  await page.keyboard.up('Alt');
+  expect(await geometry()).toEqual(populated);
+});
+
 test('uses duty-cycled animations only for persistent session statuses', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=status-filters');
 

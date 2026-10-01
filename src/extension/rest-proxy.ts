@@ -2752,11 +2752,17 @@ export class RestProxy {
     } catch {
       local = null;
     }
-    if (local) return sessionSummary.fromLocal(local, metadata);
+    if (local?.messages.length) return sessionSummary.fromLocal(local, metadata);
 
     const encodedSessionID = encodeURIComponent(sessionID);
     const [diffs, messages, sessions] = await Promise.all([
-      this.requestServer('GET', `/session/${encodedSessionID}/diff`),
+      this.requestServer('GET', `/session/${encodedSessionID}/diff`).catch((error: unknown) => {
+        // Snapshot objects can disappear while the session's messages remain readable.
+        logger.warn(
+          `Could not load diffs while summarizing ${sessionID}; using message edits: ${error instanceof Error ? error.message : String(error)}`
+        );
+        return [];
+      }),
       this.requestSessionMessagesForSummary(`/session/${encodedSessionID}/message`),
       this.readSessionListForSummary(),
     ]);
