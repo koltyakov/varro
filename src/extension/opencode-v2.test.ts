@@ -1033,7 +1033,8 @@ describe('OpenCode connection discovery', () => {
         if (path === '/global/health')
           return new Response('<html>app</html>', { headers: { 'content-type': 'text/html' } });
         if (path === healthPath) return Response.json({ version: '2.0.5', pid: 123, urls: [] });
-        if (path === '/api/status') return new Response('', { status: 404 });
+        if (path === '/api/status' || path === '/api/info')
+          return new Response('', { status: 404 });
         if (path === '/api/session/active')
           return Response.json({ data: { ses_busy: { type: 'running' } } });
         if (path === '/api/shell') return Response.json({ data: [] });
@@ -1063,7 +1064,14 @@ describe('OpenCode connection discovery', () => {
       await expect(transport.request('GET', 'https://example.com/session')).rejects.toThrow(
         'Unsupported OpenCode API path'
       );
-      expect(calls).toHaveLength(healthPath === '/api/status' ? 5 : 7);
+      expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+        '/global/health',
+        '/api/info',
+        ...(healthPath === '/api/status' ? ['/api/status'] : []),
+        healthPath,
+        '/api/session/active',
+        '/api/shell',
+      ]);
     }
   );
 
