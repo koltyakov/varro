@@ -221,6 +221,7 @@ export function registerCommands(
         if (!aboutPanel) {
           aboutPanel = panel;
           panel.iconPath = iconPath;
+          let refreshing = false;
           const messageSubscription = panel.webview.onDidReceiveMessage(
             async (message: unknown) => {
               if (!message || typeof message !== 'object') return;
@@ -228,6 +229,32 @@ export function registerCommands(
                 action?: unknown;
                 includePaths?: unknown;
               };
+              if (action === 'refresh') {
+                if (refreshing || !panel.visible || aboutPanel !== panel) return;
+                refreshing = true;
+                try {
+                  const updatedInfo = await server.readServerInfo();
+                  if (aboutPanel !== panel || !panel.visible) return;
+                  const updatedMarkdown = renderAboutMarkdown(context, updatedInfo);
+                  aboutDiagnostics = diagnosticTimeline.export(updatedMarkdown);
+                  aboutDiagnosticsWithPaths = diagnosticTimeline.export(updatedMarkdown, false);
+                  await panel.webview.postMessage({
+                    type: 'about-update',
+                    data: createAboutViewData(
+                      readPackageJson(context),
+                      updatedInfo,
+                      panel.webview.asWebviewUri(iconPath).toString()
+                    ),
+                  });
+                } catch (error) {
+                  logger.warn(
+                    `Failed to refresh Varro about: ${error instanceof Error ? error.message : String(error)}`
+                  );
+                } finally {
+                  refreshing = false;
+                }
+                return;
+              }
               if (action !== 'copyDiagnostics' && action !== 'saveDiagnostics') return;
               const report = includePaths === true ? aboutDiagnosticsWithPaths : aboutDiagnostics;
               try {

@@ -122,7 +122,12 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         }
         attached = new OpenCodeServer(address.port, false, binary, false, undefined, leasePath);
         expect(await attached.start()).toBe(url);
-        expect((await attached.readServerInfo()).health.healthy).toBe(true);
+        const attachedInfo = await attached.readServerInfo();
+        expect(attachedInfo.health.healthy).toBe(true);
+        expect(attachedInfo.cliVersion).toBe(info.cliVersion);
+        expect(attachedInfo.cliVersion).toBeTruthy();
+        expect(attachedInfo.cliVersionError).toBeNull();
+        expect(attached.isAttachOnly).toBe(true);
         await attached.dispose();
         attached = undefined;
         if (info.health.version?.startsWith('2.')) {

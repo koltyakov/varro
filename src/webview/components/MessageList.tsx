@@ -2634,21 +2634,12 @@ export function MessageList() {
     );
   });
   const standaloneQuestions = createMemo(() => {
-    const questions = getStandaloneQuestionPrompts(
+    if (state.messagesLoading) return [];
+    return getStandaloneQuestionPrompts(
       untrack(() => state.messages),
       state.questions,
       state.activeSessionId,
       linkedToolCalls()
-    );
-    if (!state.messagesLoading) return questions;
-
-    return questions.filter(
-      (question) =>
-        getToolCallLookupKey(
-          question.sessionID,
-          question.tool?.messageID,
-          question.tool?.callID
-        ) === null
     );
   });
   const activeSessionRootId = createMemo(
@@ -2717,6 +2708,7 @@ export function MessageList() {
   );
 
   function getQuestionRequestForTool(part: Extract<Part, { type: 'tool' }>) {
+    if (state.messagesLoading) return null;
     const key = getToolCallLookupKey(activeSessionRootId(), part.messageID, part.callID);
     return key ? (questionRequestsByToolCall().get(key) ?? null) : null;
   }

@@ -736,21 +736,126 @@ describe('MessageList loading states', () => {
     expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
     expect(container?.querySelector('.question-prompt-card')).toBeNull();
 
-    batch(() => {
-      replaceMessages([
-        {
-          info: assistantMessage('message-1'),
-          parts: [{ ...toolPart('tool-1'), tool: 'question' }],
-        },
-      ]);
-      setState('messagesLoading', false);
-    });
+    replaceMessages([
+      {
+        info: assistantMessage('message-1'),
+        parts: [{ ...toolPart('tool-1'), tool: 'question' }],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="message-1"]')).not.toBeNull();
+    expect(container?.querySelector('.question-prompt-card')).toBeNull();
+    expect(state.questions.map((request) => request.id)).toEqual([question.id]);
+
+    setState('messagesLoading', false);
     await Promise.resolve();
 
     const messageRow = container?.querySelector('[data-msg-id="message-1"]');
     expect(messageRow?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
     expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
   });
+
+  it('waits to render an unlinked survey until the chat loads', async () => {
+    const frames = installQueuedAnimationFrameMocks();
+    const question: QuestionRequest = {
+      id: 'question-1',
+      sessionID: 'session-1',
+      questions: [{ question: 'Choose one', header: 'Survey', options: [] }],
+    };
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    setState('activeSessionId', 'session-1');
+    setState('questions', [question]);
+    setState('messagesLoading', true);
+    replaceMessages([]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
+    expect(container?.querySelector('.question-prompt-card')).toBeNull();
+
+    replaceMessages([
+      { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Review this')] },
+    ]);
+    await Promise.resolve();
+    expect(container?.querySelector('.question-prompt-card')).toBeNull();
+    expect(state.questions.map((request) => request.id)).toEqual([question.id]);
+
+    setState('messagesLoading', false);
+    await Promise.resolve();
+    const prompt = container?.querySelector('.question-prompt-card');
+    expect(prompt).not.toBeNull();
+    expect(prompt?.closest('.is-session-hydrating')).not.toBeNull();
+    frames.flush();
+    frames.flush();
+    expect(prompt?.closest('.is-session-hydrating')).toBeNull();
+    expect(container?.querySelector('.chat-messages-loading')).toBeNull();
+    expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
+    frames.restore();
+  });
+
+  it('replaces an unlinked pending question tool with its standalone survey', async () => {
+    setSessions([session('session-1')]);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Review this')] },
+      {
+        info: assistantMessage('message-1'),
+        parts: [{ ...toolPart('tool-1'), tool: 'question' }],
+      },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
+
+    setState('questions', [
+      {
+        id: 'question-1',
+        sessionID: 'session-1',
+        questions: [{ question: 'Choose one', header: 'Survey', options: [] }],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.tool-invocation-header')).toBeNull();
+    expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
+    expect(container?.querySelector('[data-msg-id="message-1"] .question-prompt-card')).toBeNull();
+
+    setState('questions', []);
+    await Promise.resolve();
+    expect(container?.querySelector('.question-prompt-card')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
+  });
+
+  it.each([false, true])(
+    'reveals a retained question when loading ends without content, linked=%s',
+    async (linked) => {
+      const question: QuestionRequest = {
+        id: 'question-1',
+        sessionID: 'session-1',
+        questions: [{ question: 'Choose one', header: 'Survey', options: [] }],
+      };
+      if (linked) question.tool = { messageID: 'message-1', callID: 'call-1' };
+      setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+      setState('activeSessionId', 'session-1');
+      setState('questions', [question]);
+      setState('messagesLoading', true);
+      replaceMessages([]);
+
+      cleanup = render(() => MessageList(), container!);
+      await Promise.resolve();
+
+      expect(container?.querySelector('.question-prompt-card')).toBeNull();
+
+      setState('messagesLoading', false);
+      await Promise.resolve();
+
+      expect(container?.querySelector('.chat-messages-loading')).toBeNull();
+      expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
+      expect(state.questions.map((request) => request.id)).toEqual([question.id]);
+    }
+  );
 
   it('waits to render a linked permission until its message finishes loading', async () => {
     const permission: Permission = {

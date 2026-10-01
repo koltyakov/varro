@@ -1537,7 +1537,8 @@ export class OpenCodeServer extends EventEmitter {
     let activeAgentError: string | null = null;
 
     try {
-      if (!this.isAttachOnly) cliVersion = await this.readInstalledCliVersion();
+      // Local version inspection does not grant lifecycle rights to the connected server.
+      cliVersion = await this.readInstalledCliVersion();
     } catch (err) {
       cliVersionError = err instanceof Error ? err.message : String(err);
     }

@@ -47,6 +47,7 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
     window: {
       activeTextEditor: undefined,
       createWebviewPanel: vi.fn(() => ({
+        visible: true,
         webview: {
           cspSource: 'vscode-webview-resource:',
           html: '',
@@ -58,7 +59,7 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
           })),
           postMessage: vi.fn(async (_message: unknown) => true),
         },
-        onDidDispose: vi.fn(),
+        onDidDispose: vi.fn((_handler: () => void) => ({ dispose: vi.fn() })),
         reveal: vi.fn(),
       })),
       showTextDocument: vi.fn(() => Promise.resolve()),
@@ -239,6 +240,117 @@ describe('Problems Add to Context action', () => {
 });
 
 describe('About command', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('refreshes visible page data and diagnostic exports without reloading the page', async () => {
+    const info = {
+      status: { state: 'running', url: 'http://localhost:4096' },
+      url: 'http://localhost:4096',
+      health: { healthy: true, version: '1.18.4' },
+      cliVersion: '1.18.4',
+      activeAgentCount: 0,
+      installMethod: 'bun',
+    };
+    const readServerInfo = vi.fn().mockResolvedValue(info);
+    const { sidebar } = register('/repo', { readServerInfo });
+    await runCommand('varro.about');
+    const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
+    const receive = panel.webview.onDidReceiveMessage.mock.calls[0]![0];
+    const html = panel.webview.html;
+    readServerInfo.mockResolvedValue({
+      ...info,
+      activeAgentCount: 3,
+      health: { healthy: false, version: '1.18.9' },
+    });
+
+    await receive({ action: 'refresh' });
+
+    expect(readServerInfo).toHaveBeenCalledTimes(2);
+    expect(panel.webview.postMessage).toHaveBeenLastCalledWith({
+      type: 'about-update',
+      data: expect.objectContaining({ activeAgents: '3', healthy: false, serverVersion: '1.18.9' }),
+    });
+    expect(panel.webview.html).toBe(html);
+    expect(sidebar.openMarkdownDocument).toHaveBeenCalledOnce();
+    await receive({ action: 'copyDiagnostics' });
+    expect(vscodeMock.env.clipboard.writeText).toHaveBeenLastCalledWith(
+      expect.stringContaining('  - **Active agents:** `3`')
+    );
+    await receive({ action: 'copyDiagnostics', includePaths: true });
+    expect(vscodeMock.env.clipboard.writeText).toHaveBeenLastCalledWith(
+      expect.stringContaining('  - **Version:** `1.18.9`')
+    );
+  });
+
+  it('skips hidden, overlapping and disposed refresh requests', async () => {
+    const info = {
+      status: { state: 'running', url: 'http://localhost:4096' },
+      url: 'http://localhost:4096',
+      health: { healthy: true, version: '1.18.4' },
+      installMethod: 'bun',
+    };
+    const readServerInfo = vi.fn().mockResolvedValue(info);
+    register('/repo', { readServerInfo });
+    await runCommand('varro.about');
+    const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
+    const receive = panel.webview.onDidReceiveMessage.mock.calls[0]![0];
+    panel.visible = false;
+    await receive({ action: 'refresh' });
+    expect(readServerInfo).toHaveBeenCalledOnce();
+
+    panel.visible = true;
+    let resolveRefresh: (value: typeof info) => void = () => {
+      throw new Error('Refresh did not start');
+    };
+    readServerInfo.mockImplementationOnce(
+      () =>
+        new Promise<typeof info>((resolve) => {
+          resolveRefresh = resolve;
+        })
+    );
+    const refresh = receive({ action: 'refresh' });
+    await receive({ action: 'refresh' });
+    expect(readServerInfo).toHaveBeenCalledTimes(2);
+    panel.onDidDispose.mock.calls[0]![0]();
+    resolveRefresh(info);
+    await refresh;
+    expect(panel.webview.postMessage).not.toHaveBeenCalled();
+    await receive({ action: 'refresh' });
+    expect(readServerInfo).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the last snapshot after a failed refresh and retries on the next request', async () => {
+    const info = {
+      status: { state: 'running', url: 'http://localhost:4096' },
+      url: 'http://localhost:4096',
+      health: { healthy: true, version: '1.18.4' },
+      installMethod: 'bun',
+    };
+    const readServerInfo = vi.fn().mockResolvedValue(info);
+    register('/repo', { readServerInfo });
+    await runCommand('varro.about');
+    const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
+    const receive = panel.webview.onDidReceiveMessage.mock.calls[0]![0];
+    readServerInfo.mockRejectedValueOnce(new Error('server unreachable'));
+    await receive({ action: 'refresh' });
+    expect(loggerMock.warn).toHaveBeenLastCalledWith(
+      'Failed to refresh Varro about: server unreachable'
+    );
+    expect(vscodeMock.window.showErrorMessage).not.toHaveBeenCalled();
+    expect(panel.webview.postMessage).not.toHaveBeenCalled();
+    await receive({ action: 'copyDiagnostics' });
+    expect(vscodeMock.env.clipboard.writeText).toHaveBeenLastCalledWith(
+      expect.stringContaining('  - **Version:** `1.18.4`')
+    );
+    await receive({ action: 'refresh' });
+    expect(panel.webview.postMessage).toHaveBeenLastCalledWith({
+      type: 'about-update',
+      data: expect.objectContaining({ healthy: true }),
+    });
+  });
+
   it('copies and saves the same redacted snapshot with optional local paths', async () => {
     register('/repo', {
       readServerInfo: vi.fn().mockResolvedValue({

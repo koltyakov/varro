@@ -1259,6 +1259,63 @@ describe('OpenCodeServer compaction config injection', () => {
 });
 
 describe('OpenCodeServer maintenance', () => {
+  describe.each(['shared-service', 'manual-fixed-port', 'auto-start-disabled'] as const)(
+    'attach-only %s diagnostics',
+    (mode) => {
+      it.each(['installed', 'missing', 'failed'] as const)(
+        'checks the local CLI when it is %s without granting lifecycle rights',
+        async (result) => {
+          const server = new OpenCodeServer(
+            mode === 'shared-service' ? 'auto' : 4096,
+            mode !== 'auto-start-disabled'
+          );
+          const { api, children } = configureManagedStartup(server);
+          const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+          vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.21' });
+          if (mode === 'shared-service') {
+            vi.spyOn(processManager, 'discoverSharedServer').mockResolvedValue(true);
+            vi.spyOn(processManager, 'refreshDiscoveredServerRegistration').mockResolvedValue(
+              false
+            );
+          }
+          const versionCheck = vi.mocked(api.readInstalledCliVersion);
+          versionCheck.mockResolvedValue('2.0.20');
+          vi.spyOn(
+            server as unknown as { readActiveAgentCount: () => Promise<number> },
+            'readActiveAgentCount'
+          ).mockResolvedValue(2);
+          const upgrade = vi.spyOn(processManager, 'upgradeCli');
+          const stop = vi.spyOn(processManager, 'stopServerForRestart');
+          const recovery = vi.spyOn(processManager, 'recoverManagedServerOwnership');
+
+          await server.start();
+          versionCheck.mockClear();
+          if (result === 'failed')
+            versionCheck.mockRejectedValue(new Error('CLI inspection failed'));
+          else versionCheck.mockResolvedValue(result === 'installed' ? '2.0.20' : null);
+          const info = await server.readServerInfo();
+          expect(versionCheck).toHaveBeenCalledOnce();
+          expect(info.cliVersion).toBe(result === 'installed' ? '2.0.20' : null);
+          expect(info.cliVersionError).toBe(result === 'failed' ? 'CLI inspection failed' : null);
+          expect(info.health.version).toBe('2.0.21');
+          expect(info.activeAgentCount).toBe(2);
+          expect(info.ownership).toBe('unmanaged');
+          expect(info.managedProcess).toBe(false);
+          expect(server.isAttachOnly).toBe(true);
+          await runMaintenanceTick(server);
+          await expect(server.restart({ force: true })).rejects.toThrow('attach-only');
+          expect(versionCheck).toHaveBeenCalledOnce();
+          expect(upgrade).not.toHaveBeenCalled();
+          expect(stop).not.toHaveBeenCalled();
+          expect(recovery).not.toHaveBeenCalled();
+          expect(api.syncInjectedConfigFile).not.toHaveBeenCalled();
+          expect(children).toHaveLength(0);
+          await server.disconnect();
+        }
+      );
+    }
+  );
+
   it('reports active agents and ownership in server diagnostics', async () => {
     const server = new OpenCodeServer(4096, true);
     const api = server as unknown as {
