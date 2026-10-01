@@ -147,6 +147,41 @@ describe('session-controls helpers', () => {
     expect(logError).toHaveBeenCalledWith('abortSession', expect.any(Error));
   });
 
+  it.each([false, true])(
+    'refreshes acknowledged aborts without restoring busy on refresh failure (%s)',
+    async (refreshFails) => {
+      const acknowledgement = deferred<void>();
+      const syncSessionMessages = refreshFails
+        ? vi.fn().mockRejectedValue(new Error('refresh failed'))
+        : vi.fn().mockResolvedValue(undefined);
+      const clearPendingAbortTree = vi.fn();
+      const logError = vi.fn();
+      const stop = abortSessionWithDependencies({
+        getActiveSessionId: () => 'session-1',
+        getSessionTreeRootId: () => null,
+        getSessionTreeIds: () => ['session-1', 'child-1'],
+        getSelectedAgentForSession: () => 'build',
+        skipPlanSession: vi.fn(),
+        getSessionStatus: () => ({ type: 'busy' }),
+        getSessionUsageLimit: () => null,
+        markPendingAbortTree: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        stopLoading: vi.fn(),
+        abortRemoteSession: () => acknowledgement.promise,
+        clearPendingAbortTree,
+        setSessionUsageLimit: vi.fn(),
+        syncSessionMessages,
+        logError,
+      });
+      expect(syncSessionMessages).not.toHaveBeenCalled();
+      acknowledgement.resolve();
+      await stop;
+      expect(syncSessionMessages.mock.calls).toEqual([['session-1'], ['child-1']]);
+      expect(clearPendingAbortTree).not.toHaveBeenCalled();
+      expect(logError).toHaveBeenCalledTimes(refreshFails ? 2 : 0);
+    }
+  );
+
   it('undos from the latest assistant message', async () => {
     const revertSession = vi.fn(async () => {});
 

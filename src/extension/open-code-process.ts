@@ -155,16 +155,23 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-async function resolveProjectConfigPaths(directory: string): Promise<string[]> {
+async function resolveProjectConfigPaths(
+  directory: string,
+  scope: 'project' | 'ancestors' = 'project'
+): Promise<string[]> {
   const pathApi = /^[a-z]:[\\/]/i.test(directory) || directory.startsWith('\\\\') ? win32 : posix;
   const files: string[] = [];
   let current = pathApi.resolve(directory);
   while (true) {
-    for (const name of ['opencode.jsonc', 'opencode.json']) {
+    const names =
+      scope === 'ancestors'
+        ? ['opencode.jsonc', 'opencode.json', '.opencode/opencode.jsonc', '.opencode/opencode.json']
+        : ['opencode.jsonc', 'opencode.json'];
+    for (const name of names) {
       const candidate = pathApi.join(current, name);
       if (await pathExists(candidate)) files.push(candidate);
     }
-    if (await pathExists(pathApi.join(current, '.git'))) break;
+    if (scope === 'project' && (await pathExists(pathApi.join(current, '.git')))) break;
     const parent = pathApi.dirname(current);
     if (parent === current) break;
     current = parent;
@@ -181,6 +188,20 @@ function containsAskAgent(raw: string): boolean {
     return agents && typeof agents === 'object' && !Array.isArray(agents)
       ? Object.keys(agents).some((name) => name.toLowerCase() === 'ask')
       : false;
+  });
+}
+
+function containsOpenAIStreamTimeout(raw: string): boolean {
+  const errors: ParseError[] = [];
+  const value = asRecord(parse(raw, errors, { allowTrailingComma: true }));
+  // Do not inject over a policy we cannot safely inspect.
+  if (errors.length > 0 || !value) return true;
+  return ['provider', 'providers'].some((key) => {
+    const openai = asRecord(asRecord(value[key])?.openai);
+    return ['options', 'settings'].some((settingsKey) => {
+      const settings = asRecord(openai?.[settingsKey]);
+      return !!settings && ('chunkTimeout' in settings || 'timeout' in settings);
+    });
   });
 }
 
@@ -1830,28 +1851,46 @@ export class OpenCodeProcess {
       experimental: { continue_loop_on_deny: true },
     };
     if (Object.keys(compaction).length > 0) config.compaction = compaction;
-    if (!(await this.hasConfiguredAskAgent())) {
+    if (!(await this.hasConfiguredValue(containsAskAgent, 'an existing Ask agent'))) {
       config.agent = { ask: ASK_AGENT };
+    }
+    const version = this.installedCliVersionCache?.value ?? '';
+    if (
+      openCodeApiVersion(version) === 2 &&
+      compareVersions(version, '2.0.20') >= 0 &&
+      !(await this.hasConfiguredValue(
+        containsOpenAIStreamTimeout,
+        'an OpenAI stream timeout',
+        'ancestors'
+      ))
+    ) {
+      // 2.0.20 otherwise waits 30 minutes for a silent WebSocket. This is a
+      // no-data bound, not a turn/tool deadline; active reasoning can continue.
+      config.providers = { openai: { settings: { chunkTimeout: 5 * 60_000 } } };
     }
     return `${JSON.stringify(config, null, 2)}\n`;
   }
 
-  private async hasConfiguredAskAgent(): Promise<boolean> {
+  private async hasConfiguredValue(
+    containsValue: (raw: string) => boolean,
+    description: string,
+    scope: 'project' | 'ancestors' = 'project'
+  ): Promise<boolean> {
     const inherited = getEnvironmentValue(process.env, 'OPENCODE_CONFIG_CONTENT');
-    if (inherited?.trim() && containsAskAgent(inherited)) return true;
+    if (inherited?.trim() && containsValue(inherited)) return true;
 
     const workspaceCwd = this.getWorkspaceCwd();
     const paths = [
       ...getOpenCodeConfigPaths(),
-      ...(workspaceCwd ? await resolveProjectConfigPaths(workspaceCwd) : []),
+      ...(workspaceCwd ? await resolveProjectConfigPaths(workspaceCwd, scope) : []),
     ];
     for (const path of paths) {
       try {
-        if (containsAskAgent(await readFile(path, 'utf-8'))) return true;
+        if (containsValue(await readFile(path, 'utf-8'))) return true;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
         logger.warn(
-          `Could not inspect OpenCode config for an existing Ask agent: ${err instanceof Error ? err.message : String(err)}`
+          `Could not inspect OpenCode config for ${description}: ${err instanceof Error ? err.message : String(err)}`
         );
         return true;
       }

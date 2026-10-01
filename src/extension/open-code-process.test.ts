@@ -3869,6 +3869,89 @@ describe('OpenCodeProcess server ownership leases', () => {
 });
 
 describe('OpenCodeProcess config ownership', () => {
+  it.each([
+    { name: 'no override', content: '{}', expected: true },
+    {
+      name: 'native stream timeout',
+      content: '{"providers":{"openai":{"settings":{"chunkTimeout":900000}}}}',
+      expected: false,
+    },
+    {
+      name: 'legacy stream timeout',
+      content: '{"provider":{"openai":{"options":{"chunkTimeout":900000}}}}',
+      expected: false,
+    },
+    {
+      name: 'explicit disabled timeout',
+      content: '{"providers":{"openai":{"settings":{"timeout":false}}}}',
+      expected: false,
+    },
+    {
+      name: 'another provider timeout',
+      content: '{"providers":{"fixture":{"settings":{"chunkTimeout":900000}}}}',
+      expected: true,
+    },
+    { name: 'malformed config', content: '{broken', expected: false },
+  ])('bounds managed V2 OpenAI silence while preserving $name', async ({ content, expected }) => {
+    const configHome = await mkdtemp(join(tmpdir(), 'varro-stream-timeout-'));
+    process.env.XDG_CONFIG_HOME = configHome;
+    process.env.OPENCODE_CONFIG_CONTENT = content;
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
+    manager.rememberInstalledCliVersion('2.0.20');
+    try {
+      const config = asRecord(JSON.parse(await manager.serializeInjectedConfig()));
+      expect(config?.providers).toEqual(
+        expected ? { openai: { settings: { chunkTimeout: 300000 } } } : undefined
+      );
+    } finally {
+      await rm(configHome, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['opencode.jsonc', '.opencode/opencode.jsonc'])(
+    'preserves an ancestor %s OpenAI timeout without modifying its config',
+    async (filename) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-stream-ancestor-'));
+      process.env.XDG_CONFIG_HOME = join(root, 'config');
+      const workspace = join(root, 'parent/project');
+      const configPath = join(root, 'parent', filename);
+      const content =
+        '{ // custom policy\n "providers": {"openai": {"settings": {"chunkTimeout": 0,}}}}';
+      await mkdir(workspace, { recursive: true });
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, content);
+      await mkdir(join(workspace, '.git'));
+      vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: workspace } }];
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      manager.rememberInstalledCliVersion('2.0.20');
+      try {
+        expect(
+          asRecord(JSON.parse(await manager.serializeInjectedConfig()))?.providers
+        ).toBeUndefined();
+        expect(await readFile(configPath, 'utf-8')).toBe(content);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['1.18.33', '2.0.5', '2.0.19'])(
+    'does not inject unverified stream settings for OpenCode %s',
+    async (version) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-stream-version-'));
+      process.env.XDG_CONFIG_HOME = root;
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      manager.rememberInstalledCliVersion(version);
+      try {
+        expect(
+          asRecord(JSON.parse(await manager.serializeInjectedConfig()))?.providers
+        ).toBeUndefined();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('uses the documented global config directory and all supported filenames on Windows', () => {
     expect(getOpenCodeConfigPaths({}, 'C:\\Users\\Andrew', 'win32')).toEqual([
       'C:\\Users\\Andrew\\.config\\opencode\\config.json',

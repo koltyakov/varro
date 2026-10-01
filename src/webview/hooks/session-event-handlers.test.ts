@@ -319,6 +319,57 @@ function createCompletedAssistantEntry(
 }
 
 describe('registerSessionEventHandlers', () => {
+  it.each(['steer', 'queue'] as const)(
+    'reconciles idle with trailing pending %s even after native todo handoff',
+    (delivery) => {
+      const handlers = installHandlers();
+      const assistant = createAssistantEntry();
+      const steering = createUserEntry({ id: 'steering-1', pendingDelivery: delivery });
+      const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+      const cleanups = registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          getMessages: () => [assistant, steering],
+          shouldResyncSessionAfterIdle: () => true,
+          syncSessionMessages,
+        })
+      );
+      try {
+        emitServerEvent(handlers, 'session.status', {
+          properties: { sessionID: 'session-1', status: { type: 'idle' } },
+        });
+        expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+        expect(steering.info.pendingDelivery).toBe(delivery);
+      } finally {
+        for (const cleanup of cleanups) cleanup();
+      }
+    }
+  );
+
+  it('attaches interruption to the assistant behind pending input, not another session', () => {
+    const handlers = installHandlers();
+    const assistant = createAssistantEntry();
+    const steering = createUserEntry({ id: 'steering-1', pendingDelivery: 'steer' });
+    const child = createAssistantEntry({ id: 'child-assistant', sessionID: 'child-1' });
+    const error: AssistantMessage['error'] = { name: 'MessageAbortedError', data: {} };
+    upsertMessageInfo.mockClear();
+    const cleanups = registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistant, steering, child],
+      })
+    );
+    try {
+      emitServerEvent(handlers, 'session.error', {
+        properties: { sessionID: 'session-1', error },
+      });
+      expect(upsertMessageInfo).toHaveBeenCalledWith({ ...assistant.info, error });
+      expect(steering.info.pendingDelivery).toBe('steer');
+    } finally {
+      for (const cleanup of cleanups) cleanup();
+    }
+  });
+
   it('judges auto-approve permissions without showing a prompt', async () => {
     addPermission.mockClear();
     const handlers = installHandlers();

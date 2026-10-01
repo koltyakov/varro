@@ -1388,6 +1388,26 @@ describe('v2 transcript and permission projection', () => {
     expect(unknown).toMatchObject({ sequenceOnly: true, seq: 9 });
   });
 
+  it('preserves execution interruption before idle and advances the durable sequence once', () => {
+    const events = projectV2Event({
+      id: 'evt_interrupted',
+      created: 20,
+      type: 'session.execution.interrupted',
+      durable: { seq: 8 },
+      data: { sessionID: 'ses_one' },
+    }).map(parseServerEvent);
+    expect(events[0]).toMatchObject({
+      type: 'session.error',
+      seq: 8,
+      properties: { sessionID: 'ses_one', error: { name: 'MessageAbortedError' } },
+    });
+    expect(events[1]).toMatchObject({
+      type: 'session.status',
+      properties: { sessionID: 'ses_one', status: { type: 'idle' } },
+    });
+    expect(events[1]?.seq).toBeUndefined();
+  });
+
   it('delivers execution failures before idle and advances the durable sequence once', () => {
     const events = projectV2Event(
       {

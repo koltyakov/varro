@@ -65,6 +65,24 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
       'session.execution.failed',
     ].includes(event.type)
   ) {
+    if (event.type === 'session.execution.interrupted') {
+      return [
+        ...emit('session.error', {
+          sessionID,
+          error: { name: 'MessageAbortedError', data: {} },
+        }),
+        {
+          ...base,
+          id: `${String(event.id)}:idle`,
+          seq: undefined,
+          type: 'session.status',
+          properties: {
+            sessionID,
+            status: context.backgroundPending ? backgroundStatus : { type: 'idle' },
+          },
+        },
+      ];
+    }
     if (event.type !== 'session.execution.failed')
       return emit('session.status', {
         sessionID,
