@@ -101,6 +101,12 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    container:
+      # Keep this version aligned with @playwright/test in package.json.
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --ipc=host
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     strategy:
       fail-fast: false
       matrix:
@@ -122,11 +128,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-
       - name: Test browser scripts
         run: npm run test:scripts:browser
 
       - name: Run e2e tests
-        run: npm run test:e2e -- --shard=${{ matrix.shard }}/2
+        # Bypass pretest:e2e; the matching container already includes the browsers.
+        run: node scripts/run-e2e.mjs --shard=${{ matrix.shard }}/2
