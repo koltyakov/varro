@@ -35,6 +35,41 @@ import * as serverUtils from './server-utils';
 import { diagnosticTimeline } from './diagnostics';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 
+describe('server process identity from health', () => {
+  it('retains a validated API PID only for the healthy endpoint', async () => {
+    let url = 'http://localhost:4096';
+    const transport = createTransport({ getUrl: () => url });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      return path === '/api/info'
+        ? Response.json({ version: '2.0.21', pid: 1234 })
+        : new Response('', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: true, version: '2.0.21' });
+    expect(transport.serverPid).toBe(1234);
+    url = 'http://localhost:5096';
+    expect(transport.serverPid).toBeNull();
+    fetchMock.mockImplementation(async () => new Response('', { status: 503 }));
+    await transport.readHealthInfo();
+    expect(transport.serverPid).toBeNull();
+  });
+
+  it.each([0, -1, 1.5, '1234', null])('does not expose an invalid API PID %s', async (pid) => {
+    const transport = createTransport();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) =>
+        new URL(String(input)).pathname === '/api/info'
+          ? Response.json({ version: '2.0.21', pid, ready: true })
+          : new Response('', { status: 404 })
+      )
+    );
+    await transport.readHealthInfo();
+    expect(transport.serverPid).toBeNull();
+  });
+});
+
 function createTransport(
   options: Partial<ConstructorParameters<typeof OpenCodeTransport>[0]> = {}
 ) {

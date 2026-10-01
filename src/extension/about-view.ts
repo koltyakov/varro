@@ -15,6 +15,9 @@ export type AboutViewData = {
   serverStatus: string;
   healthy: boolean;
   activeAgents: string;
+  serverStartedOn: string;
+  vscodeClients: string;
+  otherClients: string;
   autoUpdate: boolean;
   vscodeVersion: string;
   nodeVersion: string;
@@ -28,6 +31,7 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
   const nonce = randomBytes(16).toString('base64');
   const statusLabel = data.healthy ? 'System ready' : 'Needs attention';
   const statusClass = data.healthy ? 'healthy' : 'unhealthy';
+  const otherClientsHidden = Number(data.otherClients) > 0 ? '' : ' hidden';
 
   return `<!doctype html>
 <html lang="en">
@@ -182,7 +186,10 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
         <dl>
           <dt>Endpoint</dt><dd><code data-about-field="serverUrl">${escapeHtml(data.serverUrl)}</code></dd>
           <dt>Ownership</dt><dd data-about-field="ownership">${escapeHtml(data.ownership)}</dd>
-          <dt>Active agents</dt><dd data-about-field="activeAgents">${escapeHtml(data.activeAgents)}</dd>
+          <dt>Started on</dt><dd data-about-field="serverStartedOn">${escapeHtml(data.serverStartedOn)}</dd>
+          <dt>Active sessions</dt><dd data-about-field="activeAgents">${escapeHtml(data.activeAgents)}</dd>
+          <dt title="Local VS Code extension-host processes with open server connections, including compatible editors. Multiple sockets from one process count once. Remote or hidden clients make the count unknown.">VS Code clients</dt><dd data-about-field="vscodeClients">${escapeHtml(data.vscodeClients)}</dd>
+          <dt data-other-clients${otherClientsHidden} title="Other local client processes with open server connections. Multiple sockets from one process count once. Remote or hidden clients make the count unknown.">Other clients</dt><dd data-other-clients${otherClientsHidden} data-about-field="otherClients">${escapeHtml(data.otherClients)}</dd>
         </dl>
       </section>
     </div>
@@ -238,6 +245,9 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
         status.classList.toggle('healthy', data.healthy);
         status.classList.toggle('unhealthy', !data.healthy);
         document.getElementById('update-notice').hidden = !data.updateNotice;
+        document.querySelectorAll('[data-other-clients]').forEach((element) => {
+          element.hidden = !(Number(data.otherClients) > 0);
+        });
       }
       if (event.data?.type === 'diagnostics-result' && typeof event.data.text === 'string') {
         document.getElementById('diagnostics-result').textContent = event.data.text;

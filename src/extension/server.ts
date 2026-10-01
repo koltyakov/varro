@@ -47,6 +47,8 @@ import {
 import { FULL_SESSION_LIST_LIMIT } from './util/session-list';
 import { basicAuthorization, openCodeApiVersion } from './opencode-connection';
 import { inspectLocalServerAccount } from './process-inspection';
+import { readLocalServerConnectionInfo } from './server-connection-info';
+import type { ServerConnectionInfo } from './server-connection-info';
 import { ServerConnectionAdmission } from './server-connection-admission';
 
 export type { OpenCodeCompactionSettings };
@@ -63,6 +65,7 @@ export interface OpenCodeServerInfo {
   cliVersion: string | null;
   cliVersionError: string | null;
   cliInstalledAt: number | null;
+  connections: ServerConnectionInfo;
   installMethod: OpenCodeInstallMethod;
   resolvedCommand: string;
   searchedPaths: string[];
@@ -1554,6 +1557,16 @@ export class OpenCodeServer extends EventEmitter {
 
     const install = this.processManager.getInstallInfo();
     const health = await this.readHealthInfo();
+    const connectionUrl = this.url;
+    const serverPid = this.transport.serverPid ?? this.processManager.managedProcessId;
+    let connections: ServerConnectionInfo = {
+      startedAt: null,
+      vscodeClients: null,
+      otherClients: null,
+    };
+    if (health.healthy && this._status.state === 'running') {
+      connections = await readLocalServerConnectionInfo(this.processManager.port, serverPid);
+    }
     let cliInstalledAt: number | null = null;
     if (install.found) {
       try {
@@ -1564,6 +1577,13 @@ export class OpenCodeServer extends EventEmitter {
       } catch {
         // Installation dates are best-effort when the CLI is missing or inaccessible.
       }
+    }
+    if (
+      this.url !== connectionUrl ||
+      this._status.state !== 'running' ||
+      (this.transport.serverPid ?? this.processManager.managedProcessId) !== serverPid
+    ) {
+      connections = { startedAt: null, vscodeClients: null, otherClients: null };
     }
 
     return {
@@ -1581,6 +1601,7 @@ export class OpenCodeServer extends EventEmitter {
       cliVersion,
       cliVersionError,
       cliInstalledAt,
+      connections,
       activeAgentCount,
       activeAgentError,
       health,

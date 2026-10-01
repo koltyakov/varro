@@ -47,6 +47,13 @@ const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writ
   }));
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
+vi.mock('./server-connection-info', () => ({
+  readLocalServerConnectionInfo: vi.fn(async () => ({
+    startedAt: null,
+    vscodeClients: null,
+    otherClients: null,
+  })),
+}));
 vi.mock('./util/windows-cli-update', () => ({ runWindowsCliUpdate: vi.fn() }));
 vi.mock('vscode', () => vscodeMock);
 vi.mock('@opencode/client/service', () => ({
@@ -90,6 +97,7 @@ import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import { runWindowsCliUpdate } from './util/windows-cli-update';
 import type { OpenCodeProcess } from './open-code-process';
 import { inspectLocalServerAccount } from './process-inspection';
+import { readLocalServerConnectionInfo } from './server-connection-info';
 import type { ServerConnectionAdmission } from './server-connection-admission';
 import type * as ProcessInspection from './process-inspection';
 
@@ -1259,6 +1267,49 @@ describe('OpenCodeServer compaction config injection', () => {
 });
 
 describe('OpenCodeServer maintenance', () => {
+  it('includes live server start and client counts in diagnostics without changing ownership', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const api = server as unknown as {
+      processManager: OpenCodeProcess;
+      readInstalledCliVersion: () => Promise<string | null>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      readActiveAgentCount: () => Promise<number>;
+    };
+    setRunning(server);
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('2.0.21');
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '2.0.21' });
+    api.readActiveAgentCount = vi.fn().mockResolvedValue(2);
+    const pid = vi.spyOn(api.processManager, 'managedProcessId', 'get').mockReturnValue(1234);
+    const connections = { startedAt: 1_790_852_400_000, vscodeClients: 2, otherClients: 1 };
+    vi.mocked(readLocalServerConnectionInfo).mockResolvedValueOnce(connections);
+    const info = await server.readServerInfo();
+    expect(readLocalServerConnectionInfo).toHaveBeenCalledWith(4096, 1234);
+    expect(info.connections).toEqual(connections);
+    expect(info.activeAgentCount).toBe(2);
+    expect(info.ownership).toBe('unmanaged');
+
+    vi.mocked(readLocalServerConnectionInfo).mockImplementationOnce(async () => {
+      pid.mockReturnValue(4321);
+      return connections;
+    });
+    const replaced = await server.readServerInfo();
+    expect(replaced.connections).toEqual({
+      startedAt: null,
+      vscodeClients: null,
+      otherClients: null,
+    });
+
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    vi.mocked(readLocalServerConnectionInfo).mockClear();
+    const unhealthy = await server.readServerInfo();
+    expect(readLocalServerConnectionInfo).not.toHaveBeenCalled();
+    expect(unhealthy.connections).toEqual({
+      startedAt: null,
+      vscodeClients: null,
+      otherClients: null,
+    });
+  });
+
   it.each([
     { label: 'available', found: true, exists: true },
     { label: 'inaccessible', found: true, exists: false },

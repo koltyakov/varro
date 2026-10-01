@@ -102,11 +102,16 @@ export class OpenCodeTransport {
   private apiVersion: OpenCodeApiVersion = 1;
   private apiIdentityUrl: string | undefined;
   private healthFailure: string | undefined;
+  private healthPid: { url: string; pid: number } | undefined;
   private authorizationRefresh: Promise<void> | null = null;
   private readonly v2: OpenCodeV2Adapter;
 
   get healthError(): string | undefined {
     return this.healthFailure;
+  }
+
+  get serverPid(): number | null {
+    return this.healthPid?.url === this.options.getUrl() ? this.healthPid.pid : null;
   }
 
   get hasGlobalSessionStatus(): boolean {
@@ -400,6 +405,7 @@ export class OpenCodeTransport {
   async readHealthInfo(signal?: AbortSignal): Promise<{ healthy: boolean; version?: string }> {
     let health: { healthy: boolean; version?: string } = { healthy: false };
     this.healthFailure = undefined;
+    this.healthPid = undefined;
     try {
       const url = this.options.getUrl();
       if (this.apiIdentityUrl !== url) {
@@ -437,6 +443,8 @@ export class OpenCodeTransport {
           const info = asRecord(data);
           if (isString(info?.version) && (isNumber(info.pid) || info.ready === true))
             health = { healthy: true, version: info.version };
+          if (isNumber(info?.pid) && Number.isSafeInteger(info.pid) && info.pid > 0)
+            this.healthPid = { url, pid: info.pid };
         }
         if (health.healthy) {
           const family = openCodeApiVersion(health.version ?? '');
@@ -458,6 +466,7 @@ export class OpenCodeTransport {
       });
       this.diagnosticHealth = health.healthy;
     }
+    if (!health.healthy) this.healthPid = undefined;
     return health;
   }
 

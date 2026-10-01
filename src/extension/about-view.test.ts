@@ -10,7 +10,7 @@ const data: AboutViewData = {
   varroVersion: '0.31.0',
   cliVersion: '1.18.4',
   installMethod: 'bun',
-  installedOn: 'Oct 1, 2026',
+  installedOn: 'Oct 1, 2026, 9:45:12 AM',
   binary: '/bin/opencode',
   serverVersion: '1.18.4',
   serverUrl: 'http://localhost:4096',
@@ -18,6 +18,9 @@ const data: AboutViewData = {
   serverStatus: 'Running',
   healthy: true,
   activeAgents: '0',
+  serverStartedOn: 'Oct 1, 2026, 10:00:00 AM',
+  vscodeClients: '1',
+  otherClients: '0',
   autoUpdate: true,
   vscodeVersion: '1.120.0',
   nodeVersion: 'v24.15.0',
@@ -55,6 +58,17 @@ function openPage(hiddenInitially = false) {
 }
 
 describe('About page', () => {
+  it.each(['0', 'Unknown', '1', '2'])(
+    'shows the other clients row initially only for a positive count: %s',
+    (otherClients) => {
+      const root = document.createElement('div');
+      root.innerHTML = renderAboutHtml({ ...data, otherClients }, 'vscode-webview-resource:');
+      const row = root.querySelectorAll<HTMLElement>('[data-other-clients]');
+      expect(row).toHaveLength(2);
+      for (const element of row) expect(element.hidden).toBe(!(Number(otherClients) > 0));
+    }
+  );
+
   it('refreshes on opening and every five seconds only while visible', () => {
     const view = openPage();
     expect(view.postMessage).toHaveBeenCalledExactlyOnceWith({ action: 'refresh' });
@@ -85,6 +99,12 @@ describe('About page', () => {
 
   it('updates live fields in place and preserves diagnostic feedback', () => {
     const view = openPage();
+    const otherClientsRow = view.page.querySelectorAll<HTMLElement>('[data-other-clients]');
+    for (const element of otherClientsRow) expect(element.hidden).toBe(true);
+    expect(
+      view.page.querySelector('[data-about-field="activeAgents"]')?.previousElementSibling
+        ?.textContent
+    ).toBe('Active sessions');
     const copyButton = view.page.getElementById('copy-diagnostics')!;
     copyButton.click();
     expect(view.postMessage).toHaveBeenLastCalledWith({
@@ -109,12 +129,15 @@ describe('About page', () => {
       serverStatus: 'Error: disconnected',
       cliVersion: '1.18.9',
       installMethod: 'npm',
-      installedOn: 'Oct 2, 2026',
+      installedOn: 'Oct 2, 2026, 11:10:23 AM',
       binary: '/new/opencode',
       serverVersion: 'Unknown',
       serverUrl: 'http://localhost:5096',
       ownership: 'Unmanaged',
       activeAgents: '2',
+      serverStartedOn: 'Oct 2, 2026, 11:00:00 AM',
+      vscodeClients: '3',
+      otherClients: '2',
       autoUpdate: false,
       updateNotice: '<img src=x onerror=alert(1)>',
     });
@@ -124,12 +147,16 @@ describe('About page', () => {
     expect(field('serverStatus')).toBe('Error: disconnected');
     expect(field('cliVersion')).toBe('1.18.9');
     expect(field('installMethod')).toBe('npm');
-    expect(field('installedOn')).toBe('Oct 2, 2026');
+    expect(field('installedOn')).toBe('Oct 2, 2026, 11:10:23 AM');
     expect(field('binary')).toBe('/new/opencode');
     expect(field('serverVersion')).toBe('Unknown');
     expect(field('serverUrl')).toBe('http://localhost:5096');
     expect(field('ownership')).toBe('Unmanaged');
     expect(field('activeAgents')).toBe('2');
+    expect(field('serverStartedOn')).toBe('Oct 2, 2026, 11:00:00 AM');
+    expect(field('vscodeClients')).toBe('3');
+    expect(field('otherClients')).toBe('2');
+    for (const element of otherClientsRow) expect(element.hidden).toBe(false);
     expect(field('autoUpdate')).toBe('Disabled');
     expect(view.page.getElementById('server-status')!.classList.contains('unhealthy')).toBe(true);
     expect(view.page.getElementById('server-status')!.classList.contains('healthy')).toBe(false);
@@ -144,6 +171,11 @@ describe('About page', () => {
     expect(view.page.getElementById('server-status')!.classList.contains('healthy')).toBe(true);
     expect(field('statusLabel')).toBe('System ready');
     expect(field('autoUpdate')).toBe('Enabled');
-    expect(field('installedOn')).toBe('Oct 1, 2026');
+    expect(field('installedOn')).toBe('Oct 1, 2026, 9:45:12 AM');
+    for (const element of otherClientsRow) expect(element.hidden).toBe(true);
+    update({ ...data, otherClients: 'Unknown' });
+    for (const element of otherClientsRow) expect(element.hidden).toBe(true);
+    update({ ...data, otherClients: '1' });
+    for (const element of otherClientsRow) expect(element.hidden).toBe(false);
   });
 });

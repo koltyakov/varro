@@ -252,7 +252,12 @@ describe('About command', () => {
       cliVersion: '1.18.4',
       activeAgentCount: 0,
       installMethod: 'bun',
-      cliInstalledAt: new Date(2026, 8, 30, 12).getTime(),
+      cliInstalledAt: new Date(2026, 8, 30, 12, 34, 56).getTime(),
+      connections: {
+        startedAt: new Date(2026, 8, 30, 12).getTime(),
+        vscodeClients: 1,
+        otherClients: 0,
+      },
     };
     const readServerInfo = vi.fn().mockResolvedValue(info);
     const { sidebar } = register('/repo', { readServerInfo });
@@ -260,14 +265,22 @@ describe('About command', () => {
     const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
     const receive = panel.webview.onDidReceiveMessage.mock.calls[0]![0];
     const html = panel.webview.html;
-    const installedOn = new Date(2026, 8, 30, 12).toLocaleDateString(undefined, {
+    const installedOn = new Date(2026, 8, 30, 12, 34, 56).toLocaleString(undefined, {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
     });
     const root = document.createElement('div');
     root.innerHTML = html;
     expect(root.querySelector('[data-about-field="installedOn"]')?.textContent).toBe(installedOn);
+    expect(root.querySelector('[data-about-field="vscodeClients"]')?.textContent).toBe('1');
+    expect(root.querySelector('[data-about-field="otherClients"]')?.textContent).toBe('0');
+    expect(root.querySelector('[data-about-field="serverStartedOn"]')?.textContent).not.toBe(
+      'Unknown'
+    );
     expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
       expect.stringContaining(`  - **Installed on:** ${installedOn} (CLI file creation date)`),
       'Varro About',
@@ -278,6 +291,11 @@ describe('About command', () => {
       activeAgentCount: 3,
       health: { healthy: false, version: '1.18.9' },
       cliInstalledAt: null,
+      connections: {
+        startedAt: new Date(2026, 9, 1, 10).getTime(),
+        vscodeClients: 2,
+        otherClients: 1,
+      },
     });
 
     await receive({ action: 'refresh' });
@@ -290,13 +308,15 @@ describe('About command', () => {
         healthy: false,
         serverVersion: '1.18.9',
         installedOn: 'Unknown',
+        vscodeClients: '2',
+        otherClients: '1',
       }),
     });
     expect(panel.webview.html).toBe(html);
     expect(sidebar.openMarkdownDocument).toHaveBeenCalledOnce();
     await receive({ action: 'copyDiagnostics' });
     expect(vscodeMock.env.clipboard.writeText).toHaveBeenLastCalledWith(
-      expect.stringContaining('  - **Active agents:** `3`')
+      expect.stringContaining('  - **Active sessions:** `3`')
     );
     await receive({ action: 'copyDiagnostics', includePaths: true });
     expect(vscodeMock.env.clipboard.writeText).toHaveBeenLastCalledWith(
@@ -466,7 +486,7 @@ describe('About command', () => {
     await runCommand('varro.about');
 
     expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
-      expect.stringContaining('  - **Active agents:** `1`'),
+      expect.stringContaining('  - **Active sessions:** `1`'),
       'Varro About',
       false
     );
@@ -484,7 +504,7 @@ describe('About command', () => {
       '- **CLI:**\n  - **Version:** `1.18.4`\n  - **Install method:** bun\n  - **Binary:** `/home/me/.bun/bin/opencode`'
     );
     expect(aboutMarkdown).toContain(
-      '- **Server:**\n  - **Version:** `1.18.4`\n  - **URL:** [http://127.0.0.1:4096](http://127.0.0.1:4096)\n  - **Ownership:** managed by Varro\n  - **Status:** `running, event stream unknown`\n  - **Health:** healthy\n  - **Active agents:** `1`\n- **Auto updates:** enabled'
+      '- **Server:**\n  - **Version:** `1.18.4`\n  - **URL:** [http://127.0.0.1:4096](http://127.0.0.1:4096)\n  - **Ownership:** managed by Varro\n  - **Status:** `running, event stream unknown`\n  - **Health:** healthy\n  - **Active sessions:** `1`\n  - **Started on:** Unknown\n  - **VS Code clients:** Unknown (local connected processes)\n  - **Other clients:** Unknown (local connected processes)\n- **Auto updates:** enabled'
     );
     expect(aboutMarkdown).not.toContain('## Diagnostics');
     expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
@@ -521,7 +541,7 @@ describe('About command', () => {
     expect(panel?.webview.html).toContain('System ready');
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining('  - **Active agents:** `1`'),
+        content: expect.stringContaining('  - **Active sessions:** `1`'),
       })
     );
     // The About report is the paste-ready hand-off for update bug reports.
