@@ -113,6 +113,44 @@ test('v2 maps preparation, prompts, status, pending input, fork and cleanup to n
   assert.ok(requests.every((r) => r.route === '/global/health' || r.route.startsWith('/api/')));
 });
 
+test('v2 transcript timing diagnostics use the console without a VS Code host', async (t) => {
+  const message = {
+    id: 'msg_fixture',
+    type: 'assistant',
+    agent: 'build',
+    model: { providerID: 'openai', id: 'fixture' },
+    time: { created: 1000, completed: 2000 },
+    finish: 'stop',
+    tokens: { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+    content: [{ type: 'text', text: 'Fixture reply' }],
+  };
+  const url = await serve(t, (request, response) => {
+    const route = new URL(request.url, 'http://localhost').pathname;
+    if (route === '/global/health') {
+      response.end(JSON.stringify({ healthy: true, version: '2.0.15' }));
+    } else if (route === '/api/session/ses_fixture/message') {
+      response.end(JSON.stringify({ data: [message] }));
+    } else if (route === '/api/session/ses_fixture/inbox') {
+      response.end(JSON.stringify({ data: [] }));
+    } else {
+      response.writeHead(404);
+      response.end('{}');
+    }
+  });
+  const warn = t.mock.method(console, 'warn', () => {});
+  const messages = await new AiOpenCodeClient(url, '/fixture').request(
+    'GET',
+    '/session/ses_fixture/message?limit=1000'
+  );
+  assert.equal(messages[0].info.id, message.id);
+  assert.equal(messages[0].parts[0].text, 'Fixture reply');
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(
+    warn.mock.calls[0].arguments[0],
+    /Could not restore OpenCode generation timing: 404 GET \/api\/experimental\/session\/ses_fixture\/log failed/
+  );
+});
+
 test('authentication failures and unknown versions cannot fall through to a different backend', async (t) => {
   const requests = [];
   const url = await serve(t, (request, response) => {
