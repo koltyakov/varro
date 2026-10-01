@@ -30,6 +30,7 @@ import type { OpenCodeRequestOptions } from './open-code-transport';
 import { OpenCodeResponseTooLargeError } from './opencode-response-error';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { OpenCodeV2BackgroundWork } from './opencode-v2-background-work';
+import { OpenCodeV2GenerationTiming } from './opencode-v2-generation-timing';
 import {
   projectV2Agent,
   projectV2Form,
@@ -218,10 +219,19 @@ export class OpenCodeV2Adapter {
   constructor(
     private readonly wire: WireRequest,
     private readonly annotations = new OpenCodeV2SessionState(),
-    private readonly openExternal: (url: string) => Promise<boolean> = async () => false
+    private readonly openExternal: (url: string) => Promise<boolean> = async () => false,
+    private readonly generationTiming = new OpenCodeV2GenerationTiming()
   ) {}
 
-  observe(type: string, data: UnknownRecord, eventID?: string, eventDirectory?: string): void {
+  observe(
+    type: string,
+    data: UnknownRecord,
+    eventID?: string,
+    eventDirectory?: string,
+    created?: unknown,
+    sequence?: unknown
+  ): void {
+    this.generationTiming.observe(type, data, created, sequence);
     this.backgroundWork.observe(type, data, eventDirectory);
     if (isString(data.sessionID)) {
       const context = { ...this.contexts.get(data.sessionID) };
@@ -263,6 +273,7 @@ export class OpenCodeV2Adapter {
   }
 
   reset(): void {
+    this.generationTiming.reset();
     this.backgroundWork.reset();
     this.permissions.clear();
     this.forms.clear();
@@ -278,6 +289,7 @@ export class OpenCodeV2Adapter {
       ...this.contexts.get(sessionID),
       backgroundPending: this.backgroundWork.isWaiting(sessionID),
       backgroundStartedAt: this.backgroundWork.startedAt(sessionID),
+      generationTiming: this.generationTiming,
     };
   }
 
@@ -561,6 +573,31 @@ export class OpenCodeV2Adapter {
       const sessionID = decodeURIComponent(sessionRoute[1]!);
       const endpoint = `/api/session/${encodeURIComponent(sessionID)}`;
       const action = sessionRoute[2] ?? '';
+      const restoreGenerationTiming = (messages: readonly SessionMessageInfo[]) =>
+        this.generationTiming.restore(
+          sessionID,
+          messages,
+          async (after) => {
+            const log = await this.wire(
+              'GET',
+              `/api/experimental/session/${encodeURIComponent(sessionID)}/log?follow=false&after=${after}`,
+              undefined,
+              {
+                unscoped: true,
+                maxResponseBytes: Math.min(
+                  options.maxResponseBytes ?? 2 * 1024 * 1024,
+                  2 * 1024 * 1024
+                ),
+                signal: options.signal
+                  ? AbortSignal.any([options.signal, AbortSignal.timeout(2000)])
+                  : AbortSignal.timeout(2000),
+              }
+            );
+            if (!isString(log)) throw new Error('Invalid OpenCode generation timing log response');
+            return log;
+          },
+          options.signal
+        );
       if (!action) {
         if (method === 'GET') return this.session(await data<SessionInfo>('GET', endpoint));
         if (method === 'DELETE') {
@@ -669,6 +706,7 @@ export class OpenCodeV2Adapter {
           }
         }
         const context = { ...this.contexts.get(sessionID) };
+        if (!options.stripMessageParts) await restoreGenerationTiming(ordered);
         const messages = ordered.flatMap((message) => {
           if (message.type === 'agent-switched') context.agent = message.agent;
           if (message.type === 'model-switched') context.model = message.model;
@@ -690,6 +728,7 @@ export class OpenCodeV2Adapter {
           if (projected.info.role === 'assistant' && parent)
             this.messageParents.set(message.id, parent);
           if (options.stripMessageParts) projected.parts = [];
+          else this.generationTiming.apply(projected);
           return [projected];
         });
         while (this.messageParents.size > 4096)
@@ -718,7 +757,8 @@ export class OpenCodeV2Adapter {
       }
       if (action.startsWith('message/') && method === 'GET') {
         const message = await data<SessionMessageInfo>('GET', `${endpoint}/${action}`);
-        return projectV2Message(
+        if (!options.stripMessageParts) await restoreGenerationTiming([message]);
+        const projected = projectV2Message(
           message,
           sessionID,
           directory,
@@ -726,6 +766,8 @@ export class OpenCodeV2Adapter {
           this.contexts.get(sessionID),
           options
         );
+        this.generationTiming.apply(projected);
+        return projected;
       }
       if (action.startsWith('message/') && method === 'DELETE') {
         const messageID = decodeURIComponent(action.slice('message/'.length));

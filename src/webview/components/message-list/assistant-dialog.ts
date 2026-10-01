@@ -277,14 +277,9 @@ export function getAssistantDialogSummaryMap(
  * These checks validate part intervals, not complete token-level measurement. Part or
  * chunk timestamps do not prove when each token was generated, whether events were
  * missed, or whether the interval contains other waits. The result remains an estimate.
- * OpenCode V2 saved text content currently has no generation timestamps, so ordinary
- * V2 text responses cannot qualify, even when reasoning or message timing is present.
- *
- * Before supporting live V2 TPS, require either a documented provider/server generation
- * metric or a complete recorded stream with explicit timing semantics. Stream timing
- * must cover all counted output and reasoning tokens, reject gaps/reconnects, and exclude
- * tool/user waits. Receiving some timestamped deltas is not proof of complete coverage;
- * chunk-based measurement must still be labeled as an estimate, not exact token TPS.
+ * V2 text snapshots omit timing. The adapter restores matching durable text/reasoning
+ * boundaries, including on reload. These are server-observed block intervals, not
+ * exact provider token timings; missing boundaries and tool-call responses stay excluded.
  */
 function getAssistantDialogTokensPerSecond(
   messages: readonly AssistantMessage[],

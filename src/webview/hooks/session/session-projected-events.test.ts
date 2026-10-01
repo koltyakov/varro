@@ -116,6 +116,32 @@ describe('projected event routing', () => {
 });
 
 describe('projected text events', () => {
+  it('preserves validated server-observed generation boundaries on text end', () => {
+    const harness = createHarness();
+    emit(harness, 'session.next.text.ended', {
+      textID: 'text-1',
+      text: 'Hello',
+      time: { start: 2000, end: 4000 },
+    });
+    expect(harness.messages[0]?.parts[0]).toMatchObject({ time: { start: 2000, end: 4000 } });
+  });
+
+  it.each([
+    undefined,
+    { start: 2000 },
+    { start: 4000, end: 2000 },
+    { start: Number.NaN, end: 4000 },
+  ])('does not synthesize missing or invalid generation timing %#', (time) => {
+    const harness = createHarness();
+    emit(harness, 'session.next.text.ended', {
+      textID: 'text-1',
+      text: 'Hello',
+      timestamp: 4000,
+      time,
+    });
+    const part = harness.messages[0]?.parts[0];
+    expect(part?.type === 'text' ? part.time : undefined).toBeUndefined();
+  });
   it('creates the text part on first delta and applies the delta to it', () => {
     const harness = createHarness();
 

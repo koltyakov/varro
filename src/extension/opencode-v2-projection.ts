@@ -12,6 +12,7 @@ import type {
 } from '@opencode/client';
 import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 import { formatSkillAttachment } from '../shared/skill-reference';
+import type { OpenCodeV2GenerationTiming } from './opencode-v2-generation-timing';
 
 export function v2PartId(messageID: string, type: string, ordinal: number): string {
   return `${messageID}:${type}:${ordinal}`;
@@ -217,6 +218,7 @@ export type V2MessageContext = {
   backgroundPending?: boolean;
   backgroundStartedAt?: number;
   error?: SessionStructuredError;
+  generationTiming?: OpenCodeV2GenerationTiming;
 };
 
 export function normalizeV2Error(value: unknown): SessionStructuredError | undefined {

@@ -617,7 +617,7 @@ function AssistantDialogSummary(props: {
                     {' '}
                     <span
                       class="assistant-dialog-summary-metric assistant-dialog-summary-tps"
-                      title="Estimated generation speed for timed text and reasoning responses. Excludes initial latency, tool calls, and subagents."
+                      title="Estimated generation speed from server-observed text and reasoning boundaries, not exact provider token timing. Excludes initial latency, tool-call responses, and subagents."
                     >
                       <UiIcon
                         source={dashboardDotsIcon}

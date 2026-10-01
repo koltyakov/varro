@@ -164,6 +164,10 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
       ...properties,
       textID: partID,
       reasoningID: partID,
+      time:
+        event.type.endsWith('.ended') && isString(data.text)
+          ? context.generationTiming?.time(sessionID, partID, data.text)
+          : undefined,
     });
   }
   if (event.type.startsWith('session.tool.')) {
