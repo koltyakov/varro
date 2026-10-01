@@ -7958,8 +7958,20 @@ export function MessageList() {
   );
 
   const presentationMessages = createMemo(() => {
-    const ids = trailingAssistantTurn()?.assistantMessageIds;
-    return compactActivityMessages().filter((message) => ids?.has(message.info.id));
+    const turn = trailingAssistantTurn();
+    let inTurn = false;
+    return compactActivityMessages().filter((message) => {
+      const isTurnAssistant = turn?.assistantMessageIds.has(message.info.id) ?? false;
+      if (message.info.id === turn?.userMessageId || isTurnAssistant) inTurn = true;
+      // Compaction paints outside assistant rows, but still ends preceding activity previews.
+      // Keep it in transcript order without replacing the real prompt's presentation identity.
+      return (
+        isTurnAssistant ||
+        (inTurn &&
+          message.info.role === 'user' &&
+          message.parts.some((part) => part.type === 'compaction'))
+      );
+    });
   });
   const presentationActivityGroups = createMemo(() =>
     getAssistantActivityGroupMap(presentationMessages(), canCompactActivityPart, (part) =>

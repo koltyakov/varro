@@ -484,7 +484,9 @@ Direct input acquires ownership only when it can affect the transcript:
   Subsequent standalone parts wait for preceding text to catch up so edits do not overtake prose.
 - Compaction-only user records paint dividers but do not replace the active prompt identity. Keep
   presentation and active-turn activity attached to the real prompt through compaction and continuation,
-  so already-visible assistant content never re-enters the streaming queue.
+  so already-visible assistant content never re-enters the streaming queue. Include their dividers as
+  ordered presentation boundaries so preceding completed previews, queued tools, and exits group
+  immediately and never replay below compaction.
 - Automatic user-role notices, including background command completion, also retain the real prompt
   identity. A metadata-only arrival cannot establish a new prompt before its content arrives. Switching
   to a notice and back when the next assistant arrives clears presentation, hides already-painted

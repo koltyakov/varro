@@ -77,6 +77,61 @@ function openChat(parts: Part[] = []) {
 }
 
 describe('streaming presentation handoff', () => {
+  it.each([
+    { boundary: 'text', delay: 600 },
+    { boundary: 'edit', delay: 600 },
+    { boundary: 'compaction', delay: 0 },
+    { boundary: 'compaction', delay: 600 },
+    { boundary: 'compaction', delay: 1_400 },
+  ])(
+    'groups the remaining burst immediately when $boundary arrives after $delay ms',
+    async ({ boundary, delay }) => {
+      openChat([completeSearch(searchPart())]);
+      const parts = Array.from({ length: 32 }, (_, index) =>
+        completeSearch({
+          ...searchPart(),
+          id: `search-${index}`,
+          callID: `search-call-${index}`,
+        })
+      );
+      batch(() => parts.forEach(upsertPart));
+      await vi.advanceTimersByTimeAsync(delay);
+      if (delay === 600) {
+        expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(2);
+      }
+
+      if (boundary === 'compaction') {
+        // Metadata can precede the divider part. It must not reset the active turn.
+        setMessagesIncremental([...state.messages, { info: userMessage('compaction'), parts: [] }]);
+        upsertPart({
+          id: 'compaction-part',
+          messageID: 'compaction',
+          sessionID: 'session-1',
+          type: 'compaction',
+          auto: true,
+          status: 'running',
+        });
+        expect(container?.textContent).toContain('Compacting context');
+      } else if (boundary === 'text') {
+        upsertPart({ ...textPart('answer-text', 'The queue is ready.'), messageID: 'answer' });
+      } else {
+        upsertPart({
+          ...toolPart('patch-streaming', 'answer', 'patch-call'),
+          tool: 'patch',
+          state: { status: 'pending', input: {}, raw: '' },
+        });
+      }
+
+      expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
+      expect(container?.textContent).toContain('Explored: 33 searches');
+      for (let frame = 0; frame < 200; frame += 1) {
+        await vi.advanceTimersByTimeAsync(16);
+        expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
+        expect(container?.textContent).toContain('Explored: 33 searches');
+      }
+    }
+  );
+
   it('groups queued siblings when their disclosure opens and never replays them on collapse', async () => {
     const parts = Array.from({ length: 3 }, (_, index) => ({
       ...searchPart(),
