@@ -13,6 +13,7 @@ type WindowsProcessDetails = {
 // neither load WMI providers nor confuse a reused PID with the original process.
 const INSPECTION_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -67,7 +68,10 @@ public static class VarroProcessInspection {
         try { hostSid = Owner(host); } finally { CloseHandle(host); }
       }
       uint code;
-      if (!GetExitCodeProcess(process, out code) || code != 259)
+      long verifiedCreated;
+      if (!GetProcessTimes(process, out verifiedCreated, out exited, out kernel, out user) ||
+          verifiedCreated != created || exited != 0 ||
+          !GetExitCodeProcess(process, out code) || code != 259)
         throw new InvalidOperationException("Process exited during inspection");
       // Existing leases use CIM's microsecond precision. Preserve their identity.
       long ticks = DateTime.FromFileTimeUtc(created).Ticks;
@@ -148,6 +152,7 @@ export class WindowsProcessInspector {
       this.pending.delete(id);
       if (!this.pending.size && this.worker === worker) {
         // stdin EOF also makes the helper exit when its extension host disappears.
+        if (this.idleTimer) clearTimeout(this.idleTimer);
         this.idleTimer = setTimeout(() => this.dispose(), 60_000);
         this.idleTimer.unref();
       }

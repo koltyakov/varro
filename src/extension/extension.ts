@@ -6,6 +6,7 @@ import { ContextProvider } from './context-provider';
 import { registerCommands } from './commands';
 import { logger } from './logger';
 import { readServerPortSetting, sweepStaleInjectedConfigDirectories } from './open-code-process';
+import { disposeProcessInspection } from './process-inspection';
 
 const DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS = 4096;
 const CONTEXT_RESCOPE_RETRY_MS = 50;
@@ -318,6 +319,7 @@ export async function deactivate() {
   await disposeSafe(() => sidebarProvider?.dispose(), 'sidebarProvider dispose');
   await disposeSafe(() => contextProvider?.dispose(), 'contextProvider dispose');
   await disposeSafe(() => server?.disconnect(), 'server disconnect');
+  disposeProcessInspection();
   server = null;
   contextProvider = null;
   sidebarProvider = null;

@@ -2,6 +2,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import packageJson from '../../package.json';
 
+const { disposeProcessInspectionMock } = vi.hoisted(() => ({
+  disposeProcessInspectionMock: vi.fn(),
+}));
+vi.mock('./process-inspection', () => ({
+  disposeProcessInspection: disposeProcessInspectionMock,
+}));
+
 type ConfigChangeEvent = { affectsConfiguration: (key: string) => boolean };
 type ConfigChangeListener = (event: ConfigChangeEvent) => void;
 
@@ -921,6 +928,7 @@ describe('extension activation', () => {
     expect(latestSidebarProviderInstance.current?.dispose).toHaveBeenCalledTimes(1);
     expect(latestContextProviderInstance.current?.dispose).toHaveBeenCalledTimes(1);
     expect(latestServerInstance.current?.disconnect).toHaveBeenCalledTimes(1);
+    expect(disposeProcessInspectionMock).toHaveBeenCalledOnce();
     expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:activated', false);
     expect(loggerMock.dispose).toHaveBeenCalledTimes(1);
   });

@@ -129,6 +129,49 @@ describe('Windows native process inspector', () => {
     await next;
   });
 
+  it('does not retain older idle timers after concurrent inspections settle', async () => {
+    vi.useFakeTimers();
+    const { inspector, children } = setup();
+    const first = inspector.read(1234);
+    const second = inspector.read(5678);
+    children[0]!.stdin.read();
+    for (const id of [1, 2]) {
+      children[0]!.stdout.write(
+        JSON.stringify({
+          id,
+          details: {
+            executable: 'C:\\OpenCode\\opencode.exe',
+            birthIdentity: 'win32:123',
+            listenerSid: 'S-1-5-21-1',
+            hostSid: 'S-1-5-21-1',
+          },
+        }) + '\n'
+      );
+    }
+    await Promise.all([first, second]);
+    await vi.advanceTimersByTimeAsync(59_000);
+    const next = inspector.read(1234);
+    respond(children[0]!);
+    await next;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(children[0]!.kill).not.toHaveBeenCalled();
+  });
+
+  it('decodes Unicode paths across fragmented UTF-8 responses', async () => {
+    const { inspector, children } = setup();
+    const inspection = inspector.read(1234);
+    children[0]!.stdin.read();
+    const executable = 'C:\\用户\\opencode.exe';
+    const bytes = Buffer.from(
+      JSON.stringify({
+        id: 1,
+        details: { executable, birthIdentity: 'win32:123', listenerSid: '', hostSid: '' },
+      }) + '\n'
+    );
+    for (const byte of bytes) children[0]!.stdout.write(Buffer.from([byte]));
+    await expect(inspection).resolves.toMatchObject({ executable });
+  });
+
   it.each([0, -1, 1.5, Number.NaN, 0x80000000])('rejects an invalid PID: %s', async (pid) => {
     const { inspector } = setup();
     await expect(inspector.read(pid)).rejects.toThrow('Invalid Windows process ID');

@@ -28,6 +28,10 @@ export const PROCESS_STOP_TIMEOUT_MS = 5000;
 const PROCESS_COMMAND_MAX_OUTPUT_CHARS = 1_000_000;
 const windowsInspector = new WindowsProcessInspector();
 
+export function disposeProcessInspection(): void {
+  windowsInspector.dispose();
+}
+
 export type LocalServerAccount = {
   kind: 'same-user' | 'different-user' | 'unknown';
   identity?: string;
