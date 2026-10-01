@@ -292,6 +292,7 @@ export function ModelsPanel() {
     agentName?: string;
     unset?: boolean;
   }) {
+    closeContextMenu();
     const updatesOpenCodeConfig = body.target === 'small_model' || body.target === 'agent';
     if (updatesOpenCodeConfig && !previousRouting()) setPreviousRouting(routing());
     setIsSaving(true);
@@ -305,7 +306,6 @@ export function ModelsPanel() {
       throw error;
     } finally {
       setIsSaving(false);
-      setContextMenu(null);
     }
   }
 

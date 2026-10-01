@@ -1753,6 +1753,6 @@ describe('v2 transcript and permission projection', () => {
     expect(JSON.parse(await readFile(join(directory, 'ses_local.json'), 'utf8'))).toMatchObject({
       metadata,
     });
-    await expect(state.read('../escape')).rejects.toThrow('Could not read');
+    await expect(state.read('../escape')).rejects.toThrow('Invalid OpenCode session ID');
   });
 });
