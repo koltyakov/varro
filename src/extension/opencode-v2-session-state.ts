@@ -106,11 +106,12 @@ export class OpenCodeV2SessionState {
         const code = asRecord(error)?.code;
         if (code === 'EPERM' && publishing) {
           // Windows reports an existing destination directory as EPERM on rename.
-          // Confirm that it is a readable lock, or has just been released.
+          // A lock being released can also temporarily deny directory scans.
+          // Retry that contention without treating an unreadable lock as empty.
           try {
             await readdir(lock);
           } catch (inspectionError) {
-            if (asRecord(inspectionError)?.code !== 'ENOENT') throw error;
+            if (!['ENOENT', 'EPERM'].includes(String(asRecord(inspectionError)?.code))) throw error;
           }
         } else if (!['EEXIST', 'ENOTEMPTY'].includes(String(code))) throw error;
         contentionError = error;
@@ -132,7 +133,9 @@ export class OpenCodeV2SessionState {
           }
         }
       } catch (error) {
-        if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(String(asRecord(error)?.code))) throw error;
+        const code = asRecord(error)?.code;
+        if (!['ENOENT', 'ENOTEMPTY', 'EEXIST', 'EPERM'].includes(String(code))) throw error;
+        if (code === 'EPERM') contentionError = error;
       }
       if (Date.now() >= deadline)
         throw new Error('Timed out waiting to update Varro session annotations', {

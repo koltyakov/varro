@@ -53,6 +53,8 @@ export function AttachmentStrip(props: {
   onRemoveNativePdf: (id: string) => void;
   onOpenFile?: (file: DroppedFile) => void;
   onPreviewImage?: (image: ClipboardImage) => void;
+  imageError?: (id: string) => string | undefined;
+  canPreviewImage?: (id: string) => boolean;
   canCompressImage?: (id: string) => boolean;
   imageCompressionHint?: (id: string) => string | undefined;
   onCompressImage?: (id: string, event: MouseEvent) => void;
@@ -189,18 +191,28 @@ export function AttachmentStrip(props: {
               <AttachmentChip
                 label={item.value.filename}
                 path={item.value.filename}
-                disabled={props.clipboardImagesNeedVision}
+                disabled={!!props.imageError?.(item.value.id) || props.clipboardImagesNeedVision}
                 icon="image"
                 title={
-                  props.clipboardImagesNeedVision
+                  props.imageError?.(item.value.id) ??
+                  (props.clipboardImagesNeedVision
                     ? `${item.value.filename} · Use a vision-capable model or vision subagent to send this image`
-                    : item.value.filename
+                    : item.value.filename)
                 }
                 onClick={
-                  props.onPreviewImage ? () => props.onPreviewImage?.(item.value) : undefined
+                  !props.imageError?.(item.value.id) &&
+                  props.canPreviewImage?.(item.value.id) !== false &&
+                  props.onPreviewImage
+                    ? () => props.onPreviewImage?.(item.value)
+                    : undefined
                 }
                 onRemove={() => props.onRemoveClipboardImage(item.value.id)}
-                previewImage={{ url: item.value.url, alt: item.value.filename }}
+                previewImage={
+                  props.imageError?.(item.value.id) ||
+                  props.canPreviewImage?.(item.value.id) === false
+                    ? undefined
+                    : { url: item.value.url, alt: item.value.filename }
+                }
                 compressionHint={props.imageCompressionHint?.(item.value.id)}
                 onCompress={
                   props.canCompressImage?.(item.value.id)

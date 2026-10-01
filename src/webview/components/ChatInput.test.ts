@@ -68,6 +68,7 @@ import { getMaterialChipIcon } from './MaterialChipIcon';
 import { getVisibleThreadMessages } from './message-list/thread-visibility';
 import { upsertMessageInfo } from '../lib/state-messages';
 import * as imageCompression from '../lib/image-compression';
+import * as imageLoading from '../lib/image-loading';
 
 interface SessionEventProperties extends UnknownRecord {
   sessionID: string;
@@ -191,8 +192,13 @@ let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
 const testDiffOverlayOwner = Symbol();
 let defaultBridgeSend: ((message: WebviewMessage) => void) | undefined;
+let restoreImageLoading: (() => void) | undefined;
 
 beforeEach(() => {
+  const imageLoad = vi
+    .spyOn(imageLoading, 'loadImage')
+    .mockResolvedValue(document.createElement('img'));
+  restoreImageLoading = () => imageLoad.mockRestore();
   container = document.createElement('div');
   document.body.appendChild(container);
   originalResizeObserver = globalThis.ResizeObserver;
@@ -217,6 +223,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  restoreImageLoading?.();
   vi.useRealTimers();
   cleanup?.();
   cleanup = undefined;
@@ -715,6 +722,207 @@ function availableProviderLimit(
 }
 
 describe('ChatInput', () => {
+  describe('broken image attachments', () => {
+    const broken = {
+      id: 'broken-image',
+      filename: 'Image 1',
+      mime: 'image/gif',
+      url: 'data:image/gif;base64,broken',
+      size: 100,
+    };
+
+    beforeEach(() => {
+      setupModelState();
+      setState('activeSessionId', 'session-1');
+      setState('clipboardImages', [{ ...broken }]);
+      vi.mocked(imageLoading.loadImage).mockRejectedValue(new Error('Could not decode the image'));
+    });
+
+    it('strikes through the attachment chip, exposes the decode reason, and prevents previews', async () => {
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      const chip = container!.querySelector<HTMLElement>('.chat-attachment-chip')!;
+      expect(chip.classList.contains('disabled')).toBe(true);
+      expect(chip.title).toBe('Could not decode the image');
+      expect(chip.getAttribute('role')).toBeNull();
+      chip.dispatchEvent(new MouseEvent('mouseenter'));
+      chip.click();
+      expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
+      expect(document.querySelector('.chat-image-preview-overlay')).toBeNull();
+      expect(container!.querySelector('.chat-send-button')?.classList).toContain('disabled');
+      chip.querySelector<HTMLButtonElement>('.chip-remove')!.click();
+      expect(state.clipboardImages).toEqual([]);
+    });
+
+    it.each([false, true])(
+      'disables inline broken chips and sends without the image or its placeholder (steering: %s)',
+      async (steering) => {
+        if (steering) setupMatchingActiveTurn();
+        setIsLoading(steering);
+        setInputText('Describe [Image 1]');
+        cleanup = render(() => ChatInput(), container!);
+        await flushAsyncWork();
+        const chip = container!.querySelector<HTMLElement>('.inline-chip')!;
+        expect(chip.classList.contains('disabled')).toBe(true);
+        expect(chip.title).toBe('Could not decode the image');
+        expect(chip.hasAttribute('data-preview-image')).toBe(false);
+        chip.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        chip.click();
+        expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
+        expect(document.querySelector('.chat-image-preview-overlay')).toBeNull();
+        container!
+          .querySelector('.rich-composer')!
+          .dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, metaKey: steering })
+          );
+        await flushAsyncWork();
+        expect(sendMessageMock).toHaveBeenCalledWith(
+          'Describe ',
+          expect.objectContaining({
+            queuedAttachments: expect.objectContaining({ clipboardImages: [] }),
+          })
+        );
+      }
+    );
+
+    it('excludes broken images and placeholders from inline edits', async () => {
+      setState('messages', [
+        {
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            role: 'user',
+            time: { created: 1 },
+            agent: 'build',
+            model: { providerID: 'openai', modelID: 'gpt-4o' },
+          },
+          parts: [],
+        },
+      ]);
+      cleanup = render(() => ChatInput(), container!);
+      startEditingMessage('message-1', 'session-1', 'Describe [Image 1]', {
+        files: [],
+        images: [{ ...broken }],
+        terminalSelection: null,
+      });
+      await flushAsyncWork();
+      container!
+        .querySelector('.rich-composer')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flushAsyncWork();
+      expect(editMessageMock).toHaveBeenCalledWith(
+        'message-1',
+        'Describe ',
+        expect.objectContaining({
+          queuedAttachments: expect.objectContaining({ clipboardImages: [] }),
+        })
+      );
+    });
+
+    it('ignores decode failures from replaced image content', async () => {
+      let rejectLoad: ((error: Error) => void) | undefined;
+      vi.mocked(imageLoading.loadImage).mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectLoad = reject;
+          })
+      );
+      setInputText('[Image 1]');
+      cleanup = render(() => ChatInput(), container!);
+      const chip = container!.querySelector<HTMLElement>('.inline-chip')!;
+      expect(chip.hasAttribute('data-preview-image')).toBe(false);
+      chip.click();
+      expect(document.querySelector('.chat-image-preview-overlay')).toBeNull();
+      vi.mocked(imageLoading.loadImage).mockResolvedValue(document.createElement('img'));
+      setState('clipboardImages', 0, 'url', 'data:image/gif;base64,repaired');
+      await flushAsyncWork();
+      rejectLoad?.(new Error('Could not decode the old image'));
+      await flushAsyncWork();
+      expect(container!.querySelector('.inline-chip.disabled')).toBeNull();
+      expect(container!.querySelector('.inline-chip[data-preview-image]')).not.toBeNull();
+    });
+
+    it('does not send an image-only broken draft', async () => {
+      setInputText('[Image 1]');
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      container!
+        .querySelector('.rich-composer')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flushAsyncWork();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(inputText()).toBe('[Image 1]');
+    });
+
+    it('omits broken images from queued messages while retaining valid images', async () => {
+      const valid = {
+        ...broken,
+        id: 'valid-image',
+        filename: 'Image 2',
+        url: 'data:image/gif;base64,valid',
+      };
+      setState('clipboardImages', [{ ...broken }, valid]);
+      vi.mocked(imageLoading.loadImage).mockImplementation(async (url) => {
+        if (url === broken.url) throw new Error('Could not decode the image');
+        return document.createElement('img');
+      });
+      setState('sessionStatus', 'session-1', { type: 'busy' });
+      setInputText('Describe [Image 1] [Image 2]');
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      container!
+        .querySelector('.rich-composer')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flushAsyncWork();
+      expect(state.queuedMessages[0]?.text).toBe('Describe [Image 2]');
+      expect(state.queuedMessages[0]?.clipboardImages).toEqual([
+        expect.objectContaining({ id: valid.id }),
+      ]);
+    });
+
+    it('checks images before sending and clears the failure when their content changes', async () => {
+      let rejectLoad: ((error: Error) => void) | undefined;
+      vi.mocked(imageLoading.loadImage).mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectLoad = reject;
+          })
+      );
+      setInputText('Describe [Image 1]');
+      cleanup = render(() => ChatInput(), container!);
+      container!
+        .querySelector('.rich-composer')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      rejectLoad?.(new Error('Timed out decoding the image'));
+      await flushAsyncWork();
+      expect(container!.querySelector<HTMLElement>('.inline-chip')!.title).toBe(
+        'Timed out decoding the image'
+      );
+      vi.mocked(imageLoading.loadImage).mockResolvedValue(document.createElement('img'));
+      setState('clipboardImages', 0, 'url', 'data:image/gif;base64,repaired');
+      await flushAsyncWork();
+      expect(container!.querySelector('.inline-chip.disabled')).toBeNull();
+      expect(container!.querySelector('.inline-chip[data-preview-image]')).not.toBeNull();
+    });
+
+    it('does not store a broken image for vision delegation', async () => {
+      setupVisionDelegationModelState();
+      setInputText('@vision Describe [Image 1]');
+      const posted = vi.fn();
+      fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+        posted;
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      expect(posted.mock.calls.some(([message]) => message.type === 'images/store')).toBe(false);
+      container!
+        .querySelector('.rich-composer')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flushAsyncWork();
+      expect(sendMessageMock).toHaveBeenCalled();
+    });
+  });
+
   describe('image compression', () => {
     const original = {
       id: 'compress-one',
@@ -849,6 +1057,7 @@ describe('ChatInput', () => {
         .querySelector('.inline-chip[data-chip-type="image"]')!
         .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       document.querySelector<HTMLButtonElement>('.image-compression-menu button')!.click();
+      await flushAsyncWork();
       expect(posted).toHaveBeenCalledWith(expect.objectContaining({ type: 'images/store' }));
       container!
         .querySelector('.rich-composer')!
@@ -3990,7 +4199,7 @@ describe('ChatInput', () => {
     });
   });
 
-  it('queues busy composer attachments and clears them from the input', () => {
+  it('queues busy composer attachments and clears them from the input', async () => {
     setupModelState();
     setInputText('Follow up with context');
     setIsLoading(true);
@@ -4003,6 +4212,7 @@ describe('ChatInput', () => {
     setState('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
 
     cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
 
     const queueButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Add to queue (Enter)"]'
@@ -9642,6 +9852,7 @@ describe('ChatInput', () => {
       });
       setInputText('Review these attachments');
       cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
       const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
       expect(container!.querySelectorAll('.chat-attachment-chip')).toHaveLength(2);
       container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();

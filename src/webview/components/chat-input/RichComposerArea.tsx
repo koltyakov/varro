@@ -809,6 +809,8 @@ export function RichComposerArea(props: {
           chip.detail,
           chip.icon,
           chip.disabled,
+          chip.previewImage?.url,
+          chip.previewImage?.alt,
           chip.textMarker,
           chip.severity,
           chip.problemDetails,

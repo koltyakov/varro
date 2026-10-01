@@ -76,6 +76,12 @@ the same session's annotations concurrently; a newer client cannot stop an old
 binary from ignoring a lock. Do not delete live locks or split production state
 by editor to hide this limitation.
 
+Windows can temporarily return `EPERM` when scanning a lock directory during
+release. Annotation writers retry that contention within the existing ten-second
+acquisition deadline and honor cancellation. An unreadable lock is never treated
+as empty or as evidence that its owner is dead; persistent errors remain the
+timeout's cause.
+
 ## Process identity and recovery
 
 A lease records the listening PID, executable, process start identity, a server

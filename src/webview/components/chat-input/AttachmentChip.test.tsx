@@ -20,6 +20,31 @@ afterEach(() => {
 });
 
 describe('AttachmentChip', () => {
+  it('shows a failure reason when a previously valid image becomes broken', () => {
+    const [error, setError] = createSignal<string>();
+    cleanup = render(
+      () => (
+        <AttachmentChip
+          label="Image 1"
+          icon="image"
+          title={error() ?? 'Image 1'}
+          disabled={!!error()}
+          previewImage={error() ? undefined : { url: 'blob:image', alt: 'Image 1' }}
+        />
+      ),
+      container
+    );
+    const chip = container.querySelector<HTMLElement>('.chat-attachment-chip')!;
+    chip.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(document.querySelector('.chat-attachment-image-preview')).not.toBeNull();
+    setError('Could not decode the image');
+    expect(chip.title).toBe('Could not decode the image');
+    expect(chip.classList.contains('disabled')).toBe(true);
+    expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
+    chip.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
+  });
+
   it('shows a non-interactive large-image warning and opens compression only on right click', () => {
     const onClick = vi.fn();
     const onCompress = vi.fn();
