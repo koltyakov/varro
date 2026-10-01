@@ -6,6 +6,8 @@ import { resolveOpenCodeDataDirectory } from '../shared/opencode-data-directory'
 import type { ContextCharacterCounts } from '../shared/context-breakdown';
 import { asRecord } from '../shared/type-utils';
 import type { OpenCodeApiVersion } from './opencode-connection';
+import type { OpenCodeV2SessionState } from './opencode-v2-session-state';
+import { logger } from './logger';
 
 const LOCAL_SESSION_SUMMARY_TIMEOUT_MS = 2_000;
 const LOCAL_SESSION_SUMMARY_MAX_SESSIONS = 10_000;
@@ -16,6 +18,7 @@ const LOCAL_SESSION_SUMMARY_MAX_DATA_BYTES = 128 * 1024 * 1024;
 
 export type LocalSessionSummaryData = {
   messages: unknown[];
+  metadata?: unknown;
   contextCharacters?: ContextCharacterCounts;
   contextInputTokens?: number;
   descendants: Array<{
@@ -30,11 +33,21 @@ export type LocalSessionSummaryData = {
 export async function readLocalSessionSummary(
   sessionID: string,
   databasePath = process.env.OPENCODE_DB ?? join(resolveOpenCodeDataDirectory(), 'opencode.db'),
-  apiVersion: OpenCodeApiVersion = 1
+  apiVersion: OpenCodeApiVersion = 1,
+  annotations?: OpenCodeV2SessionState
 ): Promise<LocalSessionSummaryData | null> {
-  if (!existsSync(databasePath)) return null;
+  const fallback = (reason: string) =>
+    logger.warn(`Local session summary unavailable for ${sessionID}; using API: ${reason}`, {
+      databasePath,
+      nodeVersion: process.version,
+      platform: process.platform,
+    });
+  if (!existsSync(databasePath)) {
+    fallback('Database file not found');
+    return null;
+  }
 
-  return new Promise((resolve) => {
+  const result = await new Promise<LocalSessionSummaryData | null>((resolve) => {
     const worker = new Worker(LOCAL_SESSION_SUMMARY_WORKER, {
       eval: true,
       workerData: {
@@ -49,23 +62,46 @@ export async function readLocalSessionSummary(
       },
     });
     let settled = false;
-    const finish = (result: LocalSessionSummaryData | null) => {
+    const finish = (summary: LocalSessionSummaryData | null, reason?: string) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      if (reason) fallback(reason);
       void worker
         .terminate()
         .catch(() => 0)
-        .then(() => resolve(result));
+        .then(() => resolve(summary));
     };
-    const timeout = setTimeout(() => finish(null), LOCAL_SESSION_SUMMARY_TIMEOUT_MS);
+    const timeout = setTimeout(
+      () => finish(null, 'Database worker timed out after 2 seconds'),
+      LOCAL_SESSION_SUMMARY_TIMEOUT_MS
+    );
 
-    worker.once('message', (value: unknown) => finish(normalizeLocalSessionSummary(value)));
-    worker.once('error', () => finish(null));
+    worker.once('message', (value: unknown) => {
+      const summary = normalizeLocalSessionSummary(value);
+      const reason = asRecord(value)?.fallbackReason;
+      finish(
+        summary,
+        summary
+          ? undefined
+          : typeof reason === 'string'
+            ? reason
+            : 'Worker returned an invalid summary'
+      );
+    });
+    worker.once('error', (error) =>
+      finish(null, error instanceof Error ? error.message : String(error))
+    );
     worker.once('exit', (code) => {
-      if (code !== 0) finish(null);
+      finish(null, `Worker exited without a summary with code ${code}`);
     });
   });
+  if (result && apiVersion === 2 && annotations) {
+    const local = await annotations.read(sessionID);
+    // Match the v2 adapter's metadata override, rather than merging removed pause entries back in.
+    if (Object.hasOwn(local, 'metadata')) result.metadata = local.metadata;
+  }
+  return result;
 }
 
 function normalizeLocalSessionSummary(value: unknown): LocalSessionSummaryData | null {
@@ -93,6 +129,7 @@ function normalizeLocalSessionSummary(value: unknown): LocalSessionSummaryData |
     messages: record.messages,
     descendants,
   };
+  if (record.metadata !== undefined) result.metadata = record.metadata;
   const characters = normalizeContextCharacterCounts(record.contextCharacters);
   const inputTokens = normalizeNonnegativeNumber(record.contextInputTokens);
   if (characters) result.contextCharacters = characters;
@@ -247,17 +284,26 @@ const readV2 = (database) => {
   if (!Object.entries(required).every(([table, columns]) => {
     const found = new Set(database.prepare('PRAGMA table_info(' + table + ')').all().map((row) => row.name));
     return columns.every((column) => found.has(column));
-  })) return null;
+  })) return { fallbackReason: 'Unsupported OpenCode v2 database schema' };
+  const hasMetadata = database.prepare('PRAGMA table_info(session_v2)').all().some((row) => row.name === 'metadata');
   const sessions = database.prepare(
     'WITH RECURSIVE tree(id) AS (SELECT id FROM session_v2 WHERE id = ?' +
     ' UNION SELECT s.id FROM session_v2 s JOIN tree ON s.parent_id = tree.id)' +
     ' SELECT s.id,s.fork_session_id,s.revert,s.tokens_input,s.tokens_output,s.tokens_reasoning,' +
     ' s.tokens_cache_read,s.tokens_cache_write FROM session_v2 s JOIN tree ON s.id = tree.id LIMIT ?'
   ).all(workerData.sessionID, workerData.maxSessions + 1);
-  if (!sessions.length || sessions.length > workerData.maxSessions) return null;
+  if (!sessions.length) return { fallbackReason: 'Session not found in the local v2 database' };
+  if (sessions.length > workerData.maxSessions) return { fallbackReason: 'Local session exceeds the session limit' };
   // Forks inherit earlier messages; staged reverts alter visible history. Let the API
   // resolve those boundaries rather than returning a partial or stale local summary.
-  if (sessions.some((session) => session.fork_session_id || session.revert)) return null;
+  if (sessions.some((session) => session.fork_session_id || session.revert)) {
+    return { fallbackReason: 'OpenCode v2 fork or revert history requires the API' };
+  }
+  // Only the root's pause metadata is used; do not materialize metadata for the entire descendant tree.
+  const metadataJSON = hasMetadata
+    ? database.prepare('SELECT metadata FROM session_v2 WHERE id = ?').get(workerData.sessionID).metadata
+    : null;
+  const metadata = metadataJSON === null ? undefined : parseData({ data: metadataJSON });
   const sessionIDs = sessions.map((session) => session.id);
   const messagesBySession = new Map(sessionIDs.map((id) => [id, []]));
   const contexts = new Map(sessionIDs.map((id) => [id, contextCharacters()]));
@@ -268,7 +314,7 @@ const readV2 = (database) => {
     sessionIDs.map(() => '?').join(',') + ') ORDER BY session_id,seq LIMIT ?'
   ).iterate(...sessionIDs, workerData.maxMessages + 1);
   let count = 0;
-  let bytes = 0;
+  let bytes = typeof metadataJSON === 'string' ? Buffer.byteLength(metadataJSON) : 0;
   let parts = 0;
   for (const row of rows) {
     if (++count > workerData.maxMessages) throw new Error('Local session exceeds the message limit');
@@ -322,6 +368,7 @@ const readV2 = (database) => {
   }
   return {
     messages: messagesBySession.get(workerData.sessionID),
+    metadata,
     contextCharacters: contexts.get(workerData.sessionID),
     contextInputTokens: inputTokens.get(workerData.sessionID),
     descendants: sessions.filter((session) => session.id !== workerData.sessionID).map((session) => ({
@@ -344,7 +391,7 @@ try {
     if (workerData.apiVersion === 2) {
       parentPort.postMessage(readV2(database));
     } else if (!hasSchema(database)) {
-      parentPort.postMessage(null);
+      parentPort.postMessage({ fallbackReason: 'Unsupported OpenCode v1 database schema' });
     } else {
       const sessions = database.prepare(
         tree +
@@ -354,7 +401,9 @@ try {
           ' FROM session JOIN tree ON session.id = tree.id LIMIT ?'
       ).all(workerData.sessionID, workerData.maxSessions + 1);
       if (sessions.length === 0 || sessions.length > workerData.maxSessions) {
-        parentPort.postMessage(null);
+        parentPort.postMessage({ fallbackReason: sessions.length === 0
+          ? 'Session not found in the local v1 database'
+          : 'Local session exceeds the session limit' });
       } else {
         // CTE joins make SQLite scan the machine-wide message and part tables despite their session indexes.
         const sessionIDs = sessions.map((session) => session.id);
@@ -447,7 +496,7 @@ try {
   } finally {
     database.close();
   }
-} catch {
-  parentPort.postMessage(null);
+} catch (error) {
+  parentPort.postMessage({ fallbackReason: error instanceof Error ? error.message : String(error) });
 }
 `;

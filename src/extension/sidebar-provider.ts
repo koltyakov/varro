@@ -100,6 +100,7 @@ import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
 import { StreamingTextCache } from './streaming-text-cache';
 import { readLocalSessionSummary } from './local-session-summary';
+import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { logger } from './logger';
 import { openCodeApiVersion } from './opencode-connection';
 import { MessageRouter } from './message-router';
@@ -670,7 +671,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       readLocalSessionSummary: (sessionId) =>
         this.server.isAttachOnly
           ? Promise.resolve(null)
-          : readLocalSessionSummary(sessionId, undefined, this.server.apiVersion),
+          : readLocalSessionSummary(
+              sessionId,
+              undefined,
+              this.server.apiVersion,
+              new OpenCodeV2SessionState()
+            ),
       simulateNoProviders: this.simulateNoProviders,
       getRequestGeneration: () => webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),

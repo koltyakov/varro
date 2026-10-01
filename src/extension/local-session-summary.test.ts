@@ -1,14 +1,20 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readLocalSessionSummary } from './local-session-summary';
 import { sessionSummary } from './session-summary';
+import { OpenCodeV2SessionState } from './opencode-v2-session-state';
+import { logger } from './logger';
+
+// oxlint-disable-next-line anti-slop/no-module-mocking -- SQLite worker diagnostics must not create a real VS Code output channel in unit tests.
+vi.mock('./logger', () => ({ logger: { warn: vi.fn() } }));
 
 const temporaryDirectories: string[] = [];
 
 afterEach(() => {
+  vi.clearAllMocks();
   vi.unstubAllEnvs();
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -84,6 +90,10 @@ describe(
       database.close();
 
       await expect(readLocalSessionSummary('root', databasePath)).resolves.toBeNull();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Unsupported OpenCode v1 database schema'),
+        expect.objectContaining({ databasePath, platform: process.platform })
+      );
     });
 
     it('reads native v2 summaries without mixing legacy histories or modifying the database', async () => {
@@ -185,6 +195,87 @@ describe(
       expect((await readLocalSessionSummary('root', databasePath, 1))?.messages).toMatchObject([
         { info: { id: 'legacy' } },
       ]);
+    });
+
+    it.each([undefined, 6_000, null])(
+      'reads native v2 pause metadata with annotation override %s without changing source rows',
+      async (pausedAt) => {
+        const databasePath = createV2Database();
+        const database = new DatabaseSync(databasePath);
+        database
+          .prepare('INSERT INTO session_v2 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run('root', null, 0, 0, 0, 0, 0, null, null);
+        database.exec('ALTER TABLE session_v2 ADD COLUMN metadata TEXT');
+        const metadata = { varro: { pauses: [{ messageId: 'paused', pausedAt: 11_000 }] } };
+        database.prepare('UPDATE session_v2 SET metadata = ?').run(JSON.stringify(metadata));
+        const insert = database.prepare('INSERT INTO session_message VALUES (?, ?, ?, ?, ?)');
+        insert.run(
+          'prompt',
+          'root',
+          'user',
+          1,
+          JSON.stringify({ time: { created: 1_000 }, text: 'Do work' })
+        );
+        insert.run(
+          'paused',
+          'root',
+          'assistant',
+          2,
+          JSON.stringify({ time: { created: 2_000 }, content: [] })
+        );
+        const before = database.prepare('SELECT * FROM session_v2').all();
+        database.close();
+        const annotations = new OpenCodeV2SessionState(join(dirname(databasePath), 'annotations'));
+        const expectedMetadata =
+          pausedAt === undefined
+            ? metadata
+            : pausedAt === null
+              ? {}
+              : { varro: { pauses: [{ messageId: 'paused', pausedAt }] } };
+        if (pausedAt !== undefined)
+          await annotations.update('root', { metadata: expectedMetadata });
+        else await annotations.update('root', { parentID: 'unrelated-annotation' });
+
+        const local = await readLocalSessionSummary('root', databasePath, 2, annotations);
+        expect(local?.metadata).toEqual(expectedMetadata);
+        const summary = sessionSummary.fromLocal(local!, local?.metadata);
+        expect(summary).toMatchObject(
+          pausedAt === null
+            ? { durationMs: 0, activeStartedAt: 1_000 }
+            : { durationMs: (pausedAt ?? 11_000) - 1_000, activeStartedAt: null }
+        );
+        const unchanged = new DatabaseSync(databasePath, { readOnly: true });
+        expect(unchanged.prepare('SELECT * FROM session_v2').all()).toEqual(before);
+        unchanged.close();
+      }
+    );
+
+    it('logs SQLite parsing failures instead of silently falling back', async () => {
+      const databasePath = createDatabase();
+      const database = new DatabaseSync(databasePath);
+      database
+        .prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run('root', null, 0, 0, 0, 0, 0);
+      database
+        .prepare('INSERT INTO message VALUES (?, ?, ?, ?)')
+        .run('invalid', 'root', 1, '{invalid');
+      database.close();
+      await expect(readLocalSessionSummary('root', databasePath)).resolves.toBeNull();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('using API:'),
+        expect.objectContaining({ databasePath, nodeVersion: process.version })
+      );
+    });
+
+    it('logs the missing database path', async () => {
+      const directory = mkdtempSync(join(tmpdir(), 'varro-session-summary-'));
+      temporaryDirectories.push(directory);
+      const databasePath = join(directory, 'missing.db');
+      await expect(readLocalSessionSummary('root', databasePath)).resolves.toBeNull();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Database file not found'),
+        expect.objectContaining({ databasePath })
+      );
     });
 
     it.each(['fork_session_id', 'revert'])(

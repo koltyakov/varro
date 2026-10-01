@@ -13,6 +13,13 @@ V2 is recommended for new installations; v1 remains supported. See the [usage gu
 - `opencode-v2-session-state.ts` persists Varro-owned metadata and timestamp overrides across the supported v2 range. Native metadata updates are available from 2.0.15, but Varro still uses local annotations under the user's XDG state directory in `varro/opencode-v2/`.
 - Native v2 agent and permission configuration keys are preserved when Varro edits a file already using them. V1-format files retain their format.
 
+Session-info statistics try the local SQLite database before fetching API histories.
+For native v2 sessions, pause metadata comes from the same read-only snapshot and
+Varro's local annotations, without a mandatory session-header API request. The
+session catalog still comes from the API. `Varro: Show Output` reports each summary's
+source and database fallback reasons, including missing paths, unsupported schemas,
+worker errors/timeouts, and fork/revert histories that require API resolution.
+
 Annotation updates and deletions share a per-session queue within each store instance. A failed
 update does not block later deletion. Cancelled updates check their signal before reading, after
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write

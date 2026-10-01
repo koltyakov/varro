@@ -2741,21 +2741,23 @@ export class RestProxy {
   }
 
   private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {
-    const metadata =
-      this.callbacks.server.apiVersion === 2
-        ? asRecord(await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`))
-            ?.metadata
-        : undefined;
     let local: LocalSessionSummaryData | null | undefined;
     try {
       local = await this.callbacks.readLocalSessionSummary?.(sessionID);
-    } catch {
+    } catch (error) {
       local = null;
+      logger.warn(
+        `Local session summary failed for ${sessionID}; using API: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
-    if (local?.messages.length) return sessionSummary.fromLocal(local, metadata);
+    if (local?.messages.length) {
+      logger.info(`Session summary source for ${sessionID}: local database`);
+      return sessionSummary.fromLocal(local, local.metadata);
+    }
 
     const encodedSessionID = encodeURIComponent(sessionID);
-    const [diffs, messages, sessions] = await Promise.all([
+    logger.info(`Session summary source for ${sessionID}: API fallback`);
+    const [diffs, messages, sessions, session] = await Promise.all([
       this.requestServer('GET', `/session/${encodedSessionID}/diff`).catch((error: unknown) => {
         // Snapshot objects can disappear while the session's messages remain readable.
         logger.warn(
@@ -2765,6 +2767,9 @@ export class RestProxy {
       }),
       this.requestSessionMessagesForSummary(`/session/${encodedSessionID}/message`),
       this.readSessionListForSummary(),
+      this.callbacks.server.apiVersion === 2
+        ? this.requestServer('GET', `/session/${encodedSessionID}`)
+        : undefined,
     ]);
     const descendants = collectDescendantSessions(sessions, sessionID);
     return sessionSummary.fromRemote(
@@ -2777,7 +2782,7 @@ export class RestProxy {
             this.requestServer('GET', `/session/${encodeURIComponent(descendant.id)}/message`)
           )
         ),
-      metadata
+      asRecord(session)?.metadata
     );
   }
 
