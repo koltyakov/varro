@@ -4,9 +4,16 @@ import type * as FsPromises from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
+import * as os from 'os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { asRecord } from '../shared/type-utils';
+
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof os>();
+  const homedir = vi.fn(actual.homedir);
+  return { ...actual, default: { ...actual, homedir }, homedir };
+});
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof FsPromises>();
@@ -69,7 +76,10 @@ describe('OpenCodeV2SessionState', () => {
     vi.stubEnv('VARRO_TEST_STATE_ROOT', undefined);
     vi.stubEnv('VARRO_TEST_SERVER_URL', undefined);
     vi.stubEnv('XDG_STATE_HOME', join(directory, 'normal-editor'));
+    vi.stubEnv('LOCALAPPDATA', join(directory, 'normal-editor-appdata'));
+    vi.mocked(os.homedir).mockReturnValue(join(directory, 'normal-editor-home'));
     const normal = new OpenCodeV2SessionState();
+    expect(normal.directory.startsWith(directory)).toBe(true);
     const entered = deferred();
     const resume = deferred();
     const read = normal.read.bind(normal);

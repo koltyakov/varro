@@ -75,6 +75,7 @@ import {
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
 import { runWindowsCliUpdate } from './util/windows-cli-update';
 import { getVarroTestStateDirectory } from './varro-test-state';
+import { getVarroStateDirectory } from './varro-state-paths';
 
 const CLI_OUTPUT_MAX_CHARS = 1024 * 1024;
 const CLI_OUTPUT_TRUNCATED_MARKER = '[earlier output truncated]\n';
@@ -393,13 +394,7 @@ async function readJsonFile<T>(
 }
 
 function getManagedServerOwnershipDirectory() {
-  const testDirectory = getVarroTestStateDirectory('servers');
-  if (testDirectory) return testDirectory;
-  return process.platform === 'win32'
-    ? join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Varro', 'servers')
-    : process.platform === 'darwin'
-      ? join(homedir(), 'Library', 'Application Support', 'Varro', 'servers')
-      : join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'varro', 'servers');
+  return getVarroStateDirectory('servers');
 }
 
 function getManagedServerOwnershipLeasePath(port: number) {

@@ -2,11 +2,15 @@
 import { createHash, randomUUID } from 'crypto';
 import { constants } from 'fs';
 import * as fs from 'fs/promises';
-import { homedir } from 'os';
 import { join } from 'path';
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
 import { ProviderQuotaIdentityChanged } from './provider-limits/types';
+import {
+  getLegacyVarroStateDirectory,
+  getVarroStateDirectory,
+  prepareVarroStateDirectory,
+} from './varro-state-paths';
 
 const STALE_MS = 15 * 60_000;
 const MAX_BACKOFF_MS = 60 * 60_000;
@@ -76,7 +80,25 @@ export class ProviderQuotaCoordinator {
   private observationTimer: ReturnType<typeof setTimeout> | undefined;
   private reconciling = false;
 
-  constructor(private readonly root = join(homedir(), '.varro-provider-quota-v2')) {}
+  private readonly root: string;
+  private readonly legacyDirectory: string | undefined;
+  private prepared: Promise<string> | undefined;
+
+  constructor(root?: string) {
+    this.root = root ?? getVarroStateDirectory('provider-quota-v2');
+    this.legacyDirectory =
+      root === undefined ? getLegacyVarroStateDirectory('provider-quota-v2') : undefined;
+  }
+
+  private prepare(): Promise<string> {
+    this.prepared ??= prepareVarroStateDirectory(this.root, this.legacyDirectory).catch(
+      (error: unknown) => {
+        this.prepared = undefined;
+        throw error;
+      }
+    );
+    return this.prepared;
+  }
 
   observe(
     owner: symbol,
@@ -135,7 +157,7 @@ export class ProviderQuotaCoordinator {
         continue;
       }
       try {
-        await validateDirectory(this.root);
+        await validateDirectory(await this.prepare());
         await validateDirectory(observation.directory);
         const snapshot = await readSnapshot(join(observation.directory, 'snapshot.json'));
         if (!snapshot || snapshot.checkedAt < observation.checkedAt) continue;
@@ -173,7 +195,7 @@ export class ProviderQuotaCoordinator {
     try {
       // POSIX modes cannot establish private Windows ACLs. Fetch without disk sharing.
       if (process.platform === 'win32') return (await pollOnce()) ?? failure();
-      await privateDirectory(this.root);
+      await privateDirectory(await this.prepare());
       const directory = join(this.root, key);
       await privateDirectory(directory);
       const snapshotPath = join(directory, 'snapshot.json');

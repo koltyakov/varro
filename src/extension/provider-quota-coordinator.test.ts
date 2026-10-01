@@ -12,6 +12,7 @@ import { ProviderLimitService } from './provider-limit-service';
 import { ProviderQuotaCoordinator } from './provider-quota-coordinator';
 import { createAnthropicAdapter } from './provider-limits/adapters/anthropic';
 import type { OpenCodeServer } from './server';
+import { getVarroStateDirectory } from './varro-state-paths';
 
 const auth = vi.hoisted(() => ({ path: '', home: '' }));
 vi.mock('os', async () => ({
@@ -79,14 +80,37 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
     root = await fs.mkdtemp(join(tmpdir(), 'varro-quota-'));
     auth.path = join(root, 'absent-auth.json');
     auth.home = root;
+    vi.stubEnv('VARRO_TEST_STATE_ROOT', join(root, 'varro-state'));
     now = Date.now();
     vi.spyOn(Date, 'now').mockImplementation(() => now);
   });
   afterEach(async () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.useRealTimers();
     await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('retains legacy quota snapshots and cooldowns behind the native compatibility path', async () => {
+    vi.stubEnv('VARRO_TEST_STATE_ROOT', undefined);
+    vi.stubEnv('XDG_STATE_HOME', join(root, 'xdg-state'));
+    const legacy = join(root, '.varro-provider-quota-v2');
+    await fs.mkdir(legacy, { mode: 0o700 });
+    const oldCoordinator = new ProviderQuotaCoordinator(legacy);
+    const poll = vi.fn(async () => available());
+    await oldCoordinator.get('same-secret', null, poll);
+    const nativeCoordinator = new ProviderQuotaCoordinator();
+    const status = await nativeCoordinator.get('same-secret', null, poll);
+    expect(status.status).toBe('available');
+    expect(poll).toHaveBeenCalledOnce();
+    expect(await fs.realpath(getVarroStateDirectory('provider-quota-v2'))).toBe(
+      await fs.realpath(legacy)
+    );
+    now += 31_000;
+    await nativeCoordinator.get('same-secret', null, poll);
+    await oldCoordinator.get('same-secret', null, poll);
+    expect(poll).toHaveBeenCalledTimes(2);
   });
 
   it('single-flights two independent services across models and reads the latest shared snapshot', async () => {

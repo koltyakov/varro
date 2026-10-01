@@ -9,7 +9,7 @@ import { asRecord } from '../shared/type-utils';
 import { pauseCompletedAt, readSessionPauses } from '../shared/session-pauses';
 import type { SessionPauseBoundary } from '../shared/session-pauses';
 import type { OpenCodeServer } from './server';
-import { OpenCodeV2SessionState } from './opencode-v2-session-state';
+import { getVarroStateReadDirectory } from './varro-state-paths';
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'request'> &
   Partial<Pick<OpenCodeServer, 'isAttachOnly'>>;
@@ -326,13 +326,14 @@ async function readLocalUsageDatabase(
   const databasePath =
     process.env.OPENCODE_DB ?? join(resolveOpenCodeDataDirectory(), 'opencode.db');
   const windows = createReportWindows(now, includeAllTime);
+  const annotationsDirectory = getVarroStateReadDirectory('opencode-v2');
 
   return new Promise((resolve, reject) => {
     const worker = new Worker(LOCAL_USAGE_WORKER, {
       eval: true,
       workerData: {
         databasePath,
-        annotationsDirectory: new OpenCodeV2SessionState().directory,
+        annotationsDirectory,
         maxAssistantRows: LOCAL_USAGE_MAX_ASSISTANT_ROWS,
         maxMessageDataBytes: LOCAL_USAGE_MAX_MESSAGE_DATA_BYTES,
         maxRoutes: LOCAL_USAGE_MAX_ROUTES,

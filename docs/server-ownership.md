@@ -18,6 +18,12 @@ server marker, and a short-lived `.claim` coordination file. The lease records
 the actual listening port, including fallback ports. These files do not depend
 on a workspace, VS Code profile, or extension ID.
 
+The parent directory is Varro's shared state root. Session annotations use its
+`opencode-v2/` subdirectory and provider quota coordination uses
+`provider-quota-v2/`. See [local state files](usage.md#local-state-files) for native
+paths, legacy compatibility links, and read-only usage reporting. Existing session
+and quota directories are not copied while old writers may still be using them.
+
 An existing valid lease in the older temporary-directory location remains the
 coordination point for that process. It is not moved while older windows may
 still use it. Once that lease is retired, newly constructed managers select the
@@ -59,7 +65,8 @@ server. Compatible builds retain the version-1 lease and existing legacy paths.
 
 AI and sandbox launchers instead supply an absolute `VARRO_TEST_STATE_ROOT` inside
 their disposable profile. Server records live in its `servers/` directory; v2
-annotations and session locks live in `opencode-v2/`. Test discovery never falls
+annotations and session locks live in `opencode-v2/`; quota coordination uses
+`provider-quota-v2/`. Test discovery never falls
 back to production or legacy temp records, even for the same port or session ID.
 A test endpoint without an isolated state root fails before default state access.
 This complements, rather than replaces, database isolation and endpoint checks.

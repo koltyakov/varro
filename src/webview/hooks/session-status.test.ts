@@ -601,6 +601,37 @@ describe('session status helpers', () => {
     );
   });
 
+  it('preserves newer background work after an idle recheck syncs a completed reply', async () => {
+    const stopLoadingSpy = vi.fn();
+    const startLoadingSpy = vi.fn();
+    const setSessionStatusEntry = vi.fn();
+    await recheckSessionStatusWithDependencies(
+      {
+        isDocumentVisible: () => true,
+        loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        updateUsageLimitState: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        stopLoading: stopLoadingSpy,
+        setSessionStatusEntry,
+        setSessionStatuses: vi.fn(),
+        shouldResyncSessionAfterIdle: () => true,
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        startLoading: startLoadingSpy,
+        isActiveSession: () => true,
+        getCurrentSessionStatus: () => ({ type: 'busy', background: true }),
+        getMessages: () => [{ info: completedAssistantMessage(), parts: [] }],
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
+    expect(stopLoadingSpy).not.toHaveBeenCalled();
+    expect(startLoadingSpy).toHaveBeenCalledOnce();
+  });
+
   it('updates usage limits from the reconciled status after a stale recheck snapshot', async () => {
     const retryStatus = {
       type: 'retry',

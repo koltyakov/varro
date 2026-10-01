@@ -1,23 +1,43 @@
 import { mkdir, readFile, readdir, rename, rm, rmdir, unlink, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, type UnknownRecord } from '../shared/type-utils';
-import { getVarroTestStateDirectory } from './varro-test-state';
+import {
+  getLegacyVarroStateDirectory,
+  getVarroStateDirectory,
+  prepareVarroStateDirectory,
+} from './varro-state-paths';
 
 /** V2 cannot patch metadata or archive timestamps. These are Varro-owned annotations. */
 export class OpenCodeV2SessionState {
   private readonly operations = new Map<string, Promise<unknown>>();
+  private readonly legacyDirectory: string | undefined;
+  private prepared: Promise<string> | undefined;
 
-  constructor(
-    readonly directory = getVarroTestStateDirectory('opencode-v2') ??
-      join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'varro', 'opencode-v2')
-  ) {}
+  readonly directory: string;
+
+  constructor(directory?: string) {
+    this.directory = directory ?? getVarroStateDirectory('opencode-v2');
+    this.legacyDirectory =
+      directory === undefined ? getLegacyVarroStateDirectory('opencode-v2') : undefined;
+  }
+
+  private async prepareDirectory(): Promise<string> {
+    this.prepared ??= prepareVarroStateDirectory(this.directory, this.legacyDirectory);
+    try {
+      return await this.prepared;
+    } catch (error) {
+      this.prepared = undefined;
+      throw error;
+    }
+  }
 
   async read(sessionID: string): Promise<UnknownRecord> {
+    const path = this.path(sessionID);
+    await this.prepareDirectory();
     try {
-      return asRecord(JSON.parse(await readFile(this.path(sessionID), 'utf8'))) ?? {};
+      return asRecord(JSON.parse(await readFile(path, 'utf8'))) ?? {};
     } catch (error) {
       if (asRecord(error)?.code === 'ENOENT') return {};
       throw new Error('Could not read Varro OpenCode v2 session annotations', { cause: error });
@@ -83,6 +103,7 @@ export class OpenCodeV2SessionState {
 
   private async acquireLock(sessionID: string, signal?: AbortSignal): Promise<() => Promise<void>> {
     const lock = `${this.path(sessionID)}.lock`;
+    await this.prepareDirectory();
     const owner = `${process.pid}-${randomUUID()}`;
     const candidate = `${lock}.${owner}`;
     const deadline = Date.now() + 10_000;
