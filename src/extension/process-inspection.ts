@@ -37,43 +37,23 @@ export async function inspectLocalServerAccount(port: number): Promise<LocalServ
     // Port-only discovery can include unrelated IPv4/IPv6 binds. Do not guess.
     if (pids.length !== 1) return { kind: 'unknown' };
     const pid = pids[0]!;
+    if (process.platform === 'win32') {
+      const details = await readWindowsProcessDetails(pid, true);
+      if (!details?.listenerSid || !details.hostSid) return { kind: 'unknown' };
+      return {
+        kind: details.listenerSid === details.hostSid ? 'same-user' : 'different-user',
+        identity: `${pid}:${details.birthIdentity}:${details.listenerSid}`,
+      };
+    }
     const birth = await readProcessBirthIdentity(pid);
     if (!birth) return { kind: 'unknown' };
     let listenerAccount: string;
-    let hostAccount: string;
-    if (process.platform === 'win32') {
-      const script = [
-        `$listener = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
-        `$hostProcess = Get-CimInstance Win32_Process -Filter "ProcessId = ${process.pid}"`,
-        '$listenerOwner = Invoke-CimMethod -InputObject $listener -MethodName GetOwnerSid',
-        '$hostOwner = Invoke-CimMethod -InputObject $hostProcess -MethodName GetOwnerSid',
-        'if ($listenerOwner.ReturnValue -eq 0 -and $hostOwner.ReturnValue -eq 0) {',
-        '  Write-Output $listenerOwner.Sid',
-        '  Write-Output $hostOwner.Sid',
-        '}',
-      ].join('; ');
-      const result = await runProcess(
-        'powershell.exe',
-        ['-NoProfile', '-Command', script],
-        WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
-      );
-      const accounts = result.stdout.trim().split(/\s+/);
-      if (
-        result.code !== 0 ||
-        accounts.length !== 2 ||
-        accounts.some((id) => !/^S-\d+(?:-\d+)+$/.test(id))
-      )
-        return { kind: 'unknown' };
-      listenerAccount = accounts[0]!;
-      hostAccount = accounts[1]!;
-    } else {
-      const result = await runProcess('ps', ['-p', String(pid), '-o', 'uid=']);
-      listenerAccount = result.stdout.trim();
-      if (result.code !== 0 || !/^\d+$/.test(listenerAccount) || !process.geteuid)
-        return { kind: 'unknown' };
-      hostAccount = String(process.geteuid());
-      listenerAccount = String(Number(listenerAccount));
-    }
+    const result = await runProcess('ps', ['-p', String(pid), '-o', 'uid=']);
+    listenerAccount = result.stdout.trim();
+    if (result.code !== 0 || !/^\d+$/.test(listenerAccount) || !process.geteuid)
+      return { kind: 'unknown' };
+    const hostAccount = String(process.geteuid());
+    listenerAccount = String(Number(listenerAccount));
     // Inspect again to avoid consenting to a PID replaced while commands ran.
     if ((await readProcessBirthIdentity(pid)) !== birth) return { kind: 'unknown' };
     return {
@@ -353,30 +333,28 @@ async function findLinuxListeningPids(port: number, procRoot: string) {
 
 export async function findListeningPids(port: number, procRoot = '/proc') {
   if (process.platform === 'win32') {
+    // Avoid loading PowerShell's networking module on every admission/ownership check.
+    const netstat = await runProcess(
+      'netstat.exe',
+      ['-ano'],
+      WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
+    );
+    if (netstat.code === 0) return parseWindowsNetstatListeningPids(netstat.stdout, port);
+    logger.warn(
+      `Windows listener inspection with netstat failed: ${netstat.stderr.trim() || `exit code ${String(netstat.code)}`}`
+    );
     const script = `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique`;
     const result = await runProcess(
       'powershell.exe',
       ['-NoProfile', '-Command', script],
       WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
     );
-    const pids = parsePids(result.stdout);
-    if (pids.length > 0) return pids;
     if (result.code !== 0) {
-      logger.warn(
-        `Windows listener inspection with PowerShell failed: ${result.stderr.trim() || `exit code ${String(result.code)}`}`
-      );
-    }
-    const fallback = await runProcess(
-      'netstat.exe',
-      ['-ano'],
-      WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
-    );
-    if (fallback.code !== 0) {
       throw new Error(
-        `Cannot inspect the listener on port ${port}: Windows netstat failed (${fallback.stderr.trim() || `exit code ${String(fallback.code)}`})`
+        `Cannot inspect the listener on port ${port}: Windows PowerShell failed (${result.stderr.trim() || `exit code ${String(result.code)}`})`
       );
     }
-    return parseWindowsNetstatListeningPids(fallback.stdout, port);
+    return parsePids(result.stdout);
   }
 
   const result = await runProcess('lsof', ['-nP', `-tiTCP:${port}`, '-sTCP:LISTEN']);
@@ -414,6 +392,74 @@ export async function findListeningPids(port: number, procRoot = '/proc') {
 
 function isCommandUnavailable(result: CommandResult) {
   return result.code === null && /(?:ENOENT|not found|not recognized)/i.test(result.stderr);
+}
+
+async function readWindowsProcessDetails(pid: number, includeAccount = false) {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$listener = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
+    'if (-not $listener -or -not $listener.CreationDate) { throw "Process identity unavailable" }',
+    '$birth = $listener.CreationDate.ToUniversalTime().Ticks',
+    ...(includeAccount
+      ? [
+          `$hostProcess = Get-CimInstance Win32_Process -Filter "ProcessId = ${process.pid}"`,
+          '$listenerOwner = Invoke-CimMethod -InputObject $listener -MethodName GetOwnerSid',
+          '$hostOwner = Invoke-CimMethod -InputObject $hostProcess -MethodName GetOwnerSid',
+          'if ($listenerOwner.ReturnValue -ne 0 -or $hostOwner.ReturnValue -ne 0) { throw "Process account unavailable" }',
+        ]
+      : []),
+    // Keep the PID-reuse check in the same invocation as the account/executable read.
+    `$verified = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
+    'if (-not $verified -or -not $verified.CreationDate -or $verified.CreationDate.ToUniversalTime().Ticks -ne $birth) { throw "Process identity changed during inspection" }',
+    '[Console]::Out.WriteLine("VARRO_EXECUTABLE=" + $listener.ExecutablePath)',
+    '[Console]::Out.WriteLine("VARRO_BIRTH=" + $birth)',
+    ...(includeAccount
+      ? [
+          '[Console]::Out.WriteLine("VARRO_LISTENER_SID=" + $listenerOwner.Sid)',
+          '[Console]::Out.WriteLine("VARRO_HOST_SID=" + $hostOwner.Sid)',
+        ]
+      : []),
+  ].join('; ');
+  const result = await runProcess(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
+  );
+  if (result.code !== 0) return null;
+  const values = new Map<string, string>();
+  for (const line of result.stdout.split(/\r?\n/)) {
+    const separator = line.indexOf('=');
+    if (separator > 0) values.set(line.slice(0, separator), line.slice(separator + 1).trim());
+  }
+  const birth = values.get('VARRO_BIRTH');
+  if (!birth || !/^\d+$/.test(birth)) return null;
+  const listenerSid = values.get('VARRO_LISTENER_SID');
+  const hostSid = values.get('VARRO_HOST_SID');
+  if (
+    includeAccount &&
+    (!listenerSid ||
+      !hostSid ||
+      !/^S-\d+(?:-\d+)+$/.test(listenerSid) ||
+      !/^S-\d+(?:-\d+)+$/.test(hostSid))
+  )
+    return null;
+  return {
+    executable: values.get('VARRO_EXECUTABLE') ?? '',
+    birthIdentity: `win32:${birth}`,
+    listenerSid,
+    hostSid,
+  };
+}
+
+/** Read both identity fields from one Windows process snapshot, without a persistent cache. */
+export async function readWindowsProcessIdentity(
+  pid: number
+): Promise<{ executable: string; birthIdentity: string }> {
+  const details = await readWindowsProcessDetails(pid);
+  return {
+    executable: details?.executable ?? '',
+    birthIdentity: details?.birthIdentity ?? '',
+  };
 }
 
 export async function readProcessExecutable(pid: number, procRoot = '/proc') {

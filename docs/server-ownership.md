@@ -172,6 +172,12 @@ cache. Unknown-owner consent covers only the current connection and requires a n
 decision on reconnect. Concurrent callers share the decision; disposal invalidates
 late answers. Refusal blocks subsequent requests rather than starting retry prompts.
 
+On Windows, ordinary listener checks use `netstat` first, with PowerShell networking
+discovery only when `netstat` fails. Executable/start identity and account/start
+identity checks each use one PowerShell invocation. Each snapshot rechecks the
+process creation ticks before returning, so batching does not remove PID-reuse
+protection. The one-second admission cache and fresh reconnect checks are unchanged.
+
 Manual servers and consented foreign or unverifiable connections remain attach-only even
 with auto-start enabled. They cannot be adopted or restarted and do not run automatic
 local recycle-bin cleanup. Existing permission and question recovery remains unchanged.

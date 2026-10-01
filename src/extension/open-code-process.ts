@@ -67,6 +67,7 @@ import {
   readProcessEnvironmentValue,
   readProcessExecutable,
   readProcessGroupId,
+  readWindowsProcessIdentity,
   runProcess,
   signalProcessGroup,
   terminateCliProcessTree,
@@ -2397,13 +2398,19 @@ export class OpenCodeProcess {
   private async matchesOwnershipLease(lease: ManagedServerOwnershipLease): Promise<boolean> {
     const listeners = await findListeningPids(lease.port, this.linuxProcRoot);
     if (!listeners.includes(lease.pid)) return false;
-    const executable = await readProcessExecutable(lease.pid, this.linuxProcRoot);
+    const windowsIdentity =
+      process.platform === 'win32' ? await readWindowsProcessIdentity(lease.pid) : undefined;
+    const executable = windowsIdentity
+      ? windowsIdentity.executable
+      : await readProcessExecutable(lease.pid, this.linuxProcRoot);
     if (!executable)
       throw new Error(`Cannot verify executable identity for managed OpenCode PID ${lease.pid}`);
     if (normalizeExecutableIdentity(executable) !== normalizeExecutableIdentity(lease.executable)) {
       return false;
     }
-    const birthIdentity = await readProcessBirthIdentity(lease.pid, this.linuxProcRoot);
+    const birthIdentity = windowsIdentity
+      ? windowsIdentity.birthIdentity
+      : await readProcessBirthIdentity(lease.pid, this.linuxProcRoot);
     if (!birthIdentity)
       throw new Error(`Cannot verify process start identity for managed OpenCode PID ${lease.pid}`);
     return matchesBirthIdentity(lease.birthIdentity, birthIdentity, lease.createdAt);

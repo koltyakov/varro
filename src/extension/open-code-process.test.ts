@@ -666,16 +666,17 @@ describe('OpenCodeProcess Windows termination', () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     waitForProcessExitMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     let listenerQueries = 0;
-    spawnMock.mockImplementation((command: string, args: string[]) => {
+    spawnMock.mockImplementation((command: string) => {
       const child = Object.assign(new EventEmitter(), {
         stdout: new EventEmitter(),
         stderr: new EventEmitter(),
         kill: vi.fn(),
       });
       queueMicrotask(() => {
-        if (command === 'powershell.exe' && args.at(-1)?.includes('Get-NetTCPConnection')) {
+        if (command === 'netstat.exe') {
           listenerQueries += 1;
-          if (listenerQueries === 1) child.stdout.emit('data', Buffer.from('777\n'));
+          if (listenerQueries === 1)
+            child.stdout.emit('data', Buffer.from('TCP 127.0.0.1:4096 0.0.0.0:0 LISTENING 777\n'));
         } else if (command === 'powershell.exe') {
           child.stdout.emit('data', Buffer.from('opencode serve --port 4096\n'));
         }
@@ -733,8 +734,9 @@ describe('OpenCodeProcess Windows termination', () => {
       });
       queueMicrotask(() => {
         const script = args.at(-1) || '';
-        if (command === 'powershell.exe' && script.includes('Get-NetTCPConnection')) {
-          if (listening) child.stdout.emit('data', Buffer.from('777\n'));
+        if (command === 'netstat.exe') {
+          if (listening)
+            child.stdout.emit('data', Buffer.from('TCP 127.0.0.1:4096 0.0.0.0:0 LISTENING 777\n'));
         } else if (command === 'powershell.exe' && script.includes('ParentProcessId')) {
           child.stdout.emit('data', Buffer.from('123\n'));
         } else if (command === 'taskkill.exe' && args[1] === '777') {
@@ -773,15 +775,15 @@ describe('OpenCodeProcess Windows termination', () => {
 
   it('reports an unmanaged occupied port without terminating its listener', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    spawnMock.mockImplementation((command: string, args: string[]) => {
+    spawnMock.mockImplementation((command: string) => {
       const child = Object.assign(new EventEmitter(), {
         stdout: new EventEmitter(),
         stderr: new EventEmitter(),
         kill: vi.fn(),
       });
       queueMicrotask(() => {
-        if (command === 'powershell.exe' && args.at(-1)?.includes('Get-NetTCPConnection')) {
-          child.stdout.emit('data', Buffer.from('777\n'));
+        if (command === 'netstat.exe') {
+          child.stdout.emit('data', Buffer.from('TCP 127.0.0.1:4096 0.0.0.0:0 LISTENING 777\n'));
         }
         child.emit('close', 0);
       });
@@ -2137,7 +2139,11 @@ describe('OpenCodeProcess server ownership leases', () => {
         queueMicrotask(() => {
           const script = args.at(-1) ?? '';
           let output = '';
-          if (
+          if (command === 'netstat.exe')
+            output = `TCP 127.0.0.1:4096 0.0.0.0:0 LISTENING ${MOCK_LINUX_PID}`;
+          else if (script.includes('VARRO_EXECUTABLE='))
+            output = `VARRO_EXECUTABLE=${executable.toLowerCase()}\nVARRO_BIRTH=123456`;
+          else if (
             (command === 'lsof' && args.some((arg) => arg.startsWith('-tiTCP:'))) ||
             script.includes('Get-NetTCPConnection')
           )
@@ -3024,8 +3030,14 @@ describe('OpenCodeProcess server ownership leases', () => {
       });
       queueMicrotask(() => {
         const script = args.at(-1) || '';
-        if (command === 'powershell.exe' && script.includes('Get-NetTCPConnection')) {
-          if (listening) result.stdout.emit('data', Buffer.from('777\n'));
+        if (command === 'netstat.exe') {
+          if (listening)
+            result.stdout.emit('data', Buffer.from('TCP 127.0.0.1:4096 0.0.0.0:0 LISTENING 777\n'));
+        } else if (command === 'powershell.exe' && script.includes('VARRO_EXECUTABLE=')) {
+          result.stdout.emit(
+            'data',
+            Buffer.from('VARRO_EXECUTABLE=C:\\OpenCode\\opencode.exe\nVARRO_BIRTH=123456\n')
+          );
         } else if (command === 'powershell.exe' && script.includes('ExecutablePath')) {
           result.stdout.emit('data', Buffer.from('C:\\OpenCode\\opencode.exe\n'));
         } else if (command === 'powershell.exe' && script.includes('CreationDate')) {
@@ -3595,8 +3607,16 @@ describe('OpenCodeProcess server ownership leases', () => {
       });
       queueMicrotask(() => {
         const script = args.at(-1) || '';
-        if (command === 'powershell.exe' && script.includes('Get-NetTCPConnection')) {
-          result.stdout.emit('data', Buffer.from(`${pid}\n`));
+        if (command === 'netstat.exe') {
+          result.stdout.emit(
+            'data',
+            Buffer.from(`TCP 127.0.0.1:4096 0.0.0.0:0 LISTENING ${pid}\n`)
+          );
+        } else if (command === 'powershell.exe' && script.includes('VARRO_EXECUTABLE=')) {
+          result.stdout.emit(
+            'data',
+            Buffer.from('VARRO_EXECUTABLE=C:\\OpenCode\\opencode.exe\nVARRO_BIRTH=123456\n')
+          );
         } else if (command === 'powershell.exe' && script.includes('ExecutablePath')) {
           result.stdout.emit('data', Buffer.from('C:\\OpenCode\\opencode.exe\n'));
         } else if (command === 'powershell.exe' && script.includes('CreationDate')) {
