@@ -60,6 +60,153 @@ function incompleteAssistantMessage(
 }
 
 describe('getAssistantDialogSummaryMap', () => {
+  it('calculates weighted generation TPS without initial latency, tool waits, or child tokens', () => {
+    const first = assistantMessage('first', 'session-1', 'user-1', 1_000, 5_000);
+    first.info.tokens.output = 100;
+    first.info.tokens.reasoning = 100;
+    first.parts = [
+      {
+        id: 'r',
+        messageID: 'first',
+        sessionID: 'session-1',
+        type: 'reasoning',
+        text: 'Thinking',
+        time: { start: 2_000, end: 3_000 },
+      },
+      {
+        id: 't1',
+        messageID: 'first',
+        sessionID: 'session-1',
+        type: 'text',
+        text: 'First',
+        time: { start: 3_000, end: 4_000 },
+      },
+    ];
+    const tool = assistantMessage('tool', 'session-1', 'user-1', 5_000, 20_000);
+    tool.info.tokens.output = 1_000;
+    tool.parts = [
+      {
+        id: 'tool',
+        messageID: 'tool',
+        sessionID: 'session-1',
+        type: 'tool',
+        callID: 'call',
+        tool: 'bash',
+        state: {
+          status: 'completed',
+          input: {},
+          output: 'Done',
+          title: 'bash',
+          metadata: {},
+          time: { start: 6_000, end: 20_000 },
+        },
+      },
+    ];
+    const last = assistantMessage('last', 'session-1', 'user-1', 20_000, 25_000);
+    last.info.tokens.output = 100;
+    last.parts = [
+      {
+        id: 't2',
+        messageID: 'last',
+        sessionID: 'session-1',
+        type: 'text',
+        text: 'Last',
+        time: { start: 21_000, end: 25_000 },
+      },
+    ];
+    const child = assistantMessage('child', 'child-1', 'first', 2_000, 24_000, 'subagent');
+    child.info.tokens.output = 5_000;
+    const summary = getAssistantDialogSummaryMap([
+      userMessage('user-1', 'session-1', 0),
+      first,
+      tool,
+      child,
+      last,
+    ]).get('last');
+    expect(summary?.durationMs).toBe(25_000);
+    expect(summary?.tokensPerSecond).toBe(50);
+  });
+
+  it.each([
+    undefined,
+    { start: 2_000 },
+    { start: 2_000, end: 2_000 },
+    { start: 3_000, end: 2_000 },
+    { start: 2_000, end: Number.NaN },
+    { start: 500, end: 3_000 },
+    { start: 2_000, end: 5_000 },
+  ])('omits TPS when generation timing is unavailable or invalid: %s', (time) => {
+    const message = assistantMessage('assistant-1', 'session-1', 'user-1', 1_000, 4_000);
+    message.parts = [
+      {
+        id: 'text',
+        messageID: 'assistant-1',
+        sessionID: 'session-1',
+        type: 'text',
+        text: 'Hello',
+        time,
+      },
+    ];
+    expect(
+      getAssistantDialogSummaryMap([message]).get('assistant-1')?.tokensPerSecond
+    ).toBeUndefined();
+  });
+
+  it.each([0, -1, Number.NaN])('omits TPS for unusable response duration: %s', (duration) => {
+    const message = assistantMessage('assistant-1', 'session-1', 'user-1', 1_000, 1_000 + duration);
+    message.parts = [
+      {
+        id: 'text',
+        messageID: 'assistant-1',
+        sessionID: 'session-1',
+        type: 'text',
+        text: 'Hello',
+      },
+    ];
+    expect(
+      getAssistantDialogSummaryMap([message]).get('assistant-1')?.tokensPerSecond
+    ).toBeUndefined();
+  });
+
+  it('does not include untimed responses in timed generation TPS', () => {
+    const untimed = assistantMessage('untimed', 'session-1', 'user-1', 1_000, 100_000);
+    untimed.info.tokens.output = 10_000;
+    untimed.parts = [
+      { id: 't1', messageID: 'untimed', sessionID: 'session-1', type: 'text', text: 'Untimed' },
+    ];
+    const timed = assistantMessage('timed', 'session-1', 'user-1', 100_000, 104_000);
+    timed.info.tokens.output = 100;
+    timed.parts = [
+      {
+        id: 't2',
+        messageID: 'timed',
+        sessionID: 'session-1',
+        type: 'text',
+        text: 'Timed',
+        time: { start: 102_000, end: 104_000 },
+      },
+    ];
+    expect(getAssistantDialogSummaryMap([untimed, timed]).get('timed')?.tokensPerSecond).toBe(50);
+  });
+
+  it('hides TPS when reasoning tokens have no corresponding generation timing', () => {
+    const message = assistantMessage('assistant-1', 'session-1', 'user-1', 1_000, 4_000);
+    message.info.tokens.reasoning = 100;
+    message.parts = [
+      {
+        id: 'text',
+        messageID: 'assistant-1',
+        sessionID: 'session-1',
+        type: 'text',
+        text: 'Hello',
+        time: { start: 2_000, end: 4_000 },
+      },
+    ];
+    expect(
+      getAssistantDialogSummaryMap([message]).get('assistant-1')?.tokensPerSecond
+    ).toBeUndefined();
+  });
+
   it('summarizes transcript ranges exactly like one pass', () => {
     const child = {
       ...assistantMessage('child-run', 'child-1', 'assistant-2', 22, 24, 'subagent'),

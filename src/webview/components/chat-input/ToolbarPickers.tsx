@@ -1,9 +1,10 @@
-import { createEffect, createSignal, For, onCleanup, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js';
 import { Portal } from 'solid-js/web';
-import type { Agent } from '../../types';
+import type { Agent, Provider } from '../../types';
 import type {
   AutoApproveActivity,
   PermissionMode,
+  ModelPricing,
   WorkspaceFolderContext,
 } from '../../../shared/protocol';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
@@ -11,6 +12,7 @@ import { getProviderIcon } from '../../lib/provider-icons';
 import { getAgentIcon } from '../../lib/agent-icons';
 import {
   checkIcon,
+  flashSolidIcon,
   folderSettingsIcon,
   navArrowDownIcon,
   openNewWindowIcon,
@@ -18,6 +20,7 @@ import {
 } from '../../lib/ui-icons';
 import { formatModelName } from '../../lib/format';
 import { postMessage } from '../../lib/bridge';
+import { client } from '../../lib/client';
 import { FolderIcon } from '../FolderIcon';
 import { Tooltip } from '../Tooltip';
 import { toCssUrl, UiIcon } from '../UiIcon';
@@ -29,6 +32,7 @@ import {
 } from '../../lib/popup-position';
 import { PermissionModeIcon } from './PermissionModeIcon';
 import { isFunction } from '../../lib/runtime-values';
+import { QUEUE_ONLY_SELECTION_TOOLTIP } from './active-turn-selection';
 
 const FAST_MODE_COST_WARNING = 'Fast mode may consume usage limits faster and cost more.';
 const PERMISSIONS_DOCS_URL = 'https://github.com/koltyakov/varro/blob/main/docs/permissions.md';
@@ -38,11 +42,49 @@ function isFastModelName(name: string) {
   return formatModelName(name).includes('⚡');
 }
 
+function modelIdentityWithoutFast(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\b(?:ultrafast|fast)\b/g, '')
+    .replace(/[\s_-]+/g, ' ')
+    .trim();
+}
+
+function getNonFastModel(
+  provider: Provider | undefined,
+  modelID: string | null | undefined,
+  modelName: string
+) {
+  if (!provider || !isFastModelName(modelName)) return undefined;
+  const models = Object.values(provider.models).filter(
+    (model) => !isFastModelName(model.name) && !/\b(?:ultrafast|fast)\b/i.test(model.id)
+  );
+  return (
+    (modelID
+      ? models.find(
+          (model) => modelIdentityWithoutFast(model.id) === modelIdentityWithoutFast(modelID)
+        )
+      : undefined) ??
+    models.find(
+      (model) => modelIdentityWithoutFast(model.name) === modelIdentityWithoutFast(modelName)
+    )
+  );
+}
+
 function PickerChevron() {
   return <UiIcon source={navArrowDownIcon} class="codicon-chevron" width={10} height={10} />;
 }
 
 const selectedIconStyle = { '--toolbar-selected-icon': toCssUrl(checkIcon) };
+
+function QueueOnlyTooltipNote(props: { class?: string }) {
+  return (
+    <>
+      <span class="toolbar-picker-tooltip-separator" role="separator" />
+      <span class={props.class}>{QUEUE_ONLY_SELECTION_TOOLTIP}</span>
+    </>
+  );
+}
 
 function getAutoApproveActivityTitle(activity: AutoApproveActivity) {
   const label = {
@@ -511,6 +553,7 @@ export function AgentPicker(props: {
   selectedAgent: string | null;
   selectedLabel: string;
   compact?: boolean;
+  queueOnly?: boolean;
   focusIndex: number;
   showPicker: boolean;
   getLabel: (agent: Agent) => string;
@@ -533,6 +576,9 @@ export function AgentPicker(props: {
       <span class="agent-picker-tooltip">
         <span class="agent-picker-tooltip-title">{props.selectedLabel}</span>
         <span class="agent-picker-tooltip-detail">{props.getDetail(agent)}</span>
+        <Show when={props.queueOnly}>
+          <QueueOnlyTooltipNote class="agent-picker-tooltip-detail" />
+        </Show>
       </span>
     );
   };
@@ -761,14 +807,22 @@ export function VariantPicker(props: {
   selectedVariant: string | null;
   selectedLabel: string;
   showPicker: boolean;
+  disabled?: boolean;
+  queueOnly?: boolean;
   getLabel: (variant: string) => string;
   onToggle: () => void;
   onSelect: (variant: string | null) => void;
 }) {
   let popupEl: HTMLDivElement | undefined;
-  const isMaximumReasoning = () => {
+  const hasReasoningWarning = () => {
     const variant = props.selectedVariant?.trim().toLowerCase();
-    return variant === 'max' || variant === 'ultra';
+    return variant === 'max' || variant === 'ultra' || variant === 'xhigh';
+  };
+  const reasoningTooltipText = () => {
+    if (!hasReasoningWarning()) return 'Thinking level';
+    const variant = props.selectedVariant?.trim().toLowerCase();
+    const level = variant === 'xhigh' ? 'Extra-high' : variant === 'ultra' ? 'Ultra' : 'Maximum';
+    return `${level} reasoning may be more expensive and can sometimes produce worse results.`;
   };
 
   createEffect(() => {
@@ -799,12 +853,18 @@ export function VariantPicker(props: {
     <div style={{ position: 'relative' }}>
       <Tooltip
         content={
-          isMaximumReasoning() ? 'Maximum reasoning may be more expensive.' : 'Thinking level'
+          <span class="reasoning-picker-tooltip">
+            <span>{reasoningTooltipText()}</span>
+            <Show when={props.queueOnly}>
+              <QueueOnlyTooltipNote />
+            </Show>
+          </span>
         }
       >
         <button
           ref={props.buttonRef}
-          class={`toolbar-picker ${isMaximumReasoning() ? 'maximum-reasoning-selected' : ''}`}
+          class={`toolbar-picker ${hasReasoningWarning() ? 'maximum-reasoning-selected' : ''}`}
+          disabled={props.disabled}
           onClick={props.onToggle}
           aria-label="Thinking level"
           aria-expanded={props.showPicker}
@@ -813,7 +873,7 @@ export function VariantPicker(props: {
           <PickerChevron />
         </button>
       </Tooltip>
-      <Show when={props.showPicker}>
+      <Show when={props.showPicker && !props.disabled}>
         <div
           ref={setPopoverRef}
           class="toolbar-popover variant-popover"
@@ -849,18 +909,66 @@ export function ModelPickerButton(props: {
   modelID?: string | null;
   providerName: string;
   modelName: string;
+  providers?: Provider[];
   canEllipsize: boolean;
   expanded?: boolean;
+  disabled?: boolean;
+  queueOnly?: boolean;
   onToggle: () => void;
 }) {
   const label = () =>
     props.modelName ? `${props.providerName} / ${props.modelName}` : 'Choose model';
   const isFastModel = () => isFastModelName(props.modelName);
+  const isUltrafastModel = () => formatModelName(props.modelName).includes('⚡⚡⚡');
+  const baseModel = createMemo(() =>
+    getNonFastModel(
+      props.providers?.find((provider) => provider.id === props.providerID),
+      props.modelID,
+      props.modelName
+    )
+  );
+  const [catalogPricing, setCatalogPricing] = createSignal<ModelPricing | null>(null);
+  createEffect(() => {
+    const model = baseModel();
+    const providerID = props.providerID;
+    setCatalogPricing(null);
+    if (!model || !providerID) return;
+    let active = true;
+    onCleanup(() => {
+      active = false;
+    });
+    void client.config.modelPricing(providerID, model.id).then(
+      (pricing) => {
+        if (active) setCatalogPricing(pricing);
+      },
+      () => {
+        // Catalog enrichment is optional; retain provider rates when offline.
+      }
+    );
+  });
+  const showCostWarning = createMemo(() => {
+    const pricing = catalogPricing() ?? baseModel()?.cost;
+    const input = pricing?.input;
+    const output = pricing?.output;
+    return (
+      input !== undefined &&
+      output !== undefined &&
+      Number.isFinite(input) &&
+      Number.isFinite(output) &&
+      input >= 10 &&
+      output >= 30
+    );
+  });
   const tooltipContent = () =>
-    isFastModel() ? (
+    isFastModel() || props.queueOnly ? (
       <span class="model-picker-tooltip">
         <span>{label()}</span>
-        <span class="model-picker-tooltip-detail">{FAST_MODE_COST_WARNING}</span>
+        <Show when={isFastModel()}>
+          <span class="model-picker-tooltip-detail">{FAST_MODE_COST_WARNING}</span>
+        </Show>
+        <Show when={props.queueOnly}>
+          <QueueOnlyTooltipNote class="model-picker-tooltip-detail" />
+        </Show>
       </span>
     ) : (
       label()
@@ -870,9 +978,10 @@ export function ModelPickerButton(props: {
     <Tooltip content={tooltipContent()}>
       <button
         ref={props.buttonRef}
-        class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''} ${isFastModel() ? 'fast-model-selected' : ''}`}
+        class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''} ${isUltrafastModel() ? 'ultrafast-model-selected' : showCostWarning() ? 'fast-model-selected' : ''}`}
         data-provider-id={props.providerID ?? undefined}
         data-model-id={props.modelID ?? undefined}
+        disabled={props.disabled}
         onClick={props.onToggle}
         aria-label={label()}
         aria-expanded={props.expanded ?? false}
@@ -902,19 +1011,38 @@ export function ModelPickerButton(props: {
   );
 }
 
-export function FormattedModelName(props: { name: string; showFastTooltip?: boolean }) {
+function ModelSpeedIcons(props: { count: number }) {
   return (
-    <For each={formatModelName(props.name).split(/(⚡)/)}>
+    <span class="model-speed-icons" role="img" aria-label={FAST_MODE_COST_WARNING}>
+      <For each={Array.from({ length: props.count }, (_, index) => index)}>
+        {() => <UiIcon source={flashSolidIcon} class="model-speed-icon" width={12} height={12} />}
+      </For>
+    </span>
+  );
+}
+
+export function FormattedModelName(props: {
+  name: string;
+  showFastTooltip?: boolean;
+  showSpeedLabel?: boolean;
+}) {
+  return (
+    <For each={formatModelName(props.name).split(/(⚡+)/)}>
       {(part) =>
-        part === '⚡' ? (
-          <Show
-            when={props.showFastTooltip !== false}
-            fallback={<span aria-label={FAST_MODE_COST_WARNING}>{part}</span>}
-          >
-            <Tooltip content={FAST_MODE_COST_WARNING} delay={300}>
-              <span aria-label={FAST_MODE_COST_WARNING}>{part}</span>
-            </Tooltip>
-          </Show>
+        part.startsWith('⚡') ? (
+          <>
+            <Show
+              when={props.showFastTooltip !== false}
+              fallback={<ModelSpeedIcons count={part === '⚡⚡⚡' ? 3 : 1} />}
+            >
+              <Tooltip content={FAST_MODE_COST_WARNING} delay={300}>
+                <ModelSpeedIcons count={part === '⚡⚡⚡' ? 3 : 1} />
+              </Tooltip>
+            </Show>
+            <Show when={props.showSpeedLabel}>
+              <span class="model-speed-label">{part === '⚡⚡⚡' ? 'Ultrafast' : 'Fast'}</span>
+            </Show>
+          </>
         ) : (
           part
         )

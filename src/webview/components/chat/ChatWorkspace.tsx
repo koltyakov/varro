@@ -1,4 +1,4 @@
-import { Show, Suspense, createSignal, lazy, onCleanup, onMount } from 'solid-js';
+import { Show, Suspense, createMemo, createSignal, lazy, onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { MessageList } from '../MessageList';
 import { ChatInput } from '../ChatInput';
@@ -115,6 +115,8 @@ export function ChatWorkspace(props: {
     props.primarySessionsCount
   );
   const [markAllRead, setMarkAllRead] = createSignal<(() => void) | null>(null);
+  // Create this memo under the component owner, not in a JSX prop getter read by a click handler.
+  const markAllReadAction = createMemo(() => (props.showSessionPicker ? markAllRead() : null));
   const updateMarkAllRead = (action: (() => void) | null) => setMarkAllRead(() => action);
   const showActiveSessionCue = () => {
     if (!chatContentRef) return;
@@ -166,7 +168,7 @@ export function ChatWorkspace(props: {
         useSidebarCounts ? props.sessionSidebarRunningCount : props.runningSessionsCount
       }
       showNewChatButton
-      onMarkAllRead={props.showSessionPicker ? markAllRead() : null}
+      onMarkAllRead={markAllReadAction()}
       onBack={useSidebarCounts ? props.onOpenTopLevelSidebarSessions : props.onOpenParentSession}
       onClearFilter={
         useSidebarCounts ? props.onOpenTopLevelSidebarSessions : props.onClearSessionListView

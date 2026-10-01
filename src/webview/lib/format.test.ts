@@ -73,6 +73,10 @@ describe('format helpers', () => {
 
   it('replaces Fast in GPT and Claude model display names with a lightning symbol', () => {
     expect(formatModelName('GPT-5.6 Fast')).toBe('GPT-5.6 ⚡');
+    expect(formatModelName('GPT-6 Astra Ultrafast')).toBe('GPT-6 Astra ⚡⚡⚡');
+    expect(formatModelName('GPT-6 Astra ULTRAFAST')).toBe('GPT-6 Astra ⚡⚡⚡');
+    expect(formatModelName('Claude Opus 5 Ultrafast')).toBe('Claude Opus 5 ⚡⚡⚡');
+    expect(formatModelName('GPT-6 Ultrafaster')).toBe('GPT-6 Ultrafaster');
     expect(formatModelName('GPT-5 Fast Reasoning')).toBe('GPT-5 ⚡ Reasoning');
     expect(formatModelName('Claude Opus 5 Fast')).toBe('Claude Opus 5 ⚡');
     expect(formatModelName('GPT-5 Faster')).toBe('GPT-5 Faster');

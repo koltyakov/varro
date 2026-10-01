@@ -1,4 +1,5 @@
 import { appStore } from '../../lib/stores/app-store';
+import { routingStore } from '../../lib/stores/routing-store';
 import { applySessionShareOverride } from '../../lib/session-share-overrides';
 import { isContinuationAssistantFinish } from '../../lib/message-metrics';
 import type {
@@ -339,7 +340,12 @@ function isCompleteSessionEventInfo(
 export function syncSessionAgent(info: NormalizedSessionEventInfo) {
   const agent = asRecord(info)?.agent;
   if (isString(agent) && agent) {
-    appStore.setState('sessionSelectedAgents', info.id, agent);
+    routingStore.setSelectedAgent(agent, {
+      sessionId: info.id,
+      persistGlobal: false,
+      updateSelection: false,
+      publishHost: false,
+    });
   }
 }
 

@@ -1106,6 +1106,43 @@ describe('session-send helpers', () => {
     });
   });
 
+  it.each([
+    { selectedVariant: undefined, rememberedVariant: 'high', expectedVariant: 'high' },
+    { selectedVariant: 'high', rememberedVariant: 'low', expectedVariant: 'high' },
+    { selectedVariant: undefined, rememberedVariant: 'unsupported', expectedVariant: undefined },
+  ])(
+    'keeps the effective model consistent with the sent reasoning variant %j',
+    ({ selectedVariant, rememberedVariant, expectedVariant }) => {
+      const result = buildSessionSendBody(
+        createState({
+          selectedModel: { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: selectedVariant },
+          providers: [
+            provider('openai', {
+              'gpt-6.1-sol': {
+                id: 'gpt-6.1-sol',
+                name: 'GPT-6.1 Sol',
+                capabilities: { toolcall: true },
+                cost: { input: 0, output: 0 },
+                variants: { high: {} },
+              },
+            }),
+          ],
+          modelVariantSelections: { 'openai:gpt-6.1-sol': rememberedVariant },
+        }),
+        'session-1',
+        'Keep High selected',
+        () => false
+      );
+
+      expect(result?.body.variant).toBe(expectedVariant);
+      expect(result?.effectiveModel).toEqual({
+        providerID: 'openai',
+        modelID: 'gpt-6.1-sol',
+        variant: expectedVariant,
+      });
+    }
+  );
+
   it('omits the variant for an explicit default reasoning selection', () => {
     const result = buildSessionSendBody(
       createState({

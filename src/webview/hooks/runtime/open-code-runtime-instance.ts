@@ -1553,6 +1553,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await reconcileStuckSessionsWithDependencies(
       {
         loadSessionStatuses: loadSessionStatusesFromSnapshot,
+        isStaleServerStatus: (sessionId, statuses) => {
+          const startedAt = statusSnapshotStartedAt.get(statuses);
+          return (
+            startedAt !== undefined &&
+            sessionStore.isSessionStatusSnapshotStale(sessionId, startedAt)
+          );
+        },
         getLocalSessionStatuses: () => appStore.state.sessionStatus,
         getActiveSessionId: () => appStore.state.activeSessionId,
         isLoading: uiStore.isLoading,

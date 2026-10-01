@@ -1,4 +1,5 @@
 import { isSessionResumeMessage } from '../../../shared/session-pauses';
+import { collectSteeringMessages } from '../../lib/message-steering';
 import {
   getUserMessageMarkupSuffix,
   getUserMessagePreviewText,
@@ -56,13 +57,15 @@ export function getSubagentSessionIds(messages: readonly { info: Message }[]): R
 export function getStickyUserMessagePreview(
   messages: MessageEntry[],
   firstVisibleMessageIndex: number | null,
-  subagentSessionIds: ReadonlySet<string> = getSubagentSessionIds(messages)
+  subagentSessionIds: ReadonlySet<string> = getSubagentSessionIds(messages),
+  steeringMessageIds: ReadonlySet<string> = collectSteeringMessages(messages).ids
 ): StickyUserMessagePreview | null {
   if (firstVisibleMessageIndex === null || firstVisibleMessageIndex < 0) return null;
   const firstVisibleEntry = messages[firstVisibleMessageIndex];
   if (!firstVisibleEntry) return null;
   if (
     firstVisibleEntry.info.role === 'user' &&
+    !steeringMessageIds.has(firstVisibleEntry.info.id) &&
     !isSessionResumeMessage(firstVisibleEntry.parts) &&
     !subagentSessionIds.has(firstVisibleEntry.info.sessionID) &&
     getUserMessagePreviewText(firstVisibleEntry.parts) !== EMPTY_USER_MESSAGE_PREVIEW
@@ -77,6 +80,7 @@ export function getStickyUserMessagePreview(
     const entry = messages[i];
     if (!entry) continue;
     if (entry.info.role !== 'user') continue;
+    if (steeringMessageIds.has(entry.info.id)) continue;
     if (isSessionResumeMessage(entry.parts)) continue;
     if (subagentSessionIds.has(entry.info.sessionID)) continue;
     const text = getUserMessagePreviewText(entry.parts);

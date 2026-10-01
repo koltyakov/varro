@@ -12,6 +12,7 @@ import type {
 } from '@opencode/client';
 import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 import { formatSkillAttachment } from '../shared/skill-reference';
+import type { OpenCodeV2GenerationTiming } from './opencode-v2-generation-timing';
 
 export function v2PartId(messageID: string, type: string, ordinal: number): string {
   return `${messageID}:${type}:${ordinal}`;
@@ -217,6 +218,7 @@ export type V2MessageContext = {
   backgroundPending?: boolean;
   backgroundStartedAt?: number;
   error?: SessionStructuredError;
+  generationTiming?: OpenCodeV2GenerationTiming;
 };
 
 export function normalizeV2Error(value: unknown): SessionStructuredError | undefined {
@@ -382,6 +384,9 @@ export function projectV2Message(
           ? projectTool(content, sessionID, message.id, options.stripToolAttachments === true)
           : part(ordinals[content.type]++, content.type, {
               text: content.text,
+              // V2 saved text has no generation timing. Do not synthesize it from message
+              // creation/completion: that interval includes latency, not just generation.
+              // Reasoning timing alone cannot establish TPS for output + reasoning tokens.
               time:
                 content.type === 'reasoning'
                   ? {

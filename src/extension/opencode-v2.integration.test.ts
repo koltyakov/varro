@@ -13,6 +13,9 @@ import { OpenCodeTransport } from './open-code-transport';
 import { basicAuthorization, OpenCodeStartupOutput } from './opencode-connection';
 import { tryGenerateOneShot } from './one-shot-generation';
 import { SessionExportService } from './session-export-service';
+import { getAssistantDialogSummaryMap } from '../webview/components/message-list/assistant-dialog';
+import type { MessageEntry } from '../webview/types';
+import { logger } from './logger';
 
 const exportEditor = vi.hoisted(() => ({
   openTextDocument: vi.fn(async (options: { content: string; language: string }) => options),
@@ -281,6 +284,66 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       await transport.request('DELETE', `/session/${id}`);
     }
   });
+
+  it('restores estimated generation speed from durable boundaries after a cold reconnect', async () => {
+    if (transport.version !== 2) return;
+    const created = asRecord(
+      await transport.request('POST', '/session', { title: 'Generation timing fixture' })
+    );
+    if (!isString(created?.id)) throw new Error('Missing generation timing fixture session');
+    const id = created.id;
+    const cold = new OpenCodeTransport({
+      getUrl: () => url,
+      getWorkspaceCwd: () => join(root, 'workspace'),
+      getStatus: () => ({ state: 'running', url }),
+      isDisposing: () => false,
+      updateEventStreamState: () => {},
+      emitEvent: () => {},
+      getAuthorization: () => authorization,
+      sessionStateDirectory: join(root, 'annotations'),
+    });
+    try {
+      await transport.request('POST', `/session/${id}/prompt_async`, {
+        agent: 'build',
+        model: { providerID: 'fixture', modelID: 'fixture' },
+        parts: [{ type: 'text', text: 'Return the fixture response without tools.' }],
+      });
+      await vi.waitFor(
+        async () => {
+          // SAFETY: The real adapter returns the canonical Varro message-entry contract.
+          const messages = (await transport.request(
+            'GET',
+            `/session/${id}/message`
+          )) as MessageEntry[];
+          const summary = [...getAssistantDialogSummaryMap(messages).values()].at(-1);
+          expect(summary?.tokensPerSecond).toBeGreaterThan(0);
+        },
+        { timeout: 15000 }
+      );
+      expect(await cold.checkHealth()).toBe(true);
+      // SAFETY: The cold authenticated transport uses the same canonical adapter contract.
+      const messages = (await cold.request('GET', `/session/${id}/message`)) as MessageEntry[];
+      await writeFile(
+        join(root, 'generation-timing.json'),
+        JSON.stringify(
+          {
+            messages,
+            warnings: vi.mocked(logger.warn).mock.calls,
+          },
+          null,
+          2
+        )
+      );
+      const summary = [...getAssistantDialogSummaryMap(messages).values()].at(-1);
+      expect(summary?.tokensPerSecond).toBeGreaterThan(0);
+      expect(summary?.outputTokens).toBe(3);
+      const assistant = messages.findLast((entry) => entry.info.role === 'assistant');
+      expect(assistant?.parts.find((part) => part.type === 'text')?.time?.end).toBeGreaterThan(0);
+    } finally {
+      cold.abortRequests();
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 30000);
 
   it('falls back for a configured custom model without admitting duplicate generation', async () => {
     if (transport.version !== 2) return;

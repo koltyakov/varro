@@ -8,13 +8,18 @@ import test from 'node:test';
 import http from 'node:http';
 
 import { buildReplayTimeline, readPlaybackCapture } from './ai-session-playback.mjs';
-import { prepareStreamingRun, readActiveSessions as readPlatformActiveSessions } from './ai-streaming-selection.mjs';
+import {
+  prepareStreamingRun,
+  readActiveSessions as readPlatformActiveSessions,
+} from './ai-streaming-selection.mjs';
 import { createStreamingServer } from './ai-streaming-server.mjs';
 
 // Existing mocked discovery fixtures describe lsof output on every test host.
-const readActiveSessions = (options, execute) => readPlatformActiveSessions(
-  { ...options, platform: execute ? 'linux' : process.platform }, execute
-);
+const readActiveSessions = (options, execute) =>
+  readPlatformActiveSessions(
+    { ...options, platform: execute ? 'linux' : process.platform },
+    execute
+  );
 
 // Real listener/database ownership checks require lsof. Mocked discovery tests run everywhere.
 const ownershipTest = process.platform === 'win32' ? test.skip : test;
@@ -529,28 +534,110 @@ ownershipTest(
 test('Windows status discovery requires one matching listener and database owner', async (t) => {
   const f = await fixture(t);
   const listener = { address: '127.0.0.1', port: Number(new URL(f.serverUrl).port), pid: 123 };
-  const options = { sourceDatabase: f.sourceDatabase, directory: '/workspace',
-    serverUrl: f.serverUrl, platform: 'win32' };
+  const options = {
+    sourceDatabase: f.sourceDatabase,
+    directory: '/workspace',
+    serverUrl: f.serverUrl,
+    platform: 'win32',
+  };
   const evidence = { listeners: [listener], databaseOwners: [123] };
-  const execute = async (command, args) => {
+  const execute = async (command, args, executionOptions) => {
+    if (command === 'netstat.exe') {
+      assert.deepEqual(args, ['-ano']);
+      assert.equal(executionOptions.timeout, 5_000);
+      return {
+        stdout: evidence.listeners
+          .map(
+            ({ address, port, pid }) =>
+              `  TCP  ${address.includes(':') ? `[${address}]` : address}:${port}  0.0.0.0:0  LISTENING  ${pid}`
+          )
+          .join('\r\n'),
+      };
+    }
     assert.equal(command, 'powershell.exe');
+    assert.equal(executionOptions.timeout, 90_000);
     assert.ok(args.includes('-NonInteractive'));
     assert.equal(args.at(-1), await realpath(f.sourceDatabase));
-    return { stdout: JSON.stringify(evidence) };
+    return { stdout: JSON.stringify({ databaseOwners: evidence.databaseOwners }) };
   };
   const result = await readPlatformActiveSessions(options, execute);
   assert.equal(result.serverPid, 123);
   assert.equal(result.association, 'windows-listener-owner-and-restart-manager-database');
   evidence.databaseOwners = [456];
-  await assert.rejects(readPlatformActiveSessions(options, execute), /does not hold source database/);
+  await assert.rejects(
+    readPlatformActiveSessions(options, execute),
+    /does not hold source database/
+  );
   evidence.databaseOwners = [123];
   evidence.listeners.push({ ...listener, pid: 456 });
   await assert.rejects(readPlatformActiveSessions(options, execute), /one listener owner/);
   evidence.listeners = [];
   await assert.rejects(readPlatformActiveSessions(options, execute), /one listener owner/);
   evidence.listeners = [listener];
+  evidence.listeners.push({ ...listener, address: '::1', pid: 456 });
+  assert.equal((await readPlatformActiveSessions(options, execute)).serverPid, 123);
+  evidence.listeners = [{ ...listener, address: '0.0.0.0' }];
+  assert.equal((await readPlatformActiveSessions(options, execute)).serverPid, 123);
+  evidence.listeners = [{ ...listener, address: '::' }];
+  const ipv6 = await readPlatformActiveSessions(
+    {
+      ...options,
+      serverUrl: `http://[::1]:${listener.port}`,
+      client: { request: async () => ({}) },
+    },
+    execute
+  );
+  assert.equal(ipv6.serverPid, 123);
+  assert.equal(ipv6.serverUrl, `http://[::1]:${listener.port}`);
+  evidence.listeners = [{ ...listener, pid: 0 }];
+  await assert.rejects(
+    readPlatformActiveSessions(options, execute),
+    /Invalid Windows listener ownership/
+  );
+  evidence.listeners = [listener];
   evidence.databaseOwners = ['123'];
-  await assert.rejects(readPlatformActiveSessions(options, execute), /Invalid Windows database ownership/);
+  await assert.rejects(
+    readPlatformActiveSessions(options, execute),
+    /Invalid Windows database ownership/
+  );
+});
+
+test('Windows ownership probes fail closed with phase-specific errors', async (t) => {
+  const f = await fixture(t);
+  const options = {
+    sourceDatabase: f.sourceDatabase,
+    directory: '/workspace',
+    serverUrl: f.serverUrl,
+    platform: 'win32',
+  };
+  await assert.rejects(
+    readPlatformActiveSessions(options, async () => {
+      throw new Error('probe timed out');
+    }),
+    /Windows TCP listener ownership: probe timed out/
+  );
+  await assert.rejects(
+    readPlatformActiveSessions(options, async (command) => {
+      if (command === 'netstat.exe') return { stdout: '' };
+      throw new Error('probe timed out');
+    }),
+    /Windows Restart Manager database ownership: probe timed out/
+  );
+  await assert.rejects(
+    readPlatformActiveSessions(options, async () => ({
+      stdout: 'TCP invalid 0.0.0.0:0 LISTENING 123',
+    })),
+    /Invalid Windows listener ownership/
+  );
+  await assert.rejects(
+    readPlatformActiveSessions(options, async (command) => ({
+      stdout:
+        command === 'netstat.exe'
+          ? `TCP 127.0.0.1:${new URL(f.serverUrl).port} 127.0.0.1:80 ESTABLISHED 123\r\nUDP 0.0.0.0:53 *:* 123`
+          : JSON.stringify({ databaseOwners: [123] }),
+    })),
+    /one listener owner/
+  );
 });
 
 test('automatic and explicit status endpoints fail closed without matching open database ownership', async (t) => {

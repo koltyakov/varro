@@ -4,13 +4,16 @@ import binocularSvg from 'iconoir/icons/binocular.svg?raw';
 import cubeScanSolidSvg from 'iconoir/icons/cube-scan-solid.svg?raw';
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { WebviewMessage } from '../../../shared/protocol';
-import type { Agent } from '../../types';
-import { openNewWindowIcon } from '../../lib/ui-icons';
+import type { ModelPricing, WebviewMessage } from '../../../shared/protocol';
+import type { Agent, Provider } from '../../types';
+import { flashSolidIcon, openNewWindowIcon } from '../../lib/ui-icons';
+import { client } from '../../lib/client';
 import { toCssUrl } from '../UiIcon';
 import { DEFAULT_TOOLTIP_DELAY } from '../Tooltip';
+import { QUEUE_ONLY_SELECTION_TOOLTIP } from './active-turn-selection';
 import {
   AgentPicker,
+  FormattedModelName,
   ModelPickerButton,
   PermissionModePicker,
   ProviderLimitChip,
@@ -55,6 +58,7 @@ function createAgent(overrides: Partial<Agent> = {}): Agent {
 }
 
 beforeEach(() => {
+  vi.spyOn(client.config, 'modelPricing').mockResolvedValue(null);
   container = document.createElement('div');
   document.body.appendChild(container);
 });
@@ -957,36 +961,45 @@ describe('ToolbarPickers', () => {
     }
   });
 
-  it('shows the selected agent description below its name in the tooltip', async () => {
-    vi.useFakeTimers();
-    cleanup = render(
-      () => (
-        <AgentPicker
-          agents={[createAgent({ name: 'reviewer', description: 'Reviews work' })]}
-          selectedAgent="reviewer"
-          selectedLabel="Reviewer"
-          focusIndex={0}
-          showPicker={false}
-          getLabel={(agent) => agent.name}
-          getDetail={(agent) => agent.description ?? 'No description'}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-          onFocusIndex={vi.fn()}
-        />
-      ),
-      container!
-    );
+  it.each([false, true])(
+    'shows the agent description with queue-only note %s',
+    async (queueOnly) => {
+      vi.useFakeTimers();
+      cleanup = render(
+        () => (
+          <AgentPicker
+            agents={[createAgent({ name: 'reviewer', description: 'Reviews work' })]}
+            selectedAgent="reviewer"
+            selectedLabel="Reviewer"
+            queueOnly={queueOnly}
+            focusIndex={0}
+            showPicker={false}
+            getLabel={(agent) => agent.name}
+            getDetail={(agent) => agent.description ?? 'No description'}
+            onToggle={vi.fn()}
+            onSelect={vi.fn()}
+            onFocusIndex={vi.fn()}
+          />
+        ),
+        container!
+      );
 
-    const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
-    toggleButton?.dispatchEvent(new MouseEvent('mouseenter'));
-    await vi.advanceTimersByTimeAsync(1500);
+      const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
+      toggleButton?.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(1500);
 
-    const tooltip = document.querySelector('[role="tooltip"]');
-    expect(tooltip?.querySelector('.agent-picker-tooltip-title')?.textContent).toBe('Reviewer');
-    expect(tooltip?.querySelector('.agent-picker-tooltip-detail')?.textContent).toBe(
-      'Reviews work'
-    );
-  });
+      const tooltip = document.querySelector('[role="tooltip"]');
+      expect(tooltip?.querySelector('.agent-picker-tooltip-title')?.textContent).toBe('Reviewer');
+      expect(tooltip?.querySelector('.agent-picker-tooltip-detail')?.textContent).toBe(
+        'Reviews work'
+      );
+      expect(tooltip?.querySelector('[role="separator"]') !== null).toBe(queueOnly);
+      if (queueOnly)
+        expect(tooltip?.querySelector('[role="separator"]')?.nextElementSibling?.textContent).toBe(
+          QUEUE_ONLY_SELECTION_TOOLTIP
+        );
+    }
+  );
 
   it.each([
     ['mouseenter', 'mouseleave', 1024],
@@ -1161,7 +1174,12 @@ describe('ToolbarPickers', () => {
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 
-  it.each(['max', 'Ultra'])('warns when %s reasoning is selected', async (variant) => {
+  it.each([
+    ['max', 'Maximum'],
+    ['Ultra', 'Ultra'],
+    ['xhigh', 'Extra-high'],
+    ['Xhigh', 'Extra-high'],
+  ])('warns when %s reasoning is selected', async (variant, level) => {
     vi.useFakeTimers();
     cleanup = render(
       () => (
@@ -1186,9 +1204,42 @@ describe('ToolbarPickers', () => {
     await vi.advanceTimersByTimeAsync(1500);
 
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
-      'Maximum reasoning may be more expensive.'
+      `${level} reasoning may be more expensive and can sometimes produce worse results.`
     );
+    expect(document.querySelector('[role="tooltip"] [role="separator"]')).toBeNull();
   });
+
+  it.each(['high', 'xhigh'])(
+    'explains why active-turn %s reasoning requires queueing',
+    async (variant) => {
+      vi.useFakeTimers();
+      cleanup = render(
+        () => (
+          <VariantPicker
+            variants={['high', 'xhigh']}
+            selectedVariant={variant}
+            selectedLabel={variant}
+            showPicker={false}
+            queueOnly={true}
+            getLabel={(value) => value}
+            onToggle={vi.fn()}
+            onSelect={vi.fn()}
+          />
+        ),
+        container!
+      );
+      const button = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
+      expect(button?.disabled).toBe(false);
+      button?.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(1500);
+      const text = document.querySelector('[role="tooltip"]')?.textContent;
+      expect(text).toContain(QUEUE_ONLY_SELECTION_TOOLTIP);
+      const separator = document.querySelector('[role="tooltip"] [role="separator"]');
+      expect(separator).not.toBeNull();
+      expect(separator?.nextElementSibling?.textContent).toBe(QUEUE_ONLY_SELECTION_TOOLTIP);
+      if (variant === 'xhigh') expect(text).toContain('can sometimes produce worse results.');
+    }
+  );
 
   it('right-aligns the variant picker popover when a boundary is provided', async () => {
     const boundary = document.createElement('div');
@@ -1308,37 +1359,377 @@ describe('ToolbarPickers', () => {
     expect(providerIcon?.style.getPropertyValue('--provider-icon-mask')).toContain('url(');
   });
 
-  it('renders Claude Fast models with a lightning symbol and cost warning', async () => {
+  it.each([
+    ['anthropic', 'Anthropic', 'Claude Opus 5 Fast', 'Claude Opus 5 '],
+    ['openai', 'OpenAI', 'GPT-6.1 Sol Fast', 'GPT-6.1 Sol '],
+  ])(
+    'renders %s Fast models with regular styling and the cost tooltip',
+    async (providerID, providerName, modelName, formattedName) => {
+      vi.useFakeTimers();
+      cleanup = render(
+        () => (
+          <ModelPickerButton
+            providerID={providerID}
+            providerName={providerName}
+            modelName={modelName}
+            canEllipsize={false}
+            onToggle={vi.fn()}
+          />
+        ),
+        container!
+      );
+
+      const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+      expect(button?.getAttribute('aria-label')).toBe(`${providerName} / ${modelName}`);
+      expect(button?.className).not.toContain('fast-model-selected');
+      expect(container?.querySelector('.model-name-text')?.textContent).toBe(formattedName);
+      expect(container?.querySelector('.model-speed-label')).toBeNull();
+      expect(
+        container
+          ?.querySelector<HTMLElement>('.model-speed-icon')
+          ?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(flashSolidIcon));
+      expect(container?.querySelectorAll('.model-speed-icon')).toHaveLength(1);
+
+      button?.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      const tooltip = document.querySelector('[role="tooltip"]');
+      expect(tooltip?.querySelector('.model-picker-tooltip > span')?.textContent).toBe(
+        `${providerName} / ${modelName}`
+      );
+      expect(tooltip?.querySelector('.model-picker-tooltip-detail')?.textContent).toBe(
+        'Fast mode may consume usage limits faster and cost more.'
+      );
+    }
+  );
+
+  it.each(['GPT-6 Astra Ultrafast', 'Claude Opus 5 Ultrafast'])(
+    'renders %s with three solid flash icons and the original fast warning styling',
+    async (modelName) => {
+      vi.useFakeTimers();
+      cleanup = render(
+        () => (
+          <ModelPickerButton
+            providerID="openai"
+            providerName="OpenAI"
+            modelName={modelName}
+            canEllipsize={false}
+            onToggle={vi.fn()}
+          />
+        ),
+        container!
+      );
+      const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+      expect(button?.classList.contains('ultrafast-model-selected')).toBe(true);
+      expect(button?.classList.contains('fast-model-selected')).toBe(false);
+      expect(button?.getAttribute('aria-label')).toBe(`OpenAI / ${modelName}`);
+      expect(container?.querySelector('.model-name-text')?.textContent).toBe(
+        modelName.replace('Ultrafast', '')
+      );
+      expect(container?.querySelectorAll('.model-speed-icon')).toHaveLength(3);
+      expect(container?.querySelector('.model-speed-label')).toBeNull();
+      expect(
+        container
+          ?.querySelector<HTMLElement>('.model-speed-icon')
+          ?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(flashSolidIcon));
+      button?.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+        'Fast mode may consume usage limits faster and cost more.'
+      );
+    }
+  );
+
+  it('groups three ultrafast solid flash icons under one cost tooltip in model lists', async () => {
     vi.useFakeTimers();
+    cleanup = render(() => <FormattedModelName name="GPT-6 Astra Ultrafast" />, container!);
+    const symbols = container?.querySelectorAll(
+      '[aria-label="Fast mode may consume usage limits faster and cost more."]'
+    );
+    expect(symbols).toHaveLength(1);
+    expect(symbols?.[0]?.classList.contains('model-speed-icons')).toBe(true);
+    expect(symbols?.[0]?.querySelectorAll('.model-speed-icon')).toHaveLength(3);
+    expect(
+      container
+        ?.querySelector<HTMLElement>('.model-speed-icon')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(flashSolidIcon));
+    symbols?.[0]?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'Fast mode may consume usage limits faster and cost more.'
+    );
+  });
+
+  it.each([
+    [10, 30, 0, 0, true],
+    [15, 75, 0, 0, true],
+    [9.99, 30, 100, 100, false],
+    [10, 29.99, 100, 100, false],
+    [0, 0, 100, 100, false],
+    [NaN, 30, 100, 100, false],
+    [10, Infinity, 100, 100, false],
+  ])(
+    'uses non-fast pricing %s/%s instead of fast pricing %s/%s for red styling',
+    (input, output, fastInput, fastOutput, warning) => {
+      const providers: Provider[] = [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-6.1-sol': {
+              id: 'gpt-6.1-sol',
+              name: 'GPT-6.1 Sol',
+              capabilities: { toolcall: true },
+              cost: { input, output },
+            },
+            'gpt-6.1-sol-fast': {
+              id: 'gpt-6.1-sol-fast',
+              name: 'GPT-6.1 Sol Fast',
+              capabilities: { toolcall: true },
+              cost: { input: fastInput, output: fastOutput },
+            },
+          },
+        },
+      ];
+      cleanup = render(
+        () => (
+          <ModelPickerButton
+            providerID="openai"
+            modelID="gpt-6.1-sol-fast"
+            providerName="OpenAI"
+            modelName="GPT-6.1 Sol Fast"
+            providers={providers}
+            canEllipsize={false}
+            onToggle={vi.fn()}
+          />
+        ),
+        container!
+      );
+      expect(
+        container?.querySelector('.model-picker-btn')?.classList.contains('fast-model-selected')
+      ).toBe(warning);
+    }
+  );
+
+  it.each([
+    { label: 'Astra catalog pricing', pricing: { input: 10, output: 50 }, warning: true },
+    { label: 'inexpensive catalog pricing', pricing: { input: 5, output: 25 }, warning: false },
+    { label: 'missing catalog pricing', pricing: null, warning: false },
+    { label: 'incomplete catalog pricing', pricing: { input: 10 }, warning: false },
+  ])('uses $label when subscription provider rates are zero', async ({ pricing, warning }) => {
+    vi.mocked(client.config.modelPricing).mockResolvedValue(pricing);
     cleanup = render(
       () => (
         <ModelPickerButton
-          providerID="anthropic"
-          providerName="Anthropic"
-          modelName="Claude Opus 5 Fast"
+          providerID="openai"
+          providerName="OpenAI"
+          modelID="gpt-6-astra-fast"
+          modelName="GPT-6 Astra Fast"
+          providers={[
+            {
+              id: 'openai',
+              name: 'OpenAI',
+              source: 'api',
+              models: {
+                'gpt-6-astra': {
+                  id: 'gpt-6-astra',
+                  name: 'GPT-6 Astra',
+                  capabilities: { toolcall: true },
+                  cost: { input: 0, output: 0 },
+                },
+                'gpt-6-astra-fast': {
+                  id: 'gpt-6-astra-fast',
+                  name: 'GPT-6 Astra Fast',
+                  capabilities: { toolcall: true },
+                  cost: { input: 100, output: 100 },
+                },
+              },
+            },
+          ]}
           canEllipsize={false}
           onToggle={vi.fn()}
         />
       ),
       container!
     );
-
-    const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
-    expect(button?.getAttribute('aria-label')).toBe('Anthropic / Claude Opus 5 Fast');
-    expect(button?.className).toContain('fast-model-selected');
-    expect(container?.querySelector('.model-name-text')?.textContent).toBe('Claude Opus 5 ⚡');
-
-    button?.dispatchEvent(new MouseEvent('mouseenter'));
-    await vi.advanceTimersByTimeAsync(1_500);
-
-    const tooltip = document.querySelector('[role="tooltip"]');
-    expect(tooltip?.querySelector('.model-picker-tooltip > span')?.textContent).toBe(
-      'Anthropic / Claude Opus 5 Fast'
-    );
-    expect(tooltip?.querySelector('.model-picker-tooltip-detail')?.textContent).toBe(
-      'Fast mode may consume usage limits faster and cost more.'
-    );
+    expect(container?.querySelector('.fast-model-selected')).toBeNull();
+    await flushMicrotasks();
+    expect(client.config.modelPricing).toHaveBeenCalledExactlyOnceWith('openai', 'gpt-6-astra');
+    expect(
+      container?.querySelector('.model-picker-btn')?.classList.contains('fast-model-selected')
+    ).toBe(warning);
   });
+
+  it('ignores late expensive pricing after switching to a cheaper fast model', async () => {
+    let resolveAstra: ((pricing: ModelPricing | null) => void) | undefined;
+    vi.mocked(client.config.modelPricing).mockImplementation((_providerID, modelID) =>
+      modelID === 'astra'
+        ? new Promise((resolve) => {
+            resolveAstra = resolve;
+          })
+        : Promise.resolve({ input: 5, output: 25 })
+    );
+    const [model, setModel] = createSignal('Astra');
+    cleanup = render(
+      () => (
+        <ModelPickerButton
+          providerID="openai"
+          providerName="OpenAI"
+          modelID={`${model().toLowerCase()}-fast`}
+          modelName={`GPT-6 ${model()} Fast`}
+          providers={[
+            {
+              id: 'openai',
+              name: 'OpenAI',
+              source: 'api',
+              models: {
+                astra: {
+                  id: 'astra',
+                  name: 'GPT-6 Astra',
+                  capabilities: { toolcall: true },
+                  cost: { input: 0, output: 0 },
+                },
+                sol: {
+                  id: 'sol',
+                  name: 'GPT-6 Sol',
+                  capabilities: { toolcall: true },
+                  cost: { input: 0, output: 0 },
+                },
+              },
+            },
+          ]}
+          canEllipsize={false}
+          onToggle={vi.fn()}
+        />
+      ),
+      container!
+    );
+    setModel('Sol');
+    await flushMicrotasks();
+    expect(resolveAstra).toBeDefined();
+    resolveAstra?.({ input: 10, output: 50 });
+    await flushMicrotasks();
+    expect(container?.querySelector('.fast-model-selected')).toBeNull();
+  });
+
+  it('matches non-fast pricing by name and updates when pricing becomes available', () => {
+    const [providers, setProviders] = createSignal<Provider[]>([
+      {
+        id: 'anthropic',
+        name: 'Anthropic',
+        source: 'api',
+        models: {
+          'opus-priority': {
+            id: 'opus-priority',
+            name: 'Claude Opus 5 Fast',
+            capabilities: { toolcall: true },
+            cost: { input: 100, output: 100 },
+          },
+        },
+      },
+    ]);
+    cleanup = render(
+      () => (
+        <ModelPickerButton
+          providerID="anthropic"
+          modelID="opus-priority"
+          providerName="Anthropic"
+          modelName="Claude Opus 5 Fast"
+          providers={providers()}
+          canEllipsize={false}
+          onToggle={vi.fn()}
+        />
+      ),
+      container!
+    );
+    const button = () => container?.querySelector('.model-picker-btn');
+    expect(button()?.classList.contains('fast-model-selected')).toBe(false);
+    setProviders([
+      {
+        ...providers()[0]!,
+        models: {
+          ...providers()[0]!.models,
+          opus: {
+            id: 'opus',
+            name: 'Claude Opus 5',
+            capabilities: { toolcall: true },
+            cost: { input: 10, output: 30 },
+          },
+        },
+      },
+    ]);
+    expect(button()?.classList.contains('fast-model-selected')).toBe(true);
+    setProviders([]);
+    expect(button()?.classList.contains('fast-model-selected')).toBe(false);
+  });
+
+  it('does not color an expensive non-fast model red', () => {
+    cleanup = render(
+      () => (
+        <ModelPickerButton
+          providerID="openai"
+          modelID="gpt-6.1-sol"
+          providerName="OpenAI"
+          modelName="GPT-6.1 Sol"
+          providers={[
+            {
+              id: 'openai',
+              name: 'OpenAI',
+              source: 'api',
+              models: {
+                'gpt-6.1-sol': {
+                  id: 'gpt-6.1-sol',
+                  name: 'GPT-6.1 Sol',
+                  capabilities: { toolcall: true },
+                  cost: { input: 10, output: 30 },
+                },
+              },
+            },
+          ]}
+          canEllipsize={false}
+          onToggle={vi.fn()}
+        />
+      ),
+      container!
+    );
+    expect(container?.querySelector('.fast-model-selected')).toBeNull();
+  });
+
+  it.each(['GPT-6.1 Sol', 'GPT-6.1 Sol Fast'])(
+    'explains why active-turn %s model selection requires queueing',
+    async (modelName) => {
+      vi.useFakeTimers();
+      cleanup = render(
+        () => (
+          <ModelPickerButton
+            providerID="openai"
+            providerName="OpenAI"
+            modelName={modelName}
+            canEllipsize={false}
+            queueOnly={true}
+            onToggle={vi.fn()}
+          />
+        ),
+        container!
+      );
+      const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+      expect(button?.disabled).toBe(false);
+      button?.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(1500);
+      const text = document.querySelector('[role="tooltip"]')?.textContent;
+      expect(text).toContain(`OpenAI / ${modelName}`);
+      expect(text).toContain(QUEUE_ONLY_SELECTION_TOOLTIP);
+      const separator = document.querySelector('[role="tooltip"] [role="separator"]');
+      expect(separator).not.toBeNull();
+      expect(separator?.nextElementSibling?.textContent).toBe(QUEUE_ONLY_SELECTION_TOOLTIP);
+      if (modelName.endsWith('Fast'))
+        expect(text).toContain('Fast mode may consume usage limits faster and cost more.');
+    }
+  );
 
   it('omits the provider limit chip when no label is available', () => {
     cleanup = render(

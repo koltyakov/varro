@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { setHostDragImage } from '../../host/extensions';
 import type { QueuedMessage } from '../../lib/app-state-types';
+import { QUEUE_ONLY_SELECTION_TOOLTIP } from './active-turn-selection';
 import {
   arrowUpIcon,
   attachmentIcon,
@@ -29,6 +30,7 @@ export type QueuedMessageItem = Pick<
   | 'ownerViewId'
   | 'sessionId'
   | 'text'
+  | 'agent'
   | 'paused'
   | 'droppedFiles'
   | 'clipboardImages'
@@ -68,6 +70,7 @@ export function QueuedMessages(props: {
   editingItemId?: string | null;
   canEdit: boolean;
   canSendImmediately: boolean;
+  canSteerItem?: (item: QueuedMessageItem) => boolean;
   onRetryDispatch: (item: QueuedMessageItem) => void;
   onSendAsSteer: (item: QueuedMessageItem) => void;
   onSetPaused: (item: QueuedMessageItem, paused: boolean, allRows: boolean) => void;
@@ -321,7 +324,11 @@ export function QueuedMessages(props: {
                             ? props.onRetryDispatch(item)
                             : props.onSendAsSteer(item)
                         }
-                        disabled={isLocked() || !props.canSendImmediately}
+                        disabled={
+                          isLocked() ||
+                          !props.canSendImmediately ||
+                          props.canSteerItem?.(item) === false
+                        }
                         hidden={isLocked()}
                         title={
                           isDispatching()
@@ -336,7 +343,9 @@ export function QueuedMessages(props: {
                                     ? 'Retry send as Steer'
                                     : !props.canSendImmediately
                                       ? 'Resolve the pending request before sending immediately'
-                                      : 'Send now as Steer'
+                                      : props.canSteerItem?.(item) === false
+                                        ? QUEUE_ONLY_SELECTION_TOOLTIP
+                                        : 'Send now as Steer'
                         }
                         aria-label={
                           didDispatchFail()

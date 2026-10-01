@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { MessageEntry } from '../../types';
+import type { AssistantMessage, MessageEntry } from '../../types';
 import {
   getStickyUserMessagePreview,
   getNextVisibleUserMessageTopMap,
@@ -54,7 +54,7 @@ function user(id: string, text: string = 'hello'): MessageEntry {
   };
 }
 
-function assistant(id: string, parentID: string = 'u1'): MessageEntry {
+function assistant(id: string, parentID: string = 'u1'): MessageEntry<AssistantMessage> {
   return {
     info: {
       id,
@@ -149,9 +149,11 @@ describe('getStickyUserMessagePreview', () => {
   });
 
   it('picks the closest preceding user message', () => {
+    const firstResponse = assistant('a1');
+    firstResponse.info.time.completed = 0;
     const messages = [
       user('u1', 'first'),
-      assistant('a1'),
+      firstResponse,
       user('u2', 'second'),
       assistant('a2', 'u2'),
     ];

@@ -25,6 +25,8 @@ import {
   showModelPicker,
   setShowModelPicker,
   setState,
+  setSelectedModel,
+  applySessionSelectedModelsSnapshot,
   setInputText,
   addContextFile,
   addClipboardImage,
@@ -410,6 +412,15 @@ function setupVisionDelegationModelState() {
       permission: [],
       model: { providerID: 'vision-provider', modelID: 'viewer' },
     },
+  ]);
+}
+
+function setupMatchingActiveTurn() {
+  setupModelState();
+  setState('selectedAgent', 'build');
+  const entry = historyEntry('active-user', 'Active turn');
+  setState('messages', [
+    { ...entry, info: { ...entry.info, model: { providerID: 'openai', modelID: 'gpt-4o' } } },
   ]);
 }
 
@@ -4967,6 +4978,36 @@ describe('ChatInput', () => {
     expect(list?.classList.contains('has-more-below')).toBe(false);
   });
 
+  it.each([
+    ['all', 'copy'],
+    ['uninitialized', 'copy'],
+    ['copy', 'copy'],
+    ['copyMove', 'copy'],
+    ['copyLink', 'copy'],
+    ['move', 'move'],
+    ['link', 'link'],
+    ['linkMove', 'link'],
+    ['none', 'none'],
+  ] as const)('uses an allowed attachment drop effect for %s drags', (allowed, expected) => {
+    cleanup = render(() => ChatInput(), container!);
+    const dataTransfer = createDragDataTransfer();
+    dataTransfer.effectAllowed = allowed;
+    const composer = container!.querySelector('.chat-input-container')!;
+
+    for (const target of [document, composer]) {
+      for (const type of ['dragenter', 'dragover']) {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperties(event, {
+          dataTransfer: { value: dataTransfer },
+          shiftKey: { value: true },
+        });
+        target.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(true);
+        expect(dataTransfer.dropEffect).toBe(expected);
+      }
+    }
+  });
+
   it('reorders queued rows by dragging the left handle without showing the file-drop overlay', () => {
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
@@ -5815,6 +5856,7 @@ describe('ChatInput', () => {
   });
 
   it('sends queued rows as steers and removes them on success', async () => {
+    setupMatchingActiveTurn();
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
     setState('queuedMessages', [
@@ -5916,6 +5958,7 @@ describe('ChatInput', () => {
   });
 
   it('does not resend a restored queued steer that OpenCode already admitted', async () => {
+    setupMatchingActiveTurn();
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
     setState('queuedMessages', [
@@ -5950,6 +5993,7 @@ describe('ChatInput', () => {
   });
 
   it('keeps a queued steer visible and blocks later queue dispatch while pending', async () => {
+    setupMatchingActiveTurn();
     vi.useFakeTimers();
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
@@ -6038,6 +6082,7 @@ describe('ChatInput', () => {
   });
 
   it('removes a pending queued steer when the backend admits it', async () => {
+    setupMatchingActiveTurn();
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
     setState('queuedMessages', [
@@ -6080,6 +6125,7 @@ describe('ChatInput', () => {
   });
 
   it('restores a queued row when steering it reports a send error', async () => {
+    setupMatchingActiveTurn();
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
     setState('queuedMessages', [
@@ -7677,7 +7723,165 @@ describe('ChatInput', () => {
     expect(container?.querySelector('[aria-label="Add to queue (Enter)"]')).not.toBeNull();
   });
 
+  it.each(['agent', 'model', 'reasoning'])(
+    'queues instead of steering after changing %s during a turn',
+    async (changed) => {
+      setupMatchingActiveTurn();
+      setIsLoading(true);
+      setState('activeSessionId', 'session-1');
+      setState('sessionStatus', 'session-1', { type: 'busy' });
+      setState('providers', 0, 'models', 'gpt-4o', 'variants', { high: {}, xhigh: {} });
+      setState('providers', 0, 'models', 'other', {
+        id: 'other',
+        name: 'Other model',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+        variants: { high: {}, xhigh: {} },
+      });
+      const model = {
+        providerID: 'openai',
+        modelID: changed === 'model' ? 'other' : 'gpt-4o',
+        variant: changed === 'reasoning' ? 'high' : undefined,
+      };
+      const agent = changed === 'agent' ? 'plan' : 'build';
+      setSelectedModel({ ...model }, { sessionId: 'session-1', persistGlobal: false });
+      setState('selectedAgent', agent);
+      setInputText('Different settings');
+      cleanup = render(() => ChatInput(), container!);
+      expect(container?.querySelector<HTMLButtonElement>('.model-picker-btn')?.disabled).toBe(
+        false
+      );
+      expect(
+        container?.querySelector<HTMLButtonElement>('[aria-label="Thinking level"]')?.disabled
+      ).toBe(false);
+      container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')?.click();
+      const menuAction = (label: string) =>
+        [...container!.querySelectorAll<HTMLButtonElement>('.busy-menu button')].find((button) =>
+          button.textContent?.includes(label)
+        );
+      expect(menuAction('Steer with Message')?.disabled).toBe(true);
+      expect(menuAction('Stop and Send')?.disabled).toBe(true);
+      menuAction('Stop and Send')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(abortSessionMock).not.toHaveBeenCalled();
+      container
+        ?.querySelector('.rich-composer')
+        ?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true })
+        );
+      await flushAsyncWork();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      const queued = state.queuedMessages[0]!;
+      expect(queued.agent).toBe(agent);
+      expect(queued.queuedContext?.editorContext.queuedModel?.selection).toEqual(model);
+      expect(
+        container?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')?.disabled
+      ).toBe(true);
+      await sendQueuedAsSteer(queued);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(state.queuedMessages).toHaveLength(1);
+
+      // Changing the composer back must not change the queued message's settings.
+      setSelectedModel(
+        { providerID: 'openai', modelID: 'gpt-4o' },
+        { sessionId: 'session-1', persistGlobal: false }
+      );
+      setState('selectedAgent', 'build');
+      setInputText('Matching settings');
+      if (!menuAction('Steer with Message'))
+        container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')?.click();
+      expect(menuAction('Steer with Message')?.disabled).toBe(false);
+      expect(
+        container?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')?.disabled
+      ).toBe(true);
+
+      // A later active turn with the queued settings makes that row steerable.
+      const entry = historyEntry('next-active-user', 'New turn');
+      setState('messages', [{ ...entry, info: { ...entry.info, agent, model } }]);
+      expect(
+        container?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')?.disabled
+      ).toBe(false);
+      container?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')?.click();
+      await flushAsyncWork();
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        'Different settings',
+        expect.objectContaining({ delivery: 'steer', agent, selectedModel: model })
+      );
+      expect(state.queuedMessages).toEqual([]);
+    }
+  );
+
+  it.each(['model', 'reasoning'])(
+    'keeps a changed %s dropdown and warning through active-turn snapshots',
+    async (changed) => {
+      setupMatchingActiveTurn();
+      setIsLoading(true);
+      setState('activeSessionId', 'session-1');
+      setState('sessionStatus', 'session-1', { type: 'busy' });
+      setState('providers', 0, 'models', 'gpt-4o', 'variants', { high: {}, xhigh: {} });
+      setState('providers', 0, 'models', 'other', {
+        id: 'other',
+        name: 'Other model',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      });
+      const running = { providerID: 'openai', modelID: 'gpt-4o' };
+      setSelectedModel({ ...running }, { sessionId: 'session-1', persistGlobal: false });
+      const sendToExtension = vi.fn(defaultBridgeSend);
+      fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+        sendToExtension;
+      cleanup = render(() => ChatInput(), container!);
+      expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
+      if (changed === 'model') {
+        container?.querySelector<HTMLButtonElement>('.model-picker-btn')?.click();
+        await vi.waitFor(() =>
+          expect(
+            container?.querySelector('.model-picker-item[data-model-id="other"]')
+          ).not.toBeNull()
+        );
+        container
+          ?.querySelector<HTMLButtonElement>('.model-picker-item[data-model-id="other"]')
+          ?.click();
+      } else {
+        container?.querySelector<HTMLButtonElement>('[aria-label="Thinking level"]')?.click();
+        const high = [
+          ...container!.querySelectorAll<HTMLButtonElement>('.variant-popover button'),
+        ].find((button) => button.textContent?.trim() === 'High');
+        expect(high).toBeDefined();
+        high?.click();
+      }
+      const selected =
+        changed === 'model'
+          ? { providerID: 'openai', modelID: 'other' }
+          : { ...running, variant: 'high' };
+      expect(state.selectedModel).toEqual(selected);
+      expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
+      const update = sendToExtension.mock.calls
+        .map(([message]) => message)
+        .find((message) => message.type === 'session-model/update');
+      expect(update?.payload.selectionId).toBeTypeOf('string');
+      applySessionSelectedModelsSnapshot(
+        { 'session-1': selected },
+        { sessionId: 'session-1', selectionId: update!.payload.selectionId! }
+      );
+      applySessionSelectedModelsSnapshot({ 'session-1': running });
+      setSelectedModel({ ...running }, { sessionId: 'session-1', persistGlobal: false });
+      expect(state.selectedModel).toEqual(selected);
+      expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
+      expect(container?.querySelector('.model-picker-btn')?.textContent).toContain(
+        changed === 'model' ? 'Other model' : 'GPT-4o'
+      );
+      if (changed === 'reasoning')
+        expect(container?.querySelector('[aria-label="Thinking level"]')?.textContent).toContain(
+          'High'
+        );
+      setIsLoading(false);
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      applySessionSelectedModelsSnapshot({ 'session-1': selected });
+    }
+  );
+
   it('sends busy composer input as a steer on modifier enter', async () => {
+    setupMatchingActiveTurn();
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
     setInputText('Change direction');
@@ -7695,6 +7899,7 @@ describe('ChatInput', () => {
   });
 
   it('stops the active response before sending from the busy send menu', async () => {
+    setupMatchingActiveTurn();
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
     setInputText('Follow up after stopping');
@@ -7719,6 +7924,7 @@ describe('ChatInput', () => {
   });
 
   it('does not send from the busy menu when stopping fails', async () => {
+    setupMatchingActiveTurn();
     abortSessionMock.mockRejectedValueOnce(new Error('abort failed'));
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
@@ -11317,6 +11523,8 @@ describe('ChatInput', () => {
 
   it('warns when the model or reasoning level changes after a session request', async () => {
     vi.useFakeTimers();
+    setSessionUsageLimit('session-1', null);
+    setSessionUsageLimit('child-1', null);
     setState('providers', [
       {
         id: 'openai',
@@ -11399,11 +11607,36 @@ describe('ChatInput', () => {
     setState('selectedModel', { providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' });
     expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
 
+    const modelButton = () => container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+    const reasoningButton = () =>
+      container?.querySelector<HTMLButtonElement>('[aria-label="Thinking level"]');
+    modelButton()?.click();
+    await vi.waitFor(() => expect(container?.querySelector('.model-picker-anchor')).not.toBeNull());
+
     setState('sessionStatus', 'session-1', { type: 'busy' });
-    expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
+    expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
+    expect(modelButton()?.disabled).toBe(false);
+    expect(reasoningButton()?.disabled).toBe(false);
+    expect(container?.querySelector('.model-picker-anchor')).not.toBeNull();
+    reasoningButton()?.click();
+    expect(container?.querySelector('.model-picker-anchor')).toBeNull();
+    expect(container?.querySelector('.variant-popover')).not.toBeNull();
+    expect(state.selectedModel).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.5',
+      variant: 'low',
+    });
 
     setState('sessionStatus', 'session-1', { type: 'idle' });
     expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
+    expect(modelButton()?.disabled).toBe(false);
+    expect(reasoningButton()?.disabled).toBe(false);
+    expect(container?.querySelector('.variant-popover')).not.toBeNull();
+    setState('sessionStatus', 'child-1', { type: 'busy' });
+    expect(modelButton()?.disabled).toBe(false);
+    expect(reasoningButton()?.disabled).toBe(false);
+    expect(container?.querySelector('.variant-popover')).not.toBeNull();
+    setState('sessionStatus', 'child-1', { type: 'idle' });
 
     setState('selectedModel', {
       providerID: 'openai',

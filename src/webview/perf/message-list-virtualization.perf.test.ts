@@ -81,7 +81,7 @@ vi.mock('../components/message-list/sticky-preview', async (importOriginal) => {
           return target[property as keyof typeof target];
         },
       });
-      return actual.getStickyUserMessagePreview(countedMessages, args[1], args[2]);
+      return actual.getStickyUserMessagePreview(countedMessages, args[1], args[2], args[3]);
     },
   };
 });

@@ -61,6 +61,7 @@ const {
   markLoadingActivity,
   setState,
   getPermissionModeForSession,
+  setSelectedAgent,
   state,
 } = vi.hoisted(() => {
   const mockState: MockState = {
@@ -101,6 +102,7 @@ const {
     markLoadingActivity: vi.fn(),
     setState: vi.fn(),
     getPermissionModeForSession: vi.fn(),
+    setSelectedAgent: vi.fn(),
     state: mockState,
   };
 });
@@ -133,6 +135,7 @@ vi.mock('../lib/state', async () => {
     setSessionUsageLimit,
     addPermission,
     getPermissionModeForSession,
+    setSelectedAgent,
     removePermission,
     setState,
     startLoading,
@@ -5436,7 +5439,39 @@ describe('registerSessionEventHandlers', () => {
         time: { created: 1, updated: 2 },
       })
     );
-    expect(setState).toHaveBeenCalledWith('sessionSelectedAgents', 'session-1', 'plan');
+    expect(setSelectedAgent).toHaveBeenCalledWith('plan', {
+      sessionId: 'session-1',
+      persistGlobal: false,
+      updateSelection: false,
+      publishHost: false,
+    });
+  });
+
+  it('routes message and agent-switch events through guarded agent synchronization', () => {
+    const handlers = installHandlers();
+    registerSessionEventHandlers(createDefaultDeps());
+    setSelectedAgent.mockClear();
+
+    emitServerEvent(handlers, 'message.updated', {
+      properties: {
+        info: { id: 'assistant-1', sessionID: 'session-1', role: 'assistant', agent: 'ask' },
+      },
+    });
+    emitServerEvent(handlers, 'session.next.agent.switched', {
+      properties: { sessionID: 'session-1', agent: 'build' },
+    });
+
+    expect(setSelectedAgent.mock.calls).toEqual(
+      ['ask', 'build'].map((agent) => [
+        agent,
+        {
+          sessionId: 'session-1',
+          persistGlobal: false,
+          updateSelection: false,
+          publishHost: false,
+        },
+      ])
+    );
   });
 
   it('ignores pending-abort status events before mutating state', () => {

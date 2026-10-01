@@ -1071,17 +1071,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           // opening a workspace must never backfill metadata or rules into session history.
           this.postPermissionModes(await this.sessionPermissionModes.setIfAbsent(legacyModes));
         },
-        updateSessionModel: async ({ sessionId, model }) => {
+        updateSessionModel: async ({ sessionId, model, selectionId }) => {
           if (model) {
             await this.updateSessionSelections(
               sessionId,
               { model },
-              this.sessionState.directoryFor(sessionId) ?? endpointServer.getWorkspaceCwd()
+              this.sessionState.directoryFor(sessionId) ?? endpointServer.getWorkspaceCwd(),
+              selectionId
             );
             return;
           }
           const models = await this.sessionSelectedModels.set(sessionId, model);
-          this.post({ type: 'session-models/sync', payload: { models } });
+          this.post({
+            type: 'session-models/sync',
+            payload: {
+              models,
+              acknowledgement: selectionId ? { sessionId, selectionId } : undefined,
+            },
+          });
         },
         migrateSessionModels: async ({ models }) => {
           const migrated = await this.sessionSelectedModels.migrateLegacy(models);
@@ -2439,7 +2446,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await this.sessionSelectedModels.set(sessionId, selection.model);
           this.post({
             type: 'session-models/sync',
-            payload: { models: this.sessionSelectedModels.list() },
+            payload: {
+              models: this.sessionSelectedModels.list(),
+              acknowledgement: selectionId ? { sessionId, selectionId } : undefined,
+            },
           });
         }
         if (selection.agent) {

@@ -27,7 +27,7 @@ import {
   resetSessionShareOverridesForTests,
 } from '../../lib/session-share-overrides';
 import { fixture } from '../../test-fixtures';
-import { forwardMessageIcon } from '../../lib/ui-icons';
+import { flashSolidIcon, forwardMessageIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 
 type TestRuntimeValue =
@@ -771,6 +771,52 @@ describe('SessionListView model details', () => {
         modelID: 'gpt-5.6-sol',
         variant: 'very_high',
       },
+    });
+  });
+
+  it.each([
+    { name: 'GPT-6.1 Sol Fast', count: 1, text: 'GPT-6.1 Sol ' },
+    { name: 'GPT-6.1 Sol Ultrafast', count: 3, text: 'GPT-6.1 Sol ' },
+    { name: 'GPT-6.1 Sol', count: 0, text: 'GPT-6.1 Sol' },
+  ])('renders $name with $count speed icons instead of emoji', async ({ name, count, text }) => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      model: { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' },
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-6.1-sol': {
+            id: 'gpt-6.1-sol',
+            name,
+            capabilities: {},
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('sessions', [session('session-1', Date.now())]);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    await vi.waitFor(() => {
+      const details = container.querySelector('.session-item-model-meta');
+      expect(details?.textContent).toBe(` · ${text} · High`);
+      expect(details?.textContent).not.toContain('⚡');
+      const icons = details?.querySelectorAll<HTMLElement>('.model-speed-icon');
+      expect(icons).toHaveLength(count);
+      icons?.forEach((icon) => {
+        expect(icon.classList).toContain('ui-icon');
+        expect(icon.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(flashSolidIcon));
+      });
     });
   });
 

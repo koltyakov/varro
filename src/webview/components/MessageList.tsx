@@ -2834,7 +2834,8 @@ export function MessageList() {
     let preview = getStickyUserMessagePreview(
       visibleMessages,
       firstVisibleMessageIndex,
-      subagentSessionIds()
+      subagentSessionIds(),
+      steeringMessageIds()
     );
     let usesBoundaryPrompt = false;
     if (
@@ -2849,7 +2850,9 @@ export function MessageList() {
       if (boundaryPrompts.length > 0) {
         const boundaryPreview = getStickyUserMessagePreview(
           [...boundaryPrompts, visibleMessages[firstVisibleMessageIndex]!],
-          boundaryPrompts.length
+          boundaryPrompts.length,
+          subagentSessionIds(),
+          steeringMessageIds()
         );
         if (boundaryPreview) {
           preview = { ...boundaryPreview, index: -1 };
@@ -4153,9 +4156,11 @@ export function MessageList() {
   function getStickyUserMessageNextUserMessageTop(messageIndex: number, containerRect: DOMRect) {
     if (!containerRef) return null;
     const currentMessages = messages();
+    const steeringIds = steeringMessageIds();
     for (let index = messageIndex + 1; index < currentMessages.length; index += 1) {
       const nextMessage = currentMessages[index];
       if (nextMessage?.info.role !== 'user') continue;
+      if (steeringIds.has(nextMessage.info.id)) continue;
 
       const nextRow = mountedMessageRows.get(nextMessage.info.id);
       if (!nextRow) return null;
@@ -4177,8 +4182,10 @@ export function MessageList() {
 
   function getNextMountedUserMessageTop(messageId: string, containerRect: DOMRect) {
     if (!containerRef) return null;
+    const steeringIds = steeringMessageIds();
     for (const row of containerRef.querySelectorAll<HTMLElement>('.interactive-request')) {
       if (row.dataset.msgId === messageId) continue;
+      if (row.dataset.msgId && steeringIds.has(row.dataset.msgId)) continue;
       const source = row.querySelector<HTMLElement>('.user-message-card');
       if (!source) continue;
       const rect = source.getBoundingClientRect();
@@ -4375,6 +4382,8 @@ export function MessageList() {
       Number.isFinite(maxVisibleItems) &&
       remainingItems.length > maxVisibleItems
     ) {
+      // The tray keeps its height; a held thumb must not gain a target that pulls it back.
+      if (pointerScrollOwnershipActive) return;
       preserveCurrentBottomTarget();
       const target = activityExitBottomTarget;
       requestAnimationFrame(() => {
@@ -4435,6 +4444,10 @@ export function MessageList() {
       }
     }
     if (reserve <= 0.5) return;
+    if (pointerScrollOwnershipActive) {
+      reserveHeldScrollbarRange(reserve);
+      return;
+    }
 
     preserveCurrentBottomTarget();
     captureActivityExitSummaryAnchor();
@@ -4614,6 +4627,10 @@ export function MessageList() {
     options?: { captureSummary?: boolean }
   ) {
     if (!containerRef || reserve <= 0.5) return;
+    if (pointerScrollOwnershipActive) {
+      reserveHeldScrollbarRange(reserve);
+      return;
+    }
 
     const collapseTarget =
       targetScrollTop ??
@@ -4808,7 +4825,8 @@ export function MessageList() {
         }
       }
     }
-    if (animated) {
+    if (pointerScrollOwnershipActive) reserveHeldScrollbarRange(reserve);
+    else if (animated) {
       activityExitBottomTarget ??= containerRef.scrollTop;
       captureActivityExitSummaryAnchor();
       if (activityExitSummaryAnchor) {
@@ -4817,6 +4835,16 @@ export function MessageList() {
       }
       setActivityExitBottomReserve((current) => current + reserve);
     } else reserveBottomCollapseSpace(reserve);
+  }
+
+  // A held thumb owns scrolling, and a downward drag leaves bottom-follow pinned. Keep only the
+  // range a collapse removes: an exit target or summary anchor armed here would capture the grab
+  // position and restore it against the drag, then again after release.
+  function reserveHeldScrollbarRange(reserve: number) {
+    // At the top, removed flow content cannot clamp the thumb backward.
+    if (!containerRef || reserve <= 0.5 || containerRef.scrollTop <= 0) return;
+    appendBottomReserveTarget = Math.max(appendBottomReserveTarget, containerRef.scrollTop);
+    setAppendBottomReserve((current) => current + reserve);
   }
 
   function clearActivityExitReserve() {

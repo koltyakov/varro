@@ -13,7 +13,7 @@ import {
   tryParseToolInput,
   toolOutputToString,
 } from './session-event-utils';
-import { isString, type UnknownRecord } from '../../lib/runtime-values';
+import { asRecord, isNumber, isString, type UnknownRecord } from '../../lib/runtime-values';
 
 const PROJECTED_TOOL_STATE_LIMIT = 256;
 const PENDING_TOOL_INPUT_MAX_CHARACTERS = 1024 * 1024;
@@ -153,6 +153,15 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
     if (!textID) return false;
     const text = getEventString(props, 'text') || '';
     if (eventName === 'session.next.text.ended') {
+      const timing = asRecord(props.time);
+      const time =
+        isNumber(timing?.start) &&
+        isNumber(timing.end) &&
+        Number.isFinite(timing.start) &&
+        Number.isFinite(timing.end) &&
+        timing.end > timing.start
+          ? { start: timing.start, end: timing.end }
+          : undefined;
       // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       return !!applyProjectedPart(sessionId, assistantMessageID, {
         id: textID,
@@ -160,6 +169,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
         messageID: assistantMessageID || '',
         type: 'text',
         text,
+        time,
       } as Part);
     }
     const messageID = ensureProjectedTextPart(sessionId, assistantMessageID, textID);

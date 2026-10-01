@@ -1,6 +1,6 @@
 import { Show } from 'solid-js';
 import { hostMetadata } from '../../host/extensions';
-import type { Agent } from '../../types';
+import type { Agent, Provider } from '../../types';
 import type { ContextBreakdownSegment } from '../../../shared/context-breakdown';
 import type {
   AutoApproveActivity,
@@ -84,7 +84,9 @@ type ToolbarSharedProps = {
   onAgentFocusIndex: (index: number) => void;
   modelButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   currentModel: CurrentModelInfo;
+  providers?: Provider[];
   modelCanEllipsize: boolean;
+  queueOnly?: boolean;
   onToggleModelPicker: () => void;
   providerLimitBadges: Array<{ label: string; tone: string }>;
   providerLimitTitle: string | null;
@@ -249,6 +251,7 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
             selectedAgent={props.selectedAgent}
             selectedLabel={props.selectedAgentLabel}
             compact={props.agentCompacted}
+            queueOnly={props.queueOnly}
             focusIndex={props.agentFocusIndex}
             showPicker={props.showAgentPicker}
             getLabel={props.getAgentLabel}
@@ -265,6 +268,8 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
           modelID={props.currentModel.modelID}
           providerName={props.currentModel.providerName}
           modelName={props.currentModel.modelName}
+          providers={props.providers}
+          queueOnly={props.queueOnly}
           canEllipsize={props.modelCanEllipsize}
           expanded={props.showModelPicker}
           onToggle={props.onToggleModelPicker}
@@ -276,6 +281,7 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
             popoverRef={props.variantPopoverRef}
             variants={props.availableVariants}
             selectedVariant={props.selectedVariant}
+            queueOnly={props.queueOnly}
             selectedLabel={props.selectedVariantLabel}
             showPicker={props.showVariantPicker}
             getLabel={props.getVariantLabel}
@@ -318,6 +324,7 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
                 onQueue={props.onQueue}
                 onSteer={props.onSteer}
                 onStopAndSend={props.onStopAndSend}
+                queueOnly={props.queueOnly}
               />
             </Show>
           </div>

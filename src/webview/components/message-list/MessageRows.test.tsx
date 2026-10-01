@@ -203,6 +203,59 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect([...actions].map((button) => button.disabled)).toEqual([false, false, false]);
   });
 
+  it.each([50, undefined, 0, Number.NaN, Number.POSITIVE_INFINITY])(
+    'shows valid TPS with the dashboard icon: %s',
+    (tokensPerSecond) => {
+      cleanup = render(
+        () => (
+          <AssistantDialogSummaryForMessage
+            summary={{
+              durationMs: 1_000,
+              inputTokens: 10,
+              outputTokens: 5,
+              agentCount: 0,
+              tokensPerSecond,
+            }}
+            msg={{ info: assistantMessage('assistant-1', { sessionID: 'session-1' }), parts: [] }}
+            hasBuildAgent={false}
+            latestPlanImplementationMessageId={null}
+          />
+        ),
+        container
+      );
+      const metric = container.querySelector('.assistant-dialog-summary-tps');
+      if (tokensPerSecond === 50) {
+        expect(metric?.textContent).toBe('50.0 tok/s');
+        expect(metric?.querySelector('[aria-label="Tokens per second"]')).not.toBeNull();
+        expect(metric?.getAttribute('title')).toContain('Estimated generation speed');
+      } else {
+        expect(metric).toBeNull();
+      }
+    }
+  );
+
+  it('hides the TPS icon and value when generation timestamps are unavailable', () => {
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{
+            durationMs: 15_000,
+            inputTokens: 11_982,
+            outputTokens: 357,
+            agentCount: 0,
+          }}
+          msg={{ info: assistantMessage('assistant-1', { sessionID: 'session-1' }), parts: [] }}
+          hasBuildAgent={false}
+          latestPlanImplementationMessageId={null}
+        />
+      ),
+      container
+    );
+    const metric = container.querySelector('.assistant-dialog-summary-tps');
+    expect(metric).toBeNull();
+    expect(container.querySelector('[aria-label="Tokens per second"]')).toBeNull();
+  });
+
   it('shows only the turn cost without a parenthesized total', () => {
     cleanup = render(
       () => (

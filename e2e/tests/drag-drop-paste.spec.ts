@@ -24,6 +24,51 @@ test('shows the drop overlay when a drag enters and hides on dragleave', async (
   await expect(page.getByText('Drop to add to context')).toHaveCount(0);
 });
 
+test('delivers a Shift file drop when the drag source only permits move', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  const composer = page.locator('.rich-composer').first();
+  await expect(composer).toBeVisible();
+
+  await page.evaluate(() => {
+    const harness = window as Window & {
+      attachmentDrops?: unknown[];
+    };
+    harness.attachmentDrops = [];
+    const send = harness.__sendToExtension;
+    if (!send) throw new Error('Expected the E2E extension bridge');
+    harness.__sendToExtension = (message) => {
+      if ((message as { type?: string }).type === 'files/drop') {
+        harness.attachmentDrops!.push(message);
+      }
+      return send(message);
+    };
+    const source = document.createElement('div');
+    source.id = 'windows-file-drag';
+    source.draggable = true;
+    source.textContent = 'Drag Windows file';
+    source.style.cssText = 'position:fixed;top:20px;left:20px;width:180px;height:40px;z-index:9999';
+    source.addEventListener('dragstart', (event) => {
+      event.dataTransfer!.effectAllowed = 'move';
+      event.dataTransfer!.setData('CodeFiles', JSON.stringify(['C:\\repo\\src\\example.ts']));
+    });
+    document.body.append(source);
+  });
+
+  await page.keyboard.down('Shift');
+  try {
+    await page.locator('#windows-file-drag').dragTo(composer);
+  } finally {
+    await page.keyboard.up('Shift');
+  }
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as Window & { attachmentDrops?: unknown[] }).attachmentDrops)
+    )
+    .toEqual([{ type: 'files/drop', payload: { paths: ['C:\\repo\\src\\example.ts'] } }]);
+  await expect(page.getByText('Drop to add to context')).toHaveCount(0);
+});
+
 test('displays files received from files/dropped in the attachment strip', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 

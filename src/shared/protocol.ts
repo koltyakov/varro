@@ -983,7 +983,10 @@ export type ExtensionMessage =
     }
   | {
       type: 'session-models/sync';
-      payload: { models: Record<string, ChatModelSelection> };
+      payload: {
+        models: Record<string, ChatModelSelection>;
+        acknowledgement?: { sessionId: string; selectionId: string };
+      };
     }
   | {
       type: 'session-plan-state/sync';
@@ -1063,7 +1066,7 @@ export type WebviewMessage =
   | { type: 'editor/route-changed'; payload: { route: WebviewRoute } }
   | {
       type: 'session-model/update';
-      payload: { sessionId: string; model: ChatModelSelection | null };
+      payload: { sessionId: string; model: ChatModelSelection | null; selectionId?: string };
     }
   | {
       type: 'session-models/migrate';

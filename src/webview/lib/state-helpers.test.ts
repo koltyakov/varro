@@ -1490,6 +1490,53 @@ describe('state helpers', () => {
     });
   });
 
+  it('keeps local model choices until the latest selection is acknowledged', async () => {
+    const stateModule = await loadState();
+    stateModule.setState('activeSessionId', 'session-1');
+    const model = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
+    const older = { ...model, variant: 'medium' };
+    stateModule.setSelectedModel(model, { sessionId: 'session-1', selectionId: 'first' });
+    stateModule.setSelectedModel(older, { sessionId: 'session-1', selectionId: 'second' });
+    stateModule.setSelectedModel(model, { sessionId: 'session-1', selectionId: 'latest' });
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': older, 'session-2': older });
+    expect(stateModule.state.selectedModel).toEqual(model);
+    expect(stateModule.getSelectedModelForSession('session-2')).toEqual(older);
+    stateModule.applySessionSelectedModelsSnapshot(
+      { 'session-1': older },
+      { sessionId: 'session-1', selectionId: 'first' }
+    );
+    expect(stateModule.state.selectedModel).toEqual(model);
+    stateModule.applySessionSelectedModelsSnapshot(
+      { 'session-1': model },
+      { sessionId: 'session-1', selectionId: 'latest' }
+    );
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': older });
+    expect(stateModule.state.selectedModel).toEqual(older);
+  });
+
+  it('preserves acknowledged composer selections through active-turn snapshots and hydration', async () => {
+    const stateModule = await loadState();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+    const selected = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'xhigh' };
+    const running = { ...selected, variant: 'high' };
+    stateModule.setSelectedModel({ ...selected }, { sessionId: 'session-1', selectionId: 'local' });
+    stateModule.applySessionSelectedModelsSnapshot(
+      { 'session-1': selected },
+      { sessionId: 'session-1', selectionId: 'local' }
+    );
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': running });
+    expect(stateModule.state.selectedModel).toEqual(selected);
+    expect(stateModule.getSelectedModelForSession('session-1')).toEqual(selected);
+    stateModule.setSelectedModel(running, { sessionId: 'session-1', persistGlobal: false });
+    expect(stateModule.state.selectedModel).toEqual(selected);
+    stateModule.setSelectedModel(running, { persistGlobal: false });
+    expect(stateModule.state.selectedModel).toEqual(selected);
+    stateModule.setState('sessionStatus', 'session-1', { type: 'idle' });
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': running });
+    expect(stateModule.state.selectedModel).toEqual(running);
+  });
+
   it('does not apply a session model snapshot to the new-chat composer', async () => {
     const stateModule = await loadState();
     const draftModel = { providerID: 'openai', modelID: 'gpt-5.6-sol' };
@@ -1687,6 +1734,63 @@ describe('state helpers', () => {
 
       // Once settled, changes from another webview must still synchronize.
       stateModule.applySessionSelectedAgentUpdate('session-1', 'ask', 'another-webview');
+      expect(stateModule.state.selectedAgent).toBe('ask');
+    } finally {
+      delete bridgeWindow.__sendToExtension;
+    }
+  });
+
+  it('keeps a pending agent choice when session loading applies older metadata', async () => {
+    const stateModule = await loadState();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setSelectedAgent('build', { sessionId: 'session-1' });
+
+    stateModule.setSelectedAgent('ask', {
+      sessionId: 'session-1',
+      persistGlobal: false,
+      publishHost: false,
+    });
+
+    expect(stateModule.state.selectedAgent).toBe('build');
+    expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
+  });
+
+  it('preserves an acknowledged composer agent through active-turn metadata updates', async () => {
+    const stateModule = await loadState();
+    const { syncSessionAgent } = await import('../hooks/session/session-event-utils');
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+    const sent: unknown[] = [];
+    const bridgeWindow = getTestBridgeWindow();
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    try {
+      stateModule.setSelectedAgent('build', { sessionId: 'session-1' });
+      const selection = sent
+        .map(parseExtensionMessage)
+        .find((message) => message?.type === 'session-plan-state/update');
+      const selectionId = selection?.payload.selectionId;
+      if (!selectionId) throw new Error('Missing selection acknowledgement id');
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'build', selectionId);
+
+      syncSessionAgent({ id: 'session-1', agent: 'ask' });
+      stateModule.hydrateSessionSelectedAgents({ 'session-1': 'ask', 'session-2': 'plan' });
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
+      stateModule.setSelectedAgent('ask', {
+        sessionId: 'session-1',
+        persistGlobal: false,
+        publishHost: false,
+      });
+      expect(stateModule.state.selectedAgent).toBe('build');
+      expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
+      expect(stateModule.getSelectedAgentForSession('session-2')).toBe('plan');
+
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'plan', 'another-webview');
+      expect(stateModule.state.selectedAgent).toBe('plan');
+      stateModule.hydrateSessionSelectedAgents({ 'session-1': 'ask' });
+      expect(stateModule.getSelectedAgentForSession('session-1')).toBe('plan');
+
+      stateModule.setState('sessionStatus', 'session-1', { type: 'idle' });
+      stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
       expect(stateModule.state.selectedAgent).toBe('ask');
     } finally {
       delete bridgeWindow.__sendToExtension;

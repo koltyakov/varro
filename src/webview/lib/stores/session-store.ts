@@ -141,6 +141,15 @@ export const sessionStore = {
   syncWorkspaceState(path: string | null) {
     syncDraftPermissionForWorkspace(path);
   },
+  /**
+   * True when a status snapshot started before this session's latest local status change or before
+   * an already applied snapshot. Its view of the session predates what the webview now shows.
+   */
+  isSessionStatusSnapshotStale(sessionId: string, snapshotStartedAt: number) {
+    if (snapshotStartedAt < latestAppliedSessionStatusSnapshotStartedAt) return true;
+    const localUpdatedAt = sessionStatusLocalUpdatedAt.get(sessionId);
+    return localUpdatedAt !== undefined && snapshotStartedAt < localUpdatedAt;
+  },
   setSessionStatuses(
     statuses: Record<string, SessionStatus>,
     options?: SessionStatusSnapshotOptions

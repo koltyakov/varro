@@ -1467,7 +1467,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       const agent = (partialMessage as { agent?: unknown }).agent;
       if (isString(agent) && agent) {
-        appStore.setState('sessionSelectedAgents', sessionID, agent);
+        syncSessionAgent({ id: sessionID, agent });
       }
 
       if (assistantFinished && !isSessionInActiveTree(sessionID)) {
@@ -1695,7 +1695,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
         if (eventName === 'session.next.agent.switched') {
           const agent = getEventString(p, 'agent');
-          if (agent) appStore.setState('sessionSelectedAgents', sessionID, agent);
+          if (agent) syncSessionAgent({ id: sessionID, agent });
         }
 
         if (!activeTreeEvent) return;

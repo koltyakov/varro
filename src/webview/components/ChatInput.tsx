@@ -333,8 +333,13 @@ import {
   getPromptEventText,
   sendWithQueuedModelSnapshot,
   sendQueuedAsSteer,
+  canSteerQueuedMessage,
   steeringQueuedMessageIds,
 } from './chat-input/queued-steer';
+import {
+  matchesActiveTurnSelection,
+  getActiveTurnSelection,
+} from './chat-input/active-turn-selection';
 import { isString } from '../lib/runtime-values';
 import { LspPicker } from './LspPicker';
 import { McpPicker } from './McpPicker';
@@ -463,6 +468,26 @@ function isInternalDrag(event: DragEvent) {
   return Array.from(event.dataTransfer?.types ?? []).some(
     (type) => type === QUEUED_MESSAGE_DRAG_TYPE || type.startsWith('application/x-varro-')
   );
+}
+
+function setAttachmentDropEffect(transfer: DataTransfer | null) {
+  if (!transfer) return;
+  // Chromium suppresses drop when the requested effect is not allowed by the
+  // source. Prefer copy, but accept move-only Windows/Shift drags as well.
+  switch (transfer.effectAllowed) {
+    case 'move':
+      transfer.dropEffect = 'move';
+      break;
+    case 'link':
+    case 'linkMove':
+      transfer.dropEffect = 'link';
+      break;
+    case 'none':
+      transfer.dropEffect = 'none';
+      break;
+    default:
+      transfer.dropEffect = 'copy';
+  }
 }
 
 function activeContextEnabled(sessionId?: string | null) {
@@ -741,11 +766,16 @@ function attachCurrentDiagnostics() {
   });
 }
 
-function postSessionModelSelection(sessionId: string, model: RalphSelectedModel) {
+function postSessionModelSelection(
+  sessionId: string,
+  model: RalphSelectedModel,
+  selectionId?: string
+) {
   postMessage({
     type: 'session-model/update',
     payload: {
       sessionId,
+      selectionId,
       model: {
         providerID: model.providerID,
         modelID: model.modelID,
@@ -3064,6 +3094,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const queuedEdit = queuedMessageEdit();
     const pendingApproval = hasPendingApproval();
     if (
+      sendSessionWasBusy &&
+      !composerEditingMessage() &&
+      queueOnlySelection() &&
+      mode === 'steer'
+    ) {
+      mode = 'queue';
+    }
+    if (
       pendingApproval &&
       (mode === 'steer' || mode === 'after-stop' || composerEditingMessage())
     ) {
@@ -3219,6 +3257,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         return;
       }
     }
+
+    if (mode === 'steer' && queueOnlySelection()) mode = 'queue';
 
     if (
       mode !== 'steer' &&
@@ -3396,7 +3436,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   async function handleStopAndSend() {
-    if (hasPendingApproval()) return;
+    if (hasPendingApproval() || queueOnlySelection()) return;
     try {
       await abortSession();
     } catch {
@@ -4789,7 +4829,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const beginDropTarget = (e: DragEvent) => {
       if (isInternalDrag(e)) return;
       e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      setAttachmentDropEffect(e.dataTransfer);
       setIsDraggingOver(true);
     };
 
@@ -5458,9 +5498,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const selectionCostWarning = createMemo(() => {
     const sessionId = composerSessionId();
-    if (!sessionId || state.messagesLoading || isComposerBusy() || composerEditingMessage())
-      return null;
-    const previous = deriveSelectedModelFromMessages(messagesBySession().get(sessionId) || []);
+    if (!sessionId || state.messagesLoading || composerEditingMessage()) return null;
+    const messages = messagesBySession().get(sessionId) || [];
+    const previous = isComposerBusy()
+      ? getActiveTurnSelection(messages, sessionId)?.model
+      : deriveSelectedModelFromMessages(messages);
     const current = currentModel();
     if (!previous || !current.providerID || !current.modelID) return null;
     const changed =
@@ -5479,6 +5521,23 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         : previous.modelID,
       reasoningLabel: previous.variant ? formatVariantLabel(previous.variant) : 'Default',
     };
+  });
+  const queueOnlySelection = createMemo(() => {
+    const sessionId = composerSessionId();
+    if (!sessionId || !isComposerBusy() || composerEditingMessage()) return false;
+    const model = currentModel();
+    return !matchesActiveTurnSelection(
+      messagesBySession().get(sessionId) ?? [],
+      sessionId,
+      state.selectedAgent,
+      model.providerID && model.modelID
+        ? {
+            providerID: model.providerID,
+            modelID: model.modelID,
+            variant: effectiveVariant() ?? undefined,
+          }
+        : null
+    );
   });
 
   const toolbarFitDependencies = createMemo(() => ({
@@ -5581,12 +5640,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     };
 
     const selectedSessionId = composerSessionId();
+    const selectionId = selectedSessionId ? crypto.randomUUID() : undefined;
     setSelectedModel(nextModel, {
       sessionId: selectedSessionId,
       persistGlobal: true,
       rememberVariant,
+      selectionId,
     });
-    if (selectedSessionId) postSessionModelSelection(selectedSessionId, nextModel);
+    if (selectedSessionId) postSessionModelSelection(selectedSessionId, nextModel, selectionId);
     syncActiveRalphModel(nextModel);
 
     const usageLimit = activeUsageLimit();
@@ -5785,6 +5846,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           editingItemId={queuedMessageEdit()?.id}
           canEdit={canEditQueuedMessage()}
           canSendImmediately={!state.messagesLoading && !hasPendingApproval()}
+          canSteerItem={canSteerQueuedMessage}
           onRetryDispatch={(item) => void dispatchQueuedMessage(item, true)}
           onSendAsSteer={(item) => {
             if (!state.messagesLoading && !hasPendingApproval()) void sendQueuedAsSteer(item);
@@ -5932,14 +5994,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             if (isInternalDrag(e)) return;
             e.preventDefault();
             e.stopPropagation();
-            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            setAttachmentDropEffect(e.dataTransfer);
             setIsDraggingOver(true);
           }}
           onDragOver={(e) => {
             if (isInternalDrag(e)) return;
             e.preventDefault();
             e.stopPropagation();
-            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            setAttachmentDropEffect(e.dataTransfer);
             setIsDraggingOver(true);
           }}
           onDragLeave={(e) => {
@@ -6281,7 +6343,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               modelPickerRef = el;
             }}
             currentModel={currentModel()}
+            providers={state.providers}
             modelCanEllipsize={modelCanEllipsize()}
+            queueOnly={queueOnlySelection()}
             showModelPicker={showModelPicker()}
             onToggleModelPicker={() => {
               const next = !showModelPicker();

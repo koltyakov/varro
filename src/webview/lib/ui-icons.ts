@@ -19,6 +19,7 @@ import clockIcon from 'iconoir/icons/clock.svg';
 import codeBracketsSquareIcon from 'iconoir/icons/code-brackets-square.svg';
 import coinsIcon from 'iconoir/icons/coins.svg';
 import copyIcon from 'iconoir/icons/copy.svg';
+import dashboardDotsIcon from 'iconoir/icons/dashboard-dots.svg';
 import databaseBackupIcon from 'iconoir/icons/database-backup.svg';
 import databaseScriptPlusIcon from 'iconoir/icons/database-script-plus.svg';
 import downloadIcon from 'iconoir/icons/download.svg';
@@ -29,6 +30,7 @@ import emptyPageIcon from 'iconoir/icons/empty-page.svg';
 import expandIcon from 'iconoir/icons/expand.svg';
 import eyeIcon from 'iconoir/icons/eye.svg';
 import fingerprintCircleIcon from 'iconoir/icons/fingerprint-circle.svg';
+import flashSolidIcon from 'iconoir/icons/flash-solid.svg';
 import folderIcon from 'iconoir/icons/folder.svg';
 import folderPlusIcon from 'iconoir/icons/folder-plus.svg';
 import folderSettingsIcon from 'iconoir/icons/folder-settings.svg';
@@ -87,6 +89,7 @@ export {
   dollarIcon,
   infoCircleIcon,
   fingerprintCircleIcon,
+  flashSolidIcon,
   archiveIcon,
   appNotificationIcon,
   arrowLeftIcon,
@@ -107,6 +110,7 @@ export {
   codeBracketsSquareIcon,
   coinsIcon,
   copyIcon,
+  dashboardDotsIcon,
   databaseBackupIcon,
   databaseScriptPlusIcon,
   downloadIcon,

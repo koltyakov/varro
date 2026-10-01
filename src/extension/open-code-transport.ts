@@ -15,6 +15,7 @@ import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/openco
 import { asRecord, findSseChunkBoundary, getString } from './server-utils';
 import { OpenCodeV2Adapter } from './opencode-v2-adapter';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
+import { OpenCodeV2GenerationTiming } from './opencode-v2-generation-timing';
 import { projectV2Event } from './opencode-v2-events';
 import { openCodeApiVersion, type OpenCodeApiVersion } from './opencode-connection';
 import { OpenCodeResponseTooLargeError } from './opencode-response-error';
@@ -128,10 +129,12 @@ export class OpenCodeTransport {
       },
     };
     this.requestWorkspaceDirectory = options.getWorkspaceCwd();
+    const annotations = new OpenCodeV2SessionState(options.sessionStateDirectory);
     this.v2 = new OpenCodeV2Adapter(
       (method, path, body, requestOptions) => this.requestWire(method, path, body, requestOptions),
-      new OpenCodeV2SessionState(options.sessionStateDirectory),
-      options.openExternal
+      annotations,
+      options.openExternal,
+      new OpenCodeV2GenerationTiming(annotations)
     );
   }
 
@@ -772,7 +775,9 @@ export class OpenCodeTransport {
         isString(record.id) ? record.id : undefined,
         isString(asRecord(record.location)?.directory)
           ? String(asRecord(record.location)?.directory)
-          : undefined
+          : undefined,
+        record.created,
+        asRecord(record.durable)?.seq
       );
     }
     const sessionID = asRecord(record?.data)?.sessionID;
