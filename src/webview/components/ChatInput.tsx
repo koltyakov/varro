@@ -1457,17 +1457,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       state.providerDefaults,
       { allowHidden: true }
     );
-    const selected =
-      editSelection ||
-      resolvedSelection ||
-      (state.workspaceCatalogReloadPending ? state.selectedModel : null);
+    const selected = editSelection || resolvedSelection || state.selectedModel;
     if (selected) {
       const provider = state.providers.find((item) => item.id === selected.providerID);
       const model = provider?.models[selected.modelID];
       const preservePresentation =
-        state.workspaceCatalogReloadPending &&
-        previous.providerID === selected.providerID &&
-        previous.modelID === selected.modelID;
+        previous.providerID === selected.providerID && previous.modelID === selected.modelID;
       return {
         providerID: selected.providerID,
         modelID: selected.modelID,

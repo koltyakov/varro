@@ -7408,6 +7408,24 @@ describe('ChatInput', () => {
     expect(modelButton?.textContent).toContain('Workspace GPT-4o');
   });
 
+  it.each(['openrouter', 'github-copilot'])(
+    'keeps the selected provider visible when only %s offers the same model',
+    async (providerID) => {
+      setupModelState();
+      cleanup = render(() => ChatInput({ newSession: true }), container!);
+      const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+      const models = { ...state.providers[0]!.models };
+
+      setState('providers', [{ id: providerID, name: providerID, source: 'api', models }]);
+      setState('providerDefaults', { [providerID]: 'gpt-4o' });
+      await Promise.resolve();
+
+      expect(modelButton?.dataset.providerId).toBe('openai');
+      expect(modelButton?.dataset.modelId).toBe('gpt-4o');
+      expect(modelButton?.textContent).toContain('GPT-4o');
+    }
+  );
+
   it('still selects a completion on Enter before queueing a pending-request message', async () => {
     setState('activeSessionId', 'session-1');
     setState('sessions', [session('session-1', 1_000)]);

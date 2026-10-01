@@ -809,8 +809,10 @@ export async function loadProvidersWithDependencies(
       } else {
         deps.setSelectedModel(routingState.nextSelectedModel);
       }
-    } else if (composerSessionId && sessionSelectedModel && routingState.effectiveModel) {
-      deps.setSelectedModel(routingState.effectiveModel, { persistGlobal: false });
+    } else if (composerSessionId && sessionSelectedModel) {
+      deps.setSelectedModel(routingState.effectiveModel ?? sessionSelectedModel, {
+        persistGlobal: false,
+      });
     }
     return true;
   } catch (err) {

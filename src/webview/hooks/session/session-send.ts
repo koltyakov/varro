@@ -251,6 +251,12 @@ function resolveComposerSendModel(
     composerState.providerDefaults,
     { allowHidden: true }
   );
+  if (composerState.selectedModel && !model) {
+    const { providerID, modelID } = composerState.selectedModel;
+    throw new Error(
+      `Selected model ${providerID}/${modelID} is unavailable. Reconnect the provider or select another model.`
+    );
+  }
   if (!model || model.variant) return model;
 
   const rememberedVariant =
@@ -1006,12 +1012,20 @@ export class SessionSendOperations {
     }
     // Capture the displayed reasoning choice before session creation can turn
     // an absent variant into an explicit session default.
-    const capturedSelectedModel = resolveComposerSendModel({
-      selectedModel,
-      providers: appStore.state.providers,
-      providerDefaults: appStore.state.providerDefaults,
-      modelVariantSelections,
-    });
+    let capturedSelectedModel: SelectedModel | null;
+    try {
+      capturedSelectedModel = resolveComposerSendModel({
+        selectedModel,
+        providers: appStore.state.providers,
+        providerDefaults: appStore.state.providerDefaults,
+        modelVariantSelections,
+      });
+    } catch (error) {
+      return async () => {
+        uiStore.setError(error instanceof Error ? error.message : String(error));
+        return false;
+      };
+    }
     const capturedAttachments = captureComposerAttachments(options?.queuedAttachments);
     const sourceEditorContext =
       options?.queuedContext?.editorContext ?? appStore.state.editorContext;

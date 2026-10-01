@@ -177,6 +177,47 @@ describe('SessionSendOperations', () => {
     appStore.resetDefaultAppState();
   });
 
+  it.each([false, true])(
+    'reports an unavailable selection before sending, newSession=%s',
+    async (newSession) => {
+      const selected = { providerID: 'openai', modelID: 'gpt-6.1-sol' };
+      appStore.setState('activeSessionId', newSession ? null : 'session-1');
+      routingStore.setSelectedModel(selected);
+      appStore.setState(
+        'providers',
+        ['openrouter', 'github-copilot'].map((id) => ({
+          id,
+          name: id,
+          source: 'api',
+          models: {
+            'gpt-6.1-sol': {
+              id: 'gpt-6.1-sol',
+              name: 'GPT-6.1 Sol',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
+          },
+        }))
+      );
+      composerStore.addContextFile({ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' });
+      const sendAsync = vi.fn<SendAsync>(async () => {});
+      const createSession = vi.fn(async () => 'session-2');
+      const beforeOptimisticPublish = vi.fn();
+      const operations = createOperations(sendAsync, undefined, { createSession });
+
+      expect(await operations.prepareSendMessage('Keep this draft')(beforeOptimisticPublish)).toBe(
+        false
+      );
+
+      expect(error()).toContain('Selected model openai/gpt-6.1-sol is unavailable');
+      expect(sendAsync).not.toHaveBeenCalled();
+      expect(createSession).not.toHaveBeenCalled();
+      expect(beforeOptimisticPublish).not.toHaveBeenCalled();
+      expect(appStore.state.selectedModel).toEqual(selected);
+      expect(appStore.state.droppedFiles).toHaveLength(1);
+    }
+  );
+
   it.each([
     { newSession: false, explicitDefault: false },
     { newSession: true, explicitDefault: false },

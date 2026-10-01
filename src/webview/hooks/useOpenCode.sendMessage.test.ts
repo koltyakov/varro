@@ -136,6 +136,16 @@ describe('sendMessage', () => {
   it('requests bottom follow when an edited replacement is published before send completes', async () => {
     const { stateModule, hookModule } = await loadModules();
     stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
     stateModule.replaceMessages([{ info: userMessage('user-1'), parts: [] }]);
     clientMocks.sessionDeleteMessage.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());

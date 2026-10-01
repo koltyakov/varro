@@ -127,6 +127,12 @@ export function reconcileLoadedProviders(args: {
   );
 
   if (args.selectedModel && !effectiveModel) {
+    const provider = args.providers.find((item) => item.id === args.selectedModel?.providerID);
+    if (!provider?.models[args.selectedModel.modelID]) {
+      // A catalog refresh can temporarily omit a route. Keep the explicit choice
+      // rather than letting the next refresh replace it with another provider.
+      return { effectiveModel, nextSelectedModel: undefined };
+    }
     // SAFETY: The surrounding shape or discriminator check establishes the SelectedModel contract used below.
     return { effectiveModel, nextSelectedModel: null as SelectedModel | null | undefined };
   }
@@ -194,6 +200,7 @@ export function getActiveProviderSelection(args: {
   if (selected) {
     return { providerID: selected.providerID, modelID: selected.modelID };
   }
+  if (args.selectedModel) return null;
 
   const firstProvider = args.providers[0];
   if (!firstProvider) return null;
