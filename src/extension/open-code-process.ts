@@ -1149,6 +1149,9 @@ export class OpenCodeProcess {
   async restoreManagedServerCredentials(secrets: Pick<vscode.SecretStorage, 'get'>) {
     const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
     if (!lease || lease.port !== this._port) return;
+    // Registration already copied this verified private lease credential. The
+    // editor vault can be slow/unavailable on Windows and is only a fallback.
+    if (lease.password) return;
     const encoded = await secrets.get(
       `varro.opencode.managedCredentials:${this.ownershipLeasePath}`
     );

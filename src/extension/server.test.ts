@@ -434,6 +434,54 @@ afterEach(async () => {
 });
 
 describe('automatic-port migration and admission', () => {
+  it('runs ownership and account checks together but sends no HTTP until both succeed', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const api = server as unknown as {
+      processManager: OpenCodeProcess;
+      admission: ServerConnectionAdmission;
+    };
+    const ownership = deferred<void>();
+    const account = deferred<void>();
+    const verifyOwnership = vi
+      .spyOn(api.processManager, 'verifyManagedServerConnection')
+      .mockReturnValue(ownership.promise);
+    const verifyAccount = vi.spyOn(api.admission, 'verify').mockReturnValue(account.promise);
+    vi.mocked(fetch).mockResolvedValue(new Response('{}'));
+    const request = server.request('GET', '/config');
+    await flushMicrotasks();
+    expect(verifyOwnership).toHaveBeenCalledOnce();
+    expect(verifyAccount).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+    ownership.resolve();
+    await flushMicrotasks();
+    expect(fetch).not.toHaveBeenCalled();
+    account.resolve();
+    await request;
+    expect(fetch).toHaveBeenCalled();
+    await server.disconnect();
+  });
+
+  it.each(['ownership', 'account'] as const)(
+    'sends no HTTP if the %s check fails',
+    async (failedCheck) => {
+      const server = new OpenCodeServer(4096, false);
+      const api = server as unknown as {
+        processManager: OpenCodeProcess;
+        admission: ServerConnectionAdmission;
+      };
+      const verifyOwnership = vi
+        .spyOn(api.processManager, 'verifyManagedServerConnection')
+        .mockResolvedValue();
+      const verifyAccount = vi.spyOn(api.admission, 'verify').mockResolvedValue();
+      (failedCheck === 'ownership' ? verifyOwnership : verifyAccount).mockRejectedValue(
+        new Error('verification failed')
+      );
+      await expect(server.request('GET', '/config')).rejects.toThrow('verification failed');
+      expect(fetch).not.toHaveBeenCalled();
+      await server.disconnect();
+    }
+  );
+
   it.each(['current-host', 'other-host'] as const)(
     'recovers a Varro-registered shared service as %s rather than attach-only',
     async (ownership) => {

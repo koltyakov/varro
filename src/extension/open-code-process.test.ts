@@ -1554,7 +1554,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     }
   });
 
-  it('copies credentials for a verified live lease and rejects unrelated stored launch tokens', async () => {
+  it('uses verified private lease credentials without waiting for the editor vault', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const root = await mkdtemp(join(tmpdir(), 'varro-managed-secrets-'));
     const path = join(root, 'lease.json');
@@ -1592,8 +1592,51 @@ describe('OpenCodeProcess server ownership leases', () => {
         JSON.stringify({ owner: lease.owner, username: lease.username, password: lease.password })
       );
       const authorization = manager.serverAuthorization;
+      secrets.get.mockImplementation(() => new Promise<string | undefined>(() => {}));
+      await manager.restoreManagedServerCredentials(secrets);
+      expect(secrets.get).not.toHaveBeenCalled();
+      expect(manager.serverAuthorization).toBe(authorization);
+      expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
+        password: lease.password,
+        username: lease.username,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('restores vault credentials only for the matching credentialless lease', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const root = await mkdtemp(join(tmpdir(), 'varro-managed-secrets-fallback-'));
+    const path = join(root, 'lease.json');
+    const lease: ManagedServerOwnershipLease = {
+      version: 1,
+      pid: MOCK_LINUX_PID,
+      port: 50001,
+      executable: '/usr/bin/opencode',
+      birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      owner: 'existing-launch',
+      host: 'old-window',
+      state: 'relinquished',
+      createdAt: Date.now(),
+    };
+    try {
+      await writeFile(path, JSON.stringify(lease));
+      mockLinuxLeaseProcess({ port: lease.port });
+      const manager = new OpenCodeProcess(
+        'auto',
+        true,
+        '',
+        false,
+        undefined,
+        path,
+        join(root, 'proc')
+      );
+      await manager.refreshStartupRegistration();
+      const authorization = manager.serverAuthorization;
+      const secrets = { get: vi.fn<() => Promise<string | undefined>>() };
       secrets.get.mockResolvedValue(
-        JSON.stringify({ owner: 'unrelated-launch', username: 'other', password: 'other-password' })
+        JSON.stringify({ owner: 'other-launch', username: 'other', password: 'wrong' })
       );
       await manager.restoreManagedServerCredentials(secrets);
       expect(manager.serverAuthorization).toBe(authorization);
@@ -1602,11 +1645,13 @@ describe('OpenCodeProcess server ownership leases', () => {
       expect(manager.serverAuthorization).toBe(authorization);
       secrets.get.mockRejectedValue(new Error('storage unavailable'));
       await expect(manager.restoreManagedServerCredentials(secrets)).rejects.toThrow('unavailable');
-      expect(manager.serverAuthorization).toBe(authorization);
-      expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
-        password: lease.password,
-        username: lease.username,
-      });
+      secrets.get.mockResolvedValue(
+        JSON.stringify({ owner: lease.owner, username: 'custom-user', password: 'vault-password' })
+      );
+      await manager.restoreManagedServerCredentials(secrets);
+      expect(manager.serverAuthorization).toBe(
+        `Basic ${Buffer.from('custom-user:vault-password').toString('base64')}`
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

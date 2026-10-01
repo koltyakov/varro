@@ -101,6 +101,7 @@ export class OpenCodeTransport {
   private readonly observedSessionDirectories = new Map<string, string>();
   private apiVersion: OpenCodeApiVersion = 1;
   private apiIdentityUrl: string | undefined;
+  private healthPath: string | undefined;
   private healthFailure: string | undefined;
   private healthPid: { url: string; pid: number } | undefined;
   private authorizationRefresh: Promise<void> | null = null;
@@ -412,47 +413,73 @@ export class OpenCodeTransport {
         this.apiVersion = 1;
         this.v2.reset();
         this.apiIdentityUrl = url;
+        this.healthPath = undefined;
       }
-      const paths =
+      const fallbackPaths =
         this.apiVersion === 2
-          ? ['/api/status', '/api/info', CURRENT_OPENCODE_ENDPOINTS.health]
-          : [CURRENT_OPENCODE_ENDPOINTS.health, '/api/status', '/api/info'];
+          ? ['/api/info', '/api/status', CURRENT_OPENCODE_ENDPOINTS.health]
+          : [CURRENT_OPENCODE_ENDPOINTS.health, '/api/info', '/api/status'];
+      const paths = [
+        ...new Set(this.healthPath ? [this.healthPath, ...fallbackPaths] : fallbackPaths),
+      ];
       for (const path of paths) {
         signal?.throwIfAborted();
-        const timeout = AbortSignal.timeout(OpenCodeTransport.HEALTH_TIMEOUT_MS);
-        const res = await this.fetchAuthenticated(`${url}${path}`, {
-          redirect: 'error',
-          headers: this.authorizationHeaders(),
-          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-        });
-        if (res.status === 401 || res.status === 403) {
-          this.healthFailure =
-            'OpenCode server authentication failed. Supply the server credentials or restart the Varro-managed server.';
-          break;
-        }
-        if (!res.ok) {
-          if (res.status !== 404) break;
-          continue;
-        }
-        const contentType = res.headers?.get('content-type');
-        if (contentType?.includes('text/html')) continue;
-        const data = await res.json();
-        if (path === CURRENT_OPENCODE_ENDPOINTS.health)
-          health = parseHealthResponse(data) ?? health;
-        else {
-          const info = asRecord(data);
-          if (isString(info?.version) && (isNumber(info.pid) || info.ready === true))
-            health = { healthy: true, version: info.version };
-          if (isNumber(info?.pid) && Number.isSafeInteger(info.pid) && info.pid > 0)
-            this.healthPid = { url, pid: info.pid };
-        }
-        if (health.healthy) {
-          const family = openCodeApiVersion(health.version ?? '');
-          if (!family) {
-            this.healthFailure = `Unsupported OpenCode server version: ${health.version ?? 'unknown'}`;
-            health = { healthy: false };
-          } else this.apiVersion = family;
-          break;
+        let authenticationRejected = false;
+        try {
+          const timeout = AbortSignal.timeout(OpenCodeTransport.HEALTH_TIMEOUT_MS);
+          const res = await this.fetchAuthenticated(
+            `${url}${path}`,
+            {
+              redirect: 'error',
+              headers: this.authorizationHeaders(),
+              signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+            },
+            () => {
+              authenticationRejected = true;
+            }
+          );
+          if (res.status === 401 || res.status === 403) {
+            this.healthFailure =
+              'OpenCode server authentication failed. Supply the server credentials or restart the Varro-managed server.';
+            break;
+          }
+          if (!res.ok) {
+            if (res.status !== 404) break;
+            continue;
+          }
+          const contentType = res.headers?.get('content-type');
+          if (contentType?.includes('text/html')) continue;
+          const data = await res.json();
+          if (path === CURRENT_OPENCODE_ENDPOINTS.health)
+            health = parseHealthResponse(data) ?? health;
+          else {
+            const info = asRecord(data);
+            if (isString(info?.version) && (isNumber(info.pid) || info.ready === true))
+              health = { healthy: true, version: info.version };
+            if (isNumber(info?.pid) && Number.isSafeInteger(info.pid) && info.pid > 0)
+              this.healthPid = { url, pid: info.pid };
+          }
+          if (health.healthy) {
+            const family = openCodeApiVersion(health.version ?? '');
+            if (!family) {
+              this.healthFailure = `Unsupported OpenCode server version: ${health.version ?? 'unknown'}`;
+              health = { healthy: false };
+            } else {
+              this.apiVersion = family;
+              this.healthPath = path;
+              this.healthFailure = undefined;
+            }
+            break;
+          }
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (authenticationRejected) {
+            this.healthFailure = 'OpenCode server authentication failed during credential refresh.';
+            break;
+          }
+          // One slow/obsolete endpoint must not hide a healthy fallback. Do not
+          // fall through on authentication errors or explicit server rejection.
+          this.healthFailure = `OpenCode health probe failed (${path}): ${error instanceof Error ? error.message : String(error)}`;
         }
       }
     } catch {
@@ -475,9 +502,14 @@ export class OpenCodeTransport {
     return authorization ? { Authorization: authorization } : {};
   }
 
-  private async fetchAuthenticated(url: string, init: RequestInit): Promise<Response> {
+  private async fetchAuthenticated(
+    url: string,
+    init: RequestInit,
+    onAuthenticationRejected?: () => void
+  ): Promise<Response> {
     const serverUrl = this.options.getUrl();
     const response = await fetch(url, init);
+    if (response.status === 401 || response.status === 403) onAuthenticationRejected?.();
     if (
       (response.status !== 401 && response.status !== 403) ||
       !this.options.refreshAuthorization ||

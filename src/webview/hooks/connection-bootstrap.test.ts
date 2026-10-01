@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { HealthResponse } from '../../shared/health';
 import type { Message, SessionStatus } from '../types';
 import {
   buildInterruptedSessionContinueBody,
@@ -13,6 +14,149 @@ import {
 } from './connection-bootstrap';
 
 const HEALTHY_RESPONSE = { healthy: true, version: '1.0.0' } as const;
+
+afterEach(() => vi.useRealTimers());
+
+function startupDeps() {
+  return {
+    health: vi.fn(async (): Promise<HealthResponse> => HEALTHY_RESPONSE),
+    loadInitialData: vi.fn(async () => {}),
+    loadBackgroundData: vi.fn(async () => {}),
+    hydrateSessionStatuses: vi.fn(async () => {}),
+    getActiveSessionId: () => null,
+    getPersistedActiveSessionId: () => null,
+    getSessionCount: () => 0,
+    getOnlyPrimarySessionId: () => null,
+    hasSession: () => false,
+    selectSession: vi.fn(async () => {}),
+    setShowSessionPicker: vi.fn(),
+    recoverInterruptedSessions: vi.fn(async () => {}),
+    setInitialized: vi.fn(),
+    setError: vi.fn(),
+    getError: vi.fn((): string | null => null),
+    logError: vi.fn(),
+  };
+}
+
+describe('startup readiness and recovery', () => {
+  const generation = { next: () => 1, isCurrent: () => true };
+
+  it('does not wait for optional background status to expose restored chat', async () => {
+    const deps = startupDeps();
+    const background = deferred<void>();
+    deps.loadBackgroundData.mockImplementation(() => background.promise);
+    await initConnectionWithDependencies(deps, generation);
+    expect(deps.setInitialized).toHaveBeenCalledWith(true);
+    expect(deps.recoverInterruptedSessions).toHaveBeenCalled();
+    expect(deps.loadBackgroundData).toHaveBeenCalledOnce();
+    background.resolve();
+  });
+
+  it('still waits for essential startup snapshots before exposing the chat', async () => {
+    const deps = startupDeps();
+    const essential = deferred<void>();
+    deps.loadInitialData.mockImplementation(() => essential.promise);
+    const initialization = initConnectionWithDependencies(deps, generation);
+    await Promise.resolve();
+    expect(deps.setInitialized).not.toHaveBeenCalled();
+    expect(deps.loadBackgroundData).not.toHaveBeenCalled();
+    essential.resolve();
+    await initialization;
+    expect(deps.setInitialized).toHaveBeenCalledWith(true);
+  });
+
+  it('logs optional failures without undoing successful initialization', async () => {
+    const deps = startupDeps();
+    const cause = new Error('MCP unavailable');
+    deps.loadBackgroundData.mockRejectedValue(cause);
+    await initConnectionWithDependencies(deps, generation);
+    await vi.waitFor(() => expect(deps.logError).toHaveBeenCalled());
+    expect(deps.setInitialized.mock.calls).toEqual([[true]]);
+    expect(deps.setError).not.toHaveBeenCalled();
+    expect(deps.logError).toHaveBeenCalledWith('startupBackgroundData', cause);
+  });
+
+  it('retries transient health failure without a new status event or server restart', async () => {
+    vi.useFakeTimers();
+    const deps = startupDeps();
+    deps.health.mockResolvedValueOnce({ healthy: false });
+    const initialization = initConnectionWithDependencies(deps, generation);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(deps.loadInitialData).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await initialization;
+    expect(deps.health).toHaveBeenCalledTimes(2);
+    expect(deps.setInitialized.mock.calls).toEqual([[true]]);
+    expect(deps.setError).not.toHaveBeenCalled();
+  });
+
+  it('bounds unhealthy retries and reports failure once', async () => {
+    vi.useFakeTimers();
+    const deps = startupDeps();
+    deps.health.mockResolvedValue({ healthy: false });
+    const initialization = initConnectionWithDependencies(deps, generation);
+    await vi.advanceTimersByTimeAsync(1000);
+    await initialization;
+    expect(deps.health).toHaveBeenCalledTimes(3);
+    expect(deps.loadInitialData).not.toHaveBeenCalled();
+    expect(deps.setInitialized.mock.calls).toEqual([[false]]);
+    expect(deps.setError).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    'authentication failed',
+    'listener changed',
+    'connection cancelled',
+    'Unsupported OpenCode server version',
+  ])('does not retry security or compatibility errors: %s', async (message) => {
+    const deps = startupDeps();
+    deps.health.mockRejectedValue(new Error(message));
+    await initConnectionWithDependencies(deps, generation);
+    expect(deps.health).toHaveBeenCalledOnce();
+    expect(deps.loadInitialData).not.toHaveBeenCalled();
+  });
+
+  it('abandons a health retry invalidated by a workspace change', async () => {
+    vi.useFakeTimers();
+    let current = true;
+    const deps = startupDeps();
+    deps.health.mockResolvedValueOnce({ healthy: false });
+    const initialization = initConnectionWithDependencies(deps, {
+      next: () => 1,
+      isCurrent: () => current,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    current = false;
+    await vi.advanceTimersByTimeAsync(500);
+    await initialization;
+    expect(deps.health).toHaveBeenCalledOnce();
+    expect(deps.setInitialized).not.toHaveBeenCalled();
+    expect(deps.setError).not.toHaveBeenCalled();
+    expect(deps.loadBackgroundData).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['Failed to connect to OpenCode server: offline', true],
+    ['Failed to load OpenCode startup data: unavailable', true],
+    ['Failed to restore OpenCode session: unavailable', true],
+    ['Message send failed', false],
+  ])('clears only startup errors on recovery: %s', async (error, cleared) => {
+    const deps = startupDeps();
+    deps.getError.mockReturnValue(error);
+    await initConnectionWithDependencies(deps, generation);
+    if (cleared) expect(deps.setError).toHaveBeenCalledWith(null);
+    else expect(deps.setError).not.toHaveBeenCalled();
+  });
+
+  it('identifies a catalog failure instead of calling it a connection failure', async () => {
+    const deps = startupDeps();
+    deps.loadInitialData.mockRejectedValue(new Error('catalog unavailable'));
+    await initConnectionWithDependencies(deps, generation);
+    expect(deps.setError).toHaveBeenCalledWith(
+      'Failed to load OpenCode startup data: catalog unavailable'
+    );
+  });
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

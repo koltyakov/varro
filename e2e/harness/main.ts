@@ -5284,7 +5284,28 @@ async function handleApiRequest(
   const url = new URL(rawPath, 'http://varro.test');
   const path = url.pathname;
 
+  const startupOptions = new URLSearchParams(window.location.search);
+  if (
+    startupOptions.has('startupBackgroundPending') &&
+    method === 'GET' &&
+    [
+      '/mcp',
+      '/lsp',
+      '/provider/auth',
+      '/experimental/workspace/status',
+      '/varro/session-trash',
+    ].includes(path)
+  ) {
+    // Model optional status that never settles without touching a live backend.
+    return new Promise<never>(() => {});
+  }
+
   if (method === 'GET' && path === '/global/health') {
+    if (
+      startupOptions.has('startupHealthRetry') &&
+      state.requests.filter((request) => request.path === '/global/health').length === 1
+    )
+      return { healthy: false };
     if (state.healthFailuresRemaining > 0) {
       state.healthFailuresRemaining -= 1;
       throw new Error('offline');

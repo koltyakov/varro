@@ -2,6 +2,47 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
+test('shows restored chat while optional startup status never settles', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=mcp-pickers&startupBackgroundPending');
+  await expect(page.getByLabel('Back to sessions')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
+  await expect(page.getByText('Restoring workspace', { exact: true })).toHaveCount(0);
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const state = (window as Window & { __varroE2E?: { requests: Array<{ path: string }> } })
+          .__varroE2E;
+        return state?.requests.map((request) => request.path) ?? [];
+      })
+    )
+    .toEqual(
+      expect.arrayContaining([
+        '/mcp',
+        '/lsp',
+        '/provider/auth',
+        '/experimental/workspace/status',
+        '/varro/session-trash',
+      ])
+    );
+});
+
+test('retries transient startup health without needing another server status event', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank&startupHealthRetry');
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const state = (window as Window & { __varroE2E?: { requests: Array<{ path: string }> } })
+          .__varroE2E;
+        return state?.requests.filter((request) => request.path === '/global/health').length ?? 0;
+      })
+    )
+    .toBe(2);
+  await expect(page.getByText(/Failed to connect to OpenCode server/)).toHaveCount(0);
+});
+
 test('shows no-provider setup actions and triggers provider setup commands', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=no-providers');
 

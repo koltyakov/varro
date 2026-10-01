@@ -297,10 +297,14 @@ export class OpenCodeServer extends EventEmitter {
     this.transport = new OpenCodeTransport({
       authorizeConnection: async (reconnect) => {
         try {
-          await this.processManager.verifyManagedServerConnection(
-            reconnect && this._status.state === 'running'
-          );
-          await this.admission.verify(reconnect);
+          // Both independent checks must succeed before transport use. Serial
+          // Windows inspections can expire the other's one-second cache.
+          await Promise.all([
+            this.processManager.verifyManagedServerConnection(
+              reconnect && this._status.state === 'running'
+            ),
+            this.admission.verify(reconnect),
+          ]);
         } catch (error) {
           if (this._status.state === 'running') {
             this.stopEventStream();

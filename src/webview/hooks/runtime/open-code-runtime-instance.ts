@@ -2201,13 +2201,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       await Promise.all([
         loadSessions(),
         reloadWorkspaceCatalogs(),
-        loadCompatibilityState(),
-        loadMcps(),
-        loadLsps(),
         loadQuestions(),
-        loadRecycleBin(),
         syncPendingPermissions().catch((err) => logError('permission.list', err)),
       ]);
+    },
+    loadBackgroundData: async () => {
+      await Promise.all([loadCompatibilityState(), loadMcps(), loadLsps(), loadRecycleBin()]);
     },
     hydrateSessionStatuses,
     getActiveSessionId: () => appStore.state.activeSessionId,
@@ -2230,7 +2229,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getSessionDirectory: (sessionId) =>
       appStore.state.sessions.find((session) => session.id === sessionId)?.directory,
     selectSession: (sessionId, directory) =>
-      selectSession(sessionId, { directory, reportActivationError: false }),
+      selectSession(sessionId, { directory, reportActivationError: false, waitForMcpSync: false }),
     startNewSession: startNewChatDraft,
     setShowSessionPicker: uiStore.setShowSessionPicker,
     setInitialized: (value) => {
@@ -2239,6 +2238,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       if (value) appStore.setState('serverReconnecting', false);
     },
     setError: uiStore.setError,
+    getError: uiStore.error,
     nextConnectionGeneration: () => ++connectionGeneration,
     isCurrentConnectionGeneration: (generation) =>
       isCurrentGeneration(generation, connectionGeneration),

@@ -1321,6 +1321,112 @@ describe('OpenCodeTransport event stream path', () => {
 });
 
 describe('OpenCodeTransport health', () => {
+  it('remembers the verified v2 info endpoint rather than repeating obsolete probes', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const info = new URL(String(input)).pathname === '/api/info';
+      return new Response(info ? JSON.stringify({ version: '2.0.20', pid: 1234 }) : '', {
+        status: info ? 200 : 404,
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = createTransport();
+    await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: true, version: '2.0.20' });
+    fetchMock.mockClear();
+    await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: true, version: '2.0.20' });
+    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual([
+      '/api/info',
+    ]);
+  });
+
+  it('continues health fallback after a probe timeout', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException('Probe timed out', 'TimeoutError'))
+      .mockResolvedValueOnce(new Response('', { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: '2.0.20', pid: 1234 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = createTransport();
+    await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: true, version: '2.0.20' });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(transport.healthError).toBeUndefined();
+  });
+
+  it.each([401, 403])(
+    'does not bypass authentication failure %s through fallback',
+    async (status) => {
+      const fetchMock = vi.fn(async () => new Response('', { status }));
+      vi.stubGlobal('fetch', fetchMock);
+      const transport = createTransport();
+      await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: false });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(transport.healthError).toContain('authentication failed');
+    }
+  );
+
+  it('does not continue fallback after caller cancellation', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => {
+      controller.abort(new Error('workspace changed'));
+      throw new Error('workspace changed');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(createTransport().readHealthInfo(controller.signal)).rejects.toThrow(
+      'workspace changed'
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not probe a public fallback when authentication refresh throws', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => undefined,
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096' }),
+      isDisposing: () => false,
+      getAuthorization: () => undefined,
+      refreshAuthorization: async () => {
+        throw new Error('vault timed out');
+      },
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+    await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: false });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(transport.healthError).toContain('authentication failed');
+  });
+
+  it('forgets the preferred endpoint when the server URL changes', async () => {
+    let url = 'http://localhost:4096';
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const request = new URL(String(input));
+      if (request.port === '4096')
+        return request.pathname === '/api/info'
+          ? new Response(JSON.stringify({ version: '2.0.20', pid: 1234 }))
+          : new Response('', { status: 404 });
+      return new Response(JSON.stringify({ healthy: true, version: '1.18.33' }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = new OpenCodeTransport({
+      getUrl: () => url,
+      getWorkspaceCwd: () => undefined,
+      getStatus: () => ({ state: 'running', url }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+    await transport.readHealthInfo();
+    url = 'http://localhost:4097';
+    fetchMock.mockClear();
+    await expect(transport.readHealthInfo()).resolves.toEqual({
+      healthy: true,
+      version: '1.18.33',
+    });
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      'http://localhost:4097/global/health',
+    ]);
+  });
+
   it.each([
     [
       { healthy: true, version: '1.2.3' },

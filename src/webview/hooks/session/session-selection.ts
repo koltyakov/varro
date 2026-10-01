@@ -225,7 +225,9 @@ export async function selectSessionWithDependencies(
     }
   }
 
-  await mcpSync;
+  // Sending still reconciles MCPs before dispatch. Startup can render restored
+  // history while this already-started, error-handled reconciliation finishes.
+  if (options?.waitForMcpSync !== false) await mcpSync;
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
   await deps.loadQuestions().catch(() => {});
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
