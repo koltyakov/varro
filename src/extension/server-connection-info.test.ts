@@ -148,32 +148,74 @@ describe('local server connection info', () => {
     await expect(readLocalServerConnectionInfo(49374, 100)).resolves.toEqual(unknown);
   });
 
-  it('counts Windows connections and reads the process start time', async () => {
-    setPlatform('win32');
-    const pair = (port: number, pid: number) => [
-      { pid: 100, from: endpoint, to: peer(port) },
-      { pid, from: peer(port), to: endpoint },
-    ];
-    vi.mocked(runProcess).mockResolvedValue({
-      code: 0,
-      stderr: '',
-      stdout: JSON.stringify({
-        listeners: [100],
+  it.each([
+    ['Code.exe --type=extensionHost', 1, 1],
+    [
+      '"C:\\Program Files\\Microsoft VS Code\\Code.exe" --type=utility --utility-sub-type=node.mojom.NodeService --service-sandbox-type=none',
+      1,
+      1,
+    ],
+    [
+      '"C:\\Program Files\\Microsoft VS Code Insiders\\Code - Insiders.exe" --type=utility --utility-sub-type=node.mojom.NodeService',
+      1,
+      1,
+    ],
+    [
+      '"C:\\Editors\\Code - OSS.exe" --type utility --utility-sub-type node.mojom.NodeService',
+      1,
+      1,
+    ],
+    [
+      '"C:\\Program Files\\VSCodium\\VSCodium.exe" --type=utility --utility-sub-type=node.mojom.NodeService',
+      1,
+      1,
+    ],
+    ['C:\\Editors\\Cursor.exe --type=utility --utility-sub-type=node.mojom.NodeService', 1, 1],
+    ['C:\\Editors\\OpenJet.exe --type=utility --utility-sub-type=node.mojom.NodeService', 1, 1],
+    ['C:\\Editors\\Windsurf.exe --type=utility --utility-sub-type=node.mojom.NodeService', 1, 1],
+    ['"C:\\Program Files\\Microsoft VS Code\\Code.exe" --type=renderer', 0, 2],
+    ['Code.exe --type=utility --utility-sub-type=network.mojom.NetworkService', 0, 2],
+    ['other.exe --type=utility --utility-sub-type=node.mojom.NodeService', 0, 2],
+    [
+      'node.exe client.js --editor=Code.exe --type=utility --utility-sub-type=node.mojom.NodeService',
+      0,
+      2,
+    ],
+    ['NotCode.exe --type=utility --utility-sub-type=node.mojom.NodeService', 0, 2],
+    [
+      'node.exe client.js --editor=C:\\Editors\\Code.exe --type=utility --utility-sub-type=node.mojom.NodeService',
+      0,
+      2,
+    ],
+  ])(
+    'counts Windows client %s and reads the process start time',
+    async (command, vscodeClients, otherClients) => {
+      setPlatform('win32');
+      const pair = (port: number, pid: number) => [
+        { pid: 100, from: endpoint, to: peer(port) },
+        { pid, from: peer(port), to: endpoint },
+      ];
+      vi.mocked(runProcess).mockResolvedValue({
+        code: 0,
+        stderr: '',
+        stdout: JSON.stringify({
+          listeners: [100],
+          startedAt,
+          connections: [...pair(50001, 200), ...pair(50002, 200), ...pair(50003, 300)],
+          commands: [
+            { pid: 200, command },
+            { pid: 300, command: 'opencode.exe --tui' },
+          ],
+        }),
+      });
+      await expect(readLocalServerConnectionInfo(49374, 100)).resolves.toEqual({
         startedAt,
-        connections: [...pair(50001, 200), ...pair(50002, 200), ...pair(50003, 300)],
-        commands: [
-          { pid: 200, command: 'Code.exe --type=extensionHost' },
-          { pid: 300, command: 'opencode.exe --tui' },
-        ],
-      }),
-    });
-    await expect(readLocalServerConnectionInfo(49374, 100)).resolves.toEqual({
-      startedAt,
-      vscodeClients: 1,
-      otherClients: 1,
-    });
-    expect(runProcess).toHaveBeenCalledWith('powershell.exe', expect.any(Array), 10_000);
-  });
+        vscodeClients,
+        otherClients,
+      });
+      expect(runProcess).toHaveBeenCalledWith('powershell.exe', expect.any(Array), 10_000);
+    }
+  );
 
   it.each(['not JSON', '{}', '{"listeners":["100"],"connections":[],"commands":[]}'])(
     'rejects invalid Windows output %s',

@@ -65,10 +65,18 @@ export async function readLocalServerConnectionInfo(
     for (const client of clients) {
       const command = snapshot.commands.get(client);
       if (!command) return { ...unknown, startedAt: snapshot.startedAt };
+      const executable = /^(?:"[^"]+"|[^\s"]+)(?=\s|$)/.exec(command)?.[0] ?? '';
       if (
         /--type[= ]extensionHost\b|\b(?:Code|VSCodium|Cursor|OpenJet|Windsurf)(?: - (?:Insiders|Nightly))? Helper \(Plugin\)/i.test(
           command
-        )
+        ) ||
+        // Windows Electron hosts use Node utility processes without an extensionHost argument.
+        (process.platform === 'win32' &&
+          /^"?(?:[^"\r\n]*[\\/])?(?:Code(?: - (?:Insiders|OSS))?|VSCodium(?: - Insiders)?|Cursor|OpenJet|Windsurf)\.exe"?(?=\s|$)/i.test(
+            executable
+          ) &&
+          /(?:^|\s)--type[= ]utility(?:\s|$)/i.test(command) &&
+          /(?:^|\s)--utility-sub-type[= ]node\.mojom\.NodeService(?:\s|$)/i.test(command))
       ) {
         vscodeClients += 1;
       } else otherClients += 1;
