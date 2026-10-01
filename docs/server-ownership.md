@@ -43,6 +43,90 @@ one contender can claim the server after validating its process identity.
 Explicit restarts coordinate ownership transfer with the same claim file.
 Startup confirmation and disconnect handoff also participate in that coordination.
 
+## Automatic ports and upgrade compatibility
+
+`varro.server.port` defaults to `"auto"`. New managed launches choose a random
+loopback port in 49152-65535 and retry collisions a bounded number of times.
+The actual port is persisted in the existing lease. An explicit integer setting
+never selects another port or redirects to a differently registered v2 service.
+
+Automatic mode retains the default `varro-opencode-server-4096.json` coordination
+key. The number in that filename is a compatibility key, not the listening port.
+Do not replace it with an independent automatic-mode lock while a process lives.
+Older clients and rollback builds already recover its recorded actual port.
+New leases remain version 1 and add optional `portMode` and `username` fields.
+
+On upgrade, validated existing leases and surviving managed markers are reused
+in place, including legacy temp paths and inherited fallback ports. Existing
+integer settings retain fixed-port intent, even when explicitly set to 4096.
+An old fallback is grandfathered for its live process; subsequent explicit
+launches cannot fall back. A new automatic-mode lease at a different port is not
+silently adopted by a newly configured fixed-port client.
+
+Fresh installations do not probe 4096. Existing installations identified by the
+previous first-activation marker retain their old default-endpoint discovery,
+so same-user manually launched servers can continue. This decision is persisted
+before the new first-activation marker is written. Very old or reset editor
+profiles without that marker can still recover leases, but manual connections
+without any registration need an explicit port setting.
+
+Initial launches acquire the same claim before spawning and re-read registration
+after acquiring it. The claim stays held through listener confirmation and lease
+publication. Cancellation and failed startup release it. A live but unhealthy or
+unverifiable registered process blocks replacement. Corrupt or unreadable leases
+are retained and reported, not interpreted as absent. Process identity mismatch
+does not authorize signalling the replacement PID.
+
+After a registered process exits, automatic mode chooses a new random port rather
+than inheriting its old fixed port. Each new launch rechecks the installed CLI and
+prefers a verified v2 executable when no command is configured. Discovery checks
+later candidates when an earlier `opencode2` command actually runs v1. A connected
+server's version is not evidence of the installed executable's version and does
+not select launch flags.
+
+Reused servers are excluded from background CLI
+maintenance for that connection, avoiding a migration-triggered restart or family
+switch. Their configuration and credentials are unchanged. Explicit restart remains
+subject to the existing active-session and pending-attention preflight. Reload
+disconnects rather than stopping the process. A surviving registered server is
+recoverable, not a stale process to kill based on age.
+
+New launches use an existing nonempty environment password or generate a
+cryptographically random password before spawning. Credentials never enter the
+command arguments or webview. Managed credentials are also copied to VS Code
+secret storage with their launch owner token. Reads validate that token against
+the verified registration. The private lease credential remains necessary for
+older builds and editor profiles/installations that do not share secret storage.
+Missing secret storage is not permission to retry without authentication.
+
+## Connection admission
+
+Before ordinary REST requests, event subscriptions, cleanup, or incompatible-server
+remediation, attachment checks the listener's OS account in the workspace
+extension host. Verified same-user attachment is quiet. Different-user and unknown
+ownership use distinct native modal warnings. Dismissal leaves the server untouched.
+A migrated automatic-mode user can instead choose to start their own server on
+another port, but cannot abandon a registered live process through this action.
+
+Consent binds to the observed PID, birth identity, account, and endpoint. Ownership
+is rechecked on stream reconnect and ordinary requests using a one-second inspection
+cache. Unknown-owner consent covers only the current connection and requires a new
+decision on reconnect. Concurrent callers share the decision; disposal invalidates
+late answers. Refusal blocks subsequent requests rather than starting retry prompts.
+
+Manual servers and consented foreign or unverifiable connections remain attach-only even
+with auto-start enabled. They cannot be adopted or restarted and do not run automatic
+local recycle-bin cleanup. Existing permission and question recovery remains unchanged.
+
+These checks prevent accidental attachment, not hostile-server impersonation. A
+supplied Authorization header does not prove that authentication is enforced.
+Account inspection proves the visible listener's account, not the backend account
+behind Docker, SSH forwarding, or another proxy. Ambiguous listeners and denied
+inspection are unknown. Native cross-user checks and Windows ACL inheritance still
+require platform validation. Private POSIX records are checked for owner, permissions,
+and symlinks; new records use private directories, exclusive temporary files, and
+atomic replacement.
+
 Maintenance rechecks the persisted lease instead of trusting cached ownership.
 A former host's retained `ChildProcess` reference does not authorize stopping a
 server or removing its files after another window takes ownership.
@@ -69,3 +153,11 @@ disconnect/recovery, transferred process references, per-platform identities,
 Linux PID reuse across boots, inspection failure, and concurrent writes. These
 tests use isolated filesystem fixtures and mocked OS commands. Native Windows
 and Linux execution remains a separate verification step.
+
+Connection-admission tests cover concurrent consent, dismissal, listener replacement,
+uncertain ownership, reconnect, and cancellation during ordinary requests. The
+startup integration test checks authentication enforcement, second-window attachment,
+disconnect/automatic-mode rediscovery, and explicit restart using isolated databases.
+It passes on macOS against released OpenCode 1.16.0, 1.18.33, 2.0.5, and 2.0.20.
+See `artifacts/opencode-adapters/verified.json` for the retained run logs. This is
+not native Windows/Linux, cross-user, rollback-editor, or live-session UI verification.

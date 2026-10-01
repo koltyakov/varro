@@ -49,7 +49,7 @@ This guide includes OpenCode v1 and v2 samples, with VS Code running on a macOS 
 
 ## Connection requirements
 
-- Varro supports a configurable port, but no custom server hostname, URL, or HTTPS setting. The default address is `http://127.0.0.1:4096`.
+- Varro supports a configurable port, but no custom server hostname, URL, or HTTPS setting. Set `varro.server.port` explicitly to Docker's published host port; the normal default is `"auto"`.
 - The address is relative to the **VS Code extension host**. With Remote SSH, WSL, or Dev Containers, this can be a different machine or container from the desktop running VS Code.
 - OpenCode must listen on `0.0.0.0` inside the container for Docker port forwarding to reach it.
 - The workspace must be available at the same absolute path in VS Code and the OpenCode container. Varro sends the workspace path to the API and has no host-to-container path mapping setting.

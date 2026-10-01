@@ -386,11 +386,12 @@
       "title": "Varro",
       "properties": {
         "varro.server.port": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535,
-          "default": 4096,
-          "markdownDescription": "Port for the OpenCode server. Reload the VS Code window after changing this setting."
+          "oneOf": [
+            { "type": "string", "enum": ["auto"] },
+            { "type": "integer", "minimum": 1, "maximum": 65535 }
+          ],
+          "default": "auto",
+          "markdownDescription": "Automatically select and remember a local server port, or set an exact port from 1 through 65535. Existing verified servers are reused without restarting. Explicit ports never fall back to another port. Reload the VS Code window after changing this setting."
         },
         "varro.server.command": {
           "type": "string",

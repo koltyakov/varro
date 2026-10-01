@@ -3410,6 +3410,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private renderOpenCodeStatusBarItem() {
     const attachOnly = this.server.isAttachOnly;
+    const serverUrl = new URL(this.server.url);
     const cliVersion = attachOnly ? null : this.openCodeCliVersion;
     const updateMarker = !attachOnly && this.openCodeUpdateAvailable ? '*' : '';
     const displayedVersion = this.openCodeServerVersion ?? cliVersion;
@@ -3422,9 +3423,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       .get<boolean>('server.autoUpdate', true);
     const versionLines = [
       ...(attachOnly
-        ? [`Server address: ${this.server.url}`, `Server IP: ${new URL(this.server.url).hostname}`]
+        ? [`Server address: ${this.server.url}`, `Server IP: ${serverUrl.hostname}`]
         : [`OpenCode CLI: ${cliVersion ?? 'unknown'}`]),
       `OpenCode Server: ${this.openCodeServerVersion ?? 'unknown'}`,
+      `Server port: ${serverUrl.port || (serverUrl.protocol === 'https:' ? '443' : '80')}`,
     ];
     if (cliVersion && compareVersions(cliVersion, maximumTestedOpenCodeVersion) < 0) {
       versionLines.push(

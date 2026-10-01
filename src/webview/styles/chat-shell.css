@@ -609,6 +609,15 @@ input:focus-visible {
   visibility: hidden;
 }
 
+.turn-navigation-tooltip-prompt {
+  max-width: min(220px, calc(100vw - 32px));
+  margin-top: 2px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .turn-navigation-tooltip-time {
   margin-top: 2px;
   font-size: 0.85em;

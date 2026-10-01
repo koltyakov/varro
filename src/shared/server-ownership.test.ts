@@ -25,6 +25,23 @@ function createLease(overrides: LeaseOverrides = {}) {
 }
 
 describe('parseManagedServerOwnershipLease', () => {
+  it('keeps optional automatic-port metadata in the version-1 lease', () => {
+    expect(
+      parseManagedServerOwnershipLease(
+        createLease({ portMode: 'auto', username: 'custom-user', password: 'private' })
+      )
+    ).toMatchObject({ version: 1, portMode: 'auto', username: 'custom-user', password: 'private' });
+    expect(parseManagedServerOwnershipLease(createLease({ portMode: 'fixed' }))).toMatchObject({
+      portMode: 'fixed',
+    });
+  });
+
+  it('rejects malformed optional port modes and usernames', () => {
+    for (const portMode of ['automatic', '', null, 4096])
+      expect(parseManagedServerOwnershipLease(createLease({ portMode }))).toBeNull();
+    for (const username of ['', 'user:password', 3, null])
+      expect(parseManagedServerOwnershipLease(createLease({ username }))).toBeNull();
+  });
   it('parses a minimal active lease', () => {
     expect(parseManagedServerOwnershipLease(createLease())).toEqual({
       version: 1,

@@ -25,6 +25,67 @@ const WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS = 10_000;
 export const PROCESS_STOP_TIMEOUT_MS = 5000;
 const PROCESS_COMMAND_MAX_OUTPUT_CHARS = 1_000_000;
 
+export type LocalServerAccount = {
+  kind: 'same-user' | 'different-user' | 'unknown';
+  identity?: string;
+};
+
+/** Inspect the listener in the extension host's namespace, not the desktop login. */
+export async function inspectLocalServerAccount(port: number): Promise<LocalServerAccount> {
+  try {
+    const pids = await findListeningPids(port);
+    // Port-only discovery can include unrelated IPv4/IPv6 binds. Do not guess.
+    if (pids.length !== 1) return { kind: 'unknown' };
+    const pid = pids[0]!;
+    const birth = await readProcessBirthIdentity(pid);
+    if (!birth) return { kind: 'unknown' };
+    let listenerAccount: string;
+    let hostAccount: string;
+    if (process.platform === 'win32') {
+      const script = [
+        `$listener = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
+        `$hostProcess = Get-CimInstance Win32_Process -Filter "ProcessId = ${process.pid}"`,
+        '$listenerOwner = Invoke-CimMethod -InputObject $listener -MethodName GetOwnerSid',
+        '$hostOwner = Invoke-CimMethod -InputObject $hostProcess -MethodName GetOwnerSid',
+        'if ($listenerOwner.ReturnValue -eq 0 -and $hostOwner.ReturnValue -eq 0) {',
+        '  Write-Output $listenerOwner.Sid',
+        '  Write-Output $hostOwner.Sid',
+        '}',
+      ].join('; ');
+      const result = await runProcess(
+        'powershell.exe',
+        ['-NoProfile', '-Command', script],
+        WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
+      );
+      const accounts = result.stdout.trim().split(/\s+/);
+      if (
+        result.code !== 0 ||
+        accounts.length !== 2 ||
+        accounts.some((id) => !/^S-\d+(?:-\d+)+$/.test(id))
+      )
+        return { kind: 'unknown' };
+      listenerAccount = accounts[0]!;
+      hostAccount = accounts[1]!;
+    } else {
+      const result = await runProcess('ps', ['-p', String(pid), '-o', 'uid=']);
+      listenerAccount = result.stdout.trim();
+      if (result.code !== 0 || !/^\d+$/.test(listenerAccount) || !process.geteuid)
+        return { kind: 'unknown' };
+      hostAccount = String(process.geteuid());
+      listenerAccount = String(Number(listenerAccount));
+    }
+    // Inspect again to avoid consenting to a PID replaced while commands ran.
+    if ((await readProcessBirthIdentity(pid)) !== birth) return { kind: 'unknown' };
+    return {
+      kind: listenerAccount === hostAccount ? 'same-user' : 'different-user',
+      identity: `${pid}:${birth}:${listenerAccount}`,
+    };
+  } catch {
+    // Restricted process visibility must never be interpreted as same-user.
+    return { kind: 'unknown' };
+  }
+}
+
 function parsePids(text: string) {
   const pids = new Set<number>();
   for (const match of text.matchAll(/\b\d+\b/g)) {

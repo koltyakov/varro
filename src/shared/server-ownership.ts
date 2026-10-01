@@ -13,6 +13,9 @@ export interface ManagedServerOwnershipLease {
   configPath?: string;
   /** Host-only credential, persisted in the private ownership file for window handoff. */
   password?: string;
+  username?: string;
+  /** Optional so older Varro builds can still read and coordinate this lease. */
+  portMode?: 'auto' | 'fixed';
 }
 
 export function parseManagedServerOwnershipLease<T>(value: T): ManagedServerOwnershipLease | null {
@@ -51,6 +54,13 @@ export function parseManagedServerOwnershipLease<T>(value: T): ManagedServerOwne
   if (!isNumber(record.createdAt) || !Number.isFinite(record.createdAt)) return null;
   if (record.configPath !== undefined && !isString(record.configPath)) return null;
   if (
+    record.username !== undefined &&
+    (!isString(record.username) || !record.username || record.username.includes(':'))
+  )
+    return null;
+  if (record.portMode !== undefined && record.portMode !== 'auto' && record.portMode !== 'fixed')
+    return null;
+  if (
     record.password !== undefined &&
     (!isString(record.password) || !record.password || record.password.length > 4096)
   )
@@ -73,6 +83,8 @@ export function parseManagedServerOwnershipLease<T>(value: T): ManagedServerOwne
   }
   if (record.configPath) lease.configPath = record.configPath;
   if (isString(record.password)) lease.password = record.password;
+  if (isString(record.username)) lease.username = record.username;
+  if (record.portMode === 'auto' || record.portMode === 'fixed') lease.portMode = record.portMode;
   return lease;
 }
 import { asRecord, isNumber, isString } from './type-utils';

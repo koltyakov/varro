@@ -2,6 +2,7 @@
 import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -18,6 +19,7 @@ import type * as OsModule from 'os';
 import { dirname, join } from 'path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ManagedServerOwnershipLease } from '../shared/server-ownership';
+import { asRecord } from '../shared/type-utils';
 import type * as ServerUtils from './server-utils';
 import { Service } from '@opencode/client/service';
 
@@ -177,7 +179,7 @@ describe('v2 shared service routing', () => {
   });
 
   it('uses the registered service port and credentials without spawning a second runner', async () => {
-    const manager = new OpenCodeProcess(4096, true, 'opencode2');
+    const manager = new OpenCodeProcess('auto', true, 'opencode2');
     manager.rememberInstalledCliVersion('2.0.6');
     vi.mocked(Service.discover).mockResolvedValue({
       url: 'http://127.0.0.1:43123',
@@ -314,7 +316,7 @@ describe('v2 shared service routing', () => {
         .mockResolvedValue(new Response(JSON.stringify({ pid, version }), { status }));
       try {
         const manager = new OpenCodeProcess(
-          4096,
+          'auto',
           true,
           'opencode2',
           false,
@@ -585,13 +587,11 @@ describe('OpenCodeProcess port validation', () => {
     expect(new OpenCodeProcess(65_535, true).port).toBe(65_535);
   });
 
-  it('never advances a conflict fallback above port 65535', () => {
+  it('never changes an explicitly configured port after a collision', () => {
     const manager = new OpenCodeProcess(65_534, true);
 
-    expect(manager.tryAdvancePort()).toBe(true);
-    expect(manager.port).toBe(65_535);
     expect(manager.tryAdvancePort()).toBe(false);
-    expect(manager.port).toBe(65_535);
+    expect(manager.port).toBe(65_534);
   });
 });
 
@@ -972,6 +972,334 @@ describe('OpenCodeProcess startup termination', () => {
 });
 
 describe('OpenCodeProcess server ownership leases', () => {
+  it('rejects public and symlinked default ownership records without altering them', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const root = await mkdtemp(join(tmpdir(), 'varro-private-record-'));
+    vi.stubEnv('XDG_STATE_HOME', root);
+    const path = join(root, 'varro', 'servers', 'varro-opencode-server-59997.json');
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const victim = join(root, 'original');
+    await writeFile(victim, 'keep');
+    try {
+      await writeFile(path, '{broken', { mode: 0o644 });
+      const manager = new OpenCodeProcess(59997, true);
+      await expect(manager.refreshStartupRegistration()).rejects.toThrow('not private');
+      expect(await readFile(path, 'utf8')).toBe('{broken');
+      await chmod(path, 0o600);
+      await expect(manager.refreshStartupRegistration()).rejects.toThrow('left untouched');
+      await rm(path);
+      await symlink(victim, path);
+      await expect(manager.refreshStartupRegistration()).rejects.toThrow('not private');
+      expect(await readFile(victim, 'utf8')).toBe('keep');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('copies credentials for a verified live lease and rejects unrelated stored launch tokens', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const root = await mkdtemp(join(tmpdir(), 'varro-managed-secrets-'));
+    const path = join(root, 'lease.json');
+    const lease: ManagedServerOwnershipLease = {
+      version: 1,
+      pid: MOCK_LINUX_PID,
+      port: 50001,
+      executable: '/usr/bin/opencode',
+      birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      owner: 'existing-launch',
+      host: 'old-window',
+      state: 'relinquished',
+      createdAt: Date.now(),
+      password: 'existing-password',
+      username: 'custom-user',
+    };
+    await writeFile(path, JSON.stringify(lease));
+    mockLinuxLeaseProcess({ port: lease.port });
+    const manager = new OpenCodeProcess(
+      'auto',
+      true,
+      '',
+      false,
+      undefined,
+      path,
+      join(root, 'proc')
+    );
+    const secrets = { get: vi.fn(), store: vi.fn().mockResolvedValue(undefined) };
+    try {
+      await manager.refreshStartupRegistration();
+      await expect(manager.recoverManagedServerOwnership()).resolves.toBe(true);
+      await manager.persistManagedServerCredentials(secrets);
+      expect(secrets.store).toHaveBeenCalledWith(
+        `varro.opencode.managedCredentials:${path}`,
+        JSON.stringify({ owner: lease.owner, username: lease.username, password: lease.password })
+      );
+      const authorization = manager.serverAuthorization;
+      secrets.get.mockResolvedValue(
+        JSON.stringify({ owner: 'unrelated-launch', username: 'other', password: 'other-password' })
+      );
+      await manager.restoreManagedServerCredentials(secrets);
+      expect(manager.serverAuthorization).toBe(authorization);
+      secrets.get.mockResolvedValue('{broken');
+      await manager.restoreManagedServerCredentials(secrets);
+      expect(manager.serverAuthorization).toBe(authorization);
+      secrets.get.mockRejectedValue(new Error('storage unavailable'));
+      await expect(manager.restoreManagedServerCredentials(secrets)).rejects.toThrow('unavailable');
+      expect(manager.serverAuthorization).toBe(authorization);
+      expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
+        password: lease.password,
+        username: lease.username,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['auto', 4096] as const)(
+    'reuses a live legacy fallback with %s without rewriting its lease',
+    async (port) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-port-migration-'));
+      const path = join(root, 'lease.json');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: MOCK_LINUX_PID,
+        port: 50001,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+        owner: 'legacy',
+        host: 'old-window',
+        state: 'active',
+        createdAt: Date.now(),
+        password: 'existing-password',
+      };
+      const raw = JSON.stringify(lease);
+      await writeFile(path, raw);
+      mockLinuxLeaseProcess({ port: lease.port });
+      try {
+        const manager = new OpenCodeProcess(
+          port,
+          true,
+          '',
+          false,
+          undefined,
+          path,
+          join(root, 'proc')
+        );
+        await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
+        expect(manager.port).toBe(50001);
+        expect(manager.serverAuthorization).toBe(
+          `Basic ${Buffer.from('opencode:existing-password').toString('base64')}`
+        );
+        expect(await readFile(path, 'utf8')).toBe(raw);
+        expect(manager.managedProcess).toBe(false);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['auto', 4096] as const)(
+    'selects the next launch port after a legacy server exits with setting %s',
+    async (port) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-retired-registration-'));
+      const path = join(root, 'varro-opencode-server-4096.json');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: MOCK_LINUX_PID,
+        port: 4096,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'linux:retired',
+        owner: 'legacy',
+        host: 'old-window',
+        state: 'active',
+        createdAt: Date.now(),
+      };
+      const raw = JSON.stringify(lease);
+      await writeFile(path, raw);
+      const manager = new OpenCodeProcess(port, true, '', false, undefined, path);
+      try {
+        await expect(manager.refreshStartupRegistration()).resolves.toBe(false);
+        manager.selectAutomaticPort();
+        if (port === 'auto') {
+          expect(manager.port).toBeGreaterThanOrEqual(49152);
+          expect(manager.port).toBeLessThanOrEqual(65535);
+        } else {
+          expect(manager.port).toBe(4096);
+        }
+        expect(await readFile(path, 'utf8')).toBe(raw);
+        const release = await manager.acquireManagedServerLaunchClaim(new AbortController().signal);
+        expect(asRecord(JSON.parse(await readFile(`${path}.claim`, 'utf8')))?.version).toBe(1);
+        await release();
+        await expect(stat(`${path}.claim`)).rejects.toMatchObject({ code: 'ENOENT' });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('restores a marked fallback when its lease was lost', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const root = await mkdtemp(join(tmpdir(), 'varro-marker-migration-'));
+    const path = join(root, 'lease.json');
+    const marker = {
+      pid: MOCK_LINUX_PID,
+      port: 50001,
+      executable: '/usr/bin/opencode',
+      birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      owner: 'legacy',
+      createdAt: Date.now(),
+    };
+    await writeFile(`${path}.managed`, JSON.stringify(marker));
+    mockLinuxLeaseProcess();
+    try {
+      const manager = new OpenCodeProcess(
+        'auto',
+        true,
+        '',
+        false,
+        undefined,
+        path,
+        join(root, 'proc')
+      );
+      await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
+      expect(manager.port).toBe(50001);
+      expect(JSON.parse(await readFile(`${path}.managed`, 'utf8'))).toEqual(marker);
+      await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not redirect an explicit port to a newly registered automatic endpoint', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const root = await mkdtemp(join(tmpdir(), 'varro-fixed-migration-'));
+    const path = join(root, 'lease.json');
+    const lease = {
+      version: 1,
+      pid: MOCK_LINUX_PID,
+      port: 50001,
+      executable: '/usr/bin/opencode',
+      birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      owner: 'automatic',
+      host: 'other-window',
+      state: 'active',
+      createdAt: Date.now(),
+      portMode: 'auto',
+    };
+    await writeFile(path, JSON.stringify(lease));
+    mockLinuxLeaseProcess();
+    try {
+      const manager = new OpenCodeProcess(
+        4096,
+        true,
+        '',
+        false,
+        undefined,
+        path,
+        join(root, 'proc')
+      );
+      expect(manager.port).toBe(4096);
+      await expect(manager.refreshStartupRegistration()).rejects.toThrow('Select auto');
+      expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(lease);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not start over corrupt registration or failed process inspection', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const root = await mkdtemp(join(tmpdir(), 'varro-corrupt-migration-'));
+    const path = join(root, 'lease.json');
+    await writeFile(path, '{broken');
+    try {
+      const manager = new OpenCodeProcess(
+        'auto',
+        true,
+        '',
+        false,
+        undefined,
+        path,
+        join(root, 'proc')
+      );
+      await expect(manager.refreshStartupRegistration()).rejects.toThrow('left untouched');
+      expect(await readFile(path, 'utf8')).toBe('{broken');
+      const lease = {
+        version: 1,
+        pid: MOCK_LINUX_PID,
+        port: 4096,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'linux:original',
+        owner: 'legacy',
+        host: 'old',
+        state: 'active',
+        createdAt: Date.now(),
+      };
+      await writeFile(path, JSON.stringify(lease));
+      mockLinuxLeaseProcess({ birthIdentity: () => '' });
+      await expect(manager.refreshStartupRegistration()).rejects.toThrow(
+        'Cannot verify process start identity'
+      );
+      expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(lease);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('serializes competing initial launches and releases the claim idempotently', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'varro-launch-claim-'));
+    const path = join(root, 'lease.json');
+    const first = new OpenCodeProcess('auto', true, '', false, undefined, path);
+    const second = new OpenCodeProcess('auto', true, '', false, undefined, path);
+    // Birth inspection may be unavailable; the real current host PID still protects its claim.
+    mockLinuxLeaseProcess();
+    try {
+      const releaseFirst = await first.acquireManagedServerLaunchClaim(
+        new AbortController().signal
+      );
+      let acquired = false;
+      const pending = second
+        .acquireManagedServerLaunchClaim(new AbortController().signal)
+        .then((release) => {
+          acquired = true;
+          return release;
+        });
+      await readFile(`${path}.claim`, 'utf8');
+      expect(acquired).toBe(false);
+      await releaseFirst();
+      await releaseFirst();
+      const releaseSecond = await pending;
+      expect(acquired).toBe(true);
+      await releaseSecond();
+      await expect(stat(`${path}.claim`)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps automatic selection stable through retries and bounds collision recovery', () => {
+    const manager = new OpenCodeProcess(
+      'auto',
+      true,
+      '',
+      false,
+      undefined,
+      join(tmpdir(), 'unused-auto.json')
+    );
+    manager.selectAutomaticPort();
+    const selected = manager.port;
+    manager.selectAutomaticPort();
+    expect(manager.port).toBe(selected);
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const previous = manager.port;
+      expect(manager.tryAdvancePort()).toBe(true);
+      expect(manager.port).not.toBe(previous);
+      expect(manager.port).toBeGreaterThanOrEqual(49152);
+      expect(manager.port).toBeLessThanOrEqual(65535);
+    }
+    expect(manager.tryAdvancePort()).toBe(false);
+  });
+
   it.each(['darwin', 'linux', 'win32'])('uses shared per-user state on %s', async (platform) => {
     Object.defineProperty(process, 'platform', { value: platform, configurable: true });
     const manager = new OpenCodeProcess(49876, true);
@@ -1569,6 +1897,8 @@ describe('OpenCodeProcess server ownership leases', () => {
       state: string;
     };
     expect(lease).toEqual({
+      password: expect.any(String),
+      portMode: 'fixed',
       version: 1,
       pid: MOCK_WINDOWS_PID,
       port: 4096,
@@ -2669,13 +2999,15 @@ describe('OpenCodeProcess server ownership leases', () => {
     mockLinuxLeaseProcess();
     const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
 
-    await expect(manager.recoverManagedServerOwnership()).resolves.toBe(false);
+    await expect(manager.recoverManagedServerOwnership()).rejects.toThrow(
+      'ownership evidence were retained'
+    );
 
     expect(
       (manager as unknown as { injectedConfigPath: string | null }).injectedConfigPath
     ).toBeNull();
     await expect(readFile(victimConfig, 'utf-8')).resolves.toBe('{"keep":true}');
-    await expect(stat(leasePath)).rejects.toThrow();
+    await expect(stat(leasePath)).resolves.toBeDefined();
     await Promise.all([
       rm(directory, { recursive: true, force: true }),
       rm(victimDirectory, { recursive: true, force: true }),
@@ -3015,7 +3347,7 @@ describe('OpenCodeProcess config ownership', () => {
     expect(spawnMock).toHaveBeenCalledTimes(2);
   });
 
-  it('reuses the managed server version without launching a CLI probe', async () => {
+  it('reuses a known installed CLI version without launching another probe', async () => {
     const manager = new OpenCodeProcess(4096, true, 'opencode');
 
     manager.rememberInstalledCliVersion('1.18.26');
@@ -3342,6 +3674,62 @@ describe('OpenCodeProcess config ownership', () => {
 });
 
 describe('OpenCodeProcess install resolution', () => {
+  it.each([
+    { configured: false, laterVersion: '2.0.17', brokenWrapper: false },
+    { configured: true, laterVersion: '2.0.17', brokenWrapper: false },
+    { configured: false, laterVersion: '1.18.33', brokenWrapper: false },
+    { configured: false, laterVersion: '2.0.17', brokenWrapper: true },
+  ])(
+    'verifies shadowed CLI candidates with $configured, $laterVersion, $brokenWrapper',
+    async ({ configured, laterVersion, brokenWrapper }) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-shadowed-cli-'));
+      const early = join(root, 'early');
+      const later = join(root, 'later');
+      await mkdir(early);
+      await mkdir(later);
+      const wrapper = join(early, 'opencode2');
+      const installed = join(later, 'opencode2');
+      await writeFile(wrapper, '#!/bin/sh\nexec opencode "$@"\n');
+      await writeFile(installed, '');
+      const manager = new OpenCodeProcess('auto', true, configured ? wrapper : '');
+      vi.spyOn(
+        manager as unknown as { serverPathEntries(): string[] },
+        'serverPathEntries'
+      ).mockReturnValue([early, later]);
+      spawnMock.mockImplementation((command: string) => {
+        const child = Object.assign(new EventEmitter(), {
+          stdout: new EventEmitter(),
+          stderr: new EventEmitter(),
+          kill: vi.fn(),
+        });
+        queueMicrotask(() => {
+          if (command === wrapper && brokenWrapper) {
+            child.stderr.emit('data', Buffer.from('wrapper failed'));
+            child.emit('close', 1, null);
+          } else {
+            child.stdout.emit('data', Buffer.from(command === wrapper ? '1.18.34' : laterVersion));
+            child.emit('close', 0, null);
+          }
+        });
+        return child;
+      });
+      try {
+        expect(manager.resolveCommand()).toBe(wrapper);
+        const useLater = !configured && laterVersion.startsWith('2.');
+        await expect(manager.readInstalledCliVersion()).resolves.toBe(
+          useLater ? laterVersion : '1.18.34'
+        );
+        expect(manager.resolveCommand()).toBe(useLater ? installed : wrapper);
+        expect(spawnMock).toHaveBeenCalledTimes(configured ? 1 : 2);
+        await manager.readInstalledCliVersion();
+        expect(spawnMock).toHaveBeenCalledTimes(configured ? 1 : 2);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it.each([
     { name: 'idle managed server', configured: false, active: false, managed: true },
     { name: 'busy managed server', configured: false, active: true, managed: true },

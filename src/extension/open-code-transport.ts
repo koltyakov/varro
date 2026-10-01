@@ -56,6 +56,7 @@ export type OpenCodeRescopeResult = {
 const EVENT_STREAM_PATH = CURRENT_OPENCODE_ENDPOINTS.eventStream;
 
 interface OpenCodeTransportOptions {
+  authorizeConnection?: (reconnect?: boolean) => Promise<void>;
   openExternal?: (url: string) => Promise<boolean>;
   sessionStateDirectory?: string;
   getAuthorization?: () => string | undefined;
@@ -144,6 +145,41 @@ export class OpenCodeTransport {
     body?: unknown,
     options?: OpenCodeRequestOptions
   ): Promise<unknown> {
+    if (
+      this.options.authorizeConnection &&
+      !(method === 'GET' && path === CURRENT_OPENCODE_ENDPOINTS.health)
+    ) {
+      const controller = new AbortController();
+      this.requestControllers.add(controller);
+      const url = this.options.getUrl();
+      const signal = options?.signal
+        ? AbortSignal.any([options.signal, controller.signal])
+        : controller.signal;
+      try {
+        scopeOpenCodeRequest(url, path);
+        signal.throwIfAborted();
+        await this.options.authorizeConnection();
+        signal.throwIfAborted();
+        if (url !== this.options.getUrl())
+          throw new Error('OpenCode endpoint changed during request admission');
+        return await this.requestAdmitted(method, path, body, { ...options, signal });
+      } finally {
+        this.requestControllers.delete(controller);
+        if (!this.requestControllers.size) {
+          for (const resolve of this.requestSettlementWaiters) resolve();
+          this.requestSettlementWaiters.clear();
+        }
+      }
+    }
+    return this.requestAdmitted(method, path, body, options);
+  }
+
+  private async requestAdmitted(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: OpenCodeRequestOptions
+  ): Promise<unknown> {
     // Validate the caller path before any adapter can construct authenticated requests.
     if (this.apiVersion === 2) {
       scopeOpenCodeRequest(this.options.getUrl(), path);
@@ -185,6 +221,13 @@ export class OpenCodeTransport {
     body?: unknown,
     options?: OpenCodeRequestOptions
   ): Promise<unknown> {
+    if (
+      this.options.authorizeConnection &&
+      !(method === 'GET' && path === CURRENT_OPENCODE_ENDPOINTS.health)
+    ) {
+      await this.options.authorizeConnection();
+      options?.signal?.throwIfAborted();
+    }
     const scoped = scopeOpenCodeRequest(
       this.options.getUrl(),
       path,
@@ -483,6 +526,7 @@ export class OpenCodeTransport {
     eventStreamDirectory = this.requestWorkspaceDirectory,
     promoteDirectoryImmediately = true
   ) {
+    await this.options.authorizeConnection?.(true);
     const serverUrl = this.options.getUrl();
     if (this.eventStreamServerUrl !== serverUrl) this.lastEventId = '';
     this.eventStreamServerUrl = serverUrl;
@@ -660,7 +704,11 @@ export class OpenCodeTransport {
             return;
           }
           this.eventReconnectTimer = null;
-          void this.startEventStream(this.eventStreamDirectory, false);
+          void this.startEventStream(this.eventStreamDirectory, false).catch((error: unknown) => {
+            logger.warn(
+              `Event stream admission failed: ${error instanceof Error ? error.message : String(error)}`
+            );
+          });
         }, delay);
       }
     }

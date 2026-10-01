@@ -62,6 +62,7 @@ function createRuntime(options?: {
   start?: () => Promise<string>;
 }) {
   const server = {
+    isAttachOnly: false,
     request: vi.fn((_method: string, _path: string): Promise<unknown> =>
       Promise.resolve(undefined)
     ),
@@ -86,6 +87,14 @@ function createRuntime(options?: {
 }
 
 describe('SidebarProviderRuntime', () => {
+  it('does not run automatic recycle-bin mutations on external connections', async () => {
+    const { runtime, server, sessionTrash, sessionState } = createRuntime();
+    server.isAttachOnly = true;
+    await runtime.cleanupExpiredRecycleBin(RUNNING_STATUS);
+    expect(sessionTrash.cleanupExpired).not.toHaveBeenCalled();
+    expect(server.request).not.toHaveBeenCalled();
+    expect(sessionState.removeSessions).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });

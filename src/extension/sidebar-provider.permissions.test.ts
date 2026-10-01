@@ -673,15 +673,55 @@ describe('SidebarProvider permission replay', () => {
       );
       const item = createStatusBarItem.mock.results[itemIndex]?.value;
       const address = 'Server address: http://127.0.0.1:4097\nServer IP: 127.0.0.1';
-      expect(item.tooltip).toBe(`${address}\nOpenCode Server: unknown\n\nVarro extension: 0.26.4`);
+      expect(item.tooltip).toBe(
+        `${address}\nOpenCode Server: unknown\nServer port: 4097\n\nVarro extension: 0.26.4`
+      );
 
       const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
       statusHandler?.({ state: 'running', url: server.url });
 
       await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${version}`));
       expect(item.tooltip).toBe(
-        `${address}\nOpenCode Server: ${version}\n\nVarro extension: 0.26.4`
+        `${address}\nOpenCode Server: ${version}\nServer port: 4097\n\nVarro extension: 0.26.4`
       );
+    }
+  );
+
+  it.each([
+    { isAttachOnly: false, url: 'http://127.0.0.1:54321', port: '54321' },
+    { isAttachOnly: true, url: 'http://opencode.example', port: '80' },
+    { isAttachOnly: true, url: 'https://opencode.example', port: '443' },
+  ])(
+    'shows the effective server port for $url and refreshes it after restart',
+    async (testCase) => {
+      const version = readMaximumTestedOpenCodeVersion(undefined, 2);
+      const server = createServer({
+        isAttachOnly: testCase.isAttachOnly,
+        url: testCase.url,
+        apiVersion: 2,
+        readServerInfo: vi.fn(async () => ({
+          managedProcess: !testCase.isAttachOnly,
+          cliVersion: version,
+          health: { healthy: true, version },
+        })),
+      });
+      await createSidebarProviderInstance({ server });
+      const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
+      const createStatusBarItem = getVscodeMock().window.createStatusBarItem;
+      const itemIndex = createStatusBarItem.mock.calls.findIndex(
+        ([id]) => id === 'varro.opencode-version'
+      );
+      const item = createStatusBarItem.mock.results[itemIndex]?.value;
+      statusHandler?.({ state: 'running', url: server.url });
+      await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${version}`));
+      expect(item.tooltip).toContain(`OpenCode Server: ${version}\nServer port: ${testCase.port}`);
+
+      statusHandler?.({ state: 'starting' });
+      server.url = 'http://127.0.0.1:54322';
+      statusHandler?.({ state: 'running', url: server.url });
+      await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${version}`));
+      expect(item.tooltip).toContain('Server port: 54322');
+      expect(item.tooltip).not.toContain(`Server port: ${testCase.port}\n`);
     }
   );
 
@@ -704,7 +744,7 @@ describe('SidebarProvider permission replay', () => {
     const item = createStatusBarItem.mock.results[itemIndex]?.value;
     await vi.waitFor(() => expect(item.text).toBe('$(robot) OpenCode 1.16.0*'));
     expect(item.tooltip).toBe(
-      `OpenCode CLI: ${readMaximumTestedOpenCodeVersion()}\nOpenCode Server: 1.16.0\n\nCLI updated to OpenCode ${readMaximumTestedOpenCodeVersion()}; server 1.16.0 is stale.\n\nVarro extension: 0.26.4\nVerified w/ OpenCode ${readMaximumTestedOpenCodeVersion()}`
+      `OpenCode CLI: ${readMaximumTestedOpenCodeVersion()}\nOpenCode Server: 1.16.0\nServer port: 4096\n\nCLI updated to OpenCode ${readMaximumTestedOpenCodeVersion()}; server 1.16.0 is stale.\n\nVarro extension: 0.26.4\nVerified w/ OpenCode ${readMaximumTestedOpenCodeVersion()}`
     );
   });
 
@@ -805,7 +845,7 @@ describe('SidebarProvider permission replay', () => {
     const item = createStatusBarItem.mock.results[itemIndex]?.value;
     await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${installedVersion}*`));
     expect(item.tooltip).toBe(
-      `OpenCode CLI: ${installedVersion}\nOpenCode Server: ${installedVersion}\n\nNew CLI version: OpenCode ${maximumTestedVersion} is not installed yet.\nAuto-updates are off.\n\nVarro extension: 0.26.4`
+      `OpenCode CLI: ${installedVersion}\nOpenCode Server: ${installedVersion}\nServer port: 4096\n\nNew CLI version: OpenCode ${maximumTestedVersion} is not installed yet.\nAuto-updates are off.\n\nVarro extension: 0.26.4`
     );
   });
 

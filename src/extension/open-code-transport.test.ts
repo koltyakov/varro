@@ -145,6 +145,51 @@ function createClosedEventResponse() {
   } as unknown as Response;
 }
 
+describe('transport connection admission', () => {
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+  it.each([1, 2])(
+    'tracks and drains a cancelled v%s request waiting for admission',
+    async (version) => {
+      let approve!: () => void;
+      const admission = new Promise<void>((resolve) => {
+        approve = resolve;
+      });
+      const transport = createTransport({ authorizeConnection: () => admission });
+      (transport as unknown as { apiVersion: number }).apiVersion = version;
+      const request = transport.request('DELETE', '/session/blocked');
+      const rejected = expect(request).rejects.toThrow();
+      transport.abortRequests();
+      let drained = false;
+      const drain = transport.waitForRequestsToSettle().then(() => {
+        drained = true;
+      });
+      await Promise.resolve();
+      expect(drained).toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+      approve();
+      await Promise.all([rejected, drain]);
+      expect(drained).toBe(true);
+      expect(fetch).not.toHaveBeenCalled();
+    }
+  );
+
+  it('never transfers a pending request to a changed endpoint', async () => {
+    let approve!: () => void;
+    let url = 'http://localhost:4096';
+    const admission = new Promise<void>((resolve) => {
+      approve = resolve;
+    });
+    const transport = createTransport({ getUrl: () => url, authorizeConnection: () => admission });
+    const rejected = expect(transport.request('POST', '/session')).rejects.toThrow(
+      'endpoint changed'
+    );
+    url = 'http://localhost:50000';
+    approve();
+    await rejected;
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   diagnosticTimeline.clear();

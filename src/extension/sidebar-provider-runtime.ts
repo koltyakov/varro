@@ -12,7 +12,7 @@ export class SidebarProviderRuntime {
   private serverStartErrorMessage: string | null = null;
 
   constructor(
-    private readonly server: Pick<OpenCodeServer, 'request' | 'start' | 'status'>,
+    private readonly server: Pick<OpenCodeServer, 'request' | 'start' | 'status' | 'isAttachOnly'>,
     private readonly sessionState: Pick<SessionStateManager, 'removeSessions'>,
     private readonly sessionTrash: Pick<
       SessionTrashManager,
@@ -53,6 +53,7 @@ export class SidebarProviderRuntime {
   }
 
   async cleanupExpiredRecycleBin(status: ServerStatus) {
+    if (this.server.isAttachOnly) return;
     if (this.recycleBinMaintenanceInFlight || status.state !== 'running') return;
     const now = Date.now();
     if (now - this.lastRecycleBinCleanupAt < this.recycleBinCleanupIntervalMs) return;

@@ -5,7 +5,7 @@ import { SidebarProvider } from './sidebar-provider';
 import { ContextProvider } from './context-provider';
 import { registerCommands } from './commands';
 import { logger } from './logger';
-import { sweepStaleInjectedConfigDirectories, validateServerPort } from './open-code-process';
+import { readServerPortSetting, sweepStaleInjectedConfigDirectories } from './open-code-process';
 
 const DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS = 4096;
 const CONTEXT_RESCOPE_RETRY_MS = 50;
@@ -145,11 +145,25 @@ export async function activate(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
 
   const config = vscode.workspace.getConfiguration('varro');
-  const port = validateServerPort(config.get<unknown>('server.port', 4096));
+  const port = readServerPortSetting(config.get<unknown>('server.port', 'auto'));
   const autoStart = config.get<boolean>('server.autoStart', true);
   const command = config.get<string>('server.command', '');
   const simulateMissingCli = config.get<boolean>('debug.simulateMissingCli', false);
   const simulateNoProviders = config.get<boolean>('debug.simulateNoProviders', false);
+  let legacyDefaultEndpoint = false;
+  if (port === 'auto' && context.globalState) {
+    const key = 'varro.server.legacyDefaultEndpoint';
+    legacyDefaultEndpoint =
+      context.globalState.get<boolean>(key) ??
+      context.globalState.get<boolean>(INITIAL_SIDEBAR_REVEAL_KEY) === true;
+    try {
+      await context.globalState.update(key, legacyDefaultEndpoint);
+    } catch (error) {
+      logger.warn(
+        `Could not remember automatic-port migration: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
   const compactionSettings = readCompactionSettings(config);
   syncShowFileDiffsContext(config);
 
@@ -160,7 +174,8 @@ export async function activate(context: vscode.ExtensionContext) {
     simulateMissingCli,
     compactionSettings,
     undefined,
-    context.secrets
+    context.secrets,
+    legacyDefaultEndpoint
   );
   let scopedWorkspacePath: string | null | undefined;
   contextProvider = new ContextProvider((ctx) => {

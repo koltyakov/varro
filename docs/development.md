@@ -366,7 +366,7 @@ The browser preview serves source through Vite, but the built webview has `sourc
 
 ## Connect To An Existing OpenCode Server
 
-By default, Varro tries to auto-start OpenCode on port `4096`. You can connect to an already running server instead.
+By default, Varro selects and remembers an automatic loopback port. You can connect to an already running server instead.
 
 Start OpenCode manually:
 
@@ -376,13 +376,13 @@ opencode serve --port 4096
 
 Then configure these VS Code settings as needed:
 
-- `varro.server.port` (an integer from 1 through 65535)
+- `varro.server.port` (set an integer from 1 through 65535 for a manually managed endpoint; the default is `"auto"`)
 - `varro.server.autoStart`
 - `varro.server.command`
 
 Varro checks `http://127.0.0.1:<port>/global/health` to verify the server.
 
-If Varro launched the server itself and the configured port is already occupied by a different process, it can retry on a nearby valid port. It never wraps past port 65535 and reports when no valid fallback remains. Set `varro.server.port` explicitly if you want a fixed server address.
+Automatic launches use random ports in the dynamic range with bounded collision retries. An explicit port never changes after a collision. The existing default lease remains the coordination key for automatic mode so legacy windows and rollback can discover its recorded actual port. See [server ownership](server-ownership.md) for migration and admission checks.
 
 ## Project Structure
 
