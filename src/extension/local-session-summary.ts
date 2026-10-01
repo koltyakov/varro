@@ -5,6 +5,7 @@ import { Worker } from 'node:worker_threads';
 import { resolveOpenCodeDataDirectory } from '../shared/opencode-data-directory';
 import type { ContextCharacterCounts } from '../shared/context-breakdown';
 import { asRecord } from '../shared/type-utils';
+import type { OpenCodeApiVersion } from './opencode-connection';
 
 const LOCAL_SESSION_SUMMARY_TIMEOUT_MS = 2_000;
 const LOCAL_SESSION_SUMMARY_MAX_SESSIONS = 10_000;
@@ -28,7 +29,8 @@ export type LocalSessionSummaryData = {
 
 export async function readLocalSessionSummary(
   sessionID: string,
-  databasePath = join(resolveOpenCodeDataDirectory(), 'opencode.db')
+  databasePath = process.env.OPENCODE_DB ?? join(resolveOpenCodeDataDirectory(), 'opencode.db'),
+  apiVersion: OpenCodeApiVersion = 1
 ): Promise<LocalSessionSummaryData | null> {
   if (!existsSync(databasePath)) return null;
 
@@ -38,6 +40,7 @@ export async function readLocalSessionSummary(
       workerData: {
         databasePath,
         sessionID,
+        apiVersion,
         maxSessions: LOCAL_SESSION_SUMMARY_MAX_SESSIONS,
         maxMessages: LOCAL_SESSION_SUMMARY_MAX_MESSAGES,
         maxParts: LOCAL_SESSION_SUMMARY_MAX_PARTS,
@@ -236,10 +239,111 @@ const addPartContext = (target, role, value) => {
   else target.tool += input;
 };
 
+const readV2 = (database) => {
+  const required = {
+    session_v2: ['id', 'parent_id', 'fork_session_id', 'revert', 'tokens_input', 'tokens_output', 'tokens_reasoning', 'tokens_cache_read', 'tokens_cache_write'],
+    session_message: ['id', 'session_id', 'type', 'seq', 'data'],
+  };
+  if (!Object.entries(required).every(([table, columns]) => {
+    const found = new Set(database.prepare('PRAGMA table_info(' + table + ')').all().map((row) => row.name));
+    return columns.every((column) => found.has(column));
+  })) return null;
+  const sessions = database.prepare(
+    'WITH RECURSIVE tree(id) AS (SELECT id FROM session_v2 WHERE id = ?' +
+    ' UNION SELECT s.id FROM session_v2 s JOIN tree ON s.parent_id = tree.id)' +
+    ' SELECT s.id,s.fork_session_id,s.revert,s.tokens_input,s.tokens_output,s.tokens_reasoning,' +
+    ' s.tokens_cache_read,s.tokens_cache_write FROM session_v2 s JOIN tree ON s.id = tree.id LIMIT ?'
+  ).all(workerData.sessionID, workerData.maxSessions + 1);
+  if (!sessions.length || sessions.length > workerData.maxSessions) return null;
+  // Forks inherit earlier messages; staged reverts alter visible history. Let the API
+  // resolve those boundaries rather than returning a partial or stale local summary.
+  if (sessions.some((session) => session.fork_session_id || session.revert)) return null;
+  const sessionIDs = sessions.map((session) => session.id);
+  const messagesBySession = new Map(sessionIDs.map((id) => [id, []]));
+  const contexts = new Map(sessionIDs.map((id) => [id, contextCharacters()]));
+  const inputTokens = new Map();
+  const parents = new Map();
+  const rows = database.prepare(
+    'SELECT id,session_id,type,data FROM session_message WHERE session_id IN (' +
+    sessionIDs.map(() => '?').join(',') + ') ORDER BY session_id,seq LIMIT ?'
+  ).iterate(...sessionIDs, workerData.maxMessages + 1);
+  let count = 0;
+  let bytes = 0;
+  let parts = 0;
+  for (const row of rows) {
+    if (++count > workerData.maxMessages) throw new Error('Local session exceeds the message limit');
+    bytes += typeof row.data === 'string' ? Buffer.byteLength(row.data) : 0;
+    if (bytes > workerData.maxDataBytes) throw new Error('Local session exceeds the data limit');
+    const data = parseData(row);
+    const context = contexts.get(row.session_id);
+    const user = row.type === 'user' || row.type === 'synthetic' || row.type === 'compaction';
+    const assistant = row.type === 'assistant' || row.type === 'shell' || row.type === 'skill' ||
+      (row.type === 'idle' && data.outcome === 'failed');
+    if (!user && !assistant) continue;
+    if (row.type === 'user') parents.set(row.session_id, row.id);
+    const info = {
+      ...projectInfo(data), id: row.id, sessionID: row.session_id,
+      role: user ? 'user' : 'assistant', parentID: assistant ? parents.get(row.session_id) : undefined,
+      providerID: data.model?.providerID, modelID: data.model?.id, variant: data.model?.variant,
+    };
+    if (row.type === 'skill' || row.type === 'idle') {
+      info.time = { created: data.time?.created, completed: data.time?.created };
+    }
+    if (row.type === 'skill') context.tool += 16 + (typeof data.text === 'string' ? data.text.length : 0);
+    if (row.type === 'shell') context.tool += 16 + (typeof data.output?.output === 'string' ? data.output.output.length : 0);
+    if (user && typeof data.text === 'string') context.user += data.text.length;
+    if (row.type === 'assistant' && Number.isFinite(data.tokens?.input) && data.tokens.input > 0) {
+      inputTokens.set(row.session_id, data.tokens.input);
+    }
+    const message = { info, parts: [] };
+    for (const content of row.type === 'assistant' && Array.isArray(data.content) ? data.content : []) {
+      if (++parts > workerData.maxParts) throw new Error('Local session exceeds the part limit');
+      if (content.type === 'text' || content.type === 'reasoning') {
+        context.assistant += typeof content.text === 'string' ? content.text.length : 0;
+        continue;
+      }
+      if (content.type !== 'tool') continue;
+      const state = content.state ?? {};
+      const input = state.input && typeof state.input === 'object' ? Object.keys(state.input).length * 16 : 0;
+      context.tool += input;
+      if (state.status === 'streaming') context.tool += typeof state.input === 'string' ? state.input.length : 0;
+      if (state.status === 'error') context.tool += state.error?.message?.length || 0;
+      for (const output of Array.isArray(state.content) ? state.content : []) {
+        if (output.type === 'text' && typeof output.text === 'string') context.tool += output.text.length;
+      }
+      if (row.session_id === workerData.sessionID) {
+        message.parts.push(projectPart({
+          type: 'tool', tool: content.name === 'shell' ? 'bash' : content.name === 'subagent' ? 'task' : content.name,
+          state,
+        }));
+      }
+    }
+    messagesBySession.get(row.session_id).push(message);
+  }
+  return {
+    messages: messagesBySession.get(workerData.sessionID),
+    contextCharacters: contexts.get(workerData.sessionID),
+    contextInputTokens: inputTokens.get(workerData.sessionID),
+    descendants: sessions.filter((session) => session.id !== workerData.sessionID).map((session) => ({
+      id: session.id,
+      tokens: {
+        input: session.tokens_input, output: session.tokens_output, reasoning: session.tokens_reasoning,
+        cache: { read: session.tokens_cache_read, write: session.tokens_cache_write },
+      },
+      messages: messagesBySession.get(session.id),
+      contextCharacters: contexts.get(session.id),
+      contextInputTokens: inputTokens.get(session.id),
+    })),
+  };
+};
+
 try {
   const database = new DatabaseSync(workerData.databasePath, { readOnly: true });
   try {
-    if (!hasSchema(database)) {
+    database.exec('BEGIN');
+    if (workerData.apiVersion === 2) {
+      parentPort.postMessage(readV2(database));
+    } else if (!hasSchema(database)) {
       parentPort.postMessage(null);
     } else {
       const sessions = database.prepare(

@@ -16,6 +16,8 @@ import { SessionExportService } from './session-export-service';
 import { getAssistantDialogSummaryMap } from '../webview/components/message-list/assistant-dialog';
 import type { MessageEntry } from '../webview/types';
 import { logger } from './logger';
+import { readLocalSessionSummary } from './local-session-summary';
+import { sessionSummary } from './session-summary';
 
 const exportEditor = vi.hoisted(() => ({
   openTextDocument: vi.fn(async (options: { content: string; language: string }) => options),
@@ -284,6 +286,46 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       await transport.request('DELETE', `/session/${id}`);
     }
   });
+
+  it('reads native V2 session summaries directly from the isolated database', async () => {
+    if (transport.version !== 2) return;
+    const created = asRecord(
+      await transport.request('POST', '/session', { title: 'Local summary fixture' })
+    );
+    if (!isString(created?.id)) throw new Error('Missing local summary fixture session');
+    const id = created.id;
+    try {
+      await transport.request('POST', `/session/${id}/prompt_async`, {
+        agent: 'build',
+        model: { providerID: 'fixture', modelID: 'fixture' },
+        parts: [{ type: 'text', text: 'Return the fixture response without tools.' }],
+      });
+      await vi.waitFor(
+        async () => {
+          const local = await readLocalSessionSummary(id, join(root, 'data/probe.db'), 2);
+          const assistant = local?.messages
+            .map((message) => asRecord(asRecord(message)?.info))
+            .findLast((info) => info?.role === 'assistant');
+          expect(asRecord(assistant?.time)?.completed).toBeGreaterThan(0);
+          expect(asRecord(assistant?.tokens)?.output).toBeGreaterThan(0);
+        },
+        { timeout: 15000 }
+      );
+      const local = await readLocalSessionSummary(id, join(root, 'data/probe.db'), 2);
+      if (!local) throw new Error('Native V2 database summary unavailable');
+      const messages = await transport.request('GET', `/session/${id}/message`);
+      const remote = await sessionSummary.fromRemote([], messages, [], async () => []);
+      expect(sessionSummary.fromLocal(local)).toMatchObject({
+        tokens: remote.tokens,
+        durationMs: remote.durationMs,
+        model: remote.model,
+        tokenBreakdown: remote.tokenBreakdown,
+        nestedContextBreakdown: remote.nestedContextBreakdown,
+      });
+    } finally {
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 20000);
 
   it('restores estimated generation speed from durable boundaries after a cold reconnect', async () => {
     if (transport.version !== 2) return;

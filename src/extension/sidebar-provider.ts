@@ -668,7 +668,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       decisionProviders: this.decisionProviders,
       sessionTitleFallback: this.sessionTitleFallback,
       readLocalSessionSummary: (sessionId) =>
-        this.server.isAttachOnly ? Promise.resolve(null) : readLocalSessionSummary(sessionId),
+        this.server.isAttachOnly
+          ? Promise.resolve(null)
+          : readLocalSessionSummary(sessionId, undefined, this.server.apiVersion),
       simulateNoProviders: this.simulateNoProviders,
       getRequestGeneration: () => webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),
