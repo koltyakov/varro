@@ -4,7 +4,7 @@ import type { MessageEntry, ToolPart } from '../../src/webview/types';
 import { getScrollMetrics } from './helpers';
 
 for (const distance of [540, 1768]) {
-  test(`return to latest survives tool completion during a ${distance}px scroll`, async ({
+  test(`return to latest survives tool completion after a ${distance}px jump`, async ({
     page,
   }, testInfo) => {
     await page.setViewportSize({ width: 486, height: 900 });
@@ -42,8 +42,8 @@ for (const distance of [540, 1768]) {
         },
       });
     });
-    // Let the running tool enter before detaching, so its delayed growth cannot
-    // accidentally enable smooth scrolling for an otherwise settled transcript.
+    // Let the running tool enter before detaching, so completion exercises the
+    // visible tray's collapse after returning to latest.
     await expect(page.locator('.assistant-active-activity-item')).toBeVisible();
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
@@ -74,6 +74,8 @@ for (const distance of [540, 1768]) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         const remaining = element.scrollHeight - element.clientHeight - element.scrollTop;
         if (!completed && element.scrollTop > initialTop + 10) {
+          // Return-to-latest jumps immediately. Complete the tool on the first
+          // moved frame, then keep recording until its tray has left the layout.
           const entry = harness
             .getSessionMessages('session-large-transcript')
             .find((message) => message.info.id === 'message-large-assistant-239')!;
@@ -104,16 +106,18 @@ for (const distance of [540, 1768]) {
         }
         const viewport = element.getBoundingClientRect();
         const rows = Array.from(element.querySelectorAll<HTMLElement>('[data-msg-id]'));
+        const activityItems = element.querySelectorAll('.assistant-active-activity-item').length;
         samples.push({
           remaining,
           completed,
+          activityItems,
           painted: rows.some((row) => {
             const rect = row.getBoundingClientRect();
             return rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom;
           }),
           duplicates: rows.length - new Set(rows.map((row) => row.dataset.msgId)).size,
         });
-        settledFrames = completed && remaining <= 2 ? settledFrames + 1 : 0;
+        settledFrames = completed && remaining <= 2 && activityItems === 0 ? settledFrames + 1 : 0;
         if (settledFrames >= 5) break;
       }
       return samples;
@@ -124,8 +128,9 @@ for (const distance of [540, 1768]) {
       body: JSON.stringify(samples),
       contentType: 'application/json',
     });
-    expect(samples.find((sample) => sample.completed)?.remaining).toBeGreaterThan(2);
+    expect(samples.find((sample) => sample.completed)?.remaining).toBeLessThanOrEqual(2);
     expect(samples.at(-1)?.remaining).toBeLessThanOrEqual(2);
+    expect(samples.at(-1)?.activityItems).toBe(0);
     expect(samples.every((sample) => sample.painted && sample.duplicates === 0)).toBe(true);
     await expect(button).toHaveCount(0);
   });
