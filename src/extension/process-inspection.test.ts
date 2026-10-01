@@ -8,6 +8,8 @@ vi.mock('./logger', () => ({ logger: { warn: vi.fn() } }));
 import { inspectLocalServerAccount } from './process-inspection';
 
 const originalPlatform = process.platform;
+const originalGeteuid = Object.getOwnPropertyDescriptor(process, 'geteuid');
+const hostUid = 1000;
 const listenerPid = 1_072_000_000 + process.pid;
 
 function mockCommands(
@@ -17,6 +19,7 @@ function mockCommands(
   denied = false
 ) {
   Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  Object.defineProperty(process, 'geteuid', { value: () => hostUid, configurable: true });
   spawnMock.mockImplementation((_command: string, args: string[]) => {
     const child = Object.assign(new EventEmitter(), {
       stdout: new EventEmitter(),
@@ -29,8 +32,7 @@ function mockCommands(
       if (script.includes('GetOwnerSid'))
         output = denied ? '' : `S-1-5-21-${foreign ? 2 : 1}\nS-1-5-21-1`;
       else if (script.includes('CreationDate') || args.includes('lstart=')) output = '123';
-      else if (args.includes('uid='))
-        output = denied ? '' : String((process.geteuid?.() ?? 0) + (foreign ? 1 : 0));
+      else if (args.includes('uid=')) output = denied ? '' : String(hostUid + (foreign ? 1 : 0));
       else output = ambiguous ? `${listenerPid}\n${listenerPid + 1}` : String(listenerPid);
       child.stdout.emit('data', Buffer.from(output));
       child.emit('close', 0);
@@ -41,6 +43,8 @@ function mockCommands(
 
 afterEach(() => {
   Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  if (originalGeteuid) Object.defineProperty(process, 'geteuid', originalGeteuid);
+  else Reflect.deleteProperty(process, 'geteuid');
   vi.clearAllMocks();
 });
 
@@ -65,6 +69,15 @@ describe('local listener account inspection', () => {
     'does not infer ownership from ambiguous listeners on %s',
     async (platform) => {
       mockCommands(platform, false, true);
+      await expect(inspectLocalServerAccount(4096)).resolves.toEqual({ kind: 'unknown' });
+    }
+  );
+
+  it.each(['darwin', 'linux'] as const)(
+    'preserves uncertainty when the host UID is unavailable on %s',
+    async (platform) => {
+      mockCommands(platform);
+      Reflect.deleteProperty(process, 'geteuid');
       await expect(inspectLocalServerAccount(4096)).resolves.toEqual({ kind: 'unknown' });
     }
   );

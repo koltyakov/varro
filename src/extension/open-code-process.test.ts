@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These process-boundary tests deliberately model malformed config, OS results, child processes, and private lease state. */
 import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
+import type * as FsPromises from 'fs/promises';
 import {
   chmod,
   mkdir,
@@ -17,7 +18,7 @@ import {
 } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
 import type * as OsModule from 'os';
-import { dirname, join } from 'path';
+import { dirname, join, resolve as resolvePath } from 'path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ManagedServerOwnershipLease } from '../shared/server-ownership';
 import { asRecord } from '../shared/type-utils';
@@ -54,6 +55,64 @@ vi.mock('@opencode/client/service', () => ({ Service: { discover: vi.fn() } }));
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 vi.mock('cross-spawn', () => ({ default: spawnMock, spawn: spawnMock }));
+vi.mock('fs/promises', async () => {
+  const actual = await vi.importActual<typeof FsPromises>('fs/promises');
+  if (process.platform !== 'win32') return actual;
+  // Windows ignores POSIX creation modes. Model them for the Linux/macOS
+  // ownership fixtures while retaining real files, symlinks, and atomic writes.
+  const modes = new Map<string, number>();
+  const mocked = {
+    ...actual,
+    async writeFile(...args: Parameters<typeof actual.writeFile>) {
+      const [path, , options] = args;
+      if (typeof path === 'string') {
+        const key = resolvePath(path);
+        const exists = await actual.stat(path).then(
+          () => true,
+          () => false
+        );
+        await actual.writeFile(...args);
+        if (!exists)
+          modes.set(key, typeof options === 'object' ? Number(options?.mode ?? 0o666) : 0o666);
+      } else await actual.writeFile(...args);
+    },
+    async mkdir(...args: Parameters<typeof actual.mkdir>) {
+      const [path, options] = args;
+      const exists = await actual.stat(path).then(
+        () => true,
+        () => false
+      );
+      const result = await actual.mkdir(...args);
+      if (!exists && typeof path === 'string')
+        modes.set(
+          resolvePath(path),
+          typeof options === 'object' ? Number(options?.mode ?? 0o777) : 0o777
+        );
+      return result;
+    },
+    async chmod(...args: Parameters<typeof actual.chmod>) {
+      await actual.chmod(...args);
+      if (typeof args[0] === 'string') modes.set(resolvePath(args[0]), Number(args[1]));
+    },
+    async rename(...args: Parameters<typeof actual.rename>) {
+      await actual.rename(...args);
+      if (typeof args[0] === 'string' && typeof args[1] === 'string') {
+        const mode = modes.get(resolvePath(args[0]));
+        if (mode !== undefined) modes.set(resolvePath(args[1]), mode);
+        modes.delete(resolvePath(args[0]));
+      }
+    },
+    async lstat(...args: Parameters<typeof actual.lstat>) {
+      const info = await actual.lstat(...args);
+      if (typeof args[0] === 'string' && !args[1]?.bigint) {
+        const mode = modes.get(resolvePath(args[0]));
+        if (mode !== undefined) info.mode = (Number(info.mode) & ~0o777) | mode;
+      }
+      return info;
+    },
+  };
+  return { ...mocked, default: mocked };
+});
 vi.mock('os', async () => {
   const actual = await vi.importActual<typeof OsModule>('os');
   const root = `${actual.tmpdir()}/varro-process-tests-${process.pid}`;
@@ -76,6 +135,7 @@ import {
 } from './open-code-process';
 
 const originalPlatform = process.platform;
+const originalGeteuid = Object.getOwnPropertyDescriptor(process, 'geteuid');
 const originalOpenCodeConfig = process.env.OPENCODE_CONFIG;
 const originalOpenCodeConfigContent = process.env.OPENCODE_CONFIG_CONTENT;
 const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
@@ -376,7 +436,9 @@ describe('v2 shared service routing', () => {
 });
 
 beforeEach(async () => {
-  await mkdir(tmpdir(), { recursive: true });
+  if (originalPlatform === 'win32')
+    Object.defineProperty(process, 'geteuid', { value: () => 0, configurable: true });
+  await mkdir(tmpdir(), { recursive: true, mode: 0o700 });
   vi.stubEnv('XDG_STATE_HOME', join(tmpdir(), 'state'));
   vi.stubEnv('LOCALAPPDATA', join(tmpdir(), 'appdata'));
   vi.mocked(Service.discover).mockReset();
@@ -392,6 +454,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  if (originalGeteuid) Object.defineProperty(process, 'geteuid', originalGeteuid);
+  else Reflect.deleteProperty(process, 'geteuid');
   if (originalOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
   else process.env.OPENCODE_CONFIG = originalOpenCodeConfig;
   if (originalOpenCodeConfigContent === undefined) delete process.env.OPENCODE_CONFIG_CONTENT;
