@@ -7,6 +7,7 @@ export type AboutViewData = {
   varroVersion: string;
   cliVersion: string;
   installMethod: string;
+  installedOn: string;
   binary: string;
   serverVersion: string;
   serverUrl: string;
@@ -171,6 +172,7 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
         <div class="card-heading"><h2>OpenCode CLI</h2><span class="card-version" data-about-field="cliVersion">${escapeHtml(data.cliVersion)}</span></div>
         <dl>
           <dt>Installed via</dt><dd data-about-field="installMethod">${escapeHtml(data.installMethod)}</dd>
+          <dt title="Estimated from the CLI file creation date. Reinstalling or copying the file may change this date.">Installed on</dt><dd data-about-field="installedOn">${escapeHtml(data.installedOn)}</dd>
           <dt>Binary</dt><dd><code data-about-field="binary">${escapeHtml(data.binary)}</code></dd>
           <dt>Auto updates</dt><dd data-about-field="autoUpdate">${data.autoUpdate ? 'Enabled' : 'Disabled'}</dd>
         </dl>

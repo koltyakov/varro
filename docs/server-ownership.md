@@ -33,6 +33,23 @@ Conflicting matching registrations block recovery rather than creating another
 ownership authority. About/diagnostics wait for the pending ownership preparation
 so they do not show a transient unmanaged result.
 
+An OpenCode v2 CLI upgrade can replace a Varro-launched shared service and retain
+its password while changing the PID and random port. Automatic discovery recovers
+this replacement without adoption consent only when a private Varro lease carries
+the exact discovered credentials, its original process is conclusively retired,
+and the replacement is a same-user listener with the same executable identity.
+An anonymous `/api/info` request must be rejected and a request using the Varro
+lease credentials must return the verified listening PID. Account and process
+identity are checked again before publication under the original claim path.
+Random ports or OpenCode's own service registration alone do not grant ownership.
+
+When several retired Varro leases share those credentials, recovery selects the
+newest lease with a deterministic path tie-break. A matching live or uncertain
+original process blocks replacement recovery. The new process receives a new
+ownership token so late cleanup from its former host cannot remove its records.
+Retired injected configuration is not attributed to the replacement. Other live
+services, credentials, and sessions are left unchanged.
+
 ## Editor distributions and test isolation
 
 VS Code, VS Code Nightly/Insiders, VSCodium, and Varro OpenJet coordinate through

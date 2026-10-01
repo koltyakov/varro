@@ -12,6 +12,7 @@ test('About copies diagnostics without local paths and waits for export acknowle
       varroVersion: '0.28.9',
       cliVersion: '1.18.4',
       installMethod: 'bun',
+      installedOn: 'Oct 1, 2026',
       binary: '/Users/alex/opencode',
       serverVersion: '1.18.4',
       serverUrl: 'http://localhost:4096',

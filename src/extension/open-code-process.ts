@@ -55,6 +55,7 @@ import {
 } from './server-utils';
 import {
   findListeningPids,
+  inspectLocalServerAccount,
   inspectWindowsManagedListener,
   isProcessAlive,
   isProcessGroupAlive,
@@ -888,7 +889,8 @@ export class OpenCodeProcess {
   }
 
   /** Discovery may find a server registered under another build's fixed-port key. */
-  async refreshDiscoveredServerRegistration(): Promise<boolean> {
+  async refreshDiscoveredServerRegistration(signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted();
     const port = this._port;
     if (await this.refreshStartupRegistration()) return true;
     this._port = port;
@@ -898,6 +900,7 @@ export class OpenCodeProcess {
       if (!getVarroTestStateDirectory('servers')) directories.add(tmpdir());
     }
     const candidates = new Set<string>();
+    const credentialCandidates = new Map<string, ManagedServerOwnershipLease>();
     for (const directory of directories) {
       let entries: Dirent[];
       try {
@@ -910,14 +913,25 @@ export class OpenCodeProcess {
         if (!/^varro-opencode-server-\d+\.json(?:\.managed)?$/.test(entry.name)) continue;
         const path = join(directory, entry.name);
         const leasePath = path.endsWith('.managed') ? path.slice(0, -'.managed'.length) : path;
-        if (leasePath === this.ownershipLeasePath) continue;
         const record = await readJsonFile(path, (value) =>
           path.endsWith('.managed')
             ? parseInjectedConfigOwner(value)
             : parseManagedServerOwnershipLease(value)
         );
-        if (!record || record.port !== port || !record.executable || !record.birthIdentity)
-          continue;
+        if (!record) continue;
+        const lease = parseManagedServerOwnershipLease(record);
+        const matchingCredentials =
+          this.isAutomaticPort &&
+          port >= 49_152 &&
+          this.credentialUrl === this.url &&
+          !!lease?.password &&
+          lease.password === this.serverPassword &&
+          (lease.username || 'opencode') === (this.serverUsername || 'opencode');
+        if (matchingCredentials && lease) {
+          await this.validateOwnershipRecord(path);
+          credentialCandidates.set(leasePath, lease);
+        }
+        if (record.port !== port || !record.executable || !record.birthIdentity) continue;
         await this.validateOwnershipRecord(path);
         const identity: ManagedServerOwnershipLease = {
           version: 1,
@@ -938,12 +952,158 @@ export class OpenCodeProcess {
         'Conflicting Varro registrations identify this OpenCode server; the records were left untouched'
       );
     const path = candidates.values().next().value;
-    if (!path) return false;
+    if (!path) return this.recoverCredentialBackedSharedServer(credentialCandidates, signal);
     // Use the original lease/marker/claim path. Never copy a live registration
     // into the automatic key and create a second ownership authority.
     this.ownershipLeasePath = path;
     this.clearLocalOwnership();
     return this.refreshStartupRegistration();
+  }
+
+  /** A CLI replacement can keep Varro's credentials while changing PID and port. */
+  private async recoverCredentialBackedSharedServer(
+    candidates: Map<string, ManagedServerOwnershipLease>,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    if (!candidates.size) return false;
+    const url = this.url;
+    const port = this._port;
+    const pids = await findListeningPids(port, this.linuxProcRoot);
+    if (pids.length !== 1) return false;
+    const pid = pids[0]!;
+    const [executable, birthIdentity, account] = await Promise.all([
+      readProcessExecutable(pid, this.linuxProcRoot),
+      readProcessBirthIdentity(pid, this.linuxProcRoot),
+      inspectLocalServerAccount(port),
+    ]);
+    if (
+      !executable ||
+      !birthIdentity ||
+      account.kind !== 'same-user' ||
+      !account.identity?.startsWith(`${pid}:${birthIdentity}:`)
+    )
+      return false;
+    const retired = [];
+    for (const [path, lease] of candidates) {
+      if (normalizeExecutableIdentity(lease.executable) !== normalizeExecutableIdentity(executable))
+        continue;
+      if (!(await this.isRegisteredProcessRetired(lease))) return false;
+      retired.push({ path, lease });
+    }
+    // Several retired launches may share the service password. All windows use
+    // the newest record, with a stable path tie-break, rather than new authorities.
+    retired.sort((a, b) => b.lease.createdAt - a.lease.createdAt || a.path.localeCompare(b.path));
+    const selected = retired[0];
+    if (!selected) return false;
+    const authorization = basicAuthorization(selected.lease.password!, selected.lease.username);
+    const infoUrl = `${url}/api/info`;
+    const requestSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(3000)])
+      : AbortSignal.timeout(3000);
+    const anonymous = await fetch(infoUrl, {
+      redirect: 'error',
+      signal: requestSignal,
+    });
+    await anonymous.body?.cancel();
+    if (anonymous.status !== 401) return false;
+    const response = await fetch(infoUrl, {
+      headers: { Authorization: authorization },
+      redirect: 'error',
+      signal: requestSignal,
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return false;
+    }
+    const info = asRecord(await response.json());
+    if (
+      info?.pid !== pid ||
+      typeof info.version !== 'string' ||
+      openCodeApiVersion(info.version) !== 2
+    )
+      return false;
+    signal?.throwIfAborted();
+    const previousPath = this.ownershipLeasePath;
+    this.ownershipLeasePath = selected.path;
+    const claim =
+      (this.startupOwnershipClaim?.path === `${selected.path}.claim`
+        ? this.startupOwnershipClaim
+        : null) ?? (await this.acquireOwnershipClaim());
+    if (!claim) {
+      this.ownershipLeasePath = previousPath;
+      throw new Error(
+        'Another Varro window is recovering the shared OpenCode service; retry shortly'
+      );
+    }
+    try {
+      const current = await this.readOwnershipLease();
+      if (!current || JSON.stringify(current) !== JSON.stringify(selected.lease)) {
+        if (
+          current &&
+          current.password === selected.lease.password &&
+          (await this.matchesOwnershipLease(current))
+        )
+          return this.refreshStartupRegistration();
+        throw new Error('The Varro registration changed during shared-service recovery; retry');
+      }
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid,
+        port,
+        executable,
+        birthIdentity,
+        owner: randomBytes(16).toString('hex'),
+        host: this.hostOwner,
+        ...(await this.readOwnershipHostIdentity()),
+        state: 'active',
+        createdAt: Date.now(),
+        portMode: 'auto',
+        password: selected.lease.password,
+        username: selected.lease.username,
+      };
+      const verifiedAccount = await inspectLocalServerAccount(port);
+      if (
+        this.url !== url ||
+        verifiedAccount.kind !== 'same-user' ||
+        verifiedAccount.identity !== account.identity ||
+        !(await this.isRegisteredProcessRetired(current)) ||
+        !(await this.matchesOwnershipLease(lease))
+      )
+        throw new Error(
+          'The OpenCode listener changed during shared-service recovery; it was left untouched'
+        );
+      // The replacement did not inherit Varro's injected config. Do not claim
+      // that config or retain the old token which late host cleanup could remove.
+      signal?.throwIfAborted();
+      await this.writeOwnershipMarker(lease);
+      await this.writeOwnershipLease(lease);
+      this.clearLocalOwnership();
+      this.adoptManagedServerOwnership(lease);
+      this.lastConnectionVerification = Date.now();
+      if (signal?.aborted) {
+        // Finish the publication as a recoverable registration, not active
+        // ownership retained by a cancelled editor connection.
+        await this.writeOwnershipLease({ ...lease, state: 'relinquished' });
+        this.clearLocalOwnership();
+        signal.throwIfAborted();
+      }
+      logger.info(`Recovered Varro-managed shared OpenCode service PID ${pid} on port ${port}`);
+      return true;
+    } finally {
+      if (claim !== this.startupOwnershipClaim) await this.releaseOwnershipClaim(claim);
+    }
+  }
+
+  private async isRegisteredProcessRetired(lease: ManagedServerOwnershipLease): Promise<boolean> {
+    try {
+      process.kill(lease.pid, 0);
+    } catch (error) {
+      return asRecord(error)?.code === 'ESRCH';
+    }
+    const birthIdentity = await readProcessBirthIdentity(lease.pid, this.linuxProcRoot);
+    return (
+      !!birthIdentity && !matchesBirthIdentity(lease.birthIdentity, birthIdentity, lease.createdAt)
+    );
   }
 
   async verifyManagedServerConnection(reconnect = false) {
@@ -1204,6 +1364,12 @@ export class OpenCodeProcess {
       await this.removeOwnershipLease(lease.owner, lease.host);
       this._port = this.originalPort;
       return false;
+    }
+    if (lease.host === this.hostOwner && lease.state === 'active') {
+      if (lease.configPath && !(await this.matchesInjectedConfigOwner(lease)))
+        throw new Error('Managed OpenCode ownership no longer matches its temporary config');
+      this.adoptManagedServerOwnership(lease);
+      return true;
     }
     if (lease.state === 'active' && (await this.isOwnershipHostAlive(lease))) {
       this.observeForeignManagedServer(lease);

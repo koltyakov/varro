@@ -252,6 +252,7 @@ describe('About command', () => {
       cliVersion: '1.18.4',
       activeAgentCount: 0,
       installMethod: 'bun',
+      cliInstalledAt: new Date(2026, 8, 30, 12).getTime(),
     };
     const readServerInfo = vi.fn().mockResolvedValue(info);
     const { sidebar } = register('/repo', { readServerInfo });
@@ -259,10 +260,24 @@ describe('About command', () => {
     const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
     const receive = panel.webview.onDidReceiveMessage.mock.calls[0]![0];
     const html = panel.webview.html;
+    const installedOn = new Date(2026, 8, 30, 12).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    expect(root.querySelector('[data-about-field="installedOn"]')?.textContent).toBe(installedOn);
+    expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
+      expect.stringContaining(`  - **Installed on:** ${installedOn} (CLI file creation date)`),
+      'Varro About',
+      false
+    );
     readServerInfo.mockResolvedValue({
       ...info,
       activeAgentCount: 3,
       health: { healthy: false, version: '1.18.9' },
+      cliInstalledAt: null,
     });
 
     await receive({ action: 'refresh' });
@@ -270,7 +285,12 @@ describe('About command', () => {
     expect(readServerInfo).toHaveBeenCalledTimes(2);
     expect(panel.webview.postMessage).toHaveBeenLastCalledWith({
       type: 'about-update',
-      data: expect.objectContaining({ activeAgents: '3', healthy: false, serverVersion: '1.18.9' }),
+      data: expect.objectContaining({
+        activeAgents: '3',
+        healthy: false,
+        serverVersion: '1.18.9',
+        installedOn: 'Unknown',
+      }),
     });
     expect(panel.webview.html).toBe(html);
     expect(sidebar.openMarkdownDocument).toHaveBeenCalledOnce();
@@ -283,6 +303,26 @@ describe('About command', () => {
       expect.stringContaining('  - **Version:** `1.18.9`')
     );
   });
+
+  it.each([null, undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1e20])(
+    'shows Unknown when the CLI installation timestamp is %s',
+    async (cliInstalledAt) => {
+      register('/repo', {
+        readServerInfo: vi.fn().mockResolvedValue({
+          status: { state: 'running', url: 'http://localhost:4096' },
+          url: 'http://localhost:4096',
+          health: { healthy: true, version: '1.18.4' },
+          installMethod: 'bun',
+          cliInstalledAt,
+        }),
+      });
+      await runCommand('varro.about');
+      const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
+      const root = document.createElement('div');
+      root.innerHTML = panel.webview.html;
+      expect(root.querySelector('[data-about-field="installedOn"]')?.textContent).toBe('Unknown');
+    }
+  );
 
   it('skips hidden, overlapping and disposed refresh requests', async () => {
     const info = {

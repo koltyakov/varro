@@ -621,6 +621,7 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     `  - **Version:** ${markdownCode(cliVersion)}`,
     `  - **Install method:** ${describeInstallMethod(serverInfo.installMethod)}`,
     `  - **Binary:** ${markdownCode(serverInfo.resolvedCommand || 'not resolved')}`,
+    `  - **Installed on:** ${formatCliInstalledOn(serverInfo.cliInstalledAt)} (CLI file creation date)`,
     '- **Server:**',
     `  - **Version:** ${markdownCode(serverInfo.health.version || 'unknown')}`,
     `  - **URL:** [${serverInfo.url}](${serverInfo.url})`,
@@ -677,6 +678,7 @@ function createAboutViewData(
     varroVersion: getString(pkg.version) || 'unknown',
     cliVersion: cliVersion || (serverInfo.cliVersionError ? 'Unavailable' : 'Not found'),
     installMethod: describeInstallMethod(serverInfo.installMethod),
+    installedOn: formatCliInstalledOn(serverInfo.cliInstalledAt),
     binary: serverInfo.resolvedCommand || 'Not resolved',
     serverVersion: serverInfo.health.version || 'Unknown',
     serverUrl: serverInfo.url,
@@ -696,6 +698,13 @@ function createAboutViewData(
         : `Reinstall OpenCode using ${describeInstallMethod(serverInfo.installMethod)}.`
       : undefined,
   };
+}
+
+function formatCliInstalledOn(timestamp: number | null | undefined): string {
+  if (timestamp == null || !Number.isFinite(timestamp) || timestamp <= 0) return 'Unknown';
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 function markdownCode(value: string | number) {

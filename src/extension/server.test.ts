@@ -1259,6 +1259,63 @@ describe('OpenCodeServer compaction config injection', () => {
 });
 
 describe('OpenCodeServer maintenance', () => {
+  it.each([
+    { label: 'available', found: true, exists: true },
+    { label: 'inaccessible', found: true, exists: false },
+    { label: 'missing', found: false, exists: true },
+  ])('reports the CLI file creation date when it is $label', async ({ found, exists }) => {
+    const fs = await vi.importActual<typeof FsPromisesModule>('fs/promises');
+    const fixtureRoot = join(process.cwd(), 'tmp');
+    await fs.mkdir(fixtureRoot, { recursive: true });
+    const fixture = await fs.mkdtemp(join(fixtureRoot, 'varro-cli-date-'));
+    onTestFinished(() => fs.rm(fixture, { recursive: true, force: true }));
+    const binary = join(fixture, 'cli');
+    const command = process.platform === 'win32' ? binary : join(fixture, 'opencode2');
+    let birthtimeMs: number | null = null;
+    if (exists) {
+      await fs.writeFile(binary, 'fixture CLI');
+      // Package modification dates can predate installation. Follow the executable link instead.
+      await fs.utimes(binary, new Date(2000, 0, 1), new Date(2000, 0, 1));
+      if (command !== binary) await fs.symlink(binary, command);
+      birthtimeMs = (await fs.stat(binary)).birthtimeMs;
+    }
+    const server = new OpenCodeServer(4096, false);
+    const api = server as unknown as {
+      processManager: OpenCodeProcess;
+      readInstalledCliVersion: () => Promise<string | null>;
+      readHealthInfo: () => Promise<{ healthy: boolean }>;
+    };
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue(found ? '2.0.21' : null);
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    vi.spyOn(api.processManager, 'getInstallInfo').mockReturnValue({
+      resolvedCommand: command,
+      configuredCommand: '',
+      configuredCommandMissing: false,
+      found,
+      installMethod: 'bun',
+      searchedPaths: [],
+    });
+    const info = await server.readServerInfo();
+
+    expect(info.resolvedCommand).toBe(command);
+    expect(info.cliInstalledAt).toBe(
+      found && birthtimeMs !== null && Number.isFinite(birthtimeMs) && birthtimeMs > 0
+        ? birthtimeMs
+        : null
+    );
+    expect(info.cliVersion).toBe(found ? '2.0.21' : null);
+    expect(info.health.healthy).toBe(false);
+    if (found && exists) {
+      // Replacing the target on upgrade must refresh the timestamp, not keep a cached date.
+      const replacement = join(fixture, 'replacement');
+      await fs.writeFile(replacement, 'updated CLI');
+      await fs.rename(replacement, binary);
+      const updatedBirthtimeMs = (await fs.stat(binary)).birthtimeMs;
+      const updatedInfo = await server.readServerInfo();
+      expect(updatedInfo.cliInstalledAt).toBe(updatedBirthtimeMs > 0 ? updatedBirthtimeMs : null);
+    }
+  });
+
   describe.each(['shared-service', 'manual-fixed-port', 'auto-start-disabled'] as const)(
     'attach-only %s diagnostics',
     (mode) => {

@@ -10,6 +10,7 @@ const data: AboutViewData = {
   varroVersion: '0.31.0',
   cliVersion: '1.18.4',
   installMethod: 'bun',
+  installedOn: 'Oct 1, 2026',
   binary: '/bin/opencode',
   serverVersion: '1.18.4',
   serverUrl: 'http://localhost:4096',
@@ -108,6 +109,7 @@ describe('About page', () => {
       serverStatus: 'Error: disconnected',
       cliVersion: '1.18.9',
       installMethod: 'npm',
+      installedOn: 'Oct 2, 2026',
       binary: '/new/opencode',
       serverVersion: 'Unknown',
       serverUrl: 'http://localhost:5096',
@@ -122,6 +124,7 @@ describe('About page', () => {
     expect(field('serverStatus')).toBe('Error: disconnected');
     expect(field('cliVersion')).toBe('1.18.9');
     expect(field('installMethod')).toBe('npm');
+    expect(field('installedOn')).toBe('Oct 2, 2026');
     expect(field('binary')).toBe('/new/opencode');
     expect(field('serverVersion')).toBe('Unknown');
     expect(field('serverUrl')).toBe('http://localhost:5096');
@@ -141,5 +144,6 @@ describe('About page', () => {
     expect(view.page.getElementById('server-status')!.classList.contains('healthy')).toBe(true);
     expect(field('statusLabel')).toBe('System ready');
     expect(field('autoUpdate')).toBe('Enabled');
+    expect(field('installedOn')).toBe('Oct 1, 2026');
   });
 });

@@ -62,6 +62,7 @@ export interface OpenCodeServerInfo {
   processId: number | null;
   cliVersion: string | null;
   cliVersionError: string | null;
+  cliInstalledAt: number | null;
   installMethod: OpenCodeInstallMethod;
   resolvedCommand: string;
   searchedPaths: string[];
@@ -748,7 +749,8 @@ export class OpenCodeServer extends EventEmitter {
       const sharedServer = this.processManager.discoverSharedServer();
       if (sharedServer && (await sharedServer)) {
         this.throwIfStartCancelled(disposeGeneration, signal);
-        const managedRegistration = await this.processManager.refreshDiscoveredServerRegistration();
+        const managedRegistration =
+          await this.processManager.refreshDiscoveredServerRegistration(signal);
         this.registeredEndpoint = managedRegistration;
         if (managedRegistration) await this.restoreRegistrationCredentials();
         this.throwIfStartCancelled(disposeGeneration, signal);
@@ -1552,6 +1554,17 @@ export class OpenCodeServer extends EventEmitter {
 
     const install = this.processManager.getInstallInfo();
     const health = await this.readHealthInfo();
+    let cliInstalledAt: number | null = null;
+    if (install.found) {
+      try {
+        // stat follows CLI symlinks. Modification times can be package build dates,
+        // so only use the local file creation time as an installation estimate.
+        const { birthtimeMs } = await stat(install.resolvedCommand);
+        if (Number.isFinite(birthtimeMs) && birthtimeMs > 0) cliInstalledAt = birthtimeMs;
+      } catch {
+        // Installation dates are best-effort when the CLI is missing or inaccessible.
+      }
+    }
 
     return {
       status: this._status,
@@ -1567,6 +1580,7 @@ export class OpenCodeServer extends EventEmitter {
       processId: this.processManager.managedProcessId,
       cliVersion,
       cliVersionError,
+      cliInstalledAt,
       activeAgentCount,
       activeAgentError,
       health,

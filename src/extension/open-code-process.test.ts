@@ -6,6 +6,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   readlink,
   realpath,
   rm,
@@ -22,6 +23,7 @@ import type { ManagedServerOwnershipLease } from '../shared/server-ownership';
 import { asRecord } from '../shared/type-utils';
 import type * as ServerUtils from './server-utils';
 import { Service } from '@opencode/client/service';
+import * as processInspection from './process-inspection';
 
 const { loggerMock, spawnMock, vscodeMock, waitForProcessExitMock } = vi.hoisted(() => ({
   loggerMock: {
@@ -972,6 +974,297 @@ describe('OpenCodeProcess startup termination', () => {
 });
 
 describe('OpenCodeProcess server ownership leases', () => {
+  describe('credential-backed shared-service replacement', () => {
+    async function fixture(automaticKey = false) {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-credential-replacement-'));
+      vi.stubEnv('VARRO_TEST_STATE_ROOT', root);
+      const directory = join(root, 'servers');
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      const path = join(directory, `varro-opencode-server-${automaticKey ? 4096 : 4196}.json`);
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: MOCK_LINUX_PID + 1,
+        port: 4196,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+        owner: 'original-launch',
+        host: 'original-editor',
+        state: 'relinquished',
+        createdAt: Date.now() - 1000,
+        password: 'fixture-varro-password',
+        configPath: join(root, 'retired-config/opencode.json'),
+      };
+      await writeFile(path, JSON.stringify(lease), { mode: 0o600 });
+      await writeFile(`${path}.managed`, JSON.stringify(lease), { mode: 0o600 });
+      mockLinuxLeaseProcess({ port: 49374 });
+      const kill = vi.spyOn(process, 'kill').mockImplementation((pid) => {
+        if (pid === lease.pid) throw Object.assign(new Error('retired'), { code: 'ESRCH' });
+        return true;
+      });
+      const account = vi.spyOn(processInspection, 'inspectLocalServerAccount').mockResolvedValue({
+        kind: 'same-user',
+        identity: `${MOCK_LINUX_PID}:${lease.birthIdentity}:1000`,
+      });
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async (_url, options) =>
+          options?.headers
+            ? new Response(JSON.stringify({ pid: MOCK_LINUX_PID, version: '2.0.21' }))
+            : new Response(null, { status: 401 })
+        );
+      vi.mocked(Service.discover).mockResolvedValue({
+        url: 'http://127.0.0.1:49374',
+        auth: { type: 'basic', username: 'opencode', password: lease.password! },
+      });
+      const manager = new OpenCodeProcess('auto', true);
+      manager.rememberInstalledCliVersion('2.0.21');
+      await expect(manager.discoverSharedServer()).resolves.toBe(true);
+      return { root, directory, path, lease, manager, kill, account, fetchMock };
+    }
+
+    it.each(['different-key', 'automatic-key', 'reused-pid', 'multiple-retired-records'])(
+      'recovers a replacement through %s without restarting or carrying obsolete config',
+      async (mode) => {
+        const state = await fixture(mode === 'automatic-key');
+        const { root, path, lease, manager, kill, fetchMock } = state;
+        let selectedPath = path;
+        try {
+          if (mode === 'reused-pid') {
+            kill.mockImplementation(() => true);
+            vi.spyOn(processInspection, 'readProcessBirthIdentity').mockImplementation(
+              async (pid) => (pid === lease.pid ? 'linux:a-reused-pid' : lease.birthIdentity)
+            );
+          }
+          if (mode === 'multiple-retired-records') {
+            selectedPath = join(state.directory, 'varro-opencode-server-4197.json');
+            await writeFile(
+              selectedPath,
+              JSON.stringify({ ...lease, owner: 'newer-launch', createdAt: lease.createdAt + 1 }),
+              { mode: 0o600 }
+            );
+          }
+          await expect(manager.refreshDiscoveredServerRegistration()).resolves.toBe(true);
+          const recovered = JSON.parse(
+            await readFile(selectedPath, 'utf8')
+          ) as ManagedServerOwnershipLease;
+          expect(recovered).toMatchObject({
+            pid: MOCK_LINUX_PID,
+            port: 49374,
+            password: lease.password,
+            portMode: 'auto',
+            state: 'active',
+          });
+          expect(recovered.owner).not.toBe(lease.owner);
+          expect(recovered.configPath).toBeUndefined();
+          await (
+            manager as unknown as {
+              clearManagedServerOwnership: (owner: string, host: string) => Promise<void>;
+            }
+          ).clearManagedServerOwnership(lease.owner, lease.host);
+          expect(JSON.parse(await readFile(selectedPath, 'utf8'))).toEqual(recovered);
+          expect(manager.serverOwnership).toBe('current-host');
+          expect(manager.managedProcessId).toBe(MOCK_LINUX_PID);
+          await expect(manager.verifyManagedServerConnection(true)).resolves.toBeUndefined();
+          expect(fetchMock).toHaveBeenCalledWith(
+            'http://127.0.0.1:49374/api/info',
+            expect.objectContaining({
+              headers: {
+                Authorization: `Basic ${Buffer.from(`opencode:${lease.password}`).toString('base64')}`,
+              },
+              redirect: 'error',
+            })
+          );
+          await expect(stat(`${selectedPath}.claim`)).rejects.toMatchObject({ code: 'ENOENT' });
+          if (mode === 'multiple-retired-records')
+            expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(lease);
+          await manager.disposeProcess({ stopProcess: false });
+          const reconnected = new OpenCodeProcess('auto', true);
+          reconnected.rememberInstalledCliVersion('2.0.21');
+          await reconnected.discoverSharedServer();
+          await expect(reconnected.refreshDiscoveredServerRegistration()).resolves.toBe(true);
+          await expect(reconnected.recoverManagedServerOwnership()).resolves.toBe(true);
+          expect(reconnected.serverOwnership).toBe('current-host');
+          expect(
+            (reconnected as unknown as { ownershipLeasePath: string }).ownershipLeasePath
+          ).toBe(selectedPath);
+          expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+          expect(JSON.stringify(loggerMock.info.mock.calls)).not.toContain(lease.password);
+          await reconnected.disposeProcess({ stopProcess: false });
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    );
+
+    it.each([
+      'wrong-password',
+      'wrong-username',
+      'anonymous-access',
+      'rejected-password',
+      'wrong-http-pid',
+      'foreign-user',
+      'unknown-user',
+      'live-original',
+      'unknown-original',
+      'wrong-executable',
+      'missing-record',
+      'public-record',
+      'busy-claim',
+      'changed-listener',
+      'changed-record',
+    ])('does not recover a replacement with %s evidence', async (mode) => {
+      const { root, path, lease, manager, kill, account, fetchMock } = await fixture();
+      try {
+        if (mode === 'wrong-password' || mode === 'wrong-username' || mode === 'wrong-executable') {
+          const altered = { ...lease };
+          if (mode === 'wrong-password') altered.password = 'unrelated-password';
+          if (mode === 'wrong-username') altered.username = 'another-user';
+          if (mode === 'wrong-executable') altered.executable = '/other/opencode';
+          await writeFile(path, JSON.stringify(altered));
+        }
+        if (mode === 'anonymous-access') fetchMock.mockResolvedValue(new Response('{}'));
+        if (mode === 'rejected-password')
+          fetchMock.mockResolvedValue(new Response(null, { status: 401 }));
+        if (mode === 'wrong-http-pid')
+          fetchMock.mockImplementation(async (_url, options) =>
+            options?.headers
+              ? new Response(JSON.stringify({ pid: MOCK_LINUX_PID + 2, version: '2.0.21' }))
+              : new Response(null, { status: 401 })
+          );
+        if (mode === 'foreign-user')
+          account.mockResolvedValue({ kind: 'different-user', identity: 'foreign' });
+        if (mode === 'unknown-user') account.mockResolvedValue({ kind: 'unknown' });
+        if (mode === 'live-original' || mode === 'unknown-original')
+          kill.mockImplementation(() => true);
+        if (mode === 'unknown-original')
+          vi.spyOn(processInspection, 'readProcessBirthIdentity').mockImplementation(async (pid) =>
+            pid === lease.pid ? '' : lease.birthIdentity
+          );
+        if (mode === 'missing-record') await rm(path);
+        if (mode === 'public-record') await chmod(path, 0o644);
+        if (mode === 'busy-claim')
+          await writeFile(
+            `${path}.claim`,
+            JSON.stringify({
+              version: 1,
+              host: 'busy-editor',
+              hostPid: process.pid,
+              createdAt: Date.now(),
+            }),
+            { mode: 0o600 }
+          );
+        if (mode === 'changed-listener')
+          account
+            .mockResolvedValueOnce({
+              kind: 'same-user',
+              identity: `${MOCK_LINUX_PID}:${lease.birthIdentity}:1000`,
+            })
+            .mockResolvedValue({ kind: 'same-user', identity: 'replacement-listener' });
+        if (mode === 'changed-record')
+          fetchMock.mockImplementation(async (_url, options) => {
+            if (!options?.headers) return new Response(null, { status: 401 });
+            await writeFile(path, JSON.stringify({ ...lease, owner: 'competing-owner' }));
+            return new Response(JSON.stringify({ pid: MOCK_LINUX_PID, version: '2.0.21' }));
+          });
+        const before = await readFile(path, 'utf8').catch(() => null);
+        const marker = await readFile(`${path}.managed`, 'utf8');
+        if (['public-record', 'busy-claim', 'changed-listener', 'changed-record'].includes(mode))
+          await expect(manager.refreshDiscoveredServerRegistration()).rejects.toThrow();
+        else await expect(manager.refreshDiscoveredServerRegistration()).resolves.toBe(false);
+        expect(manager.serverOwnership).toBe('unmanaged');
+        if (mode !== 'changed-record')
+          expect(await readFile(path, 'utf8').catch(() => null)).toBe(before);
+        expect(await readFile(`${path}.managed`, 'utf8')).toBe(marker);
+        expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it.each(['during-authentication', 'before-publication', 'during-publication'])(
+      'does not retain active ownership after cancellation %s',
+      async (stage) => {
+        const { root, path, lease, manager, account, fetchMock } = await fixture();
+        const controller = new AbortController();
+        const before = await readFile(path, 'utf8');
+        const identity = {
+          kind: 'same-user' as const,
+          identity: `${MOCK_LINUX_PID}:${lease.birthIdentity}:1000`,
+        };
+        try {
+          if (stage === 'during-authentication')
+            fetchMock.mockImplementation(async (_url, options) => {
+              if (!options?.headers) return new Response(null, { status: 401 });
+              controller.abort(new Error('cancelled'));
+              return new Response(JSON.stringify({ pid: MOCK_LINUX_PID, version: '2.0.21' }));
+            });
+          if (stage === 'before-publication')
+            account.mockResolvedValueOnce(identity).mockImplementation(async () => {
+              controller.abort(new Error('cancelled'));
+              return identity;
+            });
+          if (stage === 'during-publication') {
+            const privateManager = manager as unknown as {
+              writeOwnershipLease: (value: ManagedServerOwnershipLease) => Promise<void>;
+            };
+            const writeLease = privateManager.writeOwnershipLease.bind(privateManager);
+            vi.spyOn(privateManager, 'writeOwnershipLease').mockImplementation(async (value) => {
+              await writeLease(value);
+              if (value.state === 'active') controller.abort(new Error('cancelled'));
+            });
+          }
+          await expect(
+            manager.refreshDiscoveredServerRegistration(controller.signal)
+          ).rejects.toThrow('cancelled');
+          expect(manager.serverOwnership).toBe('unmanaged');
+          if (stage === 'during-publication')
+            expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
+              pid: MOCK_LINUX_PID,
+              port: 49374,
+              state: 'relinquished',
+            });
+          else expect(await readFile(path, 'utf8')).toBe(before);
+          await expect(stat(`${path}.claim`)).rejects.toMatchObject({ code: 'ENOENT' });
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    );
+
+    it('coordinates competing editors through one original recovery path', async () => {
+      const { root, path, manager, kill } = await fixture();
+      const contender = new OpenCodeProcess('auto', true);
+      contender.rememberInstalledCliVersion('2.0.21');
+      await contender.discoverSharedServer();
+      try {
+        const results = await Promise.allSettled([
+          manager.refreshDiscoveredServerRegistration(),
+          contender.refreshDiscoveredServerRegistration(),
+        ]);
+        expect(results.some((result) => result.status === 'fulfilled' && result.value)).toBe(true);
+        for (const editor of [manager, contender]) {
+          await expect(editor.refreshDiscoveredServerRegistration()).resolves.toBe(true);
+          if (editor.hasOwnershipLeaseCandidate) await editor.recoverManagedServerOwnership();
+          expect((editor as unknown as { ownershipLeasePath: string }).ownershipLeasePath).toBe(
+            path
+          );
+        }
+        expect(new Set([manager.serverOwnership, contender.serverOwnership])).toEqual(
+          new Set(['current-host', 'other-host'])
+        );
+        expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+        expect(
+          (await readdir(join(root, 'servers'))).filter((name) => name.endsWith('.json'))
+        ).toEqual(['varro-opencode-server-4196.json']);
+        await manager.disposeProcess({ stopProcess: false });
+        await contender.disposeProcess({ stopProcess: false });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+
   it.each(['persistent', 'legacy'])(
     'keeps %s discovery ownership on the same path across editor reconnects',
     async (location) => {

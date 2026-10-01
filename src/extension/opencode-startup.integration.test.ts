@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { delimiter, join, resolve } from 'node:path';
 import { createServer } from 'node:net';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { asRecord, isString } from '../shared/type-utils';
 import { OpenCodeServer } from './server';
 
@@ -27,13 +28,18 @@ vi.mock('vscode', () => ({
 }));
 
 describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed startup', () => {
-  it.for(['configured', 'shadowed-discovery'] as const)(
+  it.for(['configured', 'shadowed-discovery', 'service-replacement'] as const)(
     'starts, authenticates a second window, restarts, and stops its own isolated server using %s',
     { timeout: 60000 },
     async (mode, context) => {
       if (
         mode === 'shadowed-discovery' &&
         (process.platform === 'win32' || !process.env.VARRO_OPENCODE_TEST_VERSION?.startsWith('2.'))
+      )
+        context.skip();
+      if (
+        mode === 'service-replacement' &&
+        !process.env.VARRO_OPENCODE_TEST_VERSION?.startsWith('2.')
       )
         context.skip();
       const binary = process.env.VARRO_OPENCODE_TEST_BINARY!;
@@ -86,6 +92,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
       const leasePath = join(root, `varro-opencode-server-${address.port}.json`);
       let server = new OpenCodeServer(address.port, true, command, false, undefined, leasePath);
       let attached: OpenCodeServer | undefined;
+      let replacement: ChildProcess | undefined;
       try {
         expect(await server.start()).toBe(url);
         const info = await server.readServerInfo();
@@ -130,6 +137,72 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         expect(attached.isAttachOnly).toBe(true);
         await attached.dispose();
         attached = undefined;
+        if (mode === 'service-replacement') {
+          const password = lease?.password;
+          if (!isString(password)) throw new Error('No fixture credential');
+          await server.dispose();
+          // An older disconnected editor can leave its retired registration
+          // after the CLI replaces the service. Preserve that evidence verbatim.
+          await writeFile(leasePath, JSON.stringify(lease), { mode: 0o600 });
+          await writeFile(`${leasePath}.managed`, JSON.stringify(lease), { mode: 0o600 });
+          const replacementPort = await new Promise<number>((done, reject) => {
+            listener.listen(0, '127.0.0.1', () => {
+              const next = listener.address();
+              if (!next || isString(next) || next.port < 49152)
+                reject(new Error('No random fixture port'));
+              else done(next.port);
+            });
+          });
+          await new Promise<void>((done) => listener.close(() => done()));
+          const replacementUrl = `http://127.0.0.1:${replacementPort}`;
+          vi.stubEnv('VARRO_TEST_SERVER_URL', replacementUrl);
+          replacement = spawn(binary, ['serve', '--service', '--port', String(replacementPort)], {
+            cwd: editor.directory,
+            env: { ...process.env, OPENCODE_SERVER_PASSWORD: password },
+            stdio: 'ignore',
+          });
+          const deadline = Date.now() + 10000;
+          let ready = false;
+          while (Date.now() < deadline) {
+            const response = await fetch(`${replacementUrl}/api/info`, {
+              headers: {
+                Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}`,
+              },
+              signal: AbortSignal.timeout(1000),
+            }).catch(() => null);
+            if (response) {
+              ready = response.ok;
+              await response.body?.cancel();
+            }
+            if (ready) break;
+            await new Promise<void>((done) => setTimeout(done, 100));
+          }
+          expect(ready).toBe(true);
+          attached = new OpenCodeServer(
+            'auto',
+            true,
+            binary,
+            false,
+            undefined,
+            join(root, 'varro-opencode-server-4096.json')
+          );
+          expect(await attached.start()).toBe(replacementUrl);
+          const replacementInfo = await attached.readServerInfo();
+          expect(replacementInfo.ownership).toBe('current-host');
+          expect(replacementInfo.managedProcess).toBe(true);
+          expect(attached.isAttachOnly).toBe(false);
+          const recovered = asRecord(JSON.parse(await readFile(leasePath, 'utf8')));
+          expect(recovered?.pid).toBe(replacement.pid);
+          expect(recovered?.port).toBe(replacementPort);
+          expect(recovered?.password).toBe(password);
+          expect(recovered?.owner).not.toBe(lease?.owner);
+          expect(recovered?.configPath).toBeUndefined();
+          await attached.disconnect();
+          attached = new OpenCodeServer('auto', true, binary, false, undefined, leasePath);
+          expect(await attached.start()).toBe(replacementUrl);
+          expect((await attached.readServerInfo()).ownership).toBe('current-host');
+          return;
+        }
         if (info.health.version?.startsWith('2.')) {
           await new Promise<void>((done) => listener.listen(0, '127.0.0.1', done));
           const otherAddress = listener.address();
@@ -167,6 +240,11 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
       } finally {
         await attached?.dispose();
         await server.dispose();
+        if (replacement && replacement.exitCode === null && replacement.signalCode === null) {
+          const exited = new Promise<void>((done) => replacement!.once('exit', () => done()));
+          replacement.kill();
+          await exited;
+        }
         vi.unstubAllEnvs();
       }
     }
