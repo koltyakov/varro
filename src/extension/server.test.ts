@@ -157,6 +157,101 @@ describe('OpenCodeServer port validation', () => {
   );
 });
 
+describe('reused managed stream timeout', () => {
+  function fixture() {
+    const server = new OpenCodeServer(4096, true);
+    const state = server as unknown as {
+      _status: ServerStatus;
+      processManager: OpenCodeProcess;
+      transport: { version: number; request: RealOpenCodeServer['request'] };
+      preserveExistingProcess: boolean;
+      reconcileManagedStreamTimeout(): Promise<void>;
+      disposeGeneration: number;
+      readHealthInfo(): Promise<{ healthy: boolean; version?: string }>;
+    };
+    state._status = { state: 'running', url: server.url };
+    state.preserveExistingProcess = true;
+    state.processManager.managedProcess = true;
+    vi.spyOn(state.transport, 'version', 'get').mockReturnValue(2);
+    vi.spyOn(state, 'readHealthInfo').mockResolvedValue({ healthy: true, version: '2.0.20' });
+    const wire = vi
+      .spyOn(state.transport, 'request')
+      .mockResolvedValue({ data: { settings: { transport: 'websocket' } } });
+    const reconcile = vi
+      .spyOn(state.processManager, 'reconcileInjectedStreamTimeout')
+      .mockResolvedValue(true);
+    vi.spyOn(state.processManager, 'refreshManagedServerOwnership').mockResolvedValue(true);
+    const idle = vi
+      .spyOn(server, 'readRestartBlockers')
+      .mockResolvedValue({ totalSessionCount: 0, directories: [] });
+    return { server, state, wire, reconcile, idle };
+  }
+
+  it('reloads a reused server only after two globally idle checks, without restarting', async () => {
+    const { server, state, wire, reconcile, idle } = fixture();
+    const restart = vi.spyOn(server, 'restart');
+    await state.reconcileManagedStreamTimeout();
+    expect(reconcile).toHaveBeenCalledWith('2.0.20');
+    expect(idle).toHaveBeenCalledTimes(2);
+    expect(wire).toHaveBeenLastCalledWith('POST', '/global/dispose');
+    expect(restart).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'busy-before',
+    'busy-after',
+    'explicit-timeout',
+    'ownership-lost',
+    'generation-lost',
+    'unmanaged',
+    'old-version',
+  ])('does not reload for %s', async (scenario) => {
+    const { state, wire, reconcile, idle } = fixture();
+    if (scenario === 'busy-before')
+      idle.mockResolvedValue({ totalSessionCount: 1, directories: [] });
+    if (scenario === 'busy-after')
+      idle
+        .mockResolvedValueOnce({ totalSessionCount: 0, directories: [] })
+        .mockResolvedValue({ totalSessionCount: 1, directories: [] });
+    if (scenario === 'explicit-timeout')
+      wire.mockResolvedValue({ data: { settings: { timeout: false } } });
+    if (scenario === 'ownership-lost')
+      vi.mocked(state.processManager.refreshManagedServerOwnership).mockResolvedValue(false);
+    if (scenario === 'generation-lost')
+      reconcile.mockImplementation(async () => {
+        state.disposeGeneration += 1;
+        return true;
+      });
+    if (scenario === 'unmanaged') state.processManager.managedProcess = false;
+    if (scenario === 'old-version')
+      vi.mocked(state.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.19' });
+    await state.reconcileManagedStreamTimeout();
+    expect(wire.mock.calls.some(([method]) => method === 'POST')).toBe(false);
+    if (['busy-before', 'explicit-timeout', 'unmanaged', 'old-version'].includes(scenario))
+      expect(reconcile).not.toHaveBeenCalled();
+  });
+
+  it('retries failed reloads without restarting or abandoning the protection', async () => {
+    const { state, wire } = fixture();
+    wire.mockImplementation(async (method) => {
+      if (method === 'POST') throw new Error('Reload unavailable');
+      return { data: { settings: {} } };
+    });
+    await expect(state.reconcileManagedStreamTimeout()).rejects.toThrow('Reload unavailable');
+    wire.mockResolvedValue({ data: { settings: {} } });
+    await state.reconcileManagedStreamTimeout();
+    expect(wire).toHaveBeenLastCalledWith('POST', '/global/dispose');
+  });
+
+  it('applies protection before the first send on a reused connection', async () => {
+    const { server, wire } = fixture();
+    await server.request('POST', '/session/ses_fixture/prompt_async', { parts: [] });
+    expect(wire.mock.calls.filter(([method]) => method === 'POST').map(([, path]) => path)).toEqual(
+      ['/global/dispose', '/session/ses_fixture/prompt_async']
+    );
+  });
+});
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;

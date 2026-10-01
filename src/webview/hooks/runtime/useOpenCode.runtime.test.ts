@@ -11,6 +11,7 @@ function createRuntimeMock(label: string) {
     refreshRoutingState: vi.fn().mockResolvedValue(undefined),
     refreshProviderLimit: vi.fn().mockResolvedValue(undefined),
     continueInterruptedSession: vi.fn().mockResolvedValue(undefined),
+    resumeSteering: vi.fn().mockResolvedValue(true),
     applySessionMcps: vi.fn().mockResolvedValue(undefined),
     selectSession: vi.fn().mockResolvedValue(undefined),
     loadFullSessionHistory: vi.fn().mockResolvedValue(undefined),
@@ -96,6 +97,8 @@ describe('useOpenCode.runtime', () => {
 
     await expect(module.createSession('Plan session', 'full')).resolves.toBe('installed-session');
     expect(installed.runtime.createSession).toHaveBeenCalledWith('Plan session', 'full');
+    await expect(module.resumeSteering('session-1')).resolves.toBe(true);
+    expect(installed.runtime.resumeSteering).toHaveBeenCalledWith('session-1');
   });
 
   it('forwards a void operation to the installed runtime', async () => {

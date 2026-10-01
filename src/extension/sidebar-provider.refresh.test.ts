@@ -18,6 +18,7 @@ const providerFileSystem = getProviderSignatureFileSystemMock();
 type ProviderRefreshAccess = {
   initializeProviderFileSignature(): Promise<void>;
   providerFileRefresh: {
+    postStatus(): void;
     readFilesSignature(): Promise<string>;
     refreshState(generation?: number, requireSignatureChange?: boolean): Promise<void>;
   };
@@ -137,7 +138,39 @@ describe('SidebarProvider provider refresh', () => {
 
     expect(clearCache).toHaveBeenCalledOnce();
     expect(refreshState).not.toHaveBeenCalled();
+    expect(server.request).not.toHaveBeenCalled();
     expect(posted).toContainEqual({ type: 'providers/refresh' });
+    await provider.dispose();
+  });
+
+  it('retries pending synchronization immediately when the webview refreshes the list', async () => {
+    vi.useFakeTimers();
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/session/status') return {};
+        if (path === '/question' || path === '/permission') return [];
+        return undefined;
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const access = provider as unknown as ProviderRefreshAccess;
+    access.setProviderWatchActive(true);
+    await vi.advanceTimersByTimeAsync(0);
+    server.readRestartBlockers.mockRejectedValue(new Error('unavailable'));
+    await access.providerFileRefresh.refreshState();
+    access.providerFileRefresh.postStatus();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(server.request).not.toHaveBeenCalledWith('POST', '/global/dispose');
+    const refreshState = vi.spyOn(access.providerFileRefresh, 'refreshState');
+    server.readRestartBlockers.mockResolvedValue({ totalSessionCount: 0, directories: [] });
+
+    await provider.handleMessage({ type: 'providers/refresh' });
+
+    expect(server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+    expect(server.restart).not.toHaveBeenCalled();
+    expect(refreshState).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: false } });
     await provider.dispose();
   });
 

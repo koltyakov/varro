@@ -3164,10 +3164,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await operation;
   }
 
-  private refreshProviderCatalog() {
+  private async refreshProviderCatalog() {
     this.providerLimitService.clearCache();
     this.post({ type: 'providers/refresh' });
-    return Promise.resolve();
+    await this.providerFileRefresh.retryPendingRefresh();
   }
 
   private async providerAuthChanged() {

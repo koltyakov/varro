@@ -43,6 +43,10 @@ export async function continueInterruptedSession(sessionId: string) {
   await getCurrentOpenCodeRuntime().continueInterruptedSession(sessionId);
 }
 
+export async function resumeSteering(sessionId: string): Promise<boolean> {
+  return getCurrentOpenCodeRuntime().resumeSteering(sessionId);
+}
+
 export async function applySessionMcps(names: string[], sessionId?: string | null) {
   await getCurrentOpenCodeRuntime().applySessionMcps(names, sessionId);
 }

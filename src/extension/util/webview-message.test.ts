@@ -177,6 +177,11 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/session?directory=%2Frepo-a')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/init')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/prompt_async')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session/abc/resume-steering')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session/abc/resume-steering?directory=%2Frepo-a')).toBe(
+      true
+    );
+    expect(isAllowedApiRequest('GET', '/session/abc/resume-steering')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session/abc/prompt_async?directory=%2Frepo-a')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/command')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/fork')).toBe(true);

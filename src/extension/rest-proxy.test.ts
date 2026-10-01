@@ -7007,6 +7007,40 @@ describe('RestProxy handleRequest', () => {
     expect(confirmPromptAdmission).not.toHaveBeenCalled();
   });
 
+  it.each(['idle', 'busy', 'permission', 'question', 'admission-denied'])(
+    'guards steering resume against authoritative %s state',
+    async (scenario) => {
+      const serverRequest = vi.fn(async (method: string, path: string) => {
+        if (method === 'POST') return true;
+        if (path === '/session/status')
+          return scenario === 'busy' ? { 'session-1': { type: 'busy' } } : {};
+        if (path === '/permission')
+          return scenario === 'permission' ? [{ id: 'perm-1', sessionID: 'session-1' }] : [];
+        if (path === '/question')
+          return scenario === 'question' ? [{ id: 'question-1', sessionID: 'session-1' }] : [];
+        return undefined;
+      });
+      const confirmPromptAdmission = vi.fn(async () => scenario !== 'admission-denied');
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+        confirmPromptAdmission,
+      });
+      await proxy.handleRequest(makePayload(303, 'POST', '/session/session-1/resume-steering'));
+      expect(serverRequest.mock.calls.some(([method]) => method === 'POST')).toBe(
+        scenario === 'idle'
+      );
+      if (scenario === 'idle')
+        expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 303, data: true });
+      else if (scenario !== 'admission-denied')
+        expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 303, data: false });
+      else
+        expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+          id: 303,
+          error: 'Resume cancelled because generated dependencies are not ignored by Git',
+        });
+    }
+  );
+
   it('extracts the session id from a prompt_async path', async () => {
     const markSessionBusy = vi.fn();
     const { proxy } = createProxy({

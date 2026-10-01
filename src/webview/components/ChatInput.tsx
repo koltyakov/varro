@@ -141,6 +141,7 @@ import {
   sendMessage,
   abortSession,
   continueInterruptedSession,
+  resumeSteering,
   compactSession,
   editMessage,
   initSession,
@@ -5847,6 +5848,33 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     ];
   });
 
+  const [resumingSteering, setResumingSteering] = createSignal(false);
+  const canResumeSteering = () =>
+    !resumingSteering() &&
+    !isComposerBusy() &&
+    !state.messagesLoading &&
+    !hasPendingApproval() &&
+    state.messages.some(
+      (entry) =>
+        entry.info.sessionID === composerSessionId() &&
+        entry.info.role === 'user' &&
+        entry.info.pendingDelivery === 'steer'
+    );
+  async function resumePendingSteering() {
+    const sessionId = composerSessionId();
+    if (!sessionId || !canResumeSteering()) return;
+    setResumingSteering(true);
+    try {
+      await resumeSteering(sessionId);
+    } catch (err) {
+      logError('resumePendingSteering', err);
+      if (composerSessionId() === sessionId)
+        setError(err instanceof Error ? err.message : 'Failed to resume steering');
+    } finally {
+      setResumingSteering(false);
+    }
+  }
+
   const selectedAgentLabel = () => {
     const name = state.selectedAgent;
     if (!name) return 'Agent';
@@ -5912,6 +5940,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         <QueuedMessages
           items={queuedForSession().filter((item) => !steeringQueuedMessageIds().has(item.id))}
           pendingSteers={pendingSteersForSession()}
+          canResumeSteering={canResumeSteering()}
+          onResumeSteering={() => void resumePendingSteering()}
           dispatchingItemId={dispatchingQueuedMessageId()}
           failedDispatchItemIds={failedQueuedMessageIds()}
           steeringItemIds={steeringQueuedMessageIds()}

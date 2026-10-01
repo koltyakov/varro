@@ -777,6 +777,79 @@ describe('ProviderFileRefreshController', () => {
   });
 
   describe('invalidation scheduling', () => {
+    it('recovers a restored pending refresh after the quick idle-check retries are exhausted', async () => {
+      const h = createHarness({
+        persisted: { version: 3, scope: 'global', revalidateAuth: false, source: 'config' },
+      });
+      h.server.readRestartBlockers.mockRejectedValue(new Error('status temporarily unavailable'));
+      h.controller.postStatus();
+      await activateWatching(h);
+      await vi.advanceTimersByTimeAsync(5 * RETRY_MS);
+
+      expect(h.server.readRestartBlockers).toHaveBeenCalledTimes(6);
+      expect(globalDisposeCallCount(h)).toBe(0);
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
+      expect(h.postPendingStatus).not.toHaveBeenCalledWith(false);
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        'Provider refresh global idle check failed: status temporarily unavailable'
+      );
+
+      h.server.readRestartBlockers.mockResolvedValue({ totalSessionCount: 0, directories: [] });
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(h.server.readRestartBlockers).toHaveBeenCalledTimes(6);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(false);
+      expect(h.postPendingStatus).toHaveBeenLastCalledWith(false);
+      expect(h.server.restart).not.toHaveBeenCalled();
+      h.controller.dispose();
+    });
+
+    it.each(['deactivate', 'dispose'] as const)(
+      'cancels slow recovery checks on %s',
+      async (action) => {
+        const h = createHarness();
+        await activateWatching(h);
+        h.server.readRestartBlockers.mockRejectedValue(new Error('unavailable'));
+        await h.controller.refreshState();
+        await vi.advanceTimersByTimeAsync(5 * RETRY_MS);
+        resetCalls(h);
+
+        if (action === 'deactivate') h.controller.setActive(false);
+        else h.controller.dispose();
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        expect(h.server.readRestartBlockers).not.toHaveBeenCalled();
+        expect(h.server.request).not.toHaveBeenCalled();
+        expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
+        h.controller.dispose();
+      }
+    );
+
+    it('preserves pending state when a manual retry finds active work', async () => {
+      const h = createHarness();
+      await activateWatching(h);
+      h.setIdle(false);
+      await h.controller.refreshState();
+      await vi.advanceTimersByTimeAsync(7_000);
+      resetCalls(h);
+
+      await h.controller.retryPendingRefresh();
+
+      expect(h.server.readRestartBlockers).toHaveBeenCalledOnce();
+      expect(globalDisposeCallCount(h)).toBe(0);
+      expect(h.server.restart).not.toHaveBeenCalled();
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
+      expect(h.postPendingStatus).not.toHaveBeenCalledWith(false);
+
+      h.setIdle(true);
+      await vi.advanceTimersByTimeAsync(RETRY_MS);
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(false);
+      h.controller.dispose();
+    });
+
     it('coalesces status events while idle probes and disposal are in flight', async () => {
       const h = createHarness({ persisted: { version: 1, revalidateAuth: false } });
       let resolveProbe!: () => void;
@@ -1042,7 +1115,7 @@ describe('ProviderFileRefreshController', () => {
       expect(h.postRefresh).toHaveBeenCalled();
     });
 
-    it('bounds retries when server ownership cannot be determined', async () => {
+    it('slows retries when server ownership cannot be determined', async () => {
       const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'v1' } });
       await activateWatching(h);
       resetCalls(h);
@@ -1063,8 +1136,12 @@ describe('ProviderFileRefreshController', () => {
       expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
       expect(loggerMock.info).toHaveBeenCalledWith(
-        'Provider refresh invalidation remained deferred after bounded retries'
+        'Provider refresh remains pending; continuing recovery checks every 30 seconds'
       );
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(globalDisposeCallCount(h)).toBe(7);
+      expect(h.server.restart).not.toHaveBeenCalled();
+      h.controller.dispose();
     });
 
     it('restarts a managed server when global dispose fails', async () => {

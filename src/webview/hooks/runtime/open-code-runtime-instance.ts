@@ -157,6 +157,7 @@ export interface OpenCodeRuntime {
   refreshRoutingState(): Promise<void>;
   refreshProviderLimit(providerID: string, modelID?: string | null): Promise<void>;
   continueInterruptedSession(sessionId: string): Promise<void>;
+  resumeSteering(sessionId: string): Promise<boolean>;
   applySessionMcps(names: string[], sessionId?: string | null): Promise<void>;
   selectSession(id: string, options?: SessionSelectionOptions): Promise<boolean>;
   loadFullSessionHistory(sessionId: string): Promise<void>;
@@ -2288,6 +2289,28 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await connectionBootstrapOperations.continueInterruptedSession(sessionId, options);
   }
 
+  async function resumeSteering(sessionId: string): Promise<boolean> {
+    const generation = workspaceGeneration;
+    await syncSessionMcps(sessionId);
+    if (generation !== workspaceGeneration) return false;
+    clearPendingAbort(sessionId);
+    const resumed = await client.session.resumeSteering(sessionId, {
+      directory: getSessionDirectory(sessionId),
+    });
+    if (generation !== workspaceGeneration) return resumed;
+    // Acknowledgement and reconciliation are separate, just as they are for
+    // Stop. Refresh even for a no-op when another view already delivered it.
+    await Promise.all([
+      syncSessionMessages(sessionId).catch((err) =>
+        logError('syncSessionMessages after steering resume', err)
+      ),
+      recheckSessionStatus(sessionId).catch((err) =>
+        logError('recheckSessionStatus after steering resume', err)
+      ),
+    ]);
+    return resumed;
+  }
+
   const sessionSendOperations = new SessionSendOperations({
     getWorkspaceGeneration: () => workspaceGeneration,
     createSession: (initialPermissionMode, workspaceTarget, selectedModel) =>
@@ -3179,6 +3202,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     refreshProviderLimit,
     continueInterruptedSession,
     applySessionMcps,
+    resumeSteering,
     selectSession,
     loadFullSessionHistory,
     loadOlderSessionHistoryPage,

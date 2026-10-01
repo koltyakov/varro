@@ -608,6 +608,7 @@ export class OpenCodeProcess {
   private readonly processResourceCleanupOperations = new WeakMap<ChildProcess, Promise<void>>();
   private compactionSettings: OpenCodeCompactionSettings;
   private injectedConfigPath: string | null = null;
+  private injectedConfigServerVersion: string | null = null;
   private injectedConfigOwnerPid: number | null = null;
   private injectedConfigOperation: Promise<void> = Promise.resolve();
   private ownershipLease: ManagedServerOwnershipLease | null = null;
@@ -1816,6 +1817,7 @@ export class OpenCodeProcess {
 
   async syncInjectedConfigFile() {
     await this.runInjectedConfigOperation(async () => {
+      this.injectedConfigServerVersion = null;
       await sweepStaleInjectedConfigDirectories();
       if (getEnvironmentValue(process.env, 'OPENCODE_CONFIG')?.trim()) {
         await this.removeInjectedConfigFile(this.injectedConfigPath);
@@ -1854,7 +1856,7 @@ export class OpenCodeProcess {
     if (!(await this.hasConfiguredValue(containsAskAgent, 'an existing Ask agent'))) {
       config.agent = { ask: ASK_AGENT };
     }
-    const version = this.installedCliVersionCache?.value ?? '';
+    const version = this.injectedConfigServerVersion ?? this.installedCliVersionCache?.value ?? '';
     if (
       openCodeApiVersion(version) === 2 &&
       compareVersions(version, '2.0.20') >= 0 &&
@@ -1869,6 +1871,78 @@ export class OpenCodeProcess {
       config.providers = { openai: { settings: { chunkTimeout: 5 * 60_000 } } };
     }
     return `${JSON.stringify(config, null, 2)}\n`;
+  }
+
+  rememberRunningServerVersion(version: string) {
+    this.injectedConfigServerVersion = version;
+  }
+
+  async reconcileInjectedStreamTimeout(version: string): Promise<boolean> {
+    if (openCodeApiVersion(version) !== 2 || compareVersions(version, '2.0.20') < 0) return false;
+    const lease = this.ownershipLease;
+    if (!this._managedProcess || !lease?.configPath || lease.host !== this.hostOwner) return false;
+    let available = false;
+    await this.runInjectedConfigOperation(async () => {
+      const claim = await this.acquireOwnershipClaim({
+        hostPid: lease.hostPid,
+        hostBirthIdentity: lease.hostBirthIdentity,
+      });
+      if (!claim) return;
+      try {
+        const recorded = await this.readOwnershipLease();
+        // Reuse is not ownership. Validate both the live process and its private
+        // temporary config before updating it, without claiming another host's lease.
+        if (
+          this.ownershipLease !== lease ||
+          recorded?.host !== this.hostOwner ||
+          recorded.owner !== lease.owner ||
+          recorded.state !== 'active' ||
+          recorded.pid !== lease.pid ||
+          recorded.configPath !== lease.configPath ||
+          recorded.birthIdentity !== lease.birthIdentity ||
+          !(await this.matchesOwnershipLease(lease)) ||
+          !(await this.matchesInjectedConfigOwner(lease))
+        )
+          return;
+        this.injectedConfigServerVersion = version;
+        const content = await readFile(lease.configPath!, 'utf-8');
+        const errors: ParseError[] = [];
+        const config = asRecord(parse(content, errors, { allowTrailingComma: true }));
+        if (!config || errors.length > 0) return;
+        const providers = asRecord(config.providers) ?? {};
+        const openai = asRecord(providers.openai) ?? {};
+        const settings = asRecord(openai.settings) ?? {};
+        // An existing injected default may still need a reload after a failed
+        // attempt. All other explicit policies remain untouched.
+        if (containsOpenAIStreamTimeout(content)) {
+          available = settings.chunkTimeout === 300000;
+          return;
+        }
+        if (
+          await this.hasConfiguredValue(
+            containsOpenAIStreamTimeout,
+            'an OpenAI stream timeout',
+            'ancestors'
+          )
+        )
+          return;
+        config.providers = {
+          ...providers,
+          openai: { ...openai, settings: { ...settings, chunkTimeout: 300000 } },
+        };
+        const temporaryPath = `${lease.configPath}.${randomBytes(8).toString('hex')}.tmp`;
+        try {
+          await writeFile(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+          await rename(temporaryPath, lease.configPath!);
+        } finally {
+          await rm(temporaryPath, { force: true });
+        }
+        available = true;
+      } finally {
+        await this.releaseOwnershipClaim(claim);
+      }
+    });
+    return available;
   }
 
   private async hasConfiguredValue(

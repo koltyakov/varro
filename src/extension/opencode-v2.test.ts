@@ -46,6 +46,61 @@ describe('v2 Windows location paths', () => {
 });
 
 describe('v2 prompt delivery', () => {
+  it('resumes existing steering without admitting another prompt or touching queued input', async () => {
+    const wire = vi.fn(async (method: string) =>
+      method === 'GET'
+        ? {
+            data: [
+              { id: 'msg_queue', type: 'user', delivery: 'queue' },
+              { id: 'msg_steer', type: 'user', delivery: 'steer' },
+            ],
+          }
+        : undefined
+    );
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('POST', '/session/ses_resume/resume-steering', undefined)
+    ).resolves.toBe(true);
+    expect(wire).toHaveBeenCalledTimes(2);
+    expect(wire).toHaveBeenNthCalledWith(
+      1,
+      'GET',
+      '/api/session/ses_resume/inbox',
+      undefined,
+      expect.anything()
+    );
+    expect(wire).toHaveBeenNthCalledWith(
+      2,
+      'POST',
+      '/api/session/ses_resume/prompt',
+      { id: 'msg_steer', text: '', delivery: 'steer', resume: true },
+      expect.anything()
+    );
+  });
+
+  it('does not resume queued input when steering was already delivered', async () => {
+    const wire = vi.fn(async () => ({
+      data: [{ id: 'msg_queue', type: 'user', delivery: 'queue' }],
+    }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('POST', '/session/ses_resume/resume-steering', undefined)
+    ).resolves.toBe(false);
+    expect(wire).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces a rejected steering resume without dropping the inbox item', async () => {
+    const wire = vi.fn(async (method: string) => {
+      if (method === 'GET') return { data: [{ id: 'msg_steer', type: 'user', delivery: 'steer' }] };
+      throw new Error('Resume failed');
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('POST', '/session/ses_resume/resume-steering', undefined)
+    ).rejects.toThrow('Resume failed');
+    expect(wire).toHaveBeenCalledTimes(2);
+  });
+
   it.each(['', 'Review src/'])(
     'activates a skill by ID and preserves arguments %j',
     async (argumentsText) => {

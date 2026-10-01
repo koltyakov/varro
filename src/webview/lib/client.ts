@@ -176,6 +176,12 @@ export const client = {
         withDirectory(`/session/${encodeURIComponent(id)}/abort`, options?.directory)
       );
     },
+    async resumeSteering(id: string, options?: { directory?: string }): Promise<boolean> {
+      return apiCall(
+        'POST',
+        withDirectory(`/session/${encodeURIComponent(id)}/resume-steering`, options?.directory)
+      );
+    },
     async share(id: string, options?: { directory?: string }): Promise<Session> {
       return apiCall(
         'POST',

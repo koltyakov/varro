@@ -123,6 +123,9 @@ vi.mock('../hooks/useOpenCode', async () => {
     ...actual,
     abortSession: abortSessionMock,
     continueInterruptedSession: continueInterruptedSessionMock,
+    resumeSteering: vi.fn(async (sessionId: string) =>
+      client.session.resumeSteering(sessionId, { directory: undefined })
+    ),
     editMessage: editMessageMock,
     forkSession: forkSessionMock,
     loadOlderSessionPrompts: loadOlderSessionPromptsMock,
@@ -152,6 +155,7 @@ vi.mock('../lib/client', () => ({
       messages: vi.fn(async () => []),
       update: vi.fn<typeof client.session.update>(),
       status: vi.fn(async () => ({})),
+      resumeSteering: vi.fn(async () => true),
     },
     varro: {
       workspaceProblems: vi.fn(async () => ({ total: 0, diagnostics: [] })),
@@ -6149,12 +6153,28 @@ describe('ChatInput', () => {
     );
     expect(getVisibleThreadMessages(state.messages, 'session-1')).toEqual([]);
 
+    expect(container?.querySelector('button[title^="Resume the existing"]')).toBeNull();
+
     setState('activeSessionId', 'session-other');
     expect(container?.querySelector('[aria-label="Steered messages"]')).toBeNull();
     setState('activeSessionId', 'session-1');
     expect(container?.querySelector('[aria-label="Steered messages"]')?.textContent).toBe(
       'Change direction'
     );
+
+    setIsLoading(false);
+    setState('sessionStatus', { 'session-1': { type: 'idle' } });
+    const resume = container?.querySelector<HTMLButtonElement>(
+      'button[title^="Resume the existing"]'
+    );
+    expect(resume).toBeTruthy();
+    resume?.click();
+    await flushAsyncWork();
+    expect(client.session.resumeSteering).toHaveBeenCalledWith('session-1', {
+      directory: undefined,
+    });
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(state.messages[0]?.info).toMatchObject({ pendingDelivery: 'steer' });
 
     upsertMessageInfo({ ...info, pendingDelivery: undefined });
     await flushAsyncWork();

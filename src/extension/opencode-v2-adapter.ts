@@ -921,6 +921,21 @@ export class OpenCodeV2Adapter {
         await raw('POST', `${endpoint}/interrupt?resume=false`, {});
         return true;
       }
+      if (action === 'resume-steering' && method === 'POST') {
+        const inbox = await data<SessionInboxInfo[]>('GET', `${endpoint}/inbox`);
+        if (!Array.isArray(inbox)) throw new Error('Invalid OpenCode v2 session inbox');
+        const pending = inbox.find((item) => item.type === 'user' && item.delivery === 'steer');
+        if (!pending) return false;
+        // Prompt admission is idempotent by ID and wakes an existing item.
+        // Reasserting its delivery with inbox PATCH is a conflict in 2.0.20.
+        await raw('POST', `${endpoint}/prompt`, {
+          id: pending.id,
+          text: '',
+          delivery: 'steer',
+          resume: true,
+        });
+        return true;
+      }
       if (action === 'summarize') {
         return this.submit(sessionID, async () => {
           if (isString(input.providerID) && isString(input.modelID)) {

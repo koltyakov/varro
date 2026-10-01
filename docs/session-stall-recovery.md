@@ -25,9 +25,27 @@ Explicit `timeout` or `chunkTimeout` settings suppress the default, including
 legacy provider options, inherited inline configuration, global configuration,
 ancestor configuration above the repository, and `.opencode` configuration.
 Unreadable or malformed policies are not overwritten. No persistent user
-configuration is edited. Older backends, attach-only connections, reused servers,
-HTTP streams, and other providers are not changed. A fresh managed launch is
-needed to apply the runtime default; do not restart a production server to test it.
+configuration is edited. Older backends, attach-only connections, HTTP streams,
+and other providers are not changed.
+
+The subsequent recurrence used a reused server whose temporary config predated
+the default. Reloading the editor does not relaunch that backend. Maintenance now
+also reconciles the default for reused V2 servers whose live process, private
+config owner, and current ownership lease all belong to this host. It checks the
+effective provider policy and leaves explicit settings and unrelated runtime
+configuration intact. The live backend version, not the installed executable's
+version, gates the update. Atomic replacement prevents partial config reads.
+
+Configuration reload is deferred until two global restart-blocker snapshots show
+no running sessions, background work, pending questions, or permissions. Ownership
+and connection generation are rechecked before reload. Failed/deferred attempts
+remain retryable on maintenance and idle events, including reused connections
+that deliberately suppress automatic CLI upgrades. No process restart is needed.
+Send and steering-resume preflight also check the policy, so the first send after
+editor reload does not have to wait for the five-minute maintenance interval.
+Another active host's server is not claimed or rewritten. An already-running
+provider exchange cannot acquire a new timeout; stop it explicitly before applying
+the policy. Do not restart or modify production sessions to test this behavior.
 
 ## Transcript correction
 
@@ -42,14 +60,24 @@ needed to apply the runtime default; do not restart a production server to test 
   of SSE. A failed refresh is logged without undoing a successful stop.
 
 Steering still waits for a safe provider-turn boundary. Cancellation neither
-consumes nor removes pending input and does not automatically resume it.
+consumes nor removes pending input and does not automatically resume it. Parked
+steering now exposes **Resume steering** when the session is idle and no approval
+blocks it. The host checks authoritative status/attention and normal prompt
+admission before waking the first existing steering message by its original ID.
+OpenCode 2.0.20 rejects an inbox PATCH to its already-current delivery, so this
+uses idempotent prompt admission with `resume: true`. The existing content and
+attachments are retained, no new user message is added, and queued prompts stay
+parked. Failed resumes leave the prompt available for retry.
 
 ## Regression verification
 
-Unit coverage lives in `open-code-process.test.ts`, `opencode-v2.test.ts`,
+Unit coverage lives in `open-code-process.test.ts`, `server.test.ts`,
+`opencode-v2.test.ts`, `rest-proxy.test.ts`, `ChatInput.test.ts`,
 `session-controls.test.ts`, and `session-event-handlers.test.ts`.
 `opencode-v2.integration.test.ts` uses a separate database and local providers:
-one accepts a WebSocket then sends no frames, exercising a 200 ms test policy;
+one accepts a WebSocket then sends no frames, exercising a 200 ms test policy
+applied by reloading a backend that started without that timeout;
 another holds a provider request while steering is enqueued and cancellation
-preserves both interruption history and the pending prompt. These are backend
+preserves both interruption history and the pending prompt, then resumes that
+same prompt without duplicating it or consuming parked queued input. These are backend
 and reconciliation checks, not a real-editor visual verdict.

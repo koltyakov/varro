@@ -3870,6 +3870,112 @@ describe('OpenCodeProcess server ownership leases', () => {
 
 describe('OpenCodeProcess config ownership', () => {
   it.each([
+    { installed: '1.18.33', running: '2.0.20', expected: true },
+    { installed: '2.0.20', running: '2.0.19', expected: false },
+  ])(
+    'uses the running $running version instead of installed $installed for runtime rewrites',
+    async ({ installed, running, expected }) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-stream-live-version-'));
+      process.env.XDG_CONFIG_HOME = root;
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      manager.rememberInstalledCliVersion(installed);
+      manager.rememberRunningServerVersion(running);
+      try {
+        expect(asRecord(JSON.parse(await manager.serializeInjectedConfig()))?.providers).toEqual(
+          expected ? { openai: { settings: { chunkTimeout: 300000 } } } : undefined
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    'missing',
+    'already-written',
+    'explicit',
+    'malformed',
+    'foreign',
+    'transferred',
+    'replaced',
+    'untrusted-owner',
+    'old-version',
+  ])('reconciles an owned reused timeout policy safely: %s', async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'varro-stream-reused-'));
+    process.env.XDG_CONFIG_HOME = root;
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      'opencode',
+      false,
+      undefined,
+      join(root, 'lease.json')
+    );
+    await manager.syncInjectedConfigFile();
+    const state = manager as unknown as {
+      injectedConfigPath: string;
+      hostOwner: string;
+      ownershipLease: ManagedServerOwnershipLease;
+      matchesOwnershipLease(lease: ManagedServerOwnershipLease): Promise<boolean>;
+      readOwnershipLease(): Promise<ManagedServerOwnershipLease | null>;
+    };
+    const configPath = state.injectedConfigPath;
+    const settings: { transport: string; chunkTimeout?: number } = { transport: 'websocket' };
+    if (scenario === 'already-written') settings.chunkTimeout = 300000;
+    if (scenario === 'explicit') settings.chunkTimeout = 900000;
+    const original =
+      scenario === 'malformed'
+        ? '{broken'
+        : JSON.stringify({
+            keep: { unrelated: true },
+            providers: { openai: { settings } },
+          });
+    await writeFile(configPath, original);
+    state.ownershipLease = {
+      version: 1,
+      pid: 777,
+      port: 4096,
+      executable: 'fixture',
+      birthIdentity: 'fixture:1',
+      owner: 'fixture-owner',
+      host: scenario === 'foreign' ? 'other-host' : state.hostOwner,
+      state: 'active',
+      createdAt: Date.now(),
+      configPath,
+    };
+    manager.managedProcess = true;
+    vi.spyOn(state, 'readOwnershipLease').mockImplementation(async () =>
+      scenario === 'transferred'
+        ? { ...state.ownershipLease, host: 'other-host' }
+        : state.ownershipLease
+    );
+    vi.spyOn(state, 'matchesOwnershipLease').mockResolvedValue(scenario !== 'replaced');
+    await writeFile(
+      join(dirname(configPath), 'owner.json'),
+      JSON.stringify({
+        pid: 777,
+        owner: scenario === 'untrusted-owner' ? 'other-owner' : 'fixture-owner',
+      })
+    );
+    try {
+      const expected = scenario === 'missing' || scenario === 'already-written';
+      await expect(
+        manager.reconcileInjectedStreamTimeout(scenario === 'old-version' ? '2.0.19' : '2.0.20')
+      ).resolves.toBe(expected);
+      const result = await readFile(configPath, 'utf-8');
+      if (scenario === 'missing')
+        expect(JSON.parse(result)).toEqual({
+          keep: { unrelated: true },
+          providers: { openai: { settings: { transport: 'websocket', chunkTimeout: 300000 } } },
+        });
+      else expect(result).toBe(original);
+    } finally {
+      await manager.cleanupPreparedInjectedConfigFile();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
     { name: 'no override', content: '{}', expected: true },
     {
       name: 'native stream timeout',

@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { spawnSync, type ChildProcess } from 'node:child_process';
 import crossSpawn from 'cross-spawn';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -213,7 +213,6 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
                 baseURL: `http://127.0.0.1:${address.port}/v1`,
                 apiKey: 'fixture-only',
                 transport: 'websocket',
-                chunkTimeout: 200,
               },
               models: {
                 'gpt-4o': { name: 'Silent fixture', limit: { context: 32000, output: 1000 } },
@@ -296,12 +295,39 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     if (root) await writeFile(join(root, 'events.json'), JSON.stringify(events, null, 2));
   });
 
-  it('bounds silent provider WebSockets using the native chunkTimeout policy', async (context) => {
+  it('bounds silent provider WebSockets after reloading an old runtime timeout policy', async (context) => {
     const health = await transport.readHealthInfo();
     if (transport.version !== 2 || compareVersions(health.version ?? '0', '2.0.20') < 0) {
       context.skip();
       return;
     }
+    const providerPath = `/api/provider/silent?location[directory]=${encodeURIComponent(join(root, 'workspace'))}`;
+    await vi.waitFor(
+      async () => {
+        expect(asRecord(await transport.request('GET', providerPath))?.data).toBeDefined();
+      },
+      { timeout: 10000, interval: 100 }
+    );
+    const settingsBefore = asRecord(
+      asRecord(asRecord(await transport.request('GET', providerPath))?.data)?.settings
+    );
+    expect(settingsBefore).not.toHaveProperty('chunkTimeout');
+    const configPath = join(root, 'config/opencode/opencode.json');
+    const config = asRecord(JSON.parse(await readFile(configPath, 'utf-8')));
+    const settings = asRecord(asRecord(asRecord(config?.providers)?.silent)?.settings);
+    if (!settings) throw new Error('Missing isolated silent provider settings');
+    settings.chunkTimeout = 200;
+    await writeFile(configPath, JSON.stringify(config));
+    await transport.request('POST', '/global/dispose');
+    await vi.waitFor(
+      async () => {
+        expect(
+          asRecord(asRecord(asRecord(await transport.request('GET', providerPath))?.data)?.settings)
+            ?.chunkTimeout
+        ).toBe(200);
+      },
+      { timeout: 10000, interval: 100 }
+    );
     const session = asRecord(
       await transport.request('POST', '/session', { title: 'Silent stream fixture' })
     );
@@ -1121,6 +1147,39 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
             );
           })
         ).toBe(true)
+      );
+      release?.();
+      streamGate = undefined;
+      await transport.request('POST', `/api/session/${id}/prompt`, {
+        id: 'msg_still_queued',
+        text: 'This queued prompt must stay parked.',
+        delivery: 'queue',
+        resume: false,
+      });
+      expect(await transport.request('POST', `/session/${id}/resume-steering`)).toBe(true);
+      await vi.waitFor(
+        async () => {
+          const messages = (await transport.request('GET', `/session/${id}/message`)) as Array<{
+            info: UnknownRecord;
+            parts: UnknownRecord[];
+          }>;
+          const steering = messages.find((message) => message.info.id === 'msg_pending_steer');
+          expect(steering?.info.pendingDelivery).toBeUndefined();
+          expect(
+            messages.filter(
+              (message) => message.info.role === 'user' && !message.info.pendingDelivery
+            )
+          ).toHaveLength(2);
+          expect(
+            messages.find((message) => message.info.id === 'msg_still_queued')?.info.pendingDelivery
+          ).toBe('queue');
+          expect(
+            messages.some((message) =>
+              message.parts.some((part) => part.text === 'Adapter stream verified.')
+            )
+          ).toBe(true);
+        },
+        { timeout: 10000 }
       );
     } finally {
       release?.();

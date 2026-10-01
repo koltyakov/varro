@@ -23,6 +23,7 @@ import {
   type ServerStatus,
 } from '../shared/protocol';
 import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
+import { asRecord } from '../shared/type-utils';
 import {
   OpenCodeProcess,
   type OpenCodeCompactionSettings,
@@ -247,6 +248,7 @@ export class OpenCodeServer extends EventEmitter {
   private lastRestartBlockers: RestartBlockedState | null = null;
   private adoptedServerRecoveryOperation: Promise<void> | null = null;
   private existingServerPreparationOperation: Promise<void> | null = null;
+  private streamTimeoutReconciliationOperation: Promise<void> | null = null;
   private savedServerAuthorization: { url: string; value: string } | undefined;
   private readonly admission: ServerConnectionAdmission;
   private preserveExistingProcess = false;
@@ -1533,6 +1535,30 @@ export class OpenCodeServer extends EventEmitter {
     ) {
       throw new Error('OpenCode server is not accepting requests while stopping');
     }
+    if (
+      method === 'POST' &&
+      /^\/session\/[^/]+\/(?:prompt_async|prompt|message|command|resume-steering)$/.test(
+        new URL(path, 'http://localhost').pathname
+      )
+    ) {
+      options?.signal?.throwIfAborted();
+      // Do not leave the first send after editor reload waiting for the
+      // five-minute maintenance interval to protect an owned idle backend.
+      try {
+        await this.reconcileManagedStreamTimeout();
+      } catch (err) {
+        logger.warn(
+          `OpenCode stream timeout preflight failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+      options?.signal?.throwIfAborted();
+      if (
+        this.isDisposing ||
+        this.isTerminalCliUpgradeActive() ||
+        this.lifecycle.getRestartPromise<string>()
+      )
+        throw new Error('OpenCode server is not accepting requests while stopping');
+    }
     return this.transport.request(method, path, body, options);
   }
 
@@ -1753,7 +1779,73 @@ export class OpenCodeServer extends EventEmitter {
     });
   }
 
+  private reconcileManagedStreamTimeout(): Promise<void> {
+    if (this.streamTimeoutReconciliationOperation) return this.streamTimeoutReconciliationOperation;
+    const operation = this.runManagedStreamTimeoutReconciliation();
+    this.streamTimeoutReconciliationOperation = operation;
+    const finish = () => {
+      if (this.streamTimeoutReconciliationOperation === operation)
+        this.streamTimeoutReconciliationOperation = null;
+    };
+    void operation.then(finish, finish);
+    return operation;
+  }
+
+  private async runManagedStreamTimeoutReconciliation() {
+    if (this.existingServerPreparationOperation) await this.existingServerPreparationOperation;
+    if (
+      this.isAttachOnly ||
+      this.isDisposing ||
+      this.isTerminalCliUpgradeActive() ||
+      this._status.state !== 'running'
+    )
+      return;
+    if (!this.managedProcess || this.transport.version !== 2) return;
+    const generation = this.disposeGeneration;
+    const url = this.url;
+    const current = () =>
+      !this.isDisposing &&
+      generation === this.disposeGeneration &&
+      url === this.url &&
+      this._status.state === 'running';
+    const health = await this.readHealthInfo();
+    if (
+      !current() ||
+      !health.healthy ||
+      !health.version ||
+      compareVersions(health.version, '2.0.20') < 0
+    )
+      return;
+    const directory = this.getWorkspaceCwd();
+    const query = directory ? `?location[directory]=${encodeURIComponent(directory)}` : '';
+    const provider = asRecord(
+      asRecord(await this.transport.request('GET', `/api/provider/openai${query}`))?.data
+    );
+    const settings = asRecord(provider?.settings);
+    if (!settings) throw new Error('Could not inspect the effective OpenAI stream timeout policy');
+    if ('chunkTimeout' in settings || 'timeout' in settings) return;
+    if (!current() || (await this.readRestartBlockers()).totalSessionCount > 0 || !current())
+      return;
+    if (!(await this.processManager.reconcileInjectedStreamTimeout(health.version))) return;
+    // Reload cancels pending attention, so it must never be used as a way to
+    // unstick an active execution. Recheck all workspaces and ownership first.
+    if (!current() || (await this.readRestartBlockers()).totalSessionCount > 0 || !current())
+      return;
+    if (!(await this.processManager.refreshManagedServerOwnership()) || !current()) return;
+    await this.transport.request('POST', '/global/dispose');
+    logger.info(
+      'Applied five-minute OpenAI stream silence protection to the reused managed server'
+    );
+  }
+
   private async runMaintenanceTick() {
+    try {
+      await this.reconcileManagedStreamTimeout();
+    } catch (err) {
+      logger.warn(
+        `OpenCode stream timeout reconciliation failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
     if (this.isAttachOnly || this.preserveExistingProcess) return;
     await this.processManager.runMaintenanceTick({
       isDisposing: () => this.isDisposing,
@@ -2397,7 +2489,17 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async readHealthInfo(): Promise<{ healthy: boolean; version?: string }> {
-    return this.transport.readHealthInfo();
+    const url = this.url;
+    const generation = this.disposeGeneration;
+    const health = await this.transport.readHealthInfo();
+    if (
+      health.healthy &&
+      health.version &&
+      url === this.url &&
+      generation === this.disposeGeneration
+    )
+      this.processManager.rememberRunningServerVersion(health.version);
+    return health;
   }
 
   async dispose() {

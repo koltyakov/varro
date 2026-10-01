@@ -1295,6 +1295,17 @@ export class RestProxy {
       // opencode emits the SSE `session.status { busy }` event only after
       // admission, and on fast turns the finish can land first; pre-marking
       // here ensures the busy marker exists before any finish event arrives.
+      if (method === 'POST' && requestPathname.endsWith('/resume-steering') && directSessionID) {
+        const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
+        if (
+          !(await this.shouldAdmitInterruptedRecovery(directSessionID, directory, requestSignal))
+        ) {
+          this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data: false });
+          return;
+        }
+        if (directory && !(await this.confirmPromptAdmission(directory, requestSignal)))
+          throw new Error('Resume cancelled because generated dependencies are not ignored by Git');
+      }
       if (promptSessionID) {
         if (
           promptWorkspaceDirectory &&
