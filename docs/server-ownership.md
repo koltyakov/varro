@@ -185,6 +185,15 @@ cache. Unknown-owner consent covers only the current connection and requires a n
 decision on reconnect. Concurrent callers share the decision; disposal invalidates
 late answers. Refusal blocks subsequent requests rather than starting retry prompts.
 
+Before requesting new uncertainty consent, admission retries one fresh account
+inspection. Ordinary rechecks still inspect at least every second, but persistent
+uncertainty does not repeat an already approved warning within that connection.
+Newly identified foreign listeners still require consent. If inspection recovers
+to verified same-user evidence after the dialog, admission uses that fresh evidence
+instead of treating recovered visibility as listener replacement. A changed known
+identity still blocks confirmation. Generation and endpoint changes invalidate
+each inspection and dialog result before further use.
+
 On Windows, ordinary listener checks use `netstat` first, with PowerShell networking
 discovery only when `netstat` fails. A shared read-only helper obtains executable,
 creation identity, and token SIDs using Windows APIs, holding the process handle

@@ -42,11 +42,19 @@ export async function inspectLocalServerAccount(port: number): Promise<LocalServ
   try {
     const pids = await findListeningPids(port);
     // Port-only discovery can include unrelated IPv4/IPv6 binds. Do not guess.
-    if (pids.length !== 1) return { kind: 'unknown' };
+    if (pids.length !== 1) {
+      logger.warn(`Cannot verify the account on port ${port}: found ${pids.length} listeners`);
+      return { kind: 'unknown' };
+    }
     const pid = pids[0]!;
     if (process.platform === 'win32') {
       const details = await readWindowsProcessDetails(pid, true);
-      if (!details?.listenerSid || !details.hostSid) return { kind: 'unknown' };
+      if (!details?.listenerSid || !details.hostSid) {
+        logger.warn(
+          `Cannot verify the account on port ${port}: Windows account evidence unavailable`
+        );
+        return { kind: 'unknown' };
+      }
       return {
         kind: details.listenerSid === details.hostSid ? 'same-user' : 'different-user',
         identity: `${pid}:${details.birthIdentity}:${details.listenerSid}`,
@@ -67,8 +75,11 @@ export async function inspectLocalServerAccount(port: number): Promise<LocalServ
       kind: listenerAccount === hostAccount ? 'same-user' : 'different-user',
       identity: `${pid}:${birth}:${listenerAccount}`,
     };
-  } catch {
+  } catch (error) {
     // Restricted process visibility must never be interpreted as same-user.
+    logger.warn(
+      `Cannot verify the account on port ${port}: ${error instanceof Error ? error.message : String(error)}`
+    );
     return { kind: 'unknown' };
   }
 }

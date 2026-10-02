@@ -223,6 +223,9 @@ describe('Windows listener and process inspection', () => {
     commandOutput(() => ({ stdout: '', code: 1 }));
     await expect(findListeningPids(4096)).rejects.toThrow('Cannot inspect the listener');
     await expect(inspectLocalServerAccount(4096)).resolves.toEqual({ kind: 'unknown' });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Cannot verify the account on port 4096: Cannot inspect the listener')
+    );
   });
 
   it('reads executable and birth identity in one process snapshot', async () => {

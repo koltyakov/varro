@@ -36,24 +36,52 @@ export class ServerConnectionAdmission {
     if (this.operation) return this.operation;
     const generation = this.generation;
     const url = this.getUrl();
+    const assertCurrent = () => {
+      if (generation !== this.generation || url !== this.getUrl())
+        throw new Error('OpenCode connection changed during verification');
+    };
     const operation = (async () => {
       // A supplied Authorization header does not prove the server enforces it.
-      const account = await this.inspect();
-      const sameInstance =
-        this.admitted?.url === url &&
-        account.identity !== undefined &&
-        account.identity === this.admitted.account.identity;
-      if (account.kind !== 'same-user' && !sameInstance) {
-        if (!(await this.confirm(account, url)))
+      let account = await this.inspect();
+      assertCurrent();
+      const approvedAccount = this.admitted?.url === url ? this.admitted.account : undefined;
+      if (
+        account.kind === 'unknown' &&
+        !(approvedAccount?.kind === 'unknown' && approvedAccount.identity === account.identity)
+      ) {
+        // Retry fresh evidence once before turning a transient inspection failure
+        // into a modal. Never substitute the last successful observation.
+        account = await this.inspect();
+        assertCurrent();
+      }
+      const consentApplies =
+        account.kind === approvedAccount?.kind &&
+        (account.identity !== undefined || account.kind === 'unknown') &&
+        account.identity === approvedAccount.identity;
+      // Explicit uncertainty consent covers this connection only. verify(true)
+      // clears it on reconnect; fresh observations still detect known changes.
+      if (account.kind !== 'same-user' && !consentApplies) {
+        const confirmed = await this.confirm(account, url);
+        assertCurrent();
+        if (!confirmed)
           throw new Error('OpenCode connection cancelled; the existing server was left untouched');
         const verified = await this.inspect();
-        if (verified.kind !== account.kind || verified.identity !== account.identity)
+        assertCurrent();
+        const recoveredSameUser =
+          account.kind === 'unknown' &&
+          verified.kind === 'same-user' &&
+          verified.identity !== undefined &&
+          (account.identity === undefined || account.identity === verified.identity);
+        if (
+          !recoveredSameUser &&
+          (verified.kind !== account.kind || verified.identity !== account.identity)
+        )
           throw new Error(
             'OpenCode listener changed while confirmation was open; reconnect to verify it'
           );
+        account = verified;
       }
-      if (generation !== this.generation || url !== this.getUrl())
-        throw new Error('OpenCode connection changed during verification');
+      assertCurrent();
       this.admitted = { url, account };
       this.external = account.kind !== 'same-user';
       this.checkedAt = Date.now();
