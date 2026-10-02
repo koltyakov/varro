@@ -89,16 +89,28 @@ function trackWebviewWidth(root: HTMLElement) {
   let width = window.innerWidth;
   let pixelRatio = window.devicePixelRatio;
   let frame: number | undefined;
+  const cancelExpansion = () => {
+    if (frame !== undefined) window.cancelAnimationFrame(frame);
+    frame = undefined;
+  };
   const applyWidth = () => {
     width = window.innerWidth;
     root.style.maxWidth = `${width}px`;
   };
+  const handleVisibilityChange = () => {
+    cancelExpansion();
+    if (document.visibilityState === 'hidden') return;
+    // A retained tab has no painted surface to preserve. Its hidden viewport can
+    // have a temporary host width; restore the current width before revealing it.
+    pixelRatio = window.devicePixelRatio;
+    applyWidth();
+  };
   const handleResize = () => {
+    if (document.visibilityState === 'hidden') return;
     // Zoom changes CSS pixels without resizing the host's painted surface.
     if (pixelRatio !== window.devicePixelRatio) {
       pixelRatio = window.devicePixelRatio;
-      if (frame !== undefined) window.cancelAnimationFrame(frame);
-      frame = undefined;
+      cancelExpansion();
       applyWidth();
       return;
     }
@@ -122,9 +134,11 @@ function trackWebviewWidth(root: HTMLElement) {
   };
   applyWidth();
   window.addEventListener('resize', handleResize);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
   return () => {
-    if (frame !== undefined) window.cancelAnimationFrame(frame);
+    cancelExpansion();
     window.removeEventListener('resize', handleResize);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
     root.style.maxWidth = previousMaxWidth;
   };
 }
