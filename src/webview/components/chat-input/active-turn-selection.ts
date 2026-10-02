@@ -10,9 +10,11 @@ export function getActiveTurnSelection(messages: readonly MessageEntry[], sessio
     const info = messages[index]!.info;
     if (info.sessionID !== sessionId) continue;
     if (info.role === 'user' && (info.pendingDelivery || info.delivery === 'steer')) continue;
+    // The active prompt is normally near the tail. Scanning from the beginning also makes
+    // the caller track metadata for every unrelated historical message on each selection check.
     const parent =
       info.role === 'assistant'
-        ? messages.find(
+        ? messages.findLast(
             (entry) => entry.info.sessionID === sessionId && entry.info.id === info.parentID
           )?.info
         : undefined;

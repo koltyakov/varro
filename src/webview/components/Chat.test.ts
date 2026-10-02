@@ -1239,6 +1239,25 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-header-completed-badge')?.textContent).toBe('');
   });
 
+  it('switches the running badge to unread completion without a settle-window gap', () => {
+    setState('sessions', [session('finishing', 500)]);
+    setState('sessionStatus', { finishing: { type: 'busy' } });
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
+    setState('completedSessionResponses', { finishing: 500 });
+    setState('sessionStatus', 'finishing', { type: 'idle' });
+
+    expect(container?.querySelector('.chat-header-running-badge')).not.toBeNull();
+    expect(container?.querySelector('.chat-header-completed-badge')).toBeNull();
+    vi.advanceTimersByTime(1199);
+    expect(container?.querySelector('.chat-header-running-badge')).not.toBeNull();
+    expect(container?.querySelector('.chat-header-completed-badge')).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(container?.querySelector('.chat-header-running-badge')).toBeNull();
+    expect(container?.querySelector('.chat-header-completed-badge')).not.toBeNull();
+  });
+
   it('does not count parent sessions that are only running subagents', () => {
     setState('sessions', [
       session('direct-running', 600),

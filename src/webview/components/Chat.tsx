@@ -150,6 +150,18 @@ export function Chat() {
   const [sessionListNow, setSessionListNow] = createSignal(Date.now());
   const rawSessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
+  // Keep direct activity visible through the same settle window as completion,
+  // without counting parents whose only activity comes from their subagents.
+  const directSessionIndicators = createStableSessionIndicators(() => ({
+    ...rawSessionIndicators(),
+    runningIds: new Set(
+      state.sessions
+        .filter((session) => isDirectlyRunningSession(session.id))
+        .map((session) => session.id)
+    ),
+  }));
+  const isStablyDirectlyRunningSession = (sessionId: string) =>
+    directSessionIndicators().runningIds.has(sessionId);
   let publishedUnreadWorkspace: string | null = null;
   const publishedUnreadStates = new Map<string, PublishedUnreadState>();
   let publishedCommandState = '';
@@ -472,7 +484,7 @@ export function Chat() {
       recentSessions(),
       state.activeSessionId,
       isEditorSurface ? false : showSessionPicker(),
-      isDirectlyRunningSession,
+      isStablyDirectlyRunningSession,
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId) && isSessionFailureUnread(sessionId),
       (session) =>
@@ -506,7 +518,7 @@ export function Chat() {
       recentSessions(),
       filter,
       filter === 'running'
-        ? isDirectlyRunningSession
+        ? isStablyDirectlyRunningSession
         : (sessionId) => indicators.runningIds.has(sessionId),
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId),
@@ -521,7 +533,7 @@ export function Chat() {
       state.activeSessionId,
       showSessionPicker(),
       filter === 'running'
-        ? isDirectlyRunningSession
+        ? isStablyDirectlyRunningSession
         : (sessionId) => indicators.runningIds.has(sessionId),
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId),
