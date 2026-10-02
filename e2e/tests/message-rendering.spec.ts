@@ -55,9 +55,9 @@ test('a pathological code line preserves text and leaves the browser event loop 
   await expect(block.locator('code')).toHaveText(source);
   await expect(block.locator('[class^="hljs-"]')).toHaveCount(0);
   expect(
-    await block.locator('[data-copy-text]').evaluate((button) =>
-      decodeURIComponent(button.getAttribute('data-copy-text') ?? '')
-    )
+    await block
+      .locator('[data-copy-text]')
+      .evaluate((button) => decodeURIComponent(button.getAttribute('data-copy-text') ?? ''))
   ).toBe(source.slice(0, 20_000));
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Still responsive');
@@ -222,6 +222,8 @@ test('routes safe external markdown links through the extension bridge', async (
 
 test('renders real-session file variants as isolated canonical links', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=message-rendering');
+  // Wait for syntax highlighting to finish replacing the initial markdown before focusing links.
+  await expect(page.locator('.rendered-markdown .hljs-keyword').first()).toBeVisible();
 
   const links = page.locator('.rendered-markdown a.file-path-link');
   await expect(links).toHaveCount(11);
@@ -245,8 +247,13 @@ test('renders real-session file variants as isolated canonical links', async ({ 
 
   const readme = page.getByRole('link', { name: 'README.md' });
   const license = page.getByRole('link', { name: 'LICENSE' });
-  await expect(readme).toHaveAttribute('title', '/workspace/varro/README.md');
+  await expect(readme).toHaveAttribute('href', '/workspace/varro/README.md');
+  await expect(readme).not.toHaveAttribute('title');
   await readme.focus();
+  const tooltip = page.getByRole('tooltip');
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toHaveText('/workspace/varro/README.md');
+  await expect(readme).toHaveAccessibleDescription('/workspace/varro/README.md');
   await expect
     .poll(() => readme.evaluate((element) => getComputedStyle(element).outlineStyle))
     .toBe('none');
