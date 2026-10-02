@@ -45,8 +45,6 @@ const isRestoringWorkspace = () =>
 
 const isReconnecting = () => defaultAppState.state.serverReconnecting && !connectionInitialized();
 
-const hasNoOpenFolder = () => defaultAppState.state.editorContext.workspaceFolders?.length === 0;
-
 function renderErrorFallback(err: Error) {
   logError('app:error-boundary', describeError(err));
   return <ErrorFallback err={err} />;
@@ -96,20 +94,18 @@ export function App() {
 
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
-      <Show when={!hasNoOpenFolder()} fallback={<NoFolderOpen />}>
-        <Show when={!isRestoringWorkspace()} fallback={<WorkspaceLoading />}>
-          <Show
-            when={defaultAppState.state.restartBlocked}
-            fallback={
-              <Show when={showChat()} fallback={<ServerStatus />}>
-                <div class="contents" inert={isReconnecting()}>
-                  <Chat />
-                </div>
-              </Show>
-            }
-          >
-            <RestartBlocked />
-          </Show>
+      <Show when={!isRestoringWorkspace()} fallback={<WorkspaceLoading />}>
+        <Show
+          when={defaultAppState.state.restartBlocked}
+          fallback={
+            <Show when={showChat()} fallback={<ServerStatus />}>
+              <div class="contents" inert={isReconnecting()}>
+                <Chat />
+              </div>
+            </Show>
+          }
+        >
+          <RestartBlocked />
         </Show>
       </Show>
       <Show when={ralphStore.showRalphForm()}>
@@ -125,35 +121,6 @@ export function App() {
             : null
         }
       />
-    </div>
-  );
-}
-
-function NoFolderOpen() {
-  return (
-    <div class="server-status-surface">
-      <div class="server-status-content">
-        <UiIcon
-          source={statusIcons.folder}
-          class="h-10 w-10 text-vscode-muted"
-          width={40}
-          height={40}
-          aria-hidden="true"
-        />
-        <div class="w-full">
-          <p class="text-[13px] font-medium text-vscode-fg">Open a folder to use Varro</p>
-          <p class="mt-1.5 text-[12px] leading-relaxed text-vscode-muted">
-            Varro needs a workspace folder to understand and work with your project.
-          </p>
-        </div>
-        <button
-          type="button"
-          class="server-status-action-button"
-          onClick={() => postMessage({ type: 'vscode/open-folder' })}
-        >
-          Open Folder
-        </button>
-      </div>
     </div>
   );
 }

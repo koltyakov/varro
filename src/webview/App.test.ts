@@ -213,32 +213,58 @@ describe('AppRoot', () => {
     expect(appMocks.chatMountCount).toBe(1);
   });
 
-  it('suggests opening a folder and opens the native folder picker', () => {
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
-    setConnectionInitialized(true);
+  it.each([null, '/varro/scratch'])(
+    'shows chat with no open folder and working directory %s',
+    (workspacePath) => {
+      setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+      setConnectionInitialized(true);
+      setState('editorContext', {
+        ...state.editorContext,
+        workspacePath,
+        workspaceDirectory: workspacePath,
+        workspaceFolders: [],
+      });
+      mountAppRoot();
+
+      expect(container?.textContent).not.toContain('Open a folder to use Varro');
+      expect(container?.textContent).toContain('New Chat');
+      expect(appMocks.chatMountCount).toBe(1);
+      setState('editorContext', {
+        ...state.editorContext,
+        workspacePath: '/repo',
+        workspaceDirectory: '/repo',
+        workspaceFolders: [{ name: 'repo', path: '/repo' }],
+      });
+      expect(appMocks.chatMountCount).toBe(1);
+      setState('editorContext', {
+        ...state.editorContext,
+        workspacePath: '/varro/scratch',
+        workspaceDirectory: '/varro/scratch',
+        workspaceFolders: [],
+      });
+      expect(container?.textContent).toContain('New Chat');
+      expect(appMocks.chatMountCount).toBe(1);
+    }
+  );
+
+  it('keeps normal startup and recovery screens available without an open folder', () => {
     setState('editorContext', {
       ...state.editorContext,
-      workspacePath: null,
+      workspacePath: '/varro/scratch',
+      workspaceDirectory: '/varro/scratch',
       workspaceFolders: [],
     });
+    setState('serverStatus', { state: 'starting' });
     mountAppRoot();
-
-    expect(container?.textContent).toContain('Open a folder to use Varro');
-    expect(container?.textContent).not.toContain('New Chat');
-    const folderIcon = container?.querySelector<HTMLElement>('.ui-icon.text-vscode-muted');
-    expect(folderIcon?.style.getPropertyValue('--ui-icon-width')).toBe('40px');
-    expect(folderIcon?.style.getPropertyValue('--ui-icon-height')).toBe('40px');
-    expect(folderIcon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(statusIcons.folder));
-
-    const openFolderButton = Array.from(container?.querySelectorAll('button') ?? []).find(
-      (button) => button.textContent?.trim() === 'Open Folder'
-    );
-    openFolderButton?.click();
-    expect(appMocks.postMessage).toHaveBeenCalledWith({ type: 'vscode/open-folder' });
-
-    setState('editorContext', 'workspaceFolders', [{ name: 'repo', path: '/repo' }]);
-    expect(container?.textContent).not.toContain('Open a folder to use Varro');
+    expect(container?.textContent).toContain('Starting OpenCode...');
+    setState('serverStatus', { state: 'error', message: 'Failed to bind local server port' });
+    expect(container?.textContent).toContain('Failed to bind local server port');
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    expect(container?.querySelector('[aria-label="Loading workspace"]')).not.toBeNull();
+    expect(appMocks.chatMountCount).toBe(0);
+    setConnectionInitialized(true);
     expect(container?.textContent).toContain('New Chat');
+    expect(appMocks.chatMountCount).toBe(1);
   });
 
   it('renders the root fallback when app initialization throws', () => {

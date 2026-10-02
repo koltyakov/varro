@@ -55,6 +55,10 @@ the shared invariants below remain true.
   its painted destination. Reduced-motion following must not oscillate
   between virtual ranges while those writes settle. Cancel pending correction writes on disposal.
   Streamed entrance height updates also defer observer-triggered writes.
+  Consuming a trailing reserve also resizes the observed track, so observer-triggered reserve
+  reconciliation runs in the next animation frame. The latest painted follow destination is a
+  lower bound while the reserve is consumed. Measured entrances retain a fractional natural height
+  rather than rounding it up, so animation cleanup does not shrink the range by a painted pixel.
   `scroll-resize-observer.spec.ts` and `scroll-streaming.spec.ts` check
   browser error events and bottom-follow, including reduced motion.
 - `start/end` define the mounted overscan range. `coreStart/coreEnd` define the rows near the painted
@@ -257,6 +261,9 @@ the shared invariants below remain true.
 - A bottom-pinned activity exit may temporarily reserve the disappearing flow space and freeze its
   existing bottom target. The reserve is a bounded geometry owner, must not compete with bottom-follow,
   and yields immediately to direct user movement, session replacement, or transition cancellation.
+  Appended assistant steps must not start a measured append transition while this owner or its
+  retained summary anchor is active. A group-collapse settle restores that summary instead of
+  briefly jumping to a different bottom target and letting the summary undo it next frame.
 - Reaching the physical bottom during an exit that began while detached reserves the remaining
   animated tray height. Otherwise the shrinking scroll range reverses the just-completed gesture.
 - Transcript-scrolling keys release the old activity-exit target and summary anchor while handing its
@@ -495,6 +502,10 @@ Direct input acquires ownership only when it can affect the transcript:
 - Animation identity is a one-time message/render-key claim, not current DOM position. Virtual remount,
   completed-history reopening, or appending to an existing file-edit stack must not replay a claimed
   entrance.
+  A tool first painted as Editing without file metadata shares its entrance claim with the eventual
+  file-edit stack. Completion or late input must not collapse the painted card and replay its height
+  animation. `thinking-file-edit.spec.ts` checks the preceding paragraph every frame through completion
+  in short and measured transcripts.
 - File-edit stack entrances in a virtualized transcript publish their final height.
   Bottom-follow owns their reveal, as it does for measured message-row appends. Animating those inner
   heights leaves fractional row corrections after the content settles and briefly increases the

@@ -1067,6 +1067,40 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector<HTMLElement>('[data-part-id="edit-2"]')).not.toBeNull();
   });
 
+  it.each([false, true])(
+    'does not replay a painted patch when file metadata arrives (initial reveal: %s)',
+    async (allowInitialItemReveal) => {
+      const completed = previewFileEditPart('edit-1', 'PDPCOL3.md');
+      const running: ToolPart = {
+        ...completed,
+        tool: 'patch',
+        state: { status: 'running', input: {}, title: 'Editing', time: { start: 0 } },
+      };
+      const [parts, setParts] = createSignal<Part[]>([running]);
+      cleanup = render(
+        () => (
+          <AssistantMessageContent
+            info={createAssistantMessage({ time: { created: 0 } })}
+            parts={parts()}
+            allowInitialItemReveal={allowInitialItemReveal}
+            textForPart={() => null}
+          />
+        ),
+        container!
+      );
+      expect(container!.querySelector('[data-assistant-render-key="part:edit-1"]')).not.toBeNull();
+
+      setParts([{ ...completed, tool: 'patch' }]);
+      await Promise.resolve();
+      const stack = container!.querySelector(
+        '[data-assistant-render-key="file-edit-stack:edit-1"]'
+      );
+      expect(stack).not.toBeNull();
+      expect(stack!.classList).not.toContain('assistant-message-flow-item-streamed');
+      expect(stack!.classList).not.toContain('measured-entrance-active');
+    }
+  );
+
   it('retains file-edit children across completion, replacement, and stack splits', () => {
     setShowFileDiffs(true);
     const first = { ...previewFileEditPart('edit-1', 'src/a.ts'), tool: 'edit' };

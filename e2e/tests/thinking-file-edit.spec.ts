@@ -181,6 +181,63 @@ for (const measured of [false, true]) {
       Math.max(...samples.slice(1).map((sample, index) => sample.top - samples[index]!.top)),
       JSON.stringify(samples)
     ).toBeLessThanOrEqual(0.1);
+
+    const completionSamples = await page.evaluate(async (part) => {
+      // SAFETY: Only the isolated harness receives these synthetic tool events.
+      const harness = (
+        window as Window & { __varroE2E?: { replayServerEvent(event: ServerEvent): void } }
+      ).__varroE2E!;
+      const list = document.querySelector<HTMLElement>('.interactive-list')!;
+      const marker = [...list.querySelectorAll('.rendered-markdown p')].at(-1)!;
+      const sample = () => ({
+        top: marker.getBoundingClientRect().top,
+        editHeight:
+          document.querySelector('[data-msg-id="running-edit-message"]')?.getBoundingClientRect()
+            .height ?? 0,
+        cardHeight:
+          document
+            .querySelector('[data-msg-id="running-edit-message"] .chat-tool-invocation-part')
+            ?.getBoundingClientRect().height ?? 0,
+      });
+      const result = [sample()];
+      harness.replayServerEvent({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            ...part,
+            state: {
+              status: 'completed',
+              input: {
+                patchText:
+                  '*** Begin Patch\n*** Add File: PDPCOL3.md\n+Updated rules\n*** End Patch',
+              },
+              output: 'Success. Updated the following files:\nA PDPCOL3.md',
+              title: 'Patch',
+              metadata: {
+                files: [{ file: 'PDPCOL3.md', status: 'added', additions: 97, deletions: 0 }],
+              },
+              time: { start: Date.now() - 30_000, end: Date.now() },
+            },
+          } satisfies ToolPart,
+        },
+      });
+      result.push(sample());
+      for (let frame = 0; frame < 90; frame++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+        result.push(sample());
+      }
+      return result;
+    }, editPart);
+    await expect(page.locator('[data-msg-id="running-edit-message"]')).toContainText('PDPCOL3.md');
+    expect(
+      Math.max(
+        ...completionSamples
+          .slice(1)
+          .map((sample, index) => sample.top - completionSamples[index]!.top)
+      ),
+      JSON.stringify(completionSamples)
+    ).toBeLessThanOrEqual(0.1);
+    expect(completionSamples.every((sample) => sample.cardHeight > 0)).toBe(true);
   });
 }
 

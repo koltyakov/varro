@@ -40,9 +40,11 @@ export function prepareMeasuredEntrance(
 
     let targetHeight = -1;
     const updateTargetHeight = () => {
-      const nextHeight = Math.ceil(
-        Math.max(element.scrollHeight, element.getBoundingClientRect().height)
-      );
+      const renderedHeight = element.getBoundingClientRect().height;
+      // scrollHeight is integer-rounded. Prefer the exact box when it already contains
+      // the content, otherwise cleanup can shrink the range by a painted pixel.
+      const nextHeight =
+        element.scrollHeight <= Math.ceil(renderedHeight) ? renderedHeight : element.scrollHeight;
       if (nextHeight <= targetHeight) return;
       targetHeight = nextHeight;
       element.style.setProperty(options.heightProperty, `${targetHeight}px`);

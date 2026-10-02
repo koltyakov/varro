@@ -557,7 +557,7 @@
   ],
   "icon": "assets/icon.png",
   "galleryBanner": {
-    "color": "#24160f",
+    "color": "#232323",
     "theme": "dark"
   },
   "engines": {

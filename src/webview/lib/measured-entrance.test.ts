@@ -84,6 +84,20 @@ describe('prepareMeasuredEntrance', () => {
     expect(onFinish).not.toHaveBeenCalled();
   });
 
+  it('does not round a fractional natural box up for its entrance target', async () => {
+    const element = document.createElement('div');
+    Object.defineProperty(element, 'scrollHeight', { value: 23 });
+    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 0, 22.265625));
+    document.body.appendChild(element);
+    const dispose = prepareMeasuredEntrance(element, {
+      animationName: 'test-entrance',
+      heightProperty: '--test-entrance-height',
+    });
+    await Promise.resolve();
+    expect(element.style.getPropertyValue('--test-entrance-height')).toBe('22.265625px');
+    dispose();
+  });
+
   it('coalesces resize growth outside observer delivery and cancels it on cleanup', async () => {
     let notify: (() => void) | undefined;
     let nextFrame = 0;

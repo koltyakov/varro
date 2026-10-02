@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 
-test('starter hints use two columns and stack in a narrow view', async ({ page }) => {
+test('starter hints use two columns and share a left edge in a centered narrow group', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 480, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
@@ -49,24 +51,44 @@ test('starter hints use two columns and stack in a narrow view', async ({ page }
   expect(newlineBox!.x + newlineBox!.width / 2).toBeCloseTo(gridBox!.x + gridBox!.width / 2, 0);
   await expect(hints.nth(3)).toHaveCSS('opacity', '1');
 
-  await page.setViewportSize({ width: 240, height: 800 });
+  for (const width of [280, 240]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect
+      .poll(() =>
+        grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length)
+      )
+      .toBe(1);
+    const narrowLogoBox = await logo.boundingBox();
+    const center = narrowLogoBox!.x + narrowLogoBox!.width / 2;
+    const groupBox = await page.locator('.chat-empty-hints').boundingBox();
+    expect(groupBox!.x + groupBox!.width / 2).toBeCloseTo(center, 0);
+    const narrowBoxes = await hints.evaluateAll((elements) =>
+      elements.map((element) => {
+        const box = element.getBoundingClientRect();
+        const keycap = element.querySelector('kbd')!.getBoundingClientRect();
+        return { x: box.x, y: box.y, keycapX: keycap.x, right: box.right };
+      })
+    );
+    for (let index = 0; index < narrowBoxes.length; index++) {
+      const box = narrowBoxes[index]!;
+      expect(box.keycapX).toBeCloseTo(groupBox!.x, 0);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(width);
+      if (index > 0) expect(box.y).toBeGreaterThan(narrowBoxes[index - 1]!.y);
+    }
+    const narrowNewlineBox = await newlineHint.boundingBox();
+    expect(narrowNewlineBox!.x).toBeCloseTo(groupBox!.x, 0);
+    const shiftBox = await newlineHint.locator('kbd').first().boundingBox();
+    expect(shiftBox!.x).toBeCloseTo(groupBox!.x, 0);
+  }
+
+  await page.setViewportSize({ width: 480, height: 800 });
+  await expect(newlineHint).toHaveCSS('align-self', 'center');
   await expect
     .poll(() =>
       grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length)
     )
-    .toBe(1);
-  const narrowBoxes = await hints.evaluateAll((elements) =>
-    elements.map((element) => {
-      const box = element.getBoundingClientRect();
-      return { x: box.x, y: box.y, right: box.right };
-    })
-  );
-  for (let index = 0; index < narrowBoxes.length; index++) {
-    const box = narrowBoxes[index]!;
-    expect(box.x).toBe(narrowBoxes[0]!.x);
-    expect(box.right).toBeLessThanOrEqual(240);
-    if (index > 0) expect(box.y).toBeGreaterThan(narrowBoxes[index - 1]!.y);
-  }
+    .toBe(2);
 });
 
 for (const lightTheme of ['vscode-light', 'vscode-high-contrast-light']) {

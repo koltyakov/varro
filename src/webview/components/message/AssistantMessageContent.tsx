@@ -95,6 +95,11 @@ function getActivityGroupRevealTrackingKey(parts: readonly AssistantActivityPart
 
 function getRevealTrackingKey(item: AssistantRenderItem) {
   if (item.kind === 'activity-group') return getActivityGroupRevealTrackingKey(item.parts);
+  // File metadata can arrive after the same tool has already painted as Editing.
+  // Changing its wrapper to an edit stack must not replay the entrance height.
+  if (item.kind === 'file-edit-stack') {
+    return `part:${item.key.slice('file-edit-stack:'.length)}`;
+  }
   return item.key;
 }
 

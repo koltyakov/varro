@@ -1679,6 +1679,7 @@ export function MessageList() {
   let loadingRowHiddenByVisibleStream = false;
   let loadingRowReservedForMessageHydration = false;
   let appendBottomReserveTarget = 0;
+  let appendReserveReconcileFrame = 0;
   let permissionRemovalBottomTarget: {
     createdAt: number;
     permissionIds: Set<string>;
@@ -1729,6 +1730,8 @@ export function MessageList() {
     const detachedAnchor = widthResizeCanOwnScroll()
       ? (pendingThinkingLayoutAnchor ?? widthResizeAnchor)
       : null;
+    // Account for pending rounding reductions before they shrink the physical scroll range.
+    reconcileAppendBottomReserve();
     let changed = false;
     for (const [element, correction] of pendingRowHeightCorrections) {
       if (!element.isConnected) continue;
@@ -4820,8 +4823,11 @@ export function MessageList() {
       }
       activityExitBottomTarget = null;
       reconcileAppendBottomReserve();
-      setPreservedScrollTop(collapseTarget);
-      lastAutoScrolledBottomScrollTop = collapseTarget;
+      // Coalescing groups can finish while a retained summary still owns the viewport.
+      // Do not jump to the collapse target and let that owner undo it on the next frame.
+      if (activityExitSummaryAnchor) restoreActivityExitSummaryAnchor(activityExitSummaryAnchor);
+      else setPreservedScrollTop(collapseTarget);
+      lastAutoScrolledBottomScrollTop = containerRef.scrollTop;
       const sessionId = state.activeSessionId;
       if (sessionId) startFollowLoop(sessionId);
     });
@@ -5200,6 +5206,10 @@ export function MessageList() {
     }
     const unreservedBottom =
       containerRef.scrollHeight - reserve - containerRef.clientHeight - pendingHeightReduction;
+    if (autoScroll() && pinnedToBottom && !stickyNavigationOwnsScroll()) {
+      // A newer follow position is a lower bound, including while deferred rounding settles.
+      appendBottomReserveTarget = Math.max(appendBottomReserveTarget, containerRef.scrollTop);
+    }
     const nextReserve = Math.max(0, Math.ceil(appendBottomReserveTarget - unreservedBottom));
     if (Math.abs(nextReserve - reserve) <= 0.5) return;
     setAppendBottomReserve(nextReserve);
@@ -5335,6 +5345,12 @@ export function MessageList() {
   }
 
   function startPendingAppendScrollTransition(sessionId: string) {
+    if (activityExitBottomTarget !== null || activityExitSummaryAnchor) {
+      // New assistant steps must not restore an append anchor or animate the viewport
+      // against the current activity-collapse owner. Real response growth releases it.
+      cancelAppendScrollTransition();
+      return false;
+    }
     if (appendScrollSessionId === sessionId && appendScrollRafId) {
       pendingMeasuredAppendScroll = false;
       const appendAnchor = pendingMeasuredAppendAnchor;
@@ -6998,7 +7014,14 @@ export function MessageList() {
       } else if (containerHeightDelta < -0.5) {
         consumeBottomReserve(-containerHeightDelta);
       }
-      if (trackChanged) reconcileAppendBottomReserve();
+      if (trackChanged && !appendReserveReconcileFrame) {
+        // Consuming a reserve changes the observed track itself. A microtask still runs
+        // inside resize delivery, so coalesce that write into the next animation frame.
+        appendReserveReconcileFrame = requestAnimationFrame(() => {
+          appendReserveReconcileFrame = 0;
+          if (!disposed) reconcileAppendBottomReserve();
+        });
+      }
       if (trackChanged && shouldMeasureRows() && !autoScroll()) {
         setTrackLayoutVersion((version) => version + 1);
       }
@@ -7082,6 +7105,8 @@ export function MessageList() {
       measuredRowObserver = null;
       if (rowHeightCorrectionFrame) cancelAnimationFrame(rowHeightCorrectionFrame);
       rowHeightCorrectionFrame = 0;
+      if (appendReserveReconcileFrame) cancelAnimationFrame(appendReserveReconcileFrame);
+      appendReserveReconcileFrame = 0;
       pendingRowHeightCorrections.clear();
       mountedMessageRows.clear();
       clearObservedVisibleMessages();
@@ -7280,6 +7305,8 @@ export function MessageList() {
     cancelWidthResize();
     setHasBootstrappedVirtualization(false);
     setAppendBottomReserve(0);
+    if (appendReserveReconcileFrame) cancelAnimationFrame(appendReserveReconcileFrame);
+    appendReserveReconcileFrame = 0;
     clearActivityExitReserve();
     appendBottomReserveTarget = 0;
     newTurnReserveSessionId = null;
