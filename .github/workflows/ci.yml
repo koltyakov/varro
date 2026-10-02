@@ -13,11 +13,9 @@ permissions:
 jobs:
 
   build-and-test:
+    name: Linux build and test
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      matrix:
-        node-version: [24.21.0]
 
     steps:
       - name: Check out repository
@@ -26,7 +24,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 24.21.0
           cache: npm
 
       - name: Use pinned npm
@@ -39,9 +37,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: tmp/test-cache
-          key: test-results-v1-${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: test-results-v1-${{ runner.os }}-node-24.21.0-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            test-results-v1-${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-
+            test-results-v1-${{ runner.os }}-node-24.21.0-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-
 
       - name: Typecheck
         run: npm run typecheck
@@ -68,11 +66,9 @@ jobs:
         run: npm run package:vsix
 
   windows:
+    name: Windows build and test
     runs-on: windows-latest
     timeout-minutes: 15
-    strategy:
-      matrix:
-        node-version: [24.21.0]
 
     steps:
       - name: Check out repository
@@ -81,7 +77,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 24.21.0
           cache: npm
 
       - name: Use pinned npm
@@ -95,9 +91,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: tmp/test-cache
-          key: test-results-v1-${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: test-results-v1-${{ runner.os }}-node-24.21.0-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            test-results-v1-${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-
+            test-results-v1-${{ runner.os }}-node-24.21.0-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-
 
       - name: Typecheck
         run: npm run typecheck
