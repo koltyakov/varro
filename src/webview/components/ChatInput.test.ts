@@ -6390,6 +6390,67 @@ describe('ChatInput', () => {
     expect(container?.querySelector('[aria-label="Retry send as Steer"]')).not.toBeNull();
   });
 
+  it('waits for restored inline-edit images to decode before accepting Enter', async () => {
+    setupModelState();
+    setState('providers', 0, 'models', 'gpt-4o', 'capabilities', 'vision', true);
+    setState('activeSessionId', 'session-1');
+    setState('messages', [
+      {
+        info: {
+          id: 'message-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-4o' },
+        },
+        parts: [],
+      },
+    ]);
+    let finishDecode: ((image: HTMLImageElement) => void) | undefined;
+    vi.mocked(imageLoading.loadImage).mockImplementationOnce(
+      () => new Promise((resolve) => (finishDecode = resolve))
+    );
+    const image = {
+      id: 'edit-img',
+      url: 'data:image/png;base64,restored',
+      mime: 'image/png',
+      filename: 'Image 1',
+      size: 10,
+    };
+    cleanup = render(() => ChatInput(), container!);
+    startEditingMessage('message-1', 'session-1', 'edited prompt', {
+      files: [],
+      images: [image],
+      terminalSelection: null,
+    });
+    await flushAsyncWork();
+
+    const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
+    const send = container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!;
+    expect(container!.querySelector('.chat-attachment-chip')).not.toBeNull();
+    expect(send.disabled).toBe(true);
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(editMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('edited prompt');
+
+    expect(finishDecode).toBeDefined();
+    finishDecode?.(document.createElement('img'));
+    await flushAsyncWork();
+    expect(send.disabled).toBe(false);
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+    expect(editMessageMock).toHaveBeenCalledWith(
+      'message-1',
+      'edited prompt',
+      expect.objectContaining({
+        queuedAttachments: expect.objectContaining({
+          clipboardImages: [expect.objectContaining(image)],
+        }),
+      })
+    );
+  });
+
   it('restores edited message context and restores draft context on cancel', async () => {
     setState('activeSessionId', 'session-1');
     setInputText('draft prompt');
