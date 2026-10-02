@@ -923,6 +923,14 @@ edit, not a successful AI-07 scrolling verdict. The root session is openable in 
 and inventories one child session for route testing. Cleanup must remove that run-created child and
 verify its recorded ancestry.
 
+The child appends one uniquely marked comment to `packages/opencode/src/util/timeout.ts`.
+The controller saves that file's original bytes beside the manifest before sending, waits for the
+child to become idle, saves the observed edit, and restores only that file while the commit remains
+unchanged. It then verifies the original commit,
+status, changed paths, and content hash. Unexpected content remains a failed containment check even
+after restoration; a still-running child never permits restoration. The model is not responsible for
+undoing its own edit.
+
 The controller records its deterministic plan before acting, then performs these operations through the
 real webviews and native VS Code workbench commands:
 

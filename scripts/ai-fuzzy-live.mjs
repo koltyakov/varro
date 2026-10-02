@@ -18,6 +18,7 @@ import { AiOpenCodeClient } from './ai-opencode-client.mjs';
 import { normalizeCapturedEvents, savePlaybackCapture } from './ai-session-playback.mjs';
 import { installObserver } from './ai-streaming.mjs';
 import { goToLatest } from './ai-fuzzy-navigation.mjs';
+import { ReversibleFixtureEdit } from './ai-fuzzy-fixture-edit.mjs';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_MODEL = 'openai/gpt-6-luna-fast';
@@ -3040,17 +3041,61 @@ async function runMultiWebviewScenario({
     evidence.leakage.rootAbsentFromChild = !(await editor.evaluate(
       `${JSON.stringify(rootMarkers)}.some((marker) => document.body.innerText.includes(marker))`
     ));
-    await client.send(
-      child.id,
-      `${childEditTurn.promptMarker} Work only in the current OpenCode repository. Read packages/opencode/src/util/timeout.ts. Use the edit tool to append the exact temporary comment " // VFZ AI18 transient" to the line "let timeout: NodeJS.Timeout", then use the edit tool again to remove exactly that comment so the file returns byte-for-byte to its starting content. Verify the final repository status still has exactly the pre-existing changed paths and run git diff --check. Do not touch any other content, spawn subagents, or delegate work. Finish with ${childEditTurn.responseMarker}.`,
-      parseModel(requestedModel)
+    const childEdit = new ReversibleFixtureEdit(
+      manifest.workspace,
+      'packages/opencode/src/util/timeout.ts',
+      `VFZ AI18 transient ${manifest.seed} R${String(promptRun)}`
     );
-    if (!(await waitForBusy(client, child.id, Math.min(timeoutMs, 15_000)))) {
-      throw new Error('AI-18 child edit stream did not become busy');
+    const childEditEvidencePath = `${manifestPath}.AI-18.R${String(promptRun)}.fixture-edit.json`;
+    await childEdit.prepare(childEditEvidencePath);
+    let childEditSettled = false;
+    let childEditSent = false;
+    let childEditError = null;
+    try {
+      await client.send(
+        child.id,
+        `${childEditTurn.promptMarker} Work only in the current OpenCode repository. Read ${childEdit.relativePath}. Use the edit tool once to append the exact standalone comment ${JSON.stringify(childEdit.comment)} at the end of the file. Preserve all existing bytes and line endings. Leave this comment in place; the test controller will restore the recorded original after your turn. Do not change any other content, spawn subagents, or delegate work. Finish with ${childEditTurn.responseMarker}.`,
+        parseModel(requestedModel)
+      );
+      childEditSent = true;
+      if (!(await waitForBusy(client, child.id, Math.min(timeoutMs, 15_000)))) {
+        throw new Error('AI-18 child edit stream did not become busy');
+      }
+      if (!(await waitForIdle(client, child.id, timeoutMs * 3))) {
+        throw new Error('AI-18 child edit stream did not settle');
+      }
+      childEditSettled = true;
+    } catch (error) {
+      childEditError = error;
     }
-    if (!(await waitForIdle(client, child.id, timeoutMs * 3))) {
-      throw new Error('AI-18 child edit stream did not settle');
+    try {
+      // Never race a still-running model or an unacknowledged send.
+      if (childEditSent && (childEditSettled || !(await client.isBusy(child.id)))) {
+        const beforeRestoration = await fixtureStatus(manifest.workspace);
+        if (beforeRestoration.commit !== fixture.commit) {
+          throw new Error('AI-18 fixture commit changed; file restoration was not attempted');
+        }
+        evidence.fixtureEdit = {
+          ...(await childEdit.restore()),
+          evidencePath: childEditEvidencePath,
+        };
+      } else {
+        evidence.fixtureEdit = {
+          restored: false,
+          reason: 'child stream is busy or send was not acknowledged',
+          evidencePath: childEditEvidencePath,
+        };
+      }
+      manifest.livePreparation['AI-18'].fixtureEdit = evidence.fixtureEdit;
+      await writeJsonAtomic(manifestPath, manifest);
+    } catch (error) {
+      throw new AggregateError(
+        [childEditError, error].filter(Boolean),
+        'AI-18 fixture edit or restoration failed',
+        { cause: error }
+      );
     }
+    if (childEditError) throw childEditError;
     const childEditMessages = await client.messages(child.id, 1000);
     const childEditUsers = childEditMessages.filter(
       (entry) =>
@@ -3081,6 +3126,11 @@ async function runMultiWebviewScenario({
       JSON.stringify(fixtureAfterChildEdit.changedPaths) !== JSON.stringify(fixture.changedPaths)
     ) {
       throw new Error('AI-18 child edit turn did not preserve the exact recorded fixture state');
+    }
+    if (!evidence.fixtureEdit?.expectedEdit) {
+      throw new Error(
+        'AI-18 child did not make the exact authorized fixture edit; original bytes restored'
+      );
     }
     // The palette only offers Show when inline diffs are currently disabled.
     if (!(await editor.point('.file-change-inline-diffs', 'center', childEditScope))) {

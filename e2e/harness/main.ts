@@ -209,7 +209,7 @@ type HarnessWindow = Window & {
     pendingHistoryRequestCount?: () => number;
     getSessionMessages?: (sessionId: string) => MessageEntry[];
     getPendingPermissions?: () => Array<Record<string, unknown>>;
-    replayServerEvent?: (event: unknown) => void;
+    replayServerEvent?: (event: unknown, projectedMessage?: MessageEntry) => void;
   };
 };
 
@@ -5103,10 +5103,28 @@ function dispatchToWebview(message: unknown) {
   window.postMessage(message, '*');
 }
 
-function replayServerEvent(state: ScenarioState, eventValue: unknown) {
+function replayServerEvent(
+  state: ScenarioState,
+  eventValue: unknown,
+  projectedMessage?: MessageEntry
+) {
   const event = asRecord(eventValue);
   const properties = asRecord(event.properties);
   const type = event.type;
+  if (projectedMessage) {
+    const sessionId = projectedMessage.info.sessionID;
+    const messages = state.messagesBySessionId[sessionId];
+    if (
+      !messages ||
+      properties.sessionID !== sessionId ||
+      !String(type).startsWith('session.next.')
+    ) {
+      throw new Error('Native playback snapshot has invalid session routing');
+    }
+    const index = messages.findIndex((entry) => entry.info.id === projectedMessage.info.id);
+    if (index < 0) messages.push(structuredClone(projectedMessage));
+    else messages[index] = structuredClone(projectedMessage);
+  }
   if (type === 'message.updated') {
     const info = asRecord(properties.info);
     const sessionId = typeof info.sessionID === 'string' ? info.sessionID : '';
@@ -6359,7 +6377,8 @@ function setUpHarness() {
     updateSessionStatus: (sessionId, status) => {
       scenarioState.sessionStatuses[sessionId] = status;
     },
-    replayServerEvent: (event) => replayServerEvent(scenarioState, event),
+    replayServerEvent: (event, projectedMessage) =>
+      replayServerEvent(scenarioState, event, projectedMessage),
   };
   document.body.dataset.vscodeThemeKind = THEME;
   if (THEME !== 'dark') {

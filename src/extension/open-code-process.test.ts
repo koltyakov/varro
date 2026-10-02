@@ -20,6 +20,7 @@ import { homedir, tmpdir } from 'os';
 import type * as OsModule from 'os';
 import { dirname, join, resolve as resolvePath } from 'path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { TestContext } from 'vitest';
 import type { ManagedServerOwnershipLease } from '../shared/server-ownership';
 import { asRecord } from '../shared/type-utils';
 import type * as ServerUtils from './server-utils';
@@ -142,6 +143,22 @@ import {
 } from './open-code-process';
 
 const originalPlatform = process.platform;
+
+async function requireFileSymlink(context: TestContext, target: string, link: string) {
+  try {
+    await symlink(target, link);
+  } catch (error) {
+    if (
+      originalPlatform === 'win32' &&
+      error instanceof Error &&
+      'code' in error &&
+      (error.code === 'EPERM' || error.code === 'EACCES')
+    ) {
+      context.skip('File symlinks require Windows Developer Mode or symlink privilege');
+    }
+    throw error;
+  }
+}
 const originalGeteuid = Object.getOwnPropertyDescriptor(process, 'geteuid');
 const originalOpenCodeConfig = process.env.OPENCODE_CONFIG;
 const originalOpenCodeConfigContent = process.env.OPENCODE_CONFIG_CONTENT;
@@ -1537,7 +1554,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     }
   });
 
-  it('rejects public and symlinked default ownership records without altering them', async () => {
+  it('rejects public and symlinked default ownership records without altering them', async (context) => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const root = await mkdtemp(join(tmpdir(), 'varro-private-record-'));
     vi.stubEnv('XDG_STATE_HOME', root);
@@ -1553,7 +1570,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       await chmod(path, 0o600);
       await expect(manager.refreshStartupRegistration()).rejects.toThrow('left untouched');
       await rm(path);
-      await symlink(victim, path);
+      await requireFileSymlink(context, victim, path);
       await expect(manager.refreshStartupRegistration()).rejects.toThrow('not private');
       expect(await readFile(victim, 'utf8')).toBe('keep');
     } finally {
@@ -2102,13 +2119,12 @@ describe('OpenCodeProcess server ownership leases', () => {
     }
   });
 
-  it('recovers a legacy marker after macOS loses the replaced executable path', async () => {
+  it('recovers a legacy marker after macOS loses the replaced executable path', async (context) => {
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
     const root = await realpath(await mkdtemp(join(tmpdir(), 'ownership-macos-update-')));
     const executable = join(root, 'opencode.exe');
     const command = join(root, 'opencode2');
     await writeFile(executable, 'updated binary');
-    await symlink(executable, command);
     const path = join(tmpdir(), 'varro-opencode-server-49878.json');
     const marker = {
       pid: MOCK_LINUX_PID,
@@ -2141,6 +2157,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       return result;
     });
     try {
+      await requireFileSymlink(context, executable, command);
       const manager = new OpenCodeProcess(49878, true);
       await expect(manager.takeOwnershipOfExistingServer()).resolves.toBe(true);
       expect(manager.serverOwnership).toBe('current-host');
@@ -2565,8 +2582,9 @@ describe('OpenCodeProcess server ownership leases', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  it('confirms a spawned Linux descendant through procfs when inspection tools are unavailable', async () => {
-    if (originalPlatform === 'win32') return;
+  it('confirms a spawned Linux descendant through procfs when inspection tools are unavailable', async (context) => {
+    if (originalPlatform === 'win32')
+      context.skip('Linux procfs fixtures require POSIX socket symlinks');
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');

@@ -19,11 +19,36 @@ test.describe('scroll stability regressions', () => {
       page,
     }) => {
       await page.emulateMedia({ reducedMotion });
+      const initialErrors: string[] = [];
+      page.on('pageerror', (error) => initialErrors.push(error.message));
       await page.goto('/e2e/harness/index.html?scenario=large-transcript');
       const list = page.locator('.interactive-list');
-      await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-        .toBeLessThan(2);
+      const initialSamples: Awaited<ReturnType<typeof getScrollMetrics>>[] = [];
+      try {
+        await expect
+          .poll(async () => {
+            const metrics = await getScrollMetrics(page, '.interactive-list');
+            initialSamples.push(metrics);
+            return metrics.distanceFromBottom;
+          })
+          .toBeLessThan(2);
+      } catch (error) {
+        const geometry = await list.evaluate((element) => ({
+          viewport: element.getBoundingClientRect().toJSON(),
+          visibility: getComputedStyle(element).visibility,
+          trackClass: element.querySelector('.interactive-list-track')?.className,
+          rows: Array.from(element.querySelectorAll<HTMLElement>('[data-msg-id]')).map((row) => ({
+            id: row.dataset.msgId,
+            rect: row.getBoundingClientRect().toJSON(),
+            visibility: getComputedStyle(row).visibility,
+          })),
+        }));
+        await test.info().attach('initial-bottom-follow-diagnostics', {
+          body: JSON.stringify({ reducedMotion, initialSamples, initialErrors, geometry }, null, 2),
+          contentType: 'application/json',
+        });
+        throw error;
+      }
       await waitForAnimationFrames(page, 4);
 
       const { samples, errors: browserErrors } = await list.evaluate(async (element) => {
@@ -142,6 +167,14 @@ test.describe('scroll stability regressions', () => {
     await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
+    const row = page.locator('[data-msg-id="message-rapid-assistant-streaming"]');
+    await expect(row).not.toHaveClass(/interactive-item-entering/);
+    // Pause before the new item mounts. A slow host can otherwise finish its
+    // 180ms animation before Playwright acquires it, leaving no clipped geometry.
+    await page.addStyleTag({
+      content:
+        '.assistant-message-flow-item-streamed.measured-entrance-active { animation-play-state: paused; }',
+    });
     await list.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
       element.dispatchEvent(new Event('scroll'));
@@ -180,9 +213,16 @@ test.describe('scroll stability regressions', () => {
       .last();
     await expect(entering).toBeAttached();
     const geometry = await entering.evaluate(async (element) => {
-      const animation = element.getAnimations()[0];
-      animation?.pause();
-      if (animation) animation.currentTime = 90;
+      const animation = element
+        .getAnimations()
+        .find(
+          (candidate) =>
+            candidate instanceof CSSAnimation &&
+            candidate.animationName === 'streamed-assistant-item-in'
+        );
+      if (!animation) throw new Error('Clipping fixture needs an active streamed item animation');
+      animation.pause();
+      animation.currentTime = 90;
       const transcript = element.closest<HTMLElement>('.interactive-list')!;
       let stableFrames = 0;
       let previousHeight = -1;
