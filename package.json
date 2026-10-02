@@ -58,6 +58,8 @@
     "compatibility:discover": "node scripts/opencode-compatibility/run.mjs --report artifacts/opencode-compatibility.json",
     "pretest:e2e": "playwright install chromium",
     "test:e2e": "node scripts/run-e2e.mjs",
+    "pretest:e2e:cached": "playwright install chromium",
+    "test:e2e:cached": "node scripts/run-cached-e2e.mjs",
     "pretest:e2e:raster": "playwright install chromium",
     "test:e2e:raster": "VARRO_E2E_MODE=raster node scripts/run-e2e.mjs",
     "test:vscode-sandbox": "npm run build && node scripts/vscode-sandbox/run.mjs",

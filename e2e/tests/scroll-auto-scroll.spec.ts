@@ -10,6 +10,76 @@ import {
 import { appendDeltaToLastLargeAssistant, appendDeltaToRapidStreaming } from './scroll-helpers';
 
 test.describe('auto-scroll', () => {
+  for (const growth of ['new lines', 'wrapped text', 'attachment'] as const) {
+    test(`keeps the bottom aligned immediately when the composer grows from ${growth}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 504, height: 900 });
+      await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+      const composer = page.getByRole('textbox', { name: 'Message composer' });
+      await expect(composer).toBeVisible();
+      await expect
+        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .toBeLessThan(1);
+      await waitForAnimationFrames(page, 4);
+
+      await page.evaluate(() => {
+        const list = document.querySelector<HTMLElement>('.interactive-list')!;
+        let previousHeight = list.clientHeight;
+        const samples: Array<{ height: number; distance: number }> = [];
+        (
+          window as typeof window & { composerGrowthSamples?: typeof samples }
+        ).composerGrowthSamples = samples;
+        const observer = new ResizeObserver(() => {
+          if (list.clientHeight < previousHeight) {
+            samples.push({
+              height: list.clientHeight,
+              distance: list.scrollHeight - list.clientHeight - list.scrollTop,
+            });
+          }
+          previousHeight = list.clientHeight;
+        });
+        observer.observe(list);
+      });
+
+      if (growth === 'attachment') {
+        await page.evaluate(() =>
+          window.postMessage(
+            {
+              type: 'command/attach-problems',
+              payload: {
+                diagnostics: [
+                  { path: '/workspace/example.ts', line: 1, severity: 'error', message: 'Example' },
+                ],
+              },
+            },
+            '*'
+          )
+        );
+        await expect(
+          page.locator('.chat-attachments-container .chat-attachment-chip')
+        ).toBeVisible();
+      } else {
+        await composer.fill(
+          growth === 'new lines'
+            ? Array.from({ length: 8 }, (_, index) => `Draft line ${index}`).join('\n')
+            : 'A long draft that wraps as I type into the chat input. '.repeat(15)
+        );
+      }
+      await waitForAnimationFrames(page, 4);
+      const samples = await page.evaluate(
+        () =>
+          (window as typeof window & { composerGrowthSamples?: Array<{ distance: number }> })
+            .composerGrowthSamples ?? []
+      );
+      expect(samples.length).toBeGreaterThan(0);
+      expect(
+        samples.every((sample) => Math.abs(sample.distance) < 1),
+        JSON.stringify(samples)
+      ).toBe(true);
+    });
+  }
+
   test('starts at the bottom of the conversation', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');

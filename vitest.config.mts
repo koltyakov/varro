@@ -5,6 +5,16 @@ import { configDefaults, defineConfig } from 'vitest/config';
 
 const { version } = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8'));
 const windowsNativeTest = 'src/extension/windows-process-inspector.integration.test.ts';
+const backendTests = ['src/{extension,shared}/**/*.test.{ts,tsx}'];
+const jsdomBackendTests = [
+  'src/extension/about-view.test.ts',
+  'src/extension/commands.test.ts',
+  'src/extension/opencode-v2.integration.test.ts',
+  // These legacy filesystem mocks depend on jsdom's builtin-module resolution.
+  'src/extension/server.test.ts',
+  'src/extension/sidebar-provider.export.test.ts',
+  'src/shared/attention-contract.test.ts',
+];
 
 export default defineConfig({
   define: { __VARRO_VERSION__: JSON.stringify(version) },
@@ -22,10 +32,18 @@ export default defineConfig({
       {
         extends: true,
         test: {
+          name: 'backend',
+          environment: 'node',
+          include: backendTests,
+          exclude: [...configDefaults.exclude, windowsNativeTest, ...jsdomBackendTests],
+        },
+      },
+      {
+        extends: true,
+        test: {
           name: 'unit',
           environment: 'jsdom',
-          include: ['src/**/*.test.{ts,tsx}'],
-          exclude: [...configDefaults.exclude, windowsNativeTest],
+          include: ['src/{webview,test}/**/*.test.{ts,tsx}', ...jsdomBackendTests],
           setupFiles: ['./vitest.setup.ts'],
         },
       },

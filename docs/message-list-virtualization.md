@@ -328,6 +328,9 @@ Direct input acquires ownership only when it can affect the transcript:
   reserve. Track `min-height` can hide a small unreachable target, and repeated reconciliation then
   accumulates blank reserve until the scrollbar appears. `scroll-short-transcript.spec.ts` covers
   the native first send, its initial settling, and subsequent activity every frame.
+- Composer growth from wrapped text, new lines, or attachments immediately reconciles bottom-follow
+  before paint, without easing. Detached readers retain their position. Later transcript growth keeps
+  normal follow motion.
 - Send-time composer collapse eases its held minimum height over 220 ms. Before each shrinking frame,
   reserve only the scroll-range shortfall at the current painted scroll position. Reserving the whole
   height delta makes bottom-follow chase temporary space and leaves an unnecessary trailing reserve.

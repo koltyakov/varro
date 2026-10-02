@@ -214,8 +214,8 @@ describe('UsageReportService', () => {
     let resolveUsage!: (value: { sessionCount: number; usage: [] }) => void;
     const readLocalUsage = vi.fn(
       () =>
-        new Promise<{ sessionCount: number; usage: [] }>((resolve) => {
-          resolveUsage = resolve;
+        new Promise<{ sessionCount: number; usage: [] }>((resolveResult) => {
+          resolveUsage = resolveResult;
         })
     );
     const service = new UsageReportService(
@@ -239,8 +239,8 @@ describe('UsageReportService', () => {
       .fn()
       .mockImplementationOnce(
         () =>
-          new Promise<{ sessionCount: number; usage: [] }>((resolve) => {
-            resolveUsage = resolve;
+          new Promise<{ sessionCount: number; usage: [] }>((resolveResult) => {
+            resolveUsage = resolveResult;
           })
       )
       .mockResolvedValueOnce({ sessionCount: 0, usage: [] });

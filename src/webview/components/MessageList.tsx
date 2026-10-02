@@ -6877,8 +6877,15 @@ export function MessageList() {
         scheduleStickyPreviewViewportState(containerRef.scrollTop, currentContainerClientHeight);
       }
       if (trackChanged || containerHeightChanged || widthChanged) {
-        if (trackChanged && shouldCorrectBottomAfterResize()) {
-          performScroll({ force: true });
+        const localViewportShrinking =
+          containerHeightDelta < -0.5 && !hostViewportResizing && !widthChanged;
+        if ((trackChanged || localViewportShrinking) && shouldCorrectBottomAfterResize()) {
+          // Composer growth removes viewport space, so keep the bottom aligned before paint.
+          // Transcript growth and host reflow retain their normal follow motion.
+          performScroll({
+            force: true,
+            immediate: localViewportShrinking,
+          });
           if (widthChanged && widthResizeActive) {
             pendingWidthFollowCorrection = true;
           } else {

@@ -45,6 +45,12 @@ While iterating, run the narrowest relevant command for the area you changed. Us
 - `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`
 - `npm run test:e2e -- e2e/tests/layout.spec.ts`
 
+Vitest runs most extension and shared tests in Node without loading jsdom. Webview tests, About-page
+and command DOM tests, the v2 adapter/UI integration test, the host/webview attention contract, and
+two legacy filesystem-mock fixtures retain jsdom and the browser setup. Native Windows process
+inspection runs after the other projects so PowerShell startup does not compete with unit workers.
+Both CI jobs keep all tests, and Linux keeps the full-project coverage thresholds.
+
 ### Cached test runs
 
 `npm run test:affected` runs unit and Node script tests whose successful cached result no longer
@@ -59,8 +65,16 @@ tests. Browser script tests also use the cache, separately from the E2E runs. Li
 `npm run test:coverage:cached`, which reuses a successful full-suite coverage result only when the
 whole checkout is unchanged. Otherwise it runs full coverage and enforces the existing thresholds;
 partial coverage is never treated as a full-suite result. Cache hits do not regenerate coverage reports.
-E2E, compatibility, and VS Code smoke tests remain uncached. Lint, typecheck, builds, and packaging
-still run normally.
+`npm run test:e2e:cached` reuses a successful full E2E suite only when the whole checkout, Vite env
+files, test environment, OS version, CPU parallelism, Node version, and actual Chromium version match.
+It installs Chromium if needed and briefly launches it even on a cache hit to verify the browser.
+Results live in `tmp/test-cache/e2e.json`. Failed or interrupted runs are not cached. Any CLI arguments
+(including spec filters, `--list`, `--last-failed`, or shards) and custom `VARRO_E2E_MODE` values bypass
+the cache without updating it. Cache hits do not regenerate traces or test reports and are not fresh
+timing or flakiness checks. Use `npm run test:e2e` to force a fresh full run; CI continues to do so.
+
+Compatibility and VS Code smoke tests remain uncached. Lint, typecheck, builds, and packaging still
+run normally.
 
 Use `npm test`, `npm run test:scripts`, `npm run test:scripts:browser`, or `npm run test:coverage`
 to force their full suites without consulting or updating the cache.

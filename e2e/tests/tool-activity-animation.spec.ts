@@ -3,7 +3,7 @@ import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry, Session, ToolPart } from '../../src/webview/types';
 
 for (const expandable of [false, true]) {
-  test(`running command animation retains normal contrast with ${expandable ? 'expandable' : 'non-expandable'} content`, async ({
+  test(`running command sweeps a wave left to right with ${expandable ? 'expandable' : 'non-expandable'} content`, async ({
     page,
   }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -25,7 +25,15 @@ for (const expandable of [false, true]) {
         agent: 'build',
         model: { providerID: 'openai', modelID: 'gpt-5' },
       },
-      parts: [],
+      parts: [
+        {
+          id: 'animation-prompt',
+          sessionID: session.id,
+          messageID: 'animation-user',
+          type: 'text',
+          text: 'Clone the repository.',
+        },
+      ],
     };
     const assistant: MessageEntry = {
       info: {
@@ -54,6 +62,7 @@ for (const expandable of [false, true]) {
     );
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     await expect(page.locator('.interactive-list')).toBeVisible();
+    await expect(page.locator('.chat-turn-user')).toContainText('Clone the repository.');
     const state: ToolPart['state'] = {
       status: 'running',
       input: { command: 'git clone https://github.com/example/repo.git tmp/repo' },
@@ -94,21 +103,40 @@ for (const expandable of [false, true]) {
     const foreground = await header.evaluate((element) => getComputedStyle(element).color);
     await expect(icon).toHaveCSS('color', foreground);
     await expect(title).toHaveCSS('color', foreground);
-    await expect(title).toHaveCSS('-webkit-text-fill-color', foreground);
-    await expect(title).toHaveCSS('background-image', 'none');
+    await expect(title).toHaveCSS('-webkit-text-fill-color', 'rgba(0, 0, 0, 0)');
+    await expect(title).not.toHaveCSS('background-image', 'none');
+    await expect(title).toHaveCSS('background-clip', 'text');
+    await expect(title).toHaveCSS('background-size', '200% 100%');
+    await expect(title).toHaveCSS('flex', '0 1 auto');
+    await expect(title).toHaveCSS('animation-name', 'tool-activity-wave');
+    await expect(title).toHaveCSS('animation-duration', '2s');
+    await expect(title).toHaveCSS('animation-timing-function', 'linear');
+    for (const [time, position] of [
+      [0, '150% 0px'],
+      [500, '100% 0px'],
+      [1000, '50% 0px'],
+      [1500, '0% 0px'],
+      [2000, '150% 0px'],
+    ] as const) {
+      await title.evaluate((element, currentTime) => {
+        const animation = element.getAnimations()[0]!;
+        animation.pause();
+        animation.currentTime = currentTime;
+      }, time);
+      await expect(title).toHaveCSS('background-position', position);
+      await expect(title).toHaveCSS('opacity', '1');
+    }
     for (const [time, opacity] of [
       [0, '1'],
       [750, '0.4'],
       [1500, '1'],
     ] as const) {
-      for (const indicator of [icon, title]) {
-        await indicator.evaluate((element, currentTime) => {
-          const animation = element.getAnimations()[0]!;
-          animation.pause();
-          animation.currentTime = currentTime;
-        }, time);
-        await expect(indicator).toHaveCSS('opacity', opacity);
-      }
+      await icon.evaluate((element, currentTime) => {
+        const animation = element.getAnimations()[0]!;
+        animation.pause();
+        animation.currentTime = currentTime;
+      }, time);
+      await expect(icon).toHaveCSS('opacity', opacity);
       await expect(header).toHaveCSS('opacity', '1');
     }
   });

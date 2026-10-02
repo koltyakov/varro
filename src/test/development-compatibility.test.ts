@@ -20,10 +20,31 @@ describe('development compatibility', () => {
     const advertisedFloors = '22.22.2+ on Node 22, or Node 24.15.0+';
 
     expect(packageJson.engines.node).toBe('^22.22.2 || >=24.15.0');
-    expect(workflow).toContain('node-version: [24.21.0]');
+    expect(workflow.match(/^\s*node-version: 24\.21\.0$/gm)).toHaveLength(3);
+    expect(workflow).not.toContain('matrix.node-version');
     expect(workflow).not.toMatch(/^\s*node-version:\s+(?:22|24)\s*$/m);
     expect(readme).toContain(advertisedFloors);
     expect(developmentGuide).toContain(advertisedFloors);
+  });
+
+  it('runs Linux and Windows without matrices and gates E2E on both jobs', async () => {
+    const workflow = await readFile(resolve('.github/workflows/ci.yml'), 'utf8');
+    const linuxStart = workflow.indexOf('\n  build-and-test:\n');
+    const windowsStart = workflow.indexOf('\n  windows:\n');
+    const e2eStart = workflow.indexOf('\n  e2e:\n');
+    expect(linuxStart).toBeGreaterThan(-1);
+    expect(windowsStart).toBeGreaterThan(linuxStart);
+    expect(e2eStart).toBeGreaterThan(windowsStart);
+    for (const job of [
+      workflow.slice(linuxStart, windowsStart),
+      workflow.slice(windowsStart, e2eStart),
+    ]) {
+      expect(job).not.toMatch(/^    (?:strategy|needs):/m);
+      expect(job).toContain('run: npm ci --no-audit --no-fund');
+    }
+    const e2e = workflow.slice(e2eStart);
+    expect(e2e).toContain('needs: [build-and-test, windows]');
+    expect(e2e).not.toMatch(/^    if:/m);
   });
 
   it('trusts the mounted E2E checkout before cached tests inspect Git files', async () => {

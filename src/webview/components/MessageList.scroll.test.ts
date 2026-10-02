@@ -50,6 +50,93 @@ installMessageListTestEnvironment({
 
 describe('MessageList auto-scroll', () => {
   it.each([
+    { growth: 24, detached: false, trackChanged: false },
+    { growth: 120, detached: false, trackChanged: true },
+    { growth: 120, detached: true, trackChanged: false },
+  ])(
+    'follows composer growth immediately with growth=$growth, detached=$detached, trackChanged=$trackChanged',
+    async ({ growth, detached, trackChanged }) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      const observers: Array<{ callback: ResizeObserverCallback; targets: Element[] }> = [];
+      class TestResizeObserver {
+        readonly targets: Element[] = [];
+        constructor(callback: ResizeObserverCallback) {
+          observers.push({ callback, targets: this.targets });
+        }
+        observe(target: Element) {
+          this.targets.push(target);
+        }
+        unobserve() {}
+        disconnect() {}
+      }
+      // SAFETY: The test observer implements the browser methods used by MessageList.
+      globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+      let height = 1200;
+      let viewportHeight = 400;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          this.classList.contains('interactive-list-track') ? height : viewportHeight
+        );
+      });
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      const track = list.querySelector<HTMLElement>('.interactive-list-track')!;
+      Object.defineProperty(list, 'clientHeight', {
+        configurable: true,
+        get: () => viewportHeight,
+      });
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      const observer = observers.find((candidate) => candidate.targets.includes(list))!;
+      const notifyResize = (targets: Element[]) =>
+        observer.callback(
+          targets.map((target) => fixture<ResizeObserverEntry>({ target })),
+          fixture<ResizeObserver>({})
+        );
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+      notifyResize([list]);
+      animationFrames.flush();
+      expect(list.scrollTop).toBe(800);
+      if (detached) {
+        list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        list.scrollTop = 200;
+        list.dispatchEvent(new Event('scroll'));
+      }
+
+      viewportHeight -= growth;
+      notifyResize(trackChanged ? [list, track] : [list]);
+      // The resize correction must finish before the next painted frame, without easing.
+      expect(list.scrollTop).toBe(detached ? 200 : height - viewportHeight);
+      for (let frame = 0; frame < 4; frame += 1) animationFrames.flush();
+      expect(list.scrollTop).toBe(detached ? 200 : height - viewportHeight);
+
+      if (!detached) {
+        const previousTop = list.scrollTop;
+        height += 200;
+        notifyResize([track]);
+        animationFrames.flush();
+        expect(list.scrollTop).toBeGreaterThanOrEqual(previousTop);
+        expect(list.scrollTop).toBeLessThan(height - viewportHeight);
+        settleBottomFollow(animationFrames, list);
+        expect(list.scrollTop).toBe(height - viewportHeight);
+      }
+      animationFrames.restore();
+    }
+  );
+
+  it.each([
     { enabled: true, detached: false, interrupted: false },
     { enabled: false, detached: false, interrupted: false },
     { enabled: true, detached: true, interrupted: false },
