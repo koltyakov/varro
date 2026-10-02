@@ -7,6 +7,7 @@ import {
   getScrollMetrics,
   getVisibleMessageAnchor,
   sampleMessageTopAcrossFrames,
+  STREAMING_SCROLL_POLL_OPTIONS,
   waitForAnimationFrame,
   waitForAnimationFrames,
 } from './helpers';
@@ -107,7 +108,10 @@ test.describe('multi-agent scroll stability', () => {
       );
       await waitForAnimationFrames(page, 2);
       await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .poll(
+          () => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom),
+          STREAMING_SCROLL_POLL_OPTIONS
+        )
         .toBeLessThan(15);
     }
   });
@@ -134,7 +138,10 @@ test.describe('multi-agent scroll stability', () => {
       );
       await waitForAnimationFrames(page, 2);
       await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .poll(
+          () => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom),
+          STREAMING_SCROLL_POLL_OPTIONS
+        )
         .toBeLessThan(15);
     }
 
@@ -235,7 +242,10 @@ test.describe('multi-agent large virtualized scroll stability', () => {
       );
       await waitForAnimationFrames(page, 2);
       await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .poll(
+          () => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom),
+          STREAMING_SCROLL_POLL_OPTIONS
+        )
         .toBeLessThan(15);
     }
 

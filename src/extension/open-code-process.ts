@@ -72,6 +72,7 @@ import {
   signalProcessGroup,
   terminateCliProcessTree,
 } from './process-inspection';
+import { ManagedServerConnectionChangedError } from './process-inspection-error';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
 import { runWindowsCliUpdate } from './util/windows-cli-update';
 import { getVarroTestStateDirectory } from './varro-test-state';
@@ -1128,14 +1129,14 @@ export class OpenCodeProcess {
     const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
     if (!lease) return;
     if (lease.port !== this._port)
-      throw new Error(
+      throw new ManagedServerConnectionChangedError(
         'The managed OpenCode endpoint changed; reconnect to verify its registration'
       );
     if (!reconnect && Date.now() - this.lastConnectionVerification < 1000) return;
     if (this.connectionVerification) return this.connectionVerification;
     const operation = (async () => {
       if (!(await this.matchesOwnershipLease(lease)))
-        throw new Error(
+        throw new ManagedServerConnectionChangedError(
           'The managed OpenCode listener changed; its registration was retained for recovery'
         );
       this.lastConnectionVerification = Date.now();
@@ -1152,6 +1153,20 @@ export class OpenCodeProcess {
     return this.ownershipLeaseCandidate || this.ownershipLease
       ? this.lastConnectionVerification + 1000
       : Number.POSITIVE_INFINITY;
+  }
+
+  get connectionIdentity():
+    | Pick<ManagedServerOwnershipLease, 'port' | 'pid' | 'birthIdentity' | 'executable'>
+    | undefined {
+    const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
+    return lease
+      ? {
+          port: lease.port,
+          pid: lease.pid,
+          birthIdentity: lease.birthIdentity,
+          executable: lease.executable,
+        }
+      : undefined;
   }
 
   async persistManagedServerCredentials(secrets: Pick<vscode.SecretStorage, 'store'>) {
@@ -1299,6 +1314,15 @@ export class OpenCodeProcess {
       this.ownershipLease?.host === this.hostOwner &&
       this.ownershipLease.state === 'active'
     );
+  }
+
+  get needsRuntimeConfigRecovery(): boolean {
+    return this.isAdoptedManagedServer && !this.ownershipLease?.configPath;
+  }
+
+  get hasRuntimeConfigRecoveryCandidate(): boolean {
+    const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
+    return !!lease && !lease.configPath;
   }
 
   get serverOwnership(): OpenCodeServerOwnership {
@@ -1871,6 +1895,11 @@ export class OpenCodeProcess {
       config.providers = { openai: { settings: { chunkTimeout: 5 * 60_000 } } };
     }
     return `${JSON.stringify(config, null, 2)}\n`;
+  }
+
+  async shouldRestoreRuntimeAskAgent(): Promise<boolean> {
+    if (getEnvironmentValue(process.env, 'OPENCODE_CONFIG')?.trim()) return false;
+    return !(await this.hasConfiguredValue(containsAskAgent, 'an existing Ask agent', 'ancestors'));
   }
 
   rememberRunningServerVersion(version: string) {

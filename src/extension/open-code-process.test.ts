@@ -3887,6 +3887,53 @@ describe('OpenCodeProcess server ownership leases', () => {
 });
 
 describe('OpenCodeProcess config ownership', () => {
+  it.each(['replacement', 'runtime-present', 'foreign', 'unmanaged'])(
+    'identifies runtime config recovery only for an owned replacement: %s',
+    (scenario) => {
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      const state = manager as unknown as {
+        hostOwner: string;
+        ownershipLease: ManagedServerOwnershipLease;
+      };
+      state.ownershipLease = {
+        version: 1,
+        pid: 777,
+        port: 4096,
+        executable: 'fixture',
+        birthIdentity: 'fixture:1',
+        owner: 'fixture-owner',
+        host: scenario === 'foreign' ? 'other-host' : state.hostOwner,
+        state: 'active',
+        createdAt: Date.now(),
+      };
+      if (scenario === 'runtime-present')
+        state.ownershipLease.configPath = '/fixture/opencode.json';
+      manager.managedProcess = scenario !== 'unmanaged';
+      expect(manager.needsRuntimeConfigRecovery).toBe(scenario === 'replacement');
+      expect(manager.hasRuntimeConfigRecoveryCandidate).toBe(scenario !== 'runtime-present');
+    }
+  );
+
+  it.each(['missing', 'caller-config', 'native-ask', 'legacy-ask', 'malformed'])(
+    'preserves caller configuration during runtime Ask recovery: %s',
+    async (scenario) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-ask-recovery-'));
+      process.env.XDG_CONFIG_HOME = root;
+      if (scenario === 'caller-config') process.env.OPENCODE_CONFIG = '/fixture/opencode.json';
+      if (scenario === 'native-ask')
+        process.env.OPENCODE_CONFIG_CONTENT = '{"agents":{"Ask":{"disabled":true}}}';
+      if (scenario === 'legacy-ask')
+        process.env.OPENCODE_CONFIG_CONTENT = '{"agent":{"ask":{"mode":"subagent"}}}';
+      if (scenario === 'malformed') process.env.OPENCODE_CONFIG_CONTENT = '{broken';
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      try {
+        await expect(manager.shouldRestoreRuntimeAskAgent()).resolves.toBe(scenario === 'missing');
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it.each([
     { installed: '1.18.33', running: '2.0.20', expected: true },
     { installed: '2.0.20', running: '2.0.19', expected: false },

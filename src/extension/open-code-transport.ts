@@ -19,6 +19,7 @@ import { OpenCodeV2GenerationTiming } from './opencode-v2-generation-timing';
 import { projectV2Event } from './opencode-v2-events';
 import { openCodeApiVersion, type OpenCodeApiVersion } from './opencode-connection';
 import { OpenCodeResponseTooLargeError } from './opencode-response-error';
+import { ProcessInspectionTimeoutError } from './process-inspection-error';
 
 export { OpenCodeResponseTooLargeError } from './opencode-response-error';
 
@@ -593,8 +594,33 @@ export class OpenCodeTransport {
     promoteDirectoryImmediately = true
   ) {
     this.requestAdmissions = new WeakMap();
-    await this.options.authorizeConnection?.(true);
     const serverUrl = this.options.getUrl();
+    const admissionGeneration = this.eventStreamGeneration;
+    try {
+      await this.options.authorizeConnection?.(true);
+    } catch (error) {
+      if (!(error instanceof ProcessInspectionTimeoutError)) throw error;
+      if (
+        admissionGeneration !== this.eventStreamGeneration ||
+        serverUrl !== this.options.getUrl() ||
+        this.options.isDisposing()
+      )
+        return;
+      if (this.options.getStatus().state !== 'running') throw error;
+      // No new SSE traffic without admission. Keep the transcript and retry
+      // inspection with the normal reconnect backoff rather than losing SSE forever.
+      logger.warn(`Event stream admission delayed: ${error.message}`);
+      this.eventStreamDirectory = eventStreamDirectory;
+      this.options.updateEventStreamState('degraded');
+      this.scheduleEventStreamReconnect(diagnosticTimeline.nextId('stream'));
+      return;
+    }
+    if (
+      admissionGeneration !== this.eventStreamGeneration ||
+      serverUrl !== this.options.getUrl() ||
+      this.options.isDisposing()
+    )
+      return;
     if (this.eventStreamServerUrl !== serverUrl) this.lastEventId = '';
     this.eventStreamServerUrl = serverUrl;
     this.resetEventStream();
@@ -750,35 +776,44 @@ export class OpenCodeTransport {
       ) {
         if (continuityEstablished) this.clearPendingAttentionRequests();
         this.options.updateEventStreamState('degraded');
-        this.eventReconnectCount++;
-        if (this.eventReconnectCount === OpenCodeTransport.EVENT_RECONNECT_WARNING_THRESHOLD) {
-          logger.warn(
-            `Event stream reconnect attempts reached ${OpenCodeTransport.EVENT_RECONNECT_WARNING_THRESHOLD}; continuing background retries while keeping REST requests available`
-          );
-        }
-
-        const delay = this.getEventReconnectDelay();
-        diagnosticTimeline.record({
-          event: 'stream-retry',
-          operationId,
-          state: 'degraded',
-          attempt: this.eventReconnectCount,
-          delayMs: delay,
-        });
-        this.eventReconnectTimer = setTimeout(() => {
-          if (this.options.isDisposing() || this.options.getStatus().state !== 'running') {
-            this.eventReconnectTimer = null;
-            return;
-          }
-          this.eventReconnectTimer = null;
-          void this.startEventStream(this.eventStreamDirectory, false).catch((error: unknown) => {
-            logger.warn(
-              `Event stream admission failed: ${error instanceof Error ? error.message : String(error)}`
-            );
-          });
-        }, delay);
+        this.scheduleEventStreamReconnect(operationId);
       }
     }
+  }
+
+  private scheduleEventStreamReconnect(operationId: string) {
+    if (this.eventReconnectTimer) clearTimeout(this.eventReconnectTimer);
+    this.eventReconnectCount++;
+    if (this.eventReconnectCount === OpenCodeTransport.EVENT_RECONNECT_WARNING_THRESHOLD) {
+      logger.warn(
+        `Event stream reconnect attempts reached ${OpenCodeTransport.EVENT_RECONNECT_WARNING_THRESHOLD}; continuing background retries while keeping REST requests available`
+      );
+    }
+    const delay = this.getEventReconnectDelay();
+    const generation = this.eventStreamGeneration;
+    const url = this.options.getUrl();
+    diagnosticTimeline.record({
+      event: 'stream-retry',
+      operationId,
+      state: 'degraded',
+      attempt: this.eventReconnectCount,
+      delayMs: delay,
+    });
+    this.eventReconnectTimer = setTimeout(() => {
+      this.eventReconnectTimer = null;
+      if (
+        this.options.isDisposing() ||
+        this.options.getStatus().state !== 'running' ||
+        generation !== this.eventStreamGeneration ||
+        url !== this.options.getUrl()
+      )
+        return;
+      void this.startEventStream(this.eventStreamDirectory, false).catch((error: unknown) => {
+        logger.warn(
+          `Event stream admission failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
+    }, delay);
   }
 
   rescopeEventStream(directory: string | undefined): Promise<OpenCodeRescopeResult> {

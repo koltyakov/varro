@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LocalServerAccount } from './process-inspection';
 import { ServerConnectionAdmission } from './server-connection-admission';
+import { ProcessInspectionTimeoutError } from './process-inspection-error';
 
 function setup(account: LocalServerAccount = { kind: 'same-user', identity: 'first-process' }) {
   let url = 'http://127.0.0.1:4096';
@@ -32,6 +33,20 @@ describe('server connection admission', () => {
     await admission.verify();
     expect(confirm).not.toHaveBeenCalled();
     expect(admission.isExternal).toBe(false);
+  });
+
+  it('forces fresh evidence after an observed process change even inside the cache window', async () => {
+    const { admission, inspect } = setup();
+    await admission.admit();
+    await admission.verify(false, true);
+    expect(inspect).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let the initial subscription shortcut bypass forced verification', async () => {
+    const { admission, inspect } = setup();
+    await admission.admit();
+    await admission.verify(true, true);
+    expect(inspect).toHaveBeenCalledTimes(2);
   });
 
   it('always checks ownership rather than relying on supplied credentials', async () => {
@@ -147,6 +162,59 @@ describe('server connection admission', () => {
     vi.advanceTimersByTime(1001);
     await admission.verify();
     expect(confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it('blocks timed-out rechecks without prompting or extending the previous verification', async () => {
+    vi.useFakeTimers();
+    const { admission, inspect, confirm } = setup();
+    await admission.admit();
+    const expiry = admission.verificationExpiresAt;
+    vi.advanceTimersByTime(1001);
+    inspect.mockRejectedValue(new ProcessInspectionTimeoutError('lsof timed out'));
+    await expect(admission.verify()).rejects.toThrow('lsof timed out');
+    await expect(admission.verify()).rejects.toThrow('lsof timed out');
+    expect(admission.verificationExpiresAt).toBeLessThanOrEqual(expiry);
+    expect(confirm).not.toHaveBeenCalled();
+    inspect.mockResolvedValue({ kind: 'same-user', identity: 'first-process' });
+    await admission.verify();
+    expect(admission.verificationExpiresAt).toBeGreaterThan(expiry);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('requires foreign-account consent after recovering from an inspection timeout', async () => {
+    vi.useFakeTimers();
+    const { admission, inspect, confirm } = setup();
+    await admission.admit();
+    vi.advanceTimersByTime(1001);
+    inspect.mockRejectedValueOnce(new ProcessInspectionTimeoutError('lsof timed out'));
+    await expect(admission.verify()).rejects.toThrow('lsof timed out');
+    inspect.mockResolvedValue({ kind: 'different-user', identity: 'replacement' });
+    confirm.mockResolvedValue(false);
+    await expect(admission.verify()).rejects.toThrow('left untouched');
+    await expect(admission.verify()).rejects.toThrow('not been approved');
+    expect(confirm).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])(
+    'does not bypass fresh uncertainty consent after a timed-out reconnect, reconnect=%s',
+    async (reconnect) => {
+      const { admission, inspect, confirm } = setup({ kind: 'unknown' });
+      await admission.admit();
+      await admission.verify(true);
+      inspect.mockRejectedValueOnce(new ProcessInspectionTimeoutError('lsof timed out'));
+      await expect(admission.verify(true)).rejects.toThrow('lsof timed out');
+      expect(confirm).toHaveBeenCalledOnce();
+      await admission.verify(reconnect);
+      expect(confirm).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it('does not grant initial approval after an inspection timeout', async () => {
+    const { admission, inspect, confirm } = setup();
+    inspect.mockRejectedValue(new ProcessInspectionTimeoutError('lsof timed out'));
+    await expect(admission.admit()).rejects.toThrow('lsof timed out');
+    await expect(admission.verify()).rejects.toThrow('not been approved');
+    expect(confirm).not.toHaveBeenCalled();
   });
 
   it('does not prompt after reset while inspection is pending', async () => {

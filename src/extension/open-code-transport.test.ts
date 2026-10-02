@@ -31,6 +31,7 @@ vi.mock('./util/opencode-request', () => ({
 }));
 
 import { OpenCodeTransport } from './open-code-transport';
+import { ProcessInspectionTimeoutError } from './process-inspection-error';
 import * as serverUtils from './server-utils';
 import { diagnosticTimeline } from './diagnostics';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
@@ -264,6 +265,111 @@ describe('transport connection admission', () => {
       expect(fetch).not.toHaveBeenCalled();
     }
   );
+
+  it('keeps retrying fresh SSE admission after timeouts without sending unverified traffic', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const authorizeConnection = vi
+      .fn()
+      .mockRejectedValueOnce(new ProcessInspectionTimeoutError('lsof timed out'))
+      .mockRejectedValueOnce(new ProcessInspectionTimeoutError('lsof timed out'))
+      .mockResolvedValue(undefined);
+    const transport = createTransport({ authorizeConnection });
+    vi.mocked(fetch).mockImplementation(async (_input, init) =>
+      createPendingEventResponse(init!.signal!)
+    );
+    await transport.startEventStream();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(updateEventStreamStateMock).toHaveBeenCalledWith('degraded');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(authorizeConnection).toHaveBeenCalledTimes(2);
+    expect(fetch).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(authorizeConnection).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(updateEventStreamStateMock).toHaveBeenLastCalledWith('healthy');
+    transport.stopEventStream();
+  });
+
+  it.each(['stop', 'endpoint', 'dispose'] as const)(
+    'does not retry timed-out SSE admission after %s',
+    async (change) => {
+      vi.useFakeTimers();
+      let url = 'http://localhost:4096';
+      let disposing = false;
+      const authorizeConnection = vi
+        .fn()
+        .mockRejectedValue(new ProcessInspectionTimeoutError('lsof timed out'));
+      const transport = createTransport({
+        authorizeConnection,
+        getUrl: () => url,
+        isDisposing: () => disposing,
+      });
+      await transport.startEventStream();
+      if (change === 'stop') transport.stopEventStream();
+      if (change === 'endpoint') url = 'http://localhost:5096';
+      if (change === 'dispose') disposing = true;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(authorizeConnection).toHaveBeenCalledOnce();
+      expect(fetch).not.toHaveBeenCalled();
+      transport.stopEventStream();
+    }
+  );
+
+  it('does not open or retry SSE after stopping during pending admission', async () => {
+    vi.useFakeTimers();
+    let reject!: (error: Error) => void;
+    const authorizeConnection = vi.fn(
+      () =>
+        new Promise<void>((_resolve, rejectPromise) => {
+          reject = rejectPromise;
+        })
+    );
+    const transport = createTransport({ authorizeConnection });
+    const stream = transport.startEventStream();
+    transport.stopEventStream();
+    reject(new ProcessInspectionTimeoutError('lsof timed out'));
+    await stream;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(authorizeConnection).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(updateEventStreamStateMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['stop', 'endpoint', 'dispose'] as const)(
+    'does not open SSE when pending admission succeeds after %s',
+    async (change) => {
+      let approve!: () => void;
+      let url = 'http://localhost:4096';
+      let disposing = false;
+      const transport = createTransport({
+        authorizeConnection: () =>
+          new Promise<void>((resolve) => {
+            approve = resolve;
+          }),
+        getUrl: () => url,
+        isDisposing: () => disposing,
+      });
+      const stream = transport.startEventStream();
+      if (change === 'stop') transport.stopEventStream();
+      if (change === 'endpoint') url = 'http://localhost:5096';
+      if (change === 'dispose') disposing = true;
+      approve();
+      await stream;
+      expect(fetch).not.toHaveBeenCalled();
+      expect(updateEventStreamStateMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not retry SSE admission refused for a changed listener', async () => {
+    vi.useFakeTimers();
+    const authorizeConnection = vi.fn().mockRejectedValue(new Error('listener changed'));
+    const transport = createTransport({ authorizeConnection });
+    await expect(transport.startEventStream()).rejects.toThrow('listener changed');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(authorizeConnection).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+  });
 
   it('never transfers a pending request to a changed endpoint', async () => {
     let approve!: () => void;
@@ -679,8 +785,8 @@ describe('OpenCodeTransport reconnect delay', () => {
     const transport = new OpenCodeTransport({
       getUrl: () => 'http://localhost:4096',
       getWorkspaceCwd: () => undefined,
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => true,
+      getStatus: () => ({ state: 'stopped' }),
+      isDisposing: () => false,
       updateEventStreamState: updateEventStreamStateMock,
       emitEvent: emitEventMock,
     });
@@ -959,8 +1065,8 @@ describe('OpenCodeTransport event stream path', () => {
     const transport = new OpenCodeTransport({
       getUrl: () => 'http://localhost:4096',
       getWorkspaceCwd: () => undefined,
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => true,
+      getStatus: () => ({ state: 'stopped' }),
+      isDisposing: () => false,
       updateEventStreamState: updateEventStreamStateMock,
       emitEvent: emitEventMock,
     });
@@ -977,8 +1083,8 @@ describe('OpenCodeTransport event stream path', () => {
     const transport = new OpenCodeTransport({
       getUrl: () => 'http://localhost:4096',
       getWorkspaceCwd: () => '/repo',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => true,
+      getStatus: () => ({ state: 'stopped' }),
+      isDisposing: () => false,
       updateEventStreamState: updateEventStreamStateMock,
       emitEvent: emitEventMock,
     });

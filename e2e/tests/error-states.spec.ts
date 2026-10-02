@@ -57,7 +57,7 @@ test('shows the missing-cli error state and offers install actions', async ({ pa
 test('shows a generic startup error message', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=server-error-generic');
 
-  await expect(page.getByText('OpenCode could not start', { exact: true })).toBeVisible();
+  await expect(page.getByText('OpenCode is unavailable', { exact: true })).toBeVisible();
   await expect(page.getByText('Failed to bind local server port', { exact: true })).toBeVisible();
 });
 

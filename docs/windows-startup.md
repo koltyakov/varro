@@ -28,11 +28,19 @@ the parallel unit suite. This avoids making PowerShell startup and `Add-Type`
 compete with jsdom workers on Windows CI without relaxing the production timeout.
 
 Logical REST requests carry an internal admission ticket through their adapter wire
-requests. Its expiry is the **earlier original** account/ownership verification expiry,
-not one second after both checks finish. Expired tickets require verification again;
-unrelated requests cannot reuse a ticket. Cancellation, failed admission, and stream
+requests. For strict initial/foreign/unknown admission, its expiry is the **earlier
+original** account/ownership verification expiry, not one second after both checks
+finish. Complete same-user running connections reuse their generation-bound process
+confirmation and issue tickets lasting at most one second without OS subprocesses.
+Unrelated requests cannot reuse a ticket. Cancellation, failed admission, and stream
 reconnect invalidate tickets. SSE always performs its own fresh reconnect check.
-This eliminates duplicate admission without extending either trust window.
+
+Routine ownership inspection of confirmed same-user connections now runs every thirty
+seconds in the background. Missing or timed-out evidence does not revoke prior
+confirmation, block REST, or become a server failure. Endpoint/registration changes,
+observed process exit, PID/birth/account changes, reset, and reconnect require fresh
+admission. This attachment confirmation never grants permission to stop a server;
+restart, adoption, maintenance, and cleanup retain their independent identity checks.
 
 Commit-message preparation has a separate bounded deadline from model generation.
 Git history and server preparation run concurrently, and model selection is reused
@@ -61,8 +69,9 @@ The local-database session-summary optimization did not fix that readiness barri
    obsolete. Forget the preference when the URL changes.
 4. Admit the listener/account before requests or SSE. Ownership and account checks
    may run concurrently, but **both must succeed before any protected HTTP traffic**.
-   Preserve fresh reconnect checks, in-flight deduplication, and the one-second cache
-   limits. Do not solve latency by disabling checks or extending trust indefinitely.
+    Preserve fresh reconnect checks, in-flight deduplication, and one-second strict
+    admission/ticket limits. Running same-user connection reuse requires complete
+    PID/birth/account evidence and independent background monitoring, not PID-only trust.
 5. Begin SSE before publishing running state, so initial snapshots cannot get ahead
    of event subscription. Running transport state is not yet webview readiness.
 6. Bootstrap essential data: session catalog, routing catalogs, pending questions,
@@ -114,7 +123,9 @@ credentialless vault restoration, health fallback after timeout, remembered heal
 endpoint/URL reset, authentication rejection, cancellation, bounded retries, stale
 generation suppression, optional loaders that never settle, essential snapshot gating,
 startup error cleanup without losing unrelated errors, and MCP reconciliation at send.
-Ownership/account failure must result in **zero protected HTTP requests**.
+Fresh ownership/account admission failure must result in **zero protected HTTP
+requests**. Inconclusive background inspection of a previously confirmed connection
+must not block its requests or be reported as an actual server failure.
 
 For performance validation, separately time registration, credential lookup, health,
 account admission, SSE attachment, essential bootstrap, status hydration, restored

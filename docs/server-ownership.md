@@ -56,6 +56,15 @@ ownership token so late cleanup from its former host cannot remove its records.
 Retired injected configuration is not attributed to the replacement. Other live
 services, credentials, and sessions are left unchanged.
 
+A recovered replacement without runtime configuration is checked for Varro's Ask
+agent. If no user definition exists and the owned server is globally idle, startup
+relaunches it with a fresh temporary config before publishing routing catalogs.
+Recovery checks work again under verified restart ownership. If sessions, questions,
+or approvals block startup repair, catalog/send preflight and maintenance retry it;
+an idle event bypasses the ordinary maintenance throttle while repair is pending.
+This does not edit global/project configuration, invent a client-only agent, or
+grant restart rights over another host's or an unmanaged server.
+
 ## Editor distributions and test isolation
 
 VS Code, VS Code Nightly/Insiders, VSCodium, and Varro OpenJet coordinate through
@@ -179,14 +188,33 @@ ownership use distinct native modal warnings. Dismissal leaves the server untouc
 A migrated automatic-mode user can instead choose to start their own server on
 another port, but cannot abandon a registered live process through this action.
 
-Consent binds to the observed PID, birth identity, account, and endpoint. Ownership
-is rechecked on stream reconnect and ordinary requests using a one-second inspection
-cache. Unknown-owner consent covers only the current connection and requires a new
-decision on reconnect. Concurrent callers share the decision; disposal invalidates
-late answers. Refusal blocks subsequent requests rather than starting retry prompts.
+Consent binds to the observed PID, birth identity, account, and endpoint. Initial
+attachment and stream reconnect inspect fresh evidence. Foreign, unknown, and
+incomplete identities retain the strict one-second request-admission cache.
+Unknown-owner consent covers only the current connection and requires a new decision
+on reconnect. Concurrent callers share the decision; disposal invalidates late
+answers. Refusal blocks subsequent requests rather than starting retry prompts.
+
+Once the running connection has a complete same-user PID/birth/account identity,
+routine REST traffic reuses that confirmed connection. A managed lease must identify
+the same PID and birth identity. The request path checks the endpoint, registration,
+admission identity, and process liveness without starting OS inspection commands.
+Full listener/account and managed-identity checks run independently in the background
+every thirty seconds, with no overlapping scans. Slow, failed, or inconclusive
+background reads are diagnostics, not proof of replacement or server failure. They
+do not hold up sends, prompt for consent, stop SSE, or hide the chat.
+
+Confirmed process exit, changed registration/endpoint, fresh PID/birth/account change,
+disconnect, and SSE reconnect invalidate reuse. The next request then needs fresh
+admission even if an old one-second cache has not expired. Background results and
+outstanding confirmations are generation-bound and cannot restore a reset connection.
+Adapter tickets remain endpoint-bound and expire after at most one second. This is
+connection-lifetime attachment monitoring, not a permanent PID-only ownership cache.
+It does not grant adoption, restart, upgrade, or cleanup authority; those operations
+still verify the current private registration and process identity independently.
 
 Before requesting new uncertainty consent, admission retries one fresh account
-inspection. Ordinary rechecks still inspect at least every second, but persistent
+inspection. Strict request rechecks inspect at least every second, but persistent
 uncertainty does not repeat an already approved warning within that connection.
 Newly identified foreign listeners still require consent. If inspection recovers
 to verified same-user evidence after the dialog, admission uses that fresh evidence
@@ -194,17 +222,28 @@ instead of treating recovered visibility as listener replacement. A changed know
 identity still blocks confirmation. Generation and endpoint changes invalidate
 each inspection and dialog result before further use.
 
+On macOS, a timed-out `lsof` listener scan retries one fresh scan with a five-second
+deadline after the ordinary two-second deadline. Failed command output is never
+accepted as a complete listener set. Concurrent ownership/account scans share only
+their in-flight observation. A persistent timeout during initial/fresh admission
+blocks that request without granting unknown-account consent or stopping the server.
+An established confirmed same-user connection continues while background inspection
+recovers. SSE admission retries with its normal reconnect backoff.
+Actual unknown or foreign account evidence still follows the consent rules above.
+
 On Windows, ordinary listener checks use `netstat` first, with PowerShell networking
 discovery only when `netstat` fails. A shared read-only helper obtains executable,
 creation identity, and token SIDs using Windows APIs, holding the process handle
 through its final liveness check. Concurrent reads share only their in-flight
 observation; no PID-only identity cache is introduced. Creation ticks match existing
-CIM leases. The one-second admission cache and fresh reconnect checks are unchanged.
+CIM leases. Strict admission keeps its one-second cache and fresh reconnect checks;
+complete same-user running connections use the background monitoring described above.
 If native inspection is unavailable, fresh PID-reuse-checked CIM snapshots remain
 the bounded fallback, with one retry for failed or incomplete executable/account
-reads. Persistent inspection failures still block managed requests and retain records.
-Internal request admission tickets expire at the earlier original verification expiry;
-adapter wire requests cannot extend trust or transfer approval to another endpoint.
+reads. Persistent failures still block fresh admission and retain records, but do not
+revoke an established connection without evidence of replacement. Strict admission
+tickets expire at the earlier original verification expiry; confirmed-connection
+tickets last at most one second. Neither transfers approval to another endpoint.
 
 Manual servers and consented foreign or unverifiable connections remain attach-only even
 with auto-start enabled. They cannot be adopted or restarted and do not run automatic

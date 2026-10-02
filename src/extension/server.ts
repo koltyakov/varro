@@ -47,10 +47,12 @@ import {
 } from './server-utils';
 import { FULL_SESSION_LIST_LIMIT } from './util/session-list';
 import { basicAuthorization, openCodeApiVersion } from './opencode-connection';
-import { inspectLocalServerAccount } from './process-inspection';
+import { inspectLocalServerAccount, isProcessAlive } from './process-inspection';
+import { ProcessInspectionTimeoutError } from './process-inspection-error';
 import { readLocalServerConnectionInfo } from './server-connection-info';
 import type { ServerConnectionInfo } from './server-connection-info';
 import { ServerConnectionAdmission } from './server-connection-admission';
+import { ServerConnectionMonitor } from './server-connection-monitor';
 
 export type { OpenCodeCompactionSettings };
 
@@ -249,8 +251,11 @@ export class OpenCodeServer extends EventEmitter {
   private adoptedServerRecoveryOperation: Promise<void> | null = null;
   private existingServerPreparationOperation: Promise<void> | null = null;
   private streamTimeoutReconciliationOperation: Promise<void> | null = null;
+  private askAgentReconciliationOperation: Promise<void> | null = null;
+  private runtimeAskRecoveryPending = false;
   private savedServerAuthorization: { url: string; value: string } | undefined;
   private readonly admission: ServerConnectionAdmission;
+  private readonly connectionMonitor: ServerConnectionMonitor;
   private preserveExistingProcess = false;
   private registeredEndpoint = false;
   private externalEndpoint = false;
@@ -296,17 +301,40 @@ export class OpenCodeServer extends EventEmitter {
         return answer === 'Connect anyway';
       }
     );
+    this.connectionMonitor = new ServerConnectionMonitor({
+      getUrl: () => this.url,
+      getManagedIdentity: () => this.processManager.connectionIdentity,
+      getAccount: () => this.admission.confirmedAccount,
+      isProcessAlive,
+      inspectAccount: () => inspectLocalServerAccount(this.processManager.port),
+      verifyManagedConnection: () => this.processManager.verifyManagedServerConnection(true),
+      reportDiagnostic: (message) => logger.warn(message),
+    });
     this.transport = new OpenCodeTransport({
       authorizeConnection: async (reconnect) => {
+        const url = this.url;
+        const generation = this.disposeGeneration;
+        if (!reconnect && this._status.state === 'running' && this.connectionMonitor.canReuse()) {
+          // A short adapter ticket, not another OS inspection. The confirmed
+          // connection remains monitored independently of request frequency.
+          return { expiresAt: Date.now() + 1000 };
+        }
+        if (reconnect) this.connectionMonitor.invalidate();
+        const force = this.connectionMonitor.requiresVerification;
+        const monitorGeneration = this.connectionMonitor.generation;
         try {
           // Both independent checks must succeed before transport use. Serial
           // Windows inspections can expire the other's one-second cache.
           await Promise.all([
             this.processManager.verifyManagedServerConnection(
-              reconnect && this._status.state === 'running'
+              force || (reconnect && this._status.state === 'running')
             ),
-            this.admission.verify(reconnect),
+            this.admission.verify(reconnect, force),
           ]);
+          if (url !== this.url || generation !== this.disposeGeneration)
+            throw new Error('OpenCode connection changed during verification');
+          if (this._status.state === 'running' && !this.isDisposing)
+            this.connectionMonitor.confirm(this.admission.confirmedAccount, monitorGeneration);
           return {
             expiresAt: Math.min(
               this.processManager.connectionVerificationExpiresAt,
@@ -314,7 +342,13 @@ export class OpenCodeServer extends EventEmitter {
             ),
           };
         } catch (error) {
-          if (this._status.state === 'running') {
+          if (
+            this._status.state === 'running' &&
+            url === this.url &&
+            generation === this.disposeGeneration &&
+            !this.isDisposing &&
+            !(error instanceof ProcessInspectionTimeoutError)
+          ) {
             this.stopEventStream();
             this.setStatus({
               state: 'error',
@@ -350,7 +384,7 @@ export class OpenCodeServer extends EventEmitter {
     if (parsed?.type !== 'session.status') return;
     const status = (parsed.properties as { status?: unknown } | undefined)?.status;
     if (status && typeof status === 'object' && (status as { type?: unknown }).type === 'idle') {
-      this.requestMaintenanceCheck();
+      this.requestMaintenanceCheck(this.runtimeAskRecoveryPending);
     }
   }
 
@@ -409,6 +443,7 @@ export class OpenCodeServer extends EventEmitter {
       diagnosticTimeline.record({ event: 'server-state', state: nextStatus.state });
     }
     this._status = nextStatus;
+    if (nextStatus.state !== 'running') this.connectionMonitor.reset();
     if (nextStatus.state === 'running') {
       this.startMaintenanceLoop();
     } else if (previousStatus.state === 'running') {
@@ -675,6 +710,11 @@ export class OpenCodeServer extends EventEmitter {
           this.externalEndpoint = !registered;
           if (isSupportedOpenCodeVersion(health.version)) {
             logger.info(`Found existing OpenCode server at ${this.url}`);
+            const restored = await this.restoreManagedRuntimeConfigAtStartup(
+              disposeGeneration,
+              signal
+            );
+            if (restored) return restored;
             this.beginRunningEventStream();
             this.startExistingServerPreparation(disposeGeneration, signal);
             return this.url;
@@ -752,6 +792,8 @@ export class OpenCodeServer extends EventEmitter {
         this.preserveExistingProcess = true;
         this.externalEndpoint = false;
         await release();
+        const restored = await this.restoreManagedRuntimeConfigAtStartup(disposeGeneration, signal);
+        if (restored) return restored;
         this.beginRunningEventStream();
         this.startExistingServerPreparation(disposeGeneration, signal);
         return this.url;
@@ -780,6 +822,8 @@ export class OpenCodeServer extends EventEmitter {
         this.preserveExistingProcess = true;
         this.externalEndpoint = !managedRegistration;
         await release();
+        const restored = await this.restoreManagedRuntimeConfigAtStartup(disposeGeneration, signal);
+        if (restored) return restored;
         this.beginRunningEventStream();
         this.startExistingServerPreparation(disposeGeneration, signal);
         return this.url;
@@ -788,6 +832,7 @@ export class OpenCodeServer extends EventEmitter {
       this.preserveExistingProcess = false;
       this.externalEndpoint = false;
       this.admission.reset();
+      this.connectionMonitor.reset();
       await this.syncInjectedConfigFile();
       try {
         this.throwIfStartCancelled(disposeGeneration, signal);
@@ -799,6 +844,61 @@ export class OpenCodeServer extends EventEmitter {
     } finally {
       await release();
     }
+  }
+
+  private async hasMissingRuntimeAskAgent(): Promise<boolean> {
+    if (
+      this.isAttachOnly ||
+      !this.processManager.needsRuntimeConfigRecovery ||
+      !(await this.processManager.shouldRestoreRuntimeAskAgent())
+    ) {
+      this.runtimeAskRecoveryPending = false;
+      return false;
+    }
+    const agents = await this.transport.request('GET', '/agent');
+    if (
+      !Array.isArray(agents) ||
+      agents.some((value) => {
+        const name = asRecord(value)?.name;
+        return typeof name !== 'string' || !name.trim();
+      })
+    )
+      throw new Error('OpenCode returned an invalid agent catalog');
+    this.runtimeAskRecoveryPending = !agents.some((value) => {
+      const name = asRecord(value)?.name;
+      return typeof name === 'string' && name.toLowerCase() === 'ask';
+    });
+    return this.runtimeAskRecoveryPending;
+  }
+
+  private async restoreManagedRuntimeConfigAtStartup(
+    disposeGeneration: number,
+    signal: AbortSignal
+  ): Promise<string | undefined> {
+    // A service replacement can retain our credentials but lose OPENCODE_CONFIG.
+    // Restore the runtime before publishing running state and routing catalogs.
+    // Ordinary reuse keeps the background ownership-preparation fast path.
+    if (!this.processManager.hasRuntimeConfigRecoveryCandidate || this.isAttachOnly) return;
+    this.startExistingServerPreparation(disposeGeneration, signal);
+    await this.existingServerPreparationOperation;
+    this.throwIfStartCancelled(disposeGeneration, signal);
+    if (!(await this.hasMissingRuntimeAskAgent())) return;
+    this.throwIfStartCancelled(disposeGeneration, signal);
+    if ((await this.readRestartBlockers()).totalSessionCount > 0) return;
+    this.throwIfStartCancelled(disposeGeneration, signal);
+    const release = await this.processManager.acquireManagedServerRestartOwnership();
+    try {
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      // The claim protects ownership, not work submitted by other clients.
+      if ((await this.readRestartBlockers()).totalSessionCount > 0) return;
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      logger.info('Restoring Varro runtime Ask agent on the replaced managed OpenCode server');
+      await this.stopServerForRestart(true);
+    } finally {
+      await release();
+    }
+    this.throwIfStartCancelled(disposeGeneration, signal);
+    return this.launchManagedServer(disposeGeneration, false, signal);
   }
 
   private launchPreparedManagedServer(
@@ -1535,6 +1635,13 @@ export class OpenCodeServer extends EventEmitter {
     ) {
       throw new Error('OpenCode server is not accepting requests while stopping');
     }
+    if (method === 'GET' && new URL(path, 'http://localhost').pathname === '/agent') {
+      // Catalog reads must observe a completed runtime repair, not a fake agent
+      // which the server would reject when selected.
+      options?.signal?.throwIfAborted();
+      await this.reconcileManagedAskAgent();
+      options?.signal?.throwIfAborted();
+    }
     if (
       method === 'POST' &&
       /^\/session\/[^/]+\/(?:prompt_async|prompt|message|command|resume-steering)$/.test(
@@ -1544,6 +1651,13 @@ export class OpenCodeServer extends EventEmitter {
       options?.signal?.throwIfAborted();
       // Do not leave the first send after editor reload waiting for the
       // five-minute maintenance interval to protect an owned idle backend.
+      try {
+        await this.reconcileManagedAskAgent();
+      } catch (err) {
+        logger.warn(
+          `OpenCode Ask agent preflight failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
       try {
         await this.reconcileManagedStreamTimeout();
       } catch (err) {
@@ -1791,6 +1905,42 @@ export class OpenCodeServer extends EventEmitter {
     return operation;
   }
 
+  private reconcileManagedAskAgent(): Promise<void> {
+    if (this.askAgentReconciliationOperation) return this.askAgentReconciliationOperation;
+    const operation = this.runManagedAskAgentReconciliation();
+    this.askAgentReconciliationOperation = operation;
+    const finish = () => {
+      if (this.askAgentReconciliationOperation === operation)
+        this.askAgentReconciliationOperation = null;
+    };
+    void operation.then(finish, finish);
+    return operation;
+  }
+
+  private async runManagedAskAgentReconciliation() {
+    if (this.existingServerPreparationOperation) await this.existingServerPreparationOperation;
+    if (this.isDisposing || this.isTerminalCliUpgradeActive() || this._status.state !== 'running')
+      return;
+    const generation = this.disposeGeneration;
+    const url = this.url;
+    const current = () =>
+      !this.isDisposing &&
+      !this.isTerminalCliUpgradeActive() &&
+      generation === this.disposeGeneration &&
+      url === this.url &&
+      this._status.state === 'running';
+    if (!(await this.hasMissingRuntimeAskAgent()) || !current()) return;
+    if ((await this.readRestartBlockers()).totalSessionCount > 0 || !current()) return;
+    if (!(await this.processManager.refreshManagedServerOwnership()) || !current()) return;
+    // runRestart reserves the lifecycle, drains requests, rechecks global work
+    // and acquires verified ownership before stopping. Never force this repair.
+    await this.runRestart(async () => {
+      logger.info('Restoring Varro runtime Ask agent on the replaced managed OpenCode server');
+      await this.processManager.stopServerForRestart();
+    });
+    this.runtimeAskRecoveryPending = false;
+  }
+
   private async runManagedStreamTimeoutReconciliation() {
     if (this.existingServerPreparationOperation) await this.existingServerPreparationOperation;
     if (
@@ -1839,6 +1989,13 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async runMaintenanceTick() {
+    try {
+      await this.reconcileManagedAskAgent();
+    } catch (err) {
+      logger.warn(
+        `OpenCode Ask agent reconciliation failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
     try {
       await this.reconcileManagedStreamTimeout();
     } catch (err) {
@@ -2638,6 +2795,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async disposeResources(options: { stopProcess: boolean }) {
+    this.connectionMonitor.reset();
     this.admission.reset();
     this.pendingTerminalCliUpgrades = 0;
     this.restoreServerAfterTerminalCliUpgrade = false;

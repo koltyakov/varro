@@ -61,9 +61,19 @@ already includes Chromium, so CI skips the browser install hook and runs E2E acr
 
 The Playwright suite is browser-level webview E2E coverage. It runs the real Solid webview in Chromium through `e2e/harness/index.html`, while the harness mocks the VS Code message bridge and the OpenCode/Varro request and event boundary. It does not launch VS Code, an extension host, or a real OpenCode CLI/server.
 
-Local E2E runs use half the available CPU cores, capped at four workers to leave room for frame-sensitive browser checks. Override this with `npm run test:e2e -- --workers=2` on a busy machine. Playback and raster diagnostics default to one worker. CI splits the suite across four jobs with two workers each.
+Local E2E runs use half the available CPU cores, capped at four workers to leave room for frame-sensitive browser checks. Override this with `npm run test:e2e -- --workers=2` on a busy machine. Playback and diagnostics default to one worker. CI splits the suite across four jobs with two workers each.
 
 For shorter feedback loops, select a spec as above, filter test names with `npm run test:e2e -- --grep "composer"`, or rerun failures with `npm run test:e2e -- --last-failed`. Standard and raster E2E runs use port 4174 when available and automatically select a free port when it is occupied. To require a specific port, set `VARRO_E2E_PORT`, for example `VARRO_E2E_PORT=4184 npm run test:e2e` in macOS/Linux shells. Playback keeps its existing-server behavior.
+
+The normal E2E suite excludes `e2e/tests/diagnostics/`. Run those investigations explicitly with
+`npm run test:e2e:diagnostics`; their evidence stays in `tmp/playwright-diagnostics/`. For the local
+captured-transcript replay, use `npm run test:e2e:diagnostics -- scroll-reported.spec.ts`. It reads
+`tmp/scroll-reported-messages.json` and skips when that capture is absent. The strict application
+raster check remains separately available through `npm run test:e2e:raster`.
+
+Repeated streaming bottom-follow assertions use shorter polling intervals without changing their
+timeouts, pixel tolerances, frame waits, or chunk counts. Long-history traversal and repeated
+tool-exit regressions still run in full in the normal suite.
 
 For first-run and recovery checks in a disposable real Extension Host, run `npm run test:vscode-sandbox`. See [Onboarding Verification](onboarding-verification.md) for the scenario matrix and manual non-happy-path checks.
 
@@ -442,6 +452,8 @@ docs/
 | `npm run fmt` | Format `src/` with oxfmt |
 | `npm run test` | Run the Vitest suite |
 | `npm run test:e2e` | Run the Playwright webview E2E suite |
+| `npm run test:e2e:diagnostics` | Run opt-in browser diagnostics and save their evidence |
+| `npm run test:e2e:raster` | Run strict application and static native wheel raster checks |
 | `npm run test:vscode-sandbox` | Run onboarding scenarios in disposable VS Code Extension Hosts |
 | `npm run ai:vscode` | Build and launch the persistent Extension Development Host used by the [AI/fuzzy verification guide](ai-fuzzy-verification.md) |
 | `npm run test:coverage` | Run tests with coverage output |

@@ -89,7 +89,7 @@ test('recovers when the webview reloads while startup is still in progress', asy
   await expect(
     page.getByText('Startup completed without losing the restored session.', { exact: true })
   ).toBeVisible();
-  await expect(page.getByText('OpenCode could not start', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('OpenCode is unavailable', { exact: true })).toHaveCount(0);
 });
 
 test('recovers when the first startup connection attempt loses the race', async ({ page }) => {

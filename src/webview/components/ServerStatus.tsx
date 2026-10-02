@@ -443,7 +443,7 @@ function GenericErrorState(props: { message: string }) {
         />
       </div>
       <div class="flex w-full flex-col gap-1.5">
-        <p class="text-[13px] font-medium text-vscode-fg">OpenCode could not start</p>
+        <p class="text-[13px] font-medium text-vscode-fg">OpenCode is unavailable</p>
         <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
       </div>
       <RecoveryActions showOutput />

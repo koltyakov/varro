@@ -19,6 +19,19 @@ Returning to a retained sidebar or editor tab resynchronizes the cap immediately
 without a resize event. This avoids briefly squeezing the view to a stale hidden width;
 the four-frame delay still applies to ordinary visible expansion.
 
+The October 2 sidebar-switch reproduction found a separate host path: returning
+from Chat to Varro emits a 300 x 150 resize followed by the real viewport resize,
+without any `visibilitychange` event. Chromium uses 300 x 150 for an unsized iframe.
+Previously this replaced the width cap with 300 px and kept the restored sidebar
+narrow for four painted frames. Width tracking now ignores that temporary cap and
+applies the next host viewport immediately. A 300 px sidebar with its normal height
+still follows ordinary resize rules. Regression tests cover reattachment, a changed
+return width, initial unsized layout, and cancellation of a pending expansion.
+The isolated native retest checked 10 returns at 486 and 420 px: zero narrow
+animation-frame samples, versus 20 narrow samples over five baseline returns.
+The runs retained 185 baseline and 397 fixed compositor frames. Evidence and the
+reproduction script are under `artifacts/sidebar-switch-20261002/`.
+
 A fresh isolated-host retest on September 28 retained 169 compositor frames across
 the baseline, `overflow: visible`, and `overflow: clip` experiments. The visible
 override still shows stale-width paint during expansion, including frames 003 and

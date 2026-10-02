@@ -255,6 +255,86 @@ describe('webview bootstrap', () => {
     }
   });
 
+  it.each([420, 486])(
+    'restores width %i immediately after iframe reattachment without a visibility event',
+    (restoredWidth) => {
+      vi.useFakeTimers();
+      let width = 420;
+      let height = 794;
+      const widthSpy = vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => width);
+      const heightSpy = vi.spyOn(window, 'innerHeight', 'get').mockImplementation(() => height);
+      const visibilitySpy = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      try {
+        cleanup = bootstrap(root);
+        width = 300;
+        height = 150;
+        window.dispatchEvent(new Event('resize'));
+        expect(root.style.maxWidth).toBe('420px');
+
+        width = restoredWidth;
+        height = 794;
+        window.dispatchEvent(new Event('resize'));
+        expect(root.style.maxWidth).toBe(`${restoredWidth}px`);
+        vi.runAllTimers();
+        expect(root.style.maxWidth).toBe(`${restoredWidth}px`);
+
+        // A real narrow sidebar is not the browser's unsized iframe viewport.
+        width = 300;
+        window.dispatchEvent(new Event('resize'));
+        expect(root.style.maxWidth).toBe('300px');
+        width = 420;
+        window.dispatchEvent(new Event('resize'));
+        expect(root.style.maxWidth).toBe('300px');
+        vi.runAllTimers();
+        expect(root.style.maxWidth).toBe('420px');
+      } finally {
+        cleanup?.();
+        cleanup = undefined;
+        widthSpy.mockRestore();
+        heightSpy.mockRestore();
+        visibilitySpy.mockRestore();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('cancels an expansion during iframe reattachment and restores an initially unsized view', () => {
+    vi.useFakeTimers();
+    let width = 300;
+    let height = 150;
+    const widthSpy = vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => width);
+    const heightSpy = vi.spyOn(window, 'innerHeight', 'get').mockImplementation(() => height);
+    try {
+      cleanup = bootstrap(root);
+      width = 420;
+      height = 794;
+      window.dispatchEvent(new Event('resize'));
+      expect(root.style.maxWidth).toBe('420px');
+
+      width = 486;
+      window.dispatchEvent(new Event('resize'));
+      vi.advanceTimersToNextFrame();
+      expect(root.style.maxWidth).toBe('420px');
+      width = 300;
+      height = 150;
+      window.dispatchEvent(new Event('resize'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.runAllTimers();
+      expect(root.style.maxWidth).toBe('420px');
+
+      width = 486;
+      height = 794;
+      window.dispatchEvent(new Event('resize'));
+      expect(root.style.maxWidth).toBe('486px');
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+      widthSpy.mockRestore();
+      heightSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('applies zoom width immediately and cancels a pending expansion', () => {
     vi.useFakeTimers();
     let width = 360;

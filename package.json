@@ -57,6 +57,8 @@
     "test:e2e": "node scripts/run-e2e.mjs",
     "pretest:e2e:raster": "playwright install chromium",
     "test:e2e:raster": "VARRO_E2E_MODE=raster node scripts/run-e2e.mjs",
+    "pretest:e2e:diagnostics": "playwright install chromium",
+    "test:e2e:diagnostics": "VARRO_E2E_MODE=diagnostics node scripts/run-e2e.mjs",
     "test:vscode-sandbox": "npm run build && node scripts/vscode-sandbox/run.mjs",
     "ai:vscode": "npm run build && node scripts/launch-ai-vscode.mjs",
     "ai:preconditions": "node scripts/ai-fuzzy-preconditions.mjs",

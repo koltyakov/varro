@@ -74,7 +74,7 @@ describe('ServerStatus', () => {
 
     renderServerStatus();
 
-    expect(container?.textContent).toContain('OpenCode could not start');
+    expect(container?.textContent).toContain('OpenCode is unavailable');
     expect(container?.textContent).toContain('failed to bind port');
     expect(container?.textContent).not.toContain('  failed to bind port  ');
 
@@ -161,7 +161,7 @@ describe('ServerStatus', () => {
     expect(container?.textContent).toContain('the running server is 1.15.13');
     expect(container?.textContent).toContain('opencode upgrade');
     expect(container?.textContent).toContain('Restart Server');
-    expect(container?.textContent).not.toContain('OpenCode could not start');
+    expect(container?.textContent).not.toContain('OpenCode is unavailable');
   });
 
   it('recommends the install-specific command when an update has already failed', () => {

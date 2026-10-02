@@ -337,7 +337,9 @@ Define primary agents in OpenCode configuration. Varro lists them in the agent p
 
 Varro automatically adds its read-only `Ask` primary agent to the managed OpenCode runtime. This does not modify `opencode.json`; if inherited, global, or project OpenCode configuration already defines an agent named `ask` (case-insensitive), Varro uses that definition instead.
 
-Runtime injection requires Varro to launch the server itself. When Varro attaches to an existing OpenCode v2 shared service or an external server, it cannot inject Ask. OpenCode's shared-service API does not support runtime agent registration. Agents already configured on the server remain available.
+Runtime injection requires Varro to launch the server itself. If an OpenCode upgrade replaces a Varro-managed service without its runtime config, Varro detects the missing Ask agent and safely relaunches the owned server with that config. Startup restores it before publishing the agent catalog when the server is idle. Active sessions, pending questions, and pending approvals defer recovery until work finishes. User-defined Ask agents and caller-provided configuration are preserved; global and project config files are not modified.
+
+When Varro attaches to an unmanaged OpenCode v2 shared service or an external server, it cannot inject Ask. OpenCode's shared-service API does not support runtime agent registration. Agents already configured on the server remain available.
 
 Choose the config scope based on where you want the agent to appear:
 

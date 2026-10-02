@@ -14,6 +14,7 @@ vi.mock('./windows-process-inspector', () => ({
 }));
 vi.mock('./logger', () => ({ logger: { warn: vi.fn() } }));
 import { logger } from './logger';
+import { ProcessInspectionTimeoutError } from './process-inspection-error';
 import {
   findListeningPids,
   inspectLocalServerAccount,
@@ -77,6 +78,8 @@ describe('local listener account inspection', () => {
     await expect(inspectLocalServerAccount(4096)).resolves.toEqual({
       kind: 'same-user',
       identity: `${listenerPid}:win32:123:S-1-5-21-1`,
+      pid: listenerPid,
+      birthIdentity: 'win32:123',
     });
     expect(spawnMock.mock.calls.map(([command]) => command)).toEqual([
       'netstat.exe',
@@ -126,6 +129,102 @@ describe('local listener account inspection', () => {
       await expect(inspectLocalServerAccount(4096)).resolves.toEqual({ kind: 'unknown' });
     }
   );
+});
+
+describe('macOS listener inspection recovery', () => {
+  function pendingListeners() {
+    vi.useFakeTimers();
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    const children: Array<
+      EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: ReturnType<typeof vi.fn> }
+    > = [];
+    spawnMock.mockImplementation(() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+        exitCode: null,
+      });
+      children.push(child);
+      return child;
+    });
+    return children;
+  }
+
+  afterEach(() => vi.useRealTimers());
+
+  it('retries a timeout with fresh output and a bounded longer deadline', async () => {
+    const children = pendingListeners();
+    const inspection = findListeningPids(4096);
+    children[0]!.stdout.emit('data', Buffer.from(String(listenerPid)));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(children).toHaveLength(2);
+    expect(children[0]!.kill).toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('lsof timed out after 2000ms')
+    );
+    await vi.advanceTimersByTimeAsync(4000);
+    children[1]!.stdout.emit('data', Buffer.from(String(listenerPid + 1)));
+    children[1]!.emit('close', 0);
+    await expect(inspection).resolves.toEqual([listenerPid + 1]);
+  });
+
+  it('reports persistent timeout without trusting partial output or claiming unknown ownership', async () => {
+    const children = pendingListeners();
+    const inspection = inspectLocalServerAccount(4096);
+    const rejected = expect(inspection).rejects.toThrow(ProcessInspectionTimeoutError);
+    children[0]!.stdout.emit('data', Buffer.from(String(listenerPid)));
+    await vi.advanceTimersByTimeAsync(2000);
+    children[1]!.stdout.emit('data', Buffer.from(String(listenerPid)));
+    await vi.advanceTimersByTimeAsync(5000);
+    await rejected;
+    await expect(inspection).rejects.toThrow('lsof timed out after 5000ms');
+    expect(children).toHaveLength(2);
+    expect(children[1]!.kill).toHaveBeenCalled();
+    const recovered = findListeningPids(4096);
+    children[2]!.stdout.emit('data', Buffer.from(String(listenerPid + 1)));
+    children[2]!.emit('close', 0);
+    await expect(recovered).resolves.toEqual([listenerPid + 1]);
+  });
+
+  it('shares only in-flight inspections for the same port', async () => {
+    const children = pendingListeners();
+    const first = findListeningPids(4096);
+    const concurrent = findListeningPids(4096);
+    const otherPort = findListeningPids(5096);
+    expect(children).toHaveLength(2);
+    children[0]!.stdout.emit('data', Buffer.from(String(listenerPid)));
+    children[0]!.emit('close', 0);
+    children[1]!.stdout.emit('data', Buffer.from(String(listenerPid + 1)));
+    children[1]!.emit('close', 0);
+    await expect(first).resolves.toEqual([listenerPid]);
+    await expect(concurrent).resolves.toEqual([listenerPid]);
+    await expect(otherPort).resolves.toEqual([listenerPid + 1]);
+    const fresh = findListeningPids(4096);
+    expect(children).toHaveLength(3);
+    children[2]!.stdout.emit('data', Buffer.from(String(listenerPid + 2)));
+    children[2]!.emit('close', 0);
+    await expect(fresh).resolves.toEqual([listenerPid + 2]);
+  });
+
+  it('does not accept partial PIDs from a failed command or retry a permission failure', async () => {
+    const children = pendingListeners();
+    const inspection = findListeningPids(4096);
+    const rejected = expect(inspection).rejects.toThrow('permission denied');
+    children[0]!.stdout.emit('data', Buffer.from(String(listenerPid)));
+    children[0]!.stderr.emit('data', Buffer.from('permission denied'));
+    children[0]!.emit('close', 1);
+    await rejected;
+    expect(children).toHaveLength(1);
+  });
+
+  it('still reports an inspected empty port without retrying', async () => {
+    const children = pendingListeners();
+    const inspection = findListeningPids(4096);
+    children[0]!.emit('close', 1);
+    await expect(inspection).resolves.toEqual([]);
+    expect(children).toHaveLength(1);
+  });
 });
 
 describe('Windows listener and process inspection', () => {
@@ -182,6 +281,8 @@ describe('Windows listener and process inspection', () => {
     await expect(inspectLocalServerAccount(4096)).resolves.toEqual({
       kind: 'same-user',
       identity: `${listenerPid}:win32:123:S-1-5-21-1`,
+      pid: listenerPid,
+      birthIdentity: 'win32:123',
     });
     expect(spawnMock.mock.calls.map(([command]) => command)).toEqual(['netstat.exe']);
   });
@@ -332,6 +433,8 @@ describe('Windows listener and process inspection', () => {
     await expect(inspectLocalServerAccount(4096)).resolves.toEqual({
       kind: 'same-user',
       identity: `${listenerPid}:win32:123:S-1-5-21-1`,
+      pid: listenerPid,
+      birthIdentity: 'win32:123',
     });
     expect(spawnMock.mock.calls.map(([command]) => command)).toEqual([
       'netstat.exe',
