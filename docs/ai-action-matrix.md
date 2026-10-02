@@ -1,8 +1,8 @@
 # AI action coverage matrix
 
 Use this matrix for AI parity and regression runs. Rendering a stream is one part of
-the run. A passing run must exercise the actions that create, change, interrupt, and
-resume work through the real VS Code UI.
+the run. Complete coverage must exercise the actions that create, change, interrupt,
+and resume work through the real VS Code UI. Findings and coverage are separate.
 
 Follow [AI fuzzy verification](ai-fuzzy-verification.md) for database isolation,
 native input, model selection, fixture safety, evidence capture, and cleanup. Follow
@@ -90,7 +90,14 @@ model, including stale permission snapshots, late judge replies, and duplicate
 events. Report those separately from live editor results. Do not inject failures
 or synthetic state into the live editor to claim a real-backend pass.
 
-The overall action-matrix result passes only when every required applicable row
-passes on every requested backend. A capability unavailable by design needs a
-verified UI behavior and an explicit capability note. A missing test mechanism or
-unreached precondition is a block, not an unsupported capability.
+Follow the [results and recommendations contract](ai-test-workflow.md#results-and-recommendations).
+The overall action-matrix result is `FAIL` when evidenced issues were found, `PASS`
+when exercised checks found none, or `BLOCKED` when no relevant behavior was verified.
+Incomplete rows do not make the overall result a failure or become passes. Include
+the required Markdown findings/coverage table for each backend in the ledger and
+final response, with recommended fixes or diagnostics for each issue.
+
+Coverage is complete only when every required applicable row has a verified verdict
+on every requested backend. A capability unavailable by design needs a verified UI
+behavior and an explicit capability note. A missing test mechanism or unreached
+precondition is a block, not an unsupported capability.
