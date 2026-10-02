@@ -334,6 +334,7 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(backend.request).toHaveBeenCalledWith('GET', '/config/providers', undefined, {
       directory: '/other',
+      signal: expect.any(AbortSignal),
     });
     await fs.writeFile(
       auth.path,
