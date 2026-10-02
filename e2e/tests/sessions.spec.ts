@@ -90,6 +90,47 @@ test('uses duty-cycled animations only for persistent session statuses', async (
   await expect(page.locator('.chat-header-running-spinner')).toHaveCSS('animation-name', 'spin');
 });
 
+test('centers the running-session counter across font metrics', async ({ page }) => {
+  await page.setViewportSize({ width: 490, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=status-filters');
+  const counter = page.locator('.chat-header-running-count');
+  await expect(counter).toBeVisible();
+  await expect(counter).toHaveCSS('text-box-trim', 'trim-both');
+  await expect(counter).toHaveCSS('text-box-edge', 'cap alphabetic');
+  await expect(counter).toHaveCSS('transform', 'none');
+
+  for (const fontFamily of ['var(--font-mono)', 'Arial, sans-serif', 'serif', 'monospace']) {
+    for (const count of ['1', '12', '99']) {
+      const geometry = await counter.evaluate(
+        (element, options) => {
+          element.style.fontFamily = options.fontFamily;
+          element.textContent = options.count;
+          const badge = element.closest('.chat-header-running-badge');
+          if (!badge) throw new Error('Expected the running-session badge');
+          const badgeBox = badge.getBoundingClientRect();
+          const textBox = element.getBoundingClientRect();
+          return {
+            badgeWidth: badgeBox.width,
+            badgeHeight: badgeBox.height,
+            verticalOffset: textBox.top + textBox.height / 2 - (badgeBox.top + badgeBox.height / 2),
+            horizontalOffset:
+              textBox.left + textBox.width / 2 - (badgeBox.left + badgeBox.width / 2),
+            textHeight: textBox.height,
+            lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+          };
+        },
+        { fontFamily, count }
+      );
+      const context = `${fontFamily}, count ${count}`;
+      expect(geometry.badgeWidth, context).toBe(20);
+      expect(geometry.badgeHeight, context).toBe(20);
+      expect(Math.abs(geometry.verticalOffset), context).toBeLessThan(0.1);
+      expect(Math.abs(geometry.horizontalOffset), context).toBeLessThan(0.1);
+      expect(geometry.textHeight, context).toBeLessThan(geometry.lineHeight);
+    }
+  }
+});
+
 test('keeps persistent statuses static and visible with reduced motion', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/e2e/harness/index.html?scenario=status-filters');

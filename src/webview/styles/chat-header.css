@@ -235,19 +235,16 @@
 }
 
 .chat-header-running-count {
-  position: absolute;
-  inset: 0;
+  position: relative;
   z-index: var(--z-raised);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 700;
   line-height: 1;
+  /* Digits have no descenders; center their cap-height box across platform fonts. */
+  text-box: trim-both cap alphabetic;
   color: var(--color-vscode-fg);
   font-variant-numeric: tabular-nums;
-  transform: translateY(0.35px);
 }
 
 .chat-header-plan-dot {

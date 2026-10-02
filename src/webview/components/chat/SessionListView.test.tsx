@@ -1141,7 +1141,11 @@ describe('SessionListView diff summaries', () => {
     expect(container.querySelector('.session-item-meta')?.textContent).toContain('-4');
     expect(container.querySelector('.session-item-meta')?.textContent).toContain('12k tokens');
     expect(container.querySelector('.session-item-meta')?.textContent).toContain('1m 5s');
-    expect(container.querySelector('[title="12,345 tokens spent"]')).not.toBeNull();
+    const tokenLabel = Array.from(container.querySelectorAll('.session-item-meta span')).find(
+      (element) => element.textContent === '12k tokens'
+    );
+    expect(tokenLabel).toBeDefined();
+    expect(tokenLabel?.hasAttribute('title')).toBe(false);
     expect(container.querySelector('[title="1m 5s total time worked"]')).not.toBeNull();
     expect(container.querySelector('.session-item-cost')?.textContent).toBe('$0.07');
     expect(container.querySelector('.session-item-meta')?.textContent).toContain('1m 5s · $0.07');

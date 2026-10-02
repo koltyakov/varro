@@ -151,11 +151,11 @@ function formatServerUptime(startedAt: number): string {
   const units = [
     { singular: 'week', plural: 'weeks', minutes: 7 * 24 * 60 },
     { singular: 'day', plural: 'days', minutes: 24 * 60 },
-    { singular: 'hr.', plural: 'hrs.', minutes: 60 },
-    { singular: 'min.', plural: 'min.', minutes: 1 },
+    { singular: 'hr', plural: 'hrs', minutes: 60 },
+    { singular: 'min', plural: 'min', minutes: 1 },
   ];
   const index = units.findIndex((unit) => minutes >= unit.minutes);
-  if (index < 0) return 'less than a min.';
+  if (index < 0) return 'less than a min';
   let remaining = minutes;
   return units
     .slice(index, index + 2)

@@ -20,16 +20,16 @@ function getVersionItem() {
 
 describe('SidebarProvider server uptime', () => {
   it.each([
-    [0, 'less than a min.'],
-    [59_999, 'less than a min.'],
-    [MINUTE, '1 min.'],
-    [42 * MINUTE + 59_999, '42 min.'],
-    [HOUR, '1 hr.'],
-    [HOUR + MINUTE, '1 hr. 1 min.'],
-    [2 * HOUR + 35 * MINUTE, '2 hrs. 35 min.'],
+    [0, 'less than a min'],
+    [59_999, 'less than a min'],
+    [MINUTE, '1 min'],
+    [42 * MINUTE + 59_999, '42 min'],
+    [HOUR, '1 hr'],
+    [HOUR + MINUTE, '1 hr 1 min'],
+    [2 * HOUR + 35 * MINUTE, '2 hrs 35 min'],
     [DAY, '1 day'],
-    [DAY + HOUR + 45 * MINUTE, '1 day 1 hr.'],
-    [2 * DAY + 10 * HOUR + 45 * MINUTE, '2 days 10 hrs.'],
+    [DAY + HOUR + 45 * MINUTE, '1 day 1 hr'],
+    [2 * DAY + 10 * HOUR + 45 * MINUTE, '2 days 10 hrs'],
     [WEEK, '1 week'],
     [WEEK + DAY + HOUR, '1 week 1 day'],
     [2 * WEEK + 3 * DAY + 10 * HOUR, '2 weeks 3 days'],
@@ -98,10 +98,10 @@ describe('SidebarProvider server uptime', () => {
       const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
       const item = getVersionItem();
       statusHandler?.({ state: 'running', url: server.url });
-      await vi.waitFor(() => expect(item.tooltip).toContain('Server uptime: 1 hr. 59 min.'));
+      await vi.waitFor(() => expect(item.tooltip).toContain('Server uptime: 1 hr 59 min'));
 
       await vi.advanceTimersByTimeAsync(MINUTE);
-      expect(item.tooltip).toContain('Server uptime: 2 hrs.');
+      expect(item.tooltip).toContain('Server uptime: 2 hrs');
       expect(server.readServerInfo).toHaveBeenCalledTimes(1);
 
       statusHandler?.({ state: 'stopped' });
@@ -111,9 +111,9 @@ describe('SidebarProvider server uptime', () => {
 
       startedAt = Date.now();
       statusHandler?.({ state: 'running', url: server.url });
-      await vi.waitFor(() => expect(item.tooltip).toContain('Server uptime: less than a min.'));
+      await vi.waitFor(() => expect(item.tooltip).toContain('Server uptime: less than a min'));
       await vi.advanceTimersByTimeAsync(MINUTE);
-      expect(item.tooltip).toContain('Server uptime: 1 min.');
+      expect(item.tooltip).toContain('Server uptime: 1 min');
       expect(server.readServerInfo).toHaveBeenCalledTimes(2);
 
       await provider.dispose();

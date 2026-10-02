@@ -1266,6 +1266,8 @@ kbd {
 
 .chat-tool-invocation-part .tool-invocation-header:disabled {
   cursor: default;
+  /* Disabled only means there is no detail to expand, not that the tool is inactive. */
+  opacity: 1;
 }
 
 /* Inset offset: the card clips overflow, so a ring drawn outside the button
@@ -1288,12 +1290,12 @@ kbd {
 
 .chat-tool-invocation-part .tool-call-icon.tool-status-pending,
 .chat-tool-invocation-part .tool-call-icon.tool-status-completed,
-.chat-tool-invocation-part .tool-call-icon.tool-status-aborted,
-.chat-tool-invocation-part .tool-call-icon.tool-status-running {
+.chat-tool-invocation-part .tool-call-icon.tool-status-aborted {
   color: var(--color-vscode-fg-muted);
 }
 
 .chat-tool-invocation-part .tool-call-icon.tool-status-running {
+  color: var(--color-vscode-fg);
   animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
