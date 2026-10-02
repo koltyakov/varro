@@ -287,6 +287,10 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
   const title = getStateTitle(state);
   const normalizedToolName = normalizeToolName(toolName);
 
+  if (normalizedToolName === 'question' && (!title || normalizeToolName(title) === 'question')) {
+    return 'Question';
+  }
+
   if (toolName === 'automatic_action') {
     const label = title || (isString(input.description) ? input.description : 'Automatic action');
     return isString(input.command) && input.command.trim() ? `${label}: ${input.command}` : label;

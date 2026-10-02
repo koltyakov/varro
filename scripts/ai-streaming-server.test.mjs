@@ -246,8 +246,13 @@ test('controller pause interrupts a scheduled wait and stop releases a paused re
   const run = server.start();
   await sleep(10);
   server.pause();
-  await sleep(20);
+  const pausedAt = performance.now();
+  const paused = server.getResult();
+  assert.equal(paused.state, 'paused');
+  // A timer can fire slightly early relative to the monotonic clock used by the scheduler.
+  await waitFor(() => performance.now() - pausedAt >= 20);
   assert.equal(server.getResult().scheduler.appliedEvents, 0);
+  assert.equal(server.getResult().scheduler.elapsedMs, paused.scheduler.elapsedMs);
   await server.close();
   const result = await run;
   assert.equal(result.state, 'cancelled');

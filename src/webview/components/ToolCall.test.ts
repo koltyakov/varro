@@ -144,6 +144,21 @@ function session(id: string, overrides: Partial<Session> = {}): Session {
 }
 
 describe('formatToolTitle', () => {
+  it.each([
+    ['question', ''],
+    ['question', 'question'],
+    ['functions.question', ''],
+    ['functions.question', 'functions.question'],
+  ])('capitalizes the default question title for %s with title "%s"', (toolName, title) => {
+    expect(formatToolTitle(toolName, completedState({}, title))).toBe('Question');
+  });
+
+  it('preserves descriptive question titles', () => {
+    expect(formatToolTitle('question', completedState({}, 'Asked 3 questions'))).toBe(
+      'Asked 3 questions'
+    );
+  });
+
   it('shows search tools as Search with the input pattern', () => {
     expect(formatToolTitle('grep', completedState({ pattern: 'Thinking:' }, 'Thinking:'))).toBe(
       'Search: Thinking:'
@@ -2426,6 +2441,22 @@ describe('ToolCall', () => {
       expect(container?.querySelector('.question-prompt-card')).toBeNull();
     }
   );
+
+  it.each(['', 'question'])('capitalizes the completed question summary title "%s"', (title) => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'question',
+      state: completedState({ questions: [{ question: 'Which checks should I run?' }] }, title),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.question-summary-title')?.textContent).toBe('Question');
+  });
 
   it('shows completed questions and answers as a compact read-only summary', () => {
     const part: ToolPart = {
