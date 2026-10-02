@@ -107,6 +107,34 @@ function createSelectionDependencies(
   };
 }
 
+describe('selection outcomes', () => {
+  it('does not report an active ID as successful hydration after a history failure', async () => {
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => 'session-1',
+      loadSession: async () => {
+        throw new Error('503 history unavailable');
+      },
+    });
+    await expect(
+      selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1')
+    ).resolves.toEqual({ state: 'failed' });
+    expect(deps.setMessagesLoading).toHaveBeenLastCalledWith(false);
+    expect(deps.persistActiveSessionId).not.toHaveBeenCalled();
+  });
+
+  it('reports successful and superseded hydration separately', async () => {
+    const deps = createSelectionDependencies({ getActiveSessionId: () => 'session-1' });
+    await expect(
+      selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1')
+    ).resolves.toEqual({ state: 'loaded' });
+    const stale = createSelectionDependencies({ isCurrentSelectionGeneration: () => false });
+    await expect(
+      selectSessionWithDependencies(stale, { next: () => 1 }, 'session-1')
+    ).resolves.toEqual({ state: 'superseded' });
+    expect(stale.persistActiveSessionId).not.toHaveBeenCalled();
+  });
+});
+
 describe('session-selection helpers', () => {
   it('restores startup history and questions without waiting for MCP reconciliation', async () => {
     const mcp = deferred<void>();

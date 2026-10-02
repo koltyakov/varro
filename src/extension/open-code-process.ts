@@ -36,6 +36,7 @@ import {
 } from '../shared/opencode-install';
 import type { ServerStatus } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
+import { STARTUP_CREDENTIAL_TIMEOUT_MS, withStartupDeadline } from '../shared/startup';
 import {
   parseManagedServerOwnershipLease,
   type ManagedServerOwnershipLease,
@@ -1184,15 +1185,24 @@ export class OpenCodeProcess {
     // own this live process. SecretStorage is not a cross-editor lock or registry.
   }
 
-  async restoreManagedServerCredentials(secrets: Pick<vscode.SecretStorage, 'get'>) {
+  async restoreManagedServerCredentials(
+    secrets: Pick<vscode.SecretStorage, 'get'>,
+    signal?: AbortSignal
+  ) {
     const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
     if (!lease || lease.port !== this._port) return;
     // Registration already copied this verified private lease credential. The
     // editor vault can be slow/unavailable on Windows and is only a fallback.
     if (lease.password) return;
-    const encoded = await secrets.get(
-      `varro.opencode.managedCredentials:${this.ownershipLeasePath}`
+    const url = this.url;
+    const encoded = await withStartupDeadline(
+      () => secrets.get(`varro.opencode.managedCredentials:${this.ownershipLeasePath}`),
+      STARTUP_CREDENTIAL_TIMEOUT_MS,
+      'Managed credential lookup',
+      signal
     );
+    signal?.throwIfAborted();
+    if (this.url !== url || (this.ownershipLeaseCandidate ?? this.ownershipLease) !== lease) return;
     if (!encoded) return;
     let credentials: Record<string, unknown> | null;
     try {
@@ -1842,7 +1852,13 @@ export class OpenCodeProcess {
   async syncInjectedConfigFile() {
     await this.runInjectedConfigOperation(async () => {
       this.injectedConfigServerVersion = null;
-      await sweepStaleInjectedConfigDirectories();
+      // Age-based cleanup does not prepare this new config. In particular, a
+      // slow remote/temp directory scan must not re-enter the launch critical path.
+      void sweepStaleInjectedConfigDirectories().catch((error: unknown) => {
+        logger.warn(
+          `Failed to clean up stale temporary configs: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
       if (getEnvironmentValue(process.env, 'OPENCODE_CONFIG')?.trim()) {
         await this.removeInjectedConfigFile(this.injectedConfigPath);
         logger.warn(

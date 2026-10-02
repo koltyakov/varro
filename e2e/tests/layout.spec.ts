@@ -2,7 +2,8 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access DOM nodes and protocol-shaped fixtures established by each controlled layout scenario. */
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
-import type { ExtensionMessage } from '../../src/shared/protocol';
+import type { ExtensionMessage, ServerEvent } from '../../src/shared/protocol';
+import type { MessageEntry } from '../../src/webview/types';
 import {
   getE2EState,
   getScrollMetrics,
@@ -50,10 +51,12 @@ test('resets padding injected by legacy webview hosts', async ({ page }) => {
   });
 });
 
-test('bounds active tools and eases completed tools into Explored', async ({ page }) => {
+test('bounds active tools and moves completed tools into Explored without collapse animation', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1');
   const tray = page.locator('.assistant-active-activity-tray');
-  await expect(tray.locator('.assistant-active-activity-item')).toHaveCount(2);
+  await expect(tray.locator('.assistant-active-activity-item')).toHaveCount(1);
   const trayItems = tray.locator('.assistant-active-activity-items');
   await trayItems.evaluate(async (element) => {
     await Promise.all(
@@ -83,15 +86,19 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     return {
       clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight,
+      itemHeight: element
+        .querySelector<HTMLElement>('.assistant-active-activity-item')!
+        .getBoundingClientRect().height,
       scrollbarWidth: getComputedStyle(element).scrollbarWidth,
       visibleItems,
     };
   });
-  expect(trayGeometry.visibleItems).toHaveLength(2);
+  expect(trayGeometry.visibleItems).toHaveLength(1);
   expect(trayGeometry.scrollHeight).toBe(trayGeometry.clientHeight);
+  expect(Math.abs(trayGeometry.clientHeight - trayGeometry.itemHeight)).toBeLessThanOrEqual(1);
   expect(trayGeometry.scrollbarWidth).toBe('none');
 
-  const activeSpacing = await tray.evaluate(async (element) => {
+  const activeSpacing = await tray.evaluate((element) => {
     const summary = element.querySelector<HTMLElement>('.assistant-activity-summary')!;
     const viewport = element.querySelector<HTMLElement>('.assistant-active-activity-items')!;
     const items = [...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item')];
@@ -100,26 +107,12 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     const firstBoxBeforeExit = items[0]!
       .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
       .getBoundingClientRect();
-    const secondBoxBeforeExit = items[1]!
-      .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
-      .getBoundingClientRect();
-    items[1]!.classList.add('is-exiting');
-    element.classList.add('is-exiting');
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    const firstBox = items[0]!
-      .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
-      .getBoundingClientRect();
     return {
       summaryToFirst: firstBoxBeforeExit.top - summaryBox.bottom,
-      itemGap: secondBoxBeforeExit.top - firstBoxBeforeExit.bottom,
-      firstMovement: firstBox.top - firstBoxBeforeExit.top,
     };
   });
   expect(activeSpacing.summaryToFirst).toBeGreaterThanOrEqual(10);
   expect(activeSpacing.summaryToFirst).toBeLessThanOrEqual(14);
-  expect(activeSpacing.itemGap).toBeGreaterThanOrEqual(8);
-  expect(activeSpacing.itemGap).toBeLessThanOrEqual(10);
-  expect(Math.abs(activeSpacing.firstMovement)).toBeLessThanOrEqual(1);
 
   await page.goto(
     '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1&activeTrayPrefix=1'
@@ -160,15 +153,6 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
   });
   const transition = await completedItem.evaluate(async (element, initialLoadingTop) => {
-    // Observe before publishing completion; the exit can finish between Playwright calls.
-    const exiting = new Promise<void>((resolve) => {
-      const observer = new MutationObserver(() => {
-        if (!element.classList.contains('is-exiting')) return;
-        observer.disconnect();
-        resolve();
-      });
-      observer.observe(element, { attributes: true, attributeFilter: ['class'] });
-    });
     const harnessWindow = window as typeof window & {
       __varroE2E?: {
         getSessionMessages?: (id: string) => Array<{ parts: Array<Record<string, unknown>> }>;
@@ -190,7 +174,13 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
       time: { start: Date.now() - 1_000, end: Date.now() },
     };
     harnessWindow.__varroE2E?.updateMessagePart?.(part);
-    await exiting;
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: { type: 'message.part.updated', properties: { part } },
+      },
+      '*'
+    );
 
     const summary = document.querySelector<HTMLElement>('.assistant-activity-summary');
     if (!summary) throw new Error('Explored summary is missing while the tool exits');
@@ -211,15 +201,24 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
         ? loading.getBoundingClientRect().top - container.getBoundingClientRect().top
         : null;
     };
-    const exitAnimations = [...element.getAnimations(), ...summaryMask.getAnimations()];
     samples.push(element.getBoundingClientRect().height);
     const loadingTops = [initialLoadingTop, getLoadingTop()].filter(
       (top): top is number => top !== null
     );
     let summaryMissingFrames = 0;
     let framesAfterRemoval = 0;
-    for (let frame = 0; frame < 80 && framesAfterRemoval < 4; frame += 1) {
+    let sawExitAnimation = false;
+    for (let frame = 0; frame < 180 && framesAfterRemoval < 4; frame += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      sawExitAnimation ||=
+        element.classList.contains('is-exiting') ||
+        element
+          .getAnimations()
+          .some(
+            (animation) =>
+              animation instanceof CSSAnimation &&
+              animation.animationName === 'assistant-active-activity-out'
+          );
       samples.push(element.isConnected ? element.getBoundingClientRect().height : 0);
       const currentSummary = document.querySelector<HTMLElement>('.assistant-activity-summary');
       if (currentSummary) summaryTops.push(currentSummary.getBoundingClientRect().top);
@@ -232,7 +231,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
       heights: samples,
       itemWasRemoved: !element.isConnected,
       loadingTops,
-      synchronizedExitAnimationCount: exitAnimations.length,
+      sawExitAnimation,
       summaryMaskBackground,
       summaryMaskWidth,
       summaryMissingFrames,
@@ -251,7 +250,12 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   expect(transition.heights.at(-1)).toBeLessThan(transition.heights[0]! - 5);
   expect(transition.itemWasRemoved).toBe(true);
   await expect(loadingIndicator).toBeVisible();
-  expect(transition.synchronizedExitAnimationCount).toBeGreaterThanOrEqual(2);
+  expect(transition.sawExitAnimation).toBe(false);
+  expect(
+    transition.heights.every(
+      (height) => height === 0 || Math.abs(height - transition.heights[0]!) <= 1
+    )
+  ).toBe(true);
   expect(Math.abs(transition.summaryTop - placeholderTop)).toBeLessThanOrEqual(1);
   expect(transition.summaryMissingFrames).toBe(0);
   expect(
@@ -271,11 +275,10 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     1.5
   );
   expect(
-    transition.loadingTops.every(
-      (top, index) => index === 0 || transition.loadingTops[index - 1]! - top <= 5
-    ),
-    JSON.stringify(transition.loadingTops)
-  ).toBe(true);
+    transition.loadingTops.filter(
+      (top, index) => index > 0 && transition.loadingTops[index - 1]! - top > 1
+    ).length
+  ).toBeLessThanOrEqual(1);
   expect(transition.loadingTops.at(-1)).toBeLessThan(loadingTopBefore - 5);
   await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
   await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
@@ -293,11 +296,13 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
 test('keeps active-tray wheel input local before outer transcript movement', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 320 });
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1');
-  // A constrained host can still make the two-item tray scroll internally.
-  await page.addStyleTag({ content: '.assistant-active-activity-items { max-height: 40px; }' });
+  // A constrained host can still make one expanded tool scroll internally.
+  await page.addStyleTag({
+    content: '.assistant-active-activity-items { max-height: 40px !important; }',
+  });
   const list = page.locator('.interactive-list');
   const trayItems = page.locator('.assistant-active-activity-items');
-  await expect(trayItems.locator('.assistant-active-activity-item')).toHaveCount(2);
+  await expect(trayItems.locator('.assistant-active-activity-item')).toHaveCount(1);
   await trayItems.evaluate(async (element) => {
     await Promise.all(
       [...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item')].flatMap(
@@ -311,6 +316,16 @@ test('keeps active-tray wheel input local before outer transcript movement', asy
       getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
     )
     .toBeLessThanOrEqual(1);
+  await trayItems.locator('.tool-invocation-header').click();
+  await expect(trayItems.locator('.tool-invocation-chevron')).toHaveClass(/expanded/);
+  await trayItems.evaluate(async (element) => {
+    // Wait for expansion sizing, then exercise an unrelated mutation in the same item.
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    );
+    element.scrollTop = element.scrollHeight;
+    element.firstElementChild!.classList.add('nested-scroll-regression');
+  });
   await expect
     .poll(() =>
       trayItems.evaluate(
@@ -643,10 +658,12 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
   for (const gap of gaps) expect(gap).toBeCloseTo(12, 0);
 });
 
-test('hides sibling active tools while one tool is expanded', async ({ page }) => {
+test('keeps queued sibling tools hidden while the visible tool is expanded or collapsed', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=3');
   const items = page.locator('.assistant-active-activity-item');
-  await expect(items).toHaveCount(2);
+  await expect(items).toHaveCount(1);
   const firstItem = items.first();
   const firstHeader = firstItem.locator('.tool-invocation-header');
   await firstHeader.click();
@@ -662,7 +679,7 @@ test('hides sibling active tools while one tool is expanded', async ({ page }) =
 
   await firstHeader.click();
   await expect(firstItem.locator('.tool-invocation-chevron')).not.toHaveClass(/expanded/);
-  await expect.poll(visiblePartIds).toEqual(['tool-active-0', 'tool-active-1']);
+  await expect.poll(visiblePartIds).toEqual(['tool-active-0']);
 });
 
 for (const delayedDelivery of [false, true]) {
@@ -834,7 +851,7 @@ test('toggles Explored from the full disclosure hit area', async ({ page }) => {
   await expect(summary).toHaveAttribute('aria-expanded', 'false');
 });
 
-test('hides Thinking while an apply_patch tool is shown inline', async ({ page }) => {
+test('hides the loading indicator while an apply_patch tool is shown inline', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
   await page.evaluate(() => {
     const sessionId = 'session-diff-preview-large-transcript';
@@ -1795,6 +1812,26 @@ for (const elapsedSeconds of [0, 31]) {
     await page.clock.setFixedTime(startedAt);
     await page.setViewportSize({ width: 494, height: 800 });
     await page.goto('/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1');
+    await page.evaluate(() => {
+      // SAFETY: This isolated harness exposes the fixture's message store and event transport.
+      const harness = (
+        window as typeof window & {
+          __varroE2E: {
+            getSessionMessages(id: string): MessageEntry[];
+            replayServerEvent(event: ServerEvent): void;
+          };
+        }
+      ).__varroE2E;
+      const completed = harness
+        .getSessionMessages('session-large-transcript')
+        .flatMap((message) => message.parts)
+        .find((part) => part.id === 'reasoning-bottom-follow-completed');
+      if (completed?.type !== 'reasoning') throw new Error('Missing completed reasoning fixture');
+      harness.replayServerEvent({
+        type: 'message.part.updated',
+        properties: { part: { ...completed, time: { start: Date.now() - 1, end: Date.now() } } },
+      });
+    });
     const loading = page.locator('.interactive-loading-row .loading-indicator');
     await expect(loading).toBeVisible();
     if (elapsedSeconds) {
@@ -1842,7 +1879,7 @@ for (const elapsedSeconds of [0, 31]) {
   });
 }
 
-test('keeps the hidden Thinking slot fixed while an active tool is visible', async ({ page }) => {
+test('keeps the hidden loading slot fixed while an active tool is visible', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1');
 

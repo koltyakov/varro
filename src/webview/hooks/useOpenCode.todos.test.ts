@@ -49,6 +49,7 @@ describe('useOpenCode todo synchronization', () => {
 
       expect(clientMocks.sessionTodos).toHaveBeenCalledWith('session-1', {
         directory: '/repo',
+        signal: expect.any(AbortSignal),
       });
       expect(stateModule.state.todos).toEqual([
         {

@@ -1,3 +1,5 @@
+import type { StartupPhase } from '../shared/startup';
+
 const MAX_EVENTS = 100;
 const MAX_FIELD_CHARS = 256;
 const MAX_EXPORT_CHARS = 64 * 1024;
@@ -10,7 +12,8 @@ type DiagnosticEvent = {
     | 'stream-healthy'
     | 'stream-retry'
     | 'workspace-activated'
-    | 'health';
+    | 'health'
+    | 'startup-phase';
   operationId?: string;
   state?: string;
   method?: string;
@@ -19,6 +22,14 @@ type DiagnosticEvent = {
   attempt?: number;
   delayMs?: number;
   directory?: string;
+  phase?: StartupPhase;
+  durationMs?: number;
+  generation?: number;
+  platform?: string;
+  arch?: string;
+  runtime?: string;
+  editorVersion?: string;
+  remoteKind?: string;
 };
 
 type TimelineEntry = DiagnosticEvent & { at: string };
@@ -29,14 +40,25 @@ class DiagnosticTimeline {
   private sequence = 0;
   private lastStreamActivity: { at: string; operationId: string } | undefined;
 
-  nextId(prefix: 'request' | 'stream'): string {
+  nextId(prefix: 'request' | 'stream' | 'startup'): string {
     this.sequence += 1;
     return `${prefix}-${this.sequence}`;
   }
 
   record(event: DiagnosticEvent): void {
     const entry: TimelineEntry = { ...event, at: new Date().toISOString() };
-    for (const key of ['operationId', 'state', 'method', 'route', 'directory'] as const) {
+    for (const key of [
+      'operationId',
+      'state',
+      'method',
+      'route',
+      'directory',
+      'platform',
+      'arch',
+      'runtime',
+      'editorVersion',
+      'remoteKind',
+    ] as const) {
       const value = entry[key];
       if (value !== undefined) entry[key] = redactDiagnosticText(value).slice(0, MAX_FIELD_CHARS);
     }

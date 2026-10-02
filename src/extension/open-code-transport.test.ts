@@ -1483,6 +1483,38 @@ describe('OpenCodeTransport event stream path', () => {
 });
 
 describe('OpenCodeTransport health', () => {
+  it.each(['cancelled', 'endpoint changed'] as const)(
+    'does not remember health decoded after startup was %s',
+    async (reason) => {
+      let url = 'http://localhost:4096';
+      let finish!: (value: { version: string; pid: number }) => void;
+      const body = new Promise<{ version: string; pid: number }>((resolve) => {
+        finish = resolve;
+      });
+      const controller = new AbortController();
+      const fetchMock = vi.fn(async (input: string | URL | Request) => {
+        if (new URL(String(input)).pathname !== '/api/info')
+          return new Response('', { status: 404 });
+        const response = Response.json({});
+        vi.spyOn(response, 'json').mockImplementation(() => body);
+        return response;
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const transport = createTransport({ getUrl: () => url });
+      const read = transport.readHealthInfo(controller.signal);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      const result =
+        reason === 'cancelled'
+          ? expect(read).rejects.toThrow('cancelled')
+          : expect(read).resolves.toEqual({ healthy: false });
+      if (reason === 'cancelled') controller.abort(new Error('cancelled'));
+      else url = 'http://localhost:5096';
+      finish({ version: '2.0.21', pid: 1234 });
+      await result;
+      expect(transport.serverPid).toBeNull();
+    }
+  );
+
   it('remembers the verified v2 info endpoint rather than repeating obsolete probes', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const info = new URL(String(input)).pathname === '/api/info';

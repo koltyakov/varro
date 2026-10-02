@@ -7,6 +7,8 @@ import { registerCommands } from './commands';
 import { logger } from './logger';
 import { readServerPortSetting, sweepStaleInjectedConfigDirectories } from './open-code-process';
 import { disposeProcessInspection } from './process-inspection';
+import { diagnosticTimeline } from './diagnostics';
+import { measureStartupPhase } from '../shared/startup';
 
 const DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS = 4096;
 const CONTEXT_RESCOPE_RETRY_MS = 50;
@@ -143,6 +145,25 @@ function createSidebarRevealer(destinationId: string): () => Promise<void> {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
+  const operationId = diagnosticTimeline.nextId('startup');
+  return measureStartupPhase(
+    'activation',
+    () => activateExtension(context),
+    (timing) =>
+      diagnosticTimeline.record({
+        event: 'startup-phase',
+        operationId,
+        ...timing,
+        platform: process.platform,
+        arch: process.arch,
+        runtime: process.version,
+        editorVersion: vscode.version,
+        remoteKind: vscode.env?.remoteName ?? 'local',
+      })
+  );
+}
+
+async function activateExtension(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
 
   const config = vscode.workspace.getConfiguration('varro');
@@ -158,7 +179,8 @@ export async function activate(context: vscode.ExtensionContext) {
       context.globalState.get<boolean>(key) ??
       context.globalState.get<boolean>(INITIAL_SIDEBAR_REVEAL_KEY) === true;
     try {
-      await context.globalState.update(key, legacyDefaultEndpoint);
+      if (context.globalState.get<boolean>(key) === undefined)
+        await context.globalState.update(key, legacyDefaultEndpoint);
     } catch (error) {
       logger.warn(
         `Could not remember automatic-port migration: ${error instanceof Error ? error.message : String(error)}`
@@ -287,7 +309,6 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  await placeViewInPrimarySidebar(context);
   const sidebarDestination = usesPrimarySidebarForExtensions()
     ? PRIMARY_SIDEBAR_CONTAINER
     : SECONDARY_SIDEBAR_CONTAINER;
@@ -298,6 +319,7 @@ export async function activate(context: vscode.ExtensionContext) {
     server!,
     createSidebarRevealer(sidebarDestination)
   );
+  await placeViewInPrimarySidebar(context);
   await revealSidebarOnFirstActivation(context, sidebarDestination);
 
   void vscode.commands.executeCommand('setContext', 'varro:activated', true);

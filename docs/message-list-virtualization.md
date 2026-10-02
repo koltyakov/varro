@@ -364,7 +364,19 @@ Direct input acquires ownership only when it can affect the transcript:
   editor replay briefly clamped the transcript backward by 139 px when its todo panel disappeared.
   `scroll-auto-scroll.spec.ts` checks automatic completion and clearing at removal and frame boundaries.
 - The trailing Thinking, loading, empty-reserve, and Worked states share one post-message slot. The
-  slot may remain invisibly reserved while visible streaming text or tools replace its label. Debounce
+  slot stays invisibly reserved while active tool previews or inline edits replace its label. Do not
+  show a tool-specific Waiting indicator. The normal Thinking verb cycle resumes when eligible.
+  Its elapsed time counts from the latest completed
+  text, reasoning, tool, or assistant event in the current turn, falling back to the turn's loading start.
+  Ordinary streaming activity does not reset it. Verb rotation and the initial 1-second elapsed-label
+  delay count from the turn's loading start, falling back to its prompt creation time on hydration.
+  Completions do not restart the verb cycle or hide an elapsed label after that initial delay.
+  The loading row also omits the elapsed label when the immediately
+  preceding rendered active tool displays its own duration, regardless of the timer values. Completed
+  tool durations do not suppress the loading timer. Preserve its shimmer, dots, and
+  24 px slot; compaction and the Background process card retain their existing priority. Historical
+  running parts must not affect the current turn's loading indicator. The slot may also remain
+  invisibly reserved while streaming text or retained previews replace its label. Debounce
   label reappearance and reserve release so short transitions do not collapse and regrow the bottom.
 - V2 background shell work keeps that slot in a Background process card after a terminal assistant response. A completed
   tool call only confirms that the process was launched. Suppress Worked until the process finishes
@@ -396,15 +408,28 @@ Direct input acquires ownership only when it can affect the transcript:
 ### Animated Row Transitions
 
 - A compact activity part follows `delayed -> visible active/completed -> retained -> exiting -> grouped`.
+  Tool previews skip `exiting`: after retention, group them immediately without a disappearing or
+  height-collapse animation. Reserve their disappearing flow space before publishing removal, and
+  admit the next queued tool in the same update. Reasoning retains its animated exit lifecycle.
   Newly observed live tools share a 100 ms collection interval and a 1,200 ms preview deadline.
   Admit them one at a time, at least 120 ms after the preceding admission's painted-frame callback.
-  At most two items occupy the active tray, including retained and exiting items. Queue the rest until
+  At most one item occupies the active tray, including retained and exiting items. Queue the rest until
   an exit frees a slot, and give each admitted item at least 600 ms of preview time. Running tools retain
-  their actual state. Tools joining an existing burst do not extend its deadline. Already-running
+  their actual state. Queued completed tools with a known duration below 500 ms group directly when
+  another ungrouped tool is running or has a known duration of at least 500 ms. Keep short previews
+  when no such alternative exists, and never guess unknown durations or interrupt an already painted
+  preview. Tools joining an existing burst do not extend its deadline. Already-running
   activity discovered on initial hydration keeps the 500 ms display delay and 2,000 ms retention.
   Following text or standalone content immediately groups preceding completed tools, including queued
   and exiting tools. An explicitly opened tool stays visible until closed. Completed history does not
   replay previews.
+- Once a visible tool has run for 3,000 ms and another preview is queued, alternate one-second
+  slots: the next queued tool, the long-running tool, then the next queued tool. Use known tool
+  start time, falling back to observation time, and start each slot from its painted frame. Running
+  tools rotated out of the tray remain hidden, not completed or grouped. Completed queued previews
+  group after their slot; already-previewed hidden tools group when they complete. Rotation preserves
+  the one-item limit and does not animate removal. Inspecting a tool suspends rotation until closed;
+  stop timers when no alternatives remain, on interruption, or when the session/turn is replaced.
 - A height animation publishes intermediate row heights. If it runs above a detached viewport, every
   frame must preserve the same visible anchor; checking only the final grouped layout is insufficient.
 - Transition identity is part identity, not the current group owner or array position. Moving an
@@ -442,7 +467,7 @@ Direct input acquires ownership only when it can affect the transcript:
   Space below the summary cannot correct its position, and observing the resulting spacer mutations
   can starve frames and exit cleanup forever.
 - The matching CSS animation is authoritative for visual completion. Re-pin the active tray after
-  `assistant-active-activity-in` finishes. Keep an exiting item mounted until
+  `assistant-active-activity-in` finishes. Keep an exiting reasoning item mounted until
   `assistant-active-activity-out` finishes; the timer is an idempotent bounded fallback with a grace
   interval, not an earlier competing completion path.
 - Cancelled or rejected animation promises, unmount, and session replacement must still clear timers,
@@ -461,10 +486,12 @@ Direct input acquires ownership only when it can affect the transcript:
   without adding false reserve. A complete tray collapse reserves tray height, changed flow gaps, and
   source-row padding before projection changes. A partial tray collapse reserves only the visible item
   height and any leading item gap that disappears while surviving activity remains mounted.
-- When a running part splits one compact activity segment into multiple summaries, completing that part
-  may coalesce the summaries again. Reserve each disappearing summary and its flow gap, and restore the
-  same logical group across the active-to-compact remount rather than whichever summary is last in the
-  document.
+- A routine activity segment has one summary. Delayed, queued, rotated-out, visible, retained, and
+  exiting previews are not group boundaries. Completed tools on both sides of an active tool share
+  that summary; never render adjacent Explored/Exploring summaries for the same segment. Only real
+  content boundaries such as response text, inline edits, or interaction prompts split it. Keep hidden
+  previews out of summary counts until grouped, preserve the logical owner through rotation and
+  completion, and retain the existing scroll owner when old split groups coalesce.
 - Animation identity is a one-time message/render-key claim, not current DOM position. Virtual remount,
   completed-history reopening, or appending to an existing file-edit stack must not replay a claimed
   entrance.
@@ -495,7 +522,7 @@ Direct input acquires ownership only when it can affect the transcript:
   Flush before any other message, so permissions, questions, completion, and RPC replies remain
   immediate ordering barriers. Cleanup discards buffered events.
 - Text and standalone parts bypass preceding activity previews and their exits. Their arrival groups
-  completed activity immediately; running tools keep their actual state within the two-item limit.
+  completed activity immediately; running tools keep their actual state within the one-item limit.
   Each newly queued part has a 2,000 ms maximum admission wait.
   Subsequent standalone parts wait for preceding text to catch up so edits do not overtake prose.
 - Compaction-only user records paint dividers but do not replace the active prompt identity. Keep
@@ -580,7 +607,7 @@ Direct input acquires ownership only when it can affect the transcript:
   separation, grouped fast previews, completion, interruption, hydration, and cancellation.
   `e2e/tests/scroll-streaming-presentation.spec.ts` records every-frame preview, text, anchor, and scroll
   measurements for 3-, 32-, and 128-tool bursts at narrow and wide widths. It requires spaced admissions,
-  at most two previews, smooth nested scrolling, immediate content handoff, paced text,
+  at most one preview, smooth nested scrolling, immediate content handoff, paced text,
   continued easing after height settles, complete disclosure contents, and no backward scroll frame.
 
 ### Sticky Prompts

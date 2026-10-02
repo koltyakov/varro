@@ -398,7 +398,7 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
-  it('hides a restored child permission before its inherited auto mode is known', async () => {
+  it('reveals an unknown child during ancestry loading and preserves the fallback while judging', async () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();
     clientMocks.sessionList.mockResolvedValue([session('session-1')]);
@@ -429,7 +429,9 @@ describe('useOpenCode permission and config flows', () => {
       serverEventHandlers.get('server.connected')?.({});
 
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
-      expect(stateModule.state.permissions).toEqual([]);
+      expect(stateModule.state.permissions).toEqual([
+        expect.objectContaining({ id: 'perm-restored-child', sessionID: 'child-1' }),
+      ]);
 
       judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
       await vi.waitFor(() =>

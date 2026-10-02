@@ -1306,7 +1306,7 @@ describe('connection-bootstrap helpers', () => {
     };
 
     const stoppedInitialization = initConnectionWithDependencies(deps, generationRef);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(loadInitialData).toHaveBeenCalledOnce());
     generation += 1;
     const restartedInitialization = initConnectionWithDependencies(deps, generationRef);
     await restartedInitialization;

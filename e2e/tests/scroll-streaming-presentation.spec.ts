@@ -147,7 +147,7 @@ for (const { width, toolCount } of [
       },
       { sessionID: SESSION, messageID: MESSAGE, count: toolCount }
     );
-    await expect(page.locator('[data-activity-part-id="preview-tool-1"]')).toBeVisible();
+    await expect(page.locator('[data-activity-part-id^="preview-tool-"]').first()).toBeVisible();
     await page
       .locator('[data-activity-part-id^="preview-tool-"]')
       .first()
@@ -169,7 +169,7 @@ for (const { width, toolCount } of [
     const preview = samples.filter((sample) => sample.preview > 0 && !sample.exiting);
     expect(preview.length).toBeGreaterThan(20);
     expect(preview.at(-1)!.at - preview[0]!.at).toBeGreaterThan(400);
-    expect(samples.every((sample) => sample.preview <= 2)).toBe(true);
+    expect(samples.every((sample) => sample.preview <= 1)).toBe(true);
     const seen = new Map<string, number>();
     for (const sample of samples) {
       const entering = sample.previewIds.filter((id) => !seen.has(id));
@@ -177,7 +177,7 @@ for (const { width, toolCount } of [
       for (const id of entering) seen.set(id, sample.at);
     }
     const admissions = [...seen.values()];
-    expect(admissions.length).toBe(2);
+    expect(admissions.length).toBe(1);
     expect(
       admissions.every((at, index) => index === 0 || at - admissions[index - 1]! >= 90),
       JSON.stringify(admissions)
@@ -229,6 +229,173 @@ for (const { width, toolCount } of [
     await expect(page.locator(`${ROW} .assistant-activity-detail`)).toHaveCount(toolCount);
   });
 }
+
+test('alternates a long-running tool with queued tools in one-second previews', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  await expect(page.locator(`${ROW} .rendered-markdown`)).toHaveText('Starting...');
+  const samples = await page.evaluate(
+    async ({ sessionID, messageID }) => {
+      // SAFETY: This isolated fixture exposes its event transport and canonical session snapshots.
+      const harness = (
+        window as typeof window & {
+          __varroE2E: {
+            replayServerEvent: (event: ServerEvent) => void;
+            getSessionMessages: (id: string) => MessageEntry[];
+          };
+        }
+      ).__varroE2E;
+      const startedAt = Date.now();
+      for (const id of ['long', 'two', 'three']) {
+        const part: ToolPart = {
+          id: `rotation-${id}`,
+          callID: `rotation-${id}-call`,
+          type: 'tool',
+          tool: 'grep',
+          messageID,
+          sessionID,
+          state: { status: 'running', input: { pattern: id }, time: { start: startedAt } },
+        };
+        harness.replayServerEvent({ type: 'message.part.updated', properties: { part } });
+      }
+      const started = performance.now();
+      const frames = [];
+      while (performance.now() - started < 6_600) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const items = [
+          ...document.querySelectorAll<HTMLElement>('[data-activity-part-id^="rotation-"]'),
+        ];
+        frames.push({
+          at: performance.now() - started,
+          ids: items.map((item) => item.dataset.activityPartId!),
+          exiting: items.some((item) => item.classList.contains('is-exiting')),
+          verb: document.querySelector('.interactive-loading-row .loading-verb')?.textContent,
+          statusReserved: document
+            .querySelector('.interactive-loading-row')
+            ?.classList.contains('is-reserved'),
+        });
+      }
+      const tools = harness
+        .getSessionMessages(sessionID)
+        .flatMap((message) => message.parts)
+        .filter(
+          (part): part is ToolPart => part.type === 'tool' && part.id.startsWith('rotation-')
+        );
+      return { frames, statuses: tools.map((part) => part.state.status) };
+    },
+    { sessionID: SESSION, messageID: MESSAGE }
+  );
+  expect(samples.frames.every((sample) => sample.ids.length <= 1 && !sample.exiting)).toBe(true);
+  expect(
+    samples.frames
+      .filter((sample) => sample.ids.length === 1)
+      .every((sample) => sample.verb !== 'Waiting' && sample.statusReserved)
+  ).toBe(true);
+  const changes = samples.frames.filter(
+    (sample, index) =>
+      sample.ids.length === 1 && sample.ids[0] !== samples.frames[index - 1]?.ids[0]
+  );
+  expect(changes.map((sample) => sample.ids[0])).toEqual([
+    'rotation-long',
+    'rotation-two',
+    'rotation-long',
+    'rotation-three',
+    'rotation-long',
+  ]);
+  expect(changes[1]!.at).toBeGreaterThanOrEqual(2_950);
+  for (let index = 2; index < changes.length; index += 1) {
+    const elapsed = changes[index]!.at - changes[index - 1]!.at;
+    expect(elapsed).toBeGreaterThanOrEqual(950);
+    expect(elapsed).toBeLessThan(1_250);
+  }
+  expect(samples.statuses).toEqual(['running', 'running', 'running']);
+});
+
+test('keeps a single Explored summary across hidden tools, rotation, and completion', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  await expect(page.locator(`${ROW} .rendered-markdown`)).toHaveText('Starting...');
+  const result = await page.evaluate(
+    async ({ sessionID, messageID }) => {
+      // SAFETY: This isolated fixture exposes its typed event transport.
+      const harness = (
+        window as typeof window & {
+          __varroE2E: { replayServerEvent: (event: ServerEvent) => void };
+        }
+      ).__varroE2E;
+      const startedAt = Date.now();
+      const tools = ['before', 'long', 'next', 'after'].map((id): ToolPart => ({
+        id: `single-group-${id}`,
+        callID: `single-group-${id}-call`,
+        type: 'tool',
+        tool: 'grep',
+        messageID,
+        sessionID,
+        state:
+          id === 'before' || id === 'after'
+            ? {
+                status: 'completed',
+                input: { pattern: id },
+                output: 'Found matches',
+                title: id,
+                metadata: {},
+                time: { start: startedAt - 100, end: startedAt },
+              }
+            : { status: 'running', input: { pattern: id }, time: { start: startedAt } },
+      }));
+      for (const part of tools) {
+        harness.replayServerEvent({ type: 'message.part.updated', properties: { part } });
+      }
+      const row = document.querySelector(`[data-msg-id="${messageID}"]`)!;
+      const frames = [];
+      const started = performance.now();
+      while (performance.now() - started < 6_600) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        frames.push({
+          summaries: [...row.querySelectorAll('.assistant-activity-summary')].map(
+            (summary) => summary.textContent
+          ),
+          ids: [...row.querySelectorAll<HTMLElement>('.assistant-active-activity-item')].map(
+            (item) => item.dataset.activityPartId
+          ),
+        });
+      }
+      for (const part of tools) {
+        if (part.state.status !== 'running') continue;
+        const completed: ToolPart = {
+          ...part,
+          state: {
+            status: 'completed',
+            input: part.state.input,
+            output: 'Found matches',
+            title: part.id,
+            metadata: {},
+            time: { start: startedAt, end: Date.now() },
+          },
+        };
+        harness.replayServerEvent({
+          type: 'message.part.updated',
+          properties: { part: completed },
+        });
+      }
+      return frames;
+    },
+    { sessionID: SESSION, messageID: MESSAGE }
+  );
+  expect(result.every((frame) => frame.summaries.length <= 1 && frame.ids.length <= 1)).toBe(true);
+  expect(
+    result.every((frame) => frame.summaries.every((summary) => !summary?.includes('Exploring')))
+  ).toBe(true);
+  expect(result.some((frame) => frame.ids.includes('single-group-long'))).toBe(true);
+  expect(result.some((frame) => frame.ids.includes('single-group-next'))).toBe(true);
+  await expect(page.locator(`${ROW} .assistant-active-activity-item`)).toHaveCount(0);
+  await expect(page.locator(`${ROW} .assistant-activity-summary`)).toHaveCount(1);
+  await expect(page.locator(`${ROW} .assistant-activity-summary`)).toContainText(
+    'Explored: 4 searches'
+  );
+});
 
 test('reduced motion publishes available text without a paced reveal', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });

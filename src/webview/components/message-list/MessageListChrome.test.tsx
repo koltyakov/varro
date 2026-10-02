@@ -79,7 +79,9 @@ describe('MessageListChrome', () => {
     startLoading();
     const startedAt = Date.now() - 13_000;
     cleanup = render(
-      () => <LoadingRow compacting={false} visible waiting waitingStartedAt={startedAt} />,
+      () => (
+        <LoadingRow compacting={false} visible waiting toolsRunning waitingStartedAt={startedAt} />
+      ),
       container!
     );
     expect(
@@ -98,6 +100,171 @@ describe('MessageListChrome', () => {
     expect(container?.querySelector('.loading-indicator')).toBeNull();
     expect(container?.textContent).not.toContain('Session may be stale');
     expect(container?.querySelector('.loading-action')).toBeNull();
+  });
+
+  it('counts from the last completion without resetting on ordinary activity', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    startLoading(0);
+    const [completedAt, setCompletedAt] = createSignal(80_000);
+    cleanup = render(
+      () => <LoadingRow compacting={false} visible elapsedStartedAt={completedAt()} />,
+      container!
+    );
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('20s');
+    markLoadingActivity();
+    vi.advanceTimersByTime(2_000);
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('22s');
+    setCompletedAt(Date.now());
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('0s');
+    vi.advanceTimersByTime(10_000);
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
+  });
+
+  it('shows duration after the first second of the turn', () => {
+    vi.useFakeTimers();
+    startLoading();
+    cleanup = render(() => <LoadingRow compacting={false} visible />, container!);
+    vi.advanceTimersByTime(999);
+    expect(container?.querySelector('.loading-elapsed')).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1s');
+  });
+
+  it('keeps rotating verbs and showing duration through frequent completions and hidden previews', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    startLoading();
+    const [completedAt, setCompletedAt] = createSignal(0);
+    const [visible, setVisible] = createSignal(true);
+    cleanup = render(
+      () => <LoadingRow compacting={false} visible={visible()} elapsedStartedAt={completedAt()} />,
+      container!
+    );
+    expect(container?.querySelector('.loading-elapsed')).toBeNull();
+    for (let second = 1; second <= 18; second += 1) {
+      vi.advanceTimersByTime(1_000);
+      setCompletedAt(Date.now());
+      expect(container?.querySelector('.loading-verb')?.textContent).toBe(
+        second < 6
+          ? 'Thinking'
+          : second < 12
+            ? 'Analyzing'
+            : second < 18
+              ? 'Considering'
+              : 'Pondering'
+      );
+      expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('0s');
+    }
+    setVisible(false);
+    vi.advanceTimersByTime(6_000);
+    setCompletedAt(Date.now());
+    setVisible(true);
+    expect(container?.querySelector('.loading-verb')?.textContent).toBe('Musing');
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('0s');
+  });
+
+  it('hides loading duration whenever the preceding active tool displays its own timer', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(60_000);
+    startLoading(0);
+    const [duration, setDuration] = createSignal<string | null>('1m');
+    const [followingText, setFollowingText] = createSignal(false);
+    const [emptyRowText, setEmptyRowText] = createSignal('');
+    const [toolsRunning, setToolsRunning] = createSignal(true);
+    const [runningDuration, setRunningDuration] = createSignal(true);
+    cleanup = render(
+      () => (
+        <>
+          <div>
+            <div data-assistant-render-key="part:tool">
+              <div class="chat-tool-invocation-part">
+                <div class="tool-invocation-header">
+                  <span
+                    class="tool-invocation-duration"
+                    title={runningDuration() ? 'Elapsed time' : undefined}
+                  >
+                    {duration()}
+                  </span>
+                </div>
+              </div>
+            </div>
+            {followingText() && <div data-assistant-render-key="part:text">A later response</div>}
+          </div>
+          <div>
+            <div data-assistant-render-key="part:following-row">{emptyRowText()}</div>
+          </div>
+          <LoadingRow compacting={false} visible toolsRunning={toolsRunning()} />
+        </>
+      ),
+      container!
+    );
+    expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
+    expect(container?.querySelector('.loading-elapsed')).toBeNull();
+    setEmptyRowText('A new response');
+    await Promise.resolve();
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 00s');
+    setEmptyRowText('');
+    await Promise.resolve();
+    expect(container?.querySelector('.loading-elapsed')).toBeNull();
+    setDuration('59s');
+    await Promise.resolve();
+    expect(container?.querySelector('.loading-elapsed')).toBeNull();
+    setDuration('1m 1s');
+    vi.advanceTimersByTime(1_000);
+    await Promise.resolve();
+    expect(container?.querySelector('.loading-elapsed')).toBeNull();
+    setFollowingText(true);
+    await Promise.resolve();
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 01s');
+    setFollowingText(false);
+    await Promise.resolve();
+    expect(container?.querySelector('.loading-elapsed')).toBeNull();
+    setDuration(null);
+    await Promise.resolve();
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 01s');
+    setDuration('1m 1s');
+    await Promise.resolve();
+    setRunningDuration(false);
+    await Promise.resolve();
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 01s');
+    setRunningDuration(true);
+    await Promise.resolve();
+    expect(container?.querySelector('.loading-elapsed')).toBeNull();
+    setToolsRunning(false);
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 01s');
+  });
+
+  it('keeps the normal verb cycle while tools run', () => {
+    vi.useFakeTimers();
+    startLoading();
+    const [toolsRunning, setToolsRunning] = createSignal(true);
+    const [compacting, setCompacting] = createSignal(false);
+    cleanup = render(
+      () => <LoadingRow compacting={compacting()} visible toolsRunning={toolsRunning()} />,
+      container!
+    );
+    const row = container?.querySelector('.interactive-loading-row');
+    const verb = container?.querySelector('.shimmer-progress.loading-verb');
+    const dots = verb?.querySelector('.chat-animated-ellipsis');
+    expect(dots).not.toBeNull();
+    expect(container?.querySelector('.loading-verb')?.textContent).toBe('Thinking');
+    vi.advanceTimersByTime(7_000);
+    expect(container?.querySelector('.loading-verb')?.textContent).toBe('Analyzing');
+    setCompacting(true);
+    expect(container?.querySelector('.loading-verb')?.textContent).toBe('Compacting');
+    setCompacting(false);
+    setToolsRunning(false);
+    expect(container?.querySelector('.loading-verb')?.textContent).toBe('Analyzing');
+    vi.advanceTimersByTime(3_000);
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
+    setToolsRunning(true);
+    expect(container?.querySelector('.loading-verb')?.textContent).toBe('Analyzing');
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
+    expect(container?.querySelector('.loading-verb')).toBe(verb);
+    expect(container?.querySelector('.chat-animated-ellipsis')).toBe(dots);
+    expect(container?.querySelector('.interactive-loading-row')).toBe(row);
+    expect(container?.querySelectorAll('.interactive-loading-row')).toHaveLength(1);
   });
 
   it('renders the sticky user message preview shell with hidden semantics', () => {

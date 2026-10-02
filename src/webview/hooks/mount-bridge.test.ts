@@ -330,7 +330,7 @@ describe('mount bridge helpers', () => {
       state: 'running',
       url: 'http://127.0.0.1:4096',
     });
-    expect(clearError).toHaveBeenCalledTimes(1);
+    expect(clearError).not.toHaveBeenCalled();
     expect(ensureConnectionInitialized).toHaveBeenCalledTimes(1);
   });
 
@@ -922,7 +922,7 @@ describe('mount bridge helpers', () => {
       state: 'running',
       url: 'http://127.0.0.1:4096',
     });
-    expect(setError).toHaveBeenCalledWith(null);
+    expect(setError).not.toHaveBeenCalled();
     expect(ensureConnectionInitialized).toHaveBeenCalledTimes(1);
     expect(setDefaultPermissionModePreference).toHaveBeenCalledWith('full');
     expect(setShowFileDiffs).toHaveBeenCalledWith(true);

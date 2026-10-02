@@ -14,7 +14,11 @@ const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
 type BridgeOnMessage = typeof onMessage;
 const bridgeOnMessage = vi.fn<BridgeOnMessage>();
+type TestServerEvent = { properties?: unknown };
+const serverEventsOn =
+  vi.fn<(name: string, handler: (payload: TestServerEvent) => void) => () => void>();
 Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
+Object.assign(clientMocks, { serverEventsOn });
 
 function setupInterruptedRecoveryClientMocks() {
   clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
@@ -29,6 +33,216 @@ function setupInterruptedRecoveryClientMocks() {
 }
 
 describe('useOpenCode initialization', () => {
+  async function startupFixture() {
+    let handle: Parameters<BridgeOnMessage>[0] | undefined;
+    const events = new Map<string, (payload: TestServerEvent) => void>();
+    bridgeOnMessage.mockImplementation((handler) => {
+      handle = handler;
+      return () => {};
+    });
+    serverEventsOn.mockImplementation(
+      (name: string, handler: (payload: TestServerEvent) => void) => {
+        events.set(name, handler);
+        return () => {
+          events.delete(name);
+        };
+      }
+    );
+    setupInterruptedRecoveryClientMocks();
+    clientMocks.permissionList.mockResolvedValue([]);
+    const modules = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      modules.hookModule.useOpenCode();
+      return cleanup;
+    });
+    return {
+      ...modules,
+      dispose,
+      events,
+      recover: (sessionId: string) => {
+        if (!handle) throw new Error('Missing bridge handler');
+        handle({
+          type: 'recovery/interrupted-sessions',
+          payload: { claimId: 99, sessionIds: [sessionId] },
+        });
+      },
+      start: () => {
+        if (!handle) throw new Error('Missing bridge handler');
+        handle({
+          type: 'server/status',
+          payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+        });
+      },
+    };
+  }
+
+  it('exposes restored chat without waiting for a permission judge or reply', async () => {
+    const fixture = await startupFixture();
+    const permission = {
+      id: 'perm-startup',
+      type: 'bash',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      title: 'Run command',
+      metadata: {},
+      time: { created: 1 },
+    };
+    fixture.stateModule.setPermissionModeForSession('session-1', 'auto');
+    clientMocks.permissionList.mockResolvedValue([permission]);
+    let finishJudge!: (verdict: { decision: 'ask'; reason: string }) => void;
+    clientMocks.varroJudgePermission.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishJudge = resolve;
+        })
+    );
+    try {
+      fixture.recover('session-1');
+      fixture.start();
+      await vi.waitFor(() => expect(fixture.stateModule.connectionInitialized()).toBe(true));
+      expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce();
+      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+      expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
+      finishJudge({ decision: 'ask', reason: 'Please review' });
+      await vi.waitFor(() =>
+        expect(fixture.stateModule.state.permissions).toContainEqual(
+          expect.objectContaining({ id: permission.id })
+        )
+      );
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it('keeps unknown child ancestry visible without blocking readiness or resuming its root', async () => {
+    const fixture = await startupFixture();
+    fixture.stateModule.setPermissionModeForSession('session-1', 'auto');
+    clientMocks.permissionList.mockResolvedValue([
+      {
+        id: 'perm-child',
+        type: 'bash',
+        sessionID: 'unknown-child',
+        messageID: 'message-child',
+        title: 'Run command',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+    let finishChild!: (value: ReturnType<typeof session>) => void;
+    clientMocks.sessionGet.mockImplementation((id: string) =>
+      id === 'unknown-child'
+        ? new Promise((resolve) => {
+            finishChild = resolve;
+          })
+        : Promise.resolve(session(id))
+    );
+    clientMocks.varroJudgePermission.mockResolvedValue({
+      decision: 'ask',
+      reason: 'Please review',
+    });
+    try {
+      fixture.recover('session-1');
+      fixture.start();
+      await vi.waitFor(() => expect(fixture.stateModule.connectionInitialized()).toBe(true));
+      expect(fixture.stateModule.state.permissions).toContainEqual(
+        expect.objectContaining({ id: 'perm-child' })
+      );
+      expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
+      expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
+      finishChild({ ...session('unknown-child'), parentID: 'session-1' });
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it('keeps failed restored history uninitialized and retries hydration for its active ID', async () => {
+    const fixture = await startupFixture();
+    clientMocks.sessionMessages.mockRejectedValueOnce(new Error('503 history unavailable'));
+    try {
+      fixture.start();
+      await vi.waitFor(() =>
+        expect(fixture.stateModule.error()).toContain('Failed to restore OpenCode session:')
+      );
+      expect(fixture.stateModule.connectionInitialized()).toBe(false);
+      expect(fixture.stateModule.state.activeSessionId).toBe('session-1');
+      expect(fixture.stateModule.state.messagesLoading).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      fixture.stateModule.errorRetry()?.();
+      await vi.waitFor(() => expect(fixture.stateModule.connectionInitialized()).toBe(true));
+      expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(2);
+      expect(fixture.stateModule.error()).toBeNull();
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it('starts status loading with catalogs and reuses that snapshot for restoration', async () => {
+    const fixture = await startupFixture();
+    let finishCatalog!: (sessions: ReturnType<typeof session>[]) => void;
+    clientMocks.sessionList.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishCatalog = resolve;
+        })
+    );
+    try {
+      fixture.start();
+      await vi.waitFor(() => expect(clientMocks.sessionStatus).toHaveBeenCalledOnce());
+      expect(fixture.stateModule.connectionInitialized()).toBe(false);
+      finishCatalog([session('session-1')]);
+      await vi.waitFor(() => expect(fixture.stateModule.connectionInitialized()).toBe(true));
+      expect(clientMocks.sessionStatus).toHaveBeenCalledOnce();
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it('retries failed essential data without a new server status or a restart', async () => {
+    const fixture = await startupFixture();
+    clientMocks.questionList.mockRejectedValueOnce(new Error('snapshot unavailable'));
+    try {
+      fixture.start();
+      await vi.waitFor(() => expect(fixture.stateModule.error()).toContain('startup data'));
+      expect(fixture.stateModule.connectionInitialized()).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const retry = fixture.stateModule.errorRetry();
+      expect(retry).toBeTypeOf('function');
+      retry?.();
+      await vi.waitFor(() => expect(fixture.stateModule.connectionInitialized()).toBe(true));
+      expect(fixture.stateModule.error()).toBeNull();
+      expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'server/restart' })
+      );
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it('does not supersede essential bootstrap when SSE connects while snapshots are loading', async () => {
+    const fixture = await startupFixture();
+    let finishCatalog!: (sessions: ReturnType<typeof session>[]) => void;
+    clientMocks.sessionList.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCatalog = resolve;
+        })
+    );
+    try {
+      fixture.start();
+      await vi.waitFor(() => expect(clientMocks.sessionList).toHaveBeenCalledOnce());
+      fixture.events.get('server.connected')?.({});
+      await Promise.resolve();
+      expect(clientMocks.sessionList).toHaveBeenCalledOnce();
+      expect(fixture.stateModule.connectionInitialized()).toBe(false);
+      finishCatalog([session('session-1')]);
+      await vi.waitFor(() => expect(fixture.stateModule.connectionInitialized()).toBe(true));
+      await vi.waitFor(() => expect(clientMocks.sessionList).toHaveBeenCalledTimes(2));
+    } finally {
+      fixture.dispose();
+    }
+  });
+
   it('identifies each recreated webview even when VS Code reuses its initial HTML', async () => {
     // SAFETY: VS Code reuses this host state when moving an editor to another window.
     (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
@@ -363,21 +577,19 @@ describe('useOpenCode initialization', () => {
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
-      await Promise.resolve();
-      await Promise.resolve();
-
+      await vi.waitFor(() =>
+        expect(stateModule.error()).toBe('Failed to connect to OpenCode server: offline')
+      );
+      // Initialization owns its final cleanup even after publishing the failure.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       expect(clientMocks.health).toHaveBeenCalledTimes(1);
-      expect(stateModule.error()).toBe('Failed to connect to OpenCode server: offline');
 
       bridgeHandler({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(clientMocks.health).toHaveBeenCalledTimes(2);
-      expect(stateModule.error()).toBeNull();
+      await vi.waitFor(() => expect(clientMocks.health).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(stateModule.error()).toBeNull());
     } finally {
       dispose();
     }

@@ -5,7 +5,10 @@ import type { Part } from '../../types';
 
 const COLLECT_MS = 100;
 const ACTIVITY_ADMISSION_MS = 120;
-const MAX_VISIBLE_ACTIVITY = 2;
+const MAX_VISIBLE_ACTIVITY = 1;
+const SHORT_ACTIVITY_MS = 500;
+const LONG_TOOL_MS = 3_000;
+const TOOL_ROTATION_MS = 1_000;
 const ACTIVITY_PAINT_FALLBACK_MS = 250;
 const MIN_ACTIVITY_PREVIEW_MS = 600;
 const INITIAL_ACTIVITY_DELAY_MS = 500;
@@ -21,7 +24,15 @@ type ItemIdentity = { key: string; partId: string };
 export type PresentationItem = ItemIdentity &
   (
     | { kind: 'text'; text: string }
-    | { kind: 'activity'; running: boolean; active: boolean; expanded: boolean }
+    | {
+        kind: 'activity';
+        running: boolean;
+        active: boolean;
+        expanded: boolean;
+        animateExit: boolean;
+        startedAt?: number;
+        durationMs?: number;
+      }
     | { kind: 'instant' }
   );
 type Burst = {
@@ -46,14 +57,30 @@ type Entry = {
   showAt: number;
   queuedActivity: boolean;
   visibleAt: number | null;
+  previewUntil: number | null;
   burst: Burst | null;
-  phase: 'delayed' | 'visible' | 'exiting' | 'grouped';
+  phase: 'delayed' | 'visible' | 'paused' | 'exiting' | 'grouped';
   exitDeadline: number;
   exitGeneration: number;
 };
 
+type ToolRotation = {
+  anchorKey: string;
+  currentKey: string;
+  lastQueuedKey: string;
+  until: number;
+};
+
 export function getPresentationPartKey(part: Pick<Part, 'messageID' | 'id'>): string {
   return `${part.messageID}\u0000${part.id}`;
+}
+
+function activityPreviewDeadline(entry: Entry, now: number): number {
+  if (entry.previewUntil !== null) return entry.previewUntil;
+  return Math.max(
+    (entry.burst?.visibleAt ?? now) + (entry.burst?.duration ?? PREVIEW_MS),
+    (entry.visibleAt ?? now) + MIN_ACTIVITY_PREVIEW_MS
+  );
 }
 
 function sameSet(previous: ReadonlySet<string>, next: ReadonlySet<string>) {
@@ -91,6 +118,7 @@ export class StreamingPresentation {
   private updating = false;
   private immediate = false;
   private keepRunningVisible = false;
+  private toolRotation: ToolRotation | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private generation = 0;
   private lastTextReleaseAt = Number.NEGATIVE_INFINITY;
@@ -176,6 +204,7 @@ export class StreamingPresentation {
             this.ordered = [];
             this.promotedActivities.clear();
             this.inspectedActivities.clear();
+            this.toolRotation = null;
             this.generation += 1;
           }
           this.scope = input.scope;
@@ -223,6 +252,7 @@ export class StreamingPresentation {
                 burst,
                 queuedActivity: paced && item.kind === 'activity',
                 visibleAt: null,
+                previewUntil: null,
                 phase: activity ? 'delayed' : 'grouped',
                 exitDeadline: 0,
                 exitGeneration: 0,
@@ -329,6 +359,7 @@ export class StreamingPresentation {
     this.entries.clear();
     this.promotedActivities.clear();
     this.inspectedActivities.clear();
+    this.toolRotation = null;
     this.ordered = [];
     this.membership[1]((value) => value + 1);
     this.advance(Date.now(), false);
@@ -356,6 +387,7 @@ export class StreamingPresentation {
     this.entries.clear();
     this.promotedActivities.clear();
     this.inspectedActivities.clear();
+    this.toolRotation = null;
     this.ordered = [];
   }
 
@@ -379,6 +411,118 @@ export class StreamingPresentation {
         this.advance(Date.now(), true);
       })
     );
+  }
+
+  private canRotateTool(entry: Entry): boolean {
+    const { item } = entry;
+    return (
+      item.kind === 'activity' &&
+      !item.animateExit &&
+      item.active &&
+      !item.expanded &&
+      !this.inspectedActivities.has(item.key)
+    );
+  }
+
+  private advanceToolRotation(
+    now: number,
+    leavingTray: Set<string>,
+    afterShow: Array<() => void>
+  ): number {
+    if (this.immediate) {
+      this.toolRotation = null;
+      return Number.POSITIVE_INFINITY;
+    }
+    let rotation = this.toolRotation;
+    const current = rotation ? this.entries.get(rotation.currentKey) : undefined;
+    if (current?.phase === 'visible' && this.inspectedActivities.has(current.item.key))
+      return Number.POSITIVE_INFINITY;
+    const anchor = rotation ? this.entries.get(rotation.anchorKey) : undefined;
+    if (
+      rotation &&
+      (!anchor ||
+        anchor.phase === 'grouped' ||
+        !this.canRotateTool(anchor) ||
+        anchor.item.kind !== 'activity' ||
+        !anchor.item.running)
+    ) {
+      this.toolRotation = null;
+      rotation = null;
+    }
+    if (rotation && current?.phase === 'visible' && now < rotation.until) return rotation.until;
+
+    const visible = this.ordered.find(
+      (entry) => entry.phase === 'visible' && this.canRotateTool(entry)
+    );
+    const primary = rotation ? anchor : visible;
+    if (!primary || primary.item.kind !== 'activity' || !primary.item.running)
+      return Number.POSITIVE_INFINITY;
+
+    const candidates = this.ordered.filter(
+      (entry) =>
+        entry !== primary &&
+        (entry.phase === 'delayed' || entry.phase === 'paused') &&
+        this.canRotateTool(entry)
+    );
+    let next: Entry | undefined;
+    if (rotation && rotation.currentKey !== rotation.anchorKey) next = primary;
+    else {
+      next = candidates.find((entry) => entry.phase === 'delayed');
+      if (!next && candidates.length > 0) {
+        const previousIndex = candidates.findIndex(
+          (entry) => entry.item.key === rotation?.lastQueuedKey
+        );
+        next = candidates[(previousIndex + 1) % candidates.length];
+      }
+    }
+    if (!next) {
+      this.toolRotation = null;
+      return Number.POSITIVE_INFINITY;
+    }
+    const rotateAt = rotation
+      ? next.showAt
+      : Math.max(
+          (primary.item.startedAt ?? primary.arrivedAt) + LONG_TOOL_MS,
+          (primary.visibleAt ?? now) + MIN_ACTIVITY_PREVIEW_MS,
+          primary.previewUntil ?? 0,
+          next.showAt
+        );
+    if (now < rotateAt) return rotateAt;
+
+    if (visible && visible !== next) {
+      leavingTray.add(visible.item.key);
+      visible.phase = 'paused';
+    }
+    next.phase = 'visible';
+    next.admitted = true;
+    next.visibleAt = now;
+    next.previewUntil = now + TOOL_ROTATION_MS;
+    const slice: ToolRotation = {
+      anchorKey: primary.item.key,
+      currentKey: next.item.key,
+      lastQueuedKey: next === primary ? rotation!.lastQueuedKey : next.item.key,
+      until: next.previewUntil,
+    };
+    this.toolRotation = slice;
+    if (this.callbacks.afterShow) {
+      const generation = this.generation;
+      afterShow.push(() =>
+        this.callbacks.afterShow?.(() => {
+          if (
+            this.disposed ||
+            this.generation !== generation ||
+            this.toolRotation !== slice ||
+            this.entries.get(next.item.key) !== next ||
+            next.phase !== 'visible'
+          )
+            return;
+          slice.until = Date.now() + TOOL_ROTATION_MS;
+          next.previewUntil = slice.until;
+          this.advance(Date.now(), false);
+        })
+      );
+    }
+    return slice.until;
   }
 
   private advance(now: number, releaseText: boolean) {
@@ -413,6 +557,12 @@ export class StreamingPresentation {
             (item.expanded ||
               (!item.active && item.running) ||
               (this.immediate && (!item.running || !this.keepRunningVisible)) ||
+              (entry.phase === 'paused' && !item.running) ||
+              (!item.animateExit &&
+                entry.phase === 'visible' &&
+                !item.running &&
+                !this.inspectedActivities.has(item.key) &&
+                now >= activityPreviewDeadline(entry, now)) ||
               (index < lastContentIndex &&
                 !item.running &&
                 !this.inspectedActivities.has(item.key)))
@@ -421,12 +571,37 @@ export class StreamingPresentation {
             entry.phase = 'grouped';
           }
           if (entry.phase === 'exiting' && now >= entry.exitDeadline) entry.phase = 'grouped';
+        }
+        const hasLongerActivity = this.ordered.some(
+          ({ item, phase }) =>
+            phase !== 'grouped' &&
+            item.kind === 'activity' &&
+            (item.running ||
+              (item.durationMs !== undefined && item.durationMs >= SHORT_ACTIVITY_MS))
+        );
+        for (const entry of this.ordered) {
+          const { item } = entry;
+          if (item.kind !== 'activity') continue;
+          if (
+            hasLongerActivity &&
+            entry.phase === 'delayed' &&
+            !item.running &&
+            item.durationMs !== undefined &&
+            item.durationMs < SHORT_ACTIVITY_MS &&
+            !this.inspectedActivities.has(item.key)
+          ) {
+            directlyGrouped.add(item.key);
+            entry.phase = 'grouped';
+          }
+        }
+        const rotationAt = this.advanceToolRotation(now, directlyGrouped, afterShow);
+        for (const entry of this.ordered) {
           if (entry.phase === 'visible' || entry.phase === 'exiting') activitySlots += 1;
         }
         let blocked = false;
         let blockingBurst: Burst | null = null;
         let pending = false;
-        let nextAt = Number.POSITIVE_INFINITY;
+        let nextAt = rotationAt;
         for (const [index, entry] of this.ordered.entries()) {
           const { item } = entry;
           const expired = now >= entry.arrivedAt + MAX_WAIT_MS;
@@ -451,7 +626,7 @@ export class StreamingPresentation {
               entry.visibleAt = now;
               if (entry.burst) entry.burst.visibleAt ??= now;
             }
-            if (entry.phase === 'delayed') {
+            if (entry.phase === 'delayed' || entry.phase === 'paused') {
               const admissionAt = Math.max(
                 entry.showAt,
                 entry.queuedActivity
@@ -471,8 +646,14 @@ export class StreamingPresentation {
                 const firstInBurst = burst.visibleAt === null;
                 entry.phase = 'visible';
                 activitySlots += 1;
+                entry.previewUntil = null;
                 entry.visibleAt = now;
                 burst.visibleAt ??= now;
+                // Hydrated tools can already exceed the threshold before their first admission.
+                nextAt = Math.min(
+                  nextAt,
+                  this.advanceToolRotation(now, directlyGrouped, afterShow)
+                );
                 if (entry.queuedActivity) {
                   burst.nextAdmissionAt = now + ACTIVITY_ADMISSION_MS;
                   if (this.callbacks.afterShow) {
@@ -504,10 +685,7 @@ export class StreamingPresentation {
               }
             }
             if (entry.phase === 'visible') {
-              const visibleUntil = Math.max(
-                (entry.burst?.visibleAt ?? now) + (entry.burst?.duration ?? PREVIEW_MS),
-                (entry.visibleAt ?? now) + MIN_ACTIVITY_PREVIEW_MS
-              );
+              const visibleUntil = activityPreviewDeadline(entry, now);
               if (item.running) visible.add(item.key);
               else if (inspected || now < visibleUntil) retained.add(item.key);
               else {
@@ -537,12 +715,7 @@ export class StreamingPresentation {
               !inspected &&
               (entry.phase === 'delayed' ||
                 entry.phase === 'exiting' ||
-                (entry.phase === 'visible' &&
-                  now <
-                    Math.max(
-                      (entry.burst?.visibleAt ?? now) + (entry.burst?.duration ?? PREVIEW_MS),
-                      (entry.visibleAt ?? now) + MIN_ACTIVITY_PREVIEW_MS
-                    )));
+                (entry.phase === 'visible' && now < activityPreviewDeadline(entry, now)));
             const blocksContent = needsMoment && index > lastContentIndex;
             if (blocksContent && !blocked) blockingBurst = entry.burst;
             blocked ||= blocksContent;

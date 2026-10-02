@@ -3,9 +3,9 @@ import { expect, test } from '@playwright/test';
 import type { MessageEntry, Part } from '../../src/webview/types';
 
 // Regression contract for AI agents: preserve the busy turn, explicit live completion events,
-// two simultaneously visible tools plus queued siblings, real exit animation, and every-frame
-// same-anchor checks. Keep the multi-tool fixtures and busy state: queued tools must be admitted
-// through the production two-slot limit, without bypassing retention or widening drift tolerance.
+// one visible reasoning preview plus queued siblings, real exit animation, and every-frame
+// same-anchor checks. Tools group without an exit animation; reasoning still exercises the
+// production animated lifecycle without bypassing retention or widening drift tolerance.
 const exitCases: Array<{
   name: string;
   count: number;
@@ -67,7 +67,7 @@ const exitCases: Array<{
 ];
 for (const scenario of exitCases) {
   const { gap, count, early, stagger } = scenario;
-  test(`busy tool exits preserve the transcript: ${scenario.name}`, async ({ page }) => {
+  test(`busy reasoning exits preserve the transcript: ${scenario.name}`, async ({ page }) => {
     await page.setViewportSize({ width: 504, height: 800 });
     const sessionId = scenario.virtual
       ? 'session-tool-cards-large-transcript'
@@ -77,8 +77,8 @@ for (const scenario of exitCases) {
       : 'message-tool-cards-assistant';
     await page.goto(
       scenario.virtual
-        ? `/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69&activeTrayCount=${count}`
-        : `/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCount=${count}`
+        ? `/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayReasoning=1&activeTrayIndex=69&activeTrayCount=${count}`
+        : `/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayReasoning=1&activeTrayPrefix=1&activeTrayCount=${count}`
     );
     if (scenario.virtual) {
       await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
@@ -91,22 +91,14 @@ for (const scenario of exitCases) {
       });
     }
     const items = page.locator('.assistant-active-activity-item');
-    await expect(items).toHaveCount(Math.min(count, 2));
+    await expect(items).toHaveCount(1);
     await items.last().evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
     // Establish the already-visible branch; do not remove minimum retention in production.
     if (!early) await page.waitForTimeout(2_100);
-    if (count > 1)
-      expect(
-        await items
-          .nth(1)
-          .evaluate((element) =>
-            Number.parseFloat(getComputedStyle(element.firstElementChild!).paddingTop)
-          )
-      ).toBe(gap);
     // Tray entrance completion can precede the final bottom-follow easing frames.
-    // Settle before capturing the exit anchor, while the early case still retains its tools.
+    // Settle before capturing the exit anchor, while the early case still retains its previews.
     await expect
       .poll(() =>
         page
@@ -132,7 +124,7 @@ for (const scenario of exitCases) {
       const bounds = await page.locator('.interactive-list').boundingBox();
       if (!bounds) throw new Error('Transcript viewport is missing');
       await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 100);
-      // Keep the virtualized two-slot row in the painted core so reattachment exercises an exit.
+      // Keep the virtualized active row in the painted core so reattachment exercises an exit.
       // Off-core activity intentionally skips height animations.
       await page.mouse.wheel(0, scenario.reattachDuring ? -80 : -180);
       await expect
@@ -151,133 +143,137 @@ for (const scenario of exitCases) {
               '.assistant-active-activity-item.is-exiting { animation-play-state: paused !important; }',
           })
         : null;
-    const sampling = page.locator('.interactive-list').evaluate(
-      async (list, options) => {
-        const containerTop = list.getBoundingClientRect().top;
-        const ownerRow = list.querySelector<HTMLElement>(
-          `[data-msg-id="${CSS.escape(options.targetMessageId)}"]`
-        );
-        const summary = ownerRow?.querySelector<HTMLElement>('.assistant-activity-summary');
-        if (!summary) throw new Error('Active tray summary is missing');
-        const messageId = summary.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-        if (!messageId) throw new Error('Summary message identity is missing');
-        if (ownerRow?.querySelectorAll('.assistant-activity-summary').length !== 1)
-          throw new Error('This fixture requires exactly one logical activity group');
-        const before = summary.getBoundingClientRect().top - containerTop;
-        const samples: Array<{
-          top: number | null;
-          expectedTop: number | null;
-          active: number;
-          exiting: number;
-          thinking: boolean;
-          scrollTop: number;
-          scrollHeight: number;
-          append: number;
-          exit: number;
-        }> = [];
-        const harness = (
-          window as typeof window & {
-            __varroE2E: {
-              getSessionMessages: (id: string) => MessageEntry[];
-              updateMessagePart: (part: Part) => void;
+    const sampling = page
+      .locator('.interactive-list')
+      .evaluate(
+        async (list, options) => {
+          const containerTop = list.getBoundingClientRect().top;
+          const ownerRow = list.querySelector<HTMLElement>(
+            `[data-msg-id="${CSS.escape(options.targetMessageId)}"]`
+          );
+          const summary = ownerRow?.querySelector<HTMLElement>('.assistant-activity-summary');
+          if (!summary) throw new Error('Active tray summary is missing');
+          const messageId = summary.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+          if (!messageId) throw new Error('Summary message identity is missing');
+          if (ownerRow?.querySelectorAll('.assistant-activity-summary').length !== 1)
+            throw new Error('This fixture requires exactly one logical activity group');
+          const before = summary.getBoundingClientRect().top - containerTop;
+          const samples: Array<{
+            top: number | null;
+            expectedTop: number | null;
+            active: number;
+            exiting: number;
+            thinking: boolean;
+            scrollTop: number;
+            scrollHeight: number;
+            append: number;
+            exit: number;
+          }> = [];
+          const harness = (
+            window as typeof window & {
+              __varroE2E: {
+                getSessionMessages: (id: string) => MessageEntry[];
+                updateMessagePart: (part: Part) => void;
+              };
+            }
+          ).__varroE2E;
+          const running = harness
+            .getSessionMessages(options.sessionId)
+            .flatMap((message) => message.parts)
+            .filter(
+              (part): part is Extract<Part, { type: 'reasoning' }> =>
+                part.type === 'reasoning' && part.time.end === undefined
+            );
+          if (running.length !== options.count)
+            throw new Error('Expected running reasoning is missing');
+          // Start sampling in the same browser evaluation that delivers the production events.
+          // Updating mock persistence alone waits for polling and can sample before the bug occurs.
+          const completionOrder = options.stagger
+            ? [running[1]!, running[0]!, running[2]!]
+            : running;
+          const pendingCompletions = completionOrder.map((part, index) => ({
+            part,
+            at: options.stagger ? index * 180 : 0,
+          }));
+          const complete = (part: Extract<Part, { type: 'reasoning' }>) => {
+            const completed: Part = {
+              ...part,
+              time: { ...part.time, end: Date.now() },
             };
-          }
-        ).__varroE2E;
-        const running = harness
-          .getSessionMessages(options.sessionId)
-          .flatMap((message) => message.parts)
-          .filter(
-            (part): part is Extract<Part, { type: 'tool' }> =>
-              part.type === 'tool' && part.state.status === 'running'
-          );
-        if (running.length !== options.count) throw new Error('Expected running tools are missing');
-        // Start sampling in the same browser evaluation that delivers the production events.
-        // Updating mock persistence alone waits for polling and can sample before the bug occurs.
-        const completionOrder = options.stagger ? [running[1]!, running[0]!, running[2]!] : running;
-        const pendingCompletions = completionOrder.map((part, index) => ({
-          part,
-          at: options.stagger ? index * 180 : 0,
-        }));
-        const complete = (part: Extract<Part, { type: 'tool' }>) => {
-          if (part.state.status !== 'running') throw new Error('Expected a running tool');
-          const completed: Part = {
-            ...part,
-            state: {
-              ...part.state,
-              status: 'completed',
-              title: part.state.title ?? part.tool,
-              output: 'Done',
-              metadata: {},
-              time: { start: Date.now() - 3_000, end: Date.now() },
-            },
+            harness.updateMessagePart(completed);
+            window.postMessage(
+              {
+                type: 'server/event',
+                payload: { type: 'message.part.updated', properties: { part: completed } },
+              },
+              '*'
+            );
           };
-          harness.updateMessagePart(completed);
-          window.postMessage(
-            {
-              type: 'server/event',
-              payload: { type: 'message.part.updated', properties: { part: completed } },
-            },
-            '*'
-          );
-        };
-        let cancelledAnimations = 0;
-        const start = performance.now();
-        // Hydrated queued siblings get their own minimum preview after a slot is freed.
-        const sampleDuration = options.count > 3 ? 8_000 : 4_500;
-        while (performance.now() - start < sampleDuration) {
-          while (pendingCompletions[0] && pendingCompletions[0].at <= performance.now() - start) {
-            complete(pendingCompletions.shift()!.part);
-          }
-          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-          const current = list.querySelector<HTMLElement>(
-            `[data-msg-id="${CSS.escape(messageId)}"] .assistant-activity-summary`
-          );
-          if (
-            options.animation === 'cancel' &&
-            cancelledAnimations === 0 &&
-            performance.now() - start > 100
-          ) {
-            for (const item of list.querySelectorAll(
-              '.assistant-active-activity-item.is-exiting'
-            )) {
-              for (const animation of item.getAnimations()) {
-                if (
-                  animation instanceof CSSAnimation &&
-                  animation.animationName === 'assistant-active-activity-out'
-                ) {
-                  animation.cancel();
-                  cancelledAnimations += 1;
+          let cancelledAnimations = 0;
+          const start = performance.now();
+          // Hydrated queued siblings get their own minimum preview after a slot is freed.
+          const sampleDuration = options.count > 3 ? 12_000 : 4_500;
+          while (performance.now() - start < sampleDuration) {
+            while (pendingCompletions[0] && pendingCompletions[0].at <= performance.now() - start) {
+              complete(pendingCompletions.shift()!.part);
+            }
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            const current = list.querySelector<HTMLElement>(
+              `[data-msg-id="${CSS.escape(messageId)}"] .assistant-activity-summary`
+            );
+            if (
+              options.animation === 'cancel' &&
+              cancelledAnimations === 0 &&
+              performance.now() - start > 100
+            ) {
+              for (const item of list.querySelectorAll(
+                '.assistant-active-activity-item.is-exiting'
+              )) {
+                for (const animation of item.getAnimations()) {
+                  if (
+                    animation instanceof CSSAnimation &&
+                    animation.animationName === 'assistant-active-activity-out'
+                  ) {
+                    animation.cancel();
+                    cancelledAnimations += 1;
+                  }
                 }
               }
             }
+            samples.push({
+              top: current ? current.getBoundingClientRect().top - containerTop : null,
+              expectedTop:
+                list.dataset.exitTestAnchor === 'moving'
+                  ? null
+                  : list.dataset.exitTestAnchor
+                    ? Number(list.dataset.exitTestAnchor)
+                    : before,
+              active: list.querySelectorAll('.assistant-active-activity-item').length,
+              exiting: list.querySelectorAll('.assistant-active-activity-item.is-exiting').length,
+              thinking: !!list.querySelector(
+                '.interactive-loading-row:not(.is-reserved):not(.trailing-assistant-summary-row)'
+              ),
+              scrollTop: list.scrollTop,
+              scrollHeight: list.scrollHeight,
+              append:
+                list.querySelector('.append-scroll-bottom-reserve')?.getBoundingClientRect()
+                  .height ?? 0,
+              exit:
+                list.querySelector('.activity-exit-bottom-reserve')?.getBoundingClientRect()
+                  .height ?? 0,
+            });
           }
-          samples.push({
-            top: current ? current.getBoundingClientRect().top - containerTop : null,
-            expectedTop:
-              list.dataset.exitTestAnchor === 'moving'
-                ? null
-                : list.dataset.exitTestAnchor
-                  ? Number(list.dataset.exitTestAnchor)
-                  : before,
-            active: list.querySelectorAll('.assistant-active-activity-item').length,
-            exiting: list.querySelectorAll('.assistant-active-activity-item.is-exiting').length,
-            thinking: !!list.querySelector(
-              '.interactive-loading-row:not(.is-reserved):not(.trailing-assistant-summary-row)'
-            ),
-            scrollTop: list.scrollTop,
-            scrollHeight: list.scrollHeight,
-            append:
-              list.querySelector('.append-scroll-bottom-reserve')?.getBoundingClientRect().height ??
-              0,
-            exit:
-              list.querySelector('.activity-exit-bottom-reserve')?.getBoundingClientRect().height ??
-              0,
-          });
-        }
-        return { before, messageId, samples, cancelledAnimations };
-      },
-      { count, stagger, sessionId, targetMessageId, animation: scenario.animation }
-    );
+          return { before, messageId, samples, cancelledAnimations };
+        },
+        { count, stagger, sessionId, targetMessageId, animation: scenario.animation }
+      )
+      .then(async (result) => {
+        await test.info().attach('frame-geometry', {
+          body: JSON.stringify(result, null, 2),
+          contentType: 'application/json',
+        });
+        return result;
+      });
     if (scenario.detachDuring || scenario.reattachDuring || scenario.keyDuring) {
       await page.waitForFunction(() =>
         document.querySelector('.assistant-active-activity-item.is-exiting')
@@ -288,6 +284,26 @@ for (const scenario of exitCases) {
       });
       const bounds = await list.boundingBox();
       if (!bounds) throw new Error('Transcript viewport is missing');
+      if (scenario.reattachDuring) {
+        await list.evaluate((element, messageId) => {
+          // Capture native arrival before the scroll handler reserves the remaining exit height.
+          // That reserve can create a physical bottom gap while preserving the user's destination.
+          const recordArrival = () => {
+            const distance = element.scrollHeight - element.clientHeight - element.scrollTop;
+            if (distance > 1) return;
+            const summary = element.querySelector(
+              `[data-msg-id="${messageId}"] .assistant-activity-summary`
+            );
+            if (!summary) throw new Error('Missing activity summary at native bottom arrival');
+            element.dataset.exitTestBottomReached = String(distance);
+            element.dataset.exitTestAnchor = String(
+              summary.getBoundingClientRect().top - element.getBoundingClientRect().top
+            );
+            element.removeEventListener('scroll', recordArrival, true);
+          };
+          element.addEventListener('scroll', recordArrival, true);
+        }, targetMessageId);
+      }
       await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 100);
       if (scenario.keyDuring) {
         const beforeKey = await list.evaluate((element) => element.scrollTop);
@@ -299,19 +315,25 @@ for (const scenario of exitCases) {
       } else await page.mouse.wheel(0, scenario.reattachDuring ? 420 : -180);
       const distance = () =>
         list.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop);
-      if (scenario.reattachDuring) await expect.poll(distance).toBeLessThanOrEqual(1);
+      if (scenario.reattachDuring)
+        await expect
+          .poll(() =>
+            list.evaluate((element) => Number(element.dataset.exitTestBottomReached ?? Infinity))
+          )
+          .toBeLessThanOrEqual(1);
       else if (!scenario.keyDuring) await expect.poll(distance).toBeGreaterThan(100);
       await page.waitForTimeout(100);
       // The new anchor is established by genuine native movement. Later animation/timer cleanup
       // must preserve this destination, not restore the pre-gesture bottom target.
-      await list.evaluate((element, messageId) => {
-        const summary = element.querySelector(
-          `[data-msg-id="${messageId}"] .assistant-activity-summary`
-        )!;
-        element.dataset.exitTestAnchor = String(
-          summary.getBoundingClientRect().top - element.getBoundingClientRect().top
-        );
-      }, targetMessageId);
+      if (!scenario.reattachDuring)
+        await list.evaluate((element, messageId) => {
+          const summary = element.querySelector(
+            `[data-msg-id="${messageId}"] .assistant-activity-summary`
+          )!;
+          element.dataset.exitTestAnchor = String(
+            summary.getBoundingClientRect().top - element.getBoundingClientRect().top
+          );
+        }, targetMessageId);
       await pauseExit?.evaluate((element) => element.parentNode?.removeChild(element));
     }
     const result = await sampling;
@@ -325,10 +347,8 @@ for (const scenario of exitCases) {
       if (scenario.detachDuring) expect(result.samples.at(-1)?.append).toBe(0);
       else expect(result.samples.at(-1)?.append).toBeGreaterThan(0);
     }
-    expect(
-      result.samples.some((sample) => sample.exiting === (stagger ? 1 : Math.min(count, 2)))
-    ).toBe(true);
-    expect(result.samples.every((sample) => sample.active <= 2)).toBe(true);
+    expect(result.samples.some((sample) => sample.exiting === 1)).toBe(true);
+    expect(result.samples.every((sample) => sample.active <= 1)).toBe(true);
     expect(result.samples.at(-1)?.active).toBe(0);
     expect(result.samples.at(-1)?.thinking).toBe(true);
     expect(result.samples.at(-1)?.exit).toBe(0);
@@ -336,8 +356,7 @@ for (const scenario of exitCases) {
       expect(result.samples.every((sample) => sample.append === 0 && sample.exit === 0)).toBe(true);
       expect(result.samples.at(-1)?.scrollTop).toBeCloseTo(result.samples[0]!.scrollTop, 0);
     } else if (!scenario.detachDuring) expect(result.samples.at(-1)?.append).toBeGreaterThan(0);
-    if (scenario.animation === 'cancel')
-      expect(result.cancelledAnimations).toBe(Math.min(count, 2));
+    if (scenario.animation === 'cancel') expect(result.cancelledAnimations).toBe(1);
     const maxDrift = Math.max(
       ...result.samples.map((sample) =>
         sample.expectedTop === null
@@ -347,10 +366,6 @@ for (const scenario of exitCases) {
             : Math.abs(sample.top - sample.expectedTop)
       )
     );
-    await test.info().attach('frame-geometry', {
-      body: JSON.stringify(result, null, 2),
-      contentType: 'application/json',
-    });
     expect(
       maxDrift,
       'The same logical summary must remain fixed through exit and Thinking handoff'
@@ -421,10 +436,10 @@ test('activity exit tolerates persistent summary drift without observer feedback
 }) => {
   await page.setViewportSize({ width: 495, height: 1269 });
   await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCompletedPrefix=1&activeTrayCount=3'
+    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayReasoning=1&activeTrayPrefix=1&activeTrayCompletedPrefix=1&activeTrayCount=3'
   );
   const items = page.locator('.assistant-active-activity-item');
-  await expect(items).toHaveCount(2);
+  await expect(items).toHaveCount(1);
   await items.last().evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished));
   });
@@ -529,22 +544,14 @@ test('activity exit tolerates persistent summary drift without observer feedback
         .getSessionMessages('session-tool-cards')
         .flatMap((message) => message.parts)
         .filter(
-          (part): part is Extract<Part, { type: 'tool' }> =>
-            part.type === 'tool' && part.state.status === 'running'
+          (part): part is Extract<Part, { type: 'reasoning' }> =>
+            part.type === 'reasoning' && part.time.end === undefined
         );
-      if (running.length !== 3) throw new Error('Expected three running tools');
+      if (running.length !== 3) throw new Error('Expected three running reasoning parts');
       for (const part of running) {
-        if (part.state.status !== 'running') throw new Error('Expected a running tool');
         const completed: Part = {
           ...part,
-          state: {
-            ...part.state,
-            status: 'completed',
-            title: part.state.title ?? part.tool,
-            output: 'Done',
-            metadata: {},
-            time: { start: Date.now() - 3_000, end: Date.now() },
-          },
+          time: { ...part.time, end: Date.now() },
         };
         harness.updateMessagePart(completed);
         window.postMessage(
@@ -556,7 +563,7 @@ test('activity exit tolerates persistent summary drift without observer feedback
         );
       }
       const start = performance.now();
-      while (performance.now() - start < 3_500) {
+      while (performance.now() - start < 4_500) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         samples.push({
           top: top(),
@@ -586,7 +593,7 @@ test('activity exit tolerates persistent summary drift without observer feedback
   expect(result.injectedDrift, 'The fixture must introduce a positive 1px exit-anchor delta').toBe(
     1
   );
-  expect(result.samples.some((sample) => sample.exiting === 2)).toBe(true);
+  expect(result.samples.some((sample) => sample.exiting === 1)).toBe(true);
   expect(
     result.guardTrips,
     `Activity exit must not feed back on its own reserve style (${result.maxDeliveries} deliveries without yielding)`

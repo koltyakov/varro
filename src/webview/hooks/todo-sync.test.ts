@@ -300,6 +300,117 @@ describe('todo-sync', () => {
     await sync;
   });
 
+  it('bounds optional native hydration and ignores a late snapshot', async () => {
+    vi.useFakeTimers();
+    let finish!: (todos: NormalizedTodo[]) => void;
+    const loadSessionTodos = vi.fn(
+      (_sessionId: string, _signal: AbortSignal) =>
+        new Promise<NormalizedTodo[]>((resolve) => {
+          finish = resolve;
+        })
+    );
+    const operations = createTodoSyncOperations({ loadSessionTodos });
+    try {
+      const sync = operations.syncTodosForSession('session-1', []);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await sync;
+      expect(loadSessionTodos.mock.calls[0]?.[1].aborted).toBe(true);
+      setState.mockClear();
+      finish([{ id: 'late', content: 'late', status: 'pending', priority: 'high' }]);
+      await Promise.resolve();
+      expect(setState).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let a same-session reselection apply an older native response', async () => {
+    let finish!: (todos: NormalizedTodo[]) => void;
+    const pending = new Promise<NormalizedTodo[]>((resolve) => {
+      finish = resolve;
+    });
+    const loadSessionTodos = vi
+      .fn<(_sessionId: string, _signal: AbortSignal) => Promise<NormalizedTodo[]>>()
+      .mockReturnValueOnce(pending)
+      .mockResolvedValue([{ id: 'new', content: 'new', status: 'completed', priority: 'high' }]);
+    const operations = createTodoSyncOperations({ loadSessionTodos });
+    const old = operations.syncTodosForSession('session-1', []);
+    await Promise.resolve();
+    operations.resetTodoSync();
+    await operations.syncTodosForSession('session-1', []);
+    setState.mockClear();
+    finish([{ id: 'old', content: 'old', status: 'pending', priority: 'high' }]);
+    await old;
+    expect(setState).not.toHaveBeenCalled();
+  });
+
+  it('keeps native event state when an older native read fails', async () => {
+    let fail!: (error: Error) => void;
+    const loadSessionTodos = vi
+      .fn<(_sessionId: string, _signal: AbortSignal) => Promise<NormalizedTodo[]>>()
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            fail = reject;
+          })
+      );
+    const operations = createTodoSyncOperations({ loadSessionTodos });
+    await operations.syncTodosForSession('session-1', []);
+    const old = operations.syncTodosForSession('session-1', []);
+    await Promise.resolve();
+    operations.syncTodosFromMessages([], {
+      todos: [{ content: 'event', status: 'completed', priority: 'high' }],
+    });
+    setState.mockClear();
+    fail(new Error('older failed read'));
+    await old;
+    expect(setState).not.toHaveBeenCalled();
+    operations.syncTodosFromMessages([], {
+      todos: [{ content: 'later event', status: 'completed', priority: 'high' }],
+    });
+    expect(setState).toHaveBeenCalledWith('todos', [
+      expect.objectContaining({ content: 'later event' }),
+    ]);
+  });
+
+  it('does not replay old message-derived todos after a transcript refresh', async () => {
+    let fail!: (error: Error) => void;
+    const operations = createTodoSyncOperations({
+      loadSessionTodos: () =>
+        new Promise<never>((_, reject) => {
+          fail = reject;
+        }),
+    });
+    const messages = [
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [
+          todoToolPart([
+            { id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' },
+          ]),
+        ],
+      },
+    ];
+    const read = operations.syncTodosForSession('session-1', messages);
+    await Promise.resolve();
+    operations.handoffTodosToMessages([
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [
+          todoToolPart([
+            { id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' },
+          ]),
+        ],
+      },
+    ]);
+    setState.mockClear();
+    fail(new Error('older failed read'));
+    await read;
+    expect(setState).not.toHaveBeenCalled();
+  });
+
   it('uses native todo events after the native endpoint is available', async () => {
     const messages = [
       { info: userMessage('user-1'), parts: [] },

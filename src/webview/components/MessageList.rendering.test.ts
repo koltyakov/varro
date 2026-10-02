@@ -1390,17 +1390,13 @@ describe('MessageList compact activity', () => {
     expect(container?.querySelector('[data-activity-part-id="search-1"].is-exiting')).toBeNull();
 
     await vi.advanceTimersByTimeAsync(1);
-    expect(
-      container?.querySelector('[data-activity-part-id="search-1"].is-exiting')
-    ).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file, 1 search'
     );
 
     await vi.advanceTimersByTimeAsync(420);
-    expect(
-      container?.querySelector('[data-activity-part-id="search-1"].is-exiting')
-    ).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(250);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file, 1 search'
@@ -1408,7 +1404,7 @@ describe('MessageList compact activity', () => {
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
   });
 
-  it('disconnects the activity exit summary observer on unmount', async () => {
+  it('disconnects the reasoning exit summary observer on unmount', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const observers: MutationObserver[] = [];
     vi.spyOn(globalThis, 'MutationObserver').mockImplementation(function TestMutationObserver() {
@@ -1436,12 +1432,12 @@ describe('MessageList compact activity', () => {
       metadata: {},
       time: { start: 0, end: 1 },
     };
-    const search = toolPart('search-teardown', 'assistant-teardown', 'call-search-teardown');
-    search.tool = 'grep';
-    search.state = {
-      status: 'running',
-      input: { pattern: 'activity' },
-      title: 'Searching',
+    const thought: Part = {
+      id: 'reasoning-teardown',
+      messageID: 'assistant-teardown',
+      sessionID: 'session-1',
+      type: 'reasoning',
+      text: 'Checking the code.',
       time: { start: 1 },
     };
     const user = {
@@ -1451,7 +1447,7 @@ describe('MessageList compact activity', () => {
     const info = assistantMessage('assistant-teardown', { parentID: 'user-teardown' });
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
-    replaceMessages([user, { info, parts: [read, search] }]);
+    replaceMessages([user, { info, parts: [read, thought] }]);
 
     cleanup = render(() => MessageList(), container!);
     // Exit anchoring is only needed when collapsing activity can clamp a scrolled viewport.
@@ -1469,15 +1465,8 @@ describe('MessageList compact activity', () => {
         parts: [
           read,
           {
-            ...search,
-            state: {
-              status: 'completed',
-              input: { pattern: 'activity' },
-              output: 'Found matches',
-              title: 'Searching',
-              metadata: {},
-              time: { start: 1, end: 2 },
-            },
+            ...thought,
+            time: { start: 1, end: 2 },
           },
         ],
       },
@@ -1682,9 +1671,8 @@ describe('MessageList compact activity', () => {
     expect(
       container?.querySelector('[data-activity-part-id="search-before-stream"]')
     ).not.toBeNull();
-    expect(
-      container?.querySelector('[data-activity-part-id="command-after-stream"]')
-    ).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="command-after-stream"]')).toBeNull();
+    expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file'
     );
@@ -1714,6 +1702,23 @@ describe('MessageList compact activity', () => {
 
     expect(
       container?.querySelector('[data-activity-part-id="search-before-stream"]')
+    ).not.toBeNull();
+
+    upsertPart({
+      ...running,
+      state: {
+        status: 'completed',
+        input: { pattern: 'activity' },
+        output: 'Found matches',
+        title: 'Searching',
+        metadata: {},
+        time: { start: 1, end: 1_001 },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(container?.querySelector('[data-activity-part-id="search-before-stream"]')).toBeNull();
+    expect(
+      container?.querySelector('[data-activity-part-id="command-after-stream"]')
     ).not.toBeNull();
   });
 
@@ -1924,15 +1929,11 @@ describe('MessageList compact activity', () => {
     expect(followerRow?.classList).not.toContain('interactive-item-render-empty');
 
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(
-      followerRow?.querySelector('[data-activity-part-id="command-running"].is-exiting')
-    ).not.toBeNull();
-    expect(followerRow?.classList).not.toContain('interactive-item-render-empty');
+    expect(followerRow?.querySelector('[data-activity-part-id="command-running"]')).toBeNull();
+    expect(followerRow?.classList).toContain('interactive-item-render-empty');
 
     await vi.advanceTimersByTimeAsync(420);
-    expect(
-      container?.querySelector('[data-activity-part-id="command-running"].is-exiting')
-    ).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="command-running"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(250);
     expect(container?.querySelector('[data-activity-part-id="command-running"]')).toBeNull();
     expect(followerRow?.classList).toContain('interactive-item-render-empty');
@@ -2045,6 +2046,11 @@ describe('MessageList compact activity', () => {
     expect(toolRow()?.classList).toContain('interactive-item-render-empty');
 
     await vi.advanceTimersByTimeAsync(1);
+    expect(toolRow()?.classList).toContain('interactive-item-render-empty');
+    expect(container?.querySelector('[data-activity-part-id="command-1"]')).toBeNull();
+    if (thought.type !== 'reasoning') throw new Error('Expected reasoning fixture');
+    upsertPart({ ...thought, time: { ...thought.time, end: 600 } });
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(toolRow()?.classList).not.toContain('interactive-item-render-empty');
     expect(container?.querySelector('[data-activity-part-id="command-1"]')).not.toBeNull();
   });
@@ -2260,12 +2266,12 @@ describe('MessageList compact activity', () => {
     await vi.advanceTimersByTimeAsync(2_000);
 
     const tray = container?.querySelector('.assistant-active-activity-tray');
-    expect(tray?.classList).toContain('has-active-summary');
-    expect(tray?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+    expect(tray).toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 command'
     );
-    expect(tray?.querySelector('button.assistant-activity-summary')).not.toBeNull();
-    expect(tray?.querySelector('[data-activity-part-id="command-1"].is-exiting')).not.toBeNull();
+    expect(container?.querySelector('button.assistant-activity-summary')).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="command-1"]')).toBeNull();
 
     replaceMessages([
       user,
@@ -3688,6 +3694,143 @@ describe('MessageList session scoping', () => {
 });
 
 describe('MessageList loading row', () => {
+  it.each(['text', 'reasoning', 'assistant'] as const)(
+    'counts from completed %s events but ignores child-session completions',
+    async (kind) => {
+      vi.setSystemTime(100_000);
+      setState('activeSessionId', 'session-1');
+      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+      const part: Part = {
+        id: 'done',
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        type: kind === 'reasoning' ? 'reasoning' : 'text',
+        text: kind === 'reasoning' ? 'Analyzed' : 'I will continue.',
+        time: { start: 60_000, end: kind === 'assistant' ? undefined : 80_000 },
+      };
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('prompt', 'Continue')] },
+        {
+          info: {
+            ...assistantMessage('assistant-1', {
+              parentID: 'user-1',
+              time: { created: 50_000, completed: kind === 'assistant' ? 80_000 : undefined },
+            }),
+            finish: 'tool-calls',
+          },
+          parts: [part],
+        },
+        {
+          info: assistantMessage('assistant-2', { parentID: 'user-1', time: { created: 90_000 } }),
+          parts: [],
+        },
+        {
+          info: assistantMessage('child', {
+            sessionID: 'child-1',
+            mode: 'subagent',
+            parentID: 'assistant-2',
+            time: { created: 90_000, completed: 99_000 },
+          }),
+          parts: [],
+        },
+      ]);
+      startLoading(50_000);
+      cleanup = render(() => MessageList(), container!);
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('22s');
+    }
+  );
+
+  it('hides the loading row once a running tool timer mounts', async () => {
+    vi.setSystemTime(64_000);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    const tool = toolPart('tool-active', 'assistant-1');
+    tool.state = {
+      status: 'running',
+      input: { command: 'npm test' },
+      title: 'npm test',
+      time: { start: 1 },
+    };
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt', 'Run tests')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1', time: { created: 1 } }),
+        parts: [
+          {
+            id: 'last-completed-event',
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            type: 'text',
+            text: 'Running tests.',
+            time: { start: 10_000, end: 13_000 },
+          },
+          tool,
+        ],
+      },
+    ]);
+    startLoading(1);
+    cleanup = render(() => MessageList(), container!);
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('51s');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('1m 5s');
+    expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
+      'is-reserved'
+    );
+    vi.setSystemTime(65_001);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('1m 6s');
+    expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
+      'is-reserved'
+    );
+    expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
+  });
+
+  it.each(['completed', 'error'] as const)(
+    'counts from the latest %s tool in the current turn and resets at completion',
+    async (status) => {
+      vi.setSystemTime(100_000);
+      setState('activeSessionId', 'session-1');
+      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+      const tool = toolPart('finished', 'assistant-1');
+      tool.state =
+        status === 'completed'
+          ? {
+              status,
+              input: {},
+              output: '',
+              title: 'Done',
+              metadata: {},
+              time: { start: 60_000, end: 80_000 },
+            }
+          : { status, input: {}, error: 'Failed', time: { start: 60_000, end: 80_000 } };
+      replaceMessages([
+        {
+          info: assistantMessage('old', {
+            parentID: 'old-prompt',
+            time: { created: 1, completed: 99_000 },
+          }),
+          parts: [],
+        },
+        { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Continue')] },
+        {
+          info: assistantMessage('assistant-1', { parentID: 'user-1', time: { created: 50_000 } }),
+          parts: [tool],
+        },
+      ]);
+      startLoading(50_000);
+      cleanup = render(() => MessageList(), container!);
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('22s');
+      upsertPart({ ...tool, state: { ...tool.state, time: { start: 60_000, end: Date.now() } } });
+      await Promise.resolve();
+      expect(container?.querySelector('.loading-elapsed')).toBeNull();
+      await vi.advanceTimersByTimeAsync(10_500);
+      expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
+    }
+  );
+
   it('shows hours and minutes without seconds for hour-long durations', async () => {
     vi.setSystemTime(69 * 60_000 + 32_000);
     setState('activeSessionId', 'session-1');
@@ -3945,9 +4088,12 @@ describe('MessageList loading row', () => {
   it('hides the loading label when final text streams after a stale running tool', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
-      { info: assistantMessage('assistant-1'), parts: [toolPart('tool-1', 'assistant-1')] },
       {
-        info: assistantMessage('assistant-2'),
+        info: assistantMessage('assistant-1', { parentID: 'old-prompt' }),
+        parts: [toolPart('tool-1', 'assistant-1')],
+      },
+      {
+        info: assistantMessage('assistant-2', { parentID: 'new-prompt' }),
         parts: [textPart('text-2', 'Final answer')],
       },
     ]);
@@ -4093,6 +4239,7 @@ describe('MessageList loading row', () => {
     expect(row).toBeInstanceOf(HTMLDivElement);
     expect(row?.classList).toContain('is-reserved');
     expect(row?.getAttribute('aria-hidden')).toBe('true');
+    expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
   });
 
   it('keeps the loading label visible with a namespaced running task tool card', async () => {
@@ -4161,6 +4308,7 @@ describe('MessageList loading row', () => {
     expect(row).toBeInstanceOf(HTMLDivElement);
     expect(row?.classList).toContain('is-reserved');
     expect(row?.getAttribute('aria-hidden')).toBe('true');
+    expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
   });
 
   it('re-shows the loading row only after a sustained visible-stream gap', async () => {

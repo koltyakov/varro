@@ -133,6 +133,22 @@ export async function inspectWindowsManagedListener(
   if (netstat.code === 0) {
     const listenerPids = parseWindowsNetstatListeningPids(netstat.stdout, port);
     if (listenerPids.length === 0) return null;
+    // Never select one side of an ambiguous IPv4/IPv6 listener set as ownership proof.
+    if (listenerPids.length !== 1) return null;
+    try {
+      const pid = listenerPids[0]!;
+      const details = await windowsInspector.read(pid, ancestorPid);
+      if (details.ancestorPid === ancestorPid && details.hostBirthIdentity)
+        return {
+          pid,
+          executable: details.executable,
+          birthIdentity: details.birthIdentity,
+          hostBirthIdentity: details.hostBirthIdentity,
+        };
+    } catch {
+      // Native ancestry can be unavailable for exited wrappers or restricted handles.
+      // Fresh bounded CIM observation remains the fallback, never cached PID evidence.
+    }
     listenerExpression = `@(${listenerPids.join(',')})`;
   } else {
     logger.warn(
@@ -143,6 +159,7 @@ export async function inspectWindowsManagedListener(
 
   const script = [
     `$listenerIds = ${listenerExpression}`,
+    'if (@($listenerIds).Count -ne 1) { exit 0 }',
     '$processes = @(Get-CimInstance Win32_Process)',
     '$byId = @{}',
     'foreach ($process in $processes) { $byId[[int]$process.ProcessId] = $process }',
@@ -441,7 +458,9 @@ async function findListeningPidsOnce(port: number, procRoot: string): Promise<nu
   const fallback = await runProcess('ss', ['-ltnp']);
   const portPattern = new RegExp(`(?:\\]|:|\\*)${port}(?:\\s|$)`);
   const fallbackPids = new Set<number>();
-  for (const line of fallback.stdout.split(/\r?\n/)) {
+  for (const line of (fallback.code === 0 && !fallback.timedOut ? fallback.stdout : '').split(
+    /\r?\n/
+  )) {
     if (!portPattern.test(line)) continue;
     for (const match of line.matchAll(/\bpid=(\d+)\b/g)) {
       const pid = Number.parseInt(match[1]!, 10);

@@ -735,11 +735,55 @@ describe('AssistantMessageContent', () => {
 
     expect(container?.querySelectorAll('.assistant-active-activity-tray')).toHaveLength(1);
     expect(container?.querySelectorAll('.assistant-active-activity-items')).toHaveLength(1);
+    expect(
+      container
+        ?.querySelector('.assistant-active-activity-items')
+        ?.getAttribute('data-max-visible-items')
+    ).toBe('1');
     expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(3);
     expect(
       container?.querySelector('[data-activity-part-id="read-completed"].is-completed')
     ).not.toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
+  });
+
+  it('preserves a single active item viewport position through unrelated mutations', async () => {
+    const running = toolPart('nested-scroll', 'grep', { pattern: 'activity' });
+    running.state = {
+      status: 'running',
+      input: { pattern: 'activity' },
+      time: { start: 0 },
+    };
+    renderAssistantMessageContent({
+      info: createAssistantMessage({ time: { created: 0 } }),
+      parts: [running],
+    });
+    await Promise.resolve();
+    const viewport = container?.querySelector<HTMLElement>('.assistant-active-activity-items');
+    if (!viewport) throw new Error('Missing active activity viewport');
+    viewport.scrollTop = 80;
+    viewport.firstElementChild!.classList.add('nested-scroll-regression');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(viewport.scrollTop).toBe(80);
+  });
+
+  it('does not split completed activity summaries around a running tool', () => {
+    const running = toolPart('running-middle', 'grep', { pattern: 'activity' });
+    running.state = {
+      status: 'running',
+      input: { pattern: 'activity' },
+      time: { start: 0 },
+    };
+    renderAssistantMessageContent({
+      info: createAssistantMessage({ time: { created: 0 } }),
+      parts: [toolPart('before-running', 'grep'), running, toolPart('after-running', 'grep')],
+    });
+    expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 2 searches'
+    );
+    expect(container?.querySelector('[data-activity-part-id="running-middle"]')).not.toBeNull();
   });
 
   it('does not height-animate active activity outside the virtualized viewport', () => {

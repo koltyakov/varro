@@ -25,6 +25,13 @@ import {
 import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { asRecord } from '../shared/type-utils';
 import {
+  measureStartupPhase,
+  STARTUP_CREDENTIAL_TIMEOUT_MS,
+  STARTUP_HEALTH_TIMEOUT_MS,
+  withStartupDeadline,
+} from '../shared/startup';
+import type { StartupPhase } from '../shared/startup';
+import {
   OpenCodeProcess,
   type OpenCodeCompactionSettings,
   type OpenCodePortSetting,
@@ -237,6 +244,25 @@ export class OpenCodeServer extends EventEmitter {
   private readonly transport: OpenCodeTransport;
   private _status: ServerStatus = { state: 'stopped' };
   private pollHealthTimer: ReturnType<typeof setTimeout> | null = null;
+  private startupOperationId = '';
+
+  private measureStartup<T>(phase: StartupPhase, operation: () => PromiseLike<T>): Promise<T> {
+    const operationId = this.startupOperationId;
+    const generation = this.disposeGeneration;
+    const attempt = this.lifecycle.startAttemptId;
+    return measureStartupPhase(phase, operation, (timing) => {
+      diagnosticTimeline.record({
+        event: 'startup-phase',
+        operationId,
+        generation,
+        attempt,
+        platform: process.platform,
+        arch: process.arch,
+        runtime: process.version,
+        ...timing,
+      });
+    });
+  }
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private retryResetTimer: ReturnType<typeof setTimeout> | null = null;
   private retryCount = 0;
@@ -564,7 +590,12 @@ export class OpenCodeServer extends EventEmitter {
       if (this.url !== url)
         throw new Error('OpenCode server address changed during authentication');
     };
-    const stored = await secrets.get(key);
+    const stored = await withStartupDeadline(
+      () => secrets.get(key),
+      STARTUP_CREDENTIAL_TIMEOUT_MS,
+      'Server credential lookup',
+      signal
+    );
     checkCurrent();
     let username = 'opencode';
     if (stored) {
@@ -627,8 +658,13 @@ export class OpenCodeServer extends EventEmitter {
     const health = await this.transport.readHealthInfo(signal);
     checkCurrent();
     if (health.healthy) {
-      await secrets.store(key, JSON.stringify({ username: enteredUsername, password }));
-      logger.info('Saved OpenCode server credentials in VS Code secret storage; password=*');
+      void withStartupDeadline(
+        () => secrets.store(key, JSON.stringify({ username: enteredUsername, password })),
+        STARTUP_CREDENTIAL_TIMEOUT_MS,
+        'Server credential persistence'
+      ).catch(() =>
+        logger.warn('Could not persist verified OpenCode credentials in secret storage')
+      );
     } else {
       this.savedServerAuthorization = undefined;
     }
@@ -637,6 +673,7 @@ export class OpenCodeServer extends EventEmitter {
 
   private startOperation(preserveRetryCount: boolean): Promise<string> {
     return this.setStartPromise(async (signal) => {
+      this.startupOperationId = diagnosticTimeline.nextId('startup');
       try {
         this.clearRestartTimer();
         const disposeGeneration = this.lifecycle.beginStart();
@@ -661,16 +698,20 @@ export class OpenCodeServer extends EventEmitter {
           await this.processManager.stopServerForRestart();
           this.throwIfStartCancelled(disposeGeneration, signal);
         }
-        const registered = await this.processManager.refreshStartupRegistration();
+        const registered = await this.measureStartup('registration', () =>
+          this.processManager.refreshStartupRegistration()
+        );
         this.registeredEndpoint = registered;
-        if (registered) await this.restoreRegistrationCredentials();
+        if (registered) await this.restoreRegistrationCredentials(signal);
         this.throwIfStartCancelled(disposeGeneration, signal);
         const probeExistingEndpoint =
           registered ||
           !this.processManager.isAutomaticPort ||
           (this.legacyDefaultEndpoint && !this.processManager.hasHistoricalRegistration) ||
           !this.processManager.isAutoStartEnabled;
-        let health = probeExistingEndpoint ? await this.readHealthInfo() : { healthy: false };
+        let health = probeExistingEndpoint
+          ? await this.measureStartup('health', () => this.readHealthInfo(signal))
+          : { healthy: false };
         this.throwIfStartCancelled(disposeGeneration, signal);
         if (
           !health.healthy &&
@@ -772,15 +813,17 @@ export class OpenCodeServer extends EventEmitter {
     signal: AbortSignal
   ): Promise<string> {
     this.throwIfStartCancelled(disposeGeneration, signal);
-    const release = await this.processManager.acquireManagedServerLaunchClaim(signal);
+    const release = await this.measureStartup('claim', () =>
+      this.processManager.acquireManagedServerLaunchClaim(signal)
+    );
     try {
       // Another window may have published a server while this window waited.
       const registered = await this.processManager.refreshStartupRegistration();
       this.registeredEndpoint = registered;
-      if (registered) await this.restoreRegistrationCredentials();
+      if (registered) await this.restoreRegistrationCredentials(signal);
       this.throwIfStartCancelled(disposeGeneration, signal);
       if (registered) {
-        const health = await this.readHealthInfo();
+        const health = await this.measureStartup('health', () => this.readHealthInfo(signal));
         this.throwIfStartCancelled(disposeGeneration, signal);
         if (!health.healthy || !isSupportedOpenCodeVersion(health.version))
           throw new Error(
@@ -800,7 +843,9 @@ export class OpenCodeServer extends EventEmitter {
       }
       // Recheck registration under the launch claim before any CLI update. A
       // window that lost the startup race must reuse the winner without updating it.
-      await this.ensureCompatibleCliForLaunch(undefined, disposeGeneration, signal);
+      await this.measureStartup('cli', () =>
+        this.ensureCompatibleCliForLaunch(undefined, disposeGeneration, signal)
+      );
       this.throwIfStartCancelled(disposeGeneration, signal);
       const sharedServer = this.processManager.discoverSharedServer();
       if (sharedServer && (await sharedServer)) {
@@ -808,9 +853,9 @@ export class OpenCodeServer extends EventEmitter {
         const managedRegistration =
           await this.processManager.refreshDiscoveredServerRegistration(signal);
         this.registeredEndpoint = managedRegistration;
-        if (managedRegistration) await this.restoreRegistrationCredentials();
+        if (managedRegistration) await this.restoreRegistrationCredentials(signal);
         this.throwIfStartCancelled(disposeGeneration, signal);
-        const health = await this.readHealthInfo();
+        const health = await this.measureStartup('health', () => this.readHealthInfo(signal));
         this.throwIfStartCancelled(disposeGeneration, signal);
         if (!health.healthy || !isSupportedOpenCodeVersion(health.version)) {
           throw new Error('The registered OpenCode service is unavailable or unsupported');
@@ -833,7 +878,7 @@ export class OpenCodeServer extends EventEmitter {
       this.externalEndpoint = false;
       this.admission.reset();
       this.connectionMonitor.reset();
-      await this.syncInjectedConfigFile();
+      await this.measureStartup('configuration', () => this.syncInjectedConfigFile());
       try {
         this.throwIfStartCancelled(disposeGeneration, signal);
       } catch (err) {
@@ -1450,12 +1495,15 @@ export class OpenCodeServer extends EventEmitter {
         },
         0,
         signal,
-        () => awaitBoundary(this.readHealthInfo()),
+        (probeSignal) =>
+          awaitBoundary(this.measureStartup('health', () => this.readHealthInfo(probeSignal))),
         () =>
           awaitBoundary(
-            attemptProcess
-              ? this.processManager.confirmManagedServerOwnership(attemptProcess)
-              : Promise.resolve(false)
+            this.measureStartup('ownership', () =>
+              attemptProcess
+                ? this.processManager.confirmManagedServerOwnership(attemptProcess)
+                : Promise.resolve(false)
+            )
           )
       );
     });
@@ -1513,9 +1561,12 @@ export class OpenCodeServer extends EventEmitter {
     reject: (err: Error) => void,
     attempt = 0,
     signal?: AbortSignal,
-    readHealth: () => Promise<{ healthy: boolean; version?: string }> = () => this.readHealthInfo(),
+    readHealth: (signal?: AbortSignal) => Promise<{ healthy: boolean; version?: string }> = (
+      probeSignal
+    ) => this.readHealthInfo(probeSignal),
     confirmOwnership: () => Promise<boolean> = () =>
-      this.processManager.confirmManagedServerOwnership()
+      this.processManager.confirmManagedServerOwnership(),
+    deadline = performance.now() + STARTUP_HEALTH_TIMEOUT_MS
   ) {
     if (
       signal?.aborted ||
@@ -1524,10 +1575,10 @@ export class OpenCodeServer extends EventEmitter {
       reject(this.getCancellationError(signal));
       return;
     }
-    if (attempt > 50) {
+    if (performance.now() >= deadline) {
       this.cancelPollHealth();
       this.setStatus({ state: 'error', message: 'Server failed to start within timeout' });
-      reject(new Error(this.transport.healthError ?? 'Server health check timeout'));
+      reject(new Error(`Server health check timed out after ${STARTUP_HEALTH_TIMEOUT_MS}ms`));
       return;
     }
 
@@ -1540,9 +1591,18 @@ export class OpenCodeServer extends EventEmitter {
         reject(this.getCancellationError(signal));
         return;
       }
+      if (performance.now() >= deadline) {
+        reject(new Error(`Server health check timed out after ${STARTUP_HEALTH_TIMEOUT_MS}ms`));
+        return;
+      }
       let health: { healthy: boolean; version?: string };
       try {
-        health = await readHealth();
+        health = await withStartupDeadline(
+          (probeSignal) => readHealth(probeSignal),
+          Math.max(1, deadline - performance.now()),
+          'Server health check',
+          signal
+        );
       } catch (err) {
         reject(err instanceof Error ? err : new Error(String(err)));
         return;
@@ -1596,6 +1656,8 @@ export class OpenCodeServer extends EventEmitter {
         this.processManager.resetPortRetryState();
         this.beginRunningEventStream();
         resolve(this.url);
+      } else if (/authentication|^Unsupported OpenCode/i.test(this.transport.healthError ?? '')) {
+        reject(new Error(this.transport.healthError));
       } else {
         this.pollHealth(
           startAttemptId,
@@ -1605,16 +1667,20 @@ export class OpenCodeServer extends EventEmitter {
           attempt + 1,
           signal,
           readHealth,
-          confirmOwnership
+          confirmOwnership,
+          deadline
         );
       }
     };
-    this.pollHealthTimer = setTimeout(() => {
-      // An unexpected throw must fail startup instead of leaving it pending.
-      void pollOnce().catch((err: unknown) => {
-        reject(err instanceof Error ? err : new Error(String(err)));
-      });
-    }, 200);
+    this.pollHealthTimer = setTimeout(
+      () => {
+        // An unexpected throw must fail startup instead of leaving it pending.
+        void pollOnce().catch((err: unknown) => {
+          reject(err instanceof Error ? err : new Error(String(err)));
+        });
+      },
+      Math.min(200, Math.max(0, deadline - performance.now()))
+    );
   }
 
   async request(
@@ -1791,12 +1857,12 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async startEventStream() {
-    await this.transport.startEventStream();
+    await this.measureStartup('sse', () => this.transport.startEventStream());
   }
 
   private async admitExistingEndpoint(): Promise<boolean> {
     try {
-      await this.admission.admit();
+      await this.measureStartup('admission', () => this.admission.admit());
       return true;
     } catch (error) {
       if (error instanceof SeparateAutomaticServerRequested) return false;
@@ -1809,24 +1875,37 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async admitManagedServer(signal?: AbortSignal) {
-    await this.admission.admit();
+    await this.measureStartup('admission', () => this.admission.admit());
+    signal?.throwIfAborted();
     if (this.secrets) {
-      try {
-        await this.processManager.persistManagedServerCredentials(this.secrets);
-      } catch (error) {
+      const persistence = this.processManager.persistManagedServerCredentials(this.secrets);
+      // Private lease credentials are already durable. This redundant vault copy
+      // cannot retain the launch claim or alter connection state on completion.
+      void this.measureStartup('credentials', () =>
+        withStartupDeadline(
+          () => persistence,
+          STARTUP_CREDENTIAL_TIMEOUT_MS,
+          'Managed credential persistence'
+        )
+      ).catch((error: unknown) => {
         logger.warn(
           `Could not copy managed credentials to secret storage; the private lease was retained: ${error instanceof Error ? error.message : String(error)}`
         );
-      }
+      });
     }
     signal?.throwIfAborted();
   }
 
-  private async restoreRegistrationCredentials() {
+  private async restoreRegistrationCredentials(signal?: AbortSignal) {
     if (!this.secrets) return;
+    const secrets = this.secrets;
     try {
-      await this.processManager.restoreManagedServerCredentials(this.secrets);
+      await this.measureStartup('credentials', () =>
+        this.processManager.restoreManagedServerCredentials(secrets, signal)
+      );
     } catch (error) {
+      signal?.throwIfAborted();
+      if (!this.processManager.serverAuthorization) throw error;
       logger.warn(
         `Managed secret storage unavailable; retaining the private lease credential: ${error instanceof Error ? error.message : String(error)}`
       );
@@ -2645,10 +2724,13 @@ export class OpenCodeServer extends EventEmitter {
     return this.processManager.readLatestCliVersion(installedVersion);
   }
 
-  private async readHealthInfo(): Promise<{ healthy: boolean; version?: string }> {
+  private async readHealthInfo(
+    signal?: AbortSignal
+  ): Promise<{ healthy: boolean; version?: string }> {
     const url = this.url;
     const generation = this.disposeGeneration;
-    const health = await this.transport.readHealthInfo();
+    const health = await this.transport.readHealthInfo(signal);
+    signal?.throwIfAborted();
     if (
       health.healthy &&
       health.version &&

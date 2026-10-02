@@ -135,6 +135,15 @@ test('thinking visibility keeps a distant user-card anchor mounted across large 
 
   const list = page.locator('.interactive-list');
   const anchor = page.locator('[data-msg-id="message-heterogeneous-user-101"] .user-message-card');
+  // Warm exact heights above the destination. Unvisited virtual rows have provisional heights,
+  // so hiding their reasoning alone cannot establish a large measured invalidation.
+  for (const turn of [1, 11, 21, 31, 41, 51, 61, 71, 81, 91]) {
+    await selectConversationTurn(page, turn);
+    await expect(page.locator('.chat-thinking-box').first()).toBeVisible();
+    await list.evaluate(async () => {
+      for (let frame = 0; frame < 4; frame += 1) await new Promise(requestAnimationFrame);
+    });
+  }
   await selectConversationTurn(page, 102);
   await expect(anchor).toBeInViewport();
   await page.evaluate(

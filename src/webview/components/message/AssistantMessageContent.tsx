@@ -270,7 +270,7 @@ function samePartList(previous: readonly Part[], next: readonly Part[]) {
   return previous.length === next.length && previous.every((part, index) => part === next[index]);
 }
 
-const MAX_VISIBLE_ACTIVE_ACTIVITY_ITEMS = 3;
+const MAX_VISIBLE_ACTIVE_ACTIVITY_ITEMS = 1;
 
 function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
   let updateQueued = false;
@@ -381,7 +381,7 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
     const itemSignature = items.map((item) => item.dataset.activityPartId).join('\u0000');
     if (items.length <= 1) {
       cancelFollow();
-      element.scrollTop = 0;
+      if (itemSignature !== previousItemSignature) element.scrollTop = 0;
     } else {
       followLatest();
     }
@@ -599,7 +599,8 @@ export function AssistantMessageContent(props: {
       };
       for (const part of orderedDisplayParts()) {
         if (isLocallyCompactActivityPart(part)) activityParts.push(part);
-        else flush();
+        // Preview lifecycle is not a semantic boundary between completed siblings.
+        else if (!isLocallyCompactActivityCandidate(part)) flush();
       }
       flush();
       return groups.length > 0 ? groups : null;

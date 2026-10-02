@@ -158,6 +158,73 @@ describe('OpenCodeServer port validation', () => {
   );
 });
 
+describe('startup wait bounds', () => {
+  it('does not await a redundant managed-vault store after admission', async () => {
+    vi.useFakeTimers();
+    const secrets = {
+      get: vi.fn(async () => undefined),
+      store: vi.fn(async () => {}),
+      delete: vi.fn(async () => {}),
+      keys: vi.fn(async () => []),
+      onDidChange: vi.fn(() => ({ dispose() {} })),
+    };
+    const server = new OpenCodeServer(4096, true, '', false, undefined, secrets);
+    const state = server as unknown as {
+      admission: { admit(): Promise<void> };
+      processManager: OpenCodeProcess;
+      admitManagedServer(signal?: AbortSignal): Promise<void>;
+    };
+    const admitted = vi.spyOn(state.admission, 'admit').mockResolvedValue(undefined);
+    const persistence = vi
+      .spyOn(state.processManager, 'persistManagedServerCredentials')
+      .mockImplementation(() => new Promise<void>(() => {}));
+    try {
+      await state.admitManagedServer();
+      expect(admitted).toHaveBeenCalledOnce();
+      expect(persistence).toHaveBeenCalledExactlyOnceWith(secrets);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Managed credential persistence timed out')
+      );
+    } finally {
+      await server.disconnect();
+    }
+  });
+
+  it('bounds a never-settling health poll and forwards cancellation to its request', async () => {
+    vi.useFakeTimers();
+    const server = new OpenCodeServer(4096, false);
+    const state = server as unknown as {
+      startAttemptId: number;
+      pollHealth(
+        id: number,
+        generation: number,
+        resolve: (url: string) => void,
+        reject: (error: Error) => void,
+        attempt: number,
+        signal: AbortSignal,
+        read: (signal?: AbortSignal) => Promise<{ healthy: boolean }>
+      ): void;
+    };
+    state.startAttemptId = 1;
+    const controller = new AbortController();
+    const read = vi.fn((_signal?: AbortSignal) => new Promise<{ healthy: boolean }>(() => {}));
+    const resolved = vi.fn();
+    const rejected = vi.fn();
+    try {
+      state.pollHealth(1, 0, resolved, rejected, 0, controller.signal, read);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(read).toHaveBeenCalledOnce();
+      expect(read.mock.calls[0]?.[0]?.aborted).toBe(true);
+      expect(rejected).toHaveBeenCalledOnce();
+      expect(rejected.mock.calls[0]?.[0].message).toContain('Server health check timed out');
+      expect(resolved).not.toHaveBeenCalled();
+    } finally {
+      await server.disconnect();
+    }
+  });
+});
+
 describe('managed runtime Ask recovery', () => {
   function fixture() {
     const server = new OpenCodeServer(4096, true);

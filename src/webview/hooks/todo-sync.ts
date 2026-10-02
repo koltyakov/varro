@@ -3,9 +3,10 @@ import { appStore } from '../lib/stores/app-store';
 import { isTodoToolName } from '../lib/tool-normalization';
 import type { AssistantMessage, MessageEntry, NormalizedTodo, Part } from '../types';
 import { isNumber, isString, type UnknownRecord, isObject } from '../lib/runtime-values';
+import { STARTUP_TODO_TIMEOUT_MS, withStartupDeadline } from '../../shared/startup';
 
 type TodoSyncDependencies = {
-  loadSessionTodos?(sessionId: string): Promise<void | boolean | object>;
+  loadSessionTodos?(sessionId: string, signal: AbortSignal): Promise<void | boolean | object>;
 };
 
 export function resetTodoSync() {
@@ -22,6 +23,13 @@ function setStateTodos(todos: NormalizedTodo[], options?: { preserveAdvancedStat
 
 export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
   let nativeTodosEnabled = false;
+  let todoLoadGeneration = 0;
+
+  const reset = () => {
+    todoLoadGeneration += 1;
+    nativeTodosEnabled = false;
+    resetTodoSync();
+  };
 
   const applyNativeTodos = <T>(raw: T, options?: { preserveAdvancedStatuses?: boolean }) => {
     const todos = extractTodos(raw);
@@ -39,6 +47,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
       nativeTodosEnabled &&
       applyNativeTodos(latestEventPayload, { preserveAdvancedStatuses: true })
     ) {
+      todoLoadGeneration += 1;
       return;
     }
     if (nativeTodosEnabled) {
@@ -52,7 +61,11 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
     sessionId: string,
     messages: MessageEntry[] = appStore.state.messages
   ) => {
-    if (!deps.loadSessionTodos) {
+    const load = deps.loadSessionTodos;
+    const generation = ++todoLoadGeneration;
+    const isCurrent = () =>
+      generation === todoLoadGeneration && appStore.state.activeSessionId === sessionId;
+    if (!load) {
       syncTodosFromMessagesWithState(messages);
       return;
     }
@@ -62,7 +75,13 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
     advanceTodosFromMessages(messages);
 
     try {
-      const todos = extractTodos(await deps.loadSessionTodos(sessionId)) ?? [];
+      const snapshot = await withStartupDeadline(
+        (signal) => load(sessionId, signal),
+        STARTUP_TODO_TIMEOUT_MS,
+        'Session todo lookup'
+      );
+      if (!isCurrent()) return;
+      const todos = extractTodos(snapshot) ?? [];
       nativeTodosEnabled = true;
       if (appStore.state.activeSessionId === sessionId) {
         if (isStaleSettledNativeTodoSnapshot(todos, messages)) {
@@ -77,6 +96,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
         });
       }
     } catch {
+      if (!isCurrent()) return;
       nativeTodosEnabled = false;
       if (appStore.state.activeSessionId === sessionId) {
         syncTodosFromMessagesWithState(messages);
@@ -85,6 +105,8 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
   };
 
   const handoffTodosToMessagesWithState = (messages: MessageEntry[] = appStore.state.messages) => {
+    // A refreshed transcript supersedes a read started with older message-derived todos.
+    todoLoadGeneration += 1;
     if (nativeTodosEnabled) {
       advanceTodosFromMessages(messages);
       return true;
@@ -94,7 +116,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
   };
 
   return {
-    resetTodoSync,
+    resetTodoSync: reset,
     syncTodosFromMessages: syncTodosFromMessagesWithState,
     syncTodosForSession: syncTodosForSessionWithState,
     handoffTodosToMessages: handoffTodosToMessagesWithState,

@@ -353,7 +353,7 @@ describe('client', () => {
         },
       ],
       ['GET', '/config/providers'],
-      ['GET', '/model/default'],
+      ['GET', '/model/default', undefined, { signal: expect.any(AbortSignal), retries: 0 }],
       ['GET', '/provider'],
       ['GET', '/provider/auth'],
       ['POST', '/provider/openai/oauth/authorize', { method: 0 }],
@@ -439,8 +439,39 @@ describe('client', () => {
     });
     expect(bridgeMocks.apiCall.mock.calls).toEqual([
       ['GET', '/config/providers'],
-      ['GET', '/model/default'],
+      ['GET', '/model/default', undefined, { signal: expect.any(AbortSignal), retries: 0 }],
     ]);
+  });
+
+  it('bounds and cancels an optional default lookup without losing provider metadata', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client } = await loadClient();
+      const late = createDeferred<{ providerID: string; modelID: string }>();
+      let signal: AbortSignal | undefined;
+      bridgeMocks.apiCall.mockImplementation(
+        (_method: string, path: string, _body: undefined, options?: { signal?: AbortSignal }) => {
+          if (path === '/config/providers')
+            return Promise.resolve({ providers: [], default: { openai: 'fallback' } });
+          signal = options?.signal;
+          return late.promise;
+        }
+      );
+      const loading = client.config.providers();
+      await vi.advanceTimersByTimeAsync(1_000);
+      const providers = await loading;
+      expect(providers).toEqual({
+        providers: [],
+        default: { openai: 'fallback' },
+        defaultModel: undefined,
+      });
+      expect(signal?.aborted).toBe(true);
+      late.resolve({ providerID: 'other', modelID: 'late' });
+      await Promise.resolve();
+      expect(providers.defaultModel).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('preserves explicit null and falls back when the optional default endpoint is unavailable', async () => {

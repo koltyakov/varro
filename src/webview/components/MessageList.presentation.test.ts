@@ -77,6 +77,225 @@ function openChat(parts: Part[] = []) {
 }
 
 describe('streaming presentation handoff', () => {
+  it('restores the turn verb cycle and duration after hydration with a recent completion', async () => {
+    vi.setSystemTime(12_001);
+    const completed = completeSearch(searchPart());
+    if (completed.state.status !== 'completed') throw new Error('Expected completed tool fixture');
+    completed.state.time.end = Date.now();
+    openChat([completed]);
+    expect(container?.querySelector('.loading-verb')?.textContent).toBe('Considering');
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('0s');
+    await vi.advanceTimersByTimeAsync(6_000);
+    upsertPart({
+      ...completed,
+      state: { ...completed.state, time: { start: 1, end: Date.now() } },
+    });
+    expect(container?.querySelector('.loading-verb')?.textContent).toBe('Pondering');
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('0s');
+  });
+
+  it('keeps one summary around a delayed running tool and its completion', async () => {
+    const before = completeSearch({ ...searchPart(), id: 'before', callID: 'before-call' });
+    const running = { ...searchPart(), id: 'long', callID: 'long-call' };
+    const after = completeSearch({ ...searchPart(), id: 'after', callID: 'after-call' });
+    openChat([before, running, after]);
+    expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 2 searches'
+    );
+    for (let frame = 0; frame < 250; frame += 1) {
+      await vi.advanceTimersByTimeAsync(16);
+      expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
+      expect(container?.querySelector('.assistant-activity-summary-placeholder')).toBeNull();
+    }
+    upsertPart(completeSearch(running));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 3 searches'
+    );
+  });
+
+  it('shares one summary across messages on both sides of a delayed running tool', async () => {
+    openChat([completeSearch(searchPart())]);
+    const running = { ...searchPart(), id: 'middle-tool', messageID: 'middle' };
+    const after = completeSearch({ ...searchPart(), id: 'after-tool', messageID: 'after' });
+    setMessagesIncremental([
+      ...state.messages,
+      {
+        info: assistantMessage('middle', { parentID: 'prompt', time: { created: 3 } }),
+        parts: [running],
+      },
+      {
+        info: assistantMessage('after', { parentID: 'prompt', time: { created: 4 } }),
+        parts: [after],
+      },
+    ]);
+    for (let frame = 0; frame < 250; frame += 1) {
+      await vi.advanceTimersByTimeAsync(16);
+      expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
+      expect(container?.querySelector('.assistant-activity-summary-placeholder')).toBeNull();
+    }
+  });
+
+  it('does not add Exploring after Explored when a queued tool separates them', async () => {
+    openChat([completeSearch(searchPart())]);
+    const queued = { ...searchPart(), id: 'queued', callID: 'queued-call' };
+    const running = { ...searchPart(), id: 'running', callID: 'running-call' };
+    batch(() => {
+      upsertPart(queued);
+      upsertPart(running);
+    });
+    for (let frame = 0; frame < 300; frame += 1) {
+      await vi.advanceTimersByTimeAsync(16);
+      expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
+      expect(container?.querySelector('.assistant-activity-summary-placeholder')).toBeNull();
+    }
+  });
+
+  it('rotates the visible tool while queued running tools stay out of Explored', async () => {
+    openChat();
+    const startedAt = Date.now();
+    const tools = ['long', 'two', 'three'].map((id) => ({
+      ...searchPart(),
+      id,
+      callID: `${id}-call`,
+      state: {
+        status: 'running' as const,
+        input: { pattern: id },
+        time: { start: startedAt },
+      },
+    }));
+    batch(() => tools.forEach(upsertPart));
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(container?.querySelector('[data-activity-part-id="long"]')).not.toBeNull();
+    for (const expected of ['two', 'long', 'three', 'long']) {
+      for (let frame = 0; frame < 70; frame += 1) {
+        await vi.advanceTimersByTimeAsync(16);
+        expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
+        expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
+        expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
+          'is-reserved'
+        );
+        expect(container?.querySelector('.assistant-active-activity-item.is-exiting')).toBeNull();
+        expect(container?.textContent).not.toContain('Explored:');
+        if (container?.querySelector(`[data-activity-part-id="${expected}"]`)) break;
+      }
+      expect(container?.querySelector(`[data-activity-part-id="${expected}"]`)).not.toBeNull();
+    }
+    expect(
+      state.messages
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === 'tool')
+        .every((part) => part.state.status === 'running')
+    ).toBe(true);
+  });
+
+  it('hides the existing status row during a tool preview and restores it when tools finish', async () => {
+    vi.setSystemTime(1);
+    openChat();
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row?.textContent).toContain('Thinking');
+    const running = searchPart();
+    upsertPart(running);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(container?.querySelector('.interactive-loading-row')).toBe(row);
+    expect(row?.classList).toContain('is-reserved');
+    expect(row?.getAttribute('aria-hidden')).toBe('true');
+    expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
+    upsertPart(completeSearch(running));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(container?.querySelector('.interactive-loading-row')).toBe(row);
+    expect(row?.classList).not.toContain('is-reserved');
+    expect(container?.querySelector('.loading-verb')?.textContent).toBe('Thinking');
+    expect(container?.querySelectorAll('.interactive-loading-row')).toHaveLength(1);
+  });
+
+  it('hides the loading label for pending tool previews and restores it after a tool error', async () => {
+    vi.setSystemTime(1);
+    openChat();
+    const pending = searchPart();
+    pending.state = { status: 'pending', input: { pattern: 'queue' }, raw: '' };
+    upsertPart(pending);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
+      'is-reserved'
+    );
+    expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
+    upsertPart({
+      ...pending,
+      state: {
+        status: 'error',
+        input: { pattern: 'queue' },
+        error: 'Search failed',
+        time: { start: 1, end: 2 },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(container?.querySelector('.loading-verb')?.textContent).toBe('Thinking');
+  });
+
+  it('replaces a completed tool preview without rendering a collapsing row', async () => {
+    openChat();
+    const completed = completeSearch(searchPart());
+    if (completed.state.status !== 'completed') throw new Error('Expected completed tool fixture');
+    completed.state.time.end = 1_001;
+    const running = { ...searchPart(), id: 'running', callID: 'running-call' };
+    batch(() => {
+      upsertPart(completed);
+      upsertPart(running);
+    });
+    await vi.advanceTimersByTimeAsync(1_299);
+    expect(container?.querySelector('[data-activity-part-id="search"]')).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="running"]')).toBeNull();
+    for (let frame = 0; frame < 20; frame += 1) {
+      await vi.advanceTimersByTimeAsync(16);
+      expect(container?.querySelector('.assistant-active-activity-item.is-exiting')).toBeNull();
+      expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
+      if (!container?.querySelector('[data-activity-part-id="search"]')) break;
+    }
+    expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="running"]')).not.toBeNull();
+    expect(container?.querySelector('.assistant-active-activity-item.is-exiting')).toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 search'
+    );
+  });
+
+  it.each(['completed', 'error'] as const)(
+    'groups a short %s tool and previews the running alternative',
+    async (status) => {
+      openChat();
+      const short = completeSearch(searchPart());
+      if (status === 'error') {
+        short.state = {
+          status: 'error',
+          input: { pattern: 'queue' },
+          error: 'Search failed',
+          time: { start: 1, end: 2 },
+        };
+      }
+      const running = { ...searchPart(), id: 'running', callID: 'running-call' };
+      batch(() => {
+        upsertPart(short);
+        upsertPart(running);
+      });
+      await vi.advanceTimersByTimeAsync(600);
+      const items = container?.querySelectorAll<HTMLElement>('.assistant-active-activity-item');
+      expect(items).toHaveLength(1);
+      expect(items?.[0]?.dataset.activityPartId).toBe('running');
+      expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+        'Explored: 1 search'
+      );
+      upsertPart(completeSearch(running));
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
+      expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+        'Explored: 2 searches'
+      );
+    }
+  );
+
   it.each([
     { boundary: 'text', delay: 600 },
     { boundary: 'edit', delay: 600 },
@@ -97,7 +316,7 @@ describe('streaming presentation handoff', () => {
       batch(() => parts.forEach(upsertPart));
       await vi.advanceTimersByTimeAsync(delay);
       if (delay === 600) {
-        expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(2);
+        expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
       }
 
       if (boundary === 'compaction') {
@@ -140,7 +359,7 @@ describe('streaming presentation handoff', () => {
     }));
     openChat([completeSearch(searchPart()), ...parts]);
     await vi.advanceTimersByTimeAsync(600);
-    expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(2);
+    expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
     batch(() => parts.forEach((part) => upsertPart(completeSearch(part))));
     const summary = container!.querySelector<HTMLButtonElement>(
       'button.assistant-activity-summary'

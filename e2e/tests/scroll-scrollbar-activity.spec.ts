@@ -13,11 +13,11 @@ for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointe
   }, testInfo) => {
     await page.setViewportSize({ width: 504, height: 800 });
     await page.goto(
-      '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCompletedPrefix=1&activeTrayCount=2'
+      '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayReasoning=1&activeTrayPrefix=1&activeTrayCompletedPrefix=1&activeTrayCount=2'
     );
     const list = page.locator('.interactive-list');
     const items = page.locator('.assistant-active-activity-item');
-    await expect(items).toHaveCount(2);
+    await expect(items).toHaveCount(1);
     await page.waitForTimeout(2_100);
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
@@ -39,27 +39,20 @@ for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointe
         }
       ).__varroE2E;
       for (const part of harness.getSessionMessages('session-tool-cards').flatMap((m) => m.parts)) {
-        if (part.type !== 'tool' || part.state.status !== 'running') continue;
+        if (part.type !== 'reasoning' || part.time.end !== undefined) continue;
         harness.replayServerEvent({
           type: 'message.part.updated',
           properties: {
             part: {
               ...part,
-              state: {
-                ...part.state,
-                status: 'completed' as const,
-                title: 'Read source',
-                output: 'Done',
-                metadata: {},
-                time: { start: Date.now() - 3_000, end: Date.now() },
-              },
+              time: { ...part.time, end: Date.now() },
             },
           },
         });
       }
     });
     if (phase.startsWith('exiting')) {
-      await expect(page.locator('.assistant-active-activity-item.is-exiting')).toHaveCount(2);
+      await expect(page.locator('.assistant-active-activity-item.is-exiting')).toHaveCount(1);
     } else {
       await expect(items).toHaveCount(0);
       await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
@@ -161,34 +154,35 @@ for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointe
   });
 }
 
-// Issue #35: a tray exit arms a bottom anchor, and appended content below it stays unfollowed until
-// the user grabs the scrollbar. While the thumb is held, later tool exits and completions must not
-// re-arm that anchor at the grab position: each armed frame pulls the viewport back against the drag,
-// and release snaps it back to where the drag started.
-for (const completion of ['one tool exits', 'remaining tools complete'] as const) {
+// Issue #35: later activity completions must not arm a bottom anchor under a held scrollbar thumb.
+// Tools now group directly, and following text releases the previous summary owner. Establish a
+// genuinely detached reading position before growth, then keep completing tools during the drag.
+for (const completion of ['one tool groups', 'remaining tools complete'] as const) {
   test(`held scrollbar drag keeps its position when ${completion}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 504, height: 800 });
     await page.goto(
       '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCompletedPrefix=1&activeTrayCount=4'
     );
     const list = page.locator('.interactive-list');
-    await expect(page.locator('.assistant-active-activity-item')).toHaveCount(2);
+    await expect(page.locator('.assistant-active-activity-item')).toHaveCount(1);
     await page.waitForTimeout(2_100);
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThanOrEqual(1);
 
-    // Hold every exit mid-animation so the collapse owner stays armed deterministically.
-    await page.addStyleTag({
-      content:
-        '.assistant-active-activity-item.is-exiting { animation-play-state: paused !important; }',
-    });
     await completeRunningTools(page, ['tool-active-0']);
-    await expect(page.locator('.assistant-active-activity-item.is-exiting')).toHaveCount(1);
+    await expect(page.locator('[data-activity-part-id="tool-active-0"]')).toHaveCount(0);
+    const bounds = await list.boundingBox();
+    if (!bounds) throw new Error('Missing transcript viewport');
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 100);
+    await page.mouse.wheel(0, -500);
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeGreaterThan(400);
     await appendAssistantText(page, 'scrollbar-hidden-growth', 40);
     await expect(list).toContainText('Hidden growth paragraph 39.');
     await waitForAnimationFrames(page, 10);
-    // Precondition: the armed owner leaves new content below the viewport.
+    // Precondition: detached reading leaves new content below the viewport.
     expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
       400
     );
@@ -203,7 +197,7 @@ for (const completion of ['one tool exits', 'remaining tools complete'] as const
     await page.waitForTimeout(300);
     await completeRunningTools(
       page,
-      completion === 'one tool exits'
+      completion === 'one tool groups'
         ? ['tool-active-1']
         : ['tool-active-1', 'tool-active-2', 'tool-active-3']
     );

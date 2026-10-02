@@ -103,6 +103,7 @@ const {
 }));
 
 vi.mock('vscode', () => ({
+  version: '1.110.0',
   env: envMock,
   workspace: {
     getConfiguration: vi.fn(() => ({ get: getMock })),

@@ -37,11 +37,11 @@ async function runLoad<T>(
 ): Promise<boolean> {
   try {
     const value = await load();
-    if (!isCurrent()) return true;
+    if (!isCurrent()) return false;
     apply(value);
     return true;
   } catch (err) {
-    if (!isCurrent()) return true;
+    if (!isCurrent()) return false;
     logError(label, err);
     return false;
   }
@@ -201,6 +201,9 @@ export function createDataLoaderOperations(deps: {
   let recycleBinLoadGeneration = 0;
   let inFlightMcpLoad: { sessionId: string | null; promise: Promise<boolean> } | null = null;
   let inFlightSessionPageLoad: Promise<void> | null = null;
+  let inFlightSessionLoad: Promise<boolean | undefined> | null = null;
+  let inFlightQuestionLoad: Promise<boolean> | null = null;
+  let inFlightCatalogReload: Promise<boolean> | null = null;
   let knownProviderIDs: Set<string> | null = null;
   const questionSnapshots = createMutationAwareSnapshotReconciler(deps.getQuestions);
   const sessionSnapshots = createMutationAwareSnapshotReconciler(deps.getSessions);
@@ -245,11 +248,11 @@ export function createDataLoaderOperations(deps: {
     return tracked;
   };
 
-  const loadQuestions = async () => {
+  const performQuestionLoad = async () => {
     const workspace = workspaceGeneration;
     const generation = ++questionLoadGeneration;
     const mutationBaseline = questionSnapshots.captureBaseline();
-    await loadQuestionsWithDependencies(
+    return await loadQuestionsWithDependencies(
       {
         listQuestions: deps.listQuestions,
         setQuestions: (questions) => {
@@ -259,6 +262,15 @@ export function createDataLoaderOperations(deps: {
       deps.logError,
       () => workspace === workspaceGeneration && generation === questionLoadGeneration
     );
+  };
+
+  const loadQuestions = () => {
+    if (inFlightQuestionLoad) return inFlightQuestionLoad;
+    const request = performQuestionLoad().finally(() => {
+      if (inFlightQuestionLoad === request) inFlightQuestionLoad = null;
+    });
+    inFlightQuestionLoad = request;
+    return request;
   };
 
   const loadAgents = async () => {
@@ -326,7 +338,7 @@ export function createDataLoaderOperations(deps: {
     await Promise.all([loadAgents(), loadProviders()]);
   };
 
-  const reloadWorkspaceCatalogs = async () => {
+  const performWorkspaceCatalogReload = async () => {
     const workspace = workspaceGeneration;
     let agentsLoaded = false;
     let commandsLoaded = false;
@@ -343,8 +355,18 @@ export function createDataLoaderOperations(deps: {
     }
 
     if (workspace !== workspaceGeneration) return false;
-    deps.finishWorkspaceCatalogReload();
-    return agentsLoaded && commandsLoaded && providersLoaded;
+    const loaded = agentsLoaded && commandsLoaded && providersLoaded;
+    if (loaded) deps.finishWorkspaceCatalogReload();
+    return loaded;
+  };
+
+  const reloadWorkspaceCatalogs = () => {
+    if (inFlightCatalogReload) return inFlightCatalogReload;
+    const request = performWorkspaceCatalogReload().finally(() => {
+      if (inFlightCatalogReload === request) inFlightCatalogReload = null;
+    });
+    inFlightCatalogReload = request;
+    return request;
   };
 
   const refreshProviderLimit = async (providerID: string, modelID?: string | null) => {
@@ -451,11 +473,26 @@ export function createDataLoaderOperations(deps: {
       if (!loaded) deps.setSessionsLoadError?.('Failed to load sessions');
       if (loaded) deps.setSessionsPaginationError?.(null);
     }
-    return loaded;
+    return loaded && !partialLoadError;
   };
 
-  const loadSessions = async () => {
-    await performSessionLoad(false);
+  const loadSessions = (options?: { fresh?: boolean }) => {
+    if (inFlightSessionLoad && !options?.fresh) return inFlightSessionLoad;
+    const request = performSessionLoad(false).finally(() => {
+      if (inFlightSessionLoad === request) inFlightSessionLoad = null;
+    });
+    inFlightSessionLoad = request;
+    return request;
+  };
+
+  const loadEssentialSnapshots = async () => {
+    const workspace = workspaceGeneration;
+    const results = await Promise.all([loadSessions(), reloadWorkspaceCatalogs(), loadQuestions()]);
+    if (workspace !== workspaceGeneration) return { state: 'superseded' as const, failed: [] };
+    const failed = ['sessions', 'routing catalogs', 'pending questions'].filter(
+      (_, index) => results[index] !== true
+    );
+    return { state: failed.length ? ('failed' as const) : ('loaded' as const), failed };
   };
 
   const loadMoreSessions = () => {
@@ -529,6 +566,9 @@ export function createDataLoaderOperations(deps: {
     }
     inFlightMcpLoad = null;
     inFlightSessionPageLoad = null;
+    inFlightSessionLoad = null;
+    inFlightQuestionLoad = null;
+    inFlightCatalogReload = null;
     deps.setSessionsLoadingMore?.(false);
     deps.setSessionsPaginationError?.(null);
   };
@@ -544,6 +584,7 @@ export function createDataLoaderOperations(deps: {
     refreshProviderLimit,
     loadCompatibilityState,
     loadSessions,
+    loadEssentialSnapshots,
     loadMoreSessions,
     loadRecycleBin,
     hydrateSessionStatuses,
@@ -669,9 +710,12 @@ export async function loadQuestionsWithDependencies(
 ) {
   try {
     const questions = await deps.listQuestions();
-    if (isCurrent()) deps.setQuestions(questions);
+    if (!isCurrent()) return false;
+    deps.setQuestions(questions);
+    return true;
   } catch (err) {
     if (isCurrent()) logError('loadQuestions', err);
+    return false;
   }
 }
 
@@ -694,7 +738,7 @@ export async function loadAgentsWithDependencies(
 ) {
   try {
     const loadedAgents = await deps.listAgents();
-    if (!isCurrent()) return true;
+    if (!isCurrent()) return false;
     const activeSessionId = deps.getActiveSessionId();
     const routingState = reconcileLoadedAgents({
       loadedAgents,
@@ -762,7 +806,7 @@ export async function loadProvidersWithDependencies(
   deps.setProvidersLoaded(false);
   try {
     const res = await deps.listProviders();
-    if (!isCurrent()) return true;
+    if (!isCurrent()) return false;
     const providers = res.providers.map((provider) =>
       provider.id === 'openai'
         ? {
@@ -864,7 +908,7 @@ export async function loadSessionsWithDependencies(
 ): Promise<boolean> {
   try {
     const result = await deps.listSessions();
-    if (!isCurrent()) return true;
+    if (!isCurrent()) return false;
     const sessions = Array.isArray(result) ? result : result.items;
     const hasMore = Array.isArray(result) ? false : result.hasMore;
     const incomplete = Array.isArray(result) ? false : result.incomplete === true;
@@ -931,15 +975,17 @@ export async function hydrateSessionStatusesWithDependencies(
     const snapshot = deps.loadSessionStatusSnapshot
       ? await deps.loadSessionStatusSnapshot()
       : { statuses: await deps.loadSessionStatuses(), startedAt: fallbackStartedAt };
-    if (!isCurrent()) return;
+    if (!isCurrent()) return false;
     const statuses = deps.setSessionStatuses(snapshot.statuses, {
       snapshotStartedAt: snapshot.startedAt,
     });
-    if (!statuses) return;
+    if (!statuses) return false;
     for (const session of deps.getSessions()) {
       deps.updateUsageLimitState(session.id, statuses[session.id], []);
     }
+    return true;
   } catch (err) {
     if (isCurrent()) logError('session.status', err);
+    return false;
   }
 }

@@ -2961,6 +2961,19 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           },
         })),
       ];
+      if (new URLSearchParams(window.location.search).get('activeTrayReasoning') === '1') {
+        assistant.parts = assistant.parts.map((part) =>
+          part.type === 'tool' && part.state.status === 'running'
+            ? makeReasoningPart(
+                session.id,
+                assistant.info.id,
+                part.id,
+                `Checking activity ${part.id}.`,
+                BASE_TIME - 1_000
+              )
+            : part
+        );
+      }
     }
     state.sessions = [session];
     state.sessionStatuses[session.id] = activeTray ? { type: 'busy' } : { type: 'idle' };
@@ -3110,6 +3123,17 @@ function createScenarioState(name: ScenarioName): ScenarioState {
             time: { start: createdAt + 1 },
           },
         }));
+        if (searchParams.get('activeTrayReasoning') === '1') {
+          assistant.parts = assistant.parts.map((part) =>
+            makeReasoningPart(
+              session.id,
+              messageId,
+              part.id,
+              `Checking virtualized activity ${part.id}.`,
+              createdAt + 1
+            )
+          );
+        }
       }
 
       messages.push(user, assistant);
@@ -5388,6 +5412,15 @@ async function handleApiRequest(
 
   if (method === 'GET' && path === '/agent') {
     return state.agents;
+  }
+
+  if (method === 'GET' && path === '/command') {
+    if (
+      startupOptions.has('startupCatalogFailure') &&
+      !startupOptions.has('startupCatalogRecovered')
+    )
+      throw new Error('Command catalog unavailable');
+    return [];
   }
 
   if (method === 'GET' && path === '/config/providers') {

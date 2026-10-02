@@ -409,7 +409,9 @@ for (const width of [480, 1280]) {
       { sessionID, info }
     );
     expect(new Set(samples.flatMap((sample) => sample.previewIds)).size).toBe(24);
-    expect(samples.some((sample) => sample.exiting)).toBe(true);
+    expect(samples.some((sample) => sample.exiting)).toBe(false);
+    expect(samples.every((sample) => sample.previewIds.length <= 1)).toBe(true);
+    expect(samples.at(-1)?.previewIds).toEqual([]);
     expect(samples.filter((sample) => sample.overflow > 0).slice(0, 5)).toEqual([]);
     expect(samples.filter((sample) => sample.pageOverflow > 0).slice(0, 5)).toEqual([]);
     expect(samples.every((sample) => sample.top === 0)).toBe(true);

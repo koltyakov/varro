@@ -54,6 +54,7 @@ import type {
   WorkspaceStatusEntry,
 } from '../../shared/opencode-types';
 import { CURRENT_OPENCODE_ENDPOINTS } from '../../shared/opencode-endpoints';
+import { STARTUP_DEFAULT_MODEL_TIMEOUT_MS, withStartupDeadline } from '../../shared/startup';
 import { isBoolean, isNumber, isString, isObject } from './runtime-values';
 
 export type SessionMessagePage = MessageEntry[] & { nextCursor?: string };
@@ -258,11 +259,13 @@ export const client = {
         )
       );
     },
-    async todos(id: string, options?: { directory?: string }): Promise<Todo[]> {
-      return apiCall(
-        'GET',
-        withDirectory(`/session/${encodeURIComponent(id)}/todo`, options?.directory)
-      );
+    async todos(
+      id: string,
+      options?: { directory?: string; signal?: AbortSignal }
+    ): Promise<Todo[]> {
+      const path = withDirectory(`/session/${encodeURIComponent(id)}/todo`, options?.directory);
+      if (!options?.signal) return apiCall('GET', path);
+      return apiCall('GET', path, undefined, { signal: options.signal, retries: 0 });
     },
     async sendAsync(
       id: string,
@@ -429,7 +432,11 @@ export const client = {
       const [providerResponse, defaultModel] = await Promise.all([
         apiCall('GET', path),
         // This endpoint is optional and unsupported servers may return their HTML shell.
-        apiCall('GET', '/model/default')
+        withStartupDeadline(
+          (signal) => apiCall('GET', '/model/default', undefined, { signal, retries: 0 }),
+          STARTUP_DEFAULT_MODEL_TIMEOUT_MS,
+          'Default model lookup'
+        )
           .then(parseDefaultModel)
           .catch(() => undefined),
       ]);

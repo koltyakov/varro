@@ -18,6 +18,7 @@ import { ProcessInspectionTimeoutError } from './process-inspection-error';
 import {
   findListeningPids,
   inspectLocalServerAccount,
+  inspectWindowsManagedListener,
   readWindowsProcessIdentity,
 } from './process-inspection';
 
@@ -227,7 +228,68 @@ describe('macOS listener inspection recovery', () => {
   });
 });
 
+describe('Linux listener fallback completeness', () => {
+  it.each(['failed', 'timed out'] as const)(
+    'does not accept partial ss output when inspection %s',
+    async (failure) => {
+      vi.useFakeTimers();
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      spawnMock.mockImplementation((command: string) => {
+        const child = Object.assign(new EventEmitter(), {
+          stdout: new EventEmitter(),
+          stderr: new EventEmitter(),
+          kill: vi.fn(),
+        });
+        queueMicrotask(() => {
+          if (command === 'lsof') child.emit('close', 127);
+          else {
+            child.stdout.emit(
+              'data',
+              Buffer.from(
+                `LISTEN 0 128 127.0.0.1:4096 0.0.0.0:* users:(("opencode",pid=${listenerPid},fd=3))`
+              )
+            );
+            if (failure === 'failed') child.emit('close', 1);
+          }
+        });
+        return child;
+      });
+      try {
+        const inspection = findListeningPids(4096, `/missing-varro-proc-fixture-${process.pid}`);
+        const rejected = expect(inspection).rejects.toThrow('Linux socket tables are unavailable');
+        await vi.advanceTimersByTimeAsync(2_000);
+        await rejected;
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+});
+
 describe('Windows listener and process inspection', () => {
+  it('uses native ancestry for a single managed listener without a CIM subprocess', async () => {
+    mockCommands('win32');
+    nativeReadMock.mockResolvedValue({
+      executable: 'C:\\OpenCode\\opencode.exe',
+      birthIdentity: 'win32:123',
+      hostBirthIdentity: 'win32:100',
+      ancestorPid: 1234,
+    });
+    await expect(inspectWindowsManagedListener(4096, 1234)).resolves.toMatchObject({
+      pid: listenerPid,
+      birthIdentity: 'win32:123',
+      hostBirthIdentity: 'win32:100',
+    });
+    expect(nativeReadMock).toHaveBeenCalledExactlyOnceWith(listenerPid, 1234);
+    expect(spawnMock.mock.calls.map(([command]) => command)).toEqual(['netstat.exe']);
+  });
+
+  it('does not claim one of several Windows managed listeners', async () => {
+    mockCommands('win32', false, true);
+    await expect(inspectWindowsManagedListener(4096, 1234)).resolves.toBeNull();
+    expect(nativeReadMock).not.toHaveBeenCalled();
+  });
+
   function commandOutput(
     run: (command: string, args: string[]) => { stdout: string; code: number }
   ) {

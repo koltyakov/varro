@@ -2325,6 +2325,49 @@ export function MessageList() {
         null)
   );
 
+  const trailingAssistantTurn = createMemo(() => {
+    messageInfoVersion();
+    const visibleMessages = messages();
+    let userMessageId: string | null = null;
+
+    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+      const { info, parts } = visibleMessages[index]!;
+      if (info.role === 'user') {
+        // Automatic notices and metadata-only arrivals do not start a new turn.
+        // Switching away and back would requeue already-visible assistant content.
+        if (
+          !isSessionResumeMessage(parts) &&
+          !hasUserMessageContent(parseUserMessageContent(parts))
+        )
+          continue;
+        userMessageId = info.id;
+        break;
+      }
+      if (info.mode !== 'subagent') {
+        userMessageId = info.parentID;
+        break;
+      }
+    }
+
+    if (!userMessageId) return null;
+
+    const assistantMessageIds = new Set<string>();
+    let latestAssistant: AssistantMessage | null = null;
+    for (const entry of visibleMessages) {
+      if (
+        entry.info.role !== 'assistant' ||
+        entry.info.mode === 'subagent' ||
+        entry.info.parentID !== userMessageId
+      ) {
+        continue;
+      }
+      assistantMessageIds.add(entry.info.id);
+      latestAssistant = entry.info;
+    }
+
+    return { userMessageId, assistantMessageIds, latestAssistant };
+  });
+
   const loadingRowEligible = createMemo(
     () =>
       !!state.activeSessionId &&
@@ -2335,6 +2378,67 @@ export function MessageList() {
       !hasActivePermission() &&
       !activeUsageLimit()
   );
+
+  const waitingForTools = createMemo(() => {
+    if (!loadingRowEligible()) return false;
+    const turn = trailingAssistantTurn();
+    if (!turn) return false;
+    const entries = messages();
+    const indexes = messageIndexById();
+    return [...turn.assistantMessageIds].some((messageId) => {
+      const index = indexes.get(messageId);
+      const message = index === undefined ? undefined : entries[index];
+      if (!message || message.info.role !== 'assistant' || message.info.error) return false;
+      return message.parts.some(
+        (part) =>
+          part.type === 'tool' &&
+          (part.state.status === 'pending' || part.state.status === 'running') &&
+          shouldShowAssistantPartInline(part)
+      );
+    });
+  });
+
+  const loadingTurnStartedAt = createMemo(() => {
+    messageInfoVersion();
+    const startedAt = loadingStartedAt();
+    if (startedAt !== null) return startedAt;
+    const turn = trailingAssistantTurn();
+    const index = turn ? messageIndexById().get(turn.userMessageId) : undefined;
+    return (
+      (index === undefined ? undefined : messages()[index]?.info.time.created) ??
+      turn?.latestAssistant?.time.created
+    );
+  });
+
+  const loadingElapsedStartedAt = createMemo(() => {
+    messageInfoVersion();
+    const turn = trailingAssistantTurn();
+    let completedAt: number | undefined;
+    const entries = messages();
+    const indexes = messageIndexById();
+    const recordCompletion = (end: number | undefined) => {
+      if (end !== undefined && Number.isFinite(end)) {
+        completedAt = Math.max(completedAt ?? end, end);
+      }
+    };
+    for (const messageId of turn?.assistantMessageIds ?? []) {
+      const index = indexes.get(messageId);
+      const entry = index === undefined ? undefined : entries[index];
+      if (!entry || entry.info.role !== 'assistant') continue;
+      recordCompletion(entry.info.time.completed);
+      for (const part of entry.parts) {
+        if (part.type === 'text' || part.type === 'reasoning') {
+          recordCompletion(part.time?.end);
+        } else if (
+          part.type === 'tool' &&
+          (part.state.status === 'completed' || part.state.status === 'error')
+        ) {
+          recordCompletion(part.state.time.end);
+        }
+      }
+    }
+    return completedAt ?? loadingTurnStartedAt();
+  });
 
   const shouldShowLoadingRow = createMemo(
     () =>
@@ -7590,48 +7694,6 @@ export function MessageList() {
       );
     });
   });
-  const trailingAssistantTurn = createMemo(() => {
-    messageInfoVersion();
-    const visibleMessages = messages();
-    let userMessageId: string | null = null;
-
-    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
-      const { info, parts } = visibleMessages[index]!;
-      if (info.role === 'user') {
-        // Automatic notices and metadata-only arrivals do not start a new turn.
-        // Switching away and back would requeue already-visible assistant content.
-        if (
-          !isSessionResumeMessage(parts) &&
-          !hasUserMessageContent(parseUserMessageContent(parts))
-        )
-          continue;
-        userMessageId = info.id;
-        break;
-      }
-      if (info.mode !== 'subagent') {
-        userMessageId = info.parentID;
-        break;
-      }
-    }
-
-    if (!userMessageId) return null;
-
-    const assistantMessageIds = new Set<string>();
-    let latestAssistant: AssistantMessage | null = null;
-    for (const entry of visibleMessages) {
-      if (
-        entry.info.role !== 'assistant' ||
-        entry.info.mode === 'subagent' ||
-        entry.info.parentID !== userMessageId
-      ) {
-        continue;
-      }
-      assistantMessageIds.add(entry.info.id);
-      latestAssistant = entry.info;
-    }
-
-    return { userMessageId, assistantMessageIds, latestAssistant };
-  });
   const trailingTurnInlineEditRetention = createMemo<{
     sessionId: string | null;
     userMessageId: string | null;
@@ -8128,6 +8190,16 @@ export function MessageList() {
             partId: part.id,
             kind: 'activity',
             running: isAssistantActivityPartRunning(part),
+            animateExit: part.type === 'reasoning',
+            startedAt:
+              part.type === 'tool' && part.state.status === 'running'
+                ? part.state.time.start
+                : undefined,
+            durationMs:
+              part.type === 'tool' &&
+              (part.state.status === 'completed' || part.state.status === 'error')
+                ? Math.max(0, part.state.time.end - part.state.time.start)
+                : undefined,
             active: (part.type === 'reasoning'
               ? activeActivityMessageIds()
               : activeToolActivityMessageIds()
@@ -8189,9 +8261,11 @@ export function MessageList() {
     const activeMessageIds = segment.activeMessageIds();
     const streaming = segment.streaming();
     const isBoundaryPart = (part: Part) =>
-      part.type === 'text'
-        ? hasVisibleProjectedText(part, streaming)
-        : shouldShowAssistantPartInline(part);
+      isAssistantActivityPart(part) && segment.canCompact(part)
+        ? false
+        : part.type === 'text'
+          ? hasVisibleProjectedText(part, streaming)
+          : shouldShowAssistantPartInline(part);
     const isNormallyIncluded = (part: AssistantActivityPart) =>
       segment.canCompact(part) &&
       !segment.hiddenParts().has(getPresentationPartKey(part)) &&
@@ -9426,6 +9500,30 @@ export function MessageList() {
     state.messagesLoading ||
     (!!state.activeSessionId && initialPositioningSessionId() === state.activeSessionId);
 
+  // These renderer-local marks include the existing geometry/viewport-fill hold.
+  // They observe readiness without shortening it or taking scroll ownership.
+  let measuredHydration = false;
+  createEffect(() => {
+    const hydrating = hydratingSession();
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Test renderers may omit the browser Performance Timeline API.
+    if (typeof performance.mark !== 'function' || typeof performance.measure !== 'function') return;
+    if (hydrating && !measuredHydration) {
+      performance.clearMarks('varro.transcript.hydration-start');
+      performance.clearMarks('varro.transcript.ready');
+      performance.clearMeasures('varro.transcript.hydration');
+      performance.mark('varro.transcript.hydration-start');
+      measuredHydration = true;
+    } else if (!hydrating && measuredHydration) {
+      performance.mark('varro.transcript.ready');
+      performance.measure(
+        'varro.transcript.hydration',
+        'varro.transcript.hydration-start',
+        'varro.transcript.ready'
+      );
+      measuredHydration = false;
+    }
+  });
+
   return (
     <div class="interactive-list-shell min-h-0 flex-1">
       <Show when={hydratingSession()}>
@@ -9623,7 +9721,10 @@ export function MessageList() {
                 <LoadingRow
                   compacting={isSessionCompacting()}
                   waiting={waitingForBackground()}
+                  toolsRunning={waitingForTools()}
                   waitingStartedAt={backgroundWorkStartedAt()}
+                  turnStartedAt={loadingTurnStartedAt()}
+                  elapsedStartedAt={loadingElapsedStartedAt()}
                   visible={!state.messagesLoading && showLoadingRow()}
                 />
               </Show>

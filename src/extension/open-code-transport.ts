@@ -476,6 +476,8 @@ export class OpenCodeTransport {
           const contentType = res.headers?.get('content-type');
           if (contentType?.includes('text/html')) continue;
           const data = await res.json();
+          signal?.throwIfAborted();
+          if (this.options.getUrl() !== url) return { healthy: false };
           if (path === CURRENT_OPENCODE_ENDPOINTS.health)
             health = parseHealthResponse(data) ?? health;
           else {

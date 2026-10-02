@@ -478,10 +478,67 @@ export function LoadingRow(props: {
   compacting: boolean;
   visible: boolean;
   waiting?: boolean;
+  toolsRunning?: boolean;
   waitingStartedAt?: number;
+  turnStartedAt?: number;
+  elapsedStartedAt?: number;
 }) {
   // A reserved, hidden row shows no elapsed time or stale state.
   const now = useSecondClock(() => props.visible);
+  // oxlint-disable-next-line no-unassigned-vars
+  let row: HTMLDivElement | undefined;
+  const [hasPrecedingToolDuration, setHasPrecedingToolDuration] = createSignal(false);
+  onMount(() => {
+    createEffect(() => {
+      if (
+        !props.visible ||
+        !props.toolsRunning ||
+        props.waiting ||
+        props.compacting ||
+        !row?.parentElement
+      ) {
+        setHasPrecedingToolDuration(false);
+        return;
+      }
+      const observer = new MutationObserver(() => update());
+      const update = () => {
+        observer.disconnect();
+        if (row?.parentElement) observer.observe(row.parentElement, { childList: true });
+        let previous = row?.previousElementSibling;
+        while (previous) {
+          observer.observe(previous, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+            attributes: true,
+            attributeFilter: ['class', 'title'],
+          });
+          if (previous.textContent?.trim()) break;
+          previous = previous.previousElementSibling;
+        }
+        const items = previous?.querySelectorAll<HTMLElement>(
+          '[data-assistant-render-key]:not(.assistant-message-flow-item-hidden)'
+        );
+        const item = items?.[items.length - 1];
+        const activities = item?.querySelectorAll(
+          '.assistant-active-activity-item, .assistant-activity-detail'
+        );
+        const lastContent = activities?.length ? activities[activities.length - 1] : item;
+        const tools = lastContent?.querySelectorAll('.chat-tool-invocation-part');
+        const tool = tools?.[tools.length - 1];
+        setHasPrecedingToolDuration(
+          !!tool
+            ?.querySelector(
+              '.tool-invocation-header .tool-invocation-duration[title="Elapsed time"]'
+            )
+            ?.textContent?.trim()
+        );
+      };
+      // Read the painted tool label, including preview rotation and task activity overrides.
+      update();
+      onCleanup(() => observer.disconnect());
+    });
+  });
   const waiting = () => props.waiting && !props.compacting;
   const waitingClock = createMemo<{ sessionId: string | null; startedAt: number } | null>(
     (previous) => {
@@ -507,14 +564,21 @@ export function LoadingRow(props: {
   };
 
   const totalElapsedMs = () => {
-    const startedAt = waiting() ? (waitingClock()?.startedAt ?? null) : loadingStartedAt();
+    const startedAt = waiting()
+      ? (waitingClock()?.startedAt ?? null)
+      : (props.elapsedStartedAt ?? loadingStartedAt());
     return startedAt === null ? 0 : Math.max(0, now() - startedAt);
   };
   const elapsedSeconds = () => Math.floor(totalElapsedMs() / 1000);
-  const verb = () => LOADING_VERBS[Math.floor(elapsedSeconds() / 6) % LOADING_VERBS.length];
+  // Completions reset the elapsed label, not the turn's verb cycle or initial delay.
+  const turnElapsedSeconds = () => {
+    const startedAt = props.turnStartedAt ?? loadingStartedAt() ?? props.elapsedStartedAt;
+    return startedAt == null ? 0 : Math.floor(Math.max(0, now() - startedAt) / 1000);
+  };
+  const verb = () => LOADING_VERBS[Math.floor(turnElapsedSeconds() / 6) % LOADING_VERBS.length];
   const formatElapsed = () => {
     const seconds = elapsedSeconds();
-    if (seconds < 10 && !waiting()) return null;
+    if (turnElapsedSeconds() < 1 && !waiting()) return null;
     if (seconds < 60) return `${seconds}s`;
     if (seconds >= 60 * 60) {
       const hours = Math.floor(seconds / (60 * 60));
@@ -525,9 +589,12 @@ export function LoadingRow(props: {
     const remainder = seconds % 60;
     return `${minutes}m ${remainder.toString().padStart(2, '0')}s`;
   };
+  const visibleElapsed = () =>
+    props.toolsRunning && !props.compacting && hasPrecedingToolDuration() ? null : formatElapsed();
 
   return (
     <div
+      ref={row}
       class={`interactive-item-container interactive-response interactive-loading-row${
         props.visible ? '' : ' is-reserved'
       }${waiting() ? ' is-background-waiting' : ''}`}
@@ -550,8 +617,10 @@ export function LoadingRow(props: {
             >
               <span>Session may be stale</span>
             </Show>
-            <Show when={formatElapsed()}>
-              <span class="loading-elapsed">{formatElapsed()}</span>
+            <Show when={visibleElapsed()}>
+              <span class="loading-elapsed" title="Time since the last completed event">
+                {visibleElapsed()}
+              </span>
             </Show>
             <Show when={isStale()}>
               <button

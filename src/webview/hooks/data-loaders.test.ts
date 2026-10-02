@@ -115,6 +115,39 @@ function deferred<T>() {
 }
 
 describe('data loaders', () => {
+  it('shares essential in-flight snapshots and reports failed and superseded readiness', async () => {
+    const pending = deferred<Session[]>();
+    const deps = createLoaderDeps({ listSessions: vi.fn(() => pending.promise) });
+    const operations = createDataLoaderOperations(deps);
+    const first = operations.loadSessions();
+    expect(operations.loadSessions()).toBe(first);
+    const essential = operations.loadEssentialSnapshots();
+    pending.resolve([session('session-1')]);
+    await expect(essential).resolves.toEqual({ state: 'loaded', failed: [] });
+    expect(deps.listSessions).toHaveBeenCalledOnce();
+
+    const failed = createDataLoaderOperations(
+      createLoaderDeps({
+        listQuestions: async () => {
+          throw new Error('question snapshot unavailable');
+        },
+      })
+    );
+    await expect(failed.loadEssentialSnapshots()).resolves.toEqual({
+      state: 'failed',
+      failed: ['pending questions'],
+    });
+
+    const staleSessions = deferred<Session[]>();
+    const stale = createDataLoaderOperations(
+      createLoaderDeps({ listSessions: () => staleSessions.promise })
+    );
+    const load = stale.loadEssentialSnapshots();
+    stale.invalidateWorkspace();
+    staleSessions.resolve([]);
+    await expect(load).resolves.toEqual({ state: 'superseded', failed: [] });
+  });
+
   it('preserves the selected draft agent when no session is active', async () => {
     const setAllAgents = vi.fn();
     const setPrimaryAgents = vi.fn();
@@ -660,7 +693,7 @@ describe('data loaders', () => {
     expect(setProviders).toHaveBeenLastCalledWith(providers, {}, []);
   });
 
-  it('retries only failed workspace catalogs and releases the reload lock after exhaustion', async () => {
+  it('retries only failed workspace catalogs and retains the send gate after exhaustion', async () => {
     const listAgents = vi
       .fn<DataLoaderDependencies['listAgents']>()
       .mockRejectedValueOnce(new Error('agents unavailable'))
@@ -684,7 +717,7 @@ describe('data loaders', () => {
     expect(listAgents).toHaveBeenCalledTimes(2);
     expect(listCommands).toHaveBeenCalledOnce();
     expect(listProviders).toHaveBeenCalledTimes(2);
-    expect(finishWorkspaceCatalogReload).toHaveBeenCalledOnce();
+    expect(finishWorkspaceCatalogReload).not.toHaveBeenCalled();
   });
 
   it('bounds workspace catalog reloads that do not settle', async () => {
@@ -711,7 +744,7 @@ describe('data loaders', () => {
       expect(listAgents).toHaveBeenCalledTimes(2);
       expect(listCommands).toHaveBeenCalledTimes(2);
       expect(listProviders).toHaveBeenCalledTimes(2);
-      expect(finishWorkspaceCatalogReload).toHaveBeenCalledOnce();
+      expect(finishWorkspaceCatalogReload).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -1319,7 +1352,7 @@ describe('data loaders', () => {
     );
 
     const staleLoad = operations.loadSessions();
-    const latestLoad = operations.loadSessions();
+    const latestLoad = operations.loadSessions({ fresh: true });
     second.resolve([session('latest')]);
     await latestLoad;
     first.resolve([session('stale')]);

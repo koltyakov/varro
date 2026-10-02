@@ -1669,6 +1669,24 @@ describe('OpenCodeProcess server ownership leases', () => {
       expect(manager.serverAuthorization).toBe(authorization);
       secrets.get.mockRejectedValue(new Error('storage unavailable'));
       await expect(manager.restoreManagedServerCredentials(secrets)).rejects.toThrow('unavailable');
+      vi.useFakeTimers();
+      let resolveLate!: (value: string) => void;
+      secrets.get.mockImplementation(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveLate = resolve;
+          })
+      );
+      const stalled = manager.restoreManagedServerCredentials(secrets);
+      const rejected = expect(stalled).rejects.toThrow('Managed credential lookup timed out');
+      await vi.advanceTimersByTimeAsync(5_000);
+      await rejected;
+      resolveLate(
+        JSON.stringify({ owner: lease.owner, username: 'late', password: 'late-password' })
+      );
+      await Promise.resolve();
+      expect(manager.serverAuthorization).toBe(authorization);
+      vi.useRealTimers();
       secrets.get.mockResolvedValue(
         JSON.stringify({ owner: lease.owner, username: 'custom-user', password: 'vault-password' })
       );
@@ -1677,6 +1695,7 @@ describe('OpenCodeProcess server ownership leases', () => {
         `Basic ${Buffer.from('custom-user:vault-password').toString('base64')}`
       );
     } finally {
+      vi.useRealTimers();
       await rm(root, { recursive: true, force: true });
     }
   });
