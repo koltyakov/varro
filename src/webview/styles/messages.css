@@ -1524,6 +1524,12 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
 }
 
 @container (max-width: 400px) {
+  .assistant-dialog-summary-tps {
+    display: none;
+  }
+}
+
+@container (max-width: 300px) {
   .assistant-dialog-summary-token-budget {
     display: none;
   }

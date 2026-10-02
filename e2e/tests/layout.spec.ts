@@ -1610,7 +1610,36 @@ test('reveals user and sticky message timestamps on hover', async ({ page }) => 
   await expect(completedTime).toHaveCSS('transition-duration', '0.12s, 0.12s');
 
   await page.setViewportSize({ width: 410, height: 800 });
+  await expect(tokenBudget).not.toHaveCSS('display', 'none');
+  await page.setViewportSize({ width: 310, height: 800 });
   await expect(tokenBudget).toHaveCSS('display', 'none');
+});
+
+test('hides generation speed before input and output tokens in narrow summaries', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview&generationTiming=1');
+  const summary = page.locator('.assistant-dialog-summary').last();
+  await expect(summary).toBeVisible();
+  const tokens = summary.locator('.assistant-dialog-summary-token-budget');
+  const speed = summary.locator('.assistant-dialog-summary-tps');
+  await expect(tokens).toBeVisible();
+  await expect(speed).toBeVisible();
+
+  await page.setViewportSize({ width: 410, height: 800 });
+  await expect(speed).toHaveCSS('display', 'none');
+  await expect(tokens).toBeVisible();
+
+  await page.setViewportSize({ width: 310, height: 800 });
+  await expect(speed).toHaveCSS('display', 'none');
+  await expect(tokens).toHaveCSS('display', 'none');
+  await expect(summary.getByLabel('Worked for', { exact: true })).toBeVisible();
+  await expect(summary).toHaveCSS('height', '24px');
+
+  await page.setViewportSize({ width: 486, height: 800 });
+  await expect(tokens).toBeVisible();
+  await expect(speed).toBeVisible();
 });
 
 test('matches the visual incoming Thinking gap to markdown', async ({ page }) => {

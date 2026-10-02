@@ -1481,6 +1481,11 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'Short final response to keep the second prompt near the viewport.',
       BASE_TIME - 1_000
     );
+    if (new URLSearchParams(window.location.search).get('generationTiming') === '1') {
+      assistant2.info.time.completed = BASE_TIME;
+      const text = assistant2.parts.find((part) => part.type === 'text');
+      if (text) text.time = { start: BASE_TIME - 1_000, end: BASE_TIME };
+    }
     state.sessions = [session];
     state.sessionStatuses[session.id] = { type: 'idle' };
     state.messagesBySessionId[session.id] = [user1, assistant1, user2, assistant2];
