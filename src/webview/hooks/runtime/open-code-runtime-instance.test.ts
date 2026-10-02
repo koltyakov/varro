@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  getPersistedSelectedAgent,
   inputText,
   resetDefaultAppState,
   setShowSessionPicker,
@@ -287,7 +288,10 @@ describe('open code runtime synchronization', () => {
     expect(getSessionHistoryCursor(oldSession.id)).toBeUndefined();
     expect(isSessionHistoryTruncated(oldSession.id)).toBe(false);
 
-    expect(state.selectedAgent).toBe('global-agent');
+    // The fresh draft re-defaults to the primary agent once agents reload, without
+    // overwriting the persisted toolbar choice.
+    expect(state.selectedAgent).toBeNull();
+    expect(getPersistedSelectedAgent()).toBe('global-agent');
     expect(state.selectedModel).toEqual(globalModel);
     expect(state.sessionSelectedAgents[oldSession.id]).toBe('session-agent');
     expect(state.sessionSelectedModels[oldSession.id]).toEqual(sessionModel);

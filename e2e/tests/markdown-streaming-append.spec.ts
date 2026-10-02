@@ -10,6 +10,24 @@ const SESSION_ID = 'session-rapid-streaming-jitter';
 const MESSAGE_ID = 'message-rapid-assistant-streaming';
 const ROW = `[data-msg-id="${MESSAGE_ID}"]`;
 
+async function appendStreamingTextDelta(page: Page, partID: string, delta: string) {
+  await page.evaluate(
+    ({ sessionID, messageID, id, text }) => {
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'message.part.delta',
+            properties: { sessionID, messageID, partID: id, field: 'text', delta: text },
+          },
+        },
+        '*'
+      );
+    },
+    { sessionID: SESSION_ID, messageID: MESSAGE_ID, id: partID, text: delta }
+  );
+}
+
 for (const numbered of [false, true]) {
   test(`keeps blank-separated ${numbered ? 'numbered' : 'bullet'} gaps fixed while the last item streams`, async ({
     page,
@@ -95,6 +113,79 @@ test('keeps the Thinking gap fixed while a following markdown block is incomplet
   expect(gaps.length).toBeGreaterThan(5);
   expect(Math.max(...gaps) - Math.min(...gaps), JSON.stringify(gaps)).toBeLessThan(1);
 });
+
+// Replay of ses_fd36df443ffe3uYRdWBz2pwPfb: a new streamed text item began with a bullet whose
+// only content was an unfinished code span. The hidden token left an empty list item whose marker
+// overflowed the item; the measured entrance held that overflow as height and released it at
+// cleanup, clamping the bottom-followed transcript backward by 22 px.
+for (const deltas of [
+  ['There are two corrections needed, not just one guard:\n\n- `Open as Edi'],
+  // Replay of an HTML-heavy v1 session: an empty bullet arrived before its unfinished code.
+  ['There are two corrections needed, not just one guard:\n\n- ', '`Open as Edi'],
+]) {
+  test(`does not shrink an entering text item whose bullet holds incomplete inline code: ${deltas.length} deltas`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 486, height: 900 });
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    await expect(page.locator(`${ROW} .rendered-markdown`)).toHaveText('Starting...');
+    const partID = `${MESSAGE_ID}-text-2`;
+    const collector = await page.locator(ROW).evaluateHandle((row) => {
+      const state = { running: true, heights: [] as number[], entering: 0 };
+      const sample = () => {
+        state.heights.push(row.getBoundingClientRect().height);
+        if (row.querySelector('.measured-entrance-active')) state.entering += 1;
+        if (state.running) requestAnimationFrame(sample);
+      };
+      sample();
+      return state;
+    });
+    await page.evaluate(
+      ({ sessionID, messageID, id }) => {
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: {
+              type: 'message.part.updated',
+              properties: {
+                part: {
+                  id,
+                  sessionID,
+                  messageID,
+                  type: 'text',
+                  text: '',
+                  time: { start: Date.now() },
+                },
+              },
+            },
+          },
+          '*'
+        );
+      },
+      { sessionID: SESSION_ID, messageID: MESSAGE_ID, id: partID }
+    );
+    for (const delta of deltas) {
+      await appendStreamingTextDelta(page, partID, delta);
+      await waitForAnimationFrames(page, 12);
+    }
+    const entering = page.locator(`${ROW} [data-assistant-render-key] .rendered-markdown`).last();
+    await expect(entering).toContainText('not just one guard:');
+    await waitForAnimationFrames(page, 40);
+    const state = await collector.evaluate((value) => {
+      value.running = false;
+      return value;
+    });
+    expect(state.entering).toBeGreaterThan(0);
+    const reversals = state.heights.flatMap((height, index) =>
+      index > 0 && height < state.heights[index - 1]! - 0.5
+        ? [[state.heights[index - 1], height]]
+        : []
+    );
+    expect(reversals, JSON.stringify(state.heights)).toEqual([]);
+    // A bullet with no visible content must not paint an orphan marker.
+    await expect(entering.locator('li:visible')).toHaveCount(0);
+  });
+}
 
 test('keeps verification paragraph gaps fixed as inline emphasis streams and settles', async ({
   page,

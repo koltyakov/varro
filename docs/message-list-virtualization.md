@@ -366,6 +366,10 @@ Direct input acquires ownership only when it can affect the transcript:
   tray slot can otherwise consume the last reserved pixel before a deferred correction removes it,
   clamping the viewport backward. `scroll-auto-scroll.spec.ts` checks the same anchor every frame
   through this replacement and the subsequent full collapse.
+- A fixed collapse target does not consume reserve, but it still reserves pending row-rounding
+  reductions. A fractional tray reserves its exact height while its row also loses a whole-pixel
+  correction; the October 2 v1 and v2 replays clamped bottom-pinned transcripts by 1 px on most
+  tool groupings. `scroll-tool-grouping.spec.ts` amplifies the tray fraction and checks every frame.
 - Automatic todo completion and removal announce their disappearing block, margins, and parent gap
   before changing the layout. A later ResizeObserver correction is insufficient: the September 11
   editor replay briefly clamped the transcript backward by 139 px when its todo panel disappeared.
@@ -464,6 +468,10 @@ Direct input acquires ownership only when it can affect the transcript:
 - The single-item exit path must reserve the outer flow gap when a separate Explored summary survives
   the tray. Reserving only the item height lets removal clamp the scroll range before a later anchor
   correction.
+- Flow spacing includes the summary margin after a bordered block. A tray removed above its Explored
+  summary also removes that margin; the October 2 v1 replay clamped by 4 px when the next step's text
+  grouped such a tray. The margin is the `--assistant-summary-after-bordered-gap` custom property so
+  reserve calculations read the same value as CSS.
 - Completing an inline file edit removes its running status card. Reserve that card, its parent gap,
   and the preview's conditional leading margin before removal when bottom follow owns the visible
   transition. Do not reserve removals above the viewport or override detached/edit/diff ownership.
@@ -523,6 +531,9 @@ Direct input acquires ownership only when it can affect the transcript:
   includes inline edits and other standalone response parts, not only Markdown text. Bottom-follow
   must not write a competing position during that hold, and queued restore callbacks must verify the
   anchor is still current before scrolling.
+- Do not capture that anchor for a separate summary below a visible active tray. Collapsing the tray
+  above it must let the summary rise while the bottom reserve holds the viewport; restoring its old
+  top scrolled the October 2 v2 and OpenChamber replays back by 49 px.
 
 ### Streaming presentation queue
 
@@ -566,6 +577,14 @@ Direct input acquires ownership only when it can affect the transcript:
   move already-painted content backward. Reveal the completed token at its parsed geometry and let
   bottom-follow own its growth. `scroll-streaming-markdown.spec.ts` checks every-frame same-paragraph
   geometry for inline file paths and Markdown link destinations.
+- A list item whose only content is a hidden pending token is itself a hidden pending block, as is a
+  list containing only that item. Its zero-height box still paints a marker that overflows the item;
+  a measured entrance read that overflow from `scrollHeight`, held it as height, and released it on
+  cleanup. The October 2 replay of `ses_fd36df443ffe3uYRdWBz2pwPfb` clamped the bottom-followed
+  transcript backward by 22 px. A trailing empty bullet marker is pending text for the same reason:
+  painting it gives the preceding paragraph list spacing that a following hidden token removes again.
+  `markdown-streaming-append.spec.ts` checks the entering row every frame for whole and split
+  deliveries and requires no painted orphan bullet.
 - Incomplete HTML tag suffixes must not paint as temporary prose. Opening and closing tags such as
   `<details` and `</summary` otherwise lose a line when `>` arrives. Omit these suffixes before parsing;
   a hidden marker at the root of a raw HTML segment can itself change trailing-block spacing.

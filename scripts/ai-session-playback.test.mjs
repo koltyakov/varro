@@ -109,13 +109,13 @@ test('preserves short event gaps and caps long idle gaps', () => {
     [
       { delayMs: 20, sourceGapMs: 20 },
       { delayMs: 100, sourceGapMs: 100 },
-      { delayMs: 500, sourceGapMs: 5_000 },
+      { delayMs: 1_500, sourceGapMs: 5_000 },
     ]
   );
 });
 
 test('never lengthens medium gaps and preserves burst and threshold timing', () => {
-  const gaps = [0, 1, 249, 250, 251, 300, 499, 500, 501, 30_000];
+  const gaps = [0, 1, 249, 250, 251, 300, 499, 500, 501, 1_499, 1_500, 1_501, 30_000];
   let offsetMs = 0;
   const timeline = buildReplayTimeline(
     gaps.map((gap) => ({
@@ -125,7 +125,7 @@ test('never lengthens medium gaps and preserves burst and threshold timing', () 
   );
   assert.deepEqual(
     timeline.map((entry) => entry.delayMs),
-    [0, 1, 249, 250, 251, 300, 499, 500, 500, 500]
+    [0, 1, 249, 250, 251, 300, 499, 500, 501, 1_499, 1_500, 1_500, 1_500]
   );
   for (const value of [NaN, Infinity, -1]) {
     assert.throws(() => buildReplayTimeline([], { shortGapMs: value }), /timing/);
@@ -280,7 +280,7 @@ test('long CLI and subagent waits compress without accelerating subsequent or co
       ];
       assert.deepEqual(
         buildReplayTimeline(events).map(({ delayMs }) => delayMs),
-        [0, 500, ...Array(20).fill(spacing)]
+        [0, 1_500, ...Array(20).fill(spacing)]
       );
       events.splice(
         1,
@@ -457,7 +457,7 @@ test('historical estimates respect boundaries and sparse or extreme spans never 
     if (text === 'ok')
       assert.ok(
         buildReplayTimeline(events).some(
-          ({ sourceGapMs, delayMs }) => sourceGapMs > 10_000 && delayMs === 500
+          ({ sourceGapMs, delayMs }) => sourceGapMs > 10_000 && delayMs === 1_500
         )
       );
   }
@@ -523,7 +523,7 @@ async function prepareReplay(t, source) {
   // teardown clocks must remain real, especially for taskkill on Windows.
   t.mock.method(globalThis, 'setTimeout', (callback, milliseconds, ...args) => {
     const timer = realSetTimeout(callback, milliseconds, ...args);
-    if (milliseconds === 180_620) deadline = { timer, callback, remaining: milliseconds };
+    if (milliseconds === 181_620) deadline = { timer, callback, remaining: milliseconds };
     return timer;
   });
   t.mock.method(globalThis, 'clearTimeout', (timer) => {
@@ -585,7 +585,7 @@ for (const reason of ['timeout', 'SIGINT', 'SIGTERM']) {
       const rejected = assert.rejects(
         result,
         reason === 'timeout'
-          ? /Playback timed out after 180620ms/
+          ? /Playback timed out after 181620ms/
           : new RegExp(`Playback interrupted by ${reason}`)
       );
       const pids = await fixture.started;
@@ -607,10 +607,10 @@ for (const reason of ['timeout', 'SIGINT', 'SIGTERM']) {
       const { timeline } = JSON.parse(await readFile(options.env.VARRO_PLAYBACK_FILE, 'utf8'));
       assert.equal(
         timeline.reduce((total, entry) => total + entry.delayMs, 0),
-        620
+        1_620
       );
       // Advance only the deadline clock, after every real descendant has reported readiness.
-      fixture.tick(180_619);
+      fixture.tick(181_619);
       assert.ok(pids.every((pid) => process.kill(pid, 0)));
       if (reason === 'timeout') fixture.tick(1);
       else {
@@ -673,10 +673,10 @@ test(
     });
     const rejected = assert.rejects(
       fixture.run(),
-      /Playback timed out after 180620ms; process cleanup failed: cleanup deadline expired/
+      /Playback timed out after 181620ms; process cleanup failed: cleanup deadline expired/
     );
     await fixture.started;
-    fixture.tick(180_620);
+    fixture.tick(181_620);
     await rejected;
     await fixture.assertClean();
   }
@@ -687,7 +687,7 @@ test(
   { timeout: 10_000 },
   async (t) => {
     const fixture = await prepareReplay(t, hangingProcess);
-    const rejected = assert.rejects(fixture.run(), /Playback timed out after 180620ms/);
+    const rejected = assert.rejects(fixture.run(), /Playback timed out after 181620ms/);
     await fixture.started;
     t.after(async () => {
       await rejected;

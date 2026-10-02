@@ -1391,11 +1391,16 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   margin-top: calc(var(--assistant-flow-item-gap) * -0.25);
 }
 
+/* Collapse reserves read this value; keep it a custom property rather than a literal margin. */
+.assistant-turn-content.assistant-turn-content-plain .assistant-message-flow {
+  --assistant-summary-after-bordered-gap: 4px;
+}
+
 .assistant-turn-content.assistant-turn-content-plain
   .assistant-message-flow
   > .assistant-flow-block-ends-bordered
   + .assistant-flow-block-starts-summary {
-  margin-top: 4px;
+  margin-top: var(--assistant-summary-after-bordered-gap);
 }
 
 .interactive-item-container.interactive-response-follows-request:has(

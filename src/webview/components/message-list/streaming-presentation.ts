@@ -170,6 +170,14 @@ export class StreamingPresentation {
     return entry?.item.kind === 'text' ? entry.text() : undefined;
   };
 
+  // The full text queued for display, which can lead the paced prefix by one or more releases.
+  readonly targetTextForPart = (part: Part): string | undefined => {
+    this.readSource();
+    this.membership[0]();
+    const entry = this.entries.get(getPresentationPartKey(part));
+    return entry?.item.kind === 'text' ? entry.target : undefined;
+  };
+
   readonly isPartPending = (part: Part): boolean => {
     this.readSource();
     this.membership[0]();

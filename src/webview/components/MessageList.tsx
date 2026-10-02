@@ -272,13 +272,20 @@ function getFontLayoutSignature(element: HTMLElement): string {
 }
 
 function getAssistantFlowSpacingForElements(elements: readonly Element[], gap: number): number {
+  const flow = elements[0]?.parentElement;
   return getAssistantFlowSpacingSize(
     elements.map((element) => ({
       startsBordered: element.classList.contains('assistant-flow-block-starts-bordered'),
       endsBordered: element.classList.contains('assistant-flow-block-ends-bordered'),
       permissionPrompt: element.classList.contains('permission-prompt'),
+      startsSummary: element.classList.contains('assistant-flow-block-starts-summary'),
     })),
-    gap
+    gap,
+    flow
+      ? Number.parseFloat(
+          getComputedStyle(flow).getPropertyValue('--assistant-summary-after-bordered-gap')
+        ) || 0
+      : 0
   );
 }
 
@@ -1113,7 +1120,11 @@ export function MessageList() {
   }));
   const visibleBlockingStreamingPart = createMemo(() => {
     const part = streamingPart();
-    const streamingText = (part && presentation.textForPart(part)) ?? state.streamingText;
+    // Arriving text groups the preceding tool preview before its first paced chunk paints.
+    // Count the queued text as visible so Thinking cannot flash for the frames between them.
+    const streamingText =
+      (part && (presentation.textForPart(part) || presentation.targetTextForPart(part))) ??
+      state.streamingText;
     return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
   });
   // History scans are tracked so they stay current whenever the untracked tail scan runs.
@@ -4631,6 +4642,18 @@ export function MessageList() {
     const summaries = containerRef.querySelectorAll<HTMLElement>('.assistant-activity-summary');
     const summary = summaries[summaries.length - 1];
     if (!summary) return;
+    // A tray collapsing above a separate summary moves that summary up while the bottom reserve
+    // holds the viewport. Anchoring its old top would scroll the transcript back by the tray.
+    const flow = summary.closest('.assistant-message-flow');
+    const trayAboveSummary = [
+      ...(flow?.querySelectorAll<HTMLElement>(':scope > .assistant-active-activity-tray') ?? []),
+    ].some(
+      (tray) =>
+        tray.getClientRects().length > 0 &&
+        !tray.contains(summary) &&
+        (tray.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+    );
+    if (trayAboveSummary) return;
     activityExitSummaryAnchor = {
       sessionId,
       element: summary,
@@ -5179,8 +5202,26 @@ export function MessageList() {
     if (!containerRef) return;
     const reserve = untrack(appendBottomReserve);
     if (reserve <= 0) return;
+    // Deferred row rounding can still remove height from an entering replacement tool, or from a
+    // row whose tray just collapsed under a fixed exit target. Keep that space until the
+    // correction lands so neither consuming reserve nor the correction can clamp the viewport.
+    let pendingHeightReduction = 0;
+    for (const [element, correction] of pendingRowHeightCorrections) {
+      if (element.isConnected)
+        pendingHeightReduction += Math.max(
+          0,
+          (appliedRowHeightCorrections.get(element) ?? 0) - correction
+        );
+    }
     // Exit space temporarily overlaps the departing tray; it is not replacement content.
-    if (activityExitBottomTarget !== null || untrack(exitingActivityPartKeys).size > 0) return;
+    if (activityExitBottomTarget !== null || untrack(exitingActivityPartKeys).size > 0) {
+      if (activityExitBottomTarget === null || pendingHeightReduction <= 0) return;
+      const shortfall =
+        activityExitBottomTarget -
+        (containerRef.scrollHeight - containerRef.clientHeight - pendingHeightReduction);
+      if (shortfall > 0) setAppendBottomReserve(reserve + Math.ceil(shortfall));
+      return;
+    }
     if (
       activityExitSummaryAnchor &&
       isLoading() &&
@@ -5194,16 +5235,6 @@ export function MessageList() {
 
     // A short transcript also needs reserve for the space below its natural content.
     // Clamping this to zero drops that space before an entering block has grown into it.
-    // Deferred row rounding can still remove height from an entering replacement tool. Keep that
-    // space until the correction lands so consuming the final reserve cannot clamp the viewport.
-    let pendingHeightReduction = 0;
-    for (const [element, correction] of pendingRowHeightCorrections) {
-      if (element.isConnected)
-        pendingHeightReduction += Math.max(
-          0,
-          (appliedRowHeightCorrections.get(element) ?? 0) - correction
-        );
-    }
     const unreservedBottom =
       containerRef.scrollHeight - reserve - containerRef.clientHeight - pendingHeightReduction;
     if (autoScroll() && pinnedToBottom && !stickyNavigationOwnsScroll()) {

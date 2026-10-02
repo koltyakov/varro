@@ -413,7 +413,7 @@ input:focus-visible {
   overflow-y: auto;
   margin-right: -14px;
   padding-right: 14px;
-  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: inherit;
@@ -468,7 +468,7 @@ input:focus-visible {
 }
 
 .latest-user-message-sticky:hover .latest-user-message-sticky-text {
-  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 16%, transparent);
 }
 
 .latest-user-message-sticky-meta {

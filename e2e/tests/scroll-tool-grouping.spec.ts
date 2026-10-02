@@ -180,3 +180,210 @@ for (const virtualized of [false, true]) {
     expect(result.errors).toEqual([]);
   });
 }
+
+// Replays of v2 and v1 sessions clamped the bottom-pinned transcript by 1 px whenever a tool
+// tray with a fractional height grouped: its row lost a whole-pixel correction under the fixed
+// collapse target, but the reserve covered only the fractional tray height.
+for (const trayFraction of [0.1, 0.3, 0.6]) {
+  test(`tool grouping keeps a fractional row pinned: ${trayFraction}px tray fraction`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 486, height: 800 });
+    await page.goto(
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69&activeTrayCount=1'
+    );
+    // Artificial stress changes only fixture geometry; production trays have fractional heights.
+    await page.addStyleTag({
+      content: `.assistant-active-activity-tray { padding-bottom: ${trayFraction}px; }`,
+    });
+    await expect(page.locator('.assistant-active-activity-item')).toHaveCount(1);
+    const bottomDistance = () =>
+      page
+        .locator('.interactive-list')
+        .evaluate((list) => list.scrollHeight - list.clientHeight - list.scrollTop);
+    await expect.poll(bottomDistance).toBeLessThanOrEqual(1);
+    await expect
+      .poll(() =>
+        page
+          .locator('[data-msg-id="message-tool-cards-assistant-69"]')
+          .evaluate((row) => row.style.getPropertyValue('--interactive-item-block-correction'))
+      )
+      .not.toBe('');
+    await page.waitForTimeout(300);
+
+    const samples = await page.evaluate(async () => {
+      // SAFETY: The isolated fixture installs typed persistence and production-event replay helpers.
+      const harness = (
+        window as Window & {
+          __varroE2E?: {
+            getSessionMessages(id: string): MessageEntry[];
+            replayServerEvent(event: ServerEvent): void;
+          };
+        }
+      ).__varroE2E;
+      const list = document.querySelector<HTMLElement>('.interactive-list');
+      const marker = list?.querySelector<HTMLElement>(
+        '[data-msg-id="message-tool-cards-user-69"] .user-message-card'
+      );
+      const initial = harness
+        ?.getSessionMessages('session-tool-cards-large-transcript')
+        .find((entry) => entry.info.id === 'message-tool-cards-assistant-69');
+      if (!harness || !list || !marker || !initial) throw new Error('Missing tool fixture');
+      const sample = () => ({
+        scrollTop: list.scrollTop,
+        top: marker.getBoundingClientRect().top,
+        active: list.querySelectorAll('.assistant-active-activity-item').length,
+      });
+      const result = [sample()];
+      for (const part of initial.parts) {
+        if (part.type !== 'tool' || part.state.status !== 'running') continue;
+        harness.replayServerEvent({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              ...part,
+              state: {
+                status: 'completed',
+                input: part.state.input,
+                output: 'Done',
+                title: 'Inspected',
+                metadata: {},
+                time: { start: Date.now() - 1000, end: Date.now() },
+              },
+            } satisfies ToolPart,
+          },
+        });
+      }
+      for (let frame = 0; frame < 40; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        result.push(sample());
+      }
+      return result;
+    });
+    expect(samples.at(-1)?.active).toBe(0);
+    const reversals = samples
+      .slice(1)
+      .filter((sample, index) => sample.top > samples[index]!.top + 0.1);
+    expect(reversals, JSON.stringify(samples.slice(0, 6))).toEqual([]);
+  });
+}
+
+// Replay of a v2 session: following text grouped the finished tool preview one frame before its
+// first paced chunk painted, so Thinking flashed for a single frame between them.
+for (const virtualized of [false, true]) {
+  test(`following text replaces a tool preview without a Thinking flash: ${virtualized ? 'measured' : 'short'}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 486, height: 800 });
+    const sessionID = virtualized ? 'session-tool-cards-large-transcript' : 'session-tool-cards';
+    const messageID = virtualized
+      ? 'message-tool-cards-assistant-69'
+      : 'message-tool-cards-assistant';
+    await page.goto(
+      virtualized
+        ? '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69&activeTrayCount=1'
+        : '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCount=1'
+    );
+    await expect(page.locator('.assistant-active-activity-item')).toHaveCount(1);
+    await expect(page.locator('.interactive-loading-row.is-reserved')).toHaveCount(1);
+    await page.waitForTimeout(700);
+
+    const samples = await page.evaluate(
+      async ({ sessionID, messageID }) => {
+        // SAFETY: The isolated fixture installs typed persistence and production-event replay helpers.
+        const harness = (
+          window as Window & {
+            __varroE2E?: {
+              getSessionMessages(id: string): MessageEntry[];
+              replayServerEvent(event: ServerEvent): void;
+            };
+          }
+        ).__varroE2E;
+        const list = document.querySelector<HTMLElement>('.interactive-list');
+        const initial = harness
+          ?.getSessionMessages(sessionID)
+          .find((entry) => entry.info.id === messageID);
+        if (!harness || !list || !initial || initial.info.role !== 'assistant')
+          throw new Error('Missing tool fixture');
+        const tool = initial.parts.find(
+          (part): part is ToolPart => part.type === 'tool' && part.state.status === 'running'
+        );
+        if (!tool) throw new Error('Missing running tool');
+        harness.replayServerEvent({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              ...tool,
+              state: {
+                status: 'completed',
+                input: tool.state.input,
+                output: 'Done',
+                title: 'Inspected',
+                metadata: {},
+                time: { start: Date.now() - 1000, end: Date.now() },
+              },
+            } satisfies ToolPart,
+          },
+        });
+        harness.replayServerEvent({
+          type: 'message.updated',
+          properties: {
+            info: {
+              ...initial.info,
+              time: { ...initial.info.time, completed: Date.now() },
+              finish: 'tool-calls',
+            },
+          },
+        });
+        const info = {
+          ...initial.info,
+          id: 'tool-grouping-following-step',
+          time: { created: Date.now() },
+        };
+        harness.replayServerEvent({ type: 'message.updated', properties: { info } });
+        harness.replayServerEvent({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'tool-grouping-following-text',
+              sessionID,
+              messageID: info.id,
+              type: 'text',
+              text: '',
+              time: { start: Date.now() },
+            },
+          },
+        });
+        harness.replayServerEvent({
+          type: 'message.part.delta',
+          properties: {
+            sessionID,
+            messageID: info.id,
+            partID: 'tool-grouping-following-text',
+            field: 'text',
+            delta: 'The checkout has a pre-existing modification in the installer.',
+          },
+        });
+        const result: Array<{ thinking: boolean; active: number; text: boolean }> = [];
+        for (let frame = 0; frame < 30; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          result.push({
+            thinking: !!list.querySelector(
+              '.interactive-loading-row:not(.is-reserved):not(.trailing-assistant-summary-row) .loading-verb'
+            ),
+            active: list.querySelectorAll('.assistant-active-activity-item').length,
+            text: (
+              list.querySelector('[data-msg-id="tool-grouping-following-step"]')?.textContent ?? ''
+            ).includes('The checkout'),
+          });
+        }
+        return result;
+      },
+      { sessionID, messageID }
+    );
+    expect(samples.at(-1)).toMatchObject({ active: 0, text: true });
+    expect(
+      samples.flatMap((sample, frame) => (sample.thinking ? [{ frame, ...sample }] : []))
+    ).toEqual([]);
+  });
+}

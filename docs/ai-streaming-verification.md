@@ -152,7 +152,7 @@ limit allow it. Sparse text or extreme spans can still have gaps compressed by t
 deltas pad idle time into streaming. Without a trustworthy span, the estimate uses 32 ms spacing,
 shortened when needed to finish by the next part or message completion. Tool transitions retain
 pending/running/completed states and persisted timing. Long idle CLI/subagent waits are capped at
-500 ms without globally speeding up concurrent streams. Existing captures are never rewritten;
+1,500 ms without globally speeding up concurrent streams. Existing captures are never rewritten;
 prepare a new selection or reimport to use this timing. Command output may arrive as a single
 terminal snapshot. These captures are labeled `HISTORY`, not exact live SSE recordings. Retained
 live capture JSON in the same format can also be passed to `run` when exact delivered-event order
@@ -173,7 +173,7 @@ before launch and must be reported as blocked.
 npm run ai:streaming -- run \
   --capture artifacts/ai-streaming/<run>/selection/capture-1.json \
   --output artifacts/ai-streaming/<run>/str-01 \
-  --short-gap-ms 250 --max-gap-ms 500
+  --short-gap-ms 250 --max-gap-ms 1500
 ```
 
 The controller creates a disposable workspace and isolated profile, binds a loopback replay server,
@@ -261,9 +261,11 @@ Use both runs when a required interaction window is too short for the AI to targ
 
 ## Timing contract
 
-Gaps of 250 ms or less keep their source spacing. Longer gaps are capped at 500 ms, never increased.
-Thus 32 ms stays 32 ms, 300 ms stays 300 ms, and a 30-second idle wait becomes 500 ms. Both limits are
-configurable, with `0 <= short-gap-ms <= max-gap-ms`. Events retain their order and zero-gap bursts.
+Gaps of 250 ms or less keep their source spacing. Longer gaps are capped at 1,500 ms, never increased.
+Thus 32 ms stays 32 ms, 300 ms stays 300 ms, and a 30-second idle wait becomes 1,500 ms. Both limits are
+configurable, with `0 <= short-gap-ms <= max-gap-ms`. Keep the cap well above the transcript's
+600 ms Thinking reappearance delay. The former 500 ms cap shortened or hid Thinking after completed
+tools and text; a replayed wait must show the Thinking row a live wait shows, so watch for it. Events retain their order and zero-gap bursts.
 Payload timestamps remain historical and are not rewritten into a fabricated model duration.
 
 The server schedules against cumulative monotonic deadlines, not one AI/tool call per event. It

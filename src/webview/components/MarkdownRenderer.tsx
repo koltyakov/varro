@@ -1263,6 +1263,15 @@ function renderIncompleteStreamingMarkdown(
       trailingOrderedListMarker[1]!.length
     : null;
   if (visiblePendingStart !== null) pendingStart = Math.min(pendingStart, visiblePendingStart);
+  // An empty bullet paints an orphan marker and gives the preceding block list spacing. Hide
+  // it until visible content arrives, so a hidden leading token cannot remove that space again.
+  const trailingBulletMarker = blockSafeContent.match(/(?:^|\r?\n)([ \t]{0,3}[-+*][ \t]*)$/);
+  if (trailingBulletMarker) {
+    pendingStart = Math.min(
+      pendingStart,
+      trailingBulletMarker.index! + trailingBulletMarker[0].length - trailingBulletMarker[1]!.length
+    );
+  }
   const trailingPath = blockSafeContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
   if (trailingPath) {
     const candidateStart = trailingPath.index! + trailingPath[0].length - trailingPath[1]!.length;
@@ -1456,14 +1465,32 @@ function parseIncompleteStreamingMarkdown(content: string, options: ParseMarkdow
   if (!prepared.marker || prepared.pendingText === null) return html;
 
   const blockHtml = prepared.hidePendingText
-    ? html.replace(
-        `<p>${prepared.marker}</p>`,
-        `<p class="streaming-markdown-pending-block">${prepared.marker}</p>`
+    ? hidePendingOnlyListItem(
+        html.replace(
+          `<p>${prepared.marker}</p>`,
+          `<p class="streaming-markdown-pending-block">${prepared.marker}</p>`
+        ),
+        prepared.marker
       )
     : html;
   return blockHtml.replace(
     prepared.marker,
     `<span class="streaming-markdown-pending${prepared.hidePendingText ? ' streaming-markdown-pending-hidden' : ''}"${prepared.hidePendingText ? ' aria-hidden="true"' : ''}>${escapeHtml(prepared.pendingText)}</span>`
+  );
+}
+
+// A list item holding only hidden pending text has no line box, but its marker still paints
+// and overflows the item. Measured entrances then hold that overflow as height and release it
+// on cleanup, clamping a bottom-followed transcript. Hide the item, and a list it would empty.
+function hidePendingOnlyListItem(html: string, marker: string) {
+  // The marker is alphanumeric, so it is safe inside these patterns.
+  const content = `\\s*(?:${marker}|<p class="streaming-markdown-pending-block">${marker}</p>)\\s*</li>`;
+  const hiddenItem = '<li class="streaming-markdown-pending-block">';
+  const withItem = html.replace(new RegExp(`<li>(${content})`), `${hiddenItem}$1`);
+  if (withItem === html) return html;
+  return withItem.replace(
+    new RegExp(`<(ul|ol)((?: start="\\d+")?)>(\\s*${hiddenItem}${content}\\s*</\\1>)`),
+    '<$1 class="streaming-markdown-pending-block"$2>$3'
   );
 }
 

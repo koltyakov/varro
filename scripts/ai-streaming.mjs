@@ -11,7 +11,11 @@ import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { WebSocket as Socket } from 'ws';
 
-import { buildReplayTimeline } from './ai-session-playback.mjs';
+import {
+  buildReplayTimeline,
+  DEFAULT_MAX_GAP_MS,
+  DEFAULT_SHORT_GAP_MS,
+} from './ai-session-playback.mjs';
 import { prepareStreamingRun } from './ai-streaming-selection.mjs';
 import { createStreamingServer } from './ai-streaming-server.mjs';
 import {
@@ -19,6 +23,8 @@ import {
   vscodeLaunchCommandMatches,
   writeVscodeLaunchMetadata,
 } from './vscode-launch-process.mjs';
+
+export { DEFAULT_MAX_GAP_MS };
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const json = (file, value) =>
@@ -98,7 +104,8 @@ export function parseArgs(args) {
   }
   if (
     ['run', 'inspect'].includes(command) &&
-    (options['short-gap-ms'] ?? 250) > (options['max-gap-ms'] ?? 500)
+    (options['short-gap-ms'] ?? DEFAULT_SHORT_GAP_MS) >
+      (options['max-gap-ms'] ?? DEFAULT_MAX_GAP_MS)
   )
     throw new Error('short-gap-ms must not exceed max-gap-ms');
   if (options.checkpoints !== undefined) {
@@ -119,7 +126,11 @@ export function parseArgs(args) {
 }
 
 export function inspectCapture(capture, timing = {}) {
-  const timeline = buildReplayTimeline(capture.events, timing);
+  const timeline = buildReplayTimeline(capture.events, {
+    shortGapMs: DEFAULT_SHORT_GAP_MS,
+    maxGapMs: DEFAULT_MAX_GAP_MS,
+    ...timing,
+  });
   let scheduledMs = 0;
   const boundaries = [];
   const seen = new Set();
@@ -824,8 +835,8 @@ export async function runCapture(options) {
     metadata.sourceModel = capture.model ?? null;
     metadata.provenance = capture.scenario;
     metadata.timing = {
-      shortGapMs: options['short-gap-ms'] ?? 250,
-      maxGapMs: options['max-gap-ms'] ?? 500,
+      shortGapMs: options['short-gap-ms'] ?? DEFAULT_SHORT_GAP_MS,
+      maxGapMs: options['max-gap-ms'] ?? DEFAULT_MAX_GAP_MS,
     };
     const timeline = buildReplayTimeline(capture.events, metadata.timing);
     const duration = timeline.reduce((total, entry) => total + entry.delayMs, 0);
@@ -1113,8 +1124,8 @@ export async function main(args = process.argv.slice(2)) {
   if (command === 'run') return runCapture(options);
   if (command === 'inspect') {
     const result = inspectCapture(await readJson(options.capture), {
-      shortGapMs: options['short-gap-ms'] ?? 250,
-      maxGapMs: options['max-gap-ms'] ?? 500,
+      shortGapMs: options['short-gap-ms'] ?? DEFAULT_SHORT_GAP_MS,
+      maxGapMs: options['max-gap-ms'] ?? DEFAULT_MAX_GAP_MS,
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return result;

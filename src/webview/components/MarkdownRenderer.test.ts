@@ -2133,6 +2133,89 @@ describe('MarkdownRenderer', () => {
   });
 
   it.each([
+    { name: 'a bullet list', prefix: 'Two corrections:\n\n- ', visibleItems: 0 },
+    { name: 'a numbered list', prefix: 'Two corrections:\n\n3. ', visibleItems: 0 },
+    {
+      name: 'a later bullet',
+      prefix: 'Two corrections:\n\n- First visible item.\n- ',
+      visibleItems: 1,
+    },
+  ])(
+    'hides an item in $name whose only content is unfinished inline code',
+    async ({ prefix, visibleItems }) => {
+      const [content, setContent] = createSignal(`${prefix}\`Open as Edi`);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            forceStreaming: true,
+          }),
+        container!
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+      // An empty list item still paints its marker and overflows its zero-height box.
+      const paintedItems = () =>
+        Array.from(container!.querySelectorAll('li')).filter(
+          (item) => !item.closest('.streaming-markdown-pending-block')
+        );
+      expect(container?.querySelector('.streaming-markdown-pending-hidden')?.textContent).toContain(
+        '`Open as Edi'
+      );
+      expect(paintedItems()).toHaveLength(visibleItems);
+
+      setContent(`${content()}tor\` is not a model-change event.`);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(container?.querySelector('.streaming-markdown-pending-block')).toBeNull();
+      expect(paintedItems()).toHaveLength(visibleItems + 1);
+      expect(container?.querySelector('li:last-child code')?.textContent).toBe('Open as Editor');
+    }
+  );
+
+  it.each(['- ', '* ', '-'])(
+    'does not paint an empty trailing %j bullet before its content arrives',
+    async (marker) => {
+      const [content, setContent] = createSignal(`Two corrections:\n\n${marker}`);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            forceStreaming: true,
+          }),
+        container!
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+      // An empty item paints an orphan marker and gives the paragraph list spacing that
+      // disappears again when the item's first token is still hidden.
+      const visibleItems = () =>
+        Array.from(container!.querySelectorAll('li')).filter(
+          (item) => !item.closest('.streaming-markdown-pending-block')
+        );
+      expect(visibleItems()).toHaveLength(0);
+      expect(
+        container?.querySelector('[data-markdown-tail-tag]')?.getAttribute('data-markdown-tail-tag')
+      ).toBe('');
+
+      setContent(`Two corrections:\n\n- \`Open as Edi`);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(visibleItems()).toHaveLength(0);
+      expect(
+        container?.querySelector('[data-markdown-tail-tag]')?.getAttribute('data-markdown-tail-tag')
+      ).toBe('');
+
+      setContent(`Two corrections:\n\n- \`Open as Editor\` is not a model-change event.`);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(visibleItems()).toHaveLength(1);
+      expect(visibleItems()[0]?.querySelector('code')?.textContent).toBe('Open as Editor');
+    }
+  );
+
+  it.each([
     { delimiter: '`', chunks: ['npm', ' run', ' test'] },
     { delimiter: '``', chunks: ['npm', ' `run`', ' test', '`'] },
   ])(
