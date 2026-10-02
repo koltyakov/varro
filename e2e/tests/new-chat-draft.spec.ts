@@ -41,6 +41,61 @@ const BUSY_TARGET: StreamTarget = {
   partID: 'message-busy-assistant-part-1',
 };
 
+for (const source of ['chat', 'sessions']) {
+  test(`new chat logo is ready on the first frame from ${source} even when image requests stall`, async ({
+    page,
+  }) => {
+    let releaseImage: (() => void) | undefined;
+    const imageReady = new Promise<void>((resolve) => {
+      releaseImage = resolve;
+    });
+    await page.route('**/assets/icon.png', async (route) => {
+      await imageReady;
+      await route.continue();
+    });
+
+    try {
+      await page.goto('/e2e/harness/index.html?scenario=busy-stop-send', {
+        waitUntil: 'domcontentloaded',
+      });
+      await expect(
+        page.getByText('Still working through the requested refactor steps.', { exact: true })
+      ).toBeVisible();
+      if (source === 'sessions') await page.getByLabel('Back to sessions').first().click();
+
+      const newChat = page.getByRole('button', { name: 'New chat', exact: true }).first();
+      await newChat.evaluate((element) => {
+        element.addEventListener(
+          'click',
+          () => {
+            requestAnimationFrame(() => {
+              const logo = document.querySelector<HTMLImageElement>('.chat-empty-logo');
+              const box = logo?.getBoundingClientRect();
+              const ready =
+                !!logo?.complete &&
+                logo.naturalWidth > 0 &&
+                !!box &&
+                box.width > 0 &&
+                box.height > 0;
+              document.body.dataset.newChatLogoFirstFrame = String(ready);
+            });
+          },
+          { once: true }
+        );
+      });
+      await newChat.click();
+      await expect(page.locator('body')).toHaveAttribute('data-new-chat-logo-first-frame', 'true', {
+        timeout: 5_000,
+      });
+      const logo = page.locator('.chat-empty-logo');
+      await expect(logo).toBeVisible();
+      await expect(logo).toHaveAttribute('src', /^data:image\/png;base64,/);
+    } finally {
+      releaseImage?.();
+    }
+  });
+}
+
 test('new chat during active streaming opens a draft and keeps handlers alive', async ({
   page,
 }) => {

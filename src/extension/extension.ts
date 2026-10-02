@@ -319,8 +319,18 @@ async function activateExtension(context: vscode.ExtensionContext) {
     server!,
     createSidebarRevealer(sidebarDestination)
   );
-  await placeViewInPrimarySidebar(context);
-  await revealSidebarOnFirstActivation(context, sidebarDestination);
+  // View commands can wait for this extension's activation before resolving.
+  // Do not make activation wait for its own first-run reveal or placement.
+  void (async () => {
+    try {
+      await placeViewInPrimarySidebar(context);
+      await revealSidebarOnFirstActivation(context, sidebarDestination);
+    } catch (err) {
+      logger.warn(
+        `Failed to initialize Varro's sidebar placement: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  })();
 
   void vscode.commands.executeCommand('setContext', 'varro:activated', true);
   sidebarProvider.startProviderFileObservation();

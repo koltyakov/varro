@@ -1062,7 +1062,7 @@ export function resetWorkspaceDerivedState(options?: { preserveWorkspaceCatalog?
     appStore.setState('workspaceStatuses', []);
     appStore.setState('workspaceStatusSummary', reconcile({ entries: [] }));
     appStore.setState('draftSelectedMcps', null);
-    routingStore.setSelectedAgent(routingStore.getPersistedSelectedAgent(), {
+    routingStore.setSelectedAgent(null, {
       persistGlobal: false,
     });
     routingStore.setSelectedModel(routingStore.getPersistedSelectedModel(), {

@@ -84,7 +84,6 @@ import {
   readStoredNullableStringRecord,
   readStoredSelectedModelForWorkspace,
   readStoredSelectedModels,
-  readStoredString,
   readStoredStringArray,
   readStoredStringArrayRecord,
   readStoredStringRecord,
@@ -429,7 +428,7 @@ export function createAppState(): AppStateInstance {
     sessionAutoPermissionCounts: {},
     sessionAutoPermissionActivity: {},
     autoPermissionCountsSince: Date.now(),
-    selectedAgent: readStoredString(STORAGE_KEYS.selectedAgent),
+    selectedAgent: null,
     sessionSelectedAgents: readStoredStringRecord(STORAGE_KEYS.sessionSelectedAgents),
     selectedModel: readStoredSelectedModelForWorkspace(
       initialWebviewState.editorContext?.workspacePath

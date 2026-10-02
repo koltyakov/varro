@@ -61,7 +61,7 @@ describe('routing-state helpers', () => {
     expect(getBuildAgentName([agent('plan'), agent('build')])).toBe('build');
   });
 
-  it('preserves the persisted draft agent and cleans up invalid session selections', () => {
+  it('preserves the selected draft agent and cleans up invalid session selections', () => {
     const loadedAgents = [agent('plan'), agent('build'), agent('review', { hidden: true })];
 
     expect(
@@ -94,7 +94,7 @@ describe('routing-state helpers', () => {
     });
   });
 
-  it('uses a temporary default when the persisted draft agent is unavailable', () => {
+  it('keeps the current draft choice instead of restoring a previous chat agent', () => {
     expect(
       reconcileLoadedAgents({
         loadedAgents: [agent('build')],
@@ -113,7 +113,36 @@ describe('routing-state helpers', () => {
         sessionSelectedAgent: null,
         persistedSelectedAgent: 'plan',
       }).nextSelectedAgent
-    ).toEqual({ value: 'plan', options: { persistGlobal: false } });
+    ).toBeNull();
+  });
+
+  it('defaults fresh drafts to build even when ask was persisted', () => {
+    expect(
+      reconcileLoadedAgents({
+        loadedAgents: [agent('ask'), agent('plan'), agent('build')],
+        activeSessionId: null,
+        selectedAgent: null,
+        sessionSelectedAgent: null,
+        persistedSelectedAgent: 'ask',
+      }).nextSelectedAgent
+    ).toEqual({ value: 'build', options: { persistGlobal: false } });
+  });
+
+  it('preserves an explicit ask choice in the current draft', () => {
+    expect(
+      reconcileLoadedAgents({
+        loadedAgents: [agent('ask'), agent('build')],
+        activeSessionId: null,
+        selectedAgent: 'ask',
+        sessionSelectedAgent: null,
+        persistedSelectedAgent: 'build',
+      }).nextSelectedAgent
+    ).toBeNull();
+  });
+
+  it('falls back to an available primary agent when build is unavailable', () => {
+    expect(getDefaultPrimaryAgentName([agent('plan'), agent('ask')])).toBe('plan');
+    expect(getDefaultPrimaryAgentName([])).toBeNull();
   });
 
   it('restores the best available session agent for active sessions', () => {

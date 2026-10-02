@@ -2000,6 +2000,80 @@ describe('OpenCodeProcess server ownership leases', () => {
     }
   });
 
+  it.each(
+    (['marker', 'lease'] as const).flatMap((record) =>
+      (['missing-listener', 'different-listener', 'executable'] as const).map((mismatch) => ({
+        record,
+        mismatch,
+      }))
+    )
+  )(
+    'explains a live $record verification failure for $mismatch without changing it',
+    async ({ record, mismatch }) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-ownership-diagnostics-'));
+      const path = join(root, 'lease.json');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: MOCK_LINUX_PID,
+        port: 50001,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+        owner: 'existing-launch',
+        host: 'old-window',
+        state: 'active',
+        createdAt: Date.now(),
+        password: 'private-password',
+      };
+      const recordPath = record === 'marker' ? `${path}.managed` : path;
+      const raw = JSON.stringify(lease);
+      await writeFile(recordPath, raw);
+      mockLinuxLeaseProcess({
+        executable: mismatch === 'executable' ? '/other/opencode' : lease.executable,
+      });
+      const listeners =
+        mismatch === 'missing-listener'
+          ? []
+          : [mismatch === 'different-listener' ? MOCK_LINUX_PID + 1 : MOCK_LINUX_PID];
+      vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue(listeners);
+      const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+      try {
+        const manager = new OpenCodeProcess(
+          'auto',
+          true,
+          '',
+          false,
+          undefined,
+          path,
+          join(root, 'proc')
+        );
+        let failure: unknown;
+        try {
+          await manager.refreshStartupRegistration();
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toBeInstanceOf(Error);
+        const message = failure instanceof Error ? failure.message : '';
+        expect(message).toContain(`PID ${lease.pid} on port ${lease.port}`);
+        if (mismatch === 'executable') {
+          expect(message).toContain('Executable identity differs');
+          expect(message).toContain('expected "/usr/bin/opencode", observed "/other/opencode"');
+        } else {
+          expect(message).toContain(`observed listening PIDs: ${listeners.join(', ') || 'none'}`);
+        }
+        expect(message).not.toContain(lease.password);
+        expect(message).not.toContain(lease.owner);
+        expect(await readFile(recordPath, 'utf8')).toBe(raw);
+        expect(kill).toHaveBeenCalled();
+        expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+        expect(manager.managedProcess).toBe(false);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('does not redirect an explicit port to a newly registered automatic endpoint', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const root = await mkdtemp(join(tmpdir(), 'varro-fixed-migration-'));
@@ -2035,6 +2109,63 @@ describe('OpenCodeProcess server ownership leases', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it.each(
+    (['refresh', 'disconnect'] as const).flatMap((action) =>
+      (['missing-listener', 'executable', 'unknown-birth'] as const).map((mismatch) => ({
+        action,
+        mismatch,
+      }))
+    )
+  )(
+    'retains live ownership credentials during $action with $mismatch evidence',
+    async ({ action, mismatch }) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-live-lease-retention-'));
+      const path = join(root, 'lease.json');
+      const procRoot = join(root, 'proc');
+      const manager = new OpenCodeProcess('auto', true, '', false, undefined, path, procRoot);
+      const lease = {
+        ...(await setAdoptedOwnership(manager, path, 'linux:Fri Jul 10 12:00:00 2026')),
+        password: 'retained-private-password',
+      };
+      (manager as unknown as { ownershipLease: Record<string, unknown> }).ownershipLease = lease;
+      const raw = JSON.stringify(lease);
+      await writeFile(path, raw);
+      await writeFile(`${path}.managed`, raw);
+      mockLinuxLeaseProcess({
+        executable: mismatch === 'executable' ? '/other/opencode' : lease.executable,
+        birthIdentity: mismatch === 'unknown-birth' ? () => '' : undefined,
+      });
+      const listeners = vi
+        .spyOn(processInspection, 'findListeningPids')
+        .mockResolvedValue(mismatch === 'executable' ? [lease.pid] : []);
+      const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+      try {
+        if (action === 'refresh')
+          await expect(manager.refreshManagedServerOwnership()).resolves.toBe(false);
+        else await manager.disposeProcess({ stopProcess: false });
+
+        expect(await readFile(path, 'utf8')).toBe(raw);
+        expect(await readFile(`${path}.managed`, 'utf8')).toBe(raw);
+        expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+
+        // A fresh editor can verify the same server once inspection recovers,
+        // without stopping it or recovering a credentialless marker.
+        listeners.mockResolvedValue([lease.pid]);
+        mockLinuxLeaseProcess();
+        const reloaded = new OpenCodeProcess('auto', true, '', false, undefined, path, procRoot);
+        await expect(reloaded.refreshStartupRegistration()).resolves.toBe(true);
+        expect(reloaded.serverAuthorization).toBe(
+          `Basic ${Buffer.from(`opencode:${lease.password}`).toString('base64')}`
+        );
+        expect(await readFile(path, 'utf8')).toBe(raw);
+        expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('does not start over corrupt registration or failed process inspection', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
@@ -2074,6 +2205,47 @@ describe('OpenCodeProcess server ownership leases', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it.each(
+    (['refresh', 'disconnect'] as const).flatMap((action) =>
+      (['exited', 'reused-pid'] as const).map((retirement) => ({ action, retirement }))
+    )
+  )(
+    'retires ownership during $action after verified $retirement',
+    async ({ action, retirement }) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-retired-lease-cleanup-'));
+      const path = join(root, 'lease.json');
+      const manager = new OpenCodeProcess(
+        'auto',
+        true,
+        '',
+        false,
+        undefined,
+        path,
+        join(root, 'proc')
+      );
+      await setAdoptedOwnership(manager, path, 'linux:original-process');
+      mockLinuxLeaseProcess({ birthIdentity: () => 'replacement-process' });
+      vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue([]);
+      const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+        if (retirement === 'exited')
+          throw Object.assign(new Error('Process exited'), { code: 'ESRCH' });
+        return true;
+      });
+      try {
+        if (action === 'refresh')
+          await expect(manager.refreshManagedServerOwnership()).resolves.toBe(false);
+        else await manager.disposeProcess({ stopProcess: false });
+
+        await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(manager.managedProcess).toBe(false);
+        expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('serializes competing initial launches and releases the claim idempotently', async () => {
     const root = await mkdtemp(join(tmpdir(), 'varro-launch-claim-'));

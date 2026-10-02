@@ -11,6 +11,11 @@ const EXPECTATIONS = {
     '  - **Status:** `error: OpenCode CLI not found.',
     '  - **Health:** unhealthy',
   ],
+  'empty-window-missing-cli': [
+    '  - **Version:** `not found`',
+    '  - **Status:** `error: OpenCode CLI not found.',
+    '  - **Health:** unhealthy',
+  ],
   'invalid-cli-path': [
     '  - **Binary:**',
     '  - **Status:** `error: OpenCode CLI not found at the configured path:',
@@ -163,7 +168,24 @@ async function run() {
 
   const extension = vscode.extensions.getExtension('koltyakov.varro');
   assert.ok(extension, 'Varro extension was not loaded in the Extension Development Host');
-  await extension.activate();
+  if (scenario === 'empty-window-missing-cli') {
+    assert.equal(vscode.workspace.workspaceFolders, undefined, 'Sandbox must have no folder open');
+  }
+  let activationTimer;
+  try {
+    await Promise.race([
+      extension.activate(),
+      new Promise((_, reject) => {
+        activationTimer = setTimeout(
+          () =>
+            reject(new Error('Varro activation did not finish before first-run view resolution')),
+          DEFAULT_WAIT_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(activationTimer);
+  }
 
   const commands = await vscode.commands.getCommands(true);
   assert.ok(commands.includes('varro.about'), 'Varro commands were not registered');

@@ -118,6 +118,19 @@ one contender can claim the server after validating its process identity.
 Explicit restarts coordinate ownership transfer with the same claim file.
 Startup confirmation and disconnect handoff also participate in that coordination.
 
+When a live marker or lease blocks startup, the error includes the expected PID
+and port, observed listener PIDs, or the mismatching executable/start identity.
+It does not include lease credentials or ownership tokens. An explicit restart
+failure is reported through the error hub even if startup already left the server
+in an error state, with a Show Output action. This feedback does not relax process
+verification or authorize stopping an unverified server.
+
+Ownership refresh and editor disconnect retain the lease, credentials, marker,
+and temporary configuration when listener or executable verification fails but
+the original process is still alive or its retirement is uncertain. A failed
+inspection is not proof of retirement. Cleanup requires process exit or a changed
+birth identity; subsequent attachment still needs fresh complete verification.
+
 ## Automatic ports and upgrade compatibility
 
 `varro.server.port` defaults to `"auto"`. New managed launches choose a random

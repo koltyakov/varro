@@ -2973,6 +2973,7 @@ describe('MessageList empty state', () => {
     expect(logo).toBeInstanceOf(HTMLImageElement);
     expect(logo?.width).toBe(256);
     expect(logo?.height).toBe(256);
+    expect(logo?.getAttribute('decoding')).toBe('sync');
     const hints = container?.querySelectorAll('.chat-empty-hint');
     expect(hints).toHaveLength(5);
     expect([...hints!].map((hint) => hint.textContent)).toEqual([
@@ -2982,6 +2983,10 @@ describe('MessageList empty state', () => {
       '& link sessions',
       'ShiftEnter new line',
     ]);
+    expect(container?.querySelectorAll('.chat-empty-hint-grid > .chat-empty-hint')).toHaveLength(4);
+    expect(container?.querySelector('.chat-empty-hints > .chat-empty-hint')?.textContent).toBe(
+      'ShiftEnter new line'
+    );
   });
 
   it('omits the logo image when no logo URI is available but keeps the hints', () => {

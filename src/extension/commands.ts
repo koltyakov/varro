@@ -377,11 +377,12 @@ export function registerCommands(
             return;
           }
           const message = `Failed to restart server: ${err instanceof Error ? err.message : String(err)}`;
-          if (server.status.state !== 'error') {
-            errorHub.report({ code: 'server-start', message });
-          } else {
-            logger.error(message);
-          }
+          // An explicit retry needs feedback even when startup already failed.
+          errorHub.report({
+            code: 'server-start',
+            message,
+            actions: [{ title: 'Show Output', run: () => logger.show() }],
+          });
         }
       }
     ),

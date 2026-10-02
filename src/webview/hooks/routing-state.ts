@@ -64,11 +64,7 @@ export function reconcileLoadedAgents(args: {
   let nextSelectedAgent: AgentSelectionUpdate | null = null;
 
   if (!args.activeSessionId) {
-    const fallback = [
-      args.persistedSelectedAgent,
-      args.selectedAgent,
-      getDefaultPrimaryAgentName(primaryAgents),
-    ].find(
+    const fallback = [args.selectedAgent, getDefaultPrimaryAgentName(primaryAgents)].find(
       (candidate): candidate is string =>
         !!candidate && primaryAgents.some((agent) => agent.name === candidate)
     );

@@ -268,7 +268,7 @@ export function ServerStatus() {
           </div>
           <SetupCommandCard label="Setup" command="opencode auth login" />
           <button type="button" class="server-status-action-button" onClick={openProviderSetup}>
-            Open terminal and add a provider
+            <span>Open terminal and add a provider</span>
           </button>
           <button
             type="button"
@@ -316,7 +316,7 @@ function MissingCliState() {
         class="server-status-action-button"
         onClick={() => runInTerminal(OPENCODE_INSTALL_COMMAND, 'OpenCode Install')}
       >
-        Open terminal and install
+        <span>Open terminal and install</span>
       </button>
       <p class="text-[11px] leading-normal text-vscode-muted">
         Use npm on macOS, Linux, or WSL. On native Windows, download the CLI from the install docs
@@ -378,7 +378,7 @@ function InvalidPathState(props: { message: string; detail: ServerErrorDetail })
         class="server-status-action-button"
         onClick={() => openSettings(props.detail.settingId || 'varro.server.command')}
       >
-        Open settings
+        <span>Open settings</span>
       </button>
       <RecoveryActions showOutput />
     </div>
@@ -415,7 +415,7 @@ function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
           class="server-status-action-button"
           onClick={() => runInTerminal(props.detail.suggestedCommand || '', 'OpenCode Update')}
         >
-          Open terminal and update
+          <span>Open terminal and update</span>
         </button>
       </Show>
 

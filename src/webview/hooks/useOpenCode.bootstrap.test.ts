@@ -430,7 +430,7 @@ describe('useOpenCode initialization', () => {
     }
   });
 
-  it('restores the persisted toolbar agent on startup', async () => {
+  it.each(['ask', 'plan'])('defaults to build on startup after using %s', async (savedAgent) => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
     bridgeOnMessage.mockImplementation((handler) => {
       bridgeHandler = handler;
@@ -439,7 +439,7 @@ describe('useOpenCode initialization', () => {
       };
     });
 
-    window.localStorage.setItem('varro.selectedAgent', JSON.stringify('plan'));
+    window.localStorage.setItem('varro.selectedAgent', JSON.stringify(savedAgent));
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -478,8 +478,8 @@ describe('useOpenCode initialization', () => {
       });
 
       await vi.waitFor(() => expect(stateModule.connectionInitialized()).toBe(true));
-      expect(stateModule.state.selectedAgent).toBe('plan');
-      expect(stateModule.getPersistedSelectedAgent()).toBe('plan');
+      expect(stateModule.state.selectedAgent).toBe('build');
+      expect(stateModule.getPersistedSelectedAgent()).toBe(savedAgent);
     } finally {
       dispose();
     }

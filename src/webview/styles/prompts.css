@@ -491,6 +491,11 @@ body.vscode-light .question-custom-input {
   text-align: center;
 }
 
+.server-status-action-button > span {
+  /* Center the visible label, not platform-specific space above/below the font. */
+  text-box: trim-both cap alphabetic;
+}
+
 .server-status-action-button:hover:not(:disabled) {
   background: var(--color-vscode-button-hover);
 }

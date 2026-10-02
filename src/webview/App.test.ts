@@ -186,6 +186,31 @@ describe('AppRoot', () => {
     expect(appMocks.chatMountCount).toBe(1);
   });
 
+  it('shows the animated logo, then loading, then the restored chat', () => {
+    setState('serverStatus', { state: 'stopped' });
+    setState('emptyStateLogoUri', 'https://example.test/varro.png');
+    mountAppRoot();
+
+    expect(container?.querySelector('.server-status-detecting-logo')?.classList).toContain(
+      'animate-pulse-soft'
+    );
+    expect(appMocks.chatMountCount).toBe(0);
+
+    setState('serverStatus', { state: 'starting' });
+    expect(container?.querySelector('.server-status-detecting-logo')).toBeNull();
+    expect(container?.textContent).toContain('Starting OpenCode...');
+    expect(appMocks.chatMountCount).toBe(0);
+
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    expect(container?.querySelector('[aria-label="Loading workspace"]')).not.toBeNull();
+    expect(container?.querySelector('.server-status-detecting-logo')).toBeNull();
+    expect(appMocks.chatMountCount).toBe(0);
+
+    setConnectionInitialized(true);
+    expect(container?.querySelector('[aria-label="Loading workspace"]')).toBeNull();
+    expect(appMocks.chatMountCount).toBe(1);
+  });
+
   it('suggests opening a folder and opens the native folder picker', () => {
     setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
     setConnectionInitialized(true);

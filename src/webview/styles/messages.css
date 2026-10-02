@@ -1806,7 +1806,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 40px;
   align-items: center;
   justify-content: center;
   padding: 0 2px;
@@ -1833,10 +1833,18 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
 .chat-empty-hints {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 28px;
   align-items: flex-start;
+  width: min(100%, 280px);
   user-select: none;
   -webkit-user-select: none;
+}
+
+.chat-empty-hint-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
+  gap: 8px 12px;
+  width: 100%;
 }
 
 .chat-empty-hint {
@@ -1848,32 +1856,49 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   color: color-mix(in srgb, var(--color-vscode-muted) 90%, var(--color-vscode-fg));
 }
 
-.chat-empty-hint:last-child {
-  margin-top: 7px;
-  opacity: 0.72;
+.chat-empty-hints > .chat-empty-hint {
+  align-self: center;
 }
 
 .chat-empty-hint kbd {
   box-sizing: border-box;
-  height: 17px;
+  height: 20px;
+  min-width: 20px;
   display: inline-flex;
   align-items: center;
-  padding: 1px 4px 0;
+  justify-content: center;
+  padding: 2px 5px;
   margin: 0;
-  border-color: color-mix(in srgb, var(--color-vscode-fg) 18%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-input-bg) 72%, transparent);
-  line-height: 1;
+  border: 1px solid
+    var(
+      --vscode-keybindingLabel-border,
+      color-mix(in srgb, var(--color-vscode-fg) 20%, transparent)
+    );
+  border-radius: 3px;
+  background: var(
+    --vscode-keybindingLabel-background,
+    color-mix(in srgb, var(--color-vscode-input-bg) 72%, transparent)
+  );
+  color: var(--vscode-keybindingLabel-foreground, inherit);
+  box-shadow: 0 1px 2px var(--vscode-keybindingLabel-shadow, rgb(0 0 0 / 36%));
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 14px;
 }
 
 .chat-empty-logo {
   width: clamp(64px, 12vw, 88px);
   height: auto;
-  /* The brand icon grayscales to a mid-tone (~#676767); below ~0.4 opacity it
-     blends into the dark sidebar background and is effectively invisible. */
-  opacity: 0.45;
-  filter: grayscale(1);
+  opacity: 1;
+  filter: grayscale(1) brightness(1.1)
+    drop-shadow(0 1px 1px var(--vscode-keybindingLabel-shadow, rgb(0 0 0 / 28%)));
   user-select: none;
   -webkit-user-drag: none;
+}
+
+body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
+  opacity: 0.8;
+  filter: drop-shadow(0 1px 1px var(--vscode-keybindingLabel-shadow, rgb(0 0 0 / 28%)));
 }
 
 .rendered-markdown {

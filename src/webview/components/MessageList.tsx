@@ -11,6 +11,7 @@ import {
   untrack,
   type Accessor,
 } from 'solid-js';
+import chatLogoUri from '../../../assets/icon.png?inline';
 import {
   isAbortedAssistantError,
   isPermissionRejectedToolError,
@@ -9589,7 +9590,8 @@ export function MessageList() {
                   <Show when={state.emptyStateLogoUri}>
                     <img
                       class="chat-empty-logo"
-                      src={state.emptyStateLogoUri}
+                      src={chatLogoUri}
+                      decoding="sync"
                       width="256"
                       height="256"
                       alt=""
@@ -9598,18 +9600,20 @@ export function MessageList() {
                     />
                   </Show>
                   <div class="chat-empty-hints">
-                    <span class="chat-empty-hint">
-                      <kbd>@</kbd> add files and agents
-                    </span>
-                    <span class="chat-empty-hint">
-                      <kbd>/</kbd> run commands
-                    </span>
-                    <span class="chat-empty-hint">
-                      <kbd>$</kbd> select skills
-                    </span>
-                    <span class="chat-empty-hint">
-                      <kbd>&amp;</kbd> link sessions
-                    </span>
+                    <div class="chat-empty-hint-grid">
+                      <span class="chat-empty-hint">
+                        <kbd>@</kbd> add files and agents
+                      </span>
+                      <span class="chat-empty-hint">
+                        <kbd>/</kbd> run commands
+                      </span>
+                      <span class="chat-empty-hint">
+                        <kbd>$</kbd> select skills
+                      </span>
+                      <span class="chat-empty-hint">
+                        <kbd>&amp;</kbd> link sessions
+                      </span>
+                    </div>
                     <span class="chat-empty-hint">
                       <kbd>Shift</kbd>
                       <kbd>Enter</kbd> new line

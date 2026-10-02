@@ -102,6 +102,29 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('body { background: var(--vscode-editor-background, #1e1e1e); }');
   });
 
+  it('preloads the starter logo before the app module mounts the empty chat', () => {
+    const html = renderWebviewHtml(
+      'vscode-webview-resource:',
+      { ...initialState, emptyStateLogoUri: 'webview://assets/icon.png?value="<unsafe>&' },
+      { scriptUri: 'webview.js', cssUri: 'webview.css', version: 'fixed-cache-key' }
+    );
+    const preload =
+      '<link rel="preload" as="image" href="webview://assets/icon.png?value=&quot;&lt;unsafe>&amp;" fetchpriority="high" />';
+
+    expect(html).toContain(preload);
+    expect(html.indexOf(preload)).toBeLessThan(html.indexOf('<script type="module"'));
+  });
+
+  it('omits the image preload when there is no starter logo', () => {
+    const html = renderWebviewHtml(
+      'vscode-webview-resource:',
+      { ...initialState, emptyStateLogoUri: '' },
+      { scriptUri: 'webview.js', cssUri: 'webview.css', version: 'fixed-cache-key' }
+    );
+
+    expect(html).not.toContain('rel="preload" as="image"');
+  });
+
   it('does not mark sidebar webviews as editor surfaces', () => {
     const html = renderWebviewHtml(
       'vscode-webview-resource:',
@@ -138,6 +161,37 @@ describe('renderWebviewHtml', () => {
     expect(html).not.toContain('Loading workspace...');
     expect(html).not.toContain('<script');
     expect(html).not.toContain('acquireVsCodeApi');
+  });
+
+  it.each([
+    ['sidebar', renderWebviewLoadingHtml],
+    ['editor', renderEditorWebviewPlaceholderHtml],
+  ] as const)(
+    'shows the animated logo in the %s placeholder before scripts load',
+    (_surface, render) => {
+      const html = render({
+        logoUri: 'webview://assets/icon.png?value="<unsafe>&',
+        cspSource: 'vscode-webview-resource:',
+      });
+
+      expect(html).toContain('class="varro-startup-logo"');
+      expect(html).toContain('src="webview://assets/icon.png?value=&quot;&lt;unsafe>&amp;"');
+      expect(html).toContain('animation: varro-startup-logo-pulse 1.5s ease-in-out infinite;');
+      expect(html).toContain('img-src vscode-webview-resource: data:;');
+      expect(html).not.toContain('class="varro-startup-dots"');
+      expect(html).not.toContain('<script');
+    }
+  );
+
+  it('keeps the animated logo visible while the app assets load', () => {
+    const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
+      scriptUri: 'webview.js',
+      cssUri: 'webview.css',
+      version: 'fixed-cache-key',
+    });
+
+    expect(html).toContain('class="varro-startup-logo"');
+    expect(html).not.toContain('class="varro-startup-dots"');
   });
 
   it('blocks remote HTTPS images without narrowing local image sources', () => {
