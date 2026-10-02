@@ -423,6 +423,12 @@
   outline-offset: 2px;
 }
 
+.model-change-tooltip {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 4px;
+}
+
 .message-compaction-divider {
   width: 100%;
   min-width: 0;

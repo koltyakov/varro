@@ -3467,12 +3467,14 @@ describe('MessageList session scoping', () => {
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
 
-    const tooltipLines = [
-      ...document.querySelectorAll('[role="tooltip"] .model-change-tooltip > div'),
+    const tooltipCells = [
+      ...document.querySelectorAll('[role="tooltip"] .model-change-tooltip > span'),
     ];
-    expect(tooltipLines.map((line) => line.textContent)).toEqual([
-      'From: GPT-5.4 High (OpenAI)',
-      'To: Xhigh High (OpenAI)',
+    expect(tooltipCells.map((cell) => cell.textContent?.trim())).toEqual([
+      'From:',
+      'GPT-5.4 High (OpenAI)',
+      'To:',
+      'Xhigh High (OpenAI)',
     ]);
   });
 
