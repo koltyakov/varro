@@ -115,6 +115,7 @@ jobs:
         run: npm run package:vsix
 
   e2e:
+    needs: [build-and-test, windows]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
