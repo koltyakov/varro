@@ -289,7 +289,10 @@ Connection-admission tests cover concurrent consent, dismissal, listener replace
 uncertain ownership, reconnect, and cancellation during ordinary requests. The
 startup integration test checks authentication enforcement, second-window attachment,
 disconnect/automatic-mode rediscovery, and explicit restart using isolated databases.
-Its latest macOS run passes against released OpenCode 1.16.0, 1.18.34, and 2.0.21.
+Its latest macOS run passes against released OpenCode 1.16.0 and 1.18.34.
+OpenCode 2.0.22 passes configured startup and shadowed discovery, but replacement
+recovery hits a 30-second health timeout. A focused rerun against 2.0.21 also
+reproduces that timeout, despite the previous matrix passing on that release.
 OpenCode 2.0.5 passes configured startup and shadowed discovery, but replacement
 recovery attaches as unmanaged because that path still probes `/api/info` instead
 of the older `/api/status` endpoint.

@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 101 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.34`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.21`, with 21 platform- or family-specific skips and two failures on v2.0.5 described below. Both latest releases passed every applicable check. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 100 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.34`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.22`, with 21 platform- or family-specific skips and three failures described in the 2.0.22 review below. Both v1 releases passed every applicable check; neither v2 release has a full compatibility pass in this run. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,42 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.22 compatibility review
+
+Reviewed v2.0.21 to v2.0.22, `dd2af0e5fc` through `d259ae7163`.
+Session creation adds an optional native `parentID` and a missing-parent 404.
+Varro retains local parent annotations across its supported v2 range; adopting
+native child creation is optional parity work. Provider configuration now accepts
+partial model capabilities and `headerTimeout`/`chunkTimeout` values of `false`.
+Worktree errors add `_tag` while retaining `name` and `data`. The removed
+`ide.installed` event was unused. Existing HTTP routes, consumed SSE payloads,
+session/message records, permissions, forms, service discovery, and managed
+`serve` startup remain compatible. No adapter changes are required.
+
+Runtime updates default provider header and chunk timeouts to five minutes and
+cap automatic timeout retries at three. Azure deployment discovery, Alibaba and
+DigitalOcean prompt caching, Bedrock tool images, Claude capability defaults,
+MCP disconnection diagnostics, and provider rejection details improve without
+changing Varro's integration. CLI upgrade locking and periodic TUI update checks,
+ACP forms/workspace support, and the GUI extension refactor require no adaptation.
+
+The tested v2 client is `2.0.22`; v1 remains at `1.18.34`.
+Support floors remain v2 `2.0.5` and v1 `1.16.0`.
+
+The adapter matrix passed 23 checks on each v1 release and 27 on each v2 release.
+V2.0.5 retained its replacement-server ownership failure, reporting `unmanaged`
+instead of `current-host`. V2.0.22 failed replacement-server recovery with a
+30-second health timeout and the stalled-turn steering check with three admitted
+user messages instead of two. A full v2.0.22 rerun passed the steering check but
+retained the startup failure; focused reruns reproduced both failures against
+both v2.0.22 and the previous v2.0.21 CLI. These are not specific to this release
+bump, but they remain unresolved compatibility issues. For startup, capture
+credential restoration, registration selection, and health-probe phase logs;
+for steering, trace native inbox admission and resume ordering before changing
+the adapter. Logs are retained under `artifacts/opencode-release-review/`.
+The five focused compatibility unit tests passed. The unchanged v1 SDK does not
+require a new Docker support-range run.
 
 ### 2.0.21 and 1.18.34 compatibility review
 

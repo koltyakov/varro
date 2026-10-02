@@ -3787,7 +3787,7 @@ describe('MessageList loading row', () => {
   });
 
   it.each(['completed', 'error'] as const)(
-    'counts from the latest %s tool in the current turn and resets at completion',
+    'counts from the latest %s tool in the current turn and resets without hiding at completion',
     async (status) => {
       vi.setSystemTime(100_000);
       setState('activeSessionId', 'session-1');
@@ -3822,10 +3822,15 @@ describe('MessageList loading row', () => {
       cleanup = render(() => MessageList(), container!);
       await Promise.resolve();
       await vi.advanceTimersByTimeAsync(2_500);
-      expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('22s');
+      const elapsed = container?.querySelector('.loading-elapsed');
+      const verb = container?.querySelector('.loading-verb')?.textContent;
+      expect(elapsed?.textContent).toBe('22s');
       upsertPart({ ...tool, state: { ...tool.state, time: { start: 60_000, end: Date.now() } } });
       await Promise.resolve();
-      expect(container?.querySelector('.loading-elapsed')).toBeNull();
+      // Only the elapsed value resets; the mounted label and turn's verb cycle continue.
+      expect(container?.querySelector('.loading-elapsed')).toBe(elapsed);
+      expect(elapsed?.textContent).toBe('0s');
+      expect(container?.querySelector('.loading-verb')?.textContent).toBe(verb);
       await vi.advanceTimersByTimeAsync(10_500);
       expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
     }
