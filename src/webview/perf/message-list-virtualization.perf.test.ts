@@ -87,9 +87,16 @@ vi.mock('../components/message-list/sticky-preview', async (importOriginal) => {
 });
 
 import { MessageList } from '../components/MessageList';
+import { VirtualizedContent } from '../components/message-list/VirtualizedContent';
 import { buildVirtualMetrics } from '../components/message-list/virtualization';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
-import { replaceMessages, resetDefaultAppState, setState, upsertMessageInfo } from '../lib/state';
+import {
+  replaceMessages,
+  resetDefaultAppState,
+  setMessagesIncremental,
+  setState,
+  upsertMessageInfo,
+} from '../lib/state';
 import type { AssistantMessage, Message, Part, TextPart, UserMessage } from '../types';
 import { settlePerfEffects as settleMicrotasks } from './harness';
 import { fixture } from '../test-fixtures';
@@ -354,6 +361,127 @@ describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
     expect(container?.querySelector('.interactive-item-off-core')).toBeTruthy();
     expect(container?.querySelector('.virtual-spacer-bottom')).toBeTruthy();
   });
+
+  it('bootstraps batched measurements when collapsed activity has exact zero-height rows', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-item-render-empty'))
+        return new DOMRect(0, 0, 500, 0);
+      return new DOMRect(0, 0, 500, 120);
+    });
+    const prompt = createUserMessage('prompt');
+    const messages = [
+      entry(prompt, [createTextPart('prompt-text', prompt.id, 'Inspect')]),
+      ...Array.from({ length: 60 }, (_, index) => {
+        const id = `message-${index}`;
+        const info = createAssistantMessage(id);
+        info.parentID = prompt.id;
+        info.finish = 'tool-calls';
+        return entry(info, [
+          {
+            id: `reasoning-${index}`,
+            messageID: id,
+            sessionID: 'session-1',
+            type: 'reasoning',
+            text: 'Completed historical reasoning',
+            time: { start: 1, end: 2 },
+          },
+        ]);
+      }),
+    ];
+    replaceMessages(messages.slice(0, 49));
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => MessageList(), container!);
+    await settleMicrotasks();
+    expect(container?.querySelector('.interactive-item-render-empty')).not.toBeNull();
+    setMessagesIncremental(messages);
+    // Bootstrap must complete before paint, even when no observer re-delivers the unchanged zeros.
+    await settleMicrotasks();
+
+    expect(container?.querySelector('.interactive-item-render-empty')).not.toBeNull();
+    expect(container?.querySelector('.interactive-list-track.virtualized')).not.toBeNull();
+  });
+
+  it.each([0, 599])(
+    'does not hydrate unrelated activity across a gap pinned at row %i',
+    async (pinnedIndex) => {
+      const messages = Array.from({ length: 600 }, (_, index) => {
+        const id = `message-${index}`;
+        return entry(createAssistantMessage(id), [createTextPart(`part-${index}`, id, 'Result')]);
+      });
+      const groups = new Map<string, AssistantActivityModule.AssistantActivityGroupInfo[]>(
+        messages.map((message) => [
+          message.info.id,
+          [
+            {
+              key: `group-${message.info.id}`,
+              ownerMessageId: message.info.id,
+              ownerPartId: '',
+              parts: [],
+            },
+          ],
+        ])
+      );
+      // The pinned row still needs its cross-message group owner, unlike unrelated historical groups.
+      const sharedGroup: AssistantActivityModule.AssistantActivityGroupInfo = {
+        key: 'shared-group',
+        ownerMessageId: 'message-190',
+        ownerPartId: '',
+        parts: [],
+      };
+      groups.set('message-190', [sharedGroup]);
+      groups.set(`message-${pinnedIndex}`, [sharedGroup]);
+      const ids = messages.map((message) => message.info.id);
+      cleanup = render(
+        () =>
+          VirtualizedContent({
+            messages,
+            visibleRange: {
+              start: 0,
+              end: 600,
+              coreStart: pinnedIndex === 0 ? 590 : 0,
+              coreEnd: pinnedIndex === 0 ? 600 : 10,
+              pinnedIndex,
+              pinnedGapStart: pinnedIndex === 0 ? 1 : 20,
+              pinnedGapEnd: pinnedIndex === 0 ? 580 : 599,
+            },
+            virtualMetrics: buildVirtualMetrics({
+              itemIds: ids,
+              measuredHeights: new Map(ids.map((id) => [id, 120])),
+            }),
+            assistantActivityGroupMap: groups,
+            forceVirtualContent: (id) => id === 'message-150',
+            canReleaseVirtualPlaceholders: () => false,
+            outerListVirtualized: true,
+            modelChangeMap: new Map(),
+            promptNumberMap: new Map(),
+            showPromptNumbers: false,
+            showSentTimestamps: false,
+            lastAssistantID: null,
+            previousTrailingFileEventSignatureMap: new Map(),
+            assistantDialogSummaryMap: new Map(),
+            isFinalAssistantMessage: () => false,
+            hasBuildAgent: false,
+            latestPlanImplementationMessageId: null,
+            questionRequestForTool: () => null,
+            permissionMatchForTool: () => null,
+          }),
+        container!
+      );
+      await settlePerfEffects();
+
+      expect(messageRowMounts.peak).toBe(23);
+      expect(container?.querySelector('[data-msg-id="message-300"]')).toBeNull();
+      for (const id of ['message-150', 'message-190', `message-${pinnedIndex}`]) {
+        expect(container?.querySelector(`[data-msg-id="${id}"]`)).not.toBeNull();
+        expect(container?.querySelector(`[data-msg-id="${id}"]`)?.classList).not.toContain(
+          'interactive-item-virtual-placeholder'
+        );
+      }
+      expect(container?.querySelectorAll('.virtual-pinned-gap')).toHaveLength(3);
+    }
+  );
 
   it('does not regroup the transcript as visible streaming text grows', async () => {
     const messageId = 'message-1';

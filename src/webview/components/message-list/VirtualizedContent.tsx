@@ -53,6 +53,31 @@ export function VirtualizedContent(
     }
     return item;
   };
+  const pinnedActivityGroupKeys = createMemo(() => {
+    const keys = new Set<string>();
+    if (!hasPinnedGap()) return keys;
+    const range = visibleRange();
+    // Only groups connected to real viewport/anchor rows can require content inside the inert gap.
+    // Map membership alone includes unrelated completed activity throughout the entire history.
+    const segments: readonly (readonly [number, number])[] = [
+      [range.start, pinnedGapStart()!],
+      [pinnedGapEnd()!, range.end],
+    ];
+    for (const [start, end] of segments) {
+      for (let index = start; index < end; index += 1) {
+        const messageId = props.messages[index]?.info.id;
+        if (!messageId) continue;
+        for (const group of props.assistantActivityGroupMap?.get(messageId) ?? []) {
+          keys.add(group.key);
+        }
+      }
+    }
+    return keys;
+  });
+  const needsPinnedActivityContent = (messageId: string) =>
+    props.assistantActivityGroupMap
+      ?.get(messageId)
+      ?.some((group) => pinnedActivityGroupKeys().has(group.key)) ?? false;
   const pinnedSegments = createMemo<PinnedSegment[]>(() => {
     if (!hasPinnedGap()) return [];
     const start = pinnedGapStart()!;
@@ -64,7 +89,7 @@ export function VirtualizedContent(
       if (!message) continue;
       const forceContent =
         !!props.forceVirtualContent?.(message.info.id) ||
-        !!props.assistantActivityGroupMap?.has(message.info.id);
+        needsPinnedActivityContent(message.info.id);
       if (!forceContent) continue;
       if (gapStart < index) segments.push({ type: 'gap', start: gapStart, end: index });
       segments.push({ type: 'message', index, messageId: message.info.id });
@@ -191,9 +216,7 @@ export function VirtualizedContent(
       return metrics.prefix[index + 1]! - metrics.prefix[index]!;
     });
     const forceVirtualContent = createMemo(
-      () =>
-        !!props.forceVirtualContent?.(messageId) ||
-        !!props.assistantActivityGroupMap?.has(messageId)
+      () => !!props.forceVirtualContent?.(messageId) || needsPinnedActivityContent(messageId)
     );
     const previousVisibleIndex = createMemo(() => {
       let previousIndex = absoluteIndex() - 1;

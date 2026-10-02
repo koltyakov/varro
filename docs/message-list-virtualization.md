@@ -34,7 +34,9 @@ the shared invariants below remain true.
 - The current range constants are centralized: `VIRTUALIZE_THRESHOLD` is 50 rows,
   `DEFAULT_ITEM_HEIGHT` is 160 px, and `OVERSCAN` is 9 rows. Changing one requires range-boundary,
   viewport-coverage, mount-count, and performance verification.
-- Virtualization starts only after every row in the current window has an exact initial measurement.
+- Virtualization starts only after every nonzero row in the current window has an exact initial
+  measurement. Complete render-empty projections already supply an exact zero; bootstrap must not
+  wait for an observer to redeliver an unchanged empty row after grouping invalidates its cache.
   After bootstrap, it remains active while the list is above the threshold; appends and prepends use
   provisional heights rather than temporarily remounting the full transcript.
 - Every unmeasured nonzero row uses the same aligned provisional height used to construct the prefix.
@@ -65,6 +67,10 @@ the shared invariants below remain true.
 - A distant history anchor may extend the mounted range beyond ordinary overscan. Only the viewport,
   forced rows, and pinned anchor require full content; the intervening gap may use prefix-sized inert
   placeholders.
+- Activity map membership alone must not hydrate that gap. Only groups connected to the real
+  viewport/overscan or pinned row require their cross-message content; unrelated completed groups stay
+  inert. Otherwise a prepend can temporarily mount thousands of historical tools while still reporting
+  a virtualized list. Keep the bounded pinned-gap mount regression in the virtualization perf suite.
 - Retain pinned-gap placeholders through pin removal while direct input, pointer ownership, sticky
   navigation, or editing still owns geometry. A placeholder that enters the real viewport must hydrate
   immediately and must not become blank again when ownership ends.
@@ -83,6 +89,13 @@ the shared invariants below remain true.
   part sequence; do not add inner paging or truncation that changes row semantics.
 - Wheel and scroll hot paths must use prefix lookup and mounted-row maps rather than synchronously
   scanning or measuring the full transcript. Coalesce DOM geometry work to animation frames.
+- Batch bootstrap and idle mount measurements in one pre-paint microtask. Publishing per row
+  synchronously reconciles the virtual range and interleaves mounting, layout, and scroll corrections.
+  Drop disconnected/replaced rows and never measure inert placeholders. The threshold bootstrap
+  observer setup also measures its connected snapshot as a batch. While history owns an exact anchor,
+  measurement publication must not queue a competing generic anchor after direct input becomes idle.
+  Ordinary gesture-driven virtual mounts still measure synchronously so the scroll event cannot save
+  an already-shifted destination before height compensation above the viewport runs.
 
 ### Height Accounting
 

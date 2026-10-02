@@ -892,6 +892,9 @@ export function MessageList() {
   });
   const observedVisibleMessageBounds = new Map<string, { top: number; bottom: number }>();
   const mountedMessageRows = new Map<string, HTMLDivElement>();
+  const pendingMountedRowMeasurements = new Map<string, HTMLDivElement>();
+  let mountedRowMeasurementScheduled = false;
+  onCleanup(() => pendingMountedRowMeasurements.clear());
   let previousVisibleStructureSessionId: string | null = null;
   let previousVisibleStructureMessageIds: readonly string[] | null = null;
   const messages = createMemo(() => {
@@ -1913,8 +1916,11 @@ export function MessageList() {
 
   function hasMeasuredEveryMessage() {
     if (!shouldMeasureRows()) return false;
+    const zeroHeightIds = knownZeroHeightMessageIds();
     for (const id of messageIds()) {
-      if (!measuredHeights.has(id)) return false;
+      // Complete render-empty projections already have an exact zero in the prefix. Waiting for
+      // another observer delivery after grouping invalidates their cache can strand bootstrap.
+      if (!measuredHeights.has(id) && !zeroHeightIds.has(id)) return false;
     }
     return true;
   }
@@ -3045,7 +3051,9 @@ export function MessageList() {
     const measurements = rows.flatMap(({ element, messageId }) => {
       const rect = element.getBoundingClientRect();
       measuredRowInlineSizes.set(element, rect.width);
-      if (rect.height <= 0) return [];
+      // Collapsed cross-message activity can already be empty when the batch runs. Certify those
+      // projected zeros too; ResizeObserver may not redeliver a zero after its cache was invalidated.
+      if (rect.height <= 0 && !knownZeroHeightMessageIds().has(messageId)) return [];
       const height = alignMeasuredRowBlockSize(element, rect.height);
       if (!shouldAcceptRowHeight(element, messageId, height)) return [];
       return [{ messageId, height }];
@@ -3053,10 +3061,6 @@ export function MessageList() {
     if (!applyRowHeightMeasurements(measurements)) return false;
     if (publish) scheduleMeasurementPublish('content');
     return true;
-  }
-
-  function measureMountedRow(element: HTMLDivElement, messageId: string) {
-    return measureMountedRows([{ element, messageId }]);
   }
 
   function applyRowHeightMeasurements(
@@ -3926,7 +3930,14 @@ export function MessageList() {
       return;
     }
 
-    if (diffFocusPauseActive || pendingStructuralScrollAnchor) {
+    // A slow page can outlive direct input. Its exact history anchor still owns measurements;
+    // generic per-mount anchors must not queue competing restorations after the prepend.
+    const sessionId = state.activeSessionId;
+    if (
+      diffFocusPauseActive ||
+      pendingStructuralScrollAnchor ||
+      (sessionId && getCurrentPendingHistoryAnchor(sessionId)?.anchor)
+    ) {
       setMeasurementVersion((version) => version + 1);
       return;
     }
@@ -3951,6 +3962,9 @@ export function MessageList() {
   function observeMeasuredRow(element: HTMLDivElement, messageId: string, active: boolean) {
     if (!active) {
       if (mountedMessageRows.get(messageId) === element) mountedMessageRows.delete(messageId);
+      if (pendingMountedRowMeasurements.get(messageId) === element) {
+        pendingMountedRowMeasurements.delete(messageId);
+      }
       measuredRowObserver?.unobserve(element);
       return;
     }
@@ -3972,8 +3986,41 @@ export function MessageList() {
     }
     if (!shouldMeasureRows()) return;
 
-    measureMountedRow(element, messageId);
-    restorePendingHistoryAnchorIfMounted();
+    if (shouldVirtualize() && userScrollRecentlyActive()) {
+      // A direct gesture's newly mounted overscan can correct height above its painted destination.
+      // Apply that bounded correction before the scroll event remembers the destination anchor.
+      measureMountedRows([{ element, messageId }]);
+      restorePendingHistoryAnchorIfMounted();
+      if (element.isConnected && mountedMessageRows.get(messageId) === element) {
+        measuredRowObserver?.observe(element);
+      }
+      return;
+    }
+
+    // Solid mounts a whole range in one update. Publishing each row's measurement synchronously
+    // reconciles that range again and interleaves layout reads with DOM/scroll writes for every row.
+    // One microtask measures the connected batch and aligns its history owner before paint.
+    pendingMountedRowMeasurements.set(messageId, element);
+    if (!mountedRowMeasurementScheduled) {
+      mountedRowMeasurementScheduled = true;
+      queueMicrotask(() => {
+        mountedRowMeasurementScheduled = false;
+        if (disposed || !shouldMeasureRows()) {
+          pendingMountedRowMeasurements.clear();
+          return;
+        }
+        const rows = [...pendingMountedRowMeasurements].flatMap(([pendingId, pendingElement]) =>
+          pendingElement.isConnected &&
+          mountedMessageRows.get(pendingId) === pendingElement &&
+          !pendingElement.classList.contains('interactive-item-virtual-placeholder')
+            ? [{ element: pendingElement, messageId: pendingId }]
+            : []
+        );
+        pendingMountedRowMeasurements.clear();
+        measureMountedRows(rows);
+        restorePendingHistoryAnchorIfMounted();
+      });
+    }
     if (element.isConnected && mountedMessageRows.get(messageId) === element) {
       measuredRowObserver?.observe(element);
     }
@@ -6959,18 +7006,20 @@ export function MessageList() {
     if (wasMeasuring === measuring) return measuring;
 
     queueMicrotask(() => {
-      if (shouldMeasureRows() !== measuring) return;
+      if (disposed || shouldMeasureRows() !== measuring) return;
+      const rows: Array<{ element: HTMLDivElement; messageId: string }> = [];
       for (const [messageId, row] of mountedMessageRows) {
         if (measuring) {
           if (!row.isConnected) continue;
-          measureMountedRow(row, messageId);
-          if (row.isConnected && mountedMessageRows.get(messageId) === row) {
-            measuredRowObserver?.observe(row);
+          if (!row.classList.contains('interactive-item-virtual-placeholder')) {
+            rows.push({ element: row, messageId });
           }
+          measuredRowObserver?.observe(row);
         } else {
           measuredRowObserver?.unobserve(row);
         }
       }
+      if (measuring) measureMountedRows(rows);
     });
     return measuring;
   });
