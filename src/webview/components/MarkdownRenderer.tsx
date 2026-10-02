@@ -28,6 +28,7 @@ import { createExternalLinkIconElement } from './ExternalLinkIcon';
 import { createFileTypeIconElement, hasRecognizedFileType } from './FileTypeIcon';
 import { createMaterialChipIconElement } from './MaterialChipIcon';
 import { createUiIconElement, UiIcon } from './UiIcon';
+import { Tooltip } from './Tooltip';
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 
 interface MarkdownProps {
@@ -2031,7 +2032,44 @@ export function MarkdownRenderer(props: MarkdownProps) {
     initialSegments.stableContent
   );
   const inlineSlotDisposers = new Map<HTMLElement, () => void>();
+  const linkTooltips = new Map<
+    HTMLAnchorElement,
+    { dispose: () => void; setContent: (content: string) => void }
+  >();
   let disposed = false;
+
+  function disposeLinkTooltips(root?: HTMLElement) {
+    for (const [anchor, tooltip] of linkTooltips) {
+      if (root && !root.contains(anchor)) continue;
+      tooltip.dispose();
+      linkTooltips.delete(anchor);
+    }
+  }
+
+  function hydrateLinkTooltips(root: HTMLDivElement | undefined) {
+    if (!root) return;
+    for (const anchor of root.querySelectorAll<HTMLAnchorElement>(
+      'a[title], a[data-external="true"]'
+    )) {
+      if (linkTooltips.has(anchor)) continue;
+      const href = anchor.getAttribute('href');
+      const content =
+        anchor.dataset.external === 'true' && href && anchor.textContent?.trim() !== href
+          ? href
+          : anchor.getAttribute('title');
+      if (!content) continue;
+      anchor.removeAttribute('title');
+      const [tooltipContent, setContent] = createSignal(content);
+      const host = document.createElement('div');
+      linkTooltips.set(anchor, {
+        dispose: render(
+          () => <Tooltip target={anchor} content={tooltipContent()} delay={400} />,
+          host
+        ),
+        setContent,
+      });
+    }
+  }
 
   function disposeInlineSlots(root?: HTMLElement) {
     for (const [element, dispose] of inlineSlotDisposers) {
@@ -2104,6 +2142,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     if (disposed) return;
     hydrateRenderedMarkdown(root, flags);
     hydrateInlineSlots(root);
+    hydrateLinkTooltips(root);
   }
 
   const [stableHtml, setStableHtml] = createSignal(lastAppliedStableHtml);
@@ -2145,6 +2184,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
       lastAppliedTailHtml = highlightedTailHtml;
       lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(highlightedTailHtml);
+      disposeLinkTooltips(tailRef);
       setTailHtml(highlightedTailHtml);
       queueMicrotask(() => {
         hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
@@ -2260,6 +2300,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
           stableRef.append(...appendedRoot.childNodes);
         } else {
           disposeInlineSlots(stableRef);
+          disposeLinkTooltips(stableRef);
           if (stableRef) stableRef.innerHTML = nextStableHtml;
         }
         lastAppliedStableContent = segments.stableContent;
@@ -2277,6 +2318,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       }
       if (tailChanged) {
         disposeInlineSlots(tailRef);
+        disposeLinkTooltips(tailRef);
         lastAppliedTailContent = segments.tailContent;
         lastAppliedTailHtml = nextTailHtml;
         lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(nextTailHtml);
@@ -2373,6 +2415,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     cancelIdleWork(idleHighlightId);
     idleHighlightId = null;
     disposeInlineSlots();
+    disposeLinkTooltips();
     for (const id of copyTimeouts) clearTimeout(id);
     copyTimeouts.clear();
   });
@@ -2444,7 +2487,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
             link.removeAttribute('href');
             const label = link.getAttribute('aria-label') || link.textContent || 'file';
             const message = `File not found: ${label}`;
-            link.title = message;
+            linkTooltips.get(link)?.setContent(message);
             showSessionActionFeedback(message, 'warning');
           })
           .catch(() => showSessionActionFeedback('Could not open file', 'warning'));
