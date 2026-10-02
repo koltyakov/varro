@@ -2218,6 +2218,92 @@ describe('OpenCodeServer maintenance', () => {
     });
   });
 
+  it.each([
+    { installed: '2.0.22', running: '2.0.18', busy: false, healthy: true, restart: true },
+    { installed: '2.0.22', running: '2.0.18', busy: true, healthy: true, restart: false },
+    { installed: '2.0.18', running: '2.0.18', busy: false, healthy: true, restart: false },
+    { installed: '2.0.17', running: '2.0.18', busy: false, healthy: true, restart: false },
+    { installed: null, running: '2.0.18', busy: false, healthy: true, restart: false },
+    { installed: '2.0.22', running: '2.0.18', busy: false, healthy: false, restart: false },
+    { installed: '2.0.22', running: '1.18.33', busy: false, healthy: true, restart: false },
+    { installed: '1.18.34', running: '2.0.18', busy: false, healthy: true, restart: false },
+  ])(
+    'checks installed updates on a reused managed server ($running -> $installed, busy: $busy, healthy: $healthy)',
+    async ({ installed, running, busy, healthy, restart }) => {
+      const server = new OpenCodeServer('auto', true);
+      const api = server as unknown as {
+        processManager: OpenCodeProcess;
+        managedProcess: boolean;
+        preserveExistingProcess: boolean;
+        readInstalledCliVersion: () => Promise<string | null>;
+        readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+        hasActiveSessions: () => Promise<boolean>;
+        restartServerForCliUpdate: (serverVersion: string, cliVersion: string) => Promise<void>;
+        maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
+      };
+      setRunning(server);
+      api.managedProcess = true;
+      api.preserveExistingProcess = true;
+      vi.spyOn(api.processManager, 'refreshManagedServerOwnership').mockResolvedValue(true);
+      api.readInstalledCliVersion = vi.fn().mockResolvedValue(installed);
+      api.readHealthInfo = vi.fn().mockResolvedValue({ healthy, version: running });
+      api.hasActiveSessions = vi.fn().mockResolvedValue(busy);
+      const restartForUpdate = vi.spyOn(api, 'restartServerForCliUpdate').mockResolvedValue();
+      const suggestUpdate = vi.spyOn(api, 'maybeSuggestCliUpdate');
+
+      await runMaintenanceTick(server);
+
+      expect(api.readInstalledCliVersion).toHaveBeenCalledOnce();
+      expect(suggestUpdate).not.toHaveBeenCalled();
+      expect(spawnMock).not.toHaveBeenCalled();
+      if (restart) expect(restartForUpdate).toHaveBeenCalledWith(running, installed);
+      else expect(restartForUpdate).not.toHaveBeenCalled();
+      if (busy) {
+        vi.mocked(api.hasActiveSessions).mockResolvedValue(false);
+        await runMaintenanceTick(server);
+        expect(restartForUpdate).toHaveBeenCalledWith(running, installed);
+      }
+    }
+  );
+
+  it.each(['new-work', 'failed-verification'] as const)(
+    'leaves a reused managed server running after restart preflight detects %s',
+    async (scenario) => {
+      const server = new OpenCodeServer('auto', true);
+      const api = server as unknown as {
+        processManager: OpenCodeProcess;
+        managedProcess: boolean;
+        preserveExistingProcess: boolean;
+        readInstalledCliVersion: () => Promise<string | null>;
+        readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+        hasActiveSessions: () => Promise<boolean>;
+      };
+      setRunning(server);
+      api.managedProcess = true;
+      api.preserveExistingProcess = true;
+      vi.spyOn(api.processManager, 'refreshManagedServerOwnership').mockResolvedValue(true);
+      api.readInstalledCliVersion = vi.fn().mockResolvedValue('2.0.22');
+      api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '2.0.18' });
+      const idle = vi.spyOn(api, 'hasActiveSessions').mockResolvedValueOnce(false);
+      if (scenario === 'new-work') idle.mockResolvedValueOnce(true);
+      else idle.mockRejectedValueOnce(new Error('Pending attention could not be verified'));
+      const stop = vi.spyOn(api.processManager, 'stopServerForRestart');
+      const claim = vi.spyOn(api.processManager, 'acquireManagedServerRestartOwnership');
+      const start = vi.spyOn(server, 'start');
+
+      await runMaintenanceTick(server);
+
+      expect(idle).toHaveBeenCalledTimes(2);
+      expect(claim).not.toHaveBeenCalled();
+      expect(stop).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+      expect(server.status.state).toBe('running');
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        expect.stringContaining('OpenCode background maintenance failed:')
+      );
+    }
+  );
+
   it('restarts a managed idle server when the installed CLI is newer', async () => {
     const server = new OpenCodeServer(4096, false);
     const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
