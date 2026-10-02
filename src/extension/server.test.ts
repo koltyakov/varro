@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These server integration tests deliberately model malformed health data, partial child processes, and private lifecycle state. */
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { EventEmitter } from 'events';
+import { stat } from 'fs/promises';
 import type * as vscode from 'vscode';
 import type * as FsModule from 'fs';
 import type * as FsPromisesModule from 'fs/promises';
@@ -89,6 +90,12 @@ vi.mock('fs/promises', async () => {
     ...actual,
     mkdir: mkdirMock,
     writeFile: writeFileMock,
+    stat: vi.fn((...args: Parameters<typeof actual.stat>) => {
+      if (typeof args[0] === 'string' && args[0].startsWith('\\\\mac\\')) {
+        return Promise.reject(new Error("UNC host 'mac' access is not allowed"));
+      }
+      return actual.stat(...args);
+    }),
   };
 });
 
@@ -3847,6 +3854,7 @@ describe('OpenCodeServer restart blockers', () => {
           options?: { directory?: string }
         ) => {
           if (options?.directory === directory) throw new Error('500 Internal Server Error');
+          if (path === '/api/debug/location') return [];
           if (path.startsWith('/experimental/session')) return [{ id: 'old-session', directory }];
           if (path === '/session/status')
             return state === 'busy' ? { 'old-session': { type: 'busy' } } : {};
@@ -3880,6 +3888,7 @@ describe('OpenCodeServer restart blockers', () => {
       async (_method: string, path: string, _body?: unknown, options?: { directory?: string }) => {
         if (path.startsWith('/experimental/session'))
           return [{ id: 'session-1', directory: process.cwd() }];
+        if (path === '/api/debug/location') return [{ directory: process.cwd() }];
         if (path === '/session/status') return {};
         if (options?.directory) throw new Error('500 Internal Server Error');
         return [];
@@ -3892,6 +3901,131 @@ describe('OpenCodeServer restart blockers', () => {
     api.transport.request = request;
 
     await expect(server.readRestartBlockers()).rejects.toThrow('500 Internal Server Error');
+  });
+
+  it.each(['idle', 'busy', 'question', 'permission', 'observed'])(
+    'does not probe a historical UNC directory while its session is %s',
+    async (state) => {
+      const server = new OpenCodeServer(4096, true);
+      const directory = '\\\\mac\\Home\\repo';
+      const request = vi.fn(
+        async (
+          _method: string,
+          path: string,
+          _body?: unknown,
+          options?: { directory?: string }
+        ) => {
+          if (options?.directory) throw new Error("UNC host 'mac' access is not allowed");
+          if (path === '/api/debug/location') return [];
+          if (path.startsWith('/experimental/session')) return [{ id: 'old-session', directory }];
+          if (path === '/session/status')
+            return state === 'busy' ? { 'old-session': { type: 'busy' } } : {};
+          if (path === '/question')
+            return state === 'question' ? [{ sessionID: 'old-session' }] : [];
+          if (path === '/permission')
+            return state === 'permission' ? [{ sessionID: 'old-session' }] : [];
+          throw new Error(`Unexpected request: ${path}`);
+        }
+      );
+      const api = server as unknown as {
+        transport: {
+          apiVersion: number;
+          request: typeof request;
+          getPendingAttentionSessionIDs: () => string[];
+          getObservedSessionDirectories: () => Map<string, string>;
+        };
+      };
+      api.transport.apiVersion = 2;
+      api.transport.request = request;
+      api.transport.getPendingAttentionSessionIDs = () =>
+        state === 'observed' ? ['old-session'] : [];
+      api.transport.getObservedSessionDirectories = () => new Map([['old-session', directory]]);
+
+      await expect(server.readRestartBlockers()).resolves.toEqual({
+        totalSessionCount: state === 'idle' ? 0 : 1,
+        directories: state === 'idle' ? [] : [{ directory, sessionCount: 1 }],
+      });
+      expect(stat).not.toHaveBeenCalled();
+      expect(request.mock.calls.every((call) => !call[3]?.directory)).toBe(true);
+    }
+  );
+
+  it.each(['question', 'permission', 'shell'])(
+    'checks loaded UNC locations absent from history for pending %s work',
+    async (state) => {
+      const server = new OpenCodeServer(4096, true);
+      const directory = '\\\\mac\\Home\\repo';
+      const request = vi.fn(
+        async (
+          _method: string,
+          path: string,
+          _body?: unknown,
+          options?: { directory?: string }
+        ) => {
+          if (path === '/api/debug/location') return [{ directory }];
+          if (path.startsWith('/experimental/session')) return [];
+          const scoped = options?.directory === directory;
+          if (path === '/session/status')
+            return scoped && state === 'shell' ? { 'loaded-session': { type: 'busy' } } : {};
+          if (path === '/question')
+            return scoped && state === 'question' ? [{ sessionID: 'loaded-session' }] : [];
+          if (path === '/permission')
+            return scoped && state === 'permission' ? [{ sessionID: 'loaded-session' }] : [];
+          throw new Error(`Unexpected request: ${path}`);
+        }
+      );
+      const api = server as unknown as {
+        transport: { apiVersion: number; request: typeof request };
+      };
+      api.transport.apiVersion = 2;
+      api.transport.request = request;
+
+      await expect(server.readRestartBlockers()).resolves.toEqual({
+        totalSessionCount: 1,
+        directories: [{ directory, sessionCount: 1 }],
+      });
+      expect(stat).not.toHaveBeenCalled();
+      expect(request).toHaveBeenCalledWith('GET', '/question', undefined, { directory });
+      expect(request).toHaveBeenCalledWith('GET', '/permission', undefined, { directory });
+    }
+  );
+
+  it.each([{}, [null], [{ directory: '' }], [{ directory: 42 }]])(
+    'fails closed for a malformed loaded location list %j',
+    async (locations) => {
+      const server = new OpenCodeServer(4096, true);
+      const api = server as unknown as {
+        transport: { apiVersion: number; request: ReturnType<typeof vi.fn> };
+      };
+      api.transport.apiVersion = 2;
+      api.transport.request = vi.fn(async (_method: string, path: string) => {
+        if (path === '/api/debug/location') return locations;
+        return path === '/session/status' ? {} : [];
+      });
+
+      await expect(server.readRestartBlockers()).rejects.toThrow('invalid loaded location list');
+    }
+  );
+
+  it('fails closed when a loaded UNC location cannot be inspected', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const directory = '\\\\mac\\Home\\repo';
+    const api = server as unknown as {
+      transport: { apiVersion: number; request: ReturnType<typeof vi.fn> };
+    };
+    api.transport.apiVersion = 2;
+    api.transport.request = vi.fn(
+      async (_method: string, path: string, _body?: unknown, options?: { directory?: string }) => {
+        if (path === '/api/debug/location') return [{ directory }];
+        if (options?.directory) throw new Error("UNC host 'mac' access is not allowed");
+        return path === '/session/status' ? {} : [];
+      }
+    );
+
+    await expect(server.readRestartBlockers()).rejects.toThrow(
+      "UNC host 'mac' access is not allowed"
+    );
+    expect(stat).not.toHaveBeenCalled();
   });
 
   it('groups unique blocking sessions by normalized directory', async () => {

@@ -272,10 +272,14 @@ lease is missing. Recovery validates the marker's process identity before claimi
 the server.
 
 Restart preflight checks v2's process-global active sessions before inspecting
-location-scoped questions and permissions. It skips deleted historical directories
-that would fail location initialization. Running sessions and observed pending
-attention still block restart even when their directory has been deleted. Other
-inspection errors continue to block restart.
+questions, permissions, and shells in the server's loaded locations. Historical
+session directories are used only to label blockers, not for filesystem probes or
+location initialization, so deleted paths and unavailable UNC shares do not prevent
+an idle restart. Loaded locations are checked even when absent from session history
+or no longer accessible on disk. Running sessions and observed pending attention
+still block restart. Invalid location lists and failed loaded-location reads block
+restart rather than treating missing evidence as idle. V1 retains historical
+directory probing because its session status is location-scoped.
 
 ## Verification
 

@@ -2484,30 +2484,38 @@ export class OpenCodeServer extends EventEmitter {
       probeDirectories.set(directoryIdentity, directory);
     }
 
-    const directories = [...probeDirectories.values()];
-    const readDirectorySnapshot = async (directory: string) => {
+    if (this.transport.hasGlobalSessionStatus) {
+      // V2 attention and shells belong to loaded location services, not session
+      // history. Do not stat or initialize historical paths (including UNC shares).
+      // Global status and observed attention still cover their blocking sessions.
+      const locations = await this.transport.request(
+        'GET',
+        '/api/debug/location',
+        undefined,
+        signal ? { unscoped: true, signal } : { unscoped: true }
+      );
       signal?.throwIfAborted();
-      if (this.transport.hasGlobalSessionStatus) {
-        try {
-          await stat(directory);
-          signal?.throwIfAborted();
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-          // V2's global status above still catches running sessions in deleted
-          // directories. Opening their old locations just to check attention
-          // can fail with HTTP 500 and permanently prevent an idle restart.
-          return null;
-        }
+      if (!Array.isArray(locations)) {
+        throw new Error('OpenCode returned an invalid loaded location list');
       }
-      return readSnapshot(directory);
-    };
+      probeDirectories.clear();
+      for (const location of locations) {
+        const directory = asRecord(location)?.directory;
+        const identity =
+          typeof directory === 'string' ? normalizeWorkspaceIdentity(directory) : null;
+        if (typeof directory !== 'string' || !identity) {
+          throw new Error('OpenCode returned an invalid loaded location list');
+        }
+        probeDirectories.set(identity, directory);
+      }
+    }
+
+    const directories = [...probeDirectories.values()];
     for (let index = 0; index < directories.length; index += 8) {
       const snapshots = await Promise.all(
-        directories.slice(index, index + 8).map(readDirectorySnapshot)
+        directories.slice(index, index + 8).map((directory) => readSnapshot(directory))
       );
-      for (const snapshot of snapshots) {
-        if (snapshot) collectSnapshot(snapshot);
-      }
+      for (const snapshot of snapshots) collectSnapshot(snapshot);
     }
     for (const sessionID of this.transport.getPendingAttentionSessionIDs()) {
       blockingSessionIDs.add(sessionID);

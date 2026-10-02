@@ -139,8 +139,10 @@ preparation has a two-second budget per repair, with cancellation checks before 
 subsequent mutation. Stream-timeout reload verification has its own two-second read
 budget. Do not race an owned config write, ownership acquisition, reload, or restart
 against these optional deadlines. Keep global busy/attention checks fail-closed,
-including inaccessible Windows/UNC directories; a historical path error is not proof
-that a pending request is resolved or that restarting is safe.
+including inaccessible loaded Windows/UNC locations; a path error is not proof that
+a pending request is resolved or that restarting is safe. V2 restart preflight uses
+the server's loaded-location list rather than statting historical session paths.
+Global active status and observed attention remain blockers for historical paths.
 
 ## Recovery and security invariants
 
