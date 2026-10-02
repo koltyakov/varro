@@ -162,9 +162,10 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             stdio: 'ignore',
           });
           const deadline = Date.now() + 10000;
+          const healthPath = info.health.version === '2.0.5' ? '/api/status' : '/api/info';
           let ready = false;
           while (Date.now() < deadline) {
-            const response = await fetch(`${replacementUrl}/api/info`, {
+            const response = await fetch(`${replacementUrl}${healthPath}`, {
               headers: {
                 Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}`,
               },

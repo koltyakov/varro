@@ -45,6 +45,26 @@ While iterating, run the narrowest relevant command for the area you changed. Us
 - `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`
 - `npm run test:e2e -- e2e/tests/layout.spec.ts`
 
+### Cached test runs
+
+`npm run test:affected` runs unit and Node script tests whose successful cached result no longer
+matches the test, its transitive imports, shared configuration, setup, or lockfile. Results live in
+`tmp/test-cache/` and are separate for each suite, OS, architecture, Node version, and test environment.
+The first run executes everything. Failed or interrupted batches are not cached, and external
+integration tests always rerun. Tests with filesystem reads, subprocesses, unresolved imports, or
+computed imports conservatively invalidate against the whole checkout.
+
+CI restores these results between runs for the Windows unit tests and the Linux and Windows script
+tests. Browser script tests also use the cache, separately from the E2E runs. Linux uses
+`npm run test:coverage:cached`, which reuses a successful full-suite coverage result only when the
+whole checkout is unchanged. Otherwise it runs full coverage and enforces the existing thresholds;
+partial coverage is never treated as a full-suite result. Cache hits do not regenerate coverage reports.
+E2E, compatibility, and VS Code smoke tests remain uncached. Lint, typecheck, builds, and packaging
+still run normally.
+
+Use `npm test`, `npm run test:scripts`, `npm run test:scripts:browser`, or `npm run test:coverage`
+to force their full suites without consulting or updating the cache.
+
 The Playwright suite is browser-level webview E2E coverage. It runs the real Solid webview in Chromium through `e2e/harness/index.html`, while the harness mocks the VS Code message bridge and the OpenCode/Varro request and event boundary. It does not launch VS Code, an extension host, or a real OpenCode CLI/server.
 
 Local E2E runs use half the available CPU cores, capped at four workers to leave room for frame-sensitive browser checks. Override this with `npm run test:e2e -- --workers=2` on a busy machine. Playback and raster diagnostics default to one worker. CI splits the suite across two jobs with two workers each.

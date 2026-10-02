@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 86 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.33`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.20`, with 14 platform- or family-specific skips. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 101 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.34`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.21`, with 21 platform- or family-specific skips and two failures on v2.0.5 described below. Both latest releases passed every applicable check. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,48 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.21 and 1.18.34 compatibility review
+
+Reviewed v2.0.20 to v2.0.21, `8d8a7bc844` through `dd2af0e5fc`, and
+v1.18.33 to v1.18.34, `90e65205f6` through `82ea3a3a63`.
+V2 adds an optional cancellation message to the form DELETE query and cancelled
+form state. Omitting it retains the existing question-dismissal behavior.
+HTTP routes, SSE names and payloads, session/message records, permissions,
+configuration, and managed `serve`/upgrade behavior consumed by Varro remain
+compatible. V1's SDK and HTTP contracts are unchanged. No adapter changes are
+required.
+
+Both families add namespaced session identity headers to provider requests.
+V2 also fixes ancestor-instruction duplication, OpenRouter cache breakpoints,
+Cloudflare AI Gateway native routing, context-overflow classification, and
+forward-compatible GPT/GLM capability defaults. Browser tools now require an
+attached desktop browser; plugin session removal and non-interactive question
+feedback do not change Varro's HTTP integration. V1 adds macOS CLI signing and
+fixes Windows plugin-name display. ACP, browser comments, read grouping,
+session links, Console, stats, and styling changes require no Varro adaptation.
+
+The tested v2 client is `2.0.21`; the tested v1 SDK is `1.18.34`.
+Support floors remain v2 `2.0.5` and v1 `1.16.0`.
+
+The replacement-server startup fixture now probes `/api/status` on v2.0.5;
+its previous `/api/info` readiness check could never succeed on that release.
+Ordinary production health fallback already supports both endpoints. The rerun
+exposed a separate v2.0.5 ownership-recovery failure: the replacement attaches as
+`unmanaged` instead of `current-host`. Credential-backed replacement recovery
+still probes only `/api/info`; supporting `/api/status` there needs a targeted
+follow-up that preserves its identity and authentication checks.
+
+V2.0.5 also failed the stalled-turn steering test because three user messages
+entered the transcript instead of two after steering resumed. Diagnose its inbox
+admission/resume behavior before changing the adapter. Both cases pass on
+v2.0.21. The floor remains unchanged, but this run is not a full v2.0.5
+compatibility pass.
+
+The v1 Docker matrix passed all 519 required checks across 14 releases, including
+43/43 on 1.18.34. Of 78 advisory checks, 76 passed; 1.16.0 and the below-floor
+1.15.13 probe retain the MCP pagination caveat. The regenerated verification
+summary and all five focused compatibility unit tests passed.
 
 ### 2.0.20 compatibility review
 

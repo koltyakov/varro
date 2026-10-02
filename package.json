@@ -47,8 +47,11 @@
     "fmt": "oxfmt src/",
     "fmt:check": "oxfmt --check src/",
     "test": "node scripts/run-tests.mjs",
+    "test:affected": "node scripts/run-cached-tests.mjs",
     "test:scripts": "node --test scripts/*.test.mjs",
+    "test:scripts:cached": "node scripts/run-cached-tests.mjs --suite=scripts",
     "test:scripts:browser": "node --test scripts/browser/*.test.mjs",
+    "test:scripts:browser:cached": "node scripts/run-cached-tests.mjs --suite=browser",
     "test:compatibility": "node scripts/opencode-compatibility/run.mjs --check-floor --report artifacts/opencode-compatibility.json --summary scripts/opencode-compatibility/verified.json",
     "test:compatibility:adapters": "node scripts/opencode-compatibility/run-adapters.mjs",
     "test:compatibility:ui": "npm run build && node scripts/opencode-compatibility/run-ui.mjs",
@@ -65,6 +68,7 @@
     "ai:streaming": "node scripts/ai-streaming.mjs",
     "test:ai-runner": "npm run build && node scripts/ai-streaming-smoke.mjs",
     "test:coverage": "vitest run --coverage",
+    "test:coverage:cached": "node scripts/run-cached-tests.mjs --suite=coverage",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scripts.json",
     "typecheck:suggestions": "node scripts/check-ts-suggestions.mjs",
     "package:vsix": "node scripts/package-vsix.mjs",
@@ -73,8 +77,8 @@
     "artifacts:prune": "node scripts/prune-artifacts.mjs"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.18.33",
-    "@opencode/client": "^2.0.20",
+    "@opencode-ai/sdk": "^1.18.34",
+    "@opencode/client": "^2.0.21",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.16",
     "highlight.js": "11.12.0",
@@ -87,7 +91,7 @@
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/css.escape": "1.5.2",
-    "@types/node": "26.6.3",
+    "@types/node": "26.6.4",
     "@types/vscode": "1.120.0",
     "@vitest/coverage-v8": "5.0.3",
     "@vscode/vsce": "4.0.0",
@@ -103,7 +107,7 @@
     "rolldown": "1.2.12",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.3.1",
+    "vite": "8.3.2",
     "vite-plugin-solid": "2.11.14",
     "vitest": "5.0.3",
     "ws": "8.22.0"
@@ -387,8 +391,17 @@
       "properties": {
         "varro.server.port": {
           "oneOf": [
-            { "type": "string", "enum": ["auto"] },
-            { "type": "integer", "minimum": 1, "maximum": 65535 }
+            {
+              "type": "string",
+              "enum": [
+                "auto"
+              ]
+            },
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
           ],
           "default": "auto",
           "markdownDescription": "Automatically select and remember a local server port, or set an exact port from 1 through 65535. Existing verified servers are reused without restarting. Explicit ports never fall back to another port. Reload the VS Code window after changing this setting."
