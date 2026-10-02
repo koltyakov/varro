@@ -891,16 +891,24 @@ export class OpenCodeServer extends EventEmitter {
     }
   }
 
-  private async hasMissingRuntimeAskAgent(): Promise<boolean> {
+  private async hasMissingRuntimeAskAgent(signal?: AbortSignal): Promise<boolean> {
     if (
       this.isAttachOnly ||
       !this.processManager.needsRuntimeConfigRecovery ||
       !(await this.processManager.shouldRestoreRuntimeAskAgent())
     ) {
+      signal?.throwIfAborted();
       this.runtimeAskRecoveryPending = false;
       return false;
     }
-    const agents = await this.transport.request('GET', '/agent');
+    signal?.throwIfAborted();
+    const agents = await this.transport.request(
+      'GET',
+      '/agent',
+      undefined,
+      signal ? { signal } : undefined
+    );
+    signal?.throwIfAborted();
     if (
       !Array.isArray(agents) ||
       agents.some((value) => {
@@ -1997,7 +2005,6 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async runManagedAskAgentReconciliation() {
-    if (this.existingServerPreparationOperation) await this.existingServerPreparationOperation;
     if (this.isDisposing || this.isTerminalCliUpgradeActive() || this._status.state !== 'running')
       return;
     const generation = this.disposeGeneration;
@@ -2008,8 +2015,20 @@ export class OpenCodeServer extends EventEmitter {
       generation === this.disposeGeneration &&
       url === this.url &&
       this._status.state === 'running';
-    if (!(await this.hasMissingRuntimeAskAgent()) || !current()) return;
-    if ((await this.readRestartBlockers()).totalSessionCount > 0 || !current()) return;
+    const prepared = await withStartupDeadline(
+      async (signal) => {
+        if (this.existingServerPreparationOperation) await this.existingServerPreparationOperation;
+        signal.throwIfAborted();
+        if (!current() || !(await this.hasMissingRuntimeAskAgent(signal)) || !current())
+          return false;
+        const blockers = await this.readRestartBlockers(signal);
+        signal.throwIfAborted();
+        return current() && blockers.totalSessionCount === 0;
+      },
+      2000,
+      'OpenCode Ask agent preparation'
+    );
+    if (!prepared || !current()) return;
     if (!(await this.processManager.refreshManagedServerOwnership()) || !current()) return;
     // runRestart reserves the lifecycle, drains requests, rechecks global work
     // and acquires verified ownership before stopping. Never force this repair.
@@ -2021,7 +2040,6 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async runManagedStreamTimeoutReconciliation() {
-    if (this.existingServerPreparationOperation) await this.existingServerPreparationOperation;
     if (
       this.isAttachOnly ||
       this.isDisposing ||
@@ -2029,37 +2047,62 @@ export class OpenCodeServer extends EventEmitter {
       this._status.state !== 'running'
     )
       return;
-    if (!this.managedProcess || this.transport.version !== 2) return;
+    if (this.transport.version !== 2) return;
     const generation = this.disposeGeneration;
     const url = this.url;
     const current = () =>
       !this.isDisposing &&
+      !this.isTerminalCliUpgradeActive() &&
       generation === this.disposeGeneration &&
       url === this.url &&
       this._status.state === 'running';
-    const health = await this.readHealthInfo();
-    if (
-      !current() ||
-      !health.healthy ||
-      !health.version ||
-      compareVersions(health.version, '2.0.20') < 0
-    )
-      return;
-    const directory = this.getWorkspaceCwd();
-    const query = directory ? `?location[directory]=${encodeURIComponent(directory)}` : '';
-    const provider = asRecord(
-      asRecord(await this.transport.request('GET', `/api/provider/openai${query}`))?.data
+    // This best-effort repair also runs before sends. Only its read-only
+    // preparation may time out; never race an owned config write or reload.
+    const version = await withStartupDeadline(
+      async (signal) => {
+        if (this.existingServerPreparationOperation) await this.existingServerPreparationOperation;
+        signal.throwIfAborted();
+        if (!current() || !this.managedProcess || this.isAttachOnly) return undefined;
+        const health = await this.readHealthInfo(signal);
+        signal.throwIfAborted();
+        if (
+          !current() ||
+          !health.healthy ||
+          !health.version ||
+          compareVersions(health.version, '2.0.20') < 0
+        )
+          return undefined;
+        const directory = this.getWorkspaceCwd();
+        const query = directory ? `?location[directory]=${encodeURIComponent(directory)}` : '';
+        const provider = asRecord(
+          asRecord(
+            await this.transport.request('GET', `/api/provider/openai${query}`, undefined, {
+              signal,
+            })
+          )?.data
+        );
+        signal.throwIfAborted();
+        const settings = asRecord(provider?.settings);
+        if (!settings)
+          throw new Error('Could not inspect the effective OpenAI stream timeout policy');
+        if ('chunkTimeout' in settings || 'timeout' in settings) return undefined;
+        const blockers = await this.readRestartBlockers(signal);
+        signal.throwIfAborted();
+        return current() && blockers.totalSessionCount === 0 ? health.version : undefined;
+      },
+      2000,
+      'OpenCode stream timeout preparation'
     );
-    const settings = asRecord(provider?.settings);
-    if (!settings) throw new Error('Could not inspect the effective OpenAI stream timeout policy');
-    if ('chunkTimeout' in settings || 'timeout' in settings) return;
-    if (!current() || (await this.readRestartBlockers()).totalSessionCount > 0 || !current())
-      return;
-    if (!(await this.processManager.reconcileInjectedStreamTimeout(health.version))) return;
+    if (!version || !current()) return;
+    if (!(await this.processManager.reconcileInjectedStreamTimeout(version))) return;
     // Reload cancels pending attention, so it must never be used as a way to
     // unstick an active execution. Recheck all workspaces and ownership first.
-    if (!current() || (await this.readRestartBlockers()).totalSessionCount > 0 || !current())
-      return;
+    const blockers = await withStartupDeadline(
+      (signal) => this.readRestartBlockers(signal),
+      2000,
+      'OpenCode stream timeout reload verification'
+    );
+    if (!current() || blockers.totalSessionCount > 0) return;
     if (!(await this.processManager.refreshManagedServerOwnership()) || !current()) return;
     await this.transport.request('POST', '/global/dispose');
     logger.info(
@@ -2338,7 +2381,7 @@ export class OpenCodeServer extends EventEmitter {
     }
   }
 
-  async readRestartBlockers(): Promise<RestartBlockedState> {
+  async readRestartBlockers(signal?: AbortSignal): Promise<RestartBlockedState> {
     // Use the transport directly: restart preflight runs after the lifecycle
     // has reserved the restart operation, while public request() intentionally
     // waits behind that operation.
@@ -2346,12 +2389,15 @@ export class OpenCodeServer extends EventEmitter {
     const blockingSessionIDs = new Set<string>();
     const directoriesBySessionID = new Map(observedSessionDirectories);
     const readSnapshot = async (directory?: string) => {
-      const options = directory ? { directory } : { unscoped: true };
+      signal?.throwIfAborted();
+      const scope = directory ? { directory } : { unscoped: true };
+      const options = signal ? { ...scope, signal } : scope;
       const [statuses, questions, permissions] = await Promise.all([
         this.transport.request('GET', '/session/status', undefined, options),
         this.transport.request('GET', '/question', undefined, options),
         this.transport.request('GET', '/permission', undefined, options),
       ]);
+      signal?.throwIfAborted();
       return { directory, statuses, questions, permissions };
     };
     const collectSnapshot = (snapshot: Awaited<ReturnType<typeof readSnapshot>>) => {
@@ -2408,8 +2454,9 @@ export class OpenCodeServer extends EventEmitter {
       'GET',
       `/experimental/session?limit=${FULL_SESSION_LIST_LIMIT}`,
       undefined,
-      { unscoped: true }
+      signal ? { unscoped: true, signal } : { unscoped: true }
     );
+    signal?.throwIfAborted();
     if (!Array.isArray(sessionInventory)) {
       throw new Error('OpenCode returned an invalid global session list');
     }
@@ -2439,9 +2486,11 @@ export class OpenCodeServer extends EventEmitter {
 
     const directories = [...probeDirectories.values()];
     const readDirectorySnapshot = async (directory: string) => {
+      signal?.throwIfAborted();
       if (this.transport.hasGlobalSessionStatus) {
         try {
           await stat(directory);
+          signal?.throwIfAborted();
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
           // V2's global status above still catches running sessions in deleted

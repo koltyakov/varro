@@ -124,6 +124,24 @@ Native todo hydration has a one-second cancellable read budget, with message-der
 todos as its fallback. Selection resets and native events invalidate older native reads;
 a late success or failure cannot overwrite newer todo state or prolong transcript hydration.
 
+Optional V2 generation timing has a two-second budget covering annotation reads,
+request admission, and durable-log retrieval. Queued annotation writes do not gate
+history projection. Caller cancellation still rejects the history request, and an
+expired timing read cannot apply a late durable-log result.
+
+Provider quota refresh has a twelve-second whole-operation budget, including provider
+catalogs and credential discovery. Expired reads abandon only their own cached snapshot
+so a later refresh can retry; late adapter results cannot replace the returned fallback.
+Codex HTTP calls combine that cancellation with their existing request deadlines.
+
+Ask-agent and stream-timeout maintenance can run before sends. Their read-only
+preparation has a two-second budget per repair, with cancellation checks before any
+subsequent mutation. Stream-timeout reload verification has its own two-second read
+budget. Do not race an owned config write, ownership acquisition, reload, or restart
+against these optional deadlines. Keep global busy/attention checks fail-closed,
+including inaccessible Windows/UNC directories; a historical path error is not proof
+that a pending request is resolved or that restarting is safe.
+
 ## Recovery and security invariants
 
 - Each health probe is bounded. A probe timeout/network/parsing failure may try the

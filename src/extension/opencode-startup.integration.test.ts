@@ -7,6 +7,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { asRecord, isString } from '../shared/type-utils';
 import { OpenCodeServer } from './server';
+import { diagnosticTimeline } from './diagnostics';
 
 const editor = vi.hoisted(() => ({ directory: '' }));
 const logs = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
@@ -43,6 +44,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
       )
         context.skip();
       const binary = process.env.VARRO_OPENCODE_TEST_BINARY!;
+      diagnosticTimeline.clear();
       const parent = resolve('artifacts/ai-test-data');
       await mkdir(parent, { recursive: true });
       const root = await mkdtemp(join(parent, 'startup-'));
@@ -93,6 +95,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
       let server = new OpenCodeServer(address.port, true, command, false, undefined, leasePath);
       let attached: OpenCodeServer | undefined;
       let replacement: ChildProcess | undefined;
+      let phase = 'initial startup';
       try {
         expect(await server.start()).toBe(url);
         const info = await server.readServerInfo();
@@ -128,6 +131,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
           expect(output).not.toContain(String(lease?.password));
         }
         attached = new OpenCodeServer(address.port, false, binary, false, undefined, leasePath);
+        phase = 'second-window attachment';
         expect(await attached.start()).toBe(url);
         const attachedInfo = await attached.readServerInfo();
         expect(attachedInfo.health.healthy).toBe(true);
@@ -145,6 +149,15 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
           // after the CLI replaces the service. Preserve that evidence verbatim.
           await writeFile(leasePath, JSON.stringify(lease), { mode: 0o600 });
           await writeFile(`${leasePath}.managed`, JSON.stringify(lease), { mode: 0o600 });
+          // This scenario verifies registration recovery without replacing the
+          // recovered listener. A configured Ask agent avoids runtime-config
+          // repair choosing a new automatic port outside the verified test URL.
+          await writeFile(
+            join(editor.directory, 'opencode.json'),
+            JSON.stringify({
+              agents: { ask: { mode: 'primary', system: 'Fixture Ask agent' } },
+            })
+          );
           const replacementPort = await new Promise<number>((done, reject) => {
             listener.listen(0, '127.0.0.1', () => {
               const next = listener.address();
@@ -187,6 +200,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             undefined,
             join(root, 'varro-opencode-server-4096.json')
           );
+          phase = 'replacement recovery';
           expect(await attached.start()).toBe(replacementUrl);
           const replacementInfo = await attached.readServerInfo();
           expect(replacementInfo.ownership).toBe('current-host');
@@ -200,6 +214,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
           expect(recovered?.configPath).toBeUndefined();
           await attached.disconnect();
           attached = new OpenCodeServer('auto', true, binary, false, undefined, leasePath);
+          phase = 'recovered replacement reuse';
           expect(await attached.start()).toBe(replacementUrl);
           expect((await attached.readServerInfo()).ownership).toBe('current-host');
           return;
@@ -227,6 +242,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
           attached = undefined;
         }
         await server.disconnect();
+        phase = 'inherited attachment';
         const inheritedLease = await readFile(leasePath, 'utf8');
         attached = new OpenCodeServer('auto', false, binary, false, undefined, leasePath);
         expect(await attached.start()).toBe(url);
@@ -235,9 +251,28 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         await attached.disconnect();
         attached = undefined;
         server = new OpenCodeServer(address.port, true, binary, false, undefined, leasePath);
+        phase = 'managed restart';
         expect(await server.start()).toBe(url);
         expect(await server.restart()).toBe(url);
         expect((await server.readServerInfo()).health.healthy).toBe(true);
+      } catch (error) {
+        await writeFile(
+          join(root, 'failure.json'),
+          JSON.stringify(
+            {
+              mode,
+              phase,
+              message: error instanceof Error ? error.message : String(error),
+              serverStatus: server.status,
+              attachedStatus: attached?.status,
+            },
+            null,
+            2
+          )
+        );
+        throw new Error(`Isolated ${mode} failed during ${phase}; evidence: ${root}`, {
+          cause: error,
+        });
       } finally {
         await attached?.dispose();
         await server.dispose();
@@ -247,6 +282,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
           await exited;
         }
         vi.unstubAllEnvs();
+        await writeFile(join(root, 'startup-diagnostics.md'), diagnosticTimeline.export(''));
       }
     }
   );

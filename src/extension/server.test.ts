@@ -111,6 +111,7 @@ vi.mock('./process-inspection', async (importOriginal) => ({
 }));
 
 let serverOwnershipPathSequence = 0;
+const fixtureServers: RealOpenCodeServer[] = [];
 class OpenCodeServer extends RealOpenCodeServer {
   constructor(
     port: number | 'auto',
@@ -135,6 +136,7 @@ class OpenCodeServer extends RealOpenCodeServer {
     const { processManager } = this as unknown as { processManager: OpenCodeProcess };
     vi.spyOn(processManager, 'refreshStartupRegistration').mockResolvedValue(false);
     vi.spyOn(processManager, 'acquireManagedServerLaunchClaim').mockResolvedValue(async () => {});
+    fixtureServers.push(this);
   }
 }
 
@@ -358,6 +360,31 @@ describe('managed runtime Ask recovery', () => {
     expect(wire).toHaveBeenLastCalledWith('GET', '/agent', undefined, undefined);
   });
 
+  it('lets a send continue after stalled Ask preparation without a late restart', async () => {
+    const { server, wire, idle, restart, stop } = fixture();
+    const blockers = deferred<{ totalSessionCount: number; directories: [] }>();
+    idle.mockReturnValue(blockers.promise);
+    let sent = false;
+    const request = server
+      .request('POST', '/session/ses_fixture/prompt_async', { parts: [] })
+      .then(() => {
+        sent = true;
+      });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(sent).toBe(true);
+    await request;
+    blockers.resolve({ totalSessionCount: 0, directories: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(restart).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    expect(wire).toHaveBeenLastCalledWith(
+      'POST',
+      '/session/ses_fixture/prompt_async',
+      { parts: [] },
+      undefined
+    );
+  });
+
   it('repairs a registered replacement through the actual startup branch before starting SSE', async () => {
     const { server, state, launch, stop } = fixture();
     state._status = { state: 'stopped' };
@@ -526,6 +553,44 @@ describe('reused managed stream timeout', () => {
   it('applies protection before the first send on a reused connection', async () => {
     const { server, wire } = fixture();
     await server.request('POST', '/session/ses_fixture/prompt_async', { parts: [] });
+    expect(wire.mock.calls.filter(([method]) => method === 'POST').map(([, path]) => path)).toEqual(
+      ['/global/dispose', '/session/ses_fixture/prompt_async']
+    );
+  });
+
+  it('does not hold a send behind stalled optional maintenance or reload after its deadline', async () => {
+    vi.useFakeTimers();
+    const { server, wire, reconcile, idle } = fixture();
+    const blockers = deferred<{ totalSessionCount: number; directories: [] }>();
+    idle.mockReturnValue(blockers.promise);
+    let sent = false;
+    const request = server
+      .request('POST', '/session/ses_fixture/prompt_async', { parts: [] })
+      .then(() => {
+        sent = true;
+      });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(sent).toBe(true);
+    await request;
+    expect(reconcile).not.toHaveBeenCalled();
+    blockers.resolve({ totalSessionCount: 0, directories: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(wire.mock.calls.filter(([method]) => method === 'POST').map(([, path]) => path)).toEqual(
+      ['/session/ses_fixture/prompt_async']
+    );
+  });
+
+  it('waits for an owned timeout-policy write before dispatching a send', async () => {
+    const { server, wire, reconcile } = fixture();
+    const write = deferred<boolean>();
+    reconcile.mockReturnValue(write.promise);
+    const request = server.request('POST', '/session/ses_fixture/prompt_async', { parts: [] });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(wire.mock.calls.some(([method]) => method === 'POST')).toBe(false);
+    write.resolve(true);
+    await request;
     expect(wire.mock.calls.filter(([method]) => method === 'POST').map(([, path]) => path)).toEqual(
       ['/global/dispose', '/session/ses_fixture/prompt_async']
     );
@@ -797,6 +862,11 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  // Do not let draining fake timers start a previous fixture's maintenance
+  // and CLI probes under the next test's spawn mock.
+  for (const server of fixtureServers.splice(0)) {
+    (server as unknown as { stopMaintenanceLoop(): void }).stopMaintenanceLoop();
+  }
   await vi.runOnlyPendingTimersAsync();
   await flushMicrotasks();
   vi.useRealTimers();

@@ -23,6 +23,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import type { TestContext } from 'vitest';
 import type { ManagedServerOwnershipLease } from '../shared/server-ownership';
 import { asRecord } from '../shared/type-utils';
+import { getPathVariableKey } from './util/server-path';
 import type * as ServerUtils from './server-utils';
 import { Service } from '@opencode/client/service';
 import * as processInspection from './process-inspection';
@@ -5000,7 +5001,8 @@ describe('OpenCodeProcess install resolution', () => {
     const directory = await mkdtemp(join(tmpdir(), 'varro-opencode-path-'));
     const binary = join(directory, 'opencode');
     await writeFile(binary, '#!/bin/sh\n', 'utf-8');
-    process.env.PATH = directory;
+    // Windows worker environments are case-sensitive, unlike the native host.
+    vi.stubEnv(getPathVariableKey(), directory);
     try {
       const manager = new OpenCodeProcess(4096, true, 'opencode');
 

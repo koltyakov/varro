@@ -82,7 +82,6 @@ export class OpenCodeV2GenerationTiming {
     const through = Math.max(...candidates.map((message) => message.time.completed ?? 0));
     const state = this.state(sessionID);
     await this.loadStored(sessionID, state);
-    await this.writes.get(sessionID);
     signal?.throwIfAborted();
     if (
       candidates.every((message) => {
@@ -153,7 +152,6 @@ export class OpenCodeV2GenerationTiming {
     this.loads.set(sessionID, load);
     try {
       await load;
-      await this.writes.get(sessionID);
       signal?.throwIfAborted();
     } finally {
       if (this.loads.get(sessionID) === load) this.loads.delete(sessionID);

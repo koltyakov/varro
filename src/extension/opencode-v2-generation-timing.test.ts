@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop/no-module-mocking -- The adapter logger requires VS Code; wire replies are deterministic fixtures. */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionMessageAssistant, SessionTextStarted } from '@opencode/client';
 import { OpenCodeV2GenerationTiming } from './opencode-v2-generation-timing';
 import { OpenCodeV2Adapter } from './opencode-v2-adapter';
@@ -9,6 +9,8 @@ import { asRecord } from '../shared/type-utils';
 import type { UnknownRecord } from '../shared/type-utils';
 
 vi.mock('./logger', () => ({ logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
+
+afterEach(() => vi.useRealTimers());
 
 const message: SessionMessageAssistant = {
   id: 'msg_one',
@@ -61,6 +63,24 @@ function log(events = boundaries, synced = true) {
 }
 
 describe('V2 generation boundaries', () => {
+  it('restores live timing without waiting for an optional annotation write', async () => {
+    const persistence = {
+      read: vi.fn(async () => ({})),
+      update: vi.fn(() => new Promise<void>(() => {})),
+    };
+    const timing = new OpenCodeV2GenerationTiming(persistence);
+    for (const item of boundaries)
+      timing.observe(item.type, item.data, item.created, item.durable.seq);
+    let restored = false;
+    void timing
+      .restore('ses_one', [message], async () => log())
+      .then(() => {
+        restored = true;
+      });
+    await vi.waitFor(() => expect(restored).toBe(true), { timeout: 300 });
+    expect(timing.time('ses_one', 'msg_one:text:0', 'Hello')).toEqual({ start: 3000, end: 5000 });
+  });
+
   it('persists validated boundaries without response text and restores them after reload', async () => {
     let stored: UnknownRecord = {};
     const persistence = {
@@ -196,6 +216,72 @@ describe('V2 generation boundaries', () => {
 });
 
 describe('V2 adapter generation timing', () => {
+  it('does not swallow caller cancellation during an optional annotation read', async () => {
+    vi.useFakeTimers();
+    const persistence = {
+      read: vi.fn(() => new Promise<UnknownRecord>(() => {})),
+      update: vi.fn(async () => {}),
+    };
+    const adapter = new OpenCodeV2Adapter(
+      vi.fn(async () => ({ data: message })),
+      undefined,
+      undefined,
+      new OpenCodeV2GenerationTiming(persistence)
+    );
+    const controller = new AbortController();
+    const request = adapter.request('GET', '/session/ses_one/message/msg_one', undefined, {
+      signal: controller.signal,
+    });
+    const result = expect(request).rejects.toThrow('History cancelled');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(persistence.read).toHaveBeenCalledOnce();
+    controller.abort(new Error('History cancelled'));
+    await result;
+  });
+
+  it('ignores a late timing log after the optional deadline', async () => {
+    vi.useFakeTimers();
+    let resolveLog: ((value: string) => void) | undefined;
+    const timingLog = new Promise<string>((resolve) => {
+      resolveLog = resolve;
+    });
+    const timing = new OpenCodeV2GenerationTiming();
+    const wire = vi.fn(async (_method: string, path: string) =>
+      path.includes('/log?') ? timingLog : { data: message }
+    );
+    const adapter = new OpenCodeV2Adapter(wire, undefined, undefined, timing);
+    const request = adapter.request('GET', '/session/ses_one/message/msg_one', undefined);
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(request).resolves.toMatchObject({ info: { id: 'msg_one' } });
+    resolveLog?.(log());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(timing.time('ses_one', 'msg_one:text:0', 'Hello')).toBeUndefined();
+  });
+
+  it('bounds optional annotation reads without delaying or changing transcript identity', async () => {
+    vi.useFakeTimers();
+    const persistence = {
+      read: vi.fn(() => new Promise<UnknownRecord>(() => {})),
+      update: vi.fn(async () => {}),
+    };
+    const timing = new OpenCodeV2GenerationTiming(persistence);
+    const wire = vi.fn(async () => ({ data: message }));
+    const adapter = new OpenCodeV2Adapter(wire, undefined, undefined, timing);
+    let result: unknown;
+    const request = adapter
+      .request('GET', '/session/ses_one/message/msg_one', undefined)
+      .then((value) => {
+        result = value;
+      });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(result).toMatchObject({
+      info: { id: 'msg_one' },
+      parts: [{ text: 'Think' }, { text: 'Hello' }],
+    });
+    await request;
+    expect(wire).toHaveBeenCalledOnce();
+  });
+
   it('restores timing on cold page and direct message reads without changing identity or cursor', async () => {
     const wire = vi.fn(async (_method: string, path: string) => {
       if (path.includes('/log?')) return log();

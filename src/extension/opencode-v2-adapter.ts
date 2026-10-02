@@ -21,6 +21,7 @@ import type {
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, isString, type UnknownRecord } from '../shared/type-utils';
+import { withStartupDeadline } from '../shared/startup';
 import type {
   ProviderAuthMethod,
   ProviderAuthPromptCondition,
@@ -31,6 +32,7 @@ import { OpenCodeResponseTooLargeError } from './opencode-response-error';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { OpenCodeV2BackgroundWork } from './opencode-v2-background-work';
 import { OpenCodeV2GenerationTiming } from './opencode-v2-generation-timing';
+import { logger } from './logger';
 import {
   projectV2Agent,
   projectV2Form,
@@ -573,31 +575,46 @@ export class OpenCodeV2Adapter {
       const sessionID = decodeURIComponent(sessionRoute[1]!);
       const endpoint = `/api/session/${encodeURIComponent(sessionID)}`;
       const action = sessionRoute[2] ?? '';
-      const restoreGenerationTiming = (messages: readonly SessionMessageInfo[]) =>
-        this.generationTiming.restore(
-          sessionID,
-          messages,
-          async (after) => {
-            const log = await this.wire(
-              'GET',
-              `/api/experimental/session/${encodeURIComponent(sessionID)}/log?follow=false&after=${after}`,
-              undefined,
-              {
-                unscoped: true,
-                maxResponseBytes: Math.min(
-                  options.maxResponseBytes ?? 2 * 1024 * 1024,
-                  2 * 1024 * 1024
-                ),
-                signal: options.signal
-                  ? AbortSignal.any([options.signal, AbortSignal.timeout(2000)])
-                  : AbortSignal.timeout(2000),
-              }
-            );
-            if (!isString(log)) throw new Error('Invalid OpenCode generation timing log response');
-            return log;
-          },
-          options.signal
-        );
+      const restoreGenerationTiming = async (messages: readonly SessionMessageInfo[]) => {
+        try {
+          // Timing metadata is optional. Bound annotation reads and admission as
+          // well as the log fetch; never wait for its queued disk writes to paint history.
+          await withStartupDeadline(
+            (signal) =>
+              this.generationTiming.restore(
+                sessionID,
+                messages,
+                async (after) => {
+                  const log = await this.wire(
+                    'GET',
+                    `/api/experimental/session/${encodeURIComponent(sessionID)}/log?follow=false&after=${after}`,
+                    undefined,
+                    {
+                      unscoped: true,
+                      maxResponseBytes: Math.min(
+                        options.maxResponseBytes ?? 2 * 1024 * 1024,
+                        2 * 1024 * 1024
+                      ),
+                      signal,
+                    }
+                  );
+                  if (!isString(log))
+                    throw new Error('Invalid OpenCode generation timing log response');
+                  return log;
+                },
+                signal
+              ),
+            2000,
+            'Generation timing lookup',
+            options.signal
+          );
+        } catch (error) {
+          options.signal?.throwIfAborted();
+          logger.warn(
+            `Could not restore optional generation timing: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      };
       if (!action) {
         if (method === 'GET') return this.session(await data<SessionInfo>('GET', endpoint));
         if (method === 'DELETE') {
