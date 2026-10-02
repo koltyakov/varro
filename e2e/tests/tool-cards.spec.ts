@@ -50,6 +50,104 @@ test('keeps compact tool card headers on the same geometry contract', async ({ p
   expect(iconSizes).toEqual(Array.from({ length: 7 }, () => ({ width: 12, height: 12 })));
 });
 
+for (const width of [454, 800]) {
+  test(`centers tool durations and diff counts across font metrics at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
+    await expect(page.locator('.file-edit-diff-stats')).toHaveCount(4);
+    await page.evaluate(() => {
+      const harness = (
+        window as typeof window & {
+          __varroE2E: {
+            getSessionMessages(sessionId: string): MessageEntry[];
+            replayServerEvent(event: ServerEvent): void;
+          };
+        }
+      ).__varroE2E;
+      const message = harness
+        .getSessionMessages('session-tool-cards')
+        .find((entry) => entry.info.role === 'assistant');
+      if (!message) throw new Error('Tool metadata fixture is missing');
+      for (const part of message.parts) {
+        if (
+          part.type !== 'tool' ||
+          part.state.status !== 'completed' ||
+          (part.tool !== 'read' && part.tool !== 'bash')
+        ) {
+          continue;
+        }
+        harness.replayServerEvent({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              ...part,
+              state: {
+                ...part.state,
+                time: { ...part.state.time, end: part.state.time.start + 67_000 },
+              },
+            },
+          },
+        });
+      }
+    });
+    const durations = page.locator('.tool-invocation-duration');
+    await expect(durations).toHaveCount(2);
+    await expect(durations).toHaveText(['1m 7s', '1m 7s']);
+    const metadata = page.locator('.tool-invocation-duration, .file-edit-diff-stats > span');
+    await expect(metadata).toHaveCount(10);
+    const headers = page.locator(
+      '.file-read-card-header, .file-change-card-header, .tool-invocation-header'
+    );
+    const originalHeights = await headers.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().height)
+    );
+
+    for (const fontFamily of ['var(--font-mono)', 'Arial, sans-serif', 'serif', 'monospace']) {
+      const geometry = await metadata.evaluateAll(
+        (elements, font) =>
+          elements.map((element) => {
+            if (!(element instanceof HTMLElement)) throw new Error('Expected tool metadata');
+            element.style.fontFamily = font;
+            const header = element.closest(
+              '.file-read-card-header, .file-change-card-header, .tool-invocation-header'
+            );
+            if (!header) throw new Error('Expected a tool header');
+            const textBox = element.getBoundingClientRect();
+            const headerBox = header.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            return {
+              text: element.textContent,
+              centerOffset:
+                textBox.top + textBox.height / 2 - (headerBox.top + headerBox.height / 2),
+              textHeight: textBox.height,
+              lineHeight: Number.parseFloat(style.lineHeight),
+              trim: style.getPropertyValue('text-box-trim'),
+              edge: style.getPropertyValue('text-box-edge'),
+              transform: style.transform,
+            };
+          }),
+        fontFamily
+      );
+      for (const item of geometry) {
+        const context = `${fontFamily}, ${item.text}`;
+        expect(item.trim, context).toBe('trim-both');
+        expect(item.edge, context).toBe('cap alphabetic');
+        expect(item.transform, context).toBe('none');
+        expect(Math.abs(item.centerOffset), context).toBeLessThan(0.1);
+        expect(item.textHeight, context).toBeLessThan(item.lineHeight);
+      }
+      expect(
+        await headers.evaluateAll((elements) =>
+          elements.map((element) => element.getBoundingClientRect().height)
+        ),
+        fontFamily
+      ).toEqual(originalHeights);
+    }
+  });
+}
+
 test('renders each completed file edit as a separate row', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
 
@@ -323,6 +421,39 @@ test('renders search tool details in the same framed card as other tool details'
   // The unframed generic body must not also render the output.
   await expect(searchTool.locator('.tool-invocation-output')).toHaveCount(0);
   await expect(searchTool.locator('.tool-invocation-input')).toHaveCount(0);
+});
+
+test('keeps tool detail text smaller while preserving editor font scaling', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
+
+  const tools = [
+    page
+      .locator('.chat-tool-invocation-part')
+      .filter({ hasText: 'Search: --color-vscode-input-border' }),
+    page.locator('.chat-tool-invocation-part').last(),
+  ];
+
+  for (const tool of tools) {
+    await tool.locator('.tool-invocation-header').click();
+    const detail = tool.locator('.tool-invocation-detail');
+    const text = detail.locator(
+      '.structured-tool-label, .structured-tool-value, .terminal-command-text'
+    );
+    await expect(text).not.toHaveCount(0);
+
+    for (const editorFontSize of [12, 16]) {
+      await tool.evaluate((element, size) => {
+        if (!(element instanceof HTMLElement)) throw new Error('Expected a tool card');
+        element.style.setProperty('--varro-chat-editor-font-size', `${size}px`);
+      }, editorFontSize);
+
+      await expect(detail).toHaveCSS('font-size', `${editorFontSize - 1}px`);
+      for (const element of await text.all()) {
+        await expect(element).toHaveCSS('font-size', `${editorFontSize - 1}px`);
+      }
+      await expect(tool.locator('.tool-invocation-header')).toHaveCSS('font-size', '12.5px');
+    }
+  }
 });
 
 test('fills expanded details with terminal and structured cards', async ({ page }) => {

@@ -23,6 +23,10 @@ The helper has a five-second request bound, is retired after 60 idle seconds, an
 on stdin EOF when the host disappears. Failed native inspection falls back to fresh,
 bounded CIM inspection rather than reusing old evidence.
 
+The native helper integration test runs in a Node-environment Vitest project after
+the parallel unit suite. This avoids making PowerShell startup and `Add-Type`
+compete with jsdom workers on Windows CI without relaxing the production timeout.
+
 Logical REST requests carry an internal admission ticket through their adapter wire
 requests. Its expiry is the **earlier original** account/ownership verification expiry,
 not one second after both checks finish. Expired tickets require verification again;

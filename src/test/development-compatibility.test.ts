@@ -39,4 +39,17 @@ describe('development compatibility', () => {
     expect(trust).toBeGreaterThan(checkout);
     expect(cachedTests).toBeGreaterThan(trust);
   });
+
+  it('runs E2E on four shards with a matrix-derived shard count', async () => {
+    const [workflow, developmentGuide] = await Promise.all([
+      readFile(resolve('.github/workflows/ci.yml'), 'utf8'),
+      readFile(resolve('docs/development.md'), 'utf8'),
+    ]);
+
+    expect(workflow).toContain('shard: [1, 2, 3, 4]');
+    expect(workflow).toContain(
+      'run: node scripts/run-e2e.mjs --shard=${{ matrix.shard }}/${{ strategy.job-total }}'
+    );
+    expect(developmentGuide).toContain('four jobs with two workers each');
+  });
 });

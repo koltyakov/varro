@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import solid from 'vite-plugin-solid';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 const { version } = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8'));
+const windowsNativeTest = 'src/extension/windows-process-inspector.integration.test.ts';
 
 export default defineConfig({
   define: { __VARRO_VERSION__: JSON.stringify(version) },
@@ -16,10 +17,30 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'jsdom',
-    include: ['src/**/*.test.{ts,tsx}'],
     pool: 'forks',
-    setupFiles: ['./vitest.setup.ts'],
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          environment: 'jsdom',
+          include: ['src/**/*.test.{ts,tsx}'],
+          exclude: [...configDefaults.exclude, windowsNativeTest],
+          setupFiles: ['./vitest.setup.ts'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'windows-native',
+          environment: 'node',
+          include: [windowsNativeTest],
+          // PowerShell startup and Add-Type must not compete with parallel unit workers.
+          // Keep the production five-second bound rather than relaxing it for CI.
+          sequence: { groupOrder: 1 },
+        },
+      },
+    ],
     coverage: {
       reportsDirectory: './tmp/coverage',
       include: ['src/**/*.{ts,tsx}'],

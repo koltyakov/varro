@@ -1296,7 +1296,17 @@ kbd {
 
 .chat-tool-invocation-part .tool-call-icon.tool-status-running {
   color: var(--color-vscode-fg);
-  animation: pulse-soft 1.5s ease-in-out infinite;
+  animation: tool-activity-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes tool-activity-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 .chat-tool-invocation-part .tool-call-wait-icon {
@@ -1328,6 +1338,12 @@ kbd {
   color: var(--color-vscode-fg);
 }
 
+.chat-tool-invocation-part .tool-invocation-title.shimmer-progress {
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  animation: tool-activity-pulse 1.5s ease-in-out infinite;
+}
+
 .chat-tool-invocation-part
   :is(.tool-invocation-duration, .tool-invocation-activity-age, .tool-invocation-token-stats) {
   display: inline-flex;
@@ -1350,7 +1366,10 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-duration {
-  transform: translateY(1px);
+  display: block;
+  align-self: center;
+  /* Center the visible text without a platform-specific baseline offset. */
+  text-box: trim-both cap alphabetic;
 }
 
 .chat-tool-invocation-part :is(.tool-invocation-duration, .tool-invocation-activity-time) {
@@ -1460,7 +1479,7 @@ kbd {
 .chat-tool-invocation-part .tool-invocation-detail {
   border-top: 1px solid var(--color-vscode-border-soft);
   padding: var(--space-5) var(--space-6) var(--space-6) var(--tool-detail-indent);
-  font-size: var(--varro-chat-editor-font-size, 12px);
+  font-size: calc(var(--varro-chat-editor-font-size, 12px) - 1px);
 }
 
 /* Terminal and structured cards are the detail surface, rather than content
@@ -2097,6 +2116,10 @@ kbd {
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
   line-height: 1.2;
+}
+
+.file-edit-diff-stats > span {
+  text-box: trim-both cap alphabetic;
 }
 
 .file-edit-error-label {

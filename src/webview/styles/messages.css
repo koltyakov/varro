@@ -838,6 +838,8 @@
 }
 
 .assistant-activity-details .assistant-activity-detail .tool-invocation-duration {
+  display: block;
+  align-self: center;
   word-spacing: -0.2em;
 }
 

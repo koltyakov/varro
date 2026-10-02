@@ -90,24 +90,26 @@ for (const expandable of [false, true]) {
     else await expect(header).toBeDisabled();
     await expect(header).toHaveCSS('opacity', '1');
     const icon = row.locator('.tool-call-icon.tool-status-running');
+    const title = row.locator('.tool-invocation-title');
     const foreground = await header.evaluate((element) => getComputedStyle(element).color);
     await expect(icon).toHaveCSS('color', foreground);
+    await expect(title).toHaveCSS('color', foreground);
+    await expect(title).toHaveCSS('-webkit-text-fill-color', foreground);
+    await expect(title).toHaveCSS('background-image', 'none');
     for (const [time, opacity] of [
-      [0, '0.4'],
-      [750, '1'],
-      [1500, '0.4'],
+      [0, '1'],
+      [750, '0.4'],
+      [1500, '1'],
     ] as const) {
-      await icon.evaluate((element, currentTime) => {
-        const animation = element.getAnimations()[0]!;
-        animation.pause();
-        animation.currentTime = currentTime;
-      }, time);
-      await expect(icon).toHaveCSS('opacity', opacity);
+      for (const indicator of [icon, title]) {
+        await indicator.evaluate((element, currentTime) => {
+          const animation = element.getAnimations()[0]!;
+          animation.pause();
+          animation.currentTime = currentTime;
+        }, time);
+        await expect(indicator).toHaveCSS('opacity', opacity);
+      }
       await expect(header).toHaveCSS('opacity', '1');
     }
-    const title = row.locator('.tool-invocation-title');
-    await expect(title).toHaveClass(/shimmer-progress/);
-    const gradient = await title.evaluate((element) => getComputedStyle(element).backgroundImage);
-    expect(gradient).toContain(`${foreground} 50%`);
   });
 }

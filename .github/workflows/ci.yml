@@ -126,7 +126,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Check out repository
@@ -161,4 +161,4 @@ jobs:
 
       - name: Run e2e tests
         # Bypass pretest:e2e; the matching container already includes the browsers.
-        run: node scripts/run-e2e.mjs --shard=${{ matrix.shard }}/2
+        run: node scripts/run-e2e.mjs --shard=${{ matrix.shard }}/${{ strategy.job-total }}

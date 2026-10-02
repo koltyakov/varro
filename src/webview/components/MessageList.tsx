@@ -6330,8 +6330,11 @@ export function MessageList() {
         : null;
     const expandsActiveActivity =
       !!activityKey && control.getAttribute('aria-expanded') === 'false';
+    const expandsToolDetails =
+      control.matches('.tool-invocation-header') &&
+      control.getAttribute('aria-expanded') === 'false';
     const resumeBottomFollow =
-      (expandsCompactActivity || expandsActiveActivity) &&
+      (expandsCompactActivity || expandsActiveActivity || expandsToolDetails) &&
       (autoScroll() || pinnedToBottom || followModeLocked);
     const expansionAnchor = captureExpansionScrollAnchor({
       anchor,
