@@ -748,9 +748,11 @@ Direct input acquires ownership only when it can affect the transcript:
 
 ### Prompt Number Readiness
 
+- On Windows, cancel bare Alt keydown and keyup in capture before the webview host forwards them to
+  the native menu bar. Ctrl alone must not reveal counters; modifier combinations remain uncanceled.
 - Absolute prompt numbers are ready only when the prompt cursor is exhausted for the current message
   window version.
-- A failed or invalidated prompt page leaves counters hidden. A later Alt hold retries the load.
+- A failed or invalidated prompt page leaves counters hidden. A later modifier hold retries the load.
 - Resetting the active session's message window invalidates prior readiness even when the session ID
   does not change.
 - A reset window is not ready while its replacement fetch is pending. An obsolete prompt request must

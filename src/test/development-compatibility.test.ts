@@ -27,7 +27,7 @@ describe('development compatibility', () => {
     expect(developmentGuide).toContain(advertisedFloors);
   });
 
-  it('runs Linux and Windows without matrices and gates E2E on both jobs', async () => {
+  it('runs Linux and Windows without matrices and runs E2E independently', async () => {
     const workflow = await readFile(resolve('.github/workflows/ci.yml'), 'utf8');
     const linuxStart = workflow.indexOf('\n  build-and-test:\n');
     const windowsStart = workflow.indexOf('\n  windows:\n');
@@ -43,8 +43,7 @@ describe('development compatibility', () => {
       expect(job).toContain('run: npm ci --no-audit --no-fund');
     }
     const e2e = workflow.slice(e2eStart);
-    expect(e2e).toContain('needs: [build-and-test, windows]');
-    expect(e2e).not.toMatch(/^    if:/m);
+    expect(e2e).not.toMatch(/^    (?:needs|if):/m);
   });
 
   it('trusts the mounted E2E checkout before browser script tests run', async () => {

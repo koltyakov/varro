@@ -95,7 +95,7 @@ jobs:
         run: npm run package:vsix
 
   e2e:
-    needs: [build-and-test, windows]
+    # E2E installs and serves its own checkout; it does not consume build-job artifacts.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:

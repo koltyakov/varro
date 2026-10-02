@@ -499,6 +499,7 @@ export function MessageList() {
   let promptNumberSessionWindowVersion = 0;
   let promptNumberHoldGeneration = 0;
   let timestampAnimationSuppressionTimer: ReturnType<typeof setTimeout> | undefined;
+  const suppressAltMenu = /Windows/.test(navigator.userAgent);
   let altHeld = false;
   let disposed = false;
 
@@ -595,17 +596,26 @@ export function MessageList() {
   }
 
   const handleAltDown = (event: KeyboardEvent) => {
-    if (event.key === 'Alt') showPromptNumbersForAlt();
+    if (event.key !== 'Alt') return;
+    if (suppressAltMenu && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      event.preventDefault();
+    }
+    showPromptNumbersForAlt();
   };
   const handleAltUp = (event: KeyboardEvent) => {
-    if (event.key === 'Alt') hidePromptNumbersForAlt();
+    if (event.key !== 'Alt') return;
+    if (suppressAltMenu && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      event.preventDefault();
+    }
+    hidePromptNumbersForAlt();
   };
   const syncAltState = (event: MouseEvent) => {
     if (event.altKey) showPromptNumbersForAlt();
     else hidePromptNumbersForAlt();
   };
-  window.addEventListener('keydown', handleAltDown);
-  window.addEventListener('keyup', handleAltUp);
+  // Cancel bare Alt before the webview host forwards it to the Windows menu bar.
+  window.addEventListener('keydown', handleAltDown, true);
+  window.addEventListener('keyup', handleAltUp, true);
   window.addEventListener('mousemove', syncAltState);
   window.addEventListener('blur', hidePromptNumbersForAlt);
   onCleanup(() => {
@@ -614,8 +624,8 @@ export function MessageList() {
     cancelPendingScroll();
     clearActivityExitSummaryAnchor();
     if (timestampAnimationSuppressionTimer) clearTimeout(timestampAnimationSuppressionTimer);
-    window.removeEventListener('keydown', handleAltDown);
-    window.removeEventListener('keyup', handleAltUp);
+    window.removeEventListener('keydown', handleAltDown, true);
+    window.removeEventListener('keyup', handleAltUp, true);
     window.removeEventListener('mousemove', syncAltState);
     window.removeEventListener('blur', hidePromptNumbersForAlt);
   });

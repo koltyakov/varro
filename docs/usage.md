@@ -667,6 +667,8 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - A jump-to-latest button when you scroll away from the bottom of the chat; clicking it returns to the newest message and re-enables auto-follow
 - Completed turn summaries expose `Copy final response` and `Fork chat from here` actions. Copying uses the final assistant text from that turn.
 
+Hold `Option`/`Alt` to show turn numbers and message timestamps. While the chat has focus on Windows, bare `Alt` does not activate the native menu bar.
+
 Hold `Alt` or `Option` while viewing a sufficiently long final answer to reveal its read-mode action. Read mode opens the rendered answer in a focused dialog; close it with `Escape`, the close button, or a click outside the content.
 
 Editable user messages expose an edit action. Sending the replacement removes that user message and the later conversation history before resending, but it does not restore files changed in the workspace. Use session `/undo` or `/revert` when you need OpenCode's revert workflow instead.

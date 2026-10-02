@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import { replaceMessages, setSessions, setState, skipPlanSession } from '../lib/state';
@@ -56,6 +56,10 @@ installMessageListTestEnvironment({
 });
 
 describe('MessageList prompt numbers', () => {
+  beforeEach(() => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('X11; Linux x86_64');
+  });
+
   it('groups automatic completions with tools and restores their details on expansion', async () => {
     setState('activeSessionId', 'session-1');
     const command = toolPart('command', 'assistant-1');
@@ -222,6 +226,148 @@ describe('MessageList prompt numbers', () => {
         (timestamp) => !timestamp.classList.contains('is-visible')
       )
     ).toBe(true);
+  });
+
+  it.each<[string, boolean]>([
+    ['Windows NT 10.0; Win64; x64', true],
+    ['Macintosh; Intel Mac OS X 10_15_7', false],
+    ['X11; Linux x86_64', false],
+  ])(
+    'shows counters on repeated Alt holds on %s, suppressing the menu only on Windows',
+    async (userAgent, suppressAltMenu) => {
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(userAgent);
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('prompt', 'First prompt')] },
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      const composer = document.createElement('textarea');
+      container!.append(composer);
+      composer.focus();
+      for (let press = 0; press < 3; press += 1) {
+        const down = new KeyboardEvent('keydown', {
+          key: 'Alt',
+          altKey: true,
+          bubbles: true,
+          cancelable: true,
+        });
+        composer.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(suppressAltMenu);
+        expect(document.activeElement).toBe(composer);
+        await vi.waitFor(() => {
+          expect(container!.querySelector('.prompt-number-badge')?.textContent).toBe('1');
+        });
+        const up = new KeyboardEvent('keyup', { key: 'Alt', bubbles: true, cancelable: true });
+        composer.dispatchEvent(up);
+        expect(up.defaultPrevented).toBe(suppressAltMenu);
+        expect(document.activeElement).toBe(composer);
+        expect(container!.querySelector('.prompt-number-badge')).toBeNull();
+      }
+    }
+  );
+
+  it('uses Alt mouse state and clears counters on blur on Windows, leaving Ctrl alone', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows NT 10.0; Win64; x64');
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info: userMessage('user-1'), parts: [textPart('prompt', 'First prompt')] }]);
+    cleanup = render(() => MessageList(), container!);
+    const ctrlDown = new KeyboardEvent('keydown', { key: 'Control', cancelable: true });
+    window.dispatchEvent(ctrlDown);
+    expect(ctrlDown.defaultPrevented).toBe(false);
+    window.dispatchEvent(new MouseEvent('mousemove', { ctrlKey: true }));
+    await Promise.resolve();
+    expect(container!.querySelector('.prompt-number-badge')).toBeNull();
+
+    window.dispatchEvent(new MouseEvent('mousemove', { altKey: true }));
+    await vi.waitFor(() => {
+      expect(container!.querySelector('.prompt-number-badge')?.textContent).toBe('1');
+    });
+    const ctrlUp = new KeyboardEvent('keyup', { key: 'Control', altKey: true, cancelable: true });
+    window.dispatchEvent(ctrlUp);
+    expect(ctrlUp.defaultPrevented).toBe(false);
+    expect(container!.querySelector('.prompt-number-badge')).not.toBeNull();
+    window.dispatchEvent(new MouseEvent('mousemove', { ctrlKey: true }));
+    expect(container!.querySelector('.prompt-number-badge')).toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    expect(container!.querySelector('.prompt-number-badge')).not.toBeNull();
+    window.dispatchEvent(new Event('blur'));
+    expect(container!.querySelector('.prompt-number-badge')).toBeNull();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    expect(container!.querySelector('.prompt-number-badge')).not.toBeNull();
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+    expect(container!.querySelector('.prompt-number-badge')).toBeNull();
+  });
+
+  it.each<KeyboardEventInit>([
+    { key: 'Control', ctrlKey: true },
+    { key: 'AltGraph', ctrlKey: true, altKey: true },
+    { key: 'c', ctrlKey: true },
+    { key: 'v', ctrlKey: true },
+    { key: 'a', ctrlKey: true },
+    { key: 'Alt', ctrlKey: true, altKey: true },
+    { key: 'Alt', metaKey: true, altKey: true },
+    { key: 'Alt', shiftKey: true, altKey: true },
+    { key: 'a', altKey: true },
+  ])('does not cancel modifier combinations or Ctrl shortcuts on Windows: %j', (init) => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows NT 10.0; Win64; x64');
+    cleanup = render(() => MessageList(), container!);
+    for (const type of ['keydown', 'keyup']) {
+      const event = new KeyboardEvent(type, { ...init, bubbles: true, cancelable: true });
+      container!.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+  });
+
+  it('cancels Windows bare Alt before host listeners and removes capture listeners on cleanup', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows NT 10.0; Win64; x64');
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info: userMessage('user-1'), parts: [textPart('prompt', 'First prompt')] }]);
+    cleanup = render(() => MessageList(), container!);
+    const composer = document.createElement('textarea');
+    container!.append(composer);
+    composer.focus();
+    const hostListener = vi.fn((event: KeyboardEvent) => {
+      if (!event.defaultPrevented) composer.blur();
+    });
+    document.addEventListener('keydown', hostListener);
+    document.addEventListener('keyup', hostListener);
+    try {
+      for (let press = 0; press < 3; press += 1) {
+        composer.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Alt',
+            altKey: true,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+        await vi.waitFor(() => {
+          expect(container!.querySelector('.prompt-number-badge')?.textContent).toBe('1');
+        });
+        composer.dispatchEvent(
+          new KeyboardEvent('keyup', {
+            key: 'Alt',
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+        expect(document.activeElement).toBe(composer);
+        expect(container!.querySelector('.prompt-number-badge')).toBeNull();
+      }
+      expect(hostListener).toHaveBeenCalledTimes(6);
+      cleanup();
+      cleanup = undefined;
+      container!.append(composer);
+      for (const type of ['keydown', 'keyup']) {
+        const event = new KeyboardEvent(type, { key: 'Alt', bubbles: true, cancelable: true });
+        composer.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(false);
+      }
+    } finally {
+      document.removeEventListener('keydown', hostListener);
+      document.removeEventListener('keyup', hostListener);
+    }
   });
 
   it('shares numbers and one navigation target across consecutive user bubbles', async () => {
