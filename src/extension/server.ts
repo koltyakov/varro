@@ -2125,8 +2125,9 @@ export class OpenCodeServer extends EventEmitter {
         `OpenCode stream timeout reconciliation failed: ${err instanceof Error ? err.message : String(err)}`
       );
     }
-    if (this.isAttachOnly || this.preserveExistingProcess) return;
+    if (this.isAttachOnly) return;
     await this.processManager.runMaintenanceTick({
+      reusedServer: this.preserveExistingProcess,
       isDisposing: () => this.isDisposing,
       getStatus: () => this._status,
       readInstalledCliVersion: () => this.readInstalledCliVersion(),

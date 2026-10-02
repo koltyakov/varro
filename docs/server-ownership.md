@@ -164,12 +164,14 @@ later candidates when an earlier `opencode2` command actually runs v1. A connect
 server's version is not evidence of the installed executable's version and does
 not select launch flags.
 
-Reused servers are excluded from background CLI
-maintenance for that connection, avoiding a migration-triggered restart or family
-switch. Their configuration and credentials are unchanged. Explicit restart remains
-subject to the existing active-session and pending-attention preflight. Reload
-disconnects rather than stopping the process. A surviving registered server is
-recoverable, not a stale process to kill based on age.
+Reused servers do not run background CLI installation or implicit server-family
+migration. Maintenance can restart a reused Varro-owned server when the installed
+CLI is newer within the same API family, after fresh lease/process verification and
+the existing global active-session and pending-attention preflight. Unmanaged servers,
+another live host's ownership, unknown versions, and failed safety reads leave the
+server running. Explicit restart retains its existing safety checks. Reload disconnects
+rather than stopping the process. A surviving registered server is recoverable, not a
+stale process to kill based on age.
 
 New launches use an existing nonempty environment password or generate a
 cryptographically random password before spawning. Credentials never enter the

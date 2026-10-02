@@ -1129,7 +1129,7 @@ describe('automatic-port migration and admission', () => {
     await server.disconnect();
   });
 
-  it('reuses a registered live server without startup or migration maintenance', async () => {
+  it('leaves a reused registered server untouched when ownership cannot be verified', async () => {
     const server = new OpenCodeServer('auto', true);
     const { api, children } = configureManagedStartup(server);
     const { processManager } = server as unknown as { processManager: OpenCodeProcess };
@@ -1143,6 +1143,49 @@ describe('automatic-port migration and admission', () => {
     expect(api.readInstalledCliVersion).not.toHaveBeenCalled();
     await server.disconnect();
   });
+
+  it.each([
+    { platform: 'win32', serverVersion: '1.17.13', cliVersion: '1.18.34' },
+    { platform: 'linux', serverVersion: '2.0.20', cliVersion: '2.0.22' },
+  ] as const)(
+    'restarts a reused owned server from $serverVersion to $cliVersion on $platform',
+    async ({ platform, serverVersion, cliVersion }) => {
+      stubPlatform(platform);
+      const server = new OpenCodeServer('auto', true);
+      const { api, children } = configureManagedStartup(server);
+      const state = server as unknown as {
+        processManager: OpenCodeProcess;
+        hasActiveSessions(): Promise<boolean>;
+        maybeSuggestCliUpdate(version: string | null): Promise<string | null>;
+        restartServerForCliUpdate(serverVersion: string, cliVersion: string): Promise<void>;
+      };
+      vi.mocked(state.processManager.refreshStartupRegistration).mockResolvedValue(true);
+      vi.spyOn(state.processManager, 'prepareForHealthyExistingServer').mockResolvedValue(
+        undefined
+      );
+      const ownership = vi
+        .spyOn(state.processManager, 'refreshManagedServerOwnership')
+        .mockImplementation(async () => {
+          state.processManager.managedProcess = true;
+          return true;
+        });
+      vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: serverVersion });
+      vi.mocked(api.readInstalledCliVersion).mockResolvedValue(cliVersion);
+      const active = vi.spyOn(state, 'hasActiveSessions').mockResolvedValue(false);
+      const update = vi.spyOn(state, 'maybeSuggestCliUpdate').mockResolvedValue(null);
+      const restart = vi.spyOn(state, 'restartServerForCliUpdate').mockResolvedValue(undefined);
+
+      await server.start();
+      await runMaintenanceTick(server);
+
+      expect(ownership).toHaveBeenCalledOnce();
+      expect(active).toHaveBeenCalledOnce();
+      expect(restart).toHaveBeenCalledExactlyOnceWith(serverVersion, cliVersion);
+      expect(update).not.toHaveBeenCalled();
+      expect(children).toHaveLength(0);
+      await server.disconnect();
+    }
+  );
 
   it('does not replace a registered process when its health probe fails', async () => {
     const server = new OpenCodeServer('auto', true);

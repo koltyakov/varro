@@ -3509,6 +3509,153 @@ describe('OpenCodeProcess server ownership leases', () => {
     expect(tick).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    {
+      name: 'v1 upgrade',
+      serverVersion: '1.17.13',
+      cliVersion: '1.18.34',
+      owned: true,
+      active: false,
+      restart: true,
+    },
+    {
+      name: 'v2 upgrade',
+      serverVersion: '2.0.20',
+      cliVersion: '2.0.22',
+      owned: true,
+      active: false,
+      restart: true,
+    },
+    {
+      name: 'same version',
+      serverVersion: '1.18.34',
+      cliVersion: '1.18.34',
+      owned: true,
+      active: false,
+      restart: false,
+    },
+    {
+      name: 'older CLI',
+      serverVersion: '1.18.34',
+      cliVersion: '1.17.13',
+      owned: true,
+      active: false,
+      restart: false,
+    },
+    {
+      name: 'family migration',
+      serverVersion: '1.17.13',
+      cliVersion: '2.0.22',
+      owned: true,
+      active: false,
+      restart: false,
+    },
+    {
+      name: 'unknown server',
+      serverVersion: undefined,
+      cliVersion: '1.18.34',
+      owned: true,
+      active: false,
+      restart: false,
+    },
+    {
+      name: 'unknown CLI',
+      serverVersion: '1.17.13',
+      cliVersion: null,
+      owned: true,
+      active: false,
+      restart: false,
+    },
+    {
+      name: 'busy server',
+      serverVersion: '1.17.13',
+      cliVersion: '1.18.34',
+      owned: true,
+      active: true,
+      restart: false,
+    },
+    {
+      name: 'unverified owner',
+      serverVersion: '1.17.13',
+      cliVersion: '1.18.34',
+      owned: false,
+      active: false,
+      restart: false,
+    },
+  ])(
+    'reconciles a reused server safely: $name',
+    async ({ serverVersion, cliVersion, owned, active, restart }) => {
+      const manager = new OpenCodeProcess(4096, true);
+      const ownership = vi
+        .spyOn(manager, 'refreshManagedServerOwnership')
+        .mockImplementation(async () => {
+          manager.managedProcess = owned;
+          return owned;
+        });
+      const callbacks = {
+        reusedServer: true,
+        isDisposing: () => false,
+        getStatus: () => ({ state: 'running' as const, url: manager.url }),
+        readInstalledCliVersion: vi.fn().mockResolvedValue(cliVersion),
+        maybeSuggestCliUpdate: vi.fn().mockResolvedValue('2.0.22'),
+        readHealthInfo: vi.fn().mockResolvedValue({ healthy: true, version: serverVersion }),
+        hasActiveSessions: vi.fn().mockResolvedValue(active),
+        takeOwnershipOfExistingServer: vi.fn().mockResolvedValue(false),
+        restartServerForCliUpdate: vi.fn().mockResolvedValue(undefined),
+      };
+      await manager.runMaintenanceTick(callbacks);
+      expect(ownership).toHaveBeenCalledOnce();
+      expect(callbacks.maybeSuggestCliUpdate).not.toHaveBeenCalled();
+      expect(callbacks.takeOwnershipOfExistingServer).not.toHaveBeenCalled();
+      if (restart) {
+        expect(callbacks.restartServerForCliUpdate).toHaveBeenCalledExactlyOnceWith(
+          serverVersion,
+          cliVersion
+        );
+      } else {
+        expect(callbacks.restartServerForCliUpdate).not.toHaveBeenCalled();
+      }
+      if (!owned) expect(callbacks.readInstalledCliVersion).not.toHaveBeenCalled();
+      if (active) {
+        callbacks.hasActiveSessions.mockResolvedValue(false);
+        await manager.runMaintenanceTick(callbacks);
+        expect(callbacks.restartServerForCliUpdate).toHaveBeenCalledExactlyOnceWith(
+          serverVersion,
+          cliVersion
+        );
+      }
+    }
+  );
+
+  it.each(['ownership', 'health', 'activity'] as const)(
+    'leaves a reused server running after a failed %s check',
+    async (failedCheck) => {
+      const manager = new OpenCodeProcess(4096, true);
+      manager.managedProcess = true;
+      const ownership = vi.spyOn(manager, 'refreshManagedServerOwnership').mockResolvedValue(true);
+      const health = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.13' });
+      const activity = vi.fn().mockResolvedValue(false);
+      ({ ownership, health, activity })[failedCheck].mockRejectedValue(
+        new Error('Inspection unavailable')
+      );
+      const restart = vi.fn().mockResolvedValue(undefined);
+      const update = vi.fn().mockResolvedValue(null);
+      await manager.runMaintenanceTick({
+        reusedServer: true,
+        isDisposing: () => false,
+        getStatus: () => ({ state: 'running', url: manager.url }),
+        readInstalledCliVersion: vi.fn().mockResolvedValue('1.18.34'),
+        maybeSuggestCliUpdate: update,
+        readHealthInfo: health,
+        hasActiveSessions: activity,
+        takeOwnershipOfExistingServer: vi.fn().mockResolvedValue(false),
+        restartServerForCliUpdate: restart,
+      });
+      expect(restart).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+    }
+  );
+
   it('throttles repeated opportunistic maintenance requests', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-30T12:00:00Z'));

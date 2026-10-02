@@ -227,6 +227,8 @@ export function areCompactionSettingsEqual(
 }
 
 interface MaintenanceCallbacks {
+  /** Reuse permits only verified ownership and an already-installed same-family CLI. */
+  reusedServer?: boolean;
   isDisposing: () => boolean;
   getStatus: () => ServerStatus;
   readInstalledCliVersion: () => Promise<string | null>;
@@ -3091,22 +3093,33 @@ export class OpenCodeProcess {
     this.maintenanceInFlight = true;
     try {
       if (
-        (this.ownershipLease || this.foreignActiveOwnership) &&
+        (callbacks.reusedServer || this.ownershipLease || this.foreignActiveOwnership) &&
         !(await this.refreshManagedServerOwnership())
       )
         return;
       const installedCliVersion = await callbacks.readInstalledCliVersion();
       const health =
         callbacks.getStatus().state === 'running' ? await callbacks.readHealthInfo() : null;
+      // Reusing a server permits an owned same-family restart, not an implicit
+      // migration or another CLI install. Missing version evidence leaves it running.
+      if (
+        callbacks.reusedServer &&
+        (!health?.healthy ||
+          !openCodeApiVersion(health.version ?? '') ||
+          openCodeApiVersion(health.version ?? '') !==
+            openCodeApiVersion(installedCliVersion ?? ''))
+      )
+        return;
       // Switch to the installed v2 CLI before checking for further updates. The
       // v1 server's upgrade endpoint would update its own binary, not the v2 CLI.
       const switchingToV2 =
         health?.healthy &&
         openCodeApiVersion(health.version ?? '') === 1 &&
         openCodeApiVersion(installedCliVersion ?? '') === 2;
-      const updatedCliVersion = switchingToV2
-        ? null
-        : await callbacks.maybeSuggestCliUpdate(installedCliVersion);
+      const updatedCliVersion =
+        callbacks.reusedServer || switchingToV2
+          ? null
+          : await callbacks.maybeSuggestCliUpdate(installedCliVersion);
       const restartCliVersion = updatedCliVersion || installedCliVersion;
 
       if (callbacks.getStatus().state !== 'running' || !restartCliVersion) {
@@ -3127,6 +3140,7 @@ export class OpenCodeProcess {
         return;
       }
 
+      if (callbacks.reusedServer && !this._managedProcess) return;
       if (!this._managedProcess && this.autoStart) {
         await callbacks.takeOwnershipOfExistingServer();
       }
