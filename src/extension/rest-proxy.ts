@@ -3441,8 +3441,16 @@ export class RestProxy {
   ): unknown {
     const record = asRecord(body);
     if (!record) return body;
-    const scopePrompt =
-      scope === 'workspace'
+    const noProject =
+      this.callbacks.contextProvider.context.workspaceFolders?.length === 0 &&
+      isSameWorkspacePath(workingDirectory, this.callbacks.contextProvider.context.workspacePath);
+    const scopePrompt = noProject
+      ? [
+          'No project or workspace folder is open in VS Code.',
+          `Your working directory is ${JSON.stringify(workingDirectory)}, a general-purpose Varro scratch folder, not a project root.`,
+          "Do not assume any repository or project is in scope. Access other locations only when needed for the user's request and subject to tool permissions.",
+        ].join(' ')
+      : scope === 'workspace'
         ? [
             'You are working in a VS Code multi-root workspace.',
             `Treat these folders as one logical workspace: ${JSON.stringify(

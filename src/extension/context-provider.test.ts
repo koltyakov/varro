@@ -187,6 +187,7 @@ vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
 
 import { ContextProvider } from './context-provider';
+import { getVarroStateDirectory } from './varro-state-paths';
 
 function noop() {}
 
@@ -259,6 +260,101 @@ describe('ContextProvider', () => {
     const unsaved = new ContextProvider(noop);
     expect(unsaved.context.workspaceDirectory).toBe('/repos/a');
     unsaved.dispose();
+  });
+
+  it('uses scratch in an empty window without claiming a project or an active file directory', () => {
+    const scratch = getVarroStateDirectory('scratch');
+    vscodeMock.window.activeTextEditor = {
+      document: {
+        uri: { fsPath: '/other/project/file.ts' },
+        languageId: 'typescript',
+        isDirty: false,
+      },
+      selection: { isEmpty: true },
+    };
+    vscodeMock.workspace.workspaceFile = {
+      scheme: 'file',
+      fsPath: '/workspaces/empty.code-workspace',
+    };
+    const provider = new ContextProvider(noop);
+    try {
+      expect(provider.context).toMatchObject({
+        workspacePath: scratch,
+        workspaceDirectory: scratch,
+        workspaceFolders: [],
+        activeWorkspacePath: null,
+      });
+      expect(provider.getOpenWorkspaceRoot(scratch)).toBe(scratch);
+      expect(provider.getOpenWorkspaceRoot('/other/project')).toBeNull();
+      expect(provider.getOpenWorkspaceRoot(`${scratch}/nested`)).toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('returns to scratch when the last project closes and revokes scratch when a project opens', async () => {
+    vi.useFakeTimers();
+    const provider = new ContextProvider(noop);
+    const scratch = getVarroStateDirectory('scratch');
+    const workspaceChanged =
+      vscodeMock.workspace.onDidChangeWorkspaceFolders.mock.calls.at(-1)![0]!;
+    try {
+      await provider.selectWorkspace(scratch);
+      vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+      workspaceChanged();
+      expect(provider.context.workspacePath).toBe('/repo');
+      expect(provider.getOpenWorkspaceRoot(scratch)).toBeNull();
+      await expect(provider.selectWorkspace(scratch)).rejects.toThrow('not open');
+      vscodeMock.workspace.workspaceFolders = [];
+      workspaceChanged();
+      expect(provider.context.workspacePath).toBe(scratch);
+      expect(provider.context.workspaceDirectory).toBe(scratch);
+      expect(provider.context.workspaceFolders).toEqual([]);
+    } finally {
+      provider.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('resolves scratch files but keeps restricted reads inside scratch, including symlinks', async () => {
+    const provider = new ContextProvider(noop);
+    const scratch = getVarroStateDirectory('scratch');
+    const options = { restrictToWorkspace: true, workspaceDirectory: scratch };
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    try {
+      await expect(provider.resolvePath('notes/todo.txt', options)).resolves.toEqual({
+        path: `${scratch}/notes/todo.txt`,
+        relativePath: 'notes/todo.txt',
+        type: 'file',
+      });
+      await expect(
+        provider.resolvePath(`${scratch}/notes/todo.txt`, options)
+      ).resolves.toMatchObject({ relativePath: 'notes/todo.txt' });
+      await expect(provider.resolvePath('../servers/lease.json', options)).resolves.toBeNull();
+      await expect(provider.resolvePath('/other/file.txt', options)).resolves.toBeNull();
+      fsState.symlinks.set(`${scratch}/linked`, '/other');
+      await expect(provider.resolvePath('linked/file.txt', options)).resolves.toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('opens relative scratch file links with the captured working directory', async () => {
+    const provider = new ContextProvider(noop);
+    const scratch = getVarroStateDirectory('scratch');
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({});
+    vscodeMock.window.showTextDocument.mockResolvedValue({});
+    try {
+      await expect(provider.openPath('notes.txt', { workspaceDirectory: scratch })).resolves.toBe(
+        'opened'
+      );
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith({
+        fsPath: `${scratch}/notes.txt`,
+      });
+    } finally {
+      provider.dispose();
+    }
   });
 
   it('finds pasted text in recent terminal output', async () => {

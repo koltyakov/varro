@@ -108,6 +108,7 @@ import { ProcessInspectionTimeoutError } from './process-inspection-error';
 import { readLocalServerConnectionInfo } from './server-connection-info';
 import type { ServerConnectionAdmission } from './server-connection-admission';
 import type * as ProcessInspection from './process-inspection';
+import { getVarroStateDirectory } from './varro-state-paths';
 
 vi.mock('./process-inspection', async (importOriginal) => ({
   ...(await importOriginal<typeof ProcessInspection>()),
@@ -2182,6 +2183,12 @@ describe('OpenCodeServer maintenance', () => {
           'session-2': { type: 'retry' },
         };
       }
+      if (
+        path ===
+        `/session/status?directory=${encodeURIComponent(getVarroStateDirectory('scratch'))}`
+      ) {
+        return {};
+      }
       throw new Error(`Unexpected request: ${path}`);
     });
 
@@ -2193,6 +2200,7 @@ describe('OpenCodeServer maintenance', () => {
     expect(api.request).toHaveBeenCalledWith('GET', '/experimental/session?limit=100', undefined, {
       unscoped: true,
     });
+    expect(info.workspaceCwd).toBe(getVarroStateDirectory('scratch'));
   });
 
   it('reports the current status when health collection outlives a startup transition', async () => {
@@ -2711,7 +2719,7 @@ describe('OpenCodeServer maintenance', () => {
 
     expect(vscodeMock.window.createTerminal).toHaveBeenCalledWith({
       name: 'OpenCode Upgrade',
-      cwd: undefined,
+      cwd: getVarroStateDirectory('scratch'),
     });
     expect(terminal.show).toHaveBeenCalledWith(false);
     expect(terminal.sendText).toHaveBeenCalledWith(
@@ -2966,7 +2974,7 @@ describe('OpenCodeServer maintenance', () => {
     expect(runWindowsCliUpdate).toHaveBeenCalledWith(
       expect.stringMatching(/^& '.+' upgrade 1\.14\.22$/),
       'OpenCode Upgrade',
-      undefined,
+      getVarroStateDirectory('scratch'),
       expect.any(Function)
     );
   });
@@ -3024,7 +3032,7 @@ describe('OpenCodeServer maintenance', () => {
     expect(runWindowsCliUpdate).toHaveBeenCalledWith(
       expect.stringMatching(/^& '.+' upgrade 1\.14\.22$/),
       'OpenCode Upgrade',
-      undefined,
+      getVarroStateDirectory('scratch'),
       expect.any(Function)
     );
   });

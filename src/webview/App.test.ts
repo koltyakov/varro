@@ -56,6 +56,8 @@ import {
 import { ralphStore } from './lib/stores/ralph-store';
 import { showSessionActionFeedback } from './components/chat/SessionActionFeedback';
 import { wifiIcon } from './lib/ui-icons';
+import { statusIcons } from './lib/status-icons';
+import { toCssUrl } from './components/UiIcon';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -226,6 +228,7 @@ describe('AppRoot', () => {
     const folderIcon = container?.querySelector<HTMLElement>('.ui-icon.text-vscode-muted');
     expect(folderIcon?.style.getPropertyValue('--ui-icon-width')).toBe('40px');
     expect(folderIcon?.style.getPropertyValue('--ui-icon-height')).toBe('40px');
+    expect(folderIcon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(statusIcons.folder));
 
     const openFolderButton = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent?.trim() === 'Open Folder'
@@ -255,6 +258,9 @@ describe('AppRoot', () => {
     const errorIcon = container?.querySelector<HTMLElement>('.ui-icon.text-vscode-error');
     expect(errorIcon?.style.getPropertyValue('--ui-icon-width')).toBe('32px');
     expect(errorIcon?.getAttribute('aria-hidden')).toBe('true');
+    expect(errorIcon?.style.getPropertyValue('--ui-icon-mask')).toBe(
+      toCssUrl(statusIcons.warningCircle)
+    );
 
     const reloadButton = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent?.trim() === 'Reload sidebar'

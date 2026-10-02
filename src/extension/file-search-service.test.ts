@@ -44,6 +44,7 @@ const vscodeMock = vi.hoisted(() => ({
     this.base = base;
     this.pattern = pattern;
   }),
+  Uri: { file: vi.fn((fsPath: string) => ({ fsPath })) },
 }));
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
@@ -773,6 +774,40 @@ describe('FileSearchService', () => {
     expect(onResult).toHaveBeenCalledWith({ requestId: 1, query: 'app', files: [] });
     expect(vscodeMock.workspace.findFiles).not.toHaveBeenCalled();
     expect(vscodeMock.workspace.createFileSystemWatcher).not.toHaveBeenCalled();
+  });
+
+  it('searches only scratch in an empty window and stops authorizing it when a project opens', async () => {
+    const { getVarroStateDirectory } = await import('./varro-state-paths');
+    const scratch = getVarroStateDirectory('scratch');
+    vscodeMock.workspace.workspaceFolders = [];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+    vscodeMock.workspace.findFiles.mockResolvedValue([{ fsPath: `${scratch}/notes/todo.txt` }]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    try {
+      const onResult = vi.fn();
+      search(service, 1, 'todo', 10, onResult, scratch);
+      await vi.waitFor(() =>
+        expect(onResult).toHaveBeenCalledWith({
+          requestId: 1,
+          query: 'todo',
+          files: [
+            { path: `${scratch}/notes/todo.txt`, relativePath: 'notes/todo.txt', type: 'file' },
+          ],
+        })
+      );
+      expect(vscodeMock.workspace.findFiles).toHaveBeenCalledWith(
+        expect.objectContaining({ base: expect.objectContaining({ uri: { fsPath: scratch } }) }),
+        expect.any(String)
+      );
+      vscodeMock.workspace.workspaceFolders = [vscodeMock.workspaceFolder];
+      const closedResult = vi.fn();
+      search(service, 2, 'todo', 10, closedResult, scratch);
+      expect(closedResult).toHaveBeenCalledWith({ requestId: 2, query: 'todo', files: [] });
+      expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(1);
+    } finally {
+      service.dispose();
+    }
   });
 
   it('returns an empty result and logs a warning when discovery fails', async () => {

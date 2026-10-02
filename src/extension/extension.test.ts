@@ -2,6 +2,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import packageJson from '../../package.json';
 
+const scratchMock = vi.hoisted(() => ({
+  prepare: vi.fn(() => Promise.resolve()),
+  folders: undefined as { uri: { fsPath: string } }[] | undefined,
+}));
+vi.mock('./varro-state-paths', async (importOriginal) => ({
+  ...(await importOriginal()),
+  prepareVarroScratchDirectory: scratchMock.prepare,
+}));
+
 const { disposeProcessInspectionMock } = vi.hoisted(() => ({
   disposeProcessInspectionMock: vi.fn(),
 }));
@@ -70,6 +79,7 @@ const {
       | null
       | ((context: {
           workspacePath: string | null;
+          workspaceFolders?: { name: string; path: string }[];
           activeFile: null;
           selection: null;
           diagnostics: never[];
@@ -106,6 +116,9 @@ vi.mock('vscode', () => ({
   version: '1.110.0',
   env: envMock,
   workspace: {
+    get workspaceFolders() {
+      return scratchMock.folders;
+    },
     getConfiguration: vi.fn(() => ({ get: getMock })),
     onDidChangeConfiguration: onDidChangeConfigurationMock,
   },
@@ -209,6 +222,8 @@ describe('extension activation', () => {
     envMock.uriScheme = 'vscode';
     getMock.mockImplementation(readDefaultConfig);
     sweepStaleInjectedConfigDirectoriesMock.mockResolvedValue(undefined);
+    scratchMock.folders = undefined;
+    scratchMock.prepare.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -240,6 +255,10 @@ describe('extension activation', () => {
       secrets,
       false
     );
+    expect(scratchMock.prepare).toHaveBeenCalledOnce();
+    expect(scratchMock.prepare.mock.invocationCallOrder[0]).toBeLessThan(
+      openCodeServerMock.mock.invocationCallOrder[0]!
+    );
   });
 
   it('passes global state to the sidebar provider for shared model preferences', async () => {
@@ -268,6 +287,59 @@ describe('extension activation', () => {
       undefined,
       secrets
     );
+  });
+
+  it('does not prepare scratch when a project is open', async () => {
+    scratchMock.folders = [{ uri: { fsPath: '/repo' } }];
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    expect(scratchMock.prepare).not.toHaveBeenCalled();
+  });
+
+  it('prepares scratch before rescoping after the last folder closes', async () => {
+    scratchMock.folders = [{ uri: { fsPath: '/repo' } }];
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    contextChangeCallback.current?.({
+      workspacePath: '/varro/scratch',
+      workspaceFolders: [],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    await vi.waitFor(() =>
+      expect(latestServerInstance.current?.rescopeEventStream).toHaveBeenCalledWith(
+        '/varro/scratch'
+      )
+    );
+    expect(scratchMock.prepare).toHaveBeenCalledOnce();
+    expect(scratchMock.prepare.mock.invocationCallOrder[0]).toBeLessThan(
+      latestServerInstance.current!.rescopeEventStream.mock.invocationCallOrder[0]!
+    );
+  });
+
+  it('fails activation rather than inheriting a cwd if scratch cannot be created', async () => {
+    scratchMock.prepare.mockRejectedValueOnce(new Error('Scratch is not writable'));
+    const { activate } = await import('./extension');
+    await expect(
+      activate({
+        extensionUri: {},
+        extension: { id: 'koltyakov.varro' },
+        workspaceState: {},
+        subscriptions: [],
+      } as never)
+    ).rejects.toThrow('Scratch is not writable');
+    expect(openCodeServerMock).not.toHaveBeenCalled();
   });
 
   it.each([false, true])(

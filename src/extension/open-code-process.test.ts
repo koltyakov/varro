@@ -27,6 +27,7 @@ import { getPathVariableKey } from './util/server-path';
 import type * as ServerUtils from './server-utils';
 import { Service } from '@opencode/client/service';
 import * as processInspection from './process-inspection';
+import { getVarroStateDirectory } from './varro-state-paths';
 
 const { loggerMock, spawnMock, vscodeMock, waitForProcessExitMock } = vi.hoisted(() => ({
   loggerMock: {
@@ -493,6 +494,16 @@ afterEach(() => {
 
 afterAll(async () => {
   await rm(tmpdir(), { recursive: true, force: true });
+});
+
+it('uses the persistent isolated scratch cwd only when no project folder is open', () => {
+  const manager = new OpenCodeProcess(4096, true, 'opencode');
+  const scratch = getVarroStateDirectory('scratch');
+  expect(manager.getWorkspaceCwd()).toBe(scratch);
+  vscodeMock.workspace.workspaceFolders = [];
+  expect(manager.getWorkspaceCwd()).toBe(scratch);
+  vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+  expect(manager.getWorkspaceCwd()).toBe('/repo');
 });
 
 function mockLinuxLeaseProcess(options?: {

@@ -10,6 +10,19 @@ This guide covers the current Varro workflow inside VS Code.
 
 VS Code forks have limited support. See [VS Code Fork Compatibility](vscode-forks.md) for details.
 
+### Chat without opening a project
+
+Varro also works in an empty VS Code window. It uses a persistent `scratch/` folder
+under its [per-user state root](#local-state-files) for commands and relative paths.
+No-project chats have their own directory-scoped history. Files in scratch survive
+window reloads and are shared by empty windows for the same OS user on the same host.
+
+The agent receives an explicit system instruction that no project is open and that
+scratch is not a project root. Other repositories are not automatically in scope.
+Normal tool permissions still apply; this mode is not a filesystem sandbox.
+Opening a project restores the usual workspace scope. Project AGENTS.md initialization
+requires an open project.
+
 ## First Run And Connection
 
 Install the recommended [OpenCode v2 CLI](https://opencode.ai/v2/docs/) on macOS, Linux, or WSL:
@@ -105,7 +118,7 @@ Varro uses one per-user state root for files shared across editor windows and di
 - Linux: `$XDG_STATE_HOME/varro/`, defaulting to `~/.local/state/varro/`
 
 Relative or empty `LOCALAPPDATA` and `XDG_STATE_HOME` values are ignored for new paths.
-The root contains `servers/` for server ownership records, `opencode-v2/` for
+The root contains `scratch/` for no-project files, `servers/` for server ownership records, `opencode-v2/` for
 `<sessionID>.json` annotations and session locks, and `provider-quota-v2/` for shared
 quota snapshots and polling locks. Annotation JSON includes `generationTiming`,
 the text/reasoning boundaries used with OpenCode's token counts to estimate tok/s.

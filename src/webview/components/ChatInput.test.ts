@@ -6893,6 +6893,32 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.workspace-popover')).not.toBeNull();
   });
 
+  it('sends a new no-project chat in scratch without presenting it as an open folder', async () => {
+    setState('activeSessionId', null);
+    setState('editorContext', {
+      workspacePath: '/varro/scratch',
+      workspaceDirectory: '/varro/scratch',
+      workspaceFolders: [],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    cleanup = render(() => ChatInput(), container!);
+    expect(container?.querySelector('.workspace-picker-button')).toBeNull();
+    setInputText('Help me write notes');
+    sendMessageMock.mockResolvedValue(true);
+    await flushAsyncWork();
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+    expect(sendMessageMock).toHaveBeenCalledWith('Help me write notes', {
+      noReply: false,
+      queuedAttachments: undefined,
+      newSessionWorkspace: { scope: 'folder', directory: '/varro/scratch' },
+    });
+  });
+
   it('switches an active blank workspace chat to a folder-scoped lazy chat', async () => {
     const messages: WebviewMessage[] = [];
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (

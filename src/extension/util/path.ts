@@ -1,4 +1,4 @@
-import { basename } from 'path';
+import { basename, relative } from 'path';
 import * as vscode from 'vscode';
 
 export function getRelativePath(
@@ -6,6 +6,9 @@ export function getRelativePath(
   workspaceFolder: vscode.WorkspaceFolder | undefined
 ) {
   if (!workspaceFolder) return basename(uri.fsPath);
+  if (!vscode.workspace.workspaceFolders?.length) {
+    return relative(workspaceFolder.uri.fsPath, uri.fsPath).replace(/\\/g, '/') || '.';
+  }
   const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
   if (!relativePath) return '.';
   if ((vscode.workspace.workspaceFolders?.length || 0) <= 1) return relativePath;

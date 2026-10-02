@@ -19,6 +19,15 @@ export function getVarroStateDirectory(kind: VarroStateKind): string {
   return join(root, kind);
 }
 
+/** Persistent no-project files are separate from server records and credentials. */
+export async function prepareVarroScratchDirectory(): Promise<void> {
+  const directory = getVarroStateDirectory('scratch');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  if (!(await lstat(directory)).isDirectory()) {
+    throw new Error(`Expected a real Varro scratch directory: ${directory}`);
+  }
+}
+
 export function getLegacyVarroStateDirectory(
   kind: 'opencode-v2' | 'provider-quota-v2'
 ): string | undefined {

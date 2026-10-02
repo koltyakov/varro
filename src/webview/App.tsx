@@ -12,7 +12,8 @@ import { logError } from './lib/log';
 import { asRecord, getString, isString } from './lib/runtime-values';
 import { ralphStore } from './lib/stores/ralph-store';
 import { observeSurfaceContrast } from './lib/theme';
-import { folderIcon, warningCircleSolidIcon, wifiIcon } from './lib/ui-icons';
+import { statusIcons } from './lib/status-icons';
+import { wifiIcon } from './lib/ui-icons';
 import { UiIcon } from './components/UiIcon';
 import { RalphForm } from './components/ralph/RalphForm';
 
@@ -133,7 +134,7 @@ function NoFolderOpen() {
     <div class="server-status-surface">
       <div class="server-status-content">
         <UiIcon
-          source={folderIcon}
+          source={statusIcons.folder}
           class="h-10 w-10 text-vscode-muted"
           width={40}
           height={40}
@@ -180,7 +181,7 @@ function ErrorFallback(props: { err: Error }) {
     <div class="server-status-surface h-full">
       <div class="server-status-content">
         <UiIcon
-          source={warningCircleSolidIcon}
+          source={statusIcons.warningCircle}
           class="h-8 w-8 text-vscode-error"
           width={32}
           height={32}

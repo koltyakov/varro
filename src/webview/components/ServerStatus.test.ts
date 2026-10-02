@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { resetDefaultAppState, setState } from '../lib/state';
+import { statusIcons } from '../lib/status-icons';
+import { toCssUrl } from './UiIcon';
 
 const postMessageMock = vi.hoisted(() => vi.fn());
 const openProviderSetupMock = vi.hoisted(() => vi.fn());
@@ -77,6 +79,11 @@ describe('ServerStatus', () => {
     expect(container?.textContent).toContain('OpenCode is unavailable');
     expect(container?.textContent).toContain('failed to bind port');
     expect(container?.textContent).not.toContain('  failed to bind port  ');
+    expect(
+      container
+        ?.querySelector<HTMLElement>('.ui-icon.text-vscode-error')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(statusIcons.warningCircle));
 
     const showOutput = Array.from(container?.querySelectorAll('button') || []).find(
       (button) => button.textContent?.trim() === 'Show Output'
@@ -91,6 +98,11 @@ describe('ServerStatus', () => {
     renderServerStatus();
 
     expect(container?.textContent).toContain('OpenCode is not installed');
+    expect(
+      container
+        ?.querySelector<HTMLElement>('.ui-icon.text-vscode-warning')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(statusIcons.warningTriangle));
     expect(container?.textContent).toContain('npm i -g @opencode/cli');
     expect(container?.textContent).toContain('Use OpenCode v1 instead');
     // Recovery is a button now, not an instruction to open the Command Palette.

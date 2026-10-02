@@ -9,6 +9,7 @@ import { readServerPortSetting, sweepStaleInjectedConfigDirectories } from './op
 import { disposeProcessInspection } from './process-inspection';
 import { diagnosticTimeline } from './diagnostics';
 import { measureStartupPhase } from '../shared/startup';
+import { prepareVarroScratchDirectory } from './varro-state-paths';
 
 const DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS = 4096;
 const CONTEXT_RESCOPE_RETRY_MS = 50;
@@ -165,6 +166,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 async function activateExtension(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
+  if (!vscode.workspace.workspaceFolders?.length) await prepareVarroScratchDirectory();
 
   const config = vscode.workspace.getConfiguration('varro');
   const port = readServerPortSetting(config.get<unknown>('server.port', 'auto'));
@@ -213,6 +215,10 @@ async function activateExtension(context: vscode.ExtensionContext) {
       for (;;) {
         if (generation !== contextUpdateGeneration) return;
         try {
+          if (ctx.workspaceFolders?.length === 0) {
+            await prepareVarroScratchDirectory();
+            if (generation !== contextUpdateGeneration) return;
+          }
           const result = await server?.rescopeEventStream(ctx.workspacePath || undefined);
           if (generation !== contextUpdateGeneration || result?.state === 'superseded') return;
           if (result?.state === 'cancelled') {

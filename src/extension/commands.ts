@@ -348,7 +348,7 @@ export function registerCommands(
 
     vscode.commands.registerCommand('varro.agents.initializeProject', async () => {
       const workspacePath = contextProvider.context.workspacePath;
-      if (!workspacePath) {
+      if (!workspacePath || contextProvider.context.workspaceFolders?.length === 0) {
         vscode.window.showWarningMessage('Varro: Open a project before initializing AGENTS.md.');
         return;
       }

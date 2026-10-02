@@ -1,6 +1,6 @@
 import { isAbsolute, join } from 'node:path';
 
-export type VarroStateKind = 'servers' | 'opencode-v2' | 'provider-quota-v2';
+export type VarroStateKind = 'servers' | 'opencode-v2' | 'provider-quota-v2' | 'scratch';
 
 /** Test hosts must not discover or write a production editor's ownership state. */
 export function getVarroTestStateDirectory(kind: VarroStateKind): string | undefined {

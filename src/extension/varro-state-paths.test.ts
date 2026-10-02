@@ -19,6 +19,7 @@ import {
   getVarroStateDirectory,
   getVarroStateReadDirectory,
   prepareVarroStateDirectory,
+  prepareVarroScratchDirectory,
 } from './varro-state-paths';
 
 vi.mock('os', async (importOriginal) => {
@@ -28,7 +29,7 @@ vi.mock('os', async (importOriginal) => {
 });
 
 const platform = process.platform;
-const kinds = ['servers', 'opencode-v2', 'provider-quota-v2'] as const;
+const kinds = ['servers', 'opencode-v2', 'provider-quota-v2', 'scratch'] as const;
 let root: string;
 
 beforeEach(async () => {
@@ -117,6 +118,30 @@ describe('Varro state directories', () => {
     );
     expect((await stat(directory)).isDirectory()).toBe(true);
     if (platform !== 'win32') expect((await stat(directory)).mode & 0o777).toBe(0o700);
+  });
+
+  it('creates and reuses an isolated private scratch folder without discarding files', async () => {
+    vi.stubEnv('VARRO_TEST_STATE_ROOT', join(root, 'profile'));
+    const directory = getVarroStateDirectory('scratch');
+    await prepareVarroScratchDirectory();
+    await writeFile(join(directory, 'notes.txt'), 'keep me');
+    await prepareVarroScratchDirectory();
+    expect(await readFile(join(directory, 'notes.txt'), 'utf8')).toBe('keep me');
+    if (platform !== 'win32') expect((await stat(directory)).mode & 0o777).toBe(0o700);
+  });
+
+  it('refuses a scratch folder redirected to another directory', async () => {
+    vi.stubEnv('VARRO_TEST_STATE_ROOT', root);
+    const unrelated = join(root, 'unrelated');
+    await mkdir(unrelated);
+    await symlink(
+      unrelated,
+      getVarroStateDirectory('scratch'),
+      platform === 'win32' ? 'junction' : 'dir'
+    );
+    await expect(prepareVarroScratchDirectory()).rejects.toThrow(
+      'Expected a real Varro scratch directory'
+    );
   });
 
   it('reads legacy annotations without creating directories or compatibility links', async () => {

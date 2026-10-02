@@ -145,7 +145,10 @@ function register(
     }),
   };
   const contextProvider = {
-    context: { workspacePath },
+    context: {
+      workspacePath,
+      workspaceFolders: workspacePath ? [{ name: 'repo', path: workspacePath }] : [],
+    },
     terminalSelection: null as { text: string; terminalName: string } | null,
     captureTerminalSelection: vi.fn(),
   };
@@ -720,6 +723,17 @@ describe('AGENTS.md commands', () => {
     );
     expect(vscodeMock.workspace.fs.createDirectory).not.toHaveBeenCalled();
     expect(sidebar.post).not.toHaveBeenCalled();
+  });
+
+  it('does not initialize project AGENTS.md in the no-project scratch folder', async () => {
+    const { contextProvider, sidebar } = register('/varro/scratch');
+    contextProvider.context.workspaceFolders = [];
+    await runCommand('varro.agents.initializeProject');
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
+      'Varro: Open a project before initializing AGENTS.md.'
+    );
+    expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    expect(sidebar.postCommand).not.toHaveBeenCalled();
   });
 });
 
