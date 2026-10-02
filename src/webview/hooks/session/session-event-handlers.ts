@@ -725,6 +725,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const activeMessages = deps.getMessages();
       const shouldResyncActiveMessages =
         activeMessages.length === 0 ||
+        abortedRetry ||
+        activeMessages.some(
+          ({ info }) =>
+            info.sessionID === sessionId && info.role === 'user' && !!info.pendingDelivery
+        ) ||
         hadActiveAssistantReply ||
         hasActiveAssistantReply(activeMessages);
       if (readWebviewInstanceContext()?.surface === 'editor' || !uiStore.showSessionPicker()) {
@@ -908,6 +913,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       for (let index = messages.length - 1; index >= 0; index -= 1) {
         const entry = messages[index];
         if (!entry || entry.info.sessionID !== sessionId) continue;
+        if (entry.info.role === 'user' && entry.info.pendingDelivery) continue;
         if (entry.info.role === 'assistant') {
           sessionStore.upsertMessageInfo({ ...entry.info, error });
           sessionStore.finishMessageStreaming(entry.info.id);

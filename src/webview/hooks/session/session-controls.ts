@@ -35,6 +35,7 @@ export async function abortSessionWithDependencies(
     setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
     stopLoading(): void;
     abortRemoteSession(sessionId: string): Promise<void | boolean | object>;
+    syncSessionMessages?(sessionId: string): Promise<void | boolean | object>;
     clearPendingAbortTree(sessionIds: string[]): void;
     setSessionUsageLimit(sessionId: string, notice: SessionUsageLimitSnapshot): void;
     setError?(message: string): void;
@@ -66,7 +67,18 @@ export async function abortSessionWithDependencies(
   if (deps.getActiveSessionId() === sessionId) deps.stopLoading();
 
   try {
-    await Promise.all(sessionTreeIds.map((id) => deps.abortRemoteSession(id)));
+    await Promise.all(
+      sessionTreeIds.map(async (id) => {
+        await deps.abortRemoteSession(id);
+        // An acknowledged stop must reconcile even if its SSE completion was lost.
+        // A refresh failure is not an abort failure and must not restore busy state.
+        try {
+          await deps.syncSessionMessages?.(id);
+        } catch (err) {
+          deps.logError('syncSessionMessages after abort', err);
+        }
+      })
+    );
   } catch (err) {
     deps.clearPendingAbortTree(sessionTreeIds);
     for (const id of sessionTreeIds) {
@@ -561,6 +573,7 @@ export class SessionControlOperations {
         setSessionStatusEntry: this.deps.setSessionStatusEntry,
         stopLoading: this.deps.stopLoading,
         abortRemoteSession: this.deps.abortRemoteSession,
+        syncSessionMessages: this.deps.syncSessionMessages,
         clearPendingAbortTree: this.deps.clearPendingAbortTree,
         setSessionUsageLimit: this.deps.setSessionUsageLimit,
         setError: this.deps.setError,

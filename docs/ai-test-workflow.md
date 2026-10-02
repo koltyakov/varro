@@ -30,6 +30,20 @@ native composer follow-up. This test uses a local fixture provider and separate 
 runner compatibility without consuming provider credentials. It does not replace GPT-6 Luna Fast/Sol scenarios
 run through the OpenAI subscription. Use the OpenAI subscription for all AI test model calls.
 
+## Isolate editor state as well as the backend
+
+Use the existing launchers. They set `VARRO_TEST_STATE_ROOT` to a disposable profile
+directory, separating server claims and v2 annotation locks from production editors.
+They also isolate home, local app-data, state, and temporary directories used by
+older builds. Each independent test profile gets a separate root. Launch metadata
+records `varroTestStateRoot` for the AI launcher.
+
+A custom test host must supply an absolute `VARRO_TEST_STATE_ROOT` alongside
+`VARRO_TEST_SERVER_URL`; otherwise default state access fails closed. Do not copy,
+delete, or repair production lock files to unblock a test. Database isolation and
+verified endpoint checks are still required. See [server ownership](server-ownership.md#editor-distributions-and-test-isolation)
+for mixed-version limitations.
+
 ## Choose the input that exercises the behavior
 
 | Behavior | Input in the isolated VS Code host |
@@ -140,6 +154,46 @@ those variations as untested. Explicitly requested attachment coverage still nee
 Reports must say what ran, what failed, and what could not run. A `BLOCKED` row is incomplete coverage,
 not a demonstrated product defect. It cannot become a pass through a different backend or a settled
 screenshot. Include the exact recovery attempted and continue all independent rows before finishing.
+
+## Results and recommendations
+
+Keep findings separate from coverage in every AI, fuzzy, streaming, and parity ledger and final response.
+Lead with what the tested behavior showed, not whether every planned case ran:
+
+- `PASS`: the exercised checks found no issues. Say "No issues found in tested cases", not "the full
+  suite passed" unless all required applicable cases completed.
+- `FAIL`: evidence establishes an issue, such as an observed invariant violation or a confirmed failed
+  check. Missing prerequisites, unmet scenario gates, unavailable variations, controller deadlines, and
+  unexecuted actions alone are not issues and must not make the overall result `FAIL`.
+- `BLOCKED`: no relevant behavior could be verified. Say "Not verified" rather than claiming either a
+  failure or that the behavior is OK.
+
+Keep per-case `PASS`, `FAIL`, and `BLOCKED` verdicts. An incomplete case remains `BLOCKED`, even when
+the run found no issues in other cases. A failed invariant makes that case `FAIL` even if later steps
+could not run. Partial observations can be reported as OK only for the specific checks actually verified.
+Suspicions without enough evidence remain investigation leads, not confirmed issues. A known root cause
+is not required to report an evidenced failure.
+
+Include a Markdown summary table in both the ledger and the final response, with these columns:
+
+| Scope | Tested behavior | Issues found | All cases complete |
+| --- | --- | --- | --- |
+| Example: AI scenarios | OK in tested cases | None found | No, 5/8 complete; 3 blocked |
+| Example: action checks | Has issues | 1 confirmed queue-order issue | Yes, 17/17 complete |
+| Example: streaming | Not verified | Unknown, no checks verified | No, editor access unavailable |
+
+Use actual scopes and counts, not these example values. "All cases complete" means every required
+applicable case reached its preconditions and received a verified verdict; a completed failing case
+still counts as complete. List omitted optional variations separately. Never count a dispatch, a
+canonical-only outcome, or an unrelated automated check as completion of a required visual case.
+
+For each issue, include severity, affected behavior, expected versus observed result, evidence or minimal
+reproduction, and a concrete recommendation for what needs fixing and how to verify the fix. Identify
+product/backend issues, test-controller problems, automated-check failures, and cleanup issues separately;
+do not label a run-infrastructure issue as a Varro regression. If the cause is unknown, recommend the next
+diagnostic or regression test instead of inventing a fix. Recommendations for blocked coverage belong
+under follow-up verification, not product fixes. When no issues were found, say that no product fixes are
+indicated by the tested cases and note any remaining verification. Link the detailed ledger.
 
 ## Pruning old evidence
 

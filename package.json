@@ -73,8 +73,8 @@
     "artifacts:prune": "node scripts/prune-artifacts.mjs"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.18.33",
-    "@opencode/client": "^2.0.20",
+    "@opencode-ai/sdk": "^1.18.34",
+    "@opencode/client": "^2.0.21",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.16",
     "highlight.js": "11.12.0",
@@ -87,7 +87,7 @@
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/css.escape": "1.5.2",
-    "@types/node": "26.6.3",
+    "@types/node": "26.6.4",
     "@types/vscode": "1.120.0",
     "@vitest/coverage-v8": "5.0.3",
     "@vscode/vsce": "4.0.0",
@@ -100,10 +100,9 @@
     "oxlint": "1.86.0",
     "oxlint-plugin-anti-slop": "github:dmmulroy/anti-slop#c44ef22",
     "oxlint-tsgolint": "7.0.2003",
-    "rolldown": "1.2.12",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.3.1",
+    "vite": "8.3.2",
     "vite-plugin-solid": "2.11.14",
     "vitest": "5.0.3",
     "ws": "8.22.0"
@@ -386,11 +385,21 @@
       "title": "Varro",
       "properties": {
         "varro.server.port": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535,
-          "default": 4096,
-          "markdownDescription": "Port for the OpenCode server. Reload the VS Code window after changing this setting."
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "auto"
+              ]
+            },
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          ],
+          "default": "auto",
+          "markdownDescription": "Automatically select and remember a local server port, or set an exact port from 1 through 65535. Existing verified servers are reused without restarting. Explicit ports never fall back to another port. Reload the VS Code window after changing this setting."
         },
         "varro.server.command": {
           "type": "string",

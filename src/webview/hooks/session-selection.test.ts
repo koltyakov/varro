@@ -108,6 +108,42 @@ function createSelectionDependencies(
 }
 
 describe('session-selection helpers', () => {
+  it('restores startup history and questions without waiting for MCP reconciliation', async () => {
+    const mcp = deferred<void>();
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => 'session-1',
+      syncSessionMcps: vi.fn(() => mcp.promise),
+    });
+    await selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1', {
+      waitForMcpSync: false,
+    });
+    expect(deps.syncSessionMcps).toHaveBeenCalledWith('session-1');
+    expect(deps.setMessagesIncremental).toHaveBeenCalled();
+    expect(deps.mergeSessionStatuses).toHaveBeenCalled();
+    expect(deps.loadQuestions).toHaveBeenCalled();
+    mcp.resolve();
+  });
+
+  it('continues to await MCP reconciliation for ordinary session selections', async () => {
+    const mcp = deferred<void>();
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => 'session-1',
+      syncSessionMcps: vi.fn(() => mcp.promise),
+    });
+    let settled = false;
+    const selection = selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1').then(
+      () => {
+        settled = true;
+      }
+    );
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    expect(deps.setMessagesIncremental).toHaveBeenCalled();
+    expect(settled).toBe(false);
+    mcp.resolve();
+    await selection;
+    expect(settled).toBe(true);
+  });
+
   it('removes a confirmed unavailable catalog entry and reports it', async () => {
     const removeUnavailableSession = vi.fn();
     const deps = createSelectionDependencies({

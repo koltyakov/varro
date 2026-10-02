@@ -100,6 +100,7 @@ import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
 import { StreamingTextCache } from './streaming-text-cache';
 import { readLocalSessionSummary } from './local-session-summary';
+import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { logger } from './logger';
 import { openCodeApiVersion } from './opencode-connection';
 import { MessageRouter } from './message-router';
@@ -143,6 +144,27 @@ function differsByMajorOrMinor(left: string, right: string) {
   const [leftMajor, leftMinor] = left.split('.').map(Number);
   const [rightMajor, rightMinor] = right.split('.').map(Number);
   return leftMajor !== rightMajor || leftMinor !== rightMinor;
+}
+
+function formatServerUptime(startedAt: number): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - startedAt) / 60_000));
+  const units = [
+    { singular: 'week', plural: 'weeks', minutes: 7 * 24 * 60 },
+    { singular: 'day', plural: 'days', minutes: 24 * 60 },
+    { singular: 'hr', plural: 'hrs', minutes: 60 },
+    { singular: 'min', plural: 'min', minutes: 1 },
+  ];
+  const index = units.findIndex((unit) => minutes >= unit.minutes);
+  if (index < 0) return 'less than a min';
+  let remaining = minutes;
+  return units
+    .slice(index, index + 2)
+    .flatMap((unit) => {
+      const value = Math.floor(remaining / unit.minutes);
+      remaining %= unit.minutes;
+      return value > 0 ? [`${value} ${value === 1 ? unit.singular : unit.plural}`] : [];
+    })
+    .join(' ');
 }
 
 interface WebviewEndpoint {
@@ -204,6 +226,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private openCodeUpdateAvailable = false;
   private openCodeCliVersion: string | null = null;
   private openCodeServerVersion: string | null = null;
+  private openCodeServerStartedAt: number | null = null;
+  private openCodeUptimeTimer: ReturnType<typeof setInterval> | null = null;
   private readonly extensionVersion: string;
   private activeChatModel: ChatModelSelection | null = null;
   private readonly fileSearch: FileSearchService;
@@ -668,7 +692,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       decisionProviders: this.decisionProviders,
       sessionTitleFallback: this.sessionTitleFallback,
       readLocalSessionSummary: (sessionId) =>
-        this.server.isAttachOnly ? Promise.resolve(null) : readLocalSessionSummary(sessionId),
+        this.server.isAttachOnly
+          ? Promise.resolve(null)
+          : readLocalSessionSummary(
+              sessionId,
+              undefined,
+              this.server.apiVersion,
+              new OpenCodeV2SessionState()
+            ),
       simulateNoProviders: this.simulateNoProviders,
       getRequestGeneration: () => webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),
@@ -2908,6 +2939,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   async dispose() {
     this.providerLimitService.dispose();
     this.disposing = true;
+    if (this.openCodeUptimeTimer) {
+      clearInterval(this.openCodeUptimeTimer);
+      this.openCodeUptimeTimer = null;
+    }
     this.sessionReconcileRerunRequested = false;
     if (this.sessionReconcileTimer) {
       clearInterval(this.sessionReconcileTimer);
@@ -3129,10 +3164,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await operation;
   }
 
-  private refreshProviderCatalog() {
+  private async refreshProviderCatalog() {
     this.providerLimitService.clearCache();
     this.post({ type: 'providers/refresh' });
-    return Promise.resolve();
+    await this.providerFileRefresh.retryPendingRefresh();
   }
 
   private async providerAuthChanged() {
@@ -3370,6 +3405,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.openCodeUpdateAvailable = false;
       this.openCodeCliVersion = null;
       this.openCodeServerVersion = null;
+      this.openCodeServerStartedAt = null;
       return;
     }
     if (this.openCodeVersionCheck !== 'idle') return;
@@ -3389,6 +3425,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.openCodeServerVersion = info.health.version
           ? extractVersion(info.health.version)
           : null;
+        const startedAt = info.connections?.startedAt;
+        this.openCodeServerStartedAt =
+          startedAt != null && Number.isFinite(startedAt) && startedAt > 0 ? startedAt : null;
         const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion(
           undefined,
           this.openCodeCliVersion?.startsWith('2.') ? 2 : 1
@@ -3410,6 +3449,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private renderOpenCodeStatusBarItem() {
     const attachOnly = this.server.isAttachOnly;
+    const serverUrl = new URL(this.server.url);
     const cliVersion = attachOnly ? null : this.openCodeCliVersion;
     const updateMarker = !attachOnly && this.openCodeUpdateAvailable ? '*' : '';
     const displayedVersion = this.openCodeServerVersion ?? cliVersion;
@@ -3422,10 +3462,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       .get<boolean>('server.autoUpdate', true);
     const versionLines = [
       ...(attachOnly
-        ? [`Server address: ${this.server.url}`, `Server IP: ${new URL(this.server.url).hostname}`]
+        ? [`Server address: ${this.server.url}`, `Server IP: ${serverUrl.hostname}`]
         : [`OpenCode CLI: ${cliVersion ?? 'unknown'}`]),
       `OpenCode Server: ${this.openCodeServerVersion ?? 'unknown'}`,
+      `Server port: ${serverUrl.port || (serverUrl.protocol === 'https:' ? '443' : '80')}`,
     ];
+    if (this.openCodeServerStartedAt !== null) {
+      versionLines.push(`Server uptime: ${formatServerUptime(this.openCodeServerStartedAt)}`);
+      if (!this.openCodeUptimeTimer && !this.disposing) {
+        this.openCodeUptimeTimer = setInterval(() => this.renderOpenCodeStatusBarItem(), 60_000);
+      }
+    } else if (this.openCodeUptimeTimer) {
+      clearInterval(this.openCodeUptimeTimer);
+      this.openCodeUptimeTimer = null;
+    }
     if (cliVersion && compareVersions(cliVersion, maximumTestedOpenCodeVersion) < 0) {
       versionLines.push(
         '',

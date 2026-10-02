@@ -2890,101 +2890,152 @@ describe('RestProxy handleRequest', () => {
     expect(JSON.stringify(response)).not.toContain('OTHER_');
   });
 
-  it('uses the local database summary without requesting session histories', async () => {
-    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => []);
-    const readLocalSessionSummary = vi.fn(async () => ({
-      contextCharacters: { system: 40, user: 40, assistant: 40, tool: 40 },
-      messages: [
-        { info: { role: 'user', time: { created: 1_000 } }, parts: [] },
-        {
-          info: {
-            role: 'assistant',
-            providerID: 'openai',
-            modelID: 'gpt-5.6-sol',
-            time: { created: 2_000, completed: 4_000 },
+  it.each([1, 2] as const)(
+    'uses the local database summary without any v%s API requests',
+    async (apiVersion) => {
+      const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => []);
+      const readLocalSessionSummary = vi.fn(async () => ({
+        contextCharacters: { system: 40, user: 40, assistant: 40, tool: 40 },
+        messages: [
+          { info: { role: 'user', time: { created: 1_000 } }, parts: [] },
+          {
+            info: {
+              role: 'assistant',
+              providerID: 'openai',
+              modelID: 'gpt-5.6-sol',
+              time: { created: 2_000, completed: 4_000 },
+              tokens: {
+                total: 130,
+                input: 100,
+                output: 20,
+                reasoning: 0,
+                cache: { read: 10, write: 0 },
+              },
+            },
+            parts: [
+              {
+                type: 'tool',
+                tool: 'apply_patch',
+                state: {
+                  status: 'completed',
+                  input: {},
+                  output: '',
+                  metadata: {
+                    files: [{ relativePath: 'src/a.ts', additions: 4, deletions: 1 }],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+        descendants: [
+          {
+            id: 'child-1',
             tokens: {
+              input: 40,
+              output: 5,
+              reasoning: 0,
+              cache: { read: 4, write: 0 },
+            },
+            messages: [],
+          },
+        ],
+      }));
+      const { proxy, callbacks } = createProxy({
+        readLocalSessionSummary,
+        server: { ...createCallbacks().server, apiVersion, request: serverRequest } as never,
+      });
+
+      await proxy.handleRequest(makePayload(822, 'GET', '/varro/session/session-1/diff-summary'));
+
+      expect(readLocalSessionSummary).toHaveBeenCalledWith('session-1');
+      expect(serverRequest).not.toHaveBeenCalled();
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 822,
+        data: expect.objectContaining({
+          files: 1,
+          additions: 4,
+          deletions: 1,
+          tokens: 165,
+          model: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
+          durationMs: 3_000,
+          activeStartedAt: null,
+          tokenBreakdown: {
+            session: {
               total: 130,
               input: 100,
               output: 20,
               reasoning: 0,
-              cache: { read: 10, write: 0 },
+              cacheRead: 10,
+              cacheWrite: 0,
             },
+            subagents: {
+              total: 49,
+              input: 40,
+              output: 5,
+              reasoning: 0,
+              cacheRead: 4,
+              cacheWrite: 0,
+            },
+            subagentCount: 1,
           },
-          parts: [
-            {
-              type: 'tool',
-              tool: 'apply_patch',
-              state: {
-                status: 'completed',
-                input: {},
-                output: '',
-                metadata: {
-                  files: [{ relativePath: 'src/a.ts', additions: 4, deletions: 1 }],
-                },
-              },
-            },
+          nestedContextBreakdown: [
+            { key: 'system', tokens: 10, percent: 10 },
+            { key: 'user', tokens: 10, percent: 10 },
+            { key: 'assistant', tokens: 10, percent: 10 },
+            { key: 'tool', tokens: 10, percent: 10 },
+            { key: 'other', tokens: 60, percent: 60 },
           ],
-        },
-      ],
-      descendants: [
-        {
-          id: 'child-1',
-          tokens: {
-            input: 40,
-            output: 5,
-            reasoning: 0,
-            cache: { read: 4, write: 0 },
-          },
-          messages: [],
-        },
-      ],
-    }));
-    const { proxy, callbacks } = createProxy({
-      readLocalSessionSummary,
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+        }),
+      });
+    }
+  );
+
+  it('uses local v2 pause metadata without fetching the session header', async () => {
+    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => {
+      throw new Error('API should not be used for a local summary');
     });
-
-    await proxy.handleRequest(makePayload(822, 'GET', '/varro/session/session-1/diff-summary'));
-
-    expect(readLocalSessionSummary).toHaveBeenCalledWith('session-1');
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2, request: serverRequest } as never,
+      readLocalSessionSummary: vi.fn(async () => ({
+        metadata: { varro: { pauses: [{ messageId: 'paused', pausedAt: 11_000 }] } },
+        messages: [
+          { info: { id: 'prompt', role: 'user', time: { created: 1_000 } }, parts: [] },
+          { info: { id: 'paused', role: 'assistant', time: { created: 2_000 } }, parts: [] },
+        ],
+        descendants: [],
+      })),
+    });
+    await proxy.handleRequest(makePayload(827, 'GET', '/varro/session/session-1/diff-summary'));
     expect(serverRequest).not.toHaveBeenCalled();
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
-      id: 822,
-      data: expect.objectContaining({
-        files: 1,
-        additions: 4,
-        deletions: 1,
-        tokens: 165,
-        model: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
-        durationMs: 3_000,
-        activeStartedAt: null,
-        tokenBreakdown: {
-          session: {
-            total: 130,
-            input: 100,
-            output: 20,
-            reasoning: 0,
-            cacheRead: 10,
-            cacheWrite: 0,
-          },
-          subagents: {
-            total: 49,
-            input: 40,
-            output: 5,
-            reasoning: 0,
-            cacheRead: 4,
-            cacheWrite: 0,
-          },
-          subagentCount: 1,
-        },
-        nestedContextBreakdown: [
-          { key: 'system', tokens: 10, percent: 10 },
-          { key: 'user', tokens: 10, percent: 10 },
-          { key: 'assistant', tokens: 10, percent: 10 },
-          { key: 'tool', tokens: 10, percent: 10 },
-          { key: 'other', tokens: 60, percent: 60 },
-        ],
-      }),
+      id: 827,
+      data: expect.objectContaining({ durationMs: 10_000, activeStartedAt: null }),
+    });
+  });
+
+  it('preserves v2 API pause metadata when SQLite is unavailable', async () => {
+    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async (_method, path) => {
+      if (path === '/session/session-1')
+        return { metadata: { varro: { pauses: [{ messageId: 'paused', pausedAt: 11_000 }] } } };
+      if (path.endsWith('/message'))
+        return [
+          { info: { id: 'prompt', role: 'user', time: { created: 1_000 } }, parts: [] },
+          { info: { id: 'paused', role: 'assistant', time: { created: 2_000 } }, parts: [] },
+        ];
+      return [];
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2, request: serverRequest } as never,
+      readLocalSessionSummary: vi.fn(async () => null),
+    });
+    await proxy.handleRequest(makePayload(828, 'GET', '/varro/session/session-1/diff-summary'));
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/session-1', undefined, {
+      directory: '/repo',
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 828,
+      data: expect.objectContaining({ durationMs: 10_000, activeStartedAt: null }),
     });
   });
 
@@ -3003,6 +3054,84 @@ describe('RestProxy handleRequest', () => {
     expect(readLocalSessionSummary).toHaveBeenCalledWith('session-1');
     expect(serverRequest).toHaveBeenCalledWith('GET', '/session/session-1/diff', undefined, {
       directory: '/repo',
+    });
+  });
+
+  it.each([null, { messages: [], descendants: [] }])(
+    'falls back to API history when the local database has no messages: %j',
+    async (local) => {
+      const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async (_method, path) =>
+        path.endsWith('/message')
+          ? [
+              {
+                info: {
+                  role: 'assistant',
+                  time: { created: 1_000, completed: 4_000 },
+                  tokens: { total: 500 },
+                },
+              },
+            ]
+          : []
+      );
+      const { proxy, callbacks } = createProxy({
+        readLocalSessionSummary: vi.fn(async () => local),
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+      });
+
+      await proxy.handleRequest(makePayload(824, 'GET', '/varro/session/session-1/diff-summary'));
+
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 824,
+        data: expect.objectContaining({ tokens: 500, durationMs: 3_000 }),
+      });
+    }
+  );
+
+  it('preserves API history statistics and tool edits when snapshot diffs fail', async () => {
+    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async (_method, path) => {
+      if (path.endsWith('/diff')) throw new Error('500 missing snapshot object');
+      if (path.endsWith('/message')) {
+        return [
+          { info: { role: 'user', time: { created: 1_000 } }, parts: [] },
+          {
+            info: {
+              role: 'assistant',
+              providerID: 'openai',
+              modelID: 'gpt-6-astra',
+              time: { created: 2_000, completed: 4_000 },
+              tokens: { total: 500 },
+            },
+            parts: [
+              {
+                type: 'tool',
+                tool: 'apply_patch',
+                state: {
+                  metadata: { files: [{ relativePath: 'src/a.ts', additions: 4, deletions: 1 }] },
+                },
+              },
+            ],
+          },
+        ];
+      }
+      return [];
+    });
+    const { proxy, callbacks } = createProxy({
+      readLocalSessionSummary: vi.fn(async () => null),
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(825, 'GET', '/varro/session/session-1/diff-summary'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 825,
+      data: expect.objectContaining({
+        files: 1,
+        additions: 4,
+        deletions: 1,
+        tokens: 500,
+        durationMs: 3_000,
+        model: { providerID: 'openai', modelID: 'gpt-6-astra' },
+      }),
     });
   });
 
@@ -6877,6 +7006,40 @@ describe('RestProxy handleRequest', () => {
 
     expect(confirmPromptAdmission).not.toHaveBeenCalled();
   });
+
+  it.each(['idle', 'busy', 'permission', 'question', 'admission-denied'])(
+    'guards steering resume against authoritative %s state',
+    async (scenario) => {
+      const serverRequest = vi.fn(async (method: string, path: string) => {
+        if (method === 'POST') return true;
+        if (path === '/session/status')
+          return scenario === 'busy' ? { 'session-1': { type: 'busy' } } : {};
+        if (path === '/permission')
+          return scenario === 'permission' ? [{ id: 'perm-1', sessionID: 'session-1' }] : [];
+        if (path === '/question')
+          return scenario === 'question' ? [{ id: 'question-1', sessionID: 'session-1' }] : [];
+        return undefined;
+      });
+      const confirmPromptAdmission = vi.fn(async () => scenario !== 'admission-denied');
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+        confirmPromptAdmission,
+      });
+      await proxy.handleRequest(makePayload(303, 'POST', '/session/session-1/resume-steering'));
+      expect(serverRequest.mock.calls.some(([method]) => method === 'POST')).toBe(
+        scenario === 'idle'
+      );
+      if (scenario === 'idle')
+        expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 303, data: true });
+      else if (scenario !== 'admission-denied')
+        expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 303, data: false });
+      else
+        expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+          id: 303,
+          error: 'Resume cancelled because generated dependencies are not ignored by Git',
+        });
+    }
+  );
 
   it('extracts the session id from a prompt_async path', async () => {
     const markSessionBusy = vi.fn();

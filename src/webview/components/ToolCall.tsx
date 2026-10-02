@@ -287,6 +287,10 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
   const title = getStateTitle(state);
   const normalizedToolName = normalizeToolName(toolName);
 
+  if (normalizedToolName === 'question' && (!title || normalizeToolName(title) === 'question')) {
+    return 'Question';
+  }
+
   if (toolName === 'automatic_action') {
     const label = title || (isString(input.description) ? input.description : 'Automatic action');
     return isString(input.command) && input.command.trim() ? `${label}: ${input.command}` : label;
@@ -582,7 +586,16 @@ export function ToolCall(props: {
   };
 
   const shouldHideToolCard = () => {
-    return Boolean(questionRequest()) && isQuestionToolName(tool().tool);
+    if (!isQuestionToolName(tool().tool)) return false;
+    if (questionRequest()) return true;
+    if (appState.messagesLoading || (state().status !== 'pending' && state().status !== 'running'))
+      return false;
+
+    // Standalone surveys can arrive without a tool link. They replace waiting
+    // question cards in their own session, not answered questions in history.
+    return appState.questions.some(
+      (request) => request.sessionID === tool().sessionID && !request.tool
+    );
   };
   const showPermission = () => {
     const permission = permissionRequest();

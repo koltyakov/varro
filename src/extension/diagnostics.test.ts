@@ -75,4 +75,18 @@ describe('diagnostic export', () => {
     ).not.toMatch(/abc123|xyz|quoted secret/);
     expect(diagnosticTimeline.export('# Ready')).toContain('Retained events: 0/100');
   });
+
+  it.each([
+    ['/api/session/ses_private/agent', '/api/session/:id/agent'],
+    [
+      '/api/session/ses_private/prompt?location[directory]=C%3A%5Cprivate',
+      '/api/session/:id/prompt',
+    ],
+    [
+      '/api/experimental/session/ses_private/instructions/entries/varro.system',
+      '/api/experimental/session/:id/instructions/entries/:id',
+    ],
+  ])('identifies native v2 failures without exposing IDs or directories: %s', (path, route) => {
+    expect(diagnosticRoute(path)).toBe(route);
+  });
 });

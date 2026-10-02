@@ -48,9 +48,12 @@ the shared invariants below remain true.
   its shallower track observer. Mount and explicit layout measurements must instead align before
   paint, so history and wheel anchors never see integer prefixes paired with fractional row boxes.
   After applying corrections, reconcile the active bottom-follow target as well as width-resize
-  anchoring. Reduced-motion following must not oscillate between virtual ranges while those writes
-  settle. Cancel pending correction writes on disposal. Streamed entrance height updates also defer
-  observer-triggered writes. `scroll-resize-observer.spec.ts` and `scroll-streaming.spec.ts` check
+  and explicit view-change anchoring. Do not add a generic detached anchor that competes with
+  measurement or history compensation. Flush pending rounding before a scrolling key establishes
+  its painted destination. Reduced-motion following must not oscillate
+  between virtual ranges while those writes settle. Cancel pending correction writes on disposal.
+  Streamed entrance height updates also defer observer-triggered writes.
+  `scroll-resize-observer.spec.ts` and `scroll-streaming.spec.ts` check
   browser error events and bottom-follow, including reduced motion.
 - `start/end` define the mounted overscan range. `coreStart/coreEnd` define the rows near the painted
   viewport. Off-core overscan rows remain real message rows; lightweight mode may suppress expensive
@@ -325,6 +328,9 @@ Direct input acquires ownership only when it can affect the transcript:
   reserve. Track `min-height` can hide a small unreachable target, and repeated reconciliation then
   accumulates blank reserve until the scrollbar appears. `scroll-short-transcript.spec.ts` covers
   the native first send, its initial settling, and subsequent activity every frame.
+- Composer growth from wrapped text, new lines, or attachments immediately reconciles bottom-follow
+  before paint, without easing. Detached readers retain their position. Later transcript growth keeps
+  normal follow motion.
 - Send-time composer collapse eases its held minimum height over 220 ms. Before each shrinking frame,
   reserve only the scroll-range shortfall at the current painted scroll position. Reserving the whole
   height delta makes bottom-follow chase temporary space and leaves an unnecessary trailing reserve.
@@ -352,6 +358,11 @@ Direct input acquires ownership only when it can affect the transcript:
   and the resumed response settles; preserve the card while the new assistant message is being loaded.
   Use the standard tool-card border and hourglass, with the process's elapsed time aligned on the right.
   Restore this state from the running-shell snapshot on reload, and retain the existing scroll owner.
+  A successful model execution does not clear session-owned running shells. Keep waiting through
+  each command's exit and automatic follow-up; only apply the missed-follow-up grace after the last
+  command exits. Do not guess that a command is detached from its name or elapsed time. Unowned
+  processes do not affect session completion; interrupted or failed executions must not be restored
+  as waiting by a stale shell snapshot.
 - A failed assistant attempt with retry metadata is not a final response while the turn is working,
   even if it has completed partial text and `finish: error`. Keep the loading slot through retry and
   the next empty attempt; do not briefly insert Worked. `automatic-retry.spec.ts` checks that handoff
@@ -476,7 +487,9 @@ Direct input acquires ownership only when it can affect the transcript:
   Subsequent standalone parts wait for preceding text to catch up so edits do not overtake prose.
 - Compaction-only user records paint dividers but do not replace the active prompt identity. Keep
   presentation and active-turn activity attached to the real prompt through compaction and continuation,
-  so already-visible assistant content never re-enters the streaming queue.
+  so already-visible assistant content never re-enters the streaming queue. Include their dividers as
+  ordered presentation boundaries so preceding completed previews, queued tools, and exits group
+  immediately and never replay below compaction.
 - Automatic user-role notices, including background command completion, also retain the real prompt
   identity. A metadata-only arrival cannot establish a new prompt before its content arrives. Switching
   to a notice and back when the next assistant arrives clears presentation, hides already-painted
@@ -547,9 +560,9 @@ Direct input acquires ownership only when it can affect the transcript:
   Each frame starts at the current position, including newer downward user movement. Direct input,
   editing, disclosure ownership, and activity exit still take precedence. Content arriving after
   canonical completion must release the old activity-summary anchor just like a live delta.
-- An explicit return to latest more than four viewport heights away positions immediately rather than
-  traversing every intermediate row at streaming speed. Nearby returns and subsequent growth retain
-  normal easing. A newer direct gesture still cancels the queued return.
+- An explicit return to latest positions immediately at any distance rather than scrolling through
+  intermediate rows. Sends and subsequent growth retain normal easing. A newer direct gesture still
+  cancels the queued return.
 - `MessageList.presentation.test.ts` and `streaming-presentation.test.ts` cover canonical/display
   separation, grouped fast previews, completion, interruption, hydration, and cancellation.
   `e2e/tests/scroll-streaming-presentation.spec.ts` records every-frame preview, text, anchor, and scroll

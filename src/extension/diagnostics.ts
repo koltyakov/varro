@@ -114,10 +114,23 @@ export function redactDiagnosticText(text: string, hidePaths = false): string {
 /** Retain endpoint names, never query values or user-supplied path segments. */
 export function diagnosticRoute(path: string): string {
   const known = new Set([
+    'api',
+    'experimental',
     'session',
     'message',
     'status',
     'prompt_async',
+    'prompt',
+    'agent',
+    'model',
+    'command',
+    'generate',
+    'instructions',
+    'entries',
+    'inbox',
+    'revert',
+    'stage',
+    'commit',
     'summarize',
     'global',
     'health',

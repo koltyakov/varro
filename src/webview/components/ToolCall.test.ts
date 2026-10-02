@@ -144,6 +144,21 @@ function session(id: string, overrides: Partial<Session> = {}): Session {
 }
 
 describe('formatToolTitle', () => {
+  it.each([
+    ['question', ''],
+    ['question', 'question'],
+    ['functions.question', ''],
+    ['functions.question', 'functions.question'],
+  ])('capitalizes the default question title for %s with title "%s"', (toolName, title) => {
+    expect(formatToolTitle(toolName, completedState({}, title))).toBe('Question');
+  });
+
+  it('preserves descriptive question titles', () => {
+    expect(formatToolTitle('question', completedState({}, 'Asked 3 questions'))).toBe(
+      'Asked 3 questions'
+    );
+  });
+
   it('shows search tools as Search with the input pattern', () => {
     expect(formatToolTitle('grep', completedState({ pattern: 'Thinking:' }, 'Thinking:'))).toBe(
       'Search: Thinking:'
@@ -2354,6 +2369,93 @@ describe('ToolCall', () => {
 
     expect(container?.querySelector('.tool-invocation-header')).toBeNull();
     expect(container?.querySelector('.question-prompt-card')).not.toBeNull();
+  });
+
+  it.each(['pending', 'running'] as const)(
+    'hides a %s question tool while its standalone survey is pending',
+    (status) => {
+      const part: ToolPart = {
+        id: 'tool-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool: 'question',
+        state:
+          status === 'pending'
+            ? { status, input: {}, raw: '' }
+            : { status, input: {}, time: { start: 1 } },
+      };
+      const question: QuestionRequest = {
+        id: 'question-1',
+        sessionID: 'session-1',
+        questions: [{ question: 'Choose one', header: 'Survey', options: [] }],
+      };
+      setState('questions', [question]);
+
+      cleanup = render(
+        () => createComponent(ToolCall, { part, questionRequest: null }),
+        container!
+      );
+
+      expect(container?.querySelector('.tool-invocation-header')).toBeNull();
+      expect(container?.querySelector('.question-prompt-card')).toBeNull();
+
+      setState('questions', []);
+      expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
+    }
+  );
+
+  it.each(['other-session', 'other-tool', 'completed'] as const)(
+    'keeps question tools visible outside the standalone survey replacement: %s',
+    (scenario) => {
+      const part: ToolPart = {
+        id: 'tool-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool: 'question',
+        state:
+          scenario === 'completed'
+            ? completedState({}, 'question')
+            : { status: 'running', input: {}, time: { start: 1 } },
+      };
+      const question: QuestionRequest = {
+        id: 'question-1',
+        sessionID: scenario === 'other-session' ? 'child-1' : 'session-1',
+        questions: [{ question: 'Choose one', header: 'Survey', options: [] }],
+      };
+      if (scenario === 'other-tool') {
+        question.tool = { messageID: 'message-2', callID: 'call-2' };
+      }
+      setState('sessions', [session('session-1'), session('child-1', { parentID: 'session-1' })]);
+      setState('questions', [question]);
+
+      cleanup = render(
+        () => createComponent(ToolCall, { part, questionRequest: null }),
+        container!
+      );
+
+      expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
+      expect(container?.querySelector('.question-prompt-card')).toBeNull();
+    }
+  );
+
+  it.each(['', 'question'])('capitalizes the completed question summary title "%s"', (title) => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'question',
+      state: completedState({ questions: [{ question: 'Which checks should I run?' }] }, title),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.question-summary-title')?.textContent).toBe('Question');
   });
 
   it('shows completed questions and answers as a compact read-only summary', () => {

@@ -499,6 +499,22 @@ export function ProviderConnectionDialog(props: {
                           <div class="provider-connect-authorization">
                             <AuthorizationInstructions text={auth().instructions} />
                             <Show when={auth().url}>
+                              <div class="provider-connect-field">
+                                <label for="provider-connect-authorization-url">
+                                  Authorization URL
+                                </label>
+                                <div class="provider-connect-url">
+                                  <input
+                                    id="provider-connect-authorization-url"
+                                    class="provider-connect-url-input"
+                                    type="text"
+                                    value={auth().url}
+                                    readOnly
+                                    onFocus={(event) => event.currentTarget.select()}
+                                  />
+                                  <CopyIconButton text={auth().url} label="authorization URL" />
+                                </div>
+                              </div>
                               <button
                                 type="button"
                                 class="provider-connect-secondary"

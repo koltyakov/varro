@@ -13,11 +13,9 @@ permissions:
 jobs:
 
   build-and-test:
+    name: Linux build and test
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      matrix:
-        node-version: [24.21.0]
 
     steps:
       - name: Check out repository
@@ -26,14 +24,14 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 24.21.0
           cache: npm
 
       - name: Use pinned npm
-        run: npm install -g npm@$(node -p "require('./package.json').volta.npm")
+        run: npm install -g npm@$(node -p "require('./package.json').volta.npm") --no-audit --no-fund
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck
         run: npm run typecheck
@@ -60,11 +58,9 @@ jobs:
         run: npm run package:vsix
 
   windows:
+    name: Windows build and test
     runs-on: windows-latest
     timeout-minutes: 15
-    strategy:
-      matrix:
-        node-version: [24.21.0]
 
     steps:
       - name: Check out repository
@@ -73,15 +69,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 24.21.0
           cache: npm
 
       - name: Use pinned npm
         shell: bash
-        run: npm install -g npm@$(node -p "require('./package.json').volta.npm")
+        run: npm install -g npm@$(node -p "require('./package.json').volta.npm") --no-audit --no-fund
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck
         run: npm run typecheck
@@ -90,7 +86,7 @@ jobs:
         run: npm run typecheck:suggestions
 
       - name: Test
-        run: npm test
+        run: npm run test
 
       - name: Build
         run: npm run build
@@ -99,16 +95,27 @@ jobs:
         run: npm run package:vsix
 
   e2e:
+    needs: [build-and-test, windows]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    container:
+      # Keep this version aligned with @playwright/test in package.json.
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --ipc=host
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      - name: Trust container checkout
+        # The mounted checkout belongs to the host runner, not the container user.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -122,11 +129,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-
       - name: Test browser scripts
         run: npm run test:scripts:browser
 
       - name: Run e2e tests
-        run: npm run test:e2e -- --shard=${{ matrix.shard }}/2
+        # Bypass pretest:e2e; the matching container already includes the browsers.
+        run: node scripts/run-e2e.mjs --shard=${{ matrix.shard }}/${{ strategy.job-total }}

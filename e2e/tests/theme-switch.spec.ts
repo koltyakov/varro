@@ -115,6 +115,7 @@ for (const theme of ['dark', 'light'] as const) {
       const composerStyle = style('.rich-composer');
       const toolTitleStyle = style('[data-typography-probe] .tool-invocation-title');
       return {
+        isLinux: /Linux/.test(navigator.userAgent),
         sessionFontSize: sessionStyle.fontSize,
         markdownFontSize: markdownStyle.fontSize,
         markdownFontWeight: markdownStyle.fontWeight,
@@ -131,9 +132,9 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     expect(metrics.sessionFontSize).toBe('13px');
-    expect(metrics.markdownFontSize).toBe('13.5px');
+    expect(metrics.markdownFontSize).toBe(metrics.isLinux ? '13px' : '13.5px');
     expect(metrics.markdownFontWeight).toBe('400');
-    expect(metrics.markdownLineHeight).toBe('22.275px');
+    expect(metrics.markdownLineHeight).toBe(metrics.isLinux ? '21.45px' : '22.275px');
     expect(metrics.composerFontWeight).toBe('400');
     expect(metrics.toolTitleFontWeight).toBe('400');
     expect(metrics.codeBorderStyle).toBe('solid');
@@ -141,6 +142,51 @@ for (const theme of ['dark', 'light'] as const) {
     for (const ratio of metrics.contrasts) {
       expect(ratio, JSON.stringify(metrics)).toBeGreaterThanOrEqual(4.5);
     }
+  });
+}
+
+for (const [platform, userAgent, offset] of [
+  ['Linux', 'Mozilla/5.0 (X11; Linux x86_64)', 0],
+  ['macOS', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', 0.5],
+  ['Windows', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 0.5],
+] as const) {
+  test.describe(`${platform} chat font sizing`, () => {
+    test.use({ userAgent });
+
+    test('preserves default and custom sizes with the platform prose offset', async ({ page }) => {
+      await page.goto('/e2e/harness/index.html?scenario=blank');
+      const session = page.locator('.interactive-session');
+      await expect(session).toBeVisible();
+      await session.evaluate((element) => {
+        const probe = document.createElement('div');
+        probe.dataset.typographyProbe = 'true';
+        probe.className = 'rendered-markdown';
+        probe.textContent = 'Message text';
+        element.append(probe);
+      });
+      const markdown = page.locator('[data-typography-probe]');
+      await expect(markdown).toHaveCSS('font-size', `${13 + offset}px`);
+
+      for (const chatFontSize of [17, 15.5]) {
+        await page.evaluate((size) => {
+          window.postMessage(
+            {
+              type: 'config/update',
+              payload: {
+                desktopSessionPaneSide: 'left',
+                defaultPermissionMode: 'default',
+                chatFontSize: size,
+                chatEditorFontSize: 12,
+                chatFontFamily: 'default',
+              },
+            },
+            '*'
+          );
+        }, chatFontSize);
+        await expect(session).toHaveCSS('font-size', `${chatFontSize}px`);
+        await expect(markdown).toHaveCSS('font-size', `${chatFontSize + offset}px`);
+      }
+    });
   });
 }
 

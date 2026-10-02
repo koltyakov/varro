@@ -4,12 +4,13 @@ Start with the [controller workflow](ai-test-workflow.md) for input selection, a
 checkpointed replay, and independent scenario execution.
 
 > [!IMPORTANT]
-> An AI test run passes only when the requested scenarios run in a real, interactable VS Code
-> Extension Development Host. If VS Code cannot be launched or controlled, GPT-6 Luna Fast or GPT-6 Sol cannot be
-> used, required sessions cannot be prepared, or any real-editor scenario cannot reach its precondition,
-> the **overall AI test result is `FAIL`**. Automated preflight results may still be reported as supporting
-> evidence, but they cannot make the AI test pass. Put this overall result at the top of the run ledger
-> and final report.
+> Real-editor cases require a real, interactable VS Code Extension Development Host and their specified
+> models and preconditions. If these are unavailable, mark affected cases `BLOCKED` and coverage
+> incomplete, not failed. Reserve `FAIL` for evidenced issues. Report "No issues found in tested cases"
+> when exercised checks found none, or "Not verified" when no relevant checks could run. Follow the
+> [results and recommendations contract](ai-test-workflow.md#results-and-recommendations), including its
+> Markdown table, at the top of the ledger and in the final response. Automated preflight results cannot
+> establish a real-editor pass or fill missing visual coverage.
 
 This playbook verifies Varro in a real VS Code Extension Development Host using AI-generated
 transcripts and replayable, seed-driven interaction sequences. It targets timing, layout, and visual
@@ -63,8 +64,9 @@ For an unqualified **Run AI tests** or **Run fuzzy tests** request:
    ignored by Git.
 6. Roll back and verify every run-created change in `tmp/opencode` using the fixture cleanup contract.
 7. Delete every temporary session created by the run, following the cleanup contract below.
-8. Report failed invariants and reproduction steps first, followed by passes, blocked checks, model,
-   VS Code version, viewport/layout, seed, and artifact paths.
+8. Report findings and coverage separately in the required summary table. Include recommended fixes
+   for evidenced issues, then passes, blocked checks, model, VS Code version, viewport/layout, seed,
+   and artifact paths.
 9. A standard run is incomplete if it streams only synthetic prose or Markdown. It must include a
    realistic repository task in `tmp/opencode` that produces reasoning, separate tool calls, file edits,
    test output, diffs, and final response text while the UI is observed for frame-level flicker.
@@ -158,8 +160,9 @@ under test.
    never revert unrelated Varro changes made by the user or another agent.
 
 If credentials, a GUI, or Luna Fast/Sol are unavailable, continue with every feasible automated check and
-mark the affected real-editor scenarios `BLOCKED`, but report the overall AI test as `FAIL`. Never turn
-a blocked visual check into a pass or describe an automated-only run as a successful AI test.
+mark the affected real-editor scenarios `BLOCKED` with incomplete coverage. Unavailable prerequisites
+alone are not a failure. Never turn a blocked visual check into a pass or describe an automated-only
+run as completed real-editor verification.
 
 ## Automated Preflight
 
@@ -323,12 +326,13 @@ this order:
    before ending the run:
    **"The Extension Development Host is running, but I cannot control its VS Code window. Would you
    like to enable/approve editor automation, perform the listed native actions while I record results,
-   or stop and record the AI test as failed?"**
+    or stop and record the affected AI cases as blocked?"**
 5. If credentials, GPT-6 Luna Fast/Sol, a clean `tmp/opencode` fixture, required prepared history, or another
    precondition needs user action, ask one concrete question describing the missing prerequisite and
    the available choices.
 6. If the user stops, declines, or the problem remains unresolved, mark affected scenarios `BLOCKED`
-   and the overall AI test `FAIL`. Preserve diagnostics and the recovery attempts in the ledger.
+   and coverage incomplete. Determine the overall result from evidenced issues, not the block itself.
+   Preserve diagnostics and the recovery attempts in the ledger.
 
 `npm run test:vscode-sandbox -- healthy-first-run` is not a fallback for these steps. It launches a
 real disposable Extension Host, performs host-side assertions through `--extensionTestsPath`, and exits
@@ -919,6 +923,14 @@ edit, not a successful AI-07 scrolling verdict. The root session is openable in 
 and inventories one child session for route testing. Cleanup must remove that run-created child and
 verify its recorded ancestry.
 
+The child appends one uniquely marked comment to `packages/opencode/src/util/timeout.ts`.
+The controller saves that file's original bytes beside the manifest before sending, waits for the
+child to become idle, saves the observed edit, and restores only that file while the commit remains
+unchanged. It then verifies the original commit,
+status, changed paths, and content hash. Unexpected content remains a failed containment check even
+after restoration; a still-running child never permits restoration. The model is not responsible for
+undoing its own edit.
+
 The controller records its deterministic plan before acting, then performs these operations through the
 real webviews and native VS Code workbench commands:
 
@@ -1018,8 +1030,15 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 ```md
 # Varro AI Fuzzy Run
 
-- Overall result: PASS | FAIL
+- Overall result: PASS | FAIL | BLOCKED
 - Overall result reason:
+
+| Scope | Tested behavior | Issues found | All cases complete |
+| --- | --- | --- | --- |
+| AI scenarios | OK in tested cases / Has issues / Not verified | None found / issue summary / Unknown | Yes or No, counts and blocks |
+| Action matrix | OK in tested cases / Has issues / Not verified | None found / issue summary / Unknown | Yes or No, counts and blocks |
+| Automated checks | OK in tested cases / Has issues / Not verified | None found / issue summary / Unknown | Yes or No, counts and blocks |
+
 - Date:
 - Tester/agent:
 - Commit:
@@ -1063,6 +1082,13 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 - Observation time and optional screenshot path:
 - Related deterministic test:
 - Suspected owner, not assumed root cause:
+- Recommended fix or next diagnostic:
+- Verification after the fix:
+
+## Recommendations
+
+- Product fixes for each evidenced issue, or no product fixes indicated by tested cases.
+- Follow-up verification for incomplete coverage, separate from fixes.
 
 ## Omissions And Blocks
 
@@ -1080,8 +1106,10 @@ toggle samples, reload duplicate samples, canonical delivery order, queue counts
 final focus owner.
 For AI-19, attach permission synchronization samples, the exact queue item and owner IDs, paused/edit
 state samples, hide/reveal `viewId` evidence, manual-steer delivery, and the final composer draft check.
-The overall result is `PASS` only when every scenario required by the request ran in the real Extension
-Development Host and passed. Any `FAIL` or `BLOCKED` required scenario makes the overall result `FAIL`.
+Apply the [results and recommendations contract](ai-test-workflow.md#results-and-recommendations).
+Evidenced issues make the overall result `FAIL`; blocked required cases only make coverage incomplete.
+An overall `PASS` describes the exercised checks, not untested scenarios. Use `BLOCKED` when no relevant
+behavior was verified, and never claim all cases completed without the required real-editor evidence.
 
 ## Turning A Fuzzy Failure Into A Regression
 
@@ -1114,7 +1142,10 @@ Likely deterministic homes include:
 
 ## Reporting
 
-Lead with the overall `PASS` or `FAIL`, then failures ordered by severity. Include the exact marker, seed, dimensions, minimal action
-prefix, reproduction rate, and artifact path. Then list passed and blocked scenarios and every command
-run. State clearly whether verification happened in Playwright, the host-only sandbox, a real
-Extension Development Host, or more than one environment.
+Lead with "No issues found in tested cases", "Issues found", or "Not verified", and include the required
+Markdown table with `Issues found` and `All cases complete` columns. Do not describe incomplete coverage
+alone as a failure. For issues, include severity, the exact marker, seed, dimensions, minimal action
+prefix, reproduction rate, artifact path, and recommended fix or next diagnostic with verification.
+Then list passed and blocked scenarios and every command run. State clearly whether verification
+happened in Playwright, the host-only sandbox, a real Extension Development Host, or more than one
+environment. Link the ledger and keep coverage follow-ups separate from product fixes.

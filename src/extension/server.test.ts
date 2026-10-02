@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These server integration tests deliberately model malformed health data, partial child processes, and private lifecycle state. */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type * as vscode from 'vscode';
 import type * as FsModule from 'fs';
@@ -8,6 +8,7 @@ import type * as OsModule from 'os';
 import { dirname, join } from 'path';
 import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
 import type { ServerStatus } from '../shared/protocol';
+import type { ManagedServerOwnershipLease } from '../shared/server-ownership';
 
 type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;
 
@@ -46,6 +47,13 @@ const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writ
   }));
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
+vi.mock('./server-connection-info', () => ({
+  readLocalServerConnectionInfo: vi.fn(async () => ({
+    startedAt: null,
+    vscodeClients: null,
+    otherClients: null,
+  })),
+}));
 vi.mock('./util/windows-cli-update', () => ({ runWindowsCliUpdate: vi.fn() }));
 vi.mock('vscode', () => vscodeMock);
 vi.mock('@opencode/client/service', () => ({
@@ -87,16 +95,30 @@ vi.mock('fs/promises', async () => {
 import { OpenCodeServer as RealOpenCodeServer } from './server';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import { runWindowsCliUpdate } from './util/windows-cli-update';
+import type { OpenCodeProcess } from './open-code-process';
+import { inspectLocalServerAccount } from './process-inspection';
+import { readLocalServerConnectionInfo } from './server-connection-info';
+import type { ServerConnectionAdmission } from './server-connection-admission';
+import type * as ProcessInspection from './process-inspection';
+
+vi.mock('./process-inspection', async (importOriginal) => ({
+  ...(await importOriginal<typeof ProcessInspection>()),
+  inspectLocalServerAccount: vi.fn(async () => ({
+    kind: 'same-user',
+    identity: 'fixture-listener',
+  })),
+}));
 
 let serverOwnershipPathSequence = 0;
 class OpenCodeServer extends RealOpenCodeServer {
   constructor(
-    port: number,
+    port: number | 'auto',
     autoStart: boolean,
     command?: string,
     simulateMissingCli = false,
     compactionSettings?: ConstructorParameters<typeof RealOpenCodeServer>[4],
-    secrets?: vscode.SecretStorage
+    secrets?: vscode.SecretStorage,
+    legacyDefaultEndpoint = false
   ) {
     super(
       port,
@@ -105,8 +127,13 @@ class OpenCodeServer extends RealOpenCodeServer {
       simulateMissingCli,
       compactionSettings,
       join('/tmp', `varro-server-test-${process.pid}-${++serverOwnershipPathSequence}.json`),
-      secrets
+      secrets,
+      legacyDefaultEndpoint
     );
+    // Filesystem coordination is exercised with real private files in process tests.
+    const { processManager } = this as unknown as { processManager: OpenCodeProcess };
+    vi.spyOn(processManager, 'refreshStartupRegistration').mockResolvedValue(false);
+    vi.spyOn(processManager, 'acquireManagedServerLaunchClaim').mockResolvedValue(async () => {});
   }
 }
 
@@ -117,8 +144,8 @@ function nextPatchVersion(version: string) {
   return `${major}.${minor}.${(patch ?? 0) + 1}`;
 }
 
-function flushMicrotasks() {
-  return Promise.resolve().then(() => Promise.resolve());
+async function flushMicrotasks() {
+  for (let index = 0; index < 30; index += 1) await Promise.resolve();
 }
 
 describe('OpenCodeServer port validation', () => {
@@ -128,6 +155,101 @@ describe('OpenCodeServer port validation', () => {
       expect(() => new OpenCodeServer(port, true)).toThrow('varro.server.port');
     }
   );
+});
+
+describe('reused managed stream timeout', () => {
+  function fixture() {
+    const server = new OpenCodeServer(4096, true);
+    const state = server as unknown as {
+      _status: ServerStatus;
+      processManager: OpenCodeProcess;
+      transport: { version: number; request: RealOpenCodeServer['request'] };
+      preserveExistingProcess: boolean;
+      reconcileManagedStreamTimeout(): Promise<void>;
+      disposeGeneration: number;
+      readHealthInfo(): Promise<{ healthy: boolean; version?: string }>;
+    };
+    state._status = { state: 'running', url: server.url };
+    state.preserveExistingProcess = true;
+    state.processManager.managedProcess = true;
+    vi.spyOn(state.transport, 'version', 'get').mockReturnValue(2);
+    vi.spyOn(state, 'readHealthInfo').mockResolvedValue({ healthy: true, version: '2.0.20' });
+    const wire = vi
+      .spyOn(state.transport, 'request')
+      .mockResolvedValue({ data: { settings: { transport: 'websocket' } } });
+    const reconcile = vi
+      .spyOn(state.processManager, 'reconcileInjectedStreamTimeout')
+      .mockResolvedValue(true);
+    vi.spyOn(state.processManager, 'refreshManagedServerOwnership').mockResolvedValue(true);
+    const idle = vi
+      .spyOn(server, 'readRestartBlockers')
+      .mockResolvedValue({ totalSessionCount: 0, directories: [] });
+    return { server, state, wire, reconcile, idle };
+  }
+
+  it('reloads a reused server only after two globally idle checks, without restarting', async () => {
+    const { server, state, wire, reconcile, idle } = fixture();
+    const restart = vi.spyOn(server, 'restart');
+    await state.reconcileManagedStreamTimeout();
+    expect(reconcile).toHaveBeenCalledWith('2.0.20');
+    expect(idle).toHaveBeenCalledTimes(2);
+    expect(wire).toHaveBeenLastCalledWith('POST', '/global/dispose');
+    expect(restart).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'busy-before',
+    'busy-after',
+    'explicit-timeout',
+    'ownership-lost',
+    'generation-lost',
+    'unmanaged',
+    'old-version',
+  ])('does not reload for %s', async (scenario) => {
+    const { state, wire, reconcile, idle } = fixture();
+    if (scenario === 'busy-before')
+      idle.mockResolvedValue({ totalSessionCount: 1, directories: [] });
+    if (scenario === 'busy-after')
+      idle
+        .mockResolvedValueOnce({ totalSessionCount: 0, directories: [] })
+        .mockResolvedValue({ totalSessionCount: 1, directories: [] });
+    if (scenario === 'explicit-timeout')
+      wire.mockResolvedValue({ data: { settings: { timeout: false } } });
+    if (scenario === 'ownership-lost')
+      vi.mocked(state.processManager.refreshManagedServerOwnership).mockResolvedValue(false);
+    if (scenario === 'generation-lost')
+      reconcile.mockImplementation(async () => {
+        state.disposeGeneration += 1;
+        return true;
+      });
+    if (scenario === 'unmanaged') state.processManager.managedProcess = false;
+    if (scenario === 'old-version')
+      vi.mocked(state.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.19' });
+    await state.reconcileManagedStreamTimeout();
+    expect(wire.mock.calls.some(([method]) => method === 'POST')).toBe(false);
+    if (['busy-before', 'explicit-timeout', 'unmanaged', 'old-version'].includes(scenario))
+      expect(reconcile).not.toHaveBeenCalled();
+  });
+
+  it('retries failed reloads without restarting or abandoning the protection', async () => {
+    const { state, wire } = fixture();
+    wire.mockImplementation(async (method) => {
+      if (method === 'POST') throw new Error('Reload unavailable');
+      return { data: { settings: {} } };
+    });
+    await expect(state.reconcileManagedStreamTimeout()).rejects.toThrow('Reload unavailable');
+    wire.mockResolvedValue({ data: { settings: {} } });
+    await state.reconcileManagedStreamTimeout();
+    expect(wire).toHaveBeenLastCalledWith('POST', '/global/dispose');
+  });
+
+  it('applies protection before the first send on a reused connection', async () => {
+    const { server, wire } = fixture();
+    await server.request('POST', '/session/ses_fixture/prompt_async', { parts: [] });
+    expect(wire.mock.calls.filter(([method]) => method === 'POST').map(([, path]) => path)).toEqual(
+      ['/global/dispose', '/session/ses_fixture/prompt_async']
+    );
+  });
 });
 
 function deferred<T>() {
@@ -272,6 +394,11 @@ function createImmediateEventResponse(payload: string) {
 }
 
 function setRunning(server: OpenCodeServer, options?: { keepMaintenance?: boolean }) {
+  void (server as unknown as { admission: ServerConnectionAdmission }).admission
+    .admit()
+    .catch(() => {
+      // Lifecycle tests deliberately dispose immediately after publishing a fake running state.
+    });
   (
     server as unknown as {
       setRunningStatus: (url?: string, eventStream?: 'healthy' | 'degraded') => void;
@@ -282,7 +409,8 @@ function setRunning(server: OpenCodeServer, options?: { keepMaintenance?: boolea
   }
 }
 
-function startEventStream(server: OpenCodeServer) {
+async function startEventStream(server: OpenCodeServer) {
+  await (server as unknown as { admission: ServerConnectionAdmission }).admission.admit();
   return (server as unknown as { startEventStream: () => Promise<void> }).startEventStream();
 }
 
@@ -372,6 +500,11 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   vi.stubGlobal('fetch', vi.fn());
+  vi.mocked(inspectLocalServerAccount).mockResolvedValue({
+    kind: 'same-user',
+    identity: 'fixture-listener',
+  });
+  vscodeMock.window.showWarningMessage.mockReset().mockResolvedValue(undefined);
   getConfigurationMock.mockImplementation(() => ({
     get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? false : fallback),
   }));
@@ -393,6 +526,310 @@ afterEach(async () => {
   else process.env.OPENCODE_CONFIG = originalOpenCodeConfig;
   if (originalOpenCodeConfigContent === undefined) delete process.env.OPENCODE_CONFIG_CONTENT;
   else process.env.OPENCODE_CONFIG_CONTENT = originalOpenCodeConfigContent;
+});
+
+describe('automatic-port migration and admission', () => {
+  it('runs ownership and account checks together but sends no HTTP until both succeed', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const api = server as unknown as {
+      processManager: OpenCodeProcess;
+      admission: ServerConnectionAdmission;
+    };
+    const ownership = deferred<void>();
+    const account = deferred<void>();
+    const verifyOwnership = vi
+      .spyOn(api.processManager, 'verifyManagedServerConnection')
+      .mockReturnValue(ownership.promise);
+    const verifyAccount = vi.spyOn(api.admission, 'verify').mockReturnValue(account.promise);
+    vi.mocked(fetch).mockResolvedValue(new Response('{}'));
+    const request = server.request('GET', '/config');
+    await flushMicrotasks();
+    expect(verifyOwnership).toHaveBeenCalledOnce();
+    expect(verifyAccount).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+    ownership.resolve();
+    await flushMicrotasks();
+    expect(fetch).not.toHaveBeenCalled();
+    account.resolve();
+    await request;
+    expect(fetch).toHaveBeenCalled();
+    await server.disconnect();
+  });
+
+  it.each(['ownership', 'account'] as const)(
+    'sends no HTTP if the %s check fails',
+    async (failedCheck) => {
+      const server = new OpenCodeServer(4096, false);
+      const api = server as unknown as {
+        processManager: OpenCodeProcess;
+        admission: ServerConnectionAdmission;
+      };
+      const verifyOwnership = vi
+        .spyOn(api.processManager, 'verifyManagedServerConnection')
+        .mockResolvedValue();
+      const verifyAccount = vi.spyOn(api.admission, 'verify').mockResolvedValue();
+      (failedCheck === 'ownership' ? verifyOwnership : verifyAccount).mockRejectedValue(
+        new Error('verification failed')
+      );
+      await expect(server.request('GET', '/config')).rejects.toThrow('verification failed');
+      expect(fetch).not.toHaveBeenCalled();
+      await server.disconnect();
+    }
+  );
+
+  it.each(['current-host', 'other-host'] as const)(
+    'recovers a Varro-registered shared service as %s rather than attach-only',
+    async (ownership) => {
+      const server = new OpenCodeServer('auto', true);
+      const { api, children } = configureManagedStartup(server);
+      const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+      vi.mocked(api.readInstalledCliVersion).mockResolvedValue('2.0.20');
+      vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.20' });
+      vi.spyOn(processManager, 'discoverSharedServer').mockImplementation(() => {
+        processManager.port = 49374;
+        return Promise.resolve(true);
+      });
+      const registration = vi
+        .spyOn(processManager, 'refreshDiscoveredServerRegistration')
+        .mockResolvedValue(true);
+      const privateManager = processManager as unknown as {
+        hasOwnershipLeaseCandidate: boolean;
+        foreignActiveOwnership: boolean;
+        adoptManagedServerOwnership: (lease: ManagedServerOwnershipLease) => void;
+        observeForeignManagedServer: (lease: ManagedServerOwnershipLease) => void;
+      };
+      Object.defineProperty(privateManager, 'hasOwnershipLeaseCandidate', {
+        configurable: true,
+        value: true,
+      });
+      const recovery = vi
+        .spyOn(processManager, 'recoverManagedServerOwnership')
+        .mockImplementation(async () => {
+          const lease: ManagedServerOwnershipLease = {
+            version: 1,
+            pid: 1_073_000_000 + process.pid,
+            port: 49374,
+            executable: '/fixture/opencode',
+            birthIdentity: 'fixture-birth',
+            owner: 'fixture-owner',
+            host: 'another-editor',
+            state: 'active',
+            createdAt: Date.now(),
+          };
+          if (ownership === 'current-host') privateManager.adoptManagedServerOwnership(lease);
+          else {
+            privateManager.observeForeignManagedServer(lease);
+            privateManager.foreignActiveOwnership = true;
+          }
+          return ownership === 'current-host';
+        });
+      vi.spyOn(processManager, 'prepareForHealthyExistingServer').mockResolvedValue(undefined);
+      vi.spyOn(
+        server as unknown as { readActiveAgentCount: () => Promise<number> },
+        'readActiveAgentCount'
+      ).mockResolvedValue(2);
+      await expect(server.start()).resolves.toBe('http://127.0.0.1:49374');
+      const info = await server.readServerInfo();
+      expect(registration).toHaveBeenCalledOnce();
+      expect(recovery).toHaveBeenCalledOnce();
+      expect(info.ownership).toBe(ownership);
+      expect(info.activeAgentCount).toBe(2);
+      expect(server.isAttachOnly).toBe(false);
+      expect(children).toHaveLength(0);
+      await server.disconnect();
+    }
+  );
+
+  it('keeps an unregistered shared service external without claiming it', async () => {
+    const server = new OpenCodeServer('auto', true);
+    const { api, children } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.mocked(api.readInstalledCliVersion).mockResolvedValue('2.0.20');
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.20' });
+    vi.spyOn(processManager, 'discoverSharedServer').mockResolvedValue(true);
+    vi.spyOn(processManager, 'refreshDiscoveredServerRegistration').mockResolvedValue(false);
+    const recovery = vi.spyOn(processManager, 'recoverManagedServerOwnership');
+    const prepare = vi.spyOn(processManager, 'prepareForHealthyExistingServer');
+    await server.start();
+    expect(server.isAttachOnly).toBe(true);
+    expect(recovery).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(children).toHaveLength(0);
+    await server.disconnect();
+  });
+
+  it('waits for ownership preparation before reporting diagnostics, without blocking startup', async () => {
+    const server = new OpenCodeServer('auto', true);
+    const { api } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.20' });
+    const preparation = deferred<void>();
+    vi.spyOn(processManager, 'prepareForHealthyExistingServer').mockImplementation(
+      () => preparation.promise
+    );
+    await expect(server.start()).resolves.toBe(server.url);
+    let reported = false;
+    const info = server.readServerInfo().then((value) => {
+      reported = true;
+      return value;
+    });
+    await flushMicrotasks();
+    expect(reported).toBe(false);
+    preparation.resolve();
+    await info;
+    expect(reported).toBe(true);
+    await server.disconnect();
+  });
+
+  it('waits for inherited ownership preparation before an explicit restart', async () => {
+    const server = new OpenCodeServer('auto', true);
+    const { api } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '1.18.33' });
+    const preparation = deferred<void>();
+    vi.spyOn(processManager, 'prepareForHealthyExistingServer').mockImplementation(
+      () => preparation.promise
+    );
+    const stop = vi.spyOn(processManager, 'stopServerForRestart').mockResolvedValue(undefined);
+    await server.start();
+    const start = vi.spyOn(server, 'start').mockResolvedValue(server.url);
+    const restart = server.restart({ force: true });
+    await flushMicrotasks();
+    expect(stop).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    preparation.resolve();
+    await expect(restart).resolves.toBe(server.url);
+    expect(stop).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+    await server.disconnect();
+  });
+
+  it('does not grant lifecycle rights to a verified same-user manual server', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { api } = configureManagedStartup(server);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '1.18.33' });
+    await server.start();
+    expect(server.isAttachOnly).toBe(true);
+    await expect(server.restart({ force: true })).rejects.toThrow('attach-only');
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    await server.disconnect();
+  });
+
+  it('leaves an unsupported registered server running without applying an update', async () => {
+    const server = new OpenCodeServer('auto', true);
+    const { api, children } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '1.15.13' });
+    const upgrade = vi.spyOn(processManager, 'upgradeCli');
+    await expect(server.start()).rejects.toThrow('left running');
+    expect(upgrade).not.toHaveBeenCalled();
+    expect(children).toHaveLength(0);
+  });
+
+  it('does not probe or adopt the old default endpoint on a fresh automatic launch', async () => {
+    const server = new OpenCodeServer('auto', true);
+    const { api, children } = configureManagedStartup(server);
+    const url = await server.start();
+    expect(url).toBe(server.url);
+    expect(api.readHealthInfo).not.toHaveBeenCalled();
+    expect(children).toHaveLength(1);
+    expect(new URL(server.url).port).not.toBe('4096');
+    await server.disconnect();
+  });
+
+  it('reuses a registered live server without startup or migration maintenance', async () => {
+    const server = new OpenCodeServer('auto', true);
+    const { api, children } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
+    vi.spyOn(processManager, 'prepareForHealthyExistingServer').mockResolvedValue(undefined);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '1.18.33' });
+    await expect(server.start()).resolves.toBe(server.url);
+    await runMaintenanceTick(server);
+    expect(children).toHaveLength(0);
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(api.readInstalledCliVersion).not.toHaveBeenCalled();
+    await server.disconnect();
+  });
+
+  it('does not replace a registered process when its health probe fails', async () => {
+    const server = new OpenCodeServer('auto', true);
+    const { api, children } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: false });
+    await expect(server.start()).rejects.toThrow('left untouched');
+    expect(children).toHaveLength(0);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps business requests blocked while foreign-user consent is pending or dismissed', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { api, children } = configureManagedStartup(server);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '1.18.33' });
+    vi.mocked(inspectLocalServerAccount).mockResolvedValue({
+      kind: 'different-user',
+      identity: 'foreign',
+    });
+    const answer = deferred<string | undefined>();
+    vscodeMock.window.showWarningMessage.mockImplementation(() => answer.promise);
+    const start = expect(server.start()).rejects.toThrow('cancelled');
+    await flushMicrotasks();
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledOnce();
+    // Modal messages provide their own Cancel button when no close action is supplied.
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('The listening process belongs to another OS user.'),
+      { modal: true },
+      'Connect anyway'
+    );
+    const deletion = expect(server.request('DELETE', '/session/foreign')).rejects.toThrow(
+      'cancelled'
+    );
+    await flushMicrotasks();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(api.startEventStream).not.toHaveBeenCalled();
+    expect(children).toHaveLength(0);
+    answer.resolve(undefined);
+    await Promise.all([start, deletion]);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(server.status.state).toBe('error');
+  });
+
+  it('does not turn connection consent into lifecycle ownership', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { api } = configureManagedStartup(server);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '1.18.33' });
+    vi.mocked(inspectLocalServerAccount).mockResolvedValue({
+      kind: 'different-user',
+      identity: 'foreign',
+    });
+    vscodeMock.window.showWarningMessage.mockResolvedValue('Connect anyway');
+    await expect(server.start()).resolves.toBe(server.url);
+    expect(server.isAttachOnly).toBe(true);
+    await expect(server.restart({ force: true })).rejects.toThrow('attach-only');
+    await runMaintenanceTick(server);
+    expect(spawnMock).not.toHaveBeenCalled();
+    await server.disconnect();
+  });
+
+  it('allows a migrated default-port user to choose a separate automatic server', async () => {
+    const server = new OpenCodeServer('auto', true, '', false, undefined, undefined, true);
+    const { api, children } = configureManagedStartup(server);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '1.18.33' });
+    vi.mocked(inspectLocalServerAccount).mockResolvedValue({
+      kind: 'different-user',
+      identity: 'foreign',
+    });
+    vscodeMock.window.showWarningMessage.mockResolvedValue('Start my server on another port');
+    const url = await server.start();
+    expect(url).toBe(server.url);
+    expect(children).toHaveLength(1);
+    expect(new URL(server.url).port).not.toBe('4096');
+    await server.disconnect();
+  });
 });
 
 describe('OpenCodeServer credential prompts', () => {
@@ -979,6 +1416,163 @@ describe('OpenCodeServer compaction config injection', () => {
 });
 
 describe('OpenCodeServer maintenance', () => {
+  it('includes live server start and client counts in diagnostics without changing ownership', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const api = server as unknown as {
+      processManager: OpenCodeProcess;
+      readInstalledCliVersion: () => Promise<string | null>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      readActiveAgentCount: () => Promise<number>;
+    };
+    setRunning(server);
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('2.0.21');
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '2.0.21' });
+    api.readActiveAgentCount = vi.fn().mockResolvedValue(2);
+    const pid = vi.spyOn(api.processManager, 'managedProcessId', 'get').mockReturnValue(1234);
+    const connections = { startedAt: 1_790_852_400_000, vscodeClients: 2, otherClients: 1 };
+    vi.mocked(readLocalServerConnectionInfo).mockResolvedValueOnce(connections);
+    const info = await server.readServerInfo();
+    expect(readLocalServerConnectionInfo).toHaveBeenCalledWith(4096, 1234);
+    expect(info.connections).toEqual(connections);
+    expect(info.activeAgentCount).toBe(2);
+    expect(info.ownership).toBe('unmanaged');
+
+    vi.mocked(readLocalServerConnectionInfo).mockImplementationOnce(async () => {
+      pid.mockReturnValue(4321);
+      return connections;
+    });
+    const replaced = await server.readServerInfo();
+    expect(replaced.connections).toEqual({
+      startedAt: null,
+      vscodeClients: null,
+      otherClients: null,
+    });
+
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    vi.mocked(readLocalServerConnectionInfo).mockClear();
+    const unhealthy = await server.readServerInfo();
+    expect(readLocalServerConnectionInfo).not.toHaveBeenCalled();
+    expect(unhealthy.connections).toEqual({
+      startedAt: null,
+      vscodeClients: null,
+      otherClients: null,
+    });
+  });
+
+  it.each([
+    { label: 'available', found: true, exists: true },
+    { label: 'inaccessible', found: true, exists: false },
+    { label: 'missing', found: false, exists: true },
+  ])('reports the CLI file creation date when it is $label', async ({ found, exists }) => {
+    const fs = await vi.importActual<typeof FsPromisesModule>('fs/promises');
+    const fixtureRoot = join(process.cwd(), 'tmp');
+    await fs.mkdir(fixtureRoot, { recursive: true });
+    const fixture = await fs.mkdtemp(join(fixtureRoot, 'varro-cli-date-'));
+    onTestFinished(() => fs.rm(fixture, { recursive: true, force: true }));
+    const binary = join(fixture, 'cli');
+    const command = process.platform === 'win32' ? binary : join(fixture, 'opencode2');
+    let birthtimeMs: number | null = null;
+    if (exists) {
+      await fs.writeFile(binary, 'fixture CLI');
+      // Package modification dates can predate installation. Follow the executable link instead.
+      await fs.utimes(binary, new Date(2000, 0, 1), new Date(2000, 0, 1));
+      if (command !== binary) await fs.symlink(binary, command);
+      birthtimeMs = (await fs.stat(binary)).birthtimeMs;
+    }
+    const server = new OpenCodeServer(4096, false);
+    const api = server as unknown as {
+      processManager: OpenCodeProcess;
+      readInstalledCliVersion: () => Promise<string | null>;
+      readHealthInfo: () => Promise<{ healthy: boolean }>;
+    };
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue(found ? '2.0.21' : null);
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    vi.spyOn(api.processManager, 'getInstallInfo').mockReturnValue({
+      resolvedCommand: command,
+      configuredCommand: '',
+      configuredCommandMissing: false,
+      found,
+      installMethod: 'bun',
+      searchedPaths: [],
+    });
+    const info = await server.readServerInfo();
+
+    expect(info.resolvedCommand).toBe(command);
+    expect(info.cliInstalledAt).toBe(
+      found && birthtimeMs !== null && Number.isFinite(birthtimeMs) && birthtimeMs > 0
+        ? birthtimeMs
+        : null
+    );
+    expect(info.cliVersion).toBe(found ? '2.0.21' : null);
+    expect(info.health.healthy).toBe(false);
+    if (found && exists) {
+      // Replacing the target on upgrade must refresh the timestamp, not keep a cached date.
+      const replacement = join(fixture, 'replacement');
+      await fs.writeFile(replacement, 'updated CLI');
+      await fs.rename(replacement, binary);
+      const updatedBirthtimeMs = (await fs.stat(binary)).birthtimeMs;
+      const updatedInfo = await server.readServerInfo();
+      expect(updatedInfo.cliInstalledAt).toBe(updatedBirthtimeMs > 0 ? updatedBirthtimeMs : null);
+    }
+  });
+
+  describe.each(['shared-service', 'manual-fixed-port', 'auto-start-disabled'] as const)(
+    'attach-only %s diagnostics',
+    (mode) => {
+      it.each(['installed', 'missing', 'failed'] as const)(
+        'checks the local CLI when it is %s without granting lifecycle rights',
+        async (result) => {
+          const server = new OpenCodeServer(
+            mode === 'shared-service' ? 'auto' : 4096,
+            mode !== 'auto-start-disabled'
+          );
+          const { api, children } = configureManagedStartup(server);
+          const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+          vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.21' });
+          if (mode === 'shared-service') {
+            vi.spyOn(processManager, 'discoverSharedServer').mockResolvedValue(true);
+            vi.spyOn(processManager, 'refreshDiscoveredServerRegistration').mockResolvedValue(
+              false
+            );
+          }
+          const versionCheck = vi.mocked(api.readInstalledCliVersion);
+          versionCheck.mockResolvedValue('2.0.20');
+          vi.spyOn(
+            server as unknown as { readActiveAgentCount: () => Promise<number> },
+            'readActiveAgentCount'
+          ).mockResolvedValue(2);
+          const upgrade = vi.spyOn(processManager, 'upgradeCli');
+          const stop = vi.spyOn(processManager, 'stopServerForRestart');
+          const recovery = vi.spyOn(processManager, 'recoverManagedServerOwnership');
+
+          await server.start();
+          versionCheck.mockClear();
+          if (result === 'failed')
+            versionCheck.mockRejectedValue(new Error('CLI inspection failed'));
+          else versionCheck.mockResolvedValue(result === 'installed' ? '2.0.20' : null);
+          const info = await server.readServerInfo();
+          expect(versionCheck).toHaveBeenCalledOnce();
+          expect(info.cliVersion).toBe(result === 'installed' ? '2.0.20' : null);
+          expect(info.cliVersionError).toBe(result === 'failed' ? 'CLI inspection failed' : null);
+          expect(info.health.version).toBe('2.0.21');
+          expect(info.activeAgentCount).toBe(2);
+          expect(info.ownership).toBe('unmanaged');
+          expect(info.managedProcess).toBe(false);
+          expect(server.isAttachOnly).toBe(true);
+          await runMaintenanceTick(server);
+          await expect(server.restart({ force: true })).rejects.toThrow('attach-only');
+          expect(versionCheck).toHaveBeenCalledOnce();
+          expect(upgrade).not.toHaveBeenCalled();
+          expect(stop).not.toHaveBeenCalled();
+          expect(recovery).not.toHaveBeenCalled();
+          expect(api.syncInjectedConfigFile).not.toHaveBeenCalled();
+          expect(children).toHaveLength(0);
+          await server.disconnect();
+        }
+      );
+    }
+  );
+
   it('reports active agents and ownership in server diagnostics', async () => {
     const server = new OpenCodeServer(4096, true);
     const api = server as unknown as {
@@ -2046,17 +2640,21 @@ describe('OpenCodeServer compatibility gate', () => {
     api.processManager.recoverManagedServerOwnership = recoverManagedServerOwnership;
     api.processManager.prepareForHealthyExistingServer = prepareForHealthyExistingServer;
     api.processManager.rememberInstalledCliVersion = rememberInstalledCliVersion;
+    vi.mocked(
+      (api.processManager as unknown as OpenCodeProcess).refreshStartupRegistration
+    ).mockResolvedValue(true);
 
     await expect(server.start()).resolves.toBe(server.url);
 
     expect(recoverManagedServerOwnership).toHaveBeenCalledOnce();
     expect(prepareForHealthyExistingServer).not.toHaveBeenCalled();
-    expect(rememberInstalledCliVersion).toHaveBeenCalledWith('1.18.26');
+    expect(rememberInstalledCliVersion).not.toHaveBeenCalled();
     expect(requestMaintenanceCheck).not.toHaveBeenCalled();
 
     recovery.resolve(true);
     await flushMicrotasks();
     expect(prepareForHealthyExistingServer).toHaveBeenCalledOnce();
+    expect(rememberInstalledCliVersion).not.toHaveBeenCalled();
     expect(requestMaintenanceCheck).toHaveBeenCalledOnce();
   });
 
@@ -2074,6 +2672,7 @@ describe('OpenCodeServer compatibility gate', () => {
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '2.0.5' });
     api.startEventStream = vi.fn(() => {
       expect(server.status.state).not.toBe('running');
+      return Promise.resolve();
     });
     api.requestMaintenanceCheck = vi.fn();
     api.processManager.prepareForHealthyExistingServer = prepareForHealthyExistingServer;
@@ -2086,12 +2685,43 @@ describe('OpenCodeServer compatibility gate', () => {
       apiVersion: server.apiVersion,
       eventStream: 'degraded',
     });
-    expect(prepareForHealthyExistingServer).toHaveBeenCalledOnce();
+    expect(prepareForHealthyExistingServer).not.toHaveBeenCalled();
+    expect(server.isAttachOnly).toBe(true);
     expect(spawnMock).not.toHaveBeenCalled();
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
-  it('allows a Varro window to replace a server leased by another extension host', async () => {
+  // Exercise the existing remediation/preflight helpers explicitly. Startup now
+  // preserves an already-running server instead of invoking these helpers.
+  async function remediateIncompatibleServer(server: OpenCodeServer): Promise<string> {
+    const api = server as unknown as {
+      admission: ServerConnectionAdmission;
+      lifecycle: { beginStart: () => number };
+      replaceIncompatibleServer: (
+        version: string,
+        generation: number,
+        signal: AbortSignal
+      ) => Promise<void>;
+      ensureCompatibleCliForLaunch: (
+        version: undefined,
+        generation: number,
+        signal: AbortSignal
+      ) => Promise<void>;
+      launchManagedServer: (
+        generation: number,
+        preserveRetryCount: boolean,
+        signal: AbortSignal
+      ) => Promise<string>;
+    };
+    const generation = api.lifecycle.beginStart();
+    const signal = new AbortController().signal;
+    await api.admission.admit();
+    await api.replaceIncompatibleServer('1.15.13', generation, signal);
+    await api.ensureCompatibleCliForLaunch(undefined, generation, signal);
+    return api.launchManagedServer(generation, false, signal);
+  }
+
+  it('coordinates explicit remediation of a server leased by another extension host', async () => {
     getConfigurationMock.mockImplementation(() => ({
       get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
     }));
@@ -2119,7 +2749,7 @@ describe('OpenCodeServer compatibility gate', () => {
     api.launchManagedServer = launchManagedServer;
     api.processManager.foreignActiveOwnership = true;
 
-    await expect(server.start()).resolves.toBe(server.url);
+    await expect(remediateIncompatibleServer(server)).resolves.toBe(server.url);
 
     expect(hasActiveSessions).toHaveBeenCalledTimes(2);
     expect(upgradeRunningServer).toHaveBeenCalledOnce();
@@ -2136,7 +2766,7 @@ describe('OpenCodeServer compatibility gate', () => {
     api.syncInjectedConfigFile = vi.fn().mockResolvedValue(undefined);
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.15.13' });
 
-    await expect(server.start()).rejects.toThrow('OpenCode update required');
+    await expect(remediateIncompatibleServer(server)).rejects.toThrow('OpenCode update required');
 
     expect(server.status).toEqual(
       expect.objectContaining({
@@ -2174,7 +2804,7 @@ describe('OpenCodeServer compatibility gate', () => {
     api.stopServerForRestart = stopServerForRestart;
     api.upgradeRunningServer = upgradeRunningServer;
 
-    await expect(server.start()).rejects.toThrow('has active sessions');
+    await expect(remediateIncompatibleServer(server)).rejects.toThrow('has active sessions');
 
     expect(upgradeRunningServer).not.toHaveBeenCalled();
     expect(stopServerForRestart).not.toHaveBeenCalled();
@@ -2199,14 +2829,14 @@ describe('OpenCodeServer compatibility gate', () => {
     api.stopServerForRestart = stopServerForRestart;
     api.upgradeRunningServer = upgradeRunningServer;
 
-    await expect(server.start()).rejects.toThrow('has active sessions');
+    await expect(remediateIncompatibleServer(server)).rejects.toThrow('has active sessions');
 
     expect(api.hasActiveSessions).toHaveBeenCalledTimes(2);
     expect(upgradeRunningServer).toHaveBeenCalledOnce();
     expect(stopServerForRestart).not.toHaveBeenCalled();
   });
 
-  it('updates and replaces an idle outdated server before reporting success', async () => {
+  it('updates and replaces an idle outdated server during explicit remediation', async () => {
     getConfigurationMock.mockImplementation(() => ({
       get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
     }));
@@ -2250,7 +2880,7 @@ describe('OpenCodeServer compatibility gate', () => {
       signalCode: null,
     } as never);
 
-    await expect(server.start()).resolves.toBe(server.url);
+    await expect(remediateIncompatibleServer(server)).resolves.toBe(server.url);
 
     expect(upgradeRunningServer).toHaveBeenCalledWith(MINIMUM_SUPPORTED_OPENCODE_VERSION);
     expect(api.hasActiveSessions).toHaveBeenCalledTimes(2);
@@ -2306,7 +2936,9 @@ describe('OpenCodeServer compatibility gate', () => {
       .fn()
       .mockRejectedValue(new Error("EACCES: permission denied, mkdir '/usr/local/lib'"));
 
-    await expect(server.start()).rejects.toThrow('The automatic update failed.');
+    await expect(remediateIncompatibleServer(server)).rejects.toThrow(
+      'The automatic update failed.'
+    );
 
     const status = server.status as Extract<ServerStatus, { state: 'error' }>;
     expect(status.state).toBe('error');
@@ -2336,7 +2968,9 @@ describe('OpenCodeServer compatibility gate', () => {
         .fn()
         .mockRejectedValue(new Error('EPERM: operation not permitted, rename opencode.exe'));
 
-      await expect(server.start()).rejects.toThrow('The automatic update failed.');
+      await expect(remediateIncompatibleServer(server)).rejects.toThrow(
+        'The automatic update failed.'
+      );
 
       const status = server.status as Extract<ServerStatus, { state: 'error' }>;
       expect(status.message).toContain('Close the OpenCode TUI');
@@ -2356,7 +2990,9 @@ describe('OpenCodeServer compatibility gate', () => {
       .fn()
       .mockRejectedValue(new Error('Error: unknown installation method'));
 
-    await expect(server.start()).rejects.toThrow('The automatic update failed.');
+    await expect(remediateIncompatibleServer(server)).rejects.toThrow(
+      'The automatic update failed.'
+    );
 
     const status = server.status as Extract<ServerStatus, { state: 'error' }>;
     expect(status.message).toContain('Reinstall OpenCode');
@@ -2374,7 +3010,9 @@ describe('OpenCodeServer compatibility gate', () => {
     const server = new OpenCodeServer(4096, true);
     stubIncompatibleServer(server);
 
-    await expect(server.start()).rejects.toThrow('Automatic updates are disabled.');
+    await expect(remediateIncompatibleServer(server)).rejects.toThrow(
+      'Automatic updates are disabled.'
+    );
 
     const status = server.status as Extract<ServerStatus, { state: 'error' }>;
     expect(status.detail).toEqual(
@@ -2397,7 +3035,7 @@ describe('OpenCodeServer compatibility gate', () => {
     const api = stubIncompatibleServer(server);
     api.hasActiveSessions = vi.fn().mockResolvedValue(true);
 
-    await expect(server.start()).rejects.toThrow('active sessions');
+    await expect(remediateIncompatibleServer(server)).rejects.toThrow('active sessions');
 
     const status = server.status as Extract<ServerStatus, { state: 'error' }>;
     expect(status.detail).toEqual(
@@ -2432,6 +3070,101 @@ describe('OpenCodeServer compatibility gate', () => {
 });
 
 describe('OpenCodeServer startup health polling', () => {
+  async function createCliFixture() {
+    const fs = await vi.importActual<typeof FsModule>('fs');
+    const os = await vi.importActual<typeof OsModule>('os');
+    const directory = fs.mkdtempSync(join(os.tmpdir(), 'varro-cli-startup-'));
+    onTestFinished(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const v1 = join(directory, 'opencode');
+    const v2 = join(directory, 'opencode2');
+    fs.writeFileSync(v1, '');
+    return { directory, v1, v2, installV2: () => fs.writeFileSync(v2, '') };
+  }
+
+  it.each([
+    { cached: '1.18.26', installed: '2.0.20', configured: false },
+    { cached: '2.0.20', installed: '1.18.26', configured: true },
+  ])('launches CLI $installed despite cached version $cached', async (versions) => {
+    stubPlatform('linux');
+    const fixture = await createCliFixture();
+    fixture.installV2();
+    const executable = versions.configured ? fixture.v1 : fixture.v2;
+    const server = new OpenCodeServer('auto', true, versions.configured ? fixture.v1 : '');
+    const { api } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    processManager.rememberInstalledCliVersion(versions.cached);
+    api.readInstalledCliVersion = () => processManager.readInstalledCliVersion();
+    vi.spyOn(
+      processManager as unknown as { serverPathEntries(): string[] },
+      'serverPathEntries'
+    ).mockReturnValue([fixture.directory]);
+    spawnMock.mockImplementation((_command: string, args: string[]) => {
+      const child = createMockChildProcess();
+      if (args[0] === '--version') {
+        queueMicrotask(() => {
+          child.stdout.emit('data', Buffer.from(versions.installed));
+          child.emit('close', 0, null);
+        });
+      }
+      return child;
+    });
+
+    const url = await server.start();
+    expect(url).toBe(server.url);
+
+    expect(spawnMock).toHaveBeenCalledWith(executable, ['--version'], expect.anything());
+    expect(spawnMock).toHaveBeenLastCalledWith(
+      executable,
+      [
+        'serve',
+        ...(versions.installed.startsWith('2.') ? ['--service'] : []),
+        '--port',
+        new URL(server.url).port,
+      ],
+      expect.anything()
+    );
+    expect(Number(new URL(server.url).port)).toBeGreaterThanOrEqual(49152);
+  });
+
+  it('discovers v2 installed while a v1 server was running on crash recovery', async () => {
+    stubPlatform('linux');
+    const fixture = await createCliFixture();
+    const server = new OpenCodeServer('auto', true);
+    const { api, children } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.spyOn(processManager, 'discoverSharedServer').mockReturnValue(false);
+    api.readInstalledCliVersion = () => processManager.readInstalledCliVersion();
+    vi.spyOn(
+      processManager as unknown as { serverPathEntries(): string[] },
+      'serverPathEntries'
+    ).mockReturnValue([fixture.directory]);
+    spawnMock.mockImplementation((command: string, args: string[]) => {
+      const child = createMockChildProcess();
+      if (args[0] === '--version') {
+        queueMicrotask(() => {
+          child.stdout.emit('data', Buffer.from(command === fixture.v2 ? '2.0.20' : '1.18.26'));
+          child.emit('close', 0, null);
+        });
+      } else {
+        children.push(child);
+      }
+      return child;
+    });
+    await server.start();
+    fixture.installV2();
+    children[0]!.emit('exit', 1, null);
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushMicrotasks();
+
+    expect(children).toHaveLength(2);
+    expect(server.status.state).toBe('running');
+    expect(spawnMock).toHaveBeenLastCalledWith(
+      fixture.v2,
+      ['serve', '--service', '--port', new URL(server.url).port],
+      expect.anything()
+    );
+  });
+
   it('checks the Windows CLI major before choosing the managed startup mode', async () => {
     stubPlatform('win32');
     const server = new OpenCodeServer(4096, true);
@@ -2481,9 +3214,7 @@ describe('OpenCodeServer startup health polling', () => {
     expect(resolved).toHaveBeenCalledWith(server.url);
     expect(resolved).toHaveBeenCalledTimes(1);
     expect(rejected).not.toHaveBeenCalled();
-    expect(api.processManager.rememberInstalledCliVersion).toHaveBeenCalledWith(
-      MINIMUM_SUPPORTED_OPENCODE_VERSION
-    );
+    expect(api.processManager.rememberInstalledCliVersion).not.toHaveBeenCalled();
   });
 });
 
@@ -2634,6 +3365,7 @@ describe('OpenCodeServer restart blockers', () => {
 
   it('groups unique blocking sessions by normalized directory', async () => {
     const server = new OpenCodeServer(4096, true);
+    setRunning(server);
     vi.mocked(fetch).mockImplementation(async (input) => {
       const pathname = new URL(String(input)).pathname;
       const body =
@@ -3497,6 +4229,7 @@ describe('OpenCodeServer managed process lifecycle', () => {
 
   it('aborts and drains an in-flight start request before restart preflight', async () => {
     const server = new OpenCodeServer(4096, true);
+    await (server as unknown as { admission: ServerConnectionAdmission }).admission.admit();
     const requestStarted = deferred<void>();
     const requestCleanup = deferred<void>();
     let requestSignal: AbortSignal | undefined;
@@ -3597,7 +4330,7 @@ describe('OpenCodeServer managed process lifecycle', () => {
     const request = server.request('GET', '/session');
     await flushMicrotasks();
 
-    expect(server.status.state).toBe('starting');
+    expect(server.status.state).not.toBe('running');
     expect(stopServerForRestart).toHaveBeenCalledOnce();
     expect(fetchMock).not.toHaveBeenCalled();
 
@@ -3658,7 +4391,7 @@ describe('OpenCodeServer managed process lifecycle', () => {
     const restart = server.restart();
 
     await flushMicrotasks();
-    expect(server.status.state).toBe('starting');
+    expect(server.status.state).not.toBe('running');
     await expect(restart).rejects.toThrow(stopError.message);
     expect(server.status).toEqual({
       state: 'error',
@@ -3857,8 +4590,8 @@ describe('OpenCodeServer startup recovery', () => {
     expect(status.detail?.kind).not.toBe('cli-missing');
   });
 
-  it('advances to the next port and retries quickly when the port is already in use', async () => {
-    const server = new OpenCodeServer(4096, true);
+  it('selects another automatic port and retries quickly after a collision', async () => {
+    const server = new OpenCodeServer('auto', true);
     const { children } = configureFailingStartup(server, { resolveAfterAttempt: 1 });
     const processManager = getProcessManager(server);
 
@@ -3866,31 +4599,35 @@ describe('OpenCodeServer startup recovery', () => {
     await flushMicrotasks();
     expect(children).toHaveLength(1);
 
+    const occupiedPort = processManager.port;
+
     crashDuringStartup(children[0]!, 'Error: listen EADDRINUSE: address already in use :::4096');
     await settleRecovery();
     expect(processManager.hasPortInUseDetected()).toBe(false);
-    expect(processManager.port).toBe(4097);
+    expect(processManager.port).not.toBe(occupiedPort);
+    expect(processManager.port).toBeGreaterThanOrEqual(49_152);
 
     await vi.advanceTimersByTimeAsync(100);
     await expect(startResult).resolves.toBe(server.url);
     expect(children).toHaveLength(2);
     expect(loggerMock.warn).toHaveBeenCalledWith(
-      'Port 4096 in use by another process; retrying on 4097'
+      `Port ${occupiedPort} in use by another process; retrying on ${processManager.port}`
     );
   });
 
   it('keeps advancing ports while successive attempts hit a used port', async () => {
-    const server = new OpenCodeServer(4096, true);
+    const server = new OpenCodeServer('auto', true);
     const { children } = configureFailingStartup(server, { resolveAfterAttempt: 2 });
     const processManager = getProcessManager(server);
 
     const startResult = server.start();
     await flushMicrotasks();
 
-    for (const expectedPort of [4097, 4098]) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const previousPort = processManager.port;
       crashDuringStartup(children[children.length - 1]!, 'listen EADDRINUSE :::4096');
       await settleRecovery();
-      expect(processManager.port).toBe(expectedPort);
+      expect(processManager.port).not.toBe(previousPort);
       await vi.advanceTimersByTimeAsync(100);
     }
 

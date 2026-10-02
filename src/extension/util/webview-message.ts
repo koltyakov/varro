@@ -1709,6 +1709,7 @@ interface ApiRoute {
 
 const SESSION_ACTIONS = new Set([
   'abort',
+  'resume-steering',
   'fork',
   'prompt_async',
   'revert',

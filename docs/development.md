@@ -45,9 +45,23 @@ While iterating, run the narrowest relevant command for the area you changed. Us
 - `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`
 - `npm run test:e2e -- e2e/tests/layout.spec.ts`
 
+Vitest runs most extension and shared tests in Node without loading jsdom. Webview tests, About-page
+and command DOM tests, the v2 adapter/UI integration test, the host/webview attention contract, and
+two legacy filesystem-mock fixtures retain jsdom and the browser setup. Native Windows process
+inspection runs after the other projects so PowerShell startup does not compete with unit workers.
+Both CI jobs keep all tests, and Linux keeps the full-project coverage thresholds.
+
+### Test runs
+
+Unit, script, coverage, and E2E commands execute tests on every invocation; successful test results
+are not cached. `npm test` runs unit and Node script tests, `npm run test:scripts:browser` runs browser
+script tests, and `npm run test:coverage` runs the full unit suite with coverage thresholds.
+CI runs these suites fresh and caches only npm dependency downloads. Its pinned Playwright container
+already includes Chromium, so CI skips the browser install hook and runs E2E across four shards.
+
 The Playwright suite is browser-level webview E2E coverage. It runs the real Solid webview in Chromium through `e2e/harness/index.html`, while the harness mocks the VS Code message bridge and the OpenCode/Varro request and event boundary. It does not launch VS Code, an extension host, or a real OpenCode CLI/server.
 
-Local E2E runs use half the available CPU cores, capped at four workers to leave room for frame-sensitive browser checks. Override this with `npm run test:e2e -- --workers=2` on a busy machine. Playback and raster diagnostics default to one worker. CI splits the suite across two jobs with two workers each.
+Local E2E runs use half the available CPU cores, capped at four workers to leave room for frame-sensitive browser checks. Override this with `npm run test:e2e -- --workers=2` on a busy machine. Playback and raster diagnostics default to one worker. CI splits the suite across four jobs with two workers each.
 
 For shorter feedback loops, select a spec as above, filter test names with `npm run test:e2e -- --grep "composer"`, or rerun failures with `npm run test:e2e -- --last-failed`. Standard and raster E2E runs use port 4174 when available and automatically select a free port when it is occupied. To require a specific port, set `VARRO_E2E_PORT`, for example `VARRO_E2E_PORT=4184 npm run test:e2e` in macOS/Linux shells. Playback keeps its existing-server behavior.
 
@@ -366,7 +380,7 @@ The browser preview serves source through Vite, but the built webview has `sourc
 
 ## Connect To An Existing OpenCode Server
 
-By default, Varro tries to auto-start OpenCode on port `4096`. You can connect to an already running server instead.
+By default, Varro selects and remembers an automatic loopback port. You can connect to an already running server instead.
 
 Start OpenCode manually:
 
@@ -376,13 +390,13 @@ opencode serve --port 4096
 
 Then configure these VS Code settings as needed:
 
-- `varro.server.port` (an integer from 1 through 65535)
+- `varro.server.port` (set an integer from 1 through 65535 for a manually managed endpoint; the default is `"auto"`)
 - `varro.server.autoStart`
 - `varro.server.command`
 
 Varro checks `http://127.0.0.1:<port>/global/health` to verify the server.
 
-If Varro launched the server itself and the configured port is already occupied by a different process, it can retry on a nearby valid port. It never wraps past port 65535 and reports when no valid fallback remains. Set `varro.server.port` explicitly if you want a fixed server address.
+Automatic launches use random ports in the dynamic range with bounded collision retries. An explicit port never changes after a collision. The existing default lease remains the coordination key for automatic mode so legacy windows and rollback can discover its recorded actual port. See [server ownership](server-ownership.md) for migration and admission checks.
 
 ## Project Structure
 

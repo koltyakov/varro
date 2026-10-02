@@ -5,6 +5,7 @@ export {
   applySessionMcps,
   compactSession,
   continueInterruptedSession,
+  resumeSteering,
   createSession,
   deleteSession,
   deleteSessionImmediately,

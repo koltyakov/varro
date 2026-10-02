@@ -9,11 +9,12 @@ suite. It selects existing OpenCode responses and replays their output through t
 transport in a disposable VS Code Extension Development Host. No model is called and no recorded
 tool is executed.
 
-A run passes only after an AI watcher observes the actual editor during playback and reviews the
-frame and timing evidence. The runner deliberately reports `NEEDS_AI_REVIEW`, even after successful
+A streaming case passes only after an AI watcher observes the actual editor during playback and reviews
+the frame and timing evidence. The runner deliberately reports `NEEDS_AI_REVIEW`, even after successful
 delivery and canonical transcript comparison. Missing editor access or incomplete required coverage
-makes the overall result `FAIL`, with affected scenarios recorded as `BLOCKED`. Browser-harness tests,
-host startup assertions, or a final screenshot cannot substitute for watching the stream.
+makes affected scenarios `BLOCKED`, not failed. Reserve overall `FAIL` for evidenced issues and follow
+the [results and recommendations contract](ai-test-workflow.md#results-and-recommendations). Browser-harness
+tests, host startup assertions, or a final screenshot cannot substitute for watching the stream.
 
 ## Performance captures
 
@@ -48,9 +49,10 @@ diagnostic timings include instrumentation overhead.
 3. Run `STR-01` through `STR-03` with AI observation. Reuse a capture and seed when reproducing a
    failure. Each capture run has a fresh workspace/profile and stops its owned host before the next
    run. Do not start simultaneous hosts merely to parallelize scenarios.
-4. Write `artifacts/ai-streaming/<run>/ledger.md` with the overall result at the top, scenario results,
-   selection manifest, capture hashes, source IDs/model, observer identity, VS Code version, viewport,
-   timing parameters, actions, failed boundaries, metrics, and cleanup evidence.
+4. Write `artifacts/ai-streaming/<run>/ledger.md` with the findings/coverage summary table at the top,
+   scenario results, selection manifest, capture hashes, source IDs/model, observer identity, VS Code
+   version, viewport, timing parameters, actions, failed boundaries, metrics, cleanup evidence, and
+   recommended fixes or diagnostics for evidenced issues.
 
 The default selection is a recommendation, not proof of scenario preconditions. If reasoning, edits,
 large output, or enough visible history is missing, increase the selection count or ask for another
@@ -213,7 +215,8 @@ npm run ai:streaming -- stop --control artifacts/ai-streaming/<run>/str-01/contr
 
 If editor automation is unavailable, attempt the real launcher and inspect diagnostics, then ask
 whether the user wants to enable automation, perform the specified native actions while the AI
-observes, or stop with `FAIL`. Do not leave a host waiting indefinitely.
+observes, or stop with affected cases `BLOCKED` and coverage incomplete. Do not leave a host waiting
+indefinitely.
 
 ### Checkpointed interaction and AI investigation
 
@@ -317,5 +320,7 @@ controller session, and never bulk-kill VS Code processes.
 
 Before the final report, verify every launched host stopped and every run reached a terminal state.
 Any cleanup error must be prominent, with exact remaining IDs/paths. Write watcher verdicts separately
-from the runner's `NEEDS_AI_REVIEW`. Lead the ledger and report with failures and reproduction steps,
-then list passes, blocked coverage, timing provenance, and artifact paths.
+from the runner's `NEEDS_AI_REVIEW`. Lead the ledger and final response with the tested behavior outcome
+and the required Markdown table with `Issues found` and `All cases complete` columns. Include recommended
+fixes or next diagnostics and verification for each evidenced issue, then list passes, blocked coverage,
+timing provenance, and artifact paths. Incomplete coverage alone is not a failure.

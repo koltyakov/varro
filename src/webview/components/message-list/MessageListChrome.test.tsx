@@ -5,6 +5,7 @@ import { markLoadingActivity, startLoading, stopLoading } from '../../lib/state'
 import { attachmentIcon, hourglassIcon, mediaImageIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 import type { Permission, QuestionRequest } from '../../types';
+import type { StickyUserMessagePreview } from './sticky-preview';
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise chrome integration with permission and question prompts. */
 vi.mock('../QuestionPrompt', () => ({
@@ -260,7 +261,7 @@ describe('MessageListChrome', () => {
     expect(onSelect).toHaveBeenCalledWith(turns[0]);
   });
 
-  it('shows the counter tooltip to the right of a hovered active dot', async () => {
+  it('shows the turn, prompt, and timestamp to the right of a hovered active dot', async () => {
     vi.useFakeTimers();
     const sentAt = Date.now();
     const onTurnHoverChange = vi.fn();
@@ -284,6 +285,10 @@ describe('MessageListChrome', () => {
     await vi.advanceTimersByTimeAsync(150);
     const tooltip = document.body.querySelector<HTMLElement>('[role="tooltip"]')!;
     expect(tooltip.firstElementChild?.textContent).toBe('Turn 1 of 1');
+    const prompt = tooltip.querySelector('.turn-navigation-tooltip-prompt');
+    expect(prompt?.textContent).toBe('Prompt');
+    expect(tooltip.firstElementChild?.nextElementSibling).toBe(prompt);
+    expect(prompt?.nextElementSibling?.className).toBe('turn-navigation-tooltip-time');
     expect(tooltip.querySelector('.turn-navigation-tooltip-time')?.textContent).toBe(
       new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(sentAt)
     );
@@ -296,6 +301,39 @@ describe('MessageListChrome', () => {
     dot.dispatchEvent(new MouseEvent('mouseleave'));
     expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
     expect(onTurnHoverChange).toHaveBeenLastCalledWith('msg-1', false);
+  });
+
+  it('trims multiline tooltip prompts and refreshes compact markup previews without a timestamp', async () => {
+    vi.useFakeTimers();
+    const text = '  Review\n\t' + 'the failing test output '.repeat(6) + '  ';
+    const [turns, setTurns] = createSignal<StickyUserMessagePreview[]>([
+      { id: 'msg-1', index: 0, text, attachmentCount: 0, imageCount: 0 },
+    ]);
+    cleanup = render(
+      () => <TurnNavigationRail turns={turns()} activeTurnId="msg-1" onSelect={() => {}} />,
+      container!
+    );
+    const dot = container!.querySelector<HTMLButtonElement>('.turn-navigation-marker')!;
+    dot.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(150);
+    const tooltip = document.body.querySelector<HTMLElement>('[role="tooltip"]')!;
+    const prompt = tooltip.querySelector('.turn-navigation-tooltip-prompt')!;
+    const normalized = text.replaceAll(/\s+/g, ' ').trim();
+    expect(prompt.textContent).toBe(`${normalized.slice(0, 77)}...`);
+    expect(prompt.textContent).toHaveLength(80);
+    expect(tooltip.querySelector('.turn-navigation-tooltip-time')).toBeNull();
+
+    setTurns([
+      {
+        ...turns()[0]!,
+        text: '<svg>...</svg>',
+        format: { kind: 'svg', byteSize: 18 * 1024 },
+        formatPrefix: 'Use this icon',
+      },
+    ]);
+    expect(container!.querySelector('.turn-navigation-marker')).toBe(dot);
+    expect(prompt.textContent).toBe('Use this icon SVG content');
+    expect(prompt.textContent).not.toContain('<svg>');
   });
 
   it('preserves dot hover across preview refreshes and blur while the pointer stays over it', () => {

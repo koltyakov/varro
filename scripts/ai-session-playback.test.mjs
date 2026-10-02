@@ -464,6 +464,8 @@ test('historical estimates respect boundaries and sparse or extreme spans never 
 });
 
 const spawn = childProcess.spawn;
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
 const hangingProcess = `
   process.on('SIGINT', () => {});
   process.on('SIGTERM', () => {});
@@ -489,6 +491,17 @@ async function prepareReplay(t, source) {
   const listeners = ['SIGINT', 'SIGTERM'].map((signal) => process.listeners(signal));
   const children = [];
   let invocation;
+  let deadline;
+  let running;
+  const tick = (milliseconds) => {
+    if (!deadline) return;
+    deadline.remaining -= milliseconds;
+    if (deadline.remaining > 0) return;
+    const expired = deadline;
+    deadline = undefined;
+    realClearTimeout(expired.timer);
+    expired.callback();
+  };
   const started = Promise.withResolvers();
   t.mock.method(childProcess, 'spawn', (command, args, options) => {
     invocation = { command, args, options };
@@ -506,18 +519,30 @@ async function prepareReplay(t, source) {
     return child;
   });
   syncBuiltinESMExports();
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  // Advance only replay's global deadline. Node's subprocess timeout and
+  // teardown clocks must remain real, especially for taskkill on Windows.
+  t.mock.method(globalThis, 'setTimeout', (callback, milliseconds, ...args) => {
+    const timer = realSetTimeout(callback, milliseconds, ...args);
+    if (milliseconds === 180_620) deadline = { timer, callback, remaining: milliseconds };
+    return timer;
+  });
+  t.mock.method(globalThis, 'clearTimeout', (timer) => {
+    if (deadline?.timer === timer) deadline = undefined;
+    realClearTimeout(timer);
+  });
   t.after(async () => {
+    tick(200_000);
+    await running?.catch(() => {});
     t.mock.restoreAll();
     syncBuiltinESMExports();
-    t.mock.timers.reset();
     for (const child of children) {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     }
     await rm(directory, { recursive: true, force: true });
   });
   return {
-    run: () => replay(database, id, {}),
+    run: () => (running = replay(database, id, {})),
+    tick,
     started: started.promise,
     invocation: () => invocation,
     async assertClean(replayFile = invocation.options.env.VARRO_PLAYBACK_FILE) {
@@ -531,7 +556,7 @@ async function prepareReplay(t, source) {
 for (const reason of ['timeout', 'SIGINT', 'SIGTERM']) {
   test(
     `replay kills only its owned hanging process tree on ${reason}`,
-    { timeout: 15_000 },
+    { timeout: 30_000 },
     async (t) => {
       const fixture = await prepareReplay(
         t,
@@ -585,9 +610,9 @@ for (const reason of ['timeout', 'SIGINT', 'SIGTERM']) {
         620
       );
       // Advance only the deadline clock, after every real descendant has reported readiness.
-      t.mock.timers.tick(180_619);
+      fixture.tick(180_619);
       assert.ok(pids.every((pid) => process.kill(pid, 0)));
-      if (reason === 'timeout') t.mock.timers.tick(1);
+      if (reason === 'timeout') fixture.tick(1);
       else {
         process.emit(reason, reason);
         process.emit(reason, reason);
@@ -623,18 +648,60 @@ for (const code of [0, 7]) {
       });
       await fixture.run();
       assert.equal(process.exitCode, code === 0 ? previousExitCode : code);
-      t.mock.timers.tick(200_000);
+      fixture.tick(200_000);
       await fixture.assertClean();
     }
   );
 }
+
+test(
+  'replay keeps cleanup deadlines live after advancing its playback clock',
+  { timeout: 10_000 },
+  async (t) => {
+    const fixture = await prepareReplay(t, hangingProcess);
+    const execFile = childProcess.execFile;
+    // Replace the function rather than proxying it: execFile's non-configurable
+    // promisify implementation otherwise keeps invoking the original command.
+    childProcess.execFile = (_command, _args, options, callback) => {
+      assert.equal(options.timeout, 5_000);
+      return setTimeout(() => callback(new Error('cleanup deadline expired')), 20);
+    };
+    syncBuiltinESMExports();
+    t.after(() => {
+      childProcess.execFile = execFile;
+      syncBuiltinESMExports();
+    });
+    const rejected = assert.rejects(
+      fixture.run(),
+      /Playback timed out after 180620ms; process cleanup failed: cleanup deadline expired/
+    );
+    await fixture.started;
+    fixture.tick(180_620);
+    await rejected;
+    await fixture.assertClean();
+  }
+);
+
+test(
+  'replay fixture teardown drains an unfinished replay before restoring mocks',
+  { timeout: 10_000 },
+  async (t) => {
+    const fixture = await prepareReplay(t, hangingProcess);
+    const rejected = assert.rejects(fixture.run(), /Playback timed out after 180620ms/);
+    await fixture.started;
+    t.after(async () => {
+      await rejected;
+      await fixture.assertClean();
+    });
+  }
+);
 
 test('replay removes its fixture and handlers on spawn failure', { timeout: 10_000 }, async (t) => {
   const fixture = await prepareReplay(t, null);
   const failedStart = assert.rejects(fixture.started, { code: 'ENOENT' });
   await assert.rejects(fixture.run(), { code: 'ENOENT' });
   await failedStart;
-  t.mock.timers.tick(200_000);
+  fixture.tick(200_000);
   await fixture.assertClean();
 });
 

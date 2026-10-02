@@ -209,7 +209,7 @@ type HarnessWindow = Window & {
     pendingHistoryRequestCount?: () => number;
     getSessionMessages?: (sessionId: string) => MessageEntry[];
     getPendingPermissions?: () => Array<Record<string, unknown>>;
-    replayServerEvent?: (event: unknown) => void;
+    replayServerEvent?: (event: unknown, projectedMessage?: MessageEntry) => void;
   };
 };
 
@@ -1481,6 +1481,11 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'Short final response to keep the second prompt near the viewport.',
       BASE_TIME - 1_000
     );
+    if (new URLSearchParams(window.location.search).get('generationTiming') === '1') {
+      assistant2.info.time.completed = BASE_TIME;
+      const text = assistant2.parts.find((part) => part.type === 'text');
+      if (text) text.time = { start: BASE_TIME - 1_000, end: BASE_TIME };
+    }
     state.sessions = [session];
     state.sessionStatuses[session.id] = { type: 'idle' };
     state.messagesBySessionId[session.id] = [user1, assistant1, user2, assistant2];
@@ -5098,10 +5103,28 @@ function dispatchToWebview(message: unknown) {
   window.postMessage(message, '*');
 }
 
-function replayServerEvent(state: ScenarioState, eventValue: unknown) {
+function replayServerEvent(
+  state: ScenarioState,
+  eventValue: unknown,
+  projectedMessage?: MessageEntry
+) {
   const event = asRecord(eventValue);
   const properties = asRecord(event.properties);
   const type = event.type;
+  if (projectedMessage) {
+    const sessionId = projectedMessage.info.sessionID;
+    const messages = state.messagesBySessionId[sessionId];
+    if (
+      !messages ||
+      properties.sessionID !== sessionId ||
+      !String(type).startsWith('session.next.')
+    ) {
+      throw new Error('Native playback snapshot has invalid session routing');
+    }
+    const index = messages.findIndex((entry) => entry.info.id === projectedMessage.info.id);
+    if (index < 0) messages.push(structuredClone(projectedMessage));
+    else messages[index] = structuredClone(projectedMessage);
+  }
   if (type === 'message.updated') {
     const info = asRecord(properties.info);
     const sessionId = typeof info.sessionID === 'string' ? info.sessionID : '';
@@ -5284,7 +5307,28 @@ async function handleApiRequest(
   const url = new URL(rawPath, 'http://varro.test');
   const path = url.pathname;
 
+  const startupOptions = new URLSearchParams(window.location.search);
+  if (
+    startupOptions.has('startupBackgroundPending') &&
+    method === 'GET' &&
+    [
+      '/mcp',
+      '/lsp',
+      '/provider/auth',
+      '/experimental/workspace/status',
+      '/varro/session-trash',
+    ].includes(path)
+  ) {
+    // Model optional status that never settles without touching a live backend.
+    return new Promise<never>(() => {});
+  }
+
   if (method === 'GET' && path === '/global/health') {
+    if (
+      startupOptions.has('startupHealthRetry') &&
+      state.requests.filter((request) => request.path === '/global/health').length === 1
+    )
+      return { healthy: false };
     if (state.healthFailuresRemaining > 0) {
       state.healthFailuresRemaining -= 1;
       throw new Error('offline');
@@ -6333,7 +6377,8 @@ function setUpHarness() {
     updateSessionStatus: (sessionId, status) => {
       scenarioState.sessionStatuses[sessionId] = status;
     },
-    replayServerEvent: (event) => replayServerEvent(scenarioState, event),
+    replayServerEvent: (event, projectedMessage) =>
+      replayServerEvent(scenarioState, event, projectedMessage),
   };
   document.body.dataset.vscodeThemeKind = THEME;
   if (THEME !== 'dark') {

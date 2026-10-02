@@ -7,6 +7,7 @@ export type AboutViewData = {
   varroVersion: string;
   cliVersion: string;
   installMethod: string;
+  installedOn: string;
   binary: string;
   serverVersion: string;
   serverUrl: string;
@@ -14,6 +15,9 @@ export type AboutViewData = {
   serverStatus: string;
   healthy: boolean;
   activeAgents: string;
+  serverStartedOn: string;
+  vscodeClients: string;
+  otherClients: string;
   autoUpdate: boolean;
   vscodeVersion: string;
   nodeVersion: string;
@@ -27,6 +31,7 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
   const nonce = randomBytes(16).toString('base64');
   const statusLabel = data.healthy ? 'System ready' : 'Needs attention';
   const statusClass = data.healthy ? 'healthy' : 'unhealthy';
+  const otherClientsHidden = Number(data.otherClients) > 0 ? '' : ' hidden';
 
   return `<!doctype html>
 <html lang="en">
@@ -160,27 +165,31 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
       </div>
     </header>
 
-    <section class="status-bar ${statusClass}" aria-label="Server status">
-      <div class="status"><span class="status-dot"></span>${statusLabel}</div>
-      <div class="status-detail">${escapeHtml(data.serverStatus)}</div>
+    <section id="server-status" class="status-bar ${statusClass}" aria-label="Server status">
+      <div class="status"><span class="status-dot"></span><span data-about-field="statusLabel">${statusLabel}</span></div>
+      <div class="status-detail" data-about-field="serverStatus">${escapeHtml(data.serverStatus)}</div>
     </section>
-    ${data.updateNotice ? `<section class="notice"><strong>OpenCode update available</strong><span>${escapeHtml(data.updateNotice)}</span></section>` : ''}
+    <section id="update-notice" class="notice"${data.updateNotice ? '' : ' hidden'}><strong>OpenCode update available</strong><span data-about-field="updateNotice">${escapeHtml(data.updateNotice ?? '')}</span></section>
 
     <div class="cards">
       <section class="card">
-        <div class="card-heading"><h2>OpenCode CLI</h2><span class="card-version">${escapeHtml(data.cliVersion)}</span></div>
+        <div class="card-heading"><h2>OpenCode CLI</h2><span class="card-version" data-about-field="cliVersion">${escapeHtml(data.cliVersion)}</span></div>
         <dl>
-          <dt>Installed via</dt><dd>${escapeHtml(data.installMethod)}</dd>
-          <dt>Binary</dt><dd><code>${escapeHtml(data.binary)}</code></dd>
-          <dt>Auto updates</dt><dd>${data.autoUpdate ? 'Enabled' : 'Disabled'}</dd>
+          <dt>Installed via</dt><dd data-about-field="installMethod">${escapeHtml(data.installMethod)}</dd>
+          <dt title="Estimated from the CLI file creation date. Reinstalling or copying the file may change this date.">Installed on</dt><dd data-about-field="installedOn">${escapeHtml(data.installedOn)}</dd>
+          <dt>Binary</dt><dd><code data-about-field="binary">${escapeHtml(data.binary)}</code></dd>
+          <dt>Auto updates</dt><dd data-about-field="autoUpdate">${data.autoUpdate ? 'Enabled' : 'Disabled'}</dd>
         </dl>
       </section>
       <section class="card">
-        <div class="card-heading"><h2>OpenCode server</h2><span class="card-version">${escapeHtml(data.serverVersion)}</span></div>
+        <div class="card-heading"><h2>OpenCode server</h2><span class="card-version" data-about-field="serverVersion">${escapeHtml(data.serverVersion)}</span></div>
         <dl>
-          <dt>Endpoint</dt><dd><code>${escapeHtml(data.serverUrl)}</code></dd>
-          <dt>Ownership</dt><dd>${escapeHtml(data.ownership)}</dd>
-          <dt>Active agents</dt><dd>${escapeHtml(data.activeAgents)}</dd>
+          <dt>Endpoint</dt><dd><code data-about-field="serverUrl">${escapeHtml(data.serverUrl)}</code></dd>
+          <dt>Ownership</dt><dd data-about-field="ownership">${escapeHtml(data.ownership)}</dd>
+          <dt>Started on</dt><dd data-about-field="serverStartedOn">${escapeHtml(data.serverStartedOn)}</dd>
+          <dt>Active sessions</dt><dd data-about-field="activeAgents">${escapeHtml(data.activeAgents)}</dd>
+          <dt title="Local VS Code extension-host processes with open server connections, including compatible editors. Multiple sockets from one process count once. Remote or hidden clients make the count unknown.">VS Code clients</dt><dd data-about-field="vscodeClients">${escapeHtml(data.vscodeClients)}</dd>
+          <dt data-other-clients${otherClientsHidden} title="Other local client processes with open server connections. Multiple sockets from one process count once. Remote or hidden clients make the count unknown.">Other clients</dt><dd data-other-clients${otherClientsHidden} data-about-field="otherClients">${escapeHtml(data.otherClients)}</dd>
         </dl>
       </section>
     </div>
@@ -203,15 +212,48 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
   </main>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
+    const refresh = () => {
+      if (!document.hidden) vscode.postMessage({ action: 'refresh' });
+    };
+    let refreshTimer;
+    const updatePolling = () => {
+      clearInterval(refreshTimer);
+      if (!document.hidden) {
+        refresh();
+        refreshTimer = setInterval(refresh, 5000);
+      }
+    };
+    document.addEventListener('visibilitychange', updatePolling);
+    window.addEventListener('pagehide', () => clearInterval(refreshTimer));
     const copyButton = document.getElementById('copy-diagnostics');
     copyButton.addEventListener('click', () => {
       vscode.postMessage({ action: 'copyDiagnostics', includePaths: false });
     });
     window.addEventListener('message', (event) => {
+      if (event.data?.type === 'about-update') {
+        const data = event.data.data;
+        const fields = {
+          ...data,
+          statusLabel: data.healthy ? 'System ready' : 'Needs attention',
+          autoUpdate: data.autoUpdate ? 'Enabled' : 'Disabled',
+          updateNotice: data.updateNotice ?? '',
+        };
+        document.querySelectorAll('[data-about-field]').forEach((element) => {
+          element.textContent = fields[element.dataset.aboutField];
+        });
+        const status = document.getElementById('server-status');
+        status.classList.toggle('healthy', data.healthy);
+        status.classList.toggle('unhealthy', !data.healthy);
+        document.getElementById('update-notice').hidden = !data.updateNotice;
+        document.querySelectorAll('[data-other-clients]').forEach((element) => {
+          element.hidden = !(Number(data.otherClients) > 0);
+        });
+      }
       if (event.data?.type === 'diagnostics-result' && typeof event.data.text === 'string') {
         document.getElementById('diagnostics-result').textContent = event.data.text;
       }
     });
+    updatePolling();
   </script>
 </body>
 </html>`;

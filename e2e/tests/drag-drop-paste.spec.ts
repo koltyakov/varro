@@ -179,7 +179,13 @@ test('pastes an image, sends it as a file part, and clears the chip', async ({ p
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.evaluate((node) => {
-    const file = new File([new Uint8Array([137, 80, 78, 71])], 'clipboard.png', {
+    // The success path needs a decodable image, not just a truncated PNG signature.
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 1;
+    const bytes = Uint8Array.from(atob(canvas.toDataURL('image/png').split(',')[1]!), (char) =>
+      char.charCodeAt(0)
+    );
+    const file = new File([bytes], 'clipboard.png', {
       type: 'image/png',
     });
     const dataTransfer = new DataTransfer();
@@ -192,6 +198,7 @@ test('pastes an image, sends it as a file part, and clears the chip', async ({ p
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'Image' })).toBeVisible();
 
   await composer.fill('Describe this pasted image');
+  await expect(page.getByRole('button', { name: 'Send (Enter)', exact: true })).toBeEnabled();
   await page.keyboard.press('Enter');
 
   await expect

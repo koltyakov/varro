@@ -173,6 +173,88 @@ describe('webview bootstrap', () => {
     }
   });
 
+  it.each(['sidebar', 'editor'] as const)(
+    'restores the full %s width immediately after hidden viewport changes',
+    (surface) => {
+      vi.useFakeTimers();
+      let width = 420;
+      let visibilityState: DocumentVisibilityState = 'visible';
+      const widthSpy = vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => width);
+      const visibilityStateSpy = vi
+        .spyOn(document, 'visibilityState', 'get')
+        .mockImplementation(() => visibilityState);
+      bootstrapWindow.__initialWebviewState = {
+        webviewContext: { viewId: `${surface}-1`, surface },
+      };
+      root.style.maxWidth = '90%';
+      try {
+        cleanup = bootstrap(root);
+        visibilityState = 'hidden';
+        document.dispatchEvent(new Event('visibilitychange'));
+        for (const hiddenWidth of [270, 0]) {
+          width = hiddenWidth;
+          window.dispatchEvent(new Event('resize'));
+          expect(root.style.maxWidth).toBe('420px');
+        }
+
+        width = 486;
+        window.dispatchEvent(new Event('resize'));
+        visibilityState = 'visible';
+        document.dispatchEvent(new Event('visibilitychange'));
+        expect(root.style.maxWidth).toBe('486px');
+        window.dispatchEvent(new Event('resize'));
+        expect(root.style.maxWidth).toBe('486px');
+        vi.runAllTimers();
+        expect(root.style.maxWidth).toBe('486px');
+
+        cleanup();
+        cleanup = undefined;
+        document.dispatchEvent(new Event('visibilitychange'));
+        expect(root.style.maxWidth).toBe('90%');
+      } finally {
+        cleanup?.();
+        cleanup = undefined;
+        widthSpy.mockRestore();
+        visibilityStateSpy.mockRestore();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('cancels pending width expansion when hidden and resyncs without a resize event', () => {
+    vi.useFakeTimers();
+    let width = 270;
+    let visibilityState: DocumentVisibilityState = 'visible';
+    const widthSpy = vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => width);
+    const visibilityStateSpy = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockImplementation(() => visibilityState);
+    try {
+      cleanup = bootstrap(root);
+      width = 420;
+      window.dispatchEvent(new Event('resize'));
+      vi.advanceTimersToNextFrame();
+      expect(root.style.maxWidth).toBe('270px');
+
+      visibilityState = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+      width = 0;
+      vi.runAllTimers();
+      expect(root.style.maxWidth).toBe('270px');
+
+      width = 420;
+      visibilityState = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(root.style.maxWidth).toBe('420px');
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+      widthSpy.mockRestore();
+      visibilityStateSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('applies zoom width immediately and cancels a pending expansion', () => {
     vi.useFakeTimers();
     let width = 360;

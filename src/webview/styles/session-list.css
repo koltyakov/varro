@@ -1067,11 +1067,13 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 
 .session-item-meta {
   font-size: 10px;
+  line-height: 1.4;
+  height: 1lh;
+  flex-shrink: 0;
   color: var(--color-vscode-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-height: 1.2em;
 }
 
 .session-item-model-meta {

@@ -1,5 +1,61 @@
 import { expect, test } from '@playwright/test';
 
+test('keeps session row geometry unchanged with empty and hover-only metadata', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=status-filters');
+  const rows = page.locator('.session-item:visible');
+  await expect(rows).toHaveCount(5);
+  const row = rows.first();
+  const meta = row.locator('.session-item-stats-meta');
+  await row.evaluate((element) => {
+    const sessionId = element.getAttribute('data-session-id');
+    if (!sessionId) throw new Error('Session row has no ID');
+    window.postMessage(
+      {
+        type: 'session-models/sync',
+        payload: {
+          models: { [sessionId]: { providerID: 'openai', modelID: 'gpt-6-astra' } },
+        },
+      },
+      '*'
+    );
+  });
+  await expect(row).toHaveClass(/has-model-details/);
+  const geometry = () =>
+    rows.evaluateAll((elements) =>
+      elements.map((element) => {
+        const box = element.getBoundingClientRect();
+        return { top: box.top, height: box.height };
+      })
+    );
+
+  await meta.evaluate((element) => {
+    element.textContent = '4 files · +35 -13 · 80k tokens · 5m 32s';
+  });
+  const populated = await geometry();
+  await meta.evaluate((element) => element.replaceChildren());
+  expect(await geometry()).toEqual(populated);
+
+  await meta.evaluate((element) => {
+    const details = document.createElement('span');
+    details.className = 'session-item-model-meta';
+    details.textContent = 'GPT-6 Astra · High';
+    element.append(details);
+  });
+  await page.mouse.move(0, 0);
+  expect(await geometry()).toEqual(populated);
+  await row.hover();
+  await expect(meta.locator('.session-item-model-meta')).toBeVisible();
+  expect(await geometry()).toEqual(populated);
+  await page.mouse.move(0, 0);
+  await page.keyboard.down('Alt');
+  await expect(meta.locator('.session-item-model-meta')).toBeVisible();
+  expect(await geometry()).toEqual(populated);
+  await page.keyboard.up('Alt');
+  expect(await geometry()).toEqual(populated);
+});
+
 test('uses duty-cycled animations only for persistent session statuses', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=status-filters');
 
@@ -32,6 +88,47 @@ test('uses duty-cycled animations only for persistent session statuses', async (
     await expect(page.locator(selector)).toHaveCSS('animation-name', 'status-pulse');
   }
   await expect(page.locator('.chat-header-running-spinner')).toHaveCSS('animation-name', 'spin');
+});
+
+test('centers the running-session counter across font metrics', async ({ page }) => {
+  await page.setViewportSize({ width: 490, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=status-filters');
+  const counter = page.locator('.chat-header-running-count');
+  await expect(counter).toBeVisible();
+  await expect(counter).toHaveCSS('text-box-trim', 'trim-both');
+  await expect(counter).toHaveCSS('text-box-edge', 'cap alphabetic');
+  await expect(counter).toHaveCSS('transform', 'none');
+
+  for (const fontFamily of ['var(--font-mono)', 'Arial, sans-serif', 'serif', 'monospace']) {
+    for (const count of ['1', '12', '99']) {
+      const geometry = await counter.evaluate(
+        (element, options) => {
+          element.style.fontFamily = options.fontFamily;
+          element.textContent = options.count;
+          const badge = element.closest('.chat-header-running-badge');
+          if (!badge) throw new Error('Expected the running-session badge');
+          const badgeBox = badge.getBoundingClientRect();
+          const textBox = element.getBoundingClientRect();
+          return {
+            badgeWidth: badgeBox.width,
+            badgeHeight: badgeBox.height,
+            verticalOffset: textBox.top + textBox.height / 2 - (badgeBox.top + badgeBox.height / 2),
+            horizontalOffset:
+              textBox.left + textBox.width / 2 - (badgeBox.left + badgeBox.width / 2),
+            textHeight: textBox.height,
+            lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+          };
+        },
+        { fontFamily, count }
+      );
+      const context = `${fontFamily}, count ${count}`;
+      expect(geometry.badgeWidth, context).toBe(20);
+      expect(geometry.badgeHeight, context).toBe(20);
+      expect(Math.abs(geometry.verticalOffset), context).toBeLessThan(0.1);
+      expect(Math.abs(geometry.horizontalOffset), context).toBeLessThan(0.1);
+      expect(geometry.textHeight, context).toBeLessThan(geometry.lineHeight);
+    }
+  }
 });
 
 test('keeps persistent statuses static and visible with reduced motion', async ({ page }) => {

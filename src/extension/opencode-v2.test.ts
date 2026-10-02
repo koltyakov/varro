@@ -46,6 +46,61 @@ describe('v2 Windows location paths', () => {
 });
 
 describe('v2 prompt delivery', () => {
+  it('resumes existing steering without admitting another prompt or touching queued input', async () => {
+    const wire = vi.fn(async (method: string) =>
+      method === 'GET'
+        ? {
+            data: [
+              { id: 'msg_queue', type: 'user', delivery: 'queue' },
+              { id: 'msg_steer', type: 'user', delivery: 'steer' },
+            ],
+          }
+        : undefined
+    );
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('POST', '/session/ses_resume/resume-steering', undefined)
+    ).resolves.toBe(true);
+    expect(wire).toHaveBeenCalledTimes(2);
+    expect(wire).toHaveBeenNthCalledWith(
+      1,
+      'GET',
+      '/api/session/ses_resume/inbox',
+      undefined,
+      expect.anything()
+    );
+    expect(wire).toHaveBeenNthCalledWith(
+      2,
+      'POST',
+      '/api/session/ses_resume/prompt',
+      { id: 'msg_steer', text: '', delivery: 'steer', resume: true },
+      expect.anything()
+    );
+  });
+
+  it('does not resume queued input when steering was already delivered', async () => {
+    const wire = vi.fn(async () => ({
+      data: [{ id: 'msg_queue', type: 'user', delivery: 'queue' }],
+    }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('POST', '/session/ses_resume/resume-steering', undefined)
+    ).resolves.toBe(false);
+    expect(wire).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces a rejected steering resume without dropping the inbox item', async () => {
+    const wire = vi.fn(async (method: string) => {
+      if (method === 'GET') return { data: [{ id: 'msg_steer', type: 'user', delivery: 'steer' }] };
+      throw new Error('Resume failed');
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('POST', '/session/ses_resume/resume-steering', undefined)
+    ).rejects.toThrow('Resume failed');
+    expect(wire).toHaveBeenCalledTimes(2);
+  });
+
   it.each(['', 'Review src/'])(
     'activates a skill by ID and preserves arguments %j',
     async (argumentsText) => {
@@ -1033,7 +1088,8 @@ describe('OpenCode connection discovery', () => {
         if (path === '/global/health')
           return new Response('<html>app</html>', { headers: { 'content-type': 'text/html' } });
         if (path === healthPath) return Response.json({ version: '2.0.5', pid: 123, urls: [] });
-        if (path === '/api/status') return new Response('', { status: 404 });
+        if (path === '/api/status' || path === '/api/info')
+          return new Response('', { status: 404 });
         if (path === '/api/session/active')
           return Response.json({ data: { ses_busy: { type: 'running' } } });
         if (path === '/api/shell') return Response.json({ data: [] });
@@ -1063,7 +1119,14 @@ describe('OpenCode connection discovery', () => {
       await expect(transport.request('GET', 'https://example.com/session')).rejects.toThrow(
         'Unsupported OpenCode API path'
       );
-      expect(calls).toHaveLength(healthPath === '/api/status' ? 5 : 7);
+      expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+        '/global/health',
+        '/api/info',
+        ...(healthPath === '/api/status' ? ['/api/status'] : []),
+        healthPath,
+        '/api/session/active',
+        '/api/shell',
+      ]);
     }
   );
 
@@ -1386,6 +1449,26 @@ describe('v2 transcript and permission projection', () => {
       })[0]
     );
     expect(unknown).toMatchObject({ sequenceOnly: true, seq: 9 });
+  });
+
+  it('preserves execution interruption before idle and advances the durable sequence once', () => {
+    const events = projectV2Event({
+      id: 'evt_interrupted',
+      created: 20,
+      type: 'session.execution.interrupted',
+      durable: { seq: 8 },
+      data: { sessionID: 'ses_one' },
+    }).map(parseServerEvent);
+    expect(events[0]).toMatchObject({
+      type: 'session.error',
+      seq: 8,
+      properties: { sessionID: 'ses_one', error: { name: 'MessageAbortedError' } },
+    });
+    expect(events[1]).toMatchObject({
+      type: 'session.status',
+      properties: { sessionID: 'ses_one', status: { type: 'idle' } },
+    });
+    expect(events[1]?.seq).toBeUndefined();
   });
 
   it('delivers execution failures before idle and advances the durable sequence once', () => {
@@ -1753,6 +1836,6 @@ describe('v2 transcript and permission projection', () => {
     expect(JSON.parse(await readFile(join(directory, 'ses_local.json'), 'utf8'))).toMatchObject({
       metadata,
     });
-    await expect(state.read('../escape')).rejects.toThrow('Could not read');
+    await expect(state.read('../escape')).rejects.toThrow('Invalid OpenCode session ID');
   });
 });

@@ -27,6 +27,18 @@ function loadAdapter() {
     platform: 'node',
     format: 'esm',
     write: false,
+    plugins: [
+      {
+        name: 'standalone-logger',
+        setup(builder) {
+          // Keep adapter diagnostics without creating a VS Code output channel.
+          builder.onLoad({ filter: /[/\\]src[/\\]extension[/\\]logger\.ts$/ }, () => ({
+            contents: 'export const logger = console;',
+            loader: 'js',
+          }));
+        },
+      },
+    ],
   }).then(
     ({ outputFiles }) =>
       import(

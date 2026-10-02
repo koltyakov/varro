@@ -12,6 +12,14 @@ type LastOpenedView =
 
 export const STARTUP_VIEW_RESTORE_WINDOW_MS = 10 * 60 * 1000;
 const MAX_SETTLED_RECOVERY_CLAIMS = 100;
+const STARTUP_HEALTH_ATTEMPTS = 3;
+const STARTUP_HEALTH_RETRY_MS = 500;
+
+const STARTUP_ERROR_PREFIXES = [
+  'Failed to connect to OpenCode server:',
+  'Failed to load OpenCode startup data:',
+  'Failed to restore OpenCode session:',
+];
 
 export type InterruptedSessionContinueBody = {
   messageID?: string;
@@ -182,6 +190,7 @@ export async function initConnectionWithDependencies(
   deps: {
     health(): Promise<HealthResponse>;
     loadInitialData(): Promise<void | boolean | object>;
+    loadBackgroundData?(): Promise<void | boolean | object>;
     hydrateSessionStatuses(): Promise<void | boolean | object>;
     getActiveSessionId(): string | null;
     getPersistedActiveSessionId(): string | null;
@@ -198,16 +207,39 @@ export async function initConnectionWithDependencies(
     recoverInterruptedSessions(generation: number): Promise<void | boolean | object>;
     setInitialized(value: boolean): void;
     setError(message: string | null): void;
+    getError?(): string | null;
+    logError?(context: string, cause: unknown): void;
     now?(): number;
   },
   generationRef: { next(): number; isCurrent(generation: number): boolean }
 ) {
   const generation = generationRef.next();
+  let errorPrefix = STARTUP_ERROR_PREFIXES[0];
   try {
-    const health = await deps.health();
-    if (!generationRef.isCurrent(generation)) return;
-    if (!health.healthy) throw new Error('OpenCode server is not healthy');
+    for (let attempt = 0; attempt < STARTUP_HEALTH_ATTEMPTS; attempt += 1) {
+      try {
+        const health = await deps.health();
+        if (!generationRef.isCurrent(generation)) return;
+        if (!health.healthy) throw new Error('OpenCode server is not healthy');
+        break;
+      } catch (error) {
+        if (!generationRef.isCurrent(generation)) return;
+        const message = error instanceof Error ? error.message : String(error);
+        // Retry only transient health/network failures, never consent, identity,
+        // credentials, or server version failures. No server restart is needed.
+        if (
+          attempt === STARTUP_HEALTH_ATTEMPTS - 1 ||
+          !/not healthy|health probe failed|fetch failed|timed? ?out|timeout|ECONNREFUSED|ECONNRESET/i.test(
+            message
+          )
+        )
+          throw error;
+        await new Promise<void>((resolve) => setTimeout(resolve, STARTUP_HEALTH_RETRY_MS));
+        if (!generationRef.isCurrent(generation)) return;
+      }
+    }
 
+    errorPrefix = STARTUP_ERROR_PREFIXES[1];
     await deps.loadInitialData();
     if (!generationRef.isCurrent(generation)) return;
 
@@ -215,6 +247,7 @@ export async function initConnectionWithDependencies(
     if (!generationRef.isCurrent(generation)) return;
 
     const initialRoute = deps.getInitialRoute?.() ?? null;
+    errorPrefix = STARTUP_ERROR_PREFIXES[2];
     if (initialRoute || !deps.getActiveSessionId()) {
       await restoreStartupView(deps, generation, generationRef, initialRoute);
       if (!generationRef.isCurrent(generation)) return;
@@ -224,12 +257,26 @@ export async function initConnectionWithDependencies(
     if (!generationRef.isCurrent(generation)) return;
 
     deps.setInitialized(true);
+    const error = deps.getError?.();
+    if (error && STARTUP_ERROR_PREFIXES.some((prefix) => error.startsWith(prefix)))
+      deps.setError(null);
+    // Optional catalogs/status must not hold the whole chat behind its loader.
+    // Loaders retain their own workspace-generation guards and error handling.
+    if (deps.loadBackgroundData) {
+      void Promise.resolve()
+        .then(() => {
+          if (generationRef.isCurrent(generation)) return deps.loadBackgroundData?.();
+          return undefined;
+        })
+        .catch((cause: unknown) => {
+          if (generationRef.isCurrent(generation)) deps.logError?.('startupBackgroundData', cause);
+        });
+    }
   } catch (err) {
     if (!generationRef.isCurrent(generation)) return;
+    deps.logError?.('startupInitialization', err);
     deps.setInitialized(false);
-    deps.setError(
-      `Failed to connect to OpenCode server: ${err instanceof Error ? err.message : String(err)}`
-    );
+    deps.setError(`${errorPrefix} ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -334,6 +381,7 @@ export function ensureConnectionInitializedWithDependencies(deps: {
 export function createConnectionBootstrapOperations(deps: {
   health(): Promise<HealthResponse>;
   loadInitialData(): Promise<void | boolean | object>;
+  loadBackgroundData?(): Promise<void | boolean | object>;
   hydrateSessionStatuses(): Promise<void | boolean | object>;
   getActiveSessionId(): string | null;
   getPersistedActiveSessionId(): string | null;
@@ -349,6 +397,7 @@ export function createConnectionBootstrapOperations(deps: {
   setShowSessionPicker(value: boolean): void;
   setInitialized(value: boolean): void;
   setError(message: string | null): void;
+  getError?(): string | null;
   nextConnectionGeneration(): number;
   isCurrentConnectionGeneration(generation: number): boolean;
   getCurrentConnectionGeneration(): number;
@@ -482,6 +531,9 @@ export function createConnectionBootstrapOperations(deps: {
       {
         health: deps.health,
         loadInitialData: deps.loadInitialData,
+        loadBackgroundData: deps.loadBackgroundData,
+        getError: deps.getError,
+        logError: deps.logError,
         hydrateSessionStatuses: deps.hydrateSessionStatuses,
         getActiveSessionId: deps.getActiveSessionId,
         getPersistedActiveSessionId: deps.getPersistedActiveSessionId,

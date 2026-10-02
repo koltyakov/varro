@@ -56,6 +56,7 @@ export type OpenCodeRescopeResult = {
 const EVENT_STREAM_PATH = CURRENT_OPENCODE_ENDPOINTS.eventStream;
 
 interface OpenCodeTransportOptions {
+  authorizeConnection?: (reconnect?: boolean) => Promise<void | { expiresAt: number }>;
   openExternal?: (url: string) => Promise<boolean>;
   sessionStateDirectory?: string;
   getAuthorization?: () => string | undefined;
@@ -100,12 +101,19 @@ export class OpenCodeTransport {
   private readonly observedSessionDirectories = new Map<string, string>();
   private apiVersion: OpenCodeApiVersion = 1;
   private apiIdentityUrl: string | undefined;
+  private healthPath: string | undefined;
   private healthFailure: string | undefined;
+  private healthPid: { url: string; pid: number } | undefined;
   private authorizationRefresh: Promise<void> | null = null;
+  private requestAdmissions = new WeakMap<AbortSignal, { url: string; expiresAt: number }>();
   private readonly v2: OpenCodeV2Adapter;
 
   get healthError(): string | undefined {
     return this.healthFailure;
+  }
+
+  get serverPid(): number | null {
+    return this.healthPid?.url === this.options.getUrl() ? this.healthPid.pid : null;
   }
 
   get hasGlobalSessionStatus(): boolean {
@@ -144,6 +152,41 @@ export class OpenCodeTransport {
     body?: unknown,
     options?: OpenCodeRequestOptions
   ): Promise<unknown> {
+    if (
+      this.options.authorizeConnection &&
+      !(method === 'GET' && path === CURRENT_OPENCODE_ENDPOINTS.health)
+    ) {
+      const controller = new AbortController();
+      this.requestControllers.add(controller);
+      const url = this.options.getUrl();
+      const signal = options?.signal
+        ? AbortSignal.any([options.signal, controller.signal])
+        : controller.signal;
+      try {
+        scopeOpenCodeRequest(url, path);
+        signal.throwIfAborted();
+        await this.authorizeRequest(signal);
+        signal.throwIfAborted();
+        if (url !== this.options.getUrl())
+          throw new Error('OpenCode endpoint changed during request admission');
+        return await this.requestAdmitted(method, path, body, { ...options, signal });
+      } finally {
+        this.requestControllers.delete(controller);
+        if (!this.requestControllers.size) {
+          for (const resolve of this.requestSettlementWaiters) resolve();
+          this.requestSettlementWaiters.clear();
+        }
+      }
+    }
+    return this.requestAdmitted(method, path, body, options);
+  }
+
+  private async requestAdmitted(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: OpenCodeRequestOptions
+  ): Promise<unknown> {
     // Validate the caller path before any adapter can construct authenticated requests.
     if (this.apiVersion === 2) {
       scopeOpenCodeRequest(this.options.getUrl(), path);
@@ -155,6 +198,8 @@ export class OpenCodeTransport {
       const signal = options?.signal
         ? AbortSignal.any([options.signal, controller.signal])
         : controller.signal;
+      const admission = options?.signal && this.requestAdmissions.get(options.signal);
+      if (admission) this.requestAdmissions.set(signal, admission);
       try {
         const result =
           method === 'GET' && path === CURRENT_OPENCODE_ENDPOINTS.health
@@ -185,6 +230,13 @@ export class OpenCodeTransport {
     body?: unknown,
     options?: OpenCodeRequestOptions
   ): Promise<unknown> {
+    if (
+      this.options.authorizeConnection &&
+      !(method === 'GET' && path === CURRENT_OPENCODE_ENDPOINTS.health)
+    ) {
+      await this.authorizeRequest(options?.signal);
+      options?.signal?.throwIfAborted();
+    }
     const scoped = scopeOpenCodeRequest(
       this.options.getUrl(),
       path,
@@ -296,6 +348,28 @@ export class OpenCodeTransport {
     }
   }
 
+  private async authorizeRequest(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    const url = this.options.getUrl();
+    const admission = signal && this.requestAdmissions.get(signal);
+    if (admission?.url === url && Date.now() < admission.expiresAt) return;
+    let verification;
+    try {
+      verification = await this.options.authorizeConnection?.();
+    } catch (error) {
+      this.requestAdmissions = new WeakMap();
+      throw error;
+    }
+    signal?.throwIfAborted();
+    if (url !== this.options.getUrl())
+      throw new Error('OpenCode endpoint changed during request admission');
+    if (signal && verification) {
+      // The earlier of account/ownership expiry, not a new one-second window.
+      // Only descendants of this admitted request can reuse its verification.
+      this.requestAdmissions.set(signal, { url, expiresAt: verification.expiresAt });
+    }
+  }
+
   private getRequestTimeoutMs(method: string, path: string): number {
     const normalizedMethod = method.toUpperCase();
     const pathname = new URL(path, 'http://localhost').pathname;
@@ -357,51 +431,80 @@ export class OpenCodeTransport {
   async readHealthInfo(signal?: AbortSignal): Promise<{ healthy: boolean; version?: string }> {
     let health: { healthy: boolean; version?: string } = { healthy: false };
     this.healthFailure = undefined;
+    this.healthPid = undefined;
     try {
       const url = this.options.getUrl();
       if (this.apiIdentityUrl !== url) {
         this.apiVersion = 1;
         this.v2.reset();
         this.apiIdentityUrl = url;
+        this.healthPath = undefined;
       }
-      const paths =
+      const fallbackPaths =
         this.apiVersion === 2
-          ? ['/api/status', '/api/info', CURRENT_OPENCODE_ENDPOINTS.health]
-          : [CURRENT_OPENCODE_ENDPOINTS.health, '/api/status', '/api/info'];
+          ? ['/api/info', '/api/status', CURRENT_OPENCODE_ENDPOINTS.health]
+          : [CURRENT_OPENCODE_ENDPOINTS.health, '/api/info', '/api/status'];
+      const paths = [
+        ...new Set(this.healthPath ? [this.healthPath, ...fallbackPaths] : fallbackPaths),
+      ];
       for (const path of paths) {
         signal?.throwIfAborted();
-        const timeout = AbortSignal.timeout(OpenCodeTransport.HEALTH_TIMEOUT_MS);
-        const res = await this.fetchAuthenticated(`${url}${path}`, {
-          redirect: 'error',
-          headers: this.authorizationHeaders(),
-          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-        });
-        if (res.status === 401 || res.status === 403) {
-          this.healthFailure =
-            'OpenCode server authentication failed. Supply the server credentials or restart the Varro-managed server.';
-          break;
-        }
-        if (!res.ok) {
-          if (res.status !== 404) break;
-          continue;
-        }
-        const contentType = res.headers?.get('content-type');
-        if (contentType?.includes('text/html')) continue;
-        const data = await res.json();
-        if (path === CURRENT_OPENCODE_ENDPOINTS.health)
-          health = parseHealthResponse(data) ?? health;
-        else {
-          const info = asRecord(data);
-          if (isString(info?.version) && (isNumber(info.pid) || info.ready === true))
-            health = { healthy: true, version: info.version };
-        }
-        if (health.healthy) {
-          const family = openCodeApiVersion(health.version ?? '');
-          if (!family) {
-            this.healthFailure = `Unsupported OpenCode server version: ${health.version ?? 'unknown'}`;
-            health = { healthy: false };
-          } else this.apiVersion = family;
-          break;
+        let authenticationRejected = false;
+        try {
+          const timeout = AbortSignal.timeout(OpenCodeTransport.HEALTH_TIMEOUT_MS);
+          const res = await this.fetchAuthenticated(
+            `${url}${path}`,
+            {
+              redirect: 'error',
+              headers: this.authorizationHeaders(),
+              signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+            },
+            () => {
+              authenticationRejected = true;
+            }
+          );
+          if (res.status === 401 || res.status === 403) {
+            this.healthFailure =
+              'OpenCode server authentication failed. Supply the server credentials or restart the Varro-managed server.';
+            break;
+          }
+          if (!res.ok) {
+            if (res.status !== 404) break;
+            continue;
+          }
+          const contentType = res.headers?.get('content-type');
+          if (contentType?.includes('text/html')) continue;
+          const data = await res.json();
+          if (path === CURRENT_OPENCODE_ENDPOINTS.health)
+            health = parseHealthResponse(data) ?? health;
+          else {
+            const info = asRecord(data);
+            if (isString(info?.version) && (isNumber(info.pid) || info.ready === true))
+              health = { healthy: true, version: info.version };
+            if (isNumber(info?.pid) && Number.isSafeInteger(info.pid) && info.pid > 0)
+              this.healthPid = { url, pid: info.pid };
+          }
+          if (health.healthy) {
+            const family = openCodeApiVersion(health.version ?? '');
+            if (!family) {
+              this.healthFailure = `Unsupported OpenCode server version: ${health.version ?? 'unknown'}`;
+              health = { healthy: false };
+            } else {
+              this.apiVersion = family;
+              this.healthPath = path;
+              this.healthFailure = undefined;
+            }
+            break;
+          }
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (authenticationRejected) {
+            this.healthFailure = 'OpenCode server authentication failed during credential refresh.';
+            break;
+          }
+          // One slow/obsolete endpoint must not hide a healthy fallback. Do not
+          // fall through on authentication errors or explicit server rejection.
+          this.healthFailure = `OpenCode health probe failed (${path}): ${error instanceof Error ? error.message : String(error)}`;
         }
       }
     } catch {
@@ -415,6 +518,7 @@ export class OpenCodeTransport {
       });
       this.diagnosticHealth = health.healthy;
     }
+    if (!health.healthy) this.healthPid = undefined;
     return health;
   }
 
@@ -423,9 +527,14 @@ export class OpenCodeTransport {
     return authorization ? { Authorization: authorization } : {};
   }
 
-  private async fetchAuthenticated(url: string, init: RequestInit): Promise<Response> {
+  private async fetchAuthenticated(
+    url: string,
+    init: RequestInit,
+    onAuthenticationRejected?: () => void
+  ): Promise<Response> {
     const serverUrl = this.options.getUrl();
     const response = await fetch(url, init);
+    if (response.status === 401 || response.status === 403) onAuthenticationRejected?.();
     if (
       (response.status !== 401 && response.status !== 403) ||
       !this.options.refreshAuthorization ||
@@ -483,6 +592,8 @@ export class OpenCodeTransport {
     eventStreamDirectory = this.requestWorkspaceDirectory,
     promoteDirectoryImmediately = true
   ) {
+    this.requestAdmissions = new WeakMap();
+    await this.options.authorizeConnection?.(true);
     const serverUrl = this.options.getUrl();
     if (this.eventStreamServerUrl !== serverUrl) this.lastEventId = '';
     this.eventStreamServerUrl = serverUrl;
@@ -660,7 +771,11 @@ export class OpenCodeTransport {
             return;
           }
           this.eventReconnectTimer = null;
-          void this.startEventStream(this.eventStreamDirectory, false);
+          void this.startEventStream(this.eventStreamDirectory, false).catch((error: unknown) => {
+            logger.warn(
+              `Event stream admission failed: ${error instanceof Error ? error.message : String(error)}`
+            );
+          });
         }, delay);
       }
     }
@@ -700,6 +815,7 @@ export class OpenCodeTransport {
   }
 
   abortRequests() {
+    this.requestAdmissions = new WeakMap();
     for (const controller of this.requestControllers) {
       controller.abort();
     }

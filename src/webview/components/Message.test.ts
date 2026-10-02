@@ -3260,6 +3260,10 @@ describe('Message assistant final answer rendering', () => {
     expect(errorBlock?.textContent).not.toContain('Token refresh failed: 401');
     expect(reauthenticateButton).toBeInstanceOf(HTMLButtonElement);
     expect(reauthenticateButton?.textContent).toContain('Re-authenticate');
+    expect(
+      reauthenticateButton?.querySelector('.assistant-message-flow-item-error-action-label')
+        ?.textContent
+    ).toBe('Re-authenticate');
     expect(reauthenticateButton?.closest('.assistant-message-flow-item-error-card')).toBeNull();
 
     reauthenticateButton?.click();

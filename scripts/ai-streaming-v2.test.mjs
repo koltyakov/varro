@@ -1,6 +1,43 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { V2ReplayProjection } from './ai-streaming-v2.mjs';
+import { ReplayProjection } from './ai-replay-projection.mjs';
+
+test('shared replay projection rejects unsupported native events before delivery', () => {
+  const projection = new ReplayProjection([]);
+  assert.throws(
+    () =>
+      projection.apply(
+        { session: {}, messages: [] },
+        {
+          type: 'session.next.unrecognized',
+          properties: { sessionID: 's' },
+        }
+      ),
+    /Unsupported capture event/
+  );
+});
+
+test('shared replay projection preserves legacy history through a native text lifecycle', () => {
+  const { answer } = fixture();
+  const user = { info: { id: 'u', role: 'user', time: { created: 1 } }, parts: [] };
+  const projection = new ReplayProjection([user, answer]);
+  const state = { session: {}, messages: [] };
+  const legacy = { info: { id: 'old', role: 'user' }, parts: [] };
+  projection.apply(state, { type: 'message.updated', properties: { info: legacy.info } });
+  projection.apply(state, { type: 'session.next.prompted', properties: { messageID: 'u' } });
+  projection.apply(state, {
+    type: 'session.next.step.started',
+    properties: {
+      assistantMessageID: 'a',
+      timestamp: 2,
+      model: { providerID: 'test', modelID: 'test' },
+    },
+  });
+  assert.deepEqual(state.messages[0], legacy);
+  assert.equal(state.messages[2].parts.length, 0);
+  assert.equal(state.messages[2].info.time.completed, undefined);
+});
 
 function fixture() {
   const user = { info: { id: 'u', role: 'user', time: { created: 1 } }, parts: [] };

@@ -2584,9 +2584,7 @@ function SessionListItem(props: {
             </Show>
             <Show when={props.tokens !== null}>
               {' · '}
-              <span title={`${props.tokens!.toLocaleString('en-US')} tokens spent`}>
-                {formatSessionTokens(props.tokens!)} tokens
-              </span>
+              <span>{formatSessionTokens(props.tokens!)} tokens</span>
             </Show>
             <Show when={workedDurationMs()}>
               {(durationMs) => (

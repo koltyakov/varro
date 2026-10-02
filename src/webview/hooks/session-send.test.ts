@@ -124,6 +124,29 @@ function createState(overrides?: {
 }
 
 describe('session-send helpers', () => {
+  it('does not omit an unavailable explicit model and leave routing to the server', () => {
+    expect(() =>
+      buildSessionSendBody(
+        createState({
+          selectedModel: { providerID: 'openai', modelID: 'gpt-6.1-sol' },
+          providers: [
+            provider('openrouter', {
+              'gpt-6.1-sol': {
+                id: 'gpt-6.1-sol',
+                name: 'GPT-6.1 Sol',
+                capabilities: { toolcall: true },
+                cost: { input: 0, output: 0 },
+              },
+            }),
+          ],
+        }),
+        'session-1',
+        'Use my selected model',
+        () => false
+      )
+    ).toThrow('Selected model openai/gpt-6.1-sol is unavailable');
+  });
+
   it('sends text snapshots once and restores their exact contents for queueing and inline edits', () => {
     const text = '  Unicode 雪\r\n'.repeat(25);
     const file = createPastedText(text);

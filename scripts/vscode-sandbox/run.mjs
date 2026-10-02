@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { writeVscodeLaunchMetadata } from '../vscode-launch-process.mjs';
+import { isolateVarroTestState } from '../varro-test-state.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '../..');
@@ -305,15 +306,20 @@ async function runScenario(scenario, vscodeExecutable) {
       );
     }
     const port = await reservePort();
-    const fakeCommand = scenario === 'v2-first-run' ? process.env.VARRO_SANDBOX_V2_COMMAND : await createFakeCliLauncher(root);
+    const fakeCommand =
+      scenario === 'v2-first-run'
+        ? process.env.VARRO_SANDBOX_V2_COMMAND
+        : await createFakeCliLauncher(root);
     if (!fakeCommand) throw new Error('Set VARRO_SANDBOX_V2_COMMAND to a released v2 binary');
     await access(fakeCommand);
     const missingCommand = path.join(root, 'missing-opencode');
     const settings = getScenarioSettings(scenario, port, fakeCommand, missingCommand);
     const environment = { ...process.env, ...getScenarioEnvironment(scenario, root) };
+    await isolateVarroTestState(environment, root);
     if (scenario === 'v2-first-run') {
       for (const key of Object.keys(environment)) {
-        if (/^OPENCODE_|_API_KEY$|_TOKEN$|^AWS_|^AZURE_|^GOOGLE_|^ANTHROPIC_/.test(key)) delete environment[key];
+        if (/^OPENCODE_|_API_KEY$|_TOKEN$|^AWS_|^AZURE_|^GOOGLE_|^ANTHROPIC_/.test(key))
+          delete environment[key];
       }
       environment.HOME = path.join(root, 'home');
       environment.USERPROFILE = path.join(root, 'home');
@@ -376,7 +382,20 @@ async function runScenario(scenario, vscodeExecutable) {
       }
     );
     process.stdout.write(`VS Code sandbox scenario passed: ${scenario}\n`);
-    if (scenario === 'v2-first-run') await writeFile(path.join(dataRoot, 'result.json'), JSON.stringify({ scenario, passed: true, command: fakeCommand, database: path.join(dataRoot, 'opencode.db') }, null, 2));
+    if (scenario === 'v2-first-run')
+      await writeFile(
+        path.join(dataRoot, 'result.json'),
+        JSON.stringify(
+          {
+            scenario,
+            passed: true,
+            command: fakeCommand,
+            database: path.join(dataRoot, 'opencode.db'),
+          },
+          null,
+          2
+        )
+      );
   } finally {
     await stopFakeCli(pidFile);
     if (conflictServer) await new Promise((resolve) => conflictServer.close(resolve));

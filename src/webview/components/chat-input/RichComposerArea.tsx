@@ -96,7 +96,7 @@ export function RichComposerArea(props: {
   onCompressImage?: (chipId: string, event: MouseEvent) => void;
 }) {
   let editorEl: HTMLDivElement | undefined;
-  let isComposing = false;
+  const [isComposing, setIsComposing] = createSignal(false);
   let historyHandledByKeydown = false;
   let revealCaretAfterControlledInput = false;
   let pendingControlledCursorReveal = false;
@@ -809,6 +809,8 @@ export function RichComposerArea(props: {
           chip.detail,
           chip.icon,
           chip.disabled,
+          chip.previewImage?.url,
+          chip.previewImage?.alt,
           chip.textMarker,
           chip.severity,
           chip.problemDetails,
@@ -816,11 +818,13 @@ export function RichComposerArea(props: {
           chip.compressionHint,
         ])
     );
-    if (!editorEl) return;
+    const isFocused = props.isFocused || document.activeElement === editorEl;
+    // The browser owns the DOM and selection until composition has been flushed.
+    // Keep tracking controlled props so deferred updates run when composition ends.
+    if (!editorEl || isComposing()) return;
 
     const textChanged = text !== lastSyncedValue;
     const chipsChanged = chips !== lastSyncedChips;
-    const isFocused = props.isFocused || document.activeElement === editorEl;
     const externalLinksOutOfSync = externalLinksNeedResync(editorEl, text, props.chips);
     const hasExpectedExternalLinks = props.chips.some((chip) => chip.type === 'external-link');
     const preserveEditedExternalLinks =
@@ -881,8 +885,25 @@ export function RichComposerArea(props: {
     revealCaret();
   });
 
+  function finishComposition(event?: InputEvent) {
+    // Do not let the sync effect restore stale controlled text before onInput
+    // publishes the browser's committed value.
+    batch(() => {
+      setIsComposing(false);
+      handleInput(event);
+    });
+  }
+
   function handleInput(event?: InputEvent) {
-    if (isComposing) return;
+    if (event?.isComposing) {
+      setIsComposing(true);
+      return;
+    }
+    if (isComposing()) {
+      // Chromium can omit compositionend after a dead-key composition is aborted.
+      if (event?.isComposing === false) finishComposition(event);
+      return;
+    }
     if (!editorEl) return;
     if (event?.inputType === 'historyUndo' || event?.inputType === 'historyRedo') {
       const frag = buildDom(props.value, getChipMap());
@@ -1059,6 +1080,7 @@ export function RichComposerArea(props: {
 
   onMount(() => {
     const handleSelectionChange = () => {
+      if (isComposing()) return;
       const selection = document.activeElement === editorEl ? getSelectionOffsets() : null;
       updateSelectedChips(selection);
       if (selection) props.onSelect(selection.start, selection.end);
@@ -1085,6 +1107,7 @@ export function RichComposerArea(props: {
         onInput={handleInput}
         onContextMenu={handleContextMenu}
         onBeforeInput={(e) => {
+          if (isComposing() || e.isComposing) return;
           // The editor DOM is rebuilt programmatically, so the browser's
           // native undo stack is unreliable; route history edits (context
           // menu / Edit menu undo) to the composer history instead.
@@ -1137,6 +1160,11 @@ export function RichComposerArea(props: {
           }
         }}
         onKeyDown={(e) => {
+          // Some IMEs report the commit key with isComposing=false and keyCode=229.
+          // Read the legacy field explicitly because modern key/code cannot identify it.
+          const { keyCode }: { keyCode: number } = e;
+          if (e.isComposing || keyCode === 229 || e.key === 'Dead') return;
+          if (isComposing()) finishComposition();
           if (moveToLineStart(e) || moveAcrossAtomicReference(e)) return;
           const removedTrailingLineBreak =
             e.key === 'Backspace' &&
@@ -1171,8 +1199,14 @@ export function RichComposerArea(props: {
           if (sourceChip === relatedChip) return;
           hidePreview();
         }}
-        onFocus={() => props.onFocus()}
-        onBlur={() => props.onBlur()}
+        onFocus={() => {
+          if (isComposing()) finishComposition();
+          props.onFocus();
+        }}
+        onBlur={() => {
+          if (isComposing()) finishComposition();
+          props.onBlur();
+        }}
         onClick={(e) => {
           // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
           const chipEl = (e.target as HTMLElement).closest?.('[data-chip-id]');
@@ -1182,18 +1216,17 @@ export function RichComposerArea(props: {
           const selection = getSelectionOffsets();
           if (selection) props.onClick(selection.start, selection.end);
         }}
-        onKeyUp={() => {
+        onKeyUp={(e) => {
           historyHandledByKeydown = false;
+          if (isComposing() || e.isComposing) return;
           const selection = getSelectionOffsets();
           if (selection) props.onKeyUp(selection.start, selection.end);
         }}
         onCompositionStart={() => {
-          isComposing = true;
+          nativeInputSync = undefined;
+          setIsComposing(true);
         }}
-        onCompositionEnd={() => {
-          isComposing = false;
-          handleInput();
-        }}
+        onCompositionEnd={() => finishComposition()}
         spellcheck={false}
       />
 

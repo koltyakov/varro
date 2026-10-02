@@ -1709,7 +1709,12 @@ export function MessageList() {
   function flushRowHeightCorrections() {
     rowHeightCorrectionScheduled = false;
     rowHeightCorrectionFrame = 0;
-    if (disposed) return;
+    if (disposed || pendingRowHeightCorrections.size === 0) return;
+    // Rounding is a layout mutation too. Preserve an explicit view-change or
+    // width owner without competing with ordinary measurement compensation.
+    const detachedAnchor = widthResizeCanOwnScroll()
+      ? (pendingThinkingLayoutAnchor ?? widthResizeAnchor)
+      : null;
     let changed = false;
     for (const [element, correction] of pendingRowHeightCorrections) {
       if (!element.isConnected) continue;
@@ -1725,8 +1730,8 @@ export function MessageList() {
       changed = true;
     }
     pendingRowHeightCorrections.clear();
-    if (changed && widthResizeActive && widthResizeAnchor && widthResizeCanOwnScroll()) {
-      restoreVisibleScrollAnchor(widthResizeAnchor);
+    if (changed && detachedAnchor && widthResizeCanOwnScroll()) {
+      restoreVisibleScrollAnchor(detachedAnchor);
     }
     // A deferred correction can finish a virtual range change after the track observer followed.
     // Reconcile its bottom target before the next paint, including immediate reduced-motion follow.
@@ -2634,21 +2639,12 @@ export function MessageList() {
     );
   });
   const standaloneQuestions = createMemo(() => {
-    const questions = getStandaloneQuestionPrompts(
+    if (state.messagesLoading) return [];
+    return getStandaloneQuestionPrompts(
       untrack(() => state.messages),
       state.questions,
       state.activeSessionId,
       linkedToolCalls()
-    );
-    if (!state.messagesLoading) return questions;
-
-    return questions.filter(
-      (question) =>
-        getToolCallLookupKey(
-          question.sessionID,
-          question.tool?.messageID,
-          question.tool?.callID
-        ) === null
     );
   });
   const activeSessionRootId = createMemo(
@@ -2717,6 +2713,7 @@ export function MessageList() {
   );
 
   function getQuestionRequestForTool(part: Extract<Part, { type: 'tool' }>) {
+    if (state.messagesLoading) return null;
     const key = getToolCallLookupKey(activeSessionRootId(), part.messageID, part.callID);
     return key ? (questionRequestsByToolCall().get(key) ?? null) : null;
   }
@@ -6054,14 +6051,15 @@ export function MessageList() {
     return false;
   }
 
-  function handleKeyDown(event: KeyboardEvent) {
-    if (event.defaultPrevented) return;
+  function isTranscriptScrollKey(event: KeyboardEvent) {
+    if (event.defaultPrevented) return false;
     const target = event.target;
-    if (!containerRef || !(target instanceof Element) || !containerRef.contains(target)) return;
+    if (!containerRef || !(target instanceof Element) || !containerRef.contains(target))
+      return false;
     if (
       target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
     ) {
-      return;
+      return false;
     }
     // Space activates interactive controls instead of scrolling the list; arming scroll
     // ownership for it would misattribute later programmatic scrolls to user input.
@@ -6070,7 +6068,7 @@ export function MessageList() {
       target !== containerRef &&
       target.closest('button, a, label, summary, [role="button"], [role="tab"], [role="option"]')
     ) {
-      return;
+      return false;
     }
     if (
       event.key !== 'ArrowUp' &&
@@ -6081,8 +6079,25 @@ export function MessageList() {
       event.key !== 'End' &&
       event.key !== ' '
     ) {
-      return;
+      return false;
     }
+    return true;
+  }
+
+  function handleKeyDownCapture(event: KeyboardEvent) {
+    if (!isTranscriptScrollKey(event)) return;
+    if (window.innerWidth !== lastHostViewportWidth || widthResizeActive) {
+      // Host reflow can precede its resize notification. Align mounted rows before
+      // the key establishes a destination, not in a later frame that reverses it.
+      measureVisibleItems();
+    }
+    if (rowHeightCorrectionFrame) cancelAnimationFrame(rowHeightCorrectionFrame);
+    flushRowHeightCorrections();
+  }
+
+  function handleKeyDown(event: KeyboardEvent) {
+    if (!isTranscriptScrollKey(event) || !containerRef) return;
+    const target = event.target;
     pendingExpansionScrollAnchor = null;
     historyAnchorSettleOwner = null;
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
@@ -6315,8 +6330,11 @@ export function MessageList() {
         : null;
     const expandsActiveActivity =
       !!activityKey && control.getAttribute('aria-expanded') === 'false';
+    const expandsToolDetails =
+      control.matches('.tool-invocation-header') &&
+      control.getAttribute('aria-expanded') === 'false';
     const resumeBottomFollow =
-      (expandsCompactActivity || expandsActiveActivity) &&
+      (expandsCompactActivity || expandsActiveActivity || expandsToolDetails) &&
       (autoScroll() || pinnedToBottom || followModeLocked);
     const expansionAnchor = captureExpansionScrollAnchor({
       anchor,
@@ -6707,6 +6725,7 @@ export function MessageList() {
     containerRef.addEventListener('pointerdown', handlePointerDown);
     document.addEventListener('click', handleExternalLayoutClickCapture, true);
     document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDownCapture, true);
     document.addEventListener('pointerup', releasePointerScrollOwnership);
     document.addEventListener('pointercancel', releasePointerScrollOwnership);
     lastContainerClientHeight = containerRef.clientHeight;
@@ -6858,8 +6877,15 @@ export function MessageList() {
         scheduleStickyPreviewViewportState(containerRef.scrollTop, currentContainerClientHeight);
       }
       if (trackChanged || containerHeightChanged || widthChanged) {
-        if (trackChanged && shouldCorrectBottomAfterResize()) {
-          performScroll({ force: true });
+        const localViewportShrinking =
+          containerHeightDelta < -0.5 && !hostViewportResizing && !widthChanged;
+        if ((trackChanged || localViewportShrinking) && shouldCorrectBottomAfterResize()) {
+          // Composer growth removes viewport space, so keep the bottom aligned before paint.
+          // Transcript growth and host reflow retain their normal follow motion.
+          performScroll({
+            force: true,
+            immediate: localViewportShrinking,
+          });
           if (widthChanged && widthResizeActive) {
             pendingWidthFollowCorrection = true;
           } else {
@@ -6883,6 +6909,7 @@ export function MessageList() {
       containerRef?.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('click', handleExternalLayoutClickCapture, true);
       document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keydown', handleKeyDownCapture, true);
       document.removeEventListener('pointerup', releasePointerScrollOwnership);
       document.removeEventListener('pointercancel', releasePointerScrollOwnership);
       window.removeEventListener('resize', handleHostViewportResize);
@@ -7255,14 +7282,10 @@ export function MessageList() {
       }
       if (shouldAlignNewTurn && startNewTurnAlignment(sessionId, targetMessageId)) return;
       if (startPendingAppendScrollTransition(sessionId)) return;
-      // Distant navigation must not traverse the entire history at streaming speed.
-      // Nearby returns and subsequent bottom growth still use the normal follower.
+      // Explicit returns jump immediately; sends and subsequent growth keep normal easing.
       performScroll({
         force: true,
-        immediate:
-          !targetMessageId &&
-          !!containerRef &&
-          distanceFromBottom() > containerRef.clientHeight * 4,
+        immediate: !targetMessageId,
       });
       startFollowLoop(sessionId);
     });
@@ -7945,8 +7968,20 @@ export function MessageList() {
   );
 
   const presentationMessages = createMemo(() => {
-    const ids = trailingAssistantTurn()?.assistantMessageIds;
-    return compactActivityMessages().filter((message) => ids?.has(message.info.id));
+    const turn = trailingAssistantTurn();
+    let inTurn = false;
+    return compactActivityMessages().filter((message) => {
+      const isTurnAssistant = turn?.assistantMessageIds.has(message.info.id) ?? false;
+      if (message.info.id === turn?.userMessageId || isTurnAssistant) inTurn = true;
+      // Compaction paints outside assistant rows, but still ends preceding activity previews.
+      // Keep it in transcript order without replacing the real prompt's presentation identity.
+      return (
+        isTurnAssistant ||
+        (inTurn &&
+          message.info.role === 'user' &&
+          message.parts.some((part) => part.type === 'compaction'))
+      );
+    });
   });
   const presentationActivityGroups = createMemo(() =>
     getAssistantActivityGroupMap(presentationMessages(), canCompactActivityPart, (part) =>

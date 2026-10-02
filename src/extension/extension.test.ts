@@ -2,6 +2,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import packageJson from '../../package.json';
 
+const { disposeProcessInspectionMock } = vi.hoisted(() => ({
+  disposeProcessInspectionMock: vi.fn(),
+}));
+vi.mock('./process-inspection', () => ({
+  disposeProcessInspection: disposeProcessInspectionMock,
+}));
+
 type ConfigChangeEvent = { affectsConfiguration: (key: string) => boolean };
 type ConfigChangeListener = (event: ConfigChangeEvent) => void;
 
@@ -228,7 +235,8 @@ describe('extension activation', () => {
         reserved: 7777,
       },
       undefined,
-      secrets
+      secrets,
+      false
     );
   });
 
@@ -259,6 +267,37 @@ describe('extension activation', () => {
       secrets
     );
   });
+
+  it.each([false, true])(
+    'remembers whether automatic mode is migrating an existing installation: %s',
+    async (existing) => {
+      getMock.mockImplementation((key: string, fallback?: unknown) =>
+        key === 'server.port' ? 'auto' : readDefaultConfig(key, fallback)
+      );
+      const values = new Map<string, unknown>();
+      if (existing) values.set('layout.initialSidebarReveal.v1', true);
+      const globalState = {
+        get: vi.fn((key: string) => values.get(key)),
+        update: vi.fn(async (key: string, value: unknown) => {
+          values.set(key, value);
+        }),
+      };
+      const { activate } = await import('./extension');
+      await activate({
+        extensionUri: {},
+        extension: { id: 'koltyakov.varro' },
+        workspaceState: {},
+        globalState,
+        subscriptions: [],
+      } as never);
+      expect(openCodeServerMock.mock.calls.at(-1)?.[0]).toBe('auto');
+      expect(openCodeServerMock.mock.calls.at(-1)?.[7]).toBe(existing);
+      expect(globalState.update).toHaveBeenCalledWith(
+        'varro.server.legacyDefaultEndpoint',
+        existing
+      );
+    }
+  );
 
   it('initializes and refreshes the inline file changes toolbar context', async () => {
     let fileDiffs = true;
@@ -394,7 +433,8 @@ describe('extension activation', () => {
         reserved: 4096,
       },
       undefined,
-      undefined
+      undefined,
+      false
     );
   });
 
@@ -888,6 +928,7 @@ describe('extension activation', () => {
     expect(latestSidebarProviderInstance.current?.dispose).toHaveBeenCalledTimes(1);
     expect(latestContextProviderInstance.current?.dispose).toHaveBeenCalledTimes(1);
     expect(latestServerInstance.current?.disconnect).toHaveBeenCalledTimes(1);
+    expect(disposeProcessInspectionMock).toHaveBeenCalledOnce();
     expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:activated', false);
     expect(loggerMock.dispose).toHaveBeenCalledTimes(1);
   });
@@ -1032,9 +1073,11 @@ describe('extension manifest', () => {
     >;
 
     expect(properties['varro.server.port']).toMatchObject({
-      type: 'integer',
-      minimum: 1,
-      maximum: 65_535,
+      default: 'auto',
+      oneOf: [
+        { type: 'string', enum: ['auto'] },
+        { type: 'integer', minimum: 1, maximum: 65_535 },
+      ],
     });
   });
 

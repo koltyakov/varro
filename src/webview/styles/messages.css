@@ -838,6 +838,8 @@
 }
 
 .assistant-activity-details .assistant-activity-detail .tool-invocation-duration {
+  display: block;
+  align-self: center;
   word-spacing: -0.2em;
 }
 
@@ -1245,6 +1247,12 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   cursor: default;
 }
 
+.assistant-message-flow-item-error-action-label,
+.assistant-message-flow-item-error-countdown {
+  /* Center the letters rather than platform-dependent font ascent/descent space. */
+  text-box: trim-both cap alphabetic;
+}
+
 .assistant-message-flow-item-error-countdown {
   font-variant-numeric: tabular-nums;
 }
@@ -1524,6 +1532,12 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
 }
 
 @container (max-width: 400px) {
+  .assistant-dialog-summary-tps {
+    display: none;
+  }
+}
+
+@container (max-width: 300px) {
   .assistant-dialog-summary-token-budget {
     display: none;
   }
@@ -1862,9 +1876,12 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
 
 .rendered-markdown {
   line-height: 1.65;
-  /* Track the user's editor font-size setting (accessibility); the +0.5px
-     keeps the prose slightly larger than UI chrome, as before. */
-  font-size: calc(var(--varro-chat-font-size, var(--vscode-font-size, 13px)) + 0.5px);
+  /* Linux uses the configured chat size directly; other platforms retain the
+     half-pixel increase over UI chrome. */
+  font-size: calc(
+    var(--varro-chat-font-size, var(--vscode-font-size, 13px)) +
+      var(--varro-chat-prose-font-size-offset, 0.5px)
+  );
   font-family: var(--font-chat);
   font-weight: 400;
   color: var(--color-vscode-prose-fg);

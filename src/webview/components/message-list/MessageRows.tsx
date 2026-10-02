@@ -259,8 +259,10 @@ export function MessageRow(
                 delay={300}
                 content={
                   <div class="model-change-tooltip">
-                    <div>From: {change().from}</div>
-                    <div>To: {change().to}</div>
+                    <span>From: </span>
+                    <span>{change().from}</span>
+                    <span>To: </span>
+                    <span>{change().to}</span>
                   </div>
                 }
               >

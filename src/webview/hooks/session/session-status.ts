@@ -402,7 +402,8 @@ export async function recheckSessionStatusWithDependencies(
         } else if (
           syncedMessages &&
           latestAssistantFinished(messages) &&
-          isRunningSessionStatus(currentStatus)
+          isRunningSessionStatus(currentStatus) &&
+          !(currentStatus?.type === 'busy' && currentStatus.background)
         ) {
           deps.setSessionStatusEntry?.(sessionId, { type: 'idle' });
           deps.stopLoading();

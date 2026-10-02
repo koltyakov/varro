@@ -63,6 +63,8 @@ function bindQueueOverflowFade(element: HTMLElement, trackItemCount: () => numbe
 export function QueuedMessages(props: {
   items: QueuedMessageItem[];
   pendingSteers?: (QueuedMessageItem & { imageCount?: number; attachmentCount?: number })[];
+  canResumeSteering?: boolean;
+  onResumeSteering?: () => void;
   dispatchingItemId?: string | null;
   failedDispatchItemIds?: ReadonlySet<string>;
   steeringItemIds?: ReadonlySet<string>;
@@ -103,6 +105,17 @@ export function QueuedMessages(props: {
     <>
       <Show when={(props.pendingSteers?.length ?? 0) > 0}>
         <div class="chat-queue-container chat-steer-container">
+          <Show when={props.canResumeSteering}>
+            <button
+              type="button"
+              class="chat-queue-action"
+              title="Resume the existing steering prompt without sending another message"
+              onClick={() => props.onResumeSteering?.()}
+            >
+              <UiIcon source={playIcon} width={12} height={12} />
+              Resume steering
+            </button>
+          </Show>
           <div
             class="chat-queue-list"
             role="list"

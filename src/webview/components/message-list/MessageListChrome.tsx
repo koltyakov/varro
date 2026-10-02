@@ -384,6 +384,7 @@ export function TurnNavigationRail(props: {
               content={
                 <>
                   <div>{`Turn ${windowStart() + index() + 1} of ${props.turns.length}`}</div>
+                  <div class="turn-navigation-tooltip-prompt">{label()}</div>
                   <Show when={sentTimestamp()}>
                     {(timestamp) => <div class="turn-navigation-tooltip-time">{timestamp()}</div>}
                   </Show>

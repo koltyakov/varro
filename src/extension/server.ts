@@ -23,9 +23,11 @@ import {
   type ServerStatus,
 } from '../shared/protocol';
 import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
+import { asRecord } from '../shared/type-utils';
 import {
   OpenCodeProcess,
   type OpenCodeCompactionSettings,
+  type OpenCodePortSetting,
   type OpenCodeServerOwnership,
   type UpgradeFailureReport,
 } from './open-code-process';
@@ -45,6 +47,10 @@ import {
 } from './server-utils';
 import { FULL_SESSION_LIST_LIMIT } from './util/session-list';
 import { basicAuthorization, openCodeApiVersion } from './opencode-connection';
+import { inspectLocalServerAccount } from './process-inspection';
+import { readLocalServerConnectionInfo } from './server-connection-info';
+import type { ServerConnectionInfo } from './server-connection-info';
+import { ServerConnectionAdmission } from './server-connection-admission';
 
 export type { OpenCodeCompactionSettings };
 
@@ -59,6 +65,8 @@ export interface OpenCodeServerInfo {
   processId: number | null;
   cliVersion: string | null;
   cliVersionError: string | null;
+  cliInstalledAt: number | null;
+  connections: ServerConnectionInfo;
   installMethod: OpenCodeInstallMethod;
   resolvedCommand: string;
   searchedPaths: string[];
@@ -210,6 +218,10 @@ function describeManagedProcessCleanupFailure(context: string, err: unknown): st
   return `${context}. Failed to stop the managed startup process: ${err instanceof Error ? err.message : String(err)}`;
 }
 
+class SeparateAutomaticServerRequested extends Error {
+  override readonly name = 'SeparateAutomaticServerRequested';
+}
+
 export class OpenCodeServer extends EventEmitter {
   private static readonly START_DISPOSED_MESSAGE = 'Server start was cancelled';
   private static readonly MAX_RETRIES = 3;
@@ -236,16 +248,22 @@ export class OpenCodeServer extends EventEmitter {
   private lastRestartBlockers: RestartBlockedState | null = null;
   private adoptedServerRecoveryOperation: Promise<void> | null = null;
   private existingServerPreparationOperation: Promise<void> | null = null;
+  private streamTimeoutReconciliationOperation: Promise<void> | null = null;
   private savedServerAuthorization: { url: string; value: string } | undefined;
+  private readonly admission: ServerConnectionAdmission;
+  private preserveExistingProcess = false;
+  private registeredEndpoint = false;
+  private externalEndpoint = false;
 
   constructor(
-    port: number,
+    port: OpenCodePortSetting,
     autoStart: boolean,
     command?: string,
     simulateMissingCli = false,
     compactionSettings?: Partial<OpenCodeCompactionSettings>,
     ownershipLeasePath?: string,
-    private readonly secrets?: vscode.SecretStorage
+    private readonly secrets?: vscode.SecretStorage,
+    private readonly legacyDefaultEndpoint = false
   ) {
     super();
     this.processManager = new OpenCodeProcess(
@@ -256,7 +274,56 @@ export class OpenCodeServer extends EventEmitter {
       compactionSettings,
       ownershipLeasePath
     );
+    this.admission = new ServerConnectionAdmission(
+      () => this.url,
+      () => inspectLocalServerAccount(this.processManager.port),
+      async (account, url) => {
+        const description =
+          account.kind === 'different-user'
+            ? 'The listening process belongs to another OS user.'
+            : 'Varro could not verify which OS user owns the listening process.';
+        const answer = await vscode.window.showWarningMessage(
+          `Connect to OpenCode at ${url}? ${description} Connecting can expose that server's sessions and execute tools under its account. Supplied credentials alone do not prove the server enforces authentication.`,
+          { modal: true },
+          ...(this.processManager.isAutomaticPort &&
+          !this.registeredEndpoint &&
+          this._status.state !== 'running'
+            ? ['Start my server on another port', 'Connect anyway']
+            : ['Connect anyway'])
+        );
+        if (answer === 'Start my server on another port')
+          throw new SeparateAutomaticServerRequested();
+        return answer === 'Connect anyway';
+      }
+    );
     this.transport = new OpenCodeTransport({
+      authorizeConnection: async (reconnect) => {
+        try {
+          // Both independent checks must succeed before transport use. Serial
+          // Windows inspections can expire the other's one-second cache.
+          await Promise.all([
+            this.processManager.verifyManagedServerConnection(
+              reconnect && this._status.state === 'running'
+            ),
+            this.admission.verify(reconnect),
+          ]);
+          return {
+            expiresAt: Math.min(
+              this.processManager.connectionVerificationExpiresAt,
+              this.admission.verificationExpiresAt
+            ),
+          };
+        } catch (error) {
+          if (this._status.state === 'running') {
+            this.stopEventStream();
+            this.setStatus({
+              state: 'error',
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+          throw error;
+        }
+      },
       getUrl: () => this.url,
       getWorkspaceCwd: () => this.processManager.getWorkspaceCwd(),
       getStatus: () => this._status,
@@ -405,11 +472,7 @@ export class OpenCodeServer extends EventEmitter {
     }
   }
 
-  private startExistingServerPreparation(
-    disposeGeneration: number,
-    signal: AbortSignal,
-    serverVersion?: string
-  ) {
+  private startExistingServerPreparation(disposeGeneration: number, signal: AbortSignal) {
     if (this.isAttachOnly) return;
     if (this.existingServerPreparationOperation) return;
     const operation = (async () => {
@@ -419,11 +482,6 @@ export class OpenCodeServer extends EventEmitter {
         }
         await this.processManager.prepareForHealthyExistingServer();
         if (signal.aborted || disposeGeneration !== this.disposeGeneration) return;
-        if (this.managedProcess && serverVersion) {
-          this.processManager.rememberInstalledCliVersion(serverVersion);
-        } else {
-          this.processManager.forgetInstalledCliVersion();
-        }
         if (this.hasInjectedCompactionOverride() && !this.managedProcess) {
           logger.warn(
             'Varro chat auto-compaction settings require a Varro-managed OpenCode server; project opencode.json still overrides when present'
@@ -544,91 +602,127 @@ export class OpenCodeServer extends EventEmitter {
 
   private startOperation(preserveRetryCount: boolean): Promise<string> {
     return this.setStartPromise(async (signal) => {
-      this.clearRestartTimer();
-      const disposeGeneration = this.lifecycle.beginStart();
-      this.throwIfStartCancelled(disposeGeneration, signal);
-      if (!preserveRetryCount) {
-        this.clearRetryResetTimer();
-        this.retryCount = 0;
-      }
-      if (this.processManager.isSimulatingMissingCli) {
-        this.stopEventStream();
-        this.cancelPollHealth();
-        const { message, detail } = this.buildMissingCliError();
-        this.setStatus({ state: 'error', message, detail });
-        throw new Error(message);
-      }
+      try {
+        this.clearRestartTimer();
+        const disposeGeneration = this.lifecycle.beginStart();
+        this.throwIfStartCancelled(disposeGeneration, signal);
+        if (!preserveRetryCount) {
+          this.clearRetryResetTimer();
+          this.retryCount = 0;
+        }
+        if (this.processManager.isSimulatingMissingCli) {
+          this.stopEventStream();
+          this.cancelPollHealth();
+          const { message, detail } = this.buildMissingCliError();
+          this.setStatus({ state: 'error', message, detail });
+          throw new Error(message);
+        }
 
-      if (this.process && this._status.state !== 'running') {
-        await this.processManager.stopServerForRestart();
+        if (
+          this.process &&
+          this._status.state !== 'running' &&
+          !this.processManager.hasConfirmedManagedProcess
+        ) {
+          await this.processManager.stopServerForRestart();
+          this.throwIfStartCancelled(disposeGeneration, signal);
+        }
+        const registered = await this.processManager.refreshStartupRegistration();
+        this.registeredEndpoint = registered;
+        if (registered) await this.restoreRegistrationCredentials();
         this.throwIfStartCancelled(disposeGeneration, signal);
-      }
-      let health = await this.readHealthInfo();
-      this.throwIfStartCancelled(disposeGeneration, signal);
-      if (
-        !health.healthy &&
-        this.transport.healthError?.includes('authentication') &&
-        this.secrets
-      ) {
-        health = await this.recoverServerAuthentication(signal);
+        const probeExistingEndpoint =
+          registered ||
+          !this.processManager.isAutomaticPort ||
+          (this.legacyDefaultEndpoint && !this.processManager.hasHistoricalRegistration) ||
+          !this.processManager.isAutoStartEnabled;
+        let health = probeExistingEndpoint ? await this.readHealthInfo() : { healthy: false };
         this.throwIfStartCancelled(disposeGeneration, signal);
-        if (!health.healthy) {
-          const message =
-            this.transport.healthError ?? 'Could not verify OpenCode server credentials.';
+        if (
+          !health.healthy &&
+          probeExistingEndpoint &&
+          this.transport.healthError?.includes('authentication') &&
+          this.secrets
+        ) {
+          health = await this.recoverServerAuthentication(signal);
+          this.throwIfStartCancelled(disposeGeneration, signal);
+          if (!health.healthy) {
+            const message =
+              this.transport.healthError ?? 'Could not verify OpenCode server credentials.';
+            this.setStatus({ state: 'error', message });
+            throw new Error(message);
+          }
+        }
+        if (
+          probeExistingEndpoint &&
+          this.transport.healthError?.startsWith('Unsupported OpenCode')
+        ) {
+          const message = this.transport.healthError;
           this.setStatus({ state: 'error', message });
           throw new Error(message);
         }
-      }
-      if (this.transport.healthError?.startsWith('Unsupported OpenCode')) {
-        const message = this.transport.healthError;
-        this.setStatus({ state: 'error', message });
-        throw new Error(message);
-      }
-      if (!health.healthy && this.transport.healthError?.includes('authentication')) {
-        const message = this.transport.healthError;
-        this.setStatus({ state: 'error', message });
-        throw new Error(message);
-      }
-      if (health.healthy) {
-        if (isSupportedOpenCodeVersion(health.version)) {
-          logger.info(`Found existing OpenCode server at ${this.url}`);
-          if (health.version && this.processManager.hasOwnershipLeaseCandidate) {
-            this.processManager.rememberInstalledCliVersion(health.version);
+        if (
+          probeExistingEndpoint &&
+          !health.healthy &&
+          this.transport.healthError?.includes('authentication')
+        ) {
+          const message = this.transport.healthError;
+          this.setStatus({ state: 'error', message });
+          throw new Error(message);
+        }
+        if (health.healthy && (await this.admitExistingEndpoint())) {
+          this.throwIfStartCancelled(disposeGeneration, signal);
+          this.preserveExistingProcess = true;
+          this.externalEndpoint = !registered;
+          if (isSupportedOpenCodeVersion(health.version)) {
+            logger.info(`Found existing OpenCode server at ${this.url}`);
+            this.beginRunningEventStream();
+            this.startExistingServerPreparation(disposeGeneration, signal);
+            return this.url;
           }
-          this.beginRunningEventStream();
-          this.startExistingServerPreparation(disposeGeneration, signal, health.version);
-          return this.url;
+
+          if (this.preserveExistingProcess || this.admission.isExternal)
+            throw new Error(
+              'The existing OpenCode server is unsupported and was left running. Update it explicitly when its sessions have finished.'
+            );
+          await this.replaceIncompatibleServer(health.version, disposeGeneration, signal);
+          this.throwIfStartCancelled(disposeGeneration, signal);
         }
 
-        await this.replaceIncompatibleServer(health.version, disposeGeneration, signal);
+        if (registered)
+          throw new Error(
+            'The registered OpenCode process is still running but unavailable; it was left untouched.'
+          );
+
+        if (!this.processManager.isAutoStartEnabled) {
+          this.setStatus({
+            state: 'error',
+            message: `No server at ${this.url}. Start one with "opencode serve --port ${this.processManager.port}" or enable varro.server.autoStart.`,
+          });
+          throw new Error(
+            this._status.state === 'error'
+              ? (this._status as { message: string }).message
+              : 'server not running'
+          );
+        }
+
+        this.setStatus({ state: 'starting' });
+
+        if (this.managedProcess || this.process) {
+          await this.processManager.stopServerForRestart();
+          this.throwIfStartCancelled(disposeGeneration, signal);
+        }
+
         this.throwIfStartCancelled(disposeGeneration, signal);
+        return await this.launchManagedServer(disposeGeneration, preserveRetryCount, signal);
+      } catch (error) {
+        if (!signal.aborted && !this.isDisposing && this._status.state !== 'error') {
+          this.setStatus({
+            state: 'error',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+        throw error;
       }
-
-      if (!this.processManager.isAutoStartEnabled) {
-        this.setStatus({
-          state: 'error',
-          message: `No server at ${this.url}. Start one with "opencode serve --port ${this.processManager.port}" or enable varro.server.autoStart.`,
-        });
-        throw new Error(
-          this._status.state === 'error'
-            ? (this._status as { message: string }).message
-            : 'server not running'
-        );
-      }
-
-      this.setStatus({ state: 'starting' });
-
-      if (this.managedProcess || this.process) {
-        await this.processManager.stopServerForRestart();
-        this.throwIfStartCancelled(disposeGeneration, signal);
-      }
-
-      this.throwIfStartCancelled(disposeGeneration, signal);
-      // The CLI major determines whether startup must join/register the v2 service.
-      await this.ensureCompatibleCliForLaunch(undefined, disposeGeneration, signal);
-      this.throwIfStartCancelled(disposeGeneration, signal);
-
-      return this.launchManagedServer(disposeGeneration, preserveRetryCount, signal);
     });
   }
 
@@ -638,27 +732,73 @@ export class OpenCodeServer extends EventEmitter {
     signal: AbortSignal
   ): Promise<string> {
     this.throwIfStartCancelled(disposeGeneration, signal);
-    const sharedServer = this.processManager.discoverSharedServer();
-    if (sharedServer && (await sharedServer)) {
-      this.throwIfStartCancelled(disposeGeneration, signal);
-      const health = await this.readHealthInfo();
-      this.throwIfStartCancelled(disposeGeneration, signal);
-      if (!health.healthy || !isSupportedOpenCodeVersion(health.version)) {
-        throw new Error('The registered OpenCode service is unavailable or unsupported');
-      }
-      logger.info(`Found shared OpenCode service at ${this.url}`);
-      this.beginRunningEventStream();
-      this.startExistingServerPreparation(disposeGeneration, signal, health.version);
-      return this.url;
-    }
-    await this.syncInjectedConfigFile();
+    const release = await this.processManager.acquireManagedServerLaunchClaim(signal);
     try {
+      // Another window may have published a server while this window waited.
+      const registered = await this.processManager.refreshStartupRegistration();
+      this.registeredEndpoint = registered;
+      if (registered) await this.restoreRegistrationCredentials();
       this.throwIfStartCancelled(disposeGeneration, signal);
-    } catch (err) {
-      await this.processManager.cleanupPreparedInjectedConfigFile();
-      throw err;
+      if (registered) {
+        const health = await this.readHealthInfo();
+        this.throwIfStartCancelled(disposeGeneration, signal);
+        if (!health.healthy || !isSupportedOpenCodeVersion(health.version))
+          throw new Error(
+            'The registered OpenCode process could not be reused and was left untouched'
+          );
+        await release();
+        await this.admission.admit();
+        this.throwIfStartCancelled(disposeGeneration, signal);
+        this.preserveExistingProcess = true;
+        this.externalEndpoint = false;
+        await release();
+        this.beginRunningEventStream();
+        this.startExistingServerPreparation(disposeGeneration, signal);
+        return this.url;
+      }
+      // Recheck registration under the launch claim before any CLI update. A
+      // window that lost the startup race must reuse the winner without updating it.
+      await this.ensureCompatibleCliForLaunch(undefined, disposeGeneration, signal);
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      const sharedServer = this.processManager.discoverSharedServer();
+      if (sharedServer && (await sharedServer)) {
+        this.throwIfStartCancelled(disposeGeneration, signal);
+        const managedRegistration =
+          await this.processManager.refreshDiscoveredServerRegistration(signal);
+        this.registeredEndpoint = managedRegistration;
+        if (managedRegistration) await this.restoreRegistrationCredentials();
+        this.throwIfStartCancelled(disposeGeneration, signal);
+        const health = await this.readHealthInfo();
+        this.throwIfStartCancelled(disposeGeneration, signal);
+        if (!health.healthy || !isSupportedOpenCodeVersion(health.version)) {
+          throw new Error('The registered OpenCode service is unavailable or unsupported');
+        }
+        logger.info(`Found shared OpenCode service at ${this.url}`);
+        await release();
+        await this.admission.admit();
+        this.throwIfStartCancelled(disposeGeneration, signal);
+        this.preserveExistingProcess = true;
+        this.externalEndpoint = !managedRegistration;
+        await release();
+        this.beginRunningEventStream();
+        this.startExistingServerPreparation(disposeGeneration, signal);
+        return this.url;
+      }
+      this.processManager.selectAutomaticPort();
+      this.preserveExistingProcess = false;
+      this.externalEndpoint = false;
+      this.admission.reset();
+      await this.syncInjectedConfigFile();
+      try {
+        this.throwIfStartCancelled(disposeGeneration, signal);
+      } catch (err) {
+        await this.processManager.cleanupPreparedInjectedConfigFile();
+        throw err;
+      }
+      return await this.launchPreparedManagedServer(disposeGeneration, preserveRetryCount, signal);
+    } finally {
+      await release();
     }
-    return this.launchPreparedManagedServer(disposeGeneration, preserveRetryCount, signal);
   }
 
   private launchPreparedManagedServer(
@@ -974,6 +1114,23 @@ export class OpenCodeServer extends EventEmitter {
           rejectCancelledAttempt();
           return;
         }
+        if (this.processManager.hasPortInUseDetected()) {
+          const occupiedPort = this.processManager.port;
+          if (this.tryAdvancePort()) {
+            logger.warn(
+              `Port ${occupiedPort} in use by another process; retrying on ${this.processManager.port}`
+            );
+            this.processManager.setPortInUseDetected(false);
+            scheduleStartupRetry(100);
+            return;
+          }
+          failStartup(
+            this.processManager.isAutomaticPort
+              ? 'Automatic OpenCode port collision retries were exhausted. Retry startup or select an available integer port.'
+              : `Port ${occupiedPort} is already in use. Explicit ports never fall back. Set varro.server.port to auto or an available integer between 1 and 65535.`
+          );
+          return;
+        }
         if (healthNow.healthy && !isSupportedOpenCodeVersion(healthNow.version)) {
           const incompatible = createUpdateRequiredError({
             observed: healthNow.version
@@ -1011,26 +1168,14 @@ export class OpenCodeServer extends EventEmitter {
             failStartup(OpenCodeServer.OWNERSHIP_CONFIRMATION_FAILED_MESSAGE);
             return;
           }
+          await awaitBoundary(this.admitManagedServer(signal));
+          if (isInvalidAttempt()) {
+            rejectCancelledAttempt();
+            return;
+          }
           this.processManager.resetPortRetryState();
           this.beginRunningEventStream();
           finishStartup(this.url);
-          return;
-        }
-
-        if (this.processManager.hasPortInUseDetected()) {
-          const occupiedPort = this.processManager.port;
-          if (this.tryAdvancePort()) {
-            logger.warn(
-              `Port ${occupiedPort} in use by another process; retrying on ${this.processManager.port}`
-            );
-            this.processManager.setPortInUseDetected(false);
-            scheduleStartupRetry(100);
-            return;
-          }
-
-          failStartup(
-            `Port ${occupiedPort} is already in use, and Varro has no valid fallback port available. Set varro.server.port to an available integer between 1 and 65535.`
-          );
           return;
         }
 
@@ -1340,8 +1485,13 @@ export class OpenCodeServer extends EventEmitter {
           reject(new Error(OpenCodeServer.OWNERSHIP_CONFIRMATION_FAILED_MESSAGE));
           return;
         }
-        if (health.version) {
-          this.processManager.rememberInstalledCliVersion(health.version);
+        await this.admitManagedServer(signal);
+        if (
+          signal?.aborted ||
+          !this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
+        ) {
+          reject(this.getCancellationError(signal));
+          return;
         }
         this.processManager.resetPortRetryState();
         this.beginRunningEventStream();
@@ -1385,6 +1535,30 @@ export class OpenCodeServer extends EventEmitter {
     ) {
       throw new Error('OpenCode server is not accepting requests while stopping');
     }
+    if (
+      method === 'POST' &&
+      /^\/session\/[^/]+\/(?:prompt_async|prompt|message|command|resume-steering)$/.test(
+        new URL(path, 'http://localhost').pathname
+      )
+    ) {
+      options?.signal?.throwIfAborted();
+      // Do not leave the first send after editor reload waiting for the
+      // five-minute maintenance interval to protect an owned idle backend.
+      try {
+        await this.reconcileManagedStreamTimeout();
+      } catch (err) {
+        logger.warn(
+          `OpenCode stream timeout preflight failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+      options?.signal?.throwIfAborted();
+      if (
+        this.isDisposing ||
+        this.isTerminalCliUpgradeActive() ||
+        this.lifecycle.getRestartPromise<string>()
+      )
+        throw new Error('OpenCode server is not accepting requests while stopping');
+    }
     return this.transport.request(method, path, body, options);
   }
 
@@ -1394,13 +1568,17 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   async readServerInfo(): Promise<OpenCodeServerInfo> {
+    // About/diagnostics must not report a verified lease as unmanaged while its
+    // asynchronous ownership observation or handoff is still being prepared.
+    if (this.existingServerPreparationOperation) await this.existingServerPreparationOperation;
     let cliVersion: string | null = null;
     let cliVersionError: string | null = null;
     let activeAgentCount: number | null = null;
     let activeAgentError: string | null = null;
 
     try {
-      if (!this.isAttachOnly) cliVersion = await this.readInstalledCliVersion();
+      // Local version inspection does not grant lifecycle rights to the connected server.
+      cliVersion = await this.readInstalledCliVersion();
     } catch (err) {
       cliVersionError = err instanceof Error ? err.message : String(err);
     }
@@ -1414,6 +1592,34 @@ export class OpenCodeServer extends EventEmitter {
 
     const install = this.processManager.getInstallInfo();
     const health = await this.readHealthInfo();
+    const connectionUrl = this.url;
+    const serverPid = this.transport.serverPid ?? this.processManager.managedProcessId;
+    let connections: ServerConnectionInfo = {
+      startedAt: null,
+      vscodeClients: null,
+      otherClients: null,
+    };
+    if (health.healthy && this._status.state === 'running') {
+      connections = await readLocalServerConnectionInfo(this.processManager.port, serverPid);
+    }
+    let cliInstalledAt: number | null = null;
+    if (install.found) {
+      try {
+        // stat follows CLI symlinks. Modification times can be package build dates,
+        // so only use the local file creation time as an installation estimate.
+        const { birthtimeMs } = await stat(install.resolvedCommand);
+        if (Number.isFinite(birthtimeMs) && birthtimeMs > 0) cliInstalledAt = birthtimeMs;
+      } catch {
+        // Installation dates are best-effort when the CLI is missing or inaccessible.
+      }
+    }
+    if (
+      this.url !== connectionUrl ||
+      this._status.state !== 'running' ||
+      (this.transport.serverPid ?? this.processManager.managedProcessId) !== serverPid
+    ) {
+      connections = { startedAt: null, vscodeClients: null, otherClients: null };
+    }
 
     return {
       status: this._status,
@@ -1429,6 +1635,8 @@ export class OpenCodeServer extends EventEmitter {
       processId: this.processManager.managedProcessId,
       cliVersion,
       cliVersionError,
+      cliInstalledAt,
+      connections,
       activeAgentCount,
       activeAgentError,
       health,
@@ -1472,12 +1680,57 @@ export class OpenCodeServer extends EventEmitter {
     await this.transport.startEventStream();
   }
 
+  private async admitExistingEndpoint(): Promise<boolean> {
+    try {
+      await this.admission.admit();
+      return true;
+    } catch (error) {
+      if (error instanceof SeparateAutomaticServerRequested) return false;
+      this.setStatus({
+        state: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  private async admitManagedServer(signal?: AbortSignal) {
+    await this.admission.admit();
+    if (this.secrets) {
+      try {
+        await this.processManager.persistManagedServerCredentials(this.secrets);
+      } catch (error) {
+        logger.warn(
+          `Could not copy managed credentials to secret storage; the private lease was retained: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+    signal?.throwIfAborted();
+  }
+
+  private async restoreRegistrationCredentials() {
+    if (!this.secrets) return;
+    try {
+      await this.processManager.restoreManagedServerCredentials(this.secrets);
+    } catch (error) {
+      logger.warn(
+        `Managed secret storage unavailable; retaining the private lease credential: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   private beginRunningEventStream() {
     // Start the subscription request before publishing running state so snapshot
     // reads triggered by that status cannot get ahead of the SSE subscription.
     const stream = this.startEventStream();
     this.setRunningStatus(this.url, 'degraded');
-    void stream;
+    void stream.catch((error: unknown) => {
+      if (this.isDisposing) return;
+      this.setStatus({
+        state: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   private stopEventStream() {
@@ -1526,8 +1779,74 @@ export class OpenCodeServer extends EventEmitter {
     });
   }
 
+  private reconcileManagedStreamTimeout(): Promise<void> {
+    if (this.streamTimeoutReconciliationOperation) return this.streamTimeoutReconciliationOperation;
+    const operation = this.runManagedStreamTimeoutReconciliation();
+    this.streamTimeoutReconciliationOperation = operation;
+    const finish = () => {
+      if (this.streamTimeoutReconciliationOperation === operation)
+        this.streamTimeoutReconciliationOperation = null;
+    };
+    void operation.then(finish, finish);
+    return operation;
+  }
+
+  private async runManagedStreamTimeoutReconciliation() {
+    if (this.existingServerPreparationOperation) await this.existingServerPreparationOperation;
+    if (
+      this.isAttachOnly ||
+      this.isDisposing ||
+      this.isTerminalCliUpgradeActive() ||
+      this._status.state !== 'running'
+    )
+      return;
+    if (!this.managedProcess || this.transport.version !== 2) return;
+    const generation = this.disposeGeneration;
+    const url = this.url;
+    const current = () =>
+      !this.isDisposing &&
+      generation === this.disposeGeneration &&
+      url === this.url &&
+      this._status.state === 'running';
+    const health = await this.readHealthInfo();
+    if (
+      !current() ||
+      !health.healthy ||
+      !health.version ||
+      compareVersions(health.version, '2.0.20') < 0
+    )
+      return;
+    const directory = this.getWorkspaceCwd();
+    const query = directory ? `?location[directory]=${encodeURIComponent(directory)}` : '';
+    const provider = asRecord(
+      asRecord(await this.transport.request('GET', `/api/provider/openai${query}`))?.data
+    );
+    const settings = asRecord(provider?.settings);
+    if (!settings) throw new Error('Could not inspect the effective OpenAI stream timeout policy');
+    if ('chunkTimeout' in settings || 'timeout' in settings) return;
+    if (!current() || (await this.readRestartBlockers()).totalSessionCount > 0 || !current())
+      return;
+    if (!(await this.processManager.reconcileInjectedStreamTimeout(health.version))) return;
+    // Reload cancels pending attention, so it must never be used as a way to
+    // unstick an active execution. Recheck all workspaces and ownership first.
+    if (!current() || (await this.readRestartBlockers()).totalSessionCount > 0 || !current())
+      return;
+    if (!(await this.processManager.refreshManagedServerOwnership()) || !current()) return;
+    await this.transport.request('POST', '/global/dispose');
+    logger.info(
+      'Applied five-minute OpenAI stream silence protection to the reused managed server'
+    );
+  }
+
   private async runMaintenanceTick() {
-    if (this.isAttachOnly) return;
+    try {
+      await this.reconcileManagedStreamTimeout();
+    } catch (err) {
+      logger.warn(
+        `OpenCode stream timeout reconciliation failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    if (this.isAttachOnly || this.preserveExistingProcess) return;
     await this.processManager.runMaintenanceTick({
       isDisposing: () => this.isDisposing,
       getStatus: () => this._status,
@@ -1602,6 +1921,9 @@ export class OpenCodeServer extends EventEmitter {
     let installedVersion: string | null;
     try {
       this.throwIfStartCancelled(disposeGeneration, signal);
+      // The connected server can predate an install or use a different CLI.
+      // Every new launch must select its executable and flags from disk.
+      this.processManager.clearResolvedCommandCache();
       installedVersion = await this.readInstalledCliVersion();
       this.throwIfStartCancelled(disposeGeneration, signal);
     } catch (err) {
@@ -2167,7 +2489,17 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async readHealthInfo(): Promise<{ healthy: boolean; version?: string }> {
-    return this.transport.readHealthInfo();
+    const url = this.url;
+    const generation = this.disposeGeneration;
+    const health = await this.transport.readHealthInfo();
+    if (
+      health.healthy &&
+      health.version &&
+      url === this.url &&
+      generation === this.disposeGeneration
+    )
+      this.processManager.rememberRunningServerVersion(health.version);
+    return health;
   }
 
   async dispose() {
@@ -2194,7 +2526,11 @@ export class OpenCodeServer extends EventEmitter {
 
   /** Attach-only endpoints may be Docker ports or tunnels, even on loopback. */
   get isAttachOnly(): boolean {
-    return !this.processManager.isAutoStartEnabled && !this.managedProcess;
+    return (
+      this.externalEndpoint ||
+      this.admission.isExternal ||
+      (!this.processManager.isAutoStartEnabled && !this.managedProcess)
+    );
   }
 
   restart(options: { force?: boolean } = {}): Promise<string> {
@@ -2247,6 +2583,10 @@ export class OpenCodeServer extends EventEmitter {
 
     const operation = this.lifecycle.setRestartPromise(async (signal) => {
       this.throwIfOperationCancelled(signal);
+      if (this.existingServerPreparationOperation) {
+        await this.existingServerPreparationOperation;
+        this.throwIfOperationCancelled(signal);
+      }
       if (this.adoptedServerRecoveryOperation) {
         await this.waitForAdoptedServerRecovery();
         this.throwIfOperationCancelled(signal);
@@ -2298,6 +2638,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async disposeResources(options: { stopProcess: boolean }) {
+    this.admission.reset();
     this.pendingTerminalCliUpgrades = 0;
     this.restoreServerAfterTerminalCliUpgrade = false;
     this.terminalCliUpgradeWorkspaceIdentity = null;

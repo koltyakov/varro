@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These transport tests deliberately model malformed HTTP values, stream readers, and module-boundary logging. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolve as resolvePath } from 'node:path';
 
 const { warnMock, updateEventStreamStateMock, emitEventMock } = vi.hoisted(() => ({
   warnMock: vi.fn(),
@@ -33,6 +34,41 @@ import { OpenCodeTransport } from './open-code-transport';
 import * as serverUtils from './server-utils';
 import { diagnosticTimeline } from './diagnostics';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
+
+describe('server process identity from health', () => {
+  it('retains a validated API PID only for the healthy endpoint', async () => {
+    let url = 'http://localhost:4096';
+    const transport = createTransport({ getUrl: () => url });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      return path === '/api/info'
+        ? Response.json({ version: '2.0.21', pid: 1234 })
+        : new Response('', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: true, version: '2.0.21' });
+    expect(transport.serverPid).toBe(1234);
+    url = 'http://localhost:5096';
+    expect(transport.serverPid).toBeNull();
+    fetchMock.mockImplementation(async () => new Response('', { status: 503 }));
+    await transport.readHealthInfo();
+    expect(transport.serverPid).toBeNull();
+  });
+
+  it.each([0, -1, 1.5, '1234', null])('does not expose an invalid API PID %s', async (pid) => {
+    const transport = createTransport();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) =>
+        new URL(String(input)).pathname === '/api/info'
+          ? Response.json({ version: '2.0.21', pid, ready: true })
+          : new Response('', { status: 404 })
+      )
+    );
+    await transport.readHealthInfo();
+    expect(transport.serverPid).toBeNull();
+  });
+});
 
 function createTransport(
   options: Partial<ConstructorParameters<typeof OpenCodeTransport>[0]> = {}
@@ -144,6 +180,107 @@ function createClosedEventResponse() {
     },
   } as unknown as Response;
 }
+
+describe('transport connection admission', () => {
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+  it.each([1, 2])(
+    'reuses only the existing admission window across a v%s request',
+    async (version) => {
+      const authorizeConnection = vi.fn(async () => ({ expiresAt: Date.now() + 1000 }));
+      const transport = createTransport({ authorizeConnection });
+      (transport as unknown as { apiVersion: number }).apiVersion = version;
+      vi.mocked(fetch).mockResolvedValue(Response.json({ data: [] }));
+      await transport.request('GET', '/api/example');
+      expect(authorizeConnection).toHaveBeenCalledOnce();
+      await transport.request('GET', '/api/example');
+      expect(authorizeConnection).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it('shares admission across adapter wire requests without extending its expiry', async () => {
+    vi.useFakeTimers();
+    const authorizeConnection = vi.fn(async () => ({ expiresAt: Date.now() + 1000 }));
+    const transport = createTransport({ authorizeConnection });
+    (transport as unknown as { apiVersion: number }).apiVersion = 2;
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ data: [] }));
+    await transport.request('GET', '/provider/auth');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(authorizeConnection).toHaveBeenCalledOnce();
+
+    vi.mocked(fetch).mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 1001);
+      return Response.json({ data: [] });
+    });
+    await transport.request('GET', '/provider/auth');
+    expect(authorizeConnection).toHaveBeenCalledTimes(3);
+  });
+
+  it('blocks subsequent adapter traffic when expired verification detects a replacement', async () => {
+    vi.useFakeTimers();
+    const authorizeConnection = vi
+      .fn()
+      .mockResolvedValueOnce({ expiresAt: Date.now() + 1000 })
+      .mockRejectedValue(new Error('listener changed'));
+    const transport = createTransport({ authorizeConnection });
+    (transport as unknown as { apiVersion: number }).apiVersion = 2;
+    vi.mocked(fetch).mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 1001);
+      return Response.json({ data: [] });
+    });
+    await expect(transport.request('GET', '/provider/auth')).rejects.toThrow('listener changed');
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('does not restart an admission window after a slow verification', async () => {
+    const authorizeConnection = vi.fn(async () => ({ expiresAt: Date.now() - 1 }));
+    const transport = createTransport({ authorizeConnection });
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ data: [] }));
+    await transport.request('GET', '/api/example');
+    expect(authorizeConnection).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([1, 2])(
+    'tracks and drains a cancelled v%s request waiting for admission',
+    async (version) => {
+      let approve!: () => void;
+      const admission = new Promise<void>((resolve) => {
+        approve = resolve;
+      });
+      const transport = createTransport({ authorizeConnection: () => admission });
+      (transport as unknown as { apiVersion: number }).apiVersion = version;
+      const request = transport.request('DELETE', '/session/blocked');
+      const rejected = expect(request).rejects.toThrow();
+      transport.abortRequests();
+      let drained = false;
+      const drain = transport.waitForRequestsToSettle().then(() => {
+        drained = true;
+      });
+      await Promise.resolve();
+      expect(drained).toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+      approve();
+      await Promise.all([rejected, drain]);
+      expect(drained).toBe(true);
+      expect(fetch).not.toHaveBeenCalled();
+    }
+  );
+
+  it('never transfers a pending request to a changed endpoint', async () => {
+    let approve!: () => void;
+    let url = 'http://localhost:4096';
+    const admission = new Promise<void>((resolve) => {
+      approve = resolve;
+    });
+    const transport = createTransport({ getUrl: () => url, authorizeConnection: () => admission });
+    const rejected = expect(transport.request('POST', '/session')).rejects.toThrow(
+      'endpoint changed'
+    );
+    url = 'http://localhost:50000';
+    approve();
+    await rejected;
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -316,6 +453,9 @@ describe('v1 session compatibility', () => {
 });
 
 describe('AI test server isolation', () => {
+  beforeEach(() =>
+    vi.stubEnv('VARRO_TEST_STATE_ROOT', resolvePath('artifacts/ai-test-data/transport-state'))
+  );
   it('blocks metadata mutations, health checks, and event connections to an unverified server', async () => {
     vi.stubEnv('VARRO_TEST_SERVER_URL', 'http://127.0.0.1:49999');
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
@@ -1237,6 +1377,112 @@ describe('OpenCodeTransport event stream path', () => {
 });
 
 describe('OpenCodeTransport health', () => {
+  it('remembers the verified v2 info endpoint rather than repeating obsolete probes', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const info = new URL(String(input)).pathname === '/api/info';
+      return new Response(info ? JSON.stringify({ version: '2.0.20', pid: 1234 }) : '', {
+        status: info ? 200 : 404,
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = createTransport();
+    await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: true, version: '2.0.20' });
+    fetchMock.mockClear();
+    await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: true, version: '2.0.20' });
+    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual([
+      '/api/info',
+    ]);
+  });
+
+  it('continues health fallback after a probe timeout', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException('Probe timed out', 'TimeoutError'))
+      .mockResolvedValueOnce(new Response('', { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: '2.0.20', pid: 1234 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = createTransport();
+    await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: true, version: '2.0.20' });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(transport.healthError).toBeUndefined();
+  });
+
+  it.each([401, 403])(
+    'does not bypass authentication failure %s through fallback',
+    async (status) => {
+      const fetchMock = vi.fn(async () => new Response('', { status }));
+      vi.stubGlobal('fetch', fetchMock);
+      const transport = createTransport();
+      await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: false });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(transport.healthError).toContain('authentication failed');
+    }
+  );
+
+  it('does not continue fallback after caller cancellation', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => {
+      controller.abort(new Error('workspace changed'));
+      throw new Error('workspace changed');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(createTransport().readHealthInfo(controller.signal)).rejects.toThrow(
+      'workspace changed'
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not probe a public fallback when authentication refresh throws', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => undefined,
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096' }),
+      isDisposing: () => false,
+      getAuthorization: () => undefined,
+      refreshAuthorization: async () => {
+        throw new Error('vault timed out');
+      },
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+    await expect(transport.readHealthInfo()).resolves.toEqual({ healthy: false });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(transport.healthError).toContain('authentication failed');
+  });
+
+  it('forgets the preferred endpoint when the server URL changes', async () => {
+    let url = 'http://localhost:4096';
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const request = new URL(String(input));
+      if (request.port === '4096')
+        return request.pathname === '/api/info'
+          ? new Response(JSON.stringify({ version: '2.0.20', pid: 1234 }))
+          : new Response('', { status: 404 });
+      return new Response(JSON.stringify({ healthy: true, version: '1.18.33' }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = new OpenCodeTransport({
+      getUrl: () => url,
+      getWorkspaceCwd: () => undefined,
+      getStatus: () => ({ state: 'running', url }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+    await transport.readHealthInfo();
+    url = 'http://localhost:4097';
+    fetchMock.mockClear();
+    await expect(transport.readHealthInfo()).resolves.toEqual({
+      healthy: true,
+      version: '1.18.33',
+    });
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      'http://localhost:4097/global/health',
+    ]);
+  });
+
   it.each([
     [
       { healthy: true, version: '1.2.3' },

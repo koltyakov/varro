@@ -14,6 +14,10 @@ Varro now limits root expansion for four animation frames in `src/webview/index.
 The content remains inside the previous painted width while the host surface catches up.
 Shrinking and browser zoom apply immediately; repeated drag events do not restart the
 pending expansion. Message-list anchoring and transcript visibility remain independent.
+Hidden-tab resize events do not update the cap, and hiding cancels a pending expansion.
+Returning to a retained sidebar or editor tab resynchronizes the cap immediately, even
+without a resize event. This avoids briefly squeezing the view to a stale hidden width;
+the four-frame delay still applies to ordinary visible expansion.
 
 A fresh isolated-host retest on September 28 retained 169 compositor frames across
 the baseline, `overflow: visible`, and `overflow: clip` experiments. The visible

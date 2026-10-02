@@ -175,8 +175,9 @@ If the prompt had already become visible while a judge was running, it stays vis
 acknowledges the late automatic decision.
 
 Initial transcript hydration is the only presentation deferral: while `messagesLoading` is true, keep
-the request in permission state but do not mount either its standalone or inline prompt. Both successful
-and failed session loads must clear that bounded gate so the prompt appears with the loaded transcript
+permission and question requests in state but do not mount their standalone or inline prompts, even
+when a question has no tool link. Both successful and failed session loads must clear that bounded gate
+so the prompt appears with the loaded transcript
 or returns as the actionable fallback. Permission prompts mount at their final placement without an
 entrance animation; do not reintroduce a standalone-to-inline transition during session loading. Defer
 the initial bottom scroll through the same gate so prompt height is part of the first settled placement,
@@ -215,6 +216,10 @@ Skipping a question similarly completes its tool with `QuestionRejectedError` an
 Label the question tool with a compact `Question skipped` summary instead of generic input/error
 JSON. Render the terminal turn summary with `Question skipped` only for idle skip-only histories;
 other question failures remain generic failures.
+
+An actionable survey replaces its question tool card. Linked requests render only the inline form;
+standalone requests also suppress pending or running question cards in their owning session, without
+duplicating the form inline. Completed question summaries and tools from other sessions stay visible.
 
 Full mode intentionally does not restore a prompt while the mode remains `full`. A failed full-mode
 reply currently surfaces an error and remains pending for a later permission sync to retry. Do not

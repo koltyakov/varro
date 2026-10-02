@@ -1295,6 +1295,17 @@ export class RestProxy {
       // opencode emits the SSE `session.status { busy }` event only after
       // admission, and on fast turns the finish can land first; pre-marking
       // here ensures the busy marker exists before any finish event arrives.
+      if (method === 'POST' && requestPathname.endsWith('/resume-steering') && directSessionID) {
+        const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
+        if (
+          !(await this.shouldAdmitInterruptedRecovery(directSessionID, directory, requestSignal))
+        ) {
+          this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data: false });
+          return;
+        }
+        if (directory && !(await this.confirmPromptAdmission(directory, requestSignal)))
+          throw new Error('Resume cancelled because generated dependencies are not ignored by Git');
+      }
       if (promptSessionID) {
         if (
           promptWorkspaceDirectory &&
@@ -2741,24 +2752,35 @@ export class RestProxy {
   }
 
   private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {
-    const metadata =
-      this.callbacks.server.apiVersion === 2
-        ? asRecord(await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`))
-            ?.metadata
-        : undefined;
     let local: LocalSessionSummaryData | null | undefined;
     try {
       local = await this.callbacks.readLocalSessionSummary?.(sessionID);
-    } catch {
+    } catch (error) {
       local = null;
+      logger.warn(
+        `Local session summary failed for ${sessionID}; using API: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
-    if (local) return sessionSummary.fromLocal(local, metadata);
+    if (local?.messages.length) {
+      logger.info(`Session summary source for ${sessionID}: local database`);
+      return sessionSummary.fromLocal(local, local.metadata);
+    }
 
     const encodedSessionID = encodeURIComponent(sessionID);
-    const [diffs, messages, sessions] = await Promise.all([
-      this.requestServer('GET', `/session/${encodedSessionID}/diff`),
+    logger.info(`Session summary source for ${sessionID}: API fallback`);
+    const [diffs, messages, sessions, session] = await Promise.all([
+      this.requestServer('GET', `/session/${encodedSessionID}/diff`).catch((error: unknown) => {
+        // Snapshot objects can disappear while the session's messages remain readable.
+        logger.warn(
+          `Could not load diffs while summarizing ${sessionID}; using message edits: ${error instanceof Error ? error.message : String(error)}`
+        );
+        return [];
+      }),
       this.requestSessionMessagesForSummary(`/session/${encodedSessionID}/message`),
       this.readSessionListForSummary(),
+      this.callbacks.server.apiVersion === 2
+        ? this.requestServer('GET', `/session/${encodedSessionID}`)
+        : undefined,
     ]);
     const descendants = collectDescendantSessions(sessions, sessionID);
     return sessionSummary.fromRemote(
@@ -2771,7 +2793,7 @@ export class RestProxy {
             this.requestServer('GET', `/session/${encodeURIComponent(descendant.id)}/message`)
           )
         ),
-      metadata
+      asRecord(session)?.metadata
     );
   }
 

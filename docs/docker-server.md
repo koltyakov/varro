@@ -49,7 +49,7 @@ This guide includes OpenCode v1 and v2 samples, with VS Code running on a macOS 
 
 ## Connection requirements
 
-- Varro supports a configurable port, but no custom server hostname, URL, or HTTPS setting. The default address is `http://127.0.0.1:4096`.
+- Varro supports a configurable port, but no custom server hostname, URL, or HTTPS setting. Set `varro.server.port` explicitly to Docker's published host port; the normal default is `"auto"`.
 - The address is relative to the **VS Code extension host**. With Remote SSH, WSL, or Dev Containers, this can be a different machine or container from the desktop running VS Code.
 - OpenCode must listen on `0.0.0.0` inside the container for Docker port forwarding to reach it.
 - The workspace must be available at the same absolute path in VS Code and the OpenCode container. Varro sends the workspace path to the API and has no host-to-container path mapping setting.
@@ -63,8 +63,8 @@ Choose one API family. Complete samples are included in the repository:
 
 | Family | Package and example version | Dockerfile | Compose sample | Health endpoint |
 | --- | --- | --- | --- | --- |
-| v1 | `opencode-ai@1.18.33` | [Dockerfile.v1](../examples/docker/Dockerfile.v1) | [compose.v1.yaml](../examples/docker/compose.v1.yaml) | `/global/health` |
-| v2 | `@opencode/cli@2.0.20` | [Dockerfile.v2](../examples/docker/Dockerfile.v2) | [compose.v2.yaml](../examples/docker/compose.v2.yaml) | `/api/info` |
+| v1 | `opencode-ai@1.18.34` | [Dockerfile.v1](../examples/docker/Dockerfile.v1) | [compose.v1.yaml](../examples/docker/compose.v1.yaml) | `/global/health` |
+| v2 | `@opencode/cli@2.0.21` | [Dockerfile.v2](../examples/docker/Dockerfile.v2) | [compose.v2.yaml](../examples/docker/compose.v2.yaml) | `/api/info` |
 
 From the Varro repository root, build the selected image:
 
@@ -87,7 +87,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
-ARG OPENCODE_VERSION=2.0.20
+ARG OPENCODE_VERSION=2.0.21
 RUN npm install --global "@opencode/cli@${OPENCODE_VERSION}"
 
 EXPOSE 4096
@@ -97,7 +97,7 @@ CMD ["opencode", "serve", "--hostname", "0.0.0.0", "--port", "4096"]
 The v1 sample replaces the package installation with:
 
 ```dockerfile
-ARG OPENCODE_VERSION=1.18.33
+ARG OPENCODE_VERSION=1.18.34
 RUN npm install --global "opencode-ai@${OPENCODE_VERSION}"
 ```
 

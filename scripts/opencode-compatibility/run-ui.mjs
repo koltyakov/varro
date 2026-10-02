@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, expect } from '@playwright/test';
 import { DatabaseSync } from 'node:sqlite';
+import { isolateVarroTestState } from '../varro-test-state.mjs';
 import {
   executeVscodeCommand,
   reserveLoopbackPort,
@@ -153,6 +154,8 @@ const env = {
   OPENCODE_TEST_HOME: join(root, 'home'),
   VARRO_TEST_SERVER_URL: serverUrl,
 };
+const testStateRoot = await isolateVarroTestState(env, profile);
+const ownershipLeasePath = join(testStateRoot, 'servers', `varro-opencode-server-${port}.json`);
 const code = spawn(
   executable,
   [
@@ -266,9 +269,7 @@ try {
   let lease;
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
-      lease = JSON.parse(
-        await readFile(join(tmpdir(), `varro-opencode-server-${port}.json`), 'utf8')
-      );
+      lease = JSON.parse(await readFile(ownershipLeasePath, 'utf8'));
       if (lease.password) break;
     } catch {}
     await delay(200);
@@ -447,9 +448,7 @@ try {
   });
   await expect(frame.locator('.chat-turn-user')).toHaveCount(4);
   await frame.page().screenshot({ path: join(root, 'reloaded.png') });
-  const renewed = JSON.parse(
-    await readFile(join(tmpdir(), `varro-opencode-server-${port}.json`), 'utf8')
-  );
+  const renewed = JSON.parse(await readFile(ownershipLeasePath, 'utf8'));
   const renewedOwner = spawnSync('lsof', ['-t', '-a', '-p', String(renewed.pid), database], {
     encoding: 'utf8',
   });
@@ -631,9 +630,7 @@ try {
     ['Imported v1 answer.', 'UI adapter reply.'],
     { timeout: 20000 }
   );
-  const importedLease = JSON.parse(
-    await readFile(join(tmpdir(), `varro-opencode-server-${port}.json`), 'utf8')
-  );
+  const importedLease = JSON.parse(await readFile(ownershipLeasePath, 'utf8'));
   assert.ok(
     spawnSync('lsof', ['-t', '-a', '-p', String(importedLease.pid), database], { encoding: 'utf8' })
       .stdout.trim()
@@ -678,9 +675,7 @@ try {
 } finally {
   stream.abort();
   try {
-    const cleanupLease = JSON.parse(
-      await readFile(join(tmpdir(), `varro-opencode-server-${port}.json`), 'utf8')
-    );
+    const cleanupLease = JSON.parse(await readFile(ownershipLeasePath, 'utf8'));
     if (ownsDatabase(cleanupLease.pid)) {
       ownedServerPids.add(cleanupLease.pid);
       authorization = `Basic ${Buffer.from(`opencode:${cleanupLease.password}`).toString('base64')}`;

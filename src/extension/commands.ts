@@ -221,6 +221,7 @@ export function registerCommands(
         if (!aboutPanel) {
           aboutPanel = panel;
           panel.iconPath = iconPath;
+          let refreshing = false;
           const messageSubscription = panel.webview.onDidReceiveMessage(
             async (message: unknown) => {
               if (!message || typeof message !== 'object') return;
@@ -228,6 +229,32 @@ export function registerCommands(
                 action?: unknown;
                 includePaths?: unknown;
               };
+              if (action === 'refresh') {
+                if (refreshing || !panel.visible || aboutPanel !== panel) return;
+                refreshing = true;
+                try {
+                  const updatedInfo = await server.readServerInfo();
+                  if (aboutPanel !== panel || !panel.visible) return;
+                  const updatedMarkdown = renderAboutMarkdown(context, updatedInfo);
+                  aboutDiagnostics = diagnosticTimeline.export(updatedMarkdown);
+                  aboutDiagnosticsWithPaths = diagnosticTimeline.export(updatedMarkdown, false);
+                  await panel.webview.postMessage({
+                    type: 'about-update',
+                    data: createAboutViewData(
+                      readPackageJson(context),
+                      updatedInfo,
+                      panel.webview.asWebviewUri(iconPath).toString()
+                    ),
+                  });
+                } catch (error) {
+                  logger.warn(
+                    `Failed to refresh Varro about: ${error instanceof Error ? error.message : String(error)}`
+                  );
+                } finally {
+                  refreshing = false;
+                }
+                return;
+              }
               if (action !== 'copyDiagnostics' && action !== 'saveDiagnostics') return;
               const report = includePaths === true ? aboutDiagnosticsWithPaths : aboutDiagnostics;
               try {
@@ -594,13 +621,17 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     `  - **Version:** ${markdownCode(cliVersion)}`,
     `  - **Install method:** ${describeInstallMethod(serverInfo.installMethod)}`,
     `  - **Binary:** ${markdownCode(serverInfo.resolvedCommand || 'not resolved')}`,
+    `  - **Installed on:** ${formatAboutDateTime(serverInfo.cliInstalledAt)} (CLI file creation date)`,
     '- **Server:**',
     `  - **Version:** ${markdownCode(serverInfo.health.version || 'unknown')}`,
     `  - **URL:** [${serverInfo.url}](${serverInfo.url})`,
     `  - **Ownership:** ${ownership}`,
     `  - **Status:** ${markdownCode(serverStatus)}`,
     `  - **Health:** ${serverInfo.health.healthy ? 'healthy' : 'unhealthy'}`,
-    `  - **Active agents:** ${markdownCode(activeAgents)}`,
+    `  - **Active sessions:** ${markdownCode(activeAgents)}`,
+    `  - **Started on:** ${formatAboutDateTime(serverInfo.connections?.startedAt)}`,
+    `  - **VS Code clients:** ${serverInfo.connections?.vscodeClients ?? 'Unknown'} (local connected processes)`,
+    `  - **Other clients:** ${serverInfo.connections?.otherClients ?? 'Unknown'} (local connected processes)`,
     `- **Auto updates:** ${autoUpdate ? 'enabled' : 'disabled'}`,
     ...updateNoticeLines,
     '',
@@ -650,6 +681,7 @@ function createAboutViewData(
     varroVersion: getString(pkg.version) || 'unknown',
     cliVersion: cliVersion || (serverInfo.cliVersionError ? 'Unavailable' : 'Not found'),
     installMethod: describeInstallMethod(serverInfo.installMethod),
+    installedOn: formatAboutDateTime(serverInfo.cliInstalledAt),
     binary: serverInfo.resolvedCommand || 'Not resolved',
     serverVersion: serverInfo.health.version || 'Unknown',
     serverUrl: serverInfo.url,
@@ -659,6 +691,9 @@ function createAboutViewData(
     activeAgents: serverInfo.activeAgentError
       ? `Error: ${serverInfo.activeAgentError}`
       : String(serverInfo.activeAgentCount ?? 'Unknown'),
+    serverStartedOn: formatAboutDateTime(serverInfo.connections?.startedAt),
+    vscodeClients: String(serverInfo.connections?.vscodeClients ?? 'Unknown'),
+    otherClients: String(serverInfo.connections?.otherClients ?? 'Unknown'),
     autoUpdate: vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', true),
     vscodeVersion: vscode.version,
     nodeVersion: process.version,
@@ -669,6 +704,20 @@ function createAboutViewData(
         : `Reinstall OpenCode using ${describeInstallMethod(serverInfo.installMethod)}.`
       : undefined,
   };
+}
+
+function formatAboutDateTime(timestamp: number | null | undefined): string {
+  if (timestamp == null || !Number.isFinite(timestamp) || timestamp <= 0) return 'Unknown';
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
 function markdownCode(value: string | number) {

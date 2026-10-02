@@ -26,11 +26,11 @@ opencode auth login
 
 From inside Varro, `/connect` opens the provider connection dialog. The no-provider recovery screen offers terminal setup. Use `opencode auth login` when a provider does not expose a supported embedded method. If you selected a custom executable such as `opencode2`, use that executable in terminal commands too.
 
-Varro connects to `http://127.0.0.1:4096` by default. It does not start OpenCode at extension activation time. Instead, it starts or attaches to the server the first time the chat view needs it.
+Varro selects and remembers a loopback port by default with `varro.server.port: "auto"`. It does not start OpenCode at extension activation time. Instead, it starts or attaches to the server the first time the chat view needs it. An update reuses verified running servers and their credentials without a migration restart. Fresh installations do not probe the old default port 4096. See [ownership and migration](server-ownership.md).
 
 For normal use, leave `varro.server.autoStart` enabled and let Varro manage OpenCode alongside the VS Code extension host. Docker and separately managed remote servers are not recommended for general use: they disable local integrations and require you to manage networking, authentication, workspace paths, and server maintenance yourself.
 
-Only use manual server management if you have a specific requirement and understand the [unsupported and limited features](docker-server.md#feature-availability-in-attach-only-mode). Disable `varro.server.autoStart` and start OpenCode yourself. VS Code marks this switch as deprecated and debug-only, but it remains available for this advanced workflow:
+Only use manual server management if you have a specific requirement and understand the [unsupported and limited features](docker-server.md#feature-availability-in-attach-only-mode). Set `varro.server.port` to your exact port, disable `varro.server.autoStart`, and start OpenCode yourself. VS Code marks this switch as deprecated and debug-only, but it remains available for this advanced workflow:
 
 ```sh
 opencode serve --port 4096
@@ -50,8 +50,8 @@ For WSL, open the project in a VS Code WSL window, then install and authenticate
 
 | Version | Minimum supported | Tested with this release | npm package |
 | --- | --- | --- | --- |
-| v2, recommended | 2.0.5 | 2.0.20 | `@opencode/cli` |
-| v1, still supported | 1.16.0 | 1.18.33 | `opencode-ai` |
+| v2, recommended | 2.0.5 | 2.0.21 | `@opencode/cli` |
+| v1, still supported | 1.16.0 | 1.18.34 | `opencode-ai` |
 
 To keep using v1, retain your installation or run `npm install -g opencode-ai`. Set `varro.server.command` to its executable path. Setting it to `opencode` selects v1 only if that command resolves to a v1 installation. Varro detects the API automatically.
 
@@ -68,7 +68,7 @@ Supported v1 configuration remains accepted by v2. Native v2 configuration uses 
 `Varro: Restart Server` may not be enough. An old OpenCode process can keep the port occupied, and Varro will not terminate a process it cannot identify as its own. This can also affect a leftover server from an earlier Varro run. On Windows, you may need to end the old `opencode.exe` process explicitly.
 
 1. Let active work finish in all clients using that server. Stop a manually launched server with `Ctrl+C` in its terminal. If another app or service keeps relaunching it, stop it there too.
-2. Identify the process listening on Varro's server port, `4096` by default. Use your configured `varro.server.port` if different. Run these steps on the host where Varro runs, such as the WSL distribution or SSH host for a remote workspace.
+2. Identify the process listening on Varro's actual endpoint, shown in `Varro: About`. Replace `4096` in the examples below with that port. Run these steps on the host where Varro runs, such as the WSL distribution or SSH host for a remote workspace.
 3. Stop that old OpenCode process using the platform steps below, then run `Varro: Restart Server` again. For a manually managed server, start it with the v2 executable instead.
 4. Confirm that Varro's status bar shows OpenCode v2. If it still shows v1, check the executable rather than repeating the restart. Run your selected executable with `--version` and set `varro.server.command` to the full v2 executable path. An old `opencode2` takes precedence over `opencode` when this setting is empty. If you changed `PATH`, fully close and reopen VS Code so it picks up the new environment.
 
@@ -91,10 +91,48 @@ On macOS or Linux, use `lsof -nP -iTCP:4096 -sTCP:LISTEN` to find the listener. 
 ### Version differences and history
 
 - V2 does not expose session sharing or an OpenCode LSP service. Sharing is disabled on v2. VS Code Problems remain available as explicit context.
-- V2 cannot patch arbitrary session metadata. Varro keeps session annotations under the user's XDG state directory in `varro/opencode-v2/`. These annotations are local to Varro and are not synchronized to other OpenCode clients.
+- V2 cannot patch arbitrary session metadata. Varro keeps session annotations in `opencode-v2/` under its per-user state directory, described below. These annotations are local to Varro and are not synchronized to other OpenCode clients.
 - Changing CLI versions does not synchronize history. After switching to v2, opening a v1 conversation that is still in the session list imports a copy of it and its child sessions when v2 cannot load the original. The copy has new IDs and a title ending in `(v1 copy)`. You can continue it without changing the original v1 history. Imports do not execute recorded tools or send a model request.
 
 See [OpenCode v1 and v2 support](opencode-v2-support.md) for adapter details and verification coverage.
+
+## Local state files
+
+Varro uses one per-user state root for files shared across editor windows and distributions:
+
+- macOS: `~/Library/Application Support/Varro/`
+- Windows: `%LOCALAPPDATA%\Varro\`, defaulting to `~/AppData/Local/Varro/`
+- Linux: `$XDG_STATE_HOME/varro/`, defaulting to `~/.local/state/varro/`
+
+Relative or empty `LOCALAPPDATA` and `XDG_STATE_HOME` values are ignored for new paths.
+The root contains `servers/` for server ownership records, `opencode-v2/` for
+`<sessionID>.json` annotations and session locks, and `provider-quota-v2/` for shared
+quota snapshots and polling locks. Annotation JSON includes `generationTiming`,
+the text/reasoning boundaries used with OpenCode's token counts to estimate tok/s.
+Quota disk sharing remains disabled on Windows until private ACL handling is supported.
+
+Existing annotation directories at `$XDG_STATE_HOME/varro/opencode-v2/` and quota
+directories at `~/.varro-provider-quota-v2/` remain intact. When needed, Varro creates
+a symbolic link at the native path, or a directory junction on Windows, pointing
+to the existing directory. Older and newer writers then share the same files and
+locks, including atomic file replacements. This exposes a consistent native path
+without moving live data. Read-only usage reports can read the old path without
+creating a link. Separate existing directories at both locations are a conflict;
+Varro does not automatically merge or overwrite them.
+
+Update all editor installations before using a fresh state root. Older builds do
+not know the new paths and can create separate legacy directories if launched
+later. To relocate existing data physically, close all editor processes first and
+preserve a compatibility link at the old path if older builds still need access.
+Do not move or delete live server ownership records; existing legacy temporary
+records remain in place until the corresponding server is retired.
+
+These paths belong to the machine running the workspace extension host, including
+SSH, WSL, and container hosts. OpenCode's database, service registration, provider
+credentials, temporary attachments, and VS Code-managed workspace/profile storage
+retain their owners' existing locations. Isolated test hosts use
+`VARRO_TEST_STATE_ROOT` for all three state subdirectories and never use legacy
+production paths.
 
 ## Workspace And Remote Environments
 
@@ -660,7 +698,7 @@ Editable user messages expose an edit action. Sending the replacement removes th
 Server:
 
 - `varro.server.autoStart` - auto-start `opencode serve` when Varro first needs it; defaults to `true` and is marked deprecated/debug-only in VS Code
-- `varro.server.port` - port used for the local OpenCode server (default `4096`); reload the VS Code window after changing it
+- `varro.server.port` - `"auto"` selects and remembers a local port; an integer from 1 through 65535 selects a fixed endpoint without fallback. Reload the VS Code window after changing it
 - `varro.server.command` - optional path to the OpenCode CLI executable. Empty prefers `opencode2`, then `opencode`; use your v1 executable's path to keep v1 selected
 - `varro.server.autoUpdate` - automatically install updates within the installed CLI family in the background on macOS and Linux. V1 stays on v1; v2 stays on v2. Native Windows uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Failed automatic updates show tailored recovery guidance.
 
@@ -692,7 +730,7 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install v2 with `npm install -g @opencode/cli` on macOS, Linux, or WSL, or download the native Windows CLI from the [v2 install page](https://opencode.ai/v2/docs/). V1 remains available with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.33` and v2 `2.0.20`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
+- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.34` and v2 `2.0.21`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
 - OpenCode v2 authentication: Varro captures managed-server credentials automatically and redacts them from output. Existing local services use their registered credentials. An externally managed server can also use `OPENCODE_SERVER_PASSWORD` and `OPENCODE_SERVER_USERNAME` from the extension host's environment.
 - OpenCode v2 session settings: Varro stores mutable session annotations locally because the released v2 API cannot update session metadata. Session sharing is unavailable through this API, so its menu action is disabled. Existing v1-format configuration remains supported.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.

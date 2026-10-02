@@ -157,6 +157,7 @@ export interface OpenCodeRuntime {
   refreshRoutingState(): Promise<void>;
   refreshProviderLimit(providerID: string, modelID?: string | null): Promise<void>;
   continueInterruptedSession(sessionId: string): Promise<void>;
+  resumeSteering(sessionId: string): Promise<boolean>;
   applySessionMcps(names: string[], sessionId?: string | null): Promise<void>;
   selectSession(id: string, options?: SessionSelectionOptions): Promise<boolean>;
   loadFullSessionHistory(sessionId: string): Promise<void>;
@@ -2201,13 +2202,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       await Promise.all([
         loadSessions(),
         reloadWorkspaceCatalogs(),
-        loadCompatibilityState(),
-        loadMcps(),
-        loadLsps(),
         loadQuestions(),
-        loadRecycleBin(),
         syncPendingPermissions().catch((err) => logError('permission.list', err)),
       ]);
+    },
+    loadBackgroundData: async () => {
+      await Promise.all([loadCompatibilityState(), loadMcps(), loadLsps(), loadRecycleBin()]);
     },
     hydrateSessionStatuses,
     getActiveSessionId: () => appStore.state.activeSessionId,
@@ -2230,7 +2230,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getSessionDirectory: (sessionId) =>
       appStore.state.sessions.find((session) => session.id === sessionId)?.directory,
     selectSession: (sessionId, directory) =>
-      selectSession(sessionId, { directory, reportActivationError: false }),
+      selectSession(sessionId, { directory, reportActivationError: false, waitForMcpSync: false }),
     startNewSession: startNewChatDraft,
     setShowSessionPicker: uiStore.setShowSessionPicker,
     setInitialized: (value) => {
@@ -2239,6 +2239,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       if (value) appStore.setState('serverReconnecting', false);
     },
     setError: uiStore.setError,
+    getError: uiStore.error,
     nextConnectionGeneration: () => ++connectionGeneration,
     isCurrentConnectionGeneration: (generation) =>
       isCurrentGeneration(generation, connectionGeneration),
@@ -2286,6 +2287,28 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function continueInterruptedSession(sessionId: string, options?: { messageID: string }) {
     await connectionBootstrapOperations.continueInterruptedSession(sessionId, options);
+  }
+
+  async function resumeSteering(sessionId: string): Promise<boolean> {
+    const generation = workspaceGeneration;
+    await syncSessionMcps(sessionId);
+    if (generation !== workspaceGeneration) return false;
+    clearPendingAbort(sessionId);
+    const resumed = await client.session.resumeSteering(sessionId, {
+      directory: getSessionDirectory(sessionId),
+    });
+    if (generation !== workspaceGeneration) return resumed;
+    // Acknowledgement and reconciliation are separate, just as they are for
+    // Stop. Refresh even for a no-op when another view already delivered it.
+    await Promise.all([
+      syncSessionMessages(sessionId).catch((err) =>
+        logError('syncSessionMessages after steering resume', err)
+      ),
+      recheckSessionStatus(sessionId).catch((err) =>
+        logError('recheckSessionStatus after steering resume', err)
+      ),
+    ]);
+    return resumed;
   }
 
   const sessionSendOperations = new SessionSendOperations({
@@ -3179,6 +3202,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     refreshProviderLimit,
     continueInterruptedSession,
     applySessionMcps,
+    resumeSteering,
     selectSession,
     loadFullSessionHistory,
     loadOlderSessionHistoryPage,

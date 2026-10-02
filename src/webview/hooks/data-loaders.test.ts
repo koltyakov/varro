@@ -310,7 +310,7 @@ describe('data loaders', () => {
     expect(setSelectedMcpsForSession).not.toHaveBeenCalled();
   });
 
-  it('reconciles invalid selected models when providers load', async () => {
+  it('preserves unavailable selected models when providers load', async () => {
     const setProvidersLoaded = vi.fn();
     const setProviders = vi.fn();
     const setProviderDefaults = vi.fn();
@@ -343,7 +343,7 @@ describe('data loaders', () => {
 
     expect(setProvidersLoaded).toHaveBeenNthCalledWith(1, false);
     expect(setProvidersLoaded).toHaveBeenNthCalledWith(2, true);
-    expect(setSelectedModel).toHaveBeenCalledWith(null);
+    expect(setSelectedModel).not.toHaveBeenCalled();
     expect(logError).not.toHaveBeenCalled();
   });
 
@@ -472,9 +472,7 @@ describe('data loaders', () => {
 
     await operations.loadProviders();
 
-    expect(setSelectedModel).toHaveBeenCalledWith(null, {
-      persistGlobal: false,
-    });
+    expect(setSelectedModel).not.toHaveBeenCalled();
   });
 
   it('restores a preserved session model after an incomplete provider snapshot is retried', async () => {
@@ -502,8 +500,8 @@ describe('data loaders', () => {
 
     await operations.loadProviders();
 
-    expect(selectedModel).toBeNull();
-    expect(setSelectedModel).toHaveBeenLastCalledWith(null, { persistGlobal: false });
+    expect(selectedModel).toEqual(persistedModel);
+    expect(setSelectedModel).toHaveBeenLastCalledWith(persistedModel, { persistGlobal: false });
 
     providers = [
       provider('openai', {
@@ -571,6 +569,49 @@ describe('data loaders', () => {
       expect(getSelectedModelForSession('session-1')).toEqual(sessionModel);
       expect(getPersistedSelectedModel()).toEqual(globalModel);
     });
+
+    it.each(['provider', 'model'])(
+      'keeps the draft provider when a refresh omits its %s',
+      async (omitted) => {
+        const selected = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
+        const sharedModels = {
+          'gpt-6.1-sol': {
+            id: 'gpt-6.1-sol',
+            name: 'GPT-6.1 Sol',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            variants: { high: {} },
+          },
+        };
+        const alternatives = [
+          provider('openrouter', sharedModels),
+          provider('github-copilot', sharedModels),
+        ];
+        setStateSelectedModel(selected);
+        clientMocks.providerList.mockResolvedValue({
+          providers:
+            omitted === 'provider' ? alternatives : [...alternatives, provider('openai', {})],
+          default: { openrouter: selected.modelID },
+          defaultModel: { providerID: 'openrouter', modelID: selected.modelID },
+        });
+        const loader = createStateBoundLoader();
+
+        await loader.loadProviders();
+        await loader.loadProviders();
+
+        expect(state.selectedModel).toEqual(selected);
+        expect(getPersistedSelectedModel()).toEqual(selected);
+
+        clientMocks.providerList.mockResolvedValue({
+          providers: [...alternatives, provider('openai', sharedModels)],
+          default: { openrouter: selected.modelID },
+        });
+        await loader.loadProviders();
+
+        expect(state.selectedModel).toEqual(selected);
+        expect(getPersistedSelectedModel()).toEqual(selected);
+      }
+    );
 
     it('restores the scoped model when the active session owns the composer', async () => {
       selectSessionModel();

@@ -158,7 +158,7 @@ describe('routing-state helpers', () => {
       })
     ).toEqual({
       effectiveModel: null,
-      nextSelectedModel: null,
+      nextSelectedModel: undefined,
     });
 
     expect(
@@ -215,6 +215,37 @@ describe('routing-state helpers', () => {
   });
 
   it('keeps a valid selected model over the exact server default', () => {
+    const selectedModel = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
+    const models = {
+      'gpt-6.1-sol': {
+        id: 'gpt-6.1-sol',
+        name: 'GPT-6.1 Sol',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+        variants: { high: {} },
+      },
+    };
+    const alternatives = [provider('openrouter', models), provider('github-copilot', models)];
+    const providerDefaults = { openrouter: selectedModel.modelID };
+
+    expect(
+      reconcileLoadedProviders({
+        selectedModel,
+        providers: [...alternatives, provider('openai', models)],
+        providerDefaults,
+        defaultModel: { providerID: 'openrouter', modelID: selectedModel.modelID },
+      })
+    ).toEqual({ effectiveModel: selectedModel, nextSelectedModel: undefined });
+    expect(
+      getActiveProviderSelection({
+        selectedModel,
+        providers: alternatives,
+        providerDefaults,
+      })
+    ).toBeNull();
+  });
+
+  it('keeps a valid selected model over a different model in the same provider', () => {
     const providers = [
       provider('openai', {
         selected: {

@@ -1794,6 +1794,62 @@ describe('ModelsPanel', () => {
     expect(refreshRoutingStateMock).toHaveBeenCalled();
   });
 
+  it.each([
+    ['small_model', 'Use as small model', false, undefined],
+    ['small_model', "Don't use as small model", true, undefined],
+    ['commit_message', 'Use for commit messages', false, undefined],
+    ['commit_message', "Don't use for commit messages", true, undefined],
+    ['auto_approve', 'Use for auto-approve', false, undefined],
+    ['auto_approve', "Don't use for auto-approve", true, undefined],
+    ['agent', 'Use for review agent', false, 'review'],
+    ['agent', "Don't use for review agent", true, 'review'],
+  ])('closes the menu immediately for %s: %s', async (target, label, unset, agentName) => {
+    const route = unset ? { providerID: 'openai', modelID: 'gpt-5-mini' } : null;
+    const savedRouting = {
+      smallModel: route,
+      commitMessageModel: route,
+      autoApproveModel: route,
+      agentModels: route ? { review: route } : {},
+    };
+    clientMocks.openCodeConfig.mockResolvedValue(savedRouting);
+    let resolveSave!: (value: typeof savedRouting) => void;
+    clientMocks.saveModelRouting.mockImplementation(
+      () => new Promise<typeof savedRouting>((resolve) => (resolveSave = resolve))
+    );
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const row = Array.from(
+      container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
+    ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
+    expect(row).toBeTruthy();
+
+    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const button = findButton(document, label);
+    expect(button).toBeTruthy();
+    button?.click();
+
+    expect(clientMocks.saveModelRouting).toHaveBeenCalledWith({
+      target,
+      providerID: 'openai',
+      modelID: 'gpt-5-mini',
+      unset: unset ? true : undefined,
+      agentName,
+    });
+    expect(document.querySelector('.models-context-menu')).toBeNull();
+
+    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const reopenedMenu = document.querySelector('.models-context-menu');
+    expect(reopenedMenu).not.toBeNull();
+    resolveSave(savedRouting);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(refreshRoutingStateMock).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('.models-context-menu')).toBe(reopenedMenu);
+  });
+
   it('keeps the model context menu inside the viewport', async () => {
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(220);
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(240);

@@ -177,6 +177,18 @@ export class ProviderFileRefreshController {
     this.dependencies.postPendingStatus(this.pendingScope !== null);
   }
 
+  async retryPendingRefresh() {
+    if (this.disposed || !this.pendingScope) return;
+    const generation = ++this.refreshGeneration;
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    this.busyRetryMs = ProviderFileRefreshController.RETRY_MS;
+    this.authIdleCandidate = null;
+    await this.maybeInvalidate(generation, 0);
+  }
+
   async refreshWorkspaceState(
     previousRouting?: OpenCodeModelRouting,
     currentRouting?: OpenCodeModelRouting,
@@ -563,16 +575,25 @@ export class ProviderFileRefreshController {
         request('/question'),
         request('/permission'),
       ]);
-      if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) return null;
-      if (!Array.isArray(questions)) return null;
-      if (!Array.isArray(permissions)) return null;
+      if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) {
+        throw new Error('OpenCode returned an invalid session status response');
+      }
+      if (!Array.isArray(questions)) {
+        throw new Error('OpenCode returned an invalid pending question response');
+      }
+      if (!Array.isArray(permissions)) {
+        throw new Error('OpenCode returned an invalid pending permission response');
+      }
       for (const value of Object.values(statuses)) {
         if (!value || typeof value !== 'object') continue;
         const type = (value as Record<string, unknown>).type;
         if (type === 'busy' || type === 'retry') return false;
       }
       return questions.length === 0 && permissions.length === 0;
-    } catch {
+    } catch (err) {
+      logger.warn(
+        `Provider refresh idle check failed: ${err instanceof Error ? err.message : String(err)}`
+      );
       return null;
     }
   }
@@ -580,7 +601,10 @@ export class ProviderFileRefreshController {
   private async isServerGloballyIdle(): Promise<boolean | null> {
     try {
       return (await this.dependencies.server.readRestartBlockers()).totalSessionCount === 0;
-    } catch {
+    } catch (err) {
+      logger.warn(
+        `Provider refresh global idle check failed: ${err instanceof Error ? err.message : String(err)}`
+      );
       return null;
     }
   }
@@ -599,15 +623,18 @@ export class ProviderFileRefreshController {
     ) {
       return;
     }
-    if (bounded && retryCount >= ProviderFileRefreshController.MAX_RETRIES) {
-      logger.info('Provider refresh invalidation remained deferred after bounded retries');
-      return;
+    const slowRetry = bounded && retryCount >= ProviderFileRefreshController.MAX_RETRIES;
+    if (slowRetry && retryCount === ProviderFileRefreshController.MAX_RETRIES) {
+      logger.info('Provider refresh remains pending; continuing recovery checks every 30 seconds');
     }
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    this.refreshTimer = setTimeout(() => {
-      this.refreshTimer = null;
-      void this.maybeInvalidate(generation, bounded ? retryCount + 1 : 0);
-    }, delay);
+    this.refreshTimer = setTimeout(
+      () => {
+        this.refreshTimer = null;
+        void this.maybeInvalidate(generation, bounded ? retryCount + 1 : 0);
+      },
+      slowRetry ? ProviderFileRefreshController.BUSY_RETRY_MAX_MS : delay
+    );
   }
 
   private postPendingStatus() {

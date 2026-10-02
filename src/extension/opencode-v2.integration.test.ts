@@ -2,20 +2,25 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { spawnSync, type ChildProcess } from 'node:child_process';
 import crossSpawn from 'cross-spawn';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createServer, type Server } from 'node:http';
+import { createHash } from 'node:crypto';
+import type { Duplex } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, isString, type UnknownRecord } from '../shared/type-utils';
 import { parseServerEvent } from '../shared/protocol';
 import { parseHealthResponse } from '../shared/health';
 import { OpenCodeTransport } from './open-code-transport';
+import { compareVersions } from './server-utils';
 import { basicAuthorization, OpenCodeStartupOutput } from './opencode-connection';
 import { tryGenerateOneShot } from './one-shot-generation';
 import { SessionExportService } from './session-export-service';
 import { getAssistantDialogSummaryMap } from '../webview/components/message-list/assistant-dialog';
 import type { MessageEntry } from '../webview/types';
 import { logger } from './logger';
+import { readLocalSessionSummary } from './local-session-summary';
+import { sessionSummary } from './session-summary';
 
 const exportEditor = vi.hoisted(() => ({
   openTextDocument: vi.fn(async (options: { content: string; language: string }) => options),
@@ -46,6 +51,8 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
   let sessionID = '';
   let streamGate: Promise<void> | undefined;
   const providerPrompts: unknown[][] = [];
+  const silentSockets = new Set<Duplex>();
+  let silentRequests = 0;
 
   beforeAll(async () => {
     const parent = resolve('artifacts/ai-test-data');
@@ -123,6 +130,26 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
         );
       }
     });
+    modelServer.on('upgrade', (request, socket) => {
+      const key = request.headers['sec-websocket-key'];
+      if (!isString(key)) {
+        socket.destroy();
+        return;
+      }
+      silentSockets.add(socket);
+      socket.on('close', () => silentSockets.delete(socket));
+      socket.on('error', () => socket.destroy());
+      socket.on('data', () => {
+        silentRequests += 1;
+      });
+      const accept = createHash('sha1')
+        .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+        .digest('base64');
+      // Accept the request, then deliberately send no provider frames.
+      socket.write(
+        `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`
+      );
+    });
     await new Promise<void>((done) => modelServer.listen(0, '127.0.0.1', done));
     const address = modelServer.address();
     if (!address || isString(address)) throw new Error('Fixture server did not bind');
@@ -180,6 +207,17 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
             'icon-native-json': { mode: 'primary', request: { body: { icon: 'code-brackets' } } },
           },
           providers: {
+            silent: {
+              package: '@opencode/ai/providers/openai',
+              settings: {
+                baseURL: `http://127.0.0.1:${address.port}/v1`,
+                apiKey: 'fixture-only',
+                transport: 'websocket',
+              },
+              models: {
+                'gpt-4o': { name: 'Silent fixture', limit: { context: 32000, output: 1000 } },
+              },
+            },
             fixture: {
               package: '@opencode/ai/providers/openai-compatible',
               settings: { baseURL: `http://127.0.0.1:${address.port}/v1`, apiKey: 'fixture-only' },
@@ -190,19 +228,25 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       );
     }
     let logs = '';
+    const env: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH,
+      HOME: join(root, 'home'),
+      XDG_DATA_HOME: join(root, 'data'),
+      XDG_CONFIG_HOME: join(root, 'config'),
+      XDG_STATE_HOME: join(root, 'state'),
+      XDG_CACHE_HOME: join(root, 'cache'),
+      OPENCODE_DB: join(root, 'data/probe.db'),
+      OPENCODE_TEST_HOME: join(root, 'home'),
+      OPENCODE_DISABLE_AUTOUPDATE: 'true',
+    };
+    if (/^(?:opencode\s+v?)?2\./.test(version)) {
+      env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+        providers: { openai: { settings: { chunkTimeout: 300000 } } },
+      });
+    }
     child = crossSpawn(binary!, ['serve', '--hostname', '127.0.0.1', '--port', '0'], {
       cwd: join(root, 'workspace'),
-      env: {
-        PATH: process.env.PATH,
-        HOME: join(root, 'home'),
-        XDG_DATA_HOME: join(root, 'data'),
-        XDG_CONFIG_HOME: join(root, 'config'),
-        XDG_STATE_HOME: join(root, 'state'),
-        XDG_CACHE_HOME: join(root, 'cache'),
-        OPENCODE_DB: join(root, 'data/probe.db'),
-        OPENCODE_TEST_HOME: join(root, 'home'),
-        OPENCODE_DISABLE_AUTOUPDATE: 'true',
-      },
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const collect = (chunk: Buffer) => {
@@ -246,9 +290,78 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     if (child) await Promise.race([new Promise((done) => child.once('exit', done)), delay(3000)]);
     if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     modelServer?.closeAllConnections();
+    for (const socket of silentSockets) socket.destroy();
     await new Promise<void>((done) => (modelServer ? modelServer.close(() => done()) : done()));
     if (root) await writeFile(join(root, 'events.json'), JSON.stringify(events, null, 2));
   });
+
+  it('bounds silent provider WebSockets after reloading an old runtime timeout policy', async (context) => {
+    const health = await transport.readHealthInfo();
+    if (transport.version !== 2 || compareVersions(health.version ?? '0', '2.0.20') < 0) {
+      context.skip();
+      return;
+    }
+    const providerPath = `/api/provider/silent?location[directory]=${encodeURIComponent(join(root, 'workspace'))}`;
+    await vi.waitFor(
+      async () => {
+        expect(asRecord(await transport.request('GET', providerPath))?.data).toBeDefined();
+      },
+      { timeout: 10000, interval: 100 }
+    );
+    const settingsBefore = asRecord(
+      asRecord(asRecord(await transport.request('GET', providerPath))?.data)?.settings
+    );
+    expect(settingsBefore).not.toHaveProperty('chunkTimeout');
+    const configPath = join(root, 'config/opencode/opencode.json');
+    const config = asRecord(JSON.parse(await readFile(configPath, 'utf-8')));
+    const settings = asRecord(asRecord(asRecord(config?.providers)?.silent)?.settings);
+    if (!settings) throw new Error('Missing isolated silent provider settings');
+    settings.chunkTimeout = 200;
+    await writeFile(configPath, JSON.stringify(config));
+    await transport.request('POST', '/global/dispose');
+    await vi.waitFor(
+      async () => {
+        expect(
+          asRecord(asRecord(asRecord(await transport.request('GET', providerPath))?.data)?.settings)
+            ?.chunkTimeout
+        ).toBe(200);
+      },
+      { timeout: 10000, interval: 100 }
+    );
+    const session = asRecord(
+      await transport.request('POST', '/session', { title: 'Silent stream fixture' })
+    );
+    if (!isString(session?.id)) throw new Error('Missing silent stream fixture session');
+    const id = session.id;
+    const previousRequests = silentRequests;
+    try {
+      await transport.request('POST', `/session/${id}/prompt_async`, {
+        agent: 'build',
+        model: { providerID: 'silent', modelID: 'gpt-4o' },
+        parts: [{ type: 'text', text: 'Reply without tools.' }],
+      });
+      await vi.waitFor(() => expect(silentRequests).toBeGreaterThan(previousRequests), {
+        timeout: 10000,
+      });
+      await vi.waitFor(
+        () => {
+          expect(
+            events.some((event) => {
+              const properties = asRecord(parseServerEvent(event)?.properties);
+              return (
+                properties?.sessionID === id &&
+                JSON.stringify(properties).includes('Timed out waiting for WebSocket data')
+              );
+            })
+          ).toBe(true);
+        },
+        { timeout: 10000 }
+      );
+    } finally {
+      await transport.request('POST', `/session/${id}/abort`);
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 25000);
 
   it('exports from a password-protected V2 server using the authenticated connection', async () => {
     if (transport.version !== 2) return;
@@ -284,6 +397,46 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       await transport.request('DELETE', `/session/${id}`);
     }
   });
+
+  it('reads native V2 session summaries directly from the isolated database', async () => {
+    if (transport.version !== 2) return;
+    const created = asRecord(
+      await transport.request('POST', '/session', { title: 'Local summary fixture' })
+    );
+    if (!isString(created?.id)) throw new Error('Missing local summary fixture session');
+    const id = created.id;
+    try {
+      await transport.request('POST', `/session/${id}/prompt_async`, {
+        agent: 'build',
+        model: { providerID: 'fixture', modelID: 'fixture' },
+        parts: [{ type: 'text', text: 'Return the fixture response without tools.' }],
+      });
+      await vi.waitFor(
+        async () => {
+          const local = await readLocalSessionSummary(id, join(root, 'data/probe.db'), 2);
+          const assistant = local?.messages
+            .map((message) => asRecord(asRecord(message)?.info))
+            .findLast((info) => info?.role === 'assistant');
+          expect(asRecord(assistant?.time)?.completed).toBeGreaterThan(0);
+          expect(asRecord(assistant?.tokens)?.output).toBeGreaterThan(0);
+        },
+        { timeout: 15000 }
+      );
+      const local = await readLocalSessionSummary(id, join(root, 'data/probe.db'), 2);
+      if (!local) throw new Error('Native V2 database summary unavailable');
+      const messages = await transport.request('GET', `/session/${id}/message`);
+      const remote = await sessionSummary.fromRemote([], messages, [], async () => []);
+      expect(sessionSummary.fromLocal(local)).toMatchObject({
+        tokens: remote.tokens,
+        durationMs: remote.durationMs,
+        model: remote.model,
+        tokenBreakdown: remote.tokenBreakdown,
+        nestedContextBreakdown: remote.nestedContextBreakdown,
+      });
+    } finally {
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 20000);
 
   it('restores estimated generation speed from durable boundaries after a cold reconnect', async () => {
     if (transport.version !== 2) return;
@@ -928,6 +1081,113 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       await transport.request('DELETE', `/session/${id}`);
     }
   }, 45000);
+
+  it('preserves pending steering and interruption history after cancelling a stalled turn', async () => {
+    if (transport.version !== 2) return;
+    const session = asRecord(
+      await transport.request('POST', '/session', { title: 'Pending steering abort fixture' })
+    );
+    if (!isString(session?.id)) throw new Error('Missing steering abort fixture session');
+    const id = session.id;
+    const start = modelRequests.length;
+    let release: (() => void) | undefined;
+    streamGate = new Promise<void>((complete) => {
+      release = complete;
+    });
+    try {
+      await transport.request('POST', `/session/${id}/prompt_async`, {
+        model: { providerID: 'fixture', modelID: 'fixture' },
+        parts: [{ type: 'text', text: 'Wait for cancellation.' }],
+      });
+      await vi.waitFor(() => expect(modelRequests.length).toBeGreaterThan(start), {
+        timeout: 10000,
+      });
+      await transport.request('POST', `/session/${id}/prompt_async`, {
+        messageID: 'msg_pending_steer',
+        delivery: 'steer',
+        parts: [{ type: 'text', text: 'Keep this steering prompt pending.' }],
+      });
+      expect(await transport.request('GET', `/session/${id}/message`)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            info: expect.objectContaining({ id: 'msg_pending_steer', pendingDelivery: 'steer' }),
+          }),
+        ])
+      );
+      await transport.request('POST', `/session/${id}/abort`);
+      await vi.waitFor(
+        async () => {
+          expect(await transport.request('GET', `/session/${id}/message`)).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                info: expect.objectContaining({
+                  role: 'assistant',
+                  error: expect.objectContaining({ name: 'aborted' }),
+                }),
+              }),
+              expect.objectContaining({
+                info: expect.objectContaining({
+                  id: 'msg_pending_steer',
+                  pendingDelivery: 'steer',
+                }),
+              }),
+            ])
+          );
+        },
+        { timeout: 10000 }
+      );
+      await vi.waitFor(() =>
+        expect(
+          events.some((event) => {
+            const parsed = parseServerEvent(event);
+            return (
+              parsed?.type === 'session.error' &&
+              parsed.properties?.sessionID === id &&
+              asRecord(parsed.properties.error)?.name === 'MessageAbortedError'
+            );
+          })
+        ).toBe(true)
+      );
+      release?.();
+      streamGate = undefined;
+      await transport.request('POST', `/api/session/${id}/prompt`, {
+        id: 'msg_still_queued',
+        text: 'This queued prompt must stay parked.',
+        delivery: 'queue',
+        resume: false,
+      });
+      expect(await transport.request('POST', `/session/${id}/resume-steering`)).toBe(true);
+      await vi.waitFor(
+        async () => {
+          const messages = (await transport.request('GET', `/session/${id}/message`)) as Array<{
+            info: UnknownRecord;
+            parts: UnknownRecord[];
+          }>;
+          const steering = messages.find((message) => message.info.id === 'msg_pending_steer');
+          expect(steering?.info.pendingDelivery).toBeUndefined();
+          expect(
+            messages.filter(
+              (message) => message.info.role === 'user' && !message.info.pendingDelivery
+            )
+          ).toHaveLength(2);
+          expect(
+            messages.find((message) => message.info.id === 'msg_still_queued')?.info.pendingDelivery
+          ).toBe('queue');
+          expect(
+            messages.some((message) =>
+              message.parts.some((part) => part.text === 'Adapter stream verified.')
+            )
+          ).toBe(true);
+        },
+        { timeout: 10000 }
+      );
+    } finally {
+      release?.();
+      streamGate = undefined;
+      await transport.request('POST', `/session/${id}/abort`);
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 25000);
 
   it('aborts an active provider request and accepts the next prompt', async () => {
     const session = asRecord(

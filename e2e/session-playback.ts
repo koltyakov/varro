@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { ServerEvent } from '../src/shared/protocol';
 import type { MessageEntry, Session } from '../src/webview/types';
+import { asRecord } from '../src/shared/type-utils';
+import { ReplayProjection } from '../scripts/ai-replay-projection.mjs';
 
 export type PlaybackFixture = {
   capture: {
@@ -23,12 +25,32 @@ export type PlaybackFixture = {
 type HarnessWindow = typeof window & {
   __varroE2E: {
     getSessionMessages: (id: string) => MessageEntry[];
-    replayServerEvent: (event: ServerEvent) => void;
+    replayServerEvent: (event: ServerEvent, projectedMessage?: MessageEntry) => void;
   };
+};
+
+type BrowserReplayEntry = PlaybackFixture['timeline'][number] & {
+  projectedMessage?: MessageEntry;
 };
 
 export async function verifySessionPlayback(page: Page, playback: PlaybackFixture) {
   const { capture, timeline } = playback;
+  const projection = new ReplayProjection(capture.finalMessages);
+  const projectedState = {
+    session: structuredClone(capture.session),
+    messages: structuredClone(capture.initialMessages),
+  };
+  const browserTimeline: BrowserReplayEntry[] = timeline.map((entry) => {
+    projection.apply(projectedState, entry.event);
+    if (!entry.event.type.startsWith('session.next.')) return entry;
+    const properties = asRecord(entry.event.properties) ?? {};
+    const messageId = properties.assistantMessageID ?? properties.messageID;
+    const message =
+      entry.event.type === 'session.next.synthetic' && !messageId
+        ? projectedState.messages.at(-1)
+        : projectedState.messages.find((candidate) => candidate.info.id === messageId);
+    return { ...entry, projectedMessage: message ? structuredClone(message) : undefined };
+  });
   test.setTimeout(
     Math.max(
       test.info().timeout,
@@ -150,7 +172,7 @@ export async function verifySessionPlayback(page: Page, playback: PlaybackFixtur
         if (entry.delayMs > 0) {
           await new Promise((resolve) => setTimeout(resolve, entry.delayMs));
         }
-        harness.replayServerEvent(entry.event);
+        harness.replayServerEvent(entry.event, entry.projectedMessage);
       }
       await new Promise((resolve) => setTimeout(resolve, 1_000));
       active = false;
@@ -160,7 +182,7 @@ export async function verifySessionPlayback(page: Page, playback: PlaybackFixtur
         finalMessages: harness.getSessionMessages(sessionId),
       };
     },
-    { replayTimeline: timeline, sessionId: capture.session.id }
+    { replayTimeline: browserTimeline, sessionId: capture.session.id }
   );
 
   await test.info().attach('session-playback-observation', {
