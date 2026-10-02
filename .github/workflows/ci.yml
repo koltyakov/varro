@@ -33,14 +33,6 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Restore test results
-        uses: actions/cache@v6
-        with:
-          path: tmp/test-cache
-          key: test-results-v1-${{ runner.os }}-node-24.21.0-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            test-results-v1-${{ runner.os }}-node-24.21.0-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-
-
       - name: Typecheck
         run: npm run typecheck
 
@@ -54,10 +46,10 @@ jobs:
         run: npm run fmt:check
 
       - name: Test
-        run: npm run test:coverage:cached
+        run: npm run test:coverage
 
       - name: Test build scripts
-        run: npm run test:scripts:cached
+        run: npm run test:scripts
 
       - name: Build
         run: npm run build
@@ -87,14 +79,6 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Restore test results
-        uses: actions/cache@v6
-        with:
-          path: tmp/test-cache
-          key: test-results-v1-${{ runner.os }}-node-24.21.0-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            test-results-v1-${{ runner.os }}-node-24.21.0-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-
-
       - name: Typecheck
         run: npm run typecheck
 
@@ -102,7 +86,7 @@ jobs:
         run: npm run typecheck:suggestions
 
       - name: Test
-        run: npm run test:affected
+        run: npm run test
 
       - name: Build
         run: npm run build
@@ -145,16 +129,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Restore browser script test results
-        uses: actions/cache@v6
-        with:
-          path: tmp/test-cache
-          key: browser-test-results-v1-${{ runner.os }}-node-24.21.0-shard-${{ matrix.shard }}-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            browser-test-results-v1-${{ runner.os }}-node-24.21.0-shard-${{ matrix.shard }}-${{ hashFiles('package-lock.json', 'scripts/test-cache.mjs', 'scripts/run-cached-tests.mjs') }}-
-
       - name: Test browser scripts
-        run: npm run test:scripts:browser:cached
+        run: npm run test:scripts:browser
 
       - name: Run e2e tests
         # Bypass pretest:e2e; the matching container already includes the browsers.

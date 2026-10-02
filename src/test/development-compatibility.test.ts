@@ -47,18 +47,31 @@ describe('development compatibility', () => {
     expect(e2e).not.toMatch(/^    if:/m);
   });
 
-  it('trusts the mounted E2E checkout before cached tests inspect Git files', async () => {
+  it('trusts the mounted E2E checkout before browser script tests run', async () => {
     const workflow = await readFile(resolve('.github/workflows/ci.yml'), 'utf8');
     const jobStart = workflow.indexOf('\n  e2e:\n');
     expect(jobStart).toBeGreaterThan(-1);
     const job = workflow.slice(jobStart);
     const checkout = job.indexOf('uses: actions/checkout@');
     const trust = job.indexOf('run: git config --global --add safe.directory "$GITHUB_WORKSPACE"');
-    const cachedTests = job.indexOf('run: npm run test:scripts:browser:cached');
+    const browserTests = job.indexOf('run: npm run test:scripts:browser');
 
     expect(checkout).toBeGreaterThan(-1);
     expect(trust).toBeGreaterThan(checkout);
-    expect(cachedTests).toBeGreaterThan(trust);
+    expect(browserTests).toBeGreaterThan(trust);
+  });
+
+  it('runs fresh unit, script, and coverage suites without test-result caching', async () => {
+    const workflow = await readFile(resolve('.github/workflows/ci.yml'), 'utf8');
+    expect(workflow).not.toContain('uses: actions/cache@');
+    expect(workflow).not.toContain('tmp/test-cache');
+    expect(workflow).not.toContain(':cached');
+    expect(workflow).toContain('run: npm run test:coverage\n');
+    expect(workflow).toContain('run: npm run test:scripts\n');
+    expect(workflow).toContain('run: npm run test\n');
+    expect(workflow).toContain('run: npm run test:scripts:browser\n');
+    expect(Object.keys(packageJson.scripts)).not.toContain('test:affected');
+    expect(Object.keys(packageJson.scripts).filter((name) => name.endsWith(':cached'))).toEqual([]);
   });
 
   it('runs E2E on four shards with a matrix-derived shard count', async () => {
@@ -67,8 +80,14 @@ describe('development compatibility', () => {
       readFile(resolve('docs/development.md'), 'utf8'),
     ]);
 
-    expect(workflow).toContain('shard: [1, 2, 3, 4]');
-    expect(workflow).toContain(
+    const e2eStart = workflow.indexOf('\n  e2e:\n');
+    expect(e2eStart).toBeGreaterThan(-1);
+    const job = workflow.slice(e2eStart);
+    expect(job).toContain('shard: [1, 2, 3, 4]');
+    expect(job).toContain('fail-fast: false');
+    expect(job).toContain('timeout-minutes: 20');
+    expect(job).toContain('image: mcr.microsoft.com/playwright:v1.63.0-noble');
+    expect(job).toContain(
       'run: node scripts/run-e2e.mjs --shard=${{ matrix.shard }}/${{ strategy.job-total }}'
     );
     expect(developmentGuide).toContain('four jobs with two workers each');

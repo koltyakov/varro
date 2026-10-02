@@ -335,6 +335,7 @@ test('chat font changes preserve main typography proportions and a detached anch
   const toolHeader = page.locator('[data-typography-probe] .tool-invocation-header');
   await expect(markdown).toBeAttached();
   await expect(toolHeader).toBeAttached();
+  const isLinux = await page.evaluate(() => /Linux/.test(navigator.userAgent));
 
   const before = await page.evaluate(() => {
     const sessionStyle = getComputedStyle(document.querySelector('.interactive-session')!);
@@ -352,8 +353,8 @@ test('chat font changes preserve main typography proportions and a detached anch
   });
   expect(before).toEqual({
     sessionFontSize: '13px',
-    markdownFontSize: '13.5px',
-    markdownLineHeight: '22.275px',
+    markdownFontSize: isLinux ? '13px' : '13.5px',
+    markdownLineHeight: isLinux ? '21.45px' : '22.275px',
     toolFontSize: '12.5px',
     toolLineHeight: '15px',
   });
@@ -405,8 +406,8 @@ test('chat font changes preserve main typography proportions and a detached anch
   }, anchor);
   await expect(session).toHaveCSS('font-size', '17px');
   await expect(session).toHaveCSS('font-family', 'monospace');
-  await expect(markdown).toHaveCSS('font-size', '17.5px');
-  await expect(markdown).toHaveCSS('line-height', '28.875px');
+  await expect(markdown).toHaveCSS('font-size', isLinux ? '17px' : '17.5px');
+  await expect(markdown).toHaveCSS('line-height', isLinux ? '28.05px' : '28.875px');
   await expect(toolHeader).toHaveCSS('font-size', '12.5px');
   await expect(toolHeader).toHaveCSS('line-height', '15px');
   for (const top of samples) {

@@ -51,33 +51,13 @@ two legacy filesystem-mock fixtures retain jsdom and the browser setup. Native W
 inspection runs after the other projects so PowerShell startup does not compete with unit workers.
 Both CI jobs keep all tests, and Linux keeps the full-project coverage thresholds.
 
-### Cached test runs
+### Test runs
 
-`npm run test:affected` runs unit and Node script tests whose successful cached result no longer
-matches the test, its transitive imports, shared configuration, setup, or lockfile. Results live in
-`tmp/test-cache/` and are separate for each suite, OS, architecture, Node version, and test environment.
-The first run executes everything. Failed or interrupted batches are not cached, and external
-integration tests always rerun. Tests with filesystem reads, subprocesses, unresolved imports, or
-computed imports conservatively invalidate against the whole checkout.
-
-CI restores these results between runs for the Windows unit tests and the Linux and Windows script
-tests. Browser script tests also use the cache, separately from the E2E runs. Linux uses
-`npm run test:coverage:cached`, which reuses a successful full-suite coverage result only when the
-whole checkout is unchanged. Otherwise it runs full coverage and enforces the existing thresholds;
-partial coverage is never treated as a full-suite result. Cache hits do not regenerate coverage reports.
-`npm run test:e2e:cached` reuses a successful full E2E suite only when the whole checkout, Vite env
-files, test environment, OS version, CPU parallelism, Node version, and actual Chromium version match.
-It installs Chromium if needed and briefly launches it even on a cache hit to verify the browser.
-Results live in `tmp/test-cache/e2e.json`. Failed or interrupted runs are not cached. Any CLI arguments
-(including spec filters, `--list`, `--last-failed`, or shards) and custom `VARRO_E2E_MODE` values bypass
-the cache without updating it. Cache hits do not regenerate traces or test reports and are not fresh
-timing or flakiness checks. Use `npm run test:e2e` to force a fresh full run; CI continues to do so.
-
-Compatibility and VS Code smoke tests remain uncached. Lint, typecheck, builds, and packaging still
-run normally.
-
-Use `npm test`, `npm run test:scripts`, `npm run test:scripts:browser`, or `npm run test:coverage`
-to force their full suites without consulting or updating the cache.
+Unit, script, coverage, and E2E commands execute tests on every invocation; successful test results
+are not cached. `npm test` runs unit and Node script tests, `npm run test:scripts:browser` runs browser
+script tests, and `npm run test:coverage` runs the full unit suite with coverage thresholds.
+CI runs these suites fresh and caches only npm dependency downloads. Its pinned Playwright container
+already includes Chromium, so CI skips the browser install hook and runs E2E across four shards.
 
 The Playwright suite is browser-level webview E2E coverage. It runs the real Solid webview in Chromium through `e2e/harness/index.html`, while the harness mocks the VS Code message bridge and the OpenCode/Varro request and event boundary. It does not launch VS Code, an extension host, or a real OpenCode CLI/server.
 
