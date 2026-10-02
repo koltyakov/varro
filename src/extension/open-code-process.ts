@@ -3201,7 +3201,10 @@ export class OpenCodeProcess {
     }
 
     let backgroundFailure: UpgradeFailureReport | null = null;
-    if (this.isBackgroundCliAutoUpdateEnabled() && process.platform !== 'win32') {
+    if (
+      this.isBackgroundCliAutoUpdateEnabled() &&
+      (process.platform !== 'win32' || openCodeApiVersion(installedCliVersion) === 2)
+    ) {
       if (this.lastSuggestedCliVersion === latestCliVersion) {
         return null;
       }
@@ -3430,7 +3433,7 @@ export class OpenCodeProcess {
     }
 
     const { stdout, stderr } = await this.runCliCommandWithDiagnostics(
-      ['upgrade', targetVersion],
+      this.cliUpgradeArgs(targetVersion),
       OpenCodeProcess.CLI_BACKGROUND_UPGRADE_TIMEOUT_MS
     );
     // Everything the command printed, so the caller can classify the real cause
@@ -3446,7 +3449,10 @@ export class OpenCodeProcess {
     logger.info(
       `Automatically updating OpenCode CLI from ${installedCliVersion} to ${latestCliVersion} in background`
     );
-    if (await callbacks.upgradeRunningServer(latestCliVersion)) {
+    // V2's Windows updater retains the running image while replacing the install.
+    // Use that CLI directly rather than the legacy server upgrade endpoint.
+    const windowsV2 = process.platform === 'win32' && openCodeApiVersion(installedCliVersion) === 2;
+    if (!windowsV2 && (await callbacks.upgradeRunningServer(latestCliVersion))) {
       logger.info(
         `Updated OpenCode CLI to ${latestCliVersion} through the running OpenCode server`
       );
@@ -3494,7 +3500,15 @@ export class OpenCodeProcess {
   private cliUpgradeCommand(targetVersion: string): string {
     const command = this.resolveCommand();
     const quoted = `'${command.replace(/'/g, process.platform === 'win32' ? "''" : "'\\''")}'`;
-    return `${process.platform === 'win32' ? '& ' : ''}${quoted} upgrade ${targetVersion}`;
+    return `${process.platform === 'win32' ? '& ' : ''}${quoted} ${this.cliUpgradeArgs(targetVersion).join(' ')}`;
+  }
+
+  private cliUpgradeArgs(targetVersion: string): string[] {
+    const subcommand =
+      process.platform === 'win32' && openCodeApiVersion(targetVersion) === 2
+        ? 'update'
+        : 'upgrade';
+    return [subcommand, targetVersion];
   }
 
   resolveCommand(): string {

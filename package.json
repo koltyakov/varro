@@ -411,7 +411,7 @@
         "varro.server.autoUpdate": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically install updates within the installed OpenCode CLI family on macOS and Linux: @opencode/cli for v2, opencode-ai for v1. Does not migrate v1 to v2. Native Windows uses an update prompt."
+          "description": "Automatically install updates within the installed OpenCode CLI family: @opencode/cli for v2 on Windows, macOS, and Linux; opencode-ai for v1 on macOS and Linux. Does not migrate v1 to v2. Native Windows v1 uses an update prompt."
         },
         "varro.chat.showFileDiffs": {
           "type": "boolean",

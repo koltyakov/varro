@@ -789,7 +789,7 @@ function maybeSuggestCliUpdate(server: OpenCodeServer, installedCliVersion: stri
 }
 
 /**
- * Stubs the CLI spawn used by both `upgrade` and `--version`. `version` is what
+ * Stubs the CLI spawn used by `upgrade`/`update` and `--version`. `version` is what
  * `--version` prints, which is what the upgrade verification reads back: a stub
  * that prints nothing models a CLI that exited 0 without actually updating.
  */
@@ -826,7 +826,7 @@ function stubCliSpawn(options: { version?: string; stderr?: string } = {}) {
         stdoutHandler?.(Buffer.from(options.version));
       }
       // A CLI that prints the reason on stderr and still exits 0.
-      if (options.stderr && args?.includes('upgrade')) {
+      if (options.stderr && args?.some((arg) => arg === 'upgrade' || arg === 'update')) {
         stderrHandler?.(Buffer.from(options.stderr));
       }
       closeHandler?.(0, null);
@@ -2427,42 +2427,55 @@ describe('OpenCodeServer maintenance', () => {
     );
   });
 
-  it('restarts with the new CLI version after a background update', async () => {
-    stubPlatform('linux');
+  it.each([
+    { platform: 'linux', installed: '1.14.20', latest: '1.14.22', busy: false },
+    { platform: 'win32', installed: '2.0.21', latest: '2.0.22', busy: false },
+    { platform: 'win32', installed: '2.0.21', latest: '2.0.22', busy: true },
+  ] as const)(
+    'applies a background update on $platform and restarts only when idle (busy: $busy)',
+    async ({ platform, installed, latest, busy }) => {
+      stubPlatform(platform);
 
-    const server = new OpenCodeServer(4096, true);
-    const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
-    const api = server as unknown as {
-      process: Record<string, unknown> | null;
-      managedProcess: boolean;
-      readInstalledCliVersion: () => Promise<string | null>;
-      readLatestCliVersion: () => Promise<string | null>;
-      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
-      hasActiveSessions: () => Promise<boolean>;
-      restartServerForCliUpdate: (
-        serverVersion: string,
-        installedCliVersion: string
-      ) => Promise<void>;
-    };
+      const server = new OpenCodeServer(4096, true);
+      const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
+      const api = server as unknown as {
+        process: Record<string, unknown> | null;
+        managedProcess: boolean;
+        readInstalledCliVersion: () => Promise<string | null>;
+        readLatestCliVersion: () => Promise<string | null>;
+        readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+        hasActiveSessions: () => Promise<boolean>;
+        restartServerForCliUpdate: (
+          serverVersion: string,
+          installedCliVersion: string
+        ) => Promise<void>;
+      };
 
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
-    setRunning(server);
-    api.process = {};
-    api.managedProcess = true;
-    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.14.20');
-    api.readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
-    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
-    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
-    api.restartServerForCliUpdate = restartServerForCliUpdate;
-    stubCliSpawn({ version: '1.14.22' });
+      getConfigurationMock.mockImplementation(() => ({
+        get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+      }));
+      setRunning(server);
+      api.process = {};
+      api.managedProcess = true;
+      api.readInstalledCliVersion = vi.fn().mockResolvedValue(installed);
+      api.readLatestCliVersion = vi.fn().mockResolvedValue(latest);
+      api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: installed });
+      api.hasActiveSessions = vi.fn().mockResolvedValue(busy);
+      api.restartServerForCliUpdate = restartServerForCliUpdate;
+      stubCliSpawn({ version: latest });
 
-    await runMaintenanceTick(server);
-    await flushMicrotasks();
+      await runMaintenanceTick(server);
+      await flushMicrotasks();
 
-    expect(restartServerForCliUpdate).toHaveBeenCalledWith('1.14.20', '1.14.22');
-  });
+      expect(spawnMock).toHaveBeenCalledWith(
+        expect.any(String),
+        [platform === 'win32' ? 'update' : 'upgrade', latest],
+        expect.any(Object)
+      );
+      if (busy) expect(restartServerForCliUpdate).not.toHaveBeenCalled();
+      else expect(restartServerForCliUpdate).toHaveBeenCalledWith(installed, latest);
+    }
+  );
 
   it('does not treat an upgrade that left the CLI unchanged as done', async () => {
     // `opencode upgrade` handles its own errors: it can print "Upgrade failed"
@@ -2647,7 +2660,7 @@ describe('OpenCodeServer maintenance', () => {
   });
 
   it('can auto-update the CLI in background when enabled', async () => {
-    // Background auto-update is disabled on win32, so pin a POSIX platform.
+    // Background v1 auto-update is disabled on win32, so pin a POSIX platform.
     stubPlatform('linux');
 
     const server = new OpenCodeServer(4096, false);
@@ -2695,6 +2708,66 @@ describe('OpenCodeServer maintenance', () => {
       expect.arrayContaining(['upgrade', nextVersion]),
       expect.any(Object)
     );
+  });
+
+  it('auto-updates Windows v2 directly through the resolved CLI without stopping the server', async () => {
+    stubPlatform('win32');
+    const command = 'C:\\OpenCode Install\\opencode2.exe';
+    const server = new OpenCodeServer(4096, false, command);
+    const request = vi.fn().mockResolvedValue({ success: true, version: '2.0.22' });
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+      request: typeof request;
+    };
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    api.readLatestCliVersion = vi.fn().mockResolvedValue('2.0.22');
+    api.request = request;
+    const prepare = vi.spyOn(server, 'prepareForWindowsCliUpgrade');
+    setRunning(server);
+    stubCliSpawn({ version: '2.0.22' });
+
+    await expect(maybeSuggestCliUpdate(server, '2.0.21')).resolves.toBe('2.0.22');
+
+    expect(request).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalledWith(command, ['update', '2.0.22'], expect.any(Object));
+    expect(spawnMock).toHaveBeenCalledWith(command, ['--version'], expect.any(Object));
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(runWindowsCliUpdate).not.toHaveBeenCalled();
+    expect(server.status.state).toBe('running');
+  });
+
+  it('reports a Windows v2 update that exits successfully without replacing the CLI', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, false, 'C:\\OpenCode\\opencode2.exe');
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+    };
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    api.readLatestCliVersion = vi.fn().mockResolvedValue('2.0.22');
+    stubCliSpawn({ version: '2.0.21', stderr: 'EPERM: binary is being used by another process' });
+
+    await expect(maybeSuggestCliUpdate(server, '2.0.21')).resolves.toBeNull();
+    await flushMicrotasks();
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      expect.any(String),
+      ['update', '2.0.22'],
+      expect.any(Object)
+    );
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Varro could not update the OpenCode CLI to 2.0.22 automatically.'),
+      'Show Logs'
+    );
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining('EPERM: binary is being used by another process')
+    );
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
   it('offers a normal update beyond the tested manifest version when auto-update is disabled', async () => {

@@ -878,22 +878,78 @@ describe('OpenCodeProcess update notification actions', () => {
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
-  it('automatically updates the selected v2 CLI', async () => {
-    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
-    const manager = new OpenCodeProcess(4096, false, '/custom/opencode2');
-    const upgradeCli = vi.spyOn(manager, 'upgradeCli').mockResolvedValue('');
-    vi.spyOn(manager, 'readInstalledCliVersion').mockResolvedValue('2.0.1');
+  it.each(['linux', 'win32'])(
+    'automatically updates the selected v2 CLI on %s',
+    async (platform) => {
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      const manager = new OpenCodeProcess(4096, false, '/custom/opencode2');
+      const upgradeCli = vi.spyOn(manager, 'upgradeCli').mockResolvedValue('');
+      const upgradeRunningServer = vi.fn().mockResolvedValue(false);
+      const prepareForWindowsCliUpgrade = vi.fn();
+      vi.spyOn(manager, 'readInstalledCliVersion').mockResolvedValue('2.0.1');
+      await expect(
+        manager.maybeSuggestCliUpdate('2.0.0', {
+          readLatestCliVersion: vi.fn().mockResolvedValue('2.0.1'),
+          upgradeRunningServer,
+          requestMaintenanceCheck: vi.fn(),
+          getWorkspaceCwd: () => undefined,
+          prepareForWindowsCliUpgrade,
+        })
+      ).resolves.toBe('2.0.1');
+      expect(upgradeCli).toHaveBeenCalledWith('2.0.1');
+      expect(upgradeRunningServer).toHaveBeenCalledTimes(platform === 'win32' ? 0 : 1);
+      expect(prepareForWindowsCliUpgrade).not.toHaveBeenCalled();
+      expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not auto-update a Windows v1 CLI even when it is named opencode2', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const manager = new OpenCodeProcess(4096, false, 'C:\\OpenCode\\opencode2.exe');
+    const upgradeCli = vi.spyOn(manager, 'upgradeCli');
+    const upgradeRunningServer = vi.fn();
+
     await expect(
-      manager.maybeSuggestCliUpdate('2.0.0', {
-        readLatestCliVersion: vi.fn().mockResolvedValue('2.0.1'),
-        upgradeRunningServer: vi.fn().mockResolvedValue(false),
+      manager.maybeSuggestCliUpdate('1.18.33', {
+        readLatestCliVersion: vi.fn().mockResolvedValue('1.18.34'),
+        upgradeRunningServer,
         requestMaintenanceCheck: vi.fn(),
         getWorkspaceCwd: () => undefined,
         prepareForWindowsCliUpgrade: vi.fn(),
       })
-    ).resolves.toBe('2.0.1');
-    expect(upgradeCli).toHaveBeenCalledWith('2.0.1');
-    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+    ).resolves.toBeNull();
+
+    expect(upgradeCli).not.toHaveBeenCalled();
+    expect(upgradeRunningServer).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining('upgrade 1.18.34'),
+      'Run Upgrade'
+    );
+  });
+
+  it('honors disabled auto-update for the Windows v2 CLI', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const manager = new OpenCodeProcess(4096, false, 'C:\\OpenCode\\opencode2.exe');
+    vi.spyOn(manager, 'isAutoUpdateEnabled', 'get').mockReturnValue(false);
+    const upgradeCli = vi.spyOn(manager, 'upgradeCli');
+    const upgradeRunningServer = vi.fn();
+
+    await expect(
+      manager.maybeSuggestCliUpdate('2.0.21', {
+        readLatestCliVersion: vi.fn().mockResolvedValue('2.0.22'),
+        upgradeRunningServer,
+        requestMaintenanceCheck: vi.fn(),
+        getWorkspaceCwd: () => undefined,
+        prepareForWindowsCliUpgrade: vi.fn(),
+      })
+    ).resolves.toBeNull();
+
+    expect(upgradeCli).not.toHaveBeenCalled();
+    expect(upgradeRunningServer).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining('update 2.0.22'),
+      'Run Upgrade'
+    );
   });
 
   it('logs a rejected update action chain instead of leaving it unhandled', async () => {
