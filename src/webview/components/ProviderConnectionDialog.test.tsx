@@ -53,6 +53,7 @@ vi.mock('../lib/provider-setup', () => ({ openProviderSetup: openProviderSetupMo
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
+let originalClipboardDescriptor: PropertyDescriptor | undefined;
 
 function catalogProvider(id: string, name = id): Provider {
   return { id, name, source: 'api', models: {} };
@@ -163,6 +164,7 @@ beforeEach(() => {
   resetDefaultAppState();
   resetProviderConnectionState();
   originalResizeObserver = globalThis.ResizeObserver;
+  originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
   // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
   globalThis.ResizeObserver = class ResizeObserver {
     observe() {}
@@ -196,6 +198,9 @@ afterEach(() => {
   resetProviderConnectionState();
   if (originalResizeObserver) globalThis.ResizeObserver = originalResizeObserver;
   else Reflect.deleteProperty(globalThis, 'ResizeObserver');
+  if (originalClipboardDescriptor)
+    Object.defineProperty(navigator, 'clipboard', originalClipboardDescriptor);
+  else Reflect.deleteProperty(navigator, 'clipboard');
   vi.restoreAllMocks();
 });
 
@@ -806,6 +811,66 @@ describe('ProviderConnectionDialog API key flow', () => {
 
 describe('ProviderConnectionDialog OAuth flow', () => {
   it.each(['auto', 'code'] as const)(
+    'copies the full authorization URL during a pending %s exchange without submitting or cancelling',
+    async (method) => {
+      const url =
+        'https://auth.example.com/oauth?state=abc%2B123&redirect_uri=http%3A%2F%2Flocalhost';
+      const writeText = vi.fn(() => Promise.resolve());
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText },
+        configurable: true,
+      });
+      clientMocks.authorizeProvider.mockResolvedValue({
+        url,
+        method,
+        instructions: 'Approve access in your browser',
+      });
+      const completion = deferred<boolean>();
+      clientMocks.completeProviderAuth.mockReturnValue(completion.promise);
+      const onClose = renderDialog();
+      chooseProvider('Anthropic');
+      chooseMethod('Claude subscription');
+      expect(dialog()?.querySelector('[aria-label^="Copy authorization URL:"]')).toBeNull();
+      primaryButton().click();
+      await flush();
+
+      const urlInput = dialog()!.querySelector<HTMLInputElement>(
+        '#provider-connect-authorization-url'
+      )!;
+      expect(urlInput.value).toBe(url);
+      expect(urlInput.readOnly).toBe(true);
+      expect(urlInput.disabled).toBe(false);
+      urlInput.focus();
+      expect(urlInput.selectionStart).toBe(0);
+      expect(urlInput.selectionEnd).toBe(url.length);
+
+      const copyButton = dialog()!.querySelector<HTMLButtonElement>(
+        '[aria-label^="Copy authorization URL:"]'
+      )!;
+      expect(copyButton.disabled).toBe(false);
+      copyButton.click();
+      await flush();
+
+      expect(writeText).toHaveBeenCalledExactlyOnceWith(url);
+      expect(copyButton.getAttribute('aria-label')).toBe('Copied');
+      expect(clientMocks.authorizeProvider).toHaveBeenCalledTimes(1);
+      expect(clientMocks.completeProviderAuth).toHaveBeenCalledTimes(method === 'auto' ? 1 : 0);
+      if (method === 'auto') {
+        const options: { signal: AbortSignal } = clientMocks.completeProviderAuth.mock.calls[0]![1];
+        expect(options.signal.aborted).toBe(false);
+      }
+      expect(onClose).not.toHaveBeenCalled();
+
+      findButton('Back to methods')!.click();
+      expect(dialog()?.querySelector('#provider-connect-authorization-url')).toBeNull();
+      expect(dialog()?.querySelector('[aria-label="Copied"]')).toBeNull();
+      completion.resolve(true);
+      await flush();
+      expect(onClose).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['auto', 'code'] as const)(
     'completes the exact %s OAuth attempt returned to this dialog',
     async (method) => {
       clientMocks.authorizeProvider.mockResolvedValue({
@@ -1002,6 +1067,8 @@ describe('ProviderConnectionDialog OAuth flow', () => {
       payload: { url: '' },
     });
     expect(findButton('Open authorization page')).toBeUndefined();
+    expect(dialog()?.querySelector('#provider-connect-authorization-url')).toBeNull();
+    expect(dialog()?.querySelector('[aria-label^="Copy authorization URL:"]')).toBeNull();
     expect(clientMocks.completeProviderAuth).toHaveBeenCalledWith(
       { providerID: 'azure', method: 0 },
       { signal: expect.any(AbortSignal) }

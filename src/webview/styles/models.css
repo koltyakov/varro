@@ -620,7 +620,8 @@
   line-height: 1.4;
 }
 
-.provider-connect-input {
+.provider-connect-input,
+.provider-connect-url-input {
   width: 100%;
   height: var(--provider-connect-control-height);
   padding: 0 10px;
@@ -633,8 +634,22 @@
   outline: none;
 }
 
-.provider-connect-input:focus {
+.provider-connect-input:focus,
+.provider-connect-url-input:focus {
   border-color: var(--color-vscode-accent);
+}
+
+.provider-connect-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.provider-connect-url-input {
+  min-width: 0;
+  flex: 1;
+  text-overflow: ellipsis;
 }
 
 .provider-connect-select {
@@ -776,7 +791,8 @@
   min-width: 0;
 }
 
-.provider-connect-instructions .tool-copy-button {
+.provider-connect-instructions .tool-copy-button,
+.provider-connect-url .tool-copy-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -797,11 +813,13 @@
 
 .provider-connect-instructions:hover .tool-copy-button,
 .provider-connect-instructions .tool-copy-button.is-copied,
-.provider-connect-instructions .tool-copy-button:focus-visible {
+.provider-connect-instructions .tool-copy-button:focus-visible,
+.provider-connect-url .tool-copy-button {
   opacity: 1;
 }
 
-.provider-connect-instructions .tool-copy-button:hover {
+.provider-connect-instructions .tool-copy-button:hover,
+.provider-connect-url .tool-copy-button:hover {
   color: var(--color-vscode-fg);
   background: var(--color-vscode-toolbar-hover);
 }

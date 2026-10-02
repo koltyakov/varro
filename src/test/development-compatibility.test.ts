@@ -25,4 +25,18 @@ describe('development compatibility', () => {
     expect(readme).toContain(advertisedFloors);
     expect(developmentGuide).toContain(advertisedFloors);
   });
+
+  it('trusts the mounted E2E checkout before cached tests inspect Git files', async () => {
+    const workflow = await readFile(resolve('.github/workflows/ci.yml'), 'utf8');
+    const jobStart = workflow.indexOf('\n  e2e:\n');
+    expect(jobStart).toBeGreaterThan(-1);
+    const job = workflow.slice(jobStart);
+    const checkout = job.indexOf('uses: actions/checkout@');
+    const trust = job.indexOf('run: git config --global --add safe.directory "$GITHUB_WORKSPACE"');
+    const cachedTests = job.indexOf('run: npm run test:scripts:browser:cached');
+
+    expect(checkout).toBeGreaterThan(-1);
+    expect(trust).toBeGreaterThan(checkout);
+    expect(cachedTests).toBeGreaterThan(trust);
+  });
 });

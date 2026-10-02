@@ -132,6 +132,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Trust container checkout
+        # The mounted checkout belongs to the host runner, not the container user.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:

@@ -1245,6 +1245,12 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   cursor: default;
 }
 
+.assistant-message-flow-item-error-action-label,
+.assistant-message-flow-item-error-countdown {
+  /* Center the letters rather than platform-dependent font ascent/descent space. */
+  text-box: trim-both cap alphabetic;
+}
+
 .assistant-message-flow-item-error-countdown {
   font-variant-numeric: tabular-nums;
 }

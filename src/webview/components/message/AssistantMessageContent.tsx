@@ -1283,7 +1283,9 @@ export function AssistantMessageContent(props: {
                     aria-hidden="true"
                   />
                 </Show>
-                {props.errorAction?.label || 'Retry'}
+                <span class="assistant-message-flow-item-error-action-label">
+                  {props.errorAction?.label || 'Retry'}
+                </span>
                 <Show when={retrySeconds() !== undefined}>
                   <span class="assistant-message-flow-item-error-countdown">
                     ({retrySeconds()}s)
