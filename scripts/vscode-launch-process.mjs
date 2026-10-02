@@ -285,10 +285,56 @@ export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
     await waitForPalette(focusedPalette, 'did not receive focus');
     await requests.call('Input.insertText', { text: commandLabel });
     const commandRow = `[...document.querySelectorAll('.quick-input-list .monaco-list-row')].find(row => row.querySelector('.label-name')?.textContent?.trim() === ${JSON.stringify(commandLabel)})`;
-    await waitForPalette(
-      `(${focusedPalette}) && (${commandRow})?.getBoundingClientRect().height > 0`,
-      'did not find the requested command'
-    );
+    try {
+      await waitForPalette(
+        `(${focusedPalette}) && (${commandRow})?.getBoundingClientRect().height > 0`,
+        'did not find the requested command'
+      );
+    } catch (error) {
+      if (
+        commandLabel !== 'Varro: Focus on Varro View' ||
+        !(error instanceof Error) ||
+        !error.message.startsWith('VS Code command palette did not find the requested command:')
+      )
+        throw error;
+      // Cold VS Code workbenches can expose the container before its generated focus command.
+      for (const type of ['keyDown', 'keyUp']) {
+        await requests.call('Input.dispatchKeyEvent', {
+          type,
+          key: 'Escape',
+          code: 'Escape',
+          windowsVirtualKeyCode: 27,
+        });
+      }
+      const response = await requests.call('Runtime.evaluate', {
+        expression: `(() => {
+          const points = [...document.querySelectorAll('a[aria-label="Varro"]')].flatMap(element => {
+            const rect = element.getBoundingClientRect();
+            const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+            if (rect.width <= 0 || rect.height <= 0 || x < 0 || x >= innerWidth || y < 0 || y >= innerHeight) return [];
+            const hit = document.elementFromPoint(x, y);
+            return hit && element.contains(hit) ? [{ x, y }] : [];
+          });
+          return points.length === 1 ? points[0] : null;
+        })()`,
+        returnByValue: true,
+      });
+      const point = response.result?.value;
+      if (!point) throw error;
+      for (const [type, buttons] of [
+        ['mousePressed', 1],
+        ['mouseReleased', 0],
+      ]) {
+        await requests.call('Input.dispatchMouseEvent', {
+          type,
+          ...point,
+          button: 'left',
+          buttons,
+          clickCount: 1,
+        });
+      }
+      return;
+    }
     // Search results can move between measuring a row and clicking it. Select the
     // exact focused result with native keys so a neighboring command cannot run.
     let selected = false;

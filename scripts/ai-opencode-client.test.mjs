@@ -151,6 +151,81 @@ test('v2 transcript timing diagnostics use the console without a VS Code host', 
   );
 });
 
+test('v2 restores generation timing from the finite SSE log instead of parsing it as JSON', async (t) => {
+  const sessionID = 'ses_timing';
+  const message = {
+    id: 'msg_timing',
+    type: 'assistant',
+    agent: 'build',
+    model: { providerID: 'openai', id: 'fixture' },
+    time: { created: 1000, completed: 2000 },
+    finish: 'stop',
+    tokens: { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+    content: [{ type: 'text', text: 'Timing fixture' }],
+  };
+  const events = [
+    {
+      type: 'session.text.started',
+      created: 1200,
+      durable: { aggregateID: sessionID, seq: 1 },
+      data: { sessionID, assistantMessageID: message.id, ordinal: 0 },
+    },
+    {
+      type: 'session.text.ended',
+      created: 1900,
+      durable: { aggregateID: sessionID, seq: 2 },
+      data: { sessionID, assistantMessageID: message.id, ordinal: 0, text: 'Timing fixture' },
+    },
+    { type: 'log.synced', aggregateID: sessionID, seq: 2 },
+  ];
+  let logRequest;
+  const url = await serve(t, (request, response) => {
+    const route = new URL(request.url, 'http://localhost').pathname;
+    if (route === '/global/health') {
+      response.end(JSON.stringify({ healthy: true, version: '2.0.21' }));
+    } else if (route === `/api/session/${sessionID}/message`) {
+      response.end(JSON.stringify({ data: [message] }));
+    } else if (route === `/api/session/${sessionID}/inbox`) {
+      response.end(JSON.stringify({ data: [] }));
+    } else if (route === `/api/experimental/session/${sessionID}/log`) {
+      logRequest = { url: request.url, directory: request.headers['x-opencode-directory'] };
+      response.setHeader('content-type', 'text/event-stream');
+      response.end(events.map((event) => `data: ${JSON.stringify(event)}\r\n\r\n`).join(''));
+    } else {
+      response.writeHead(404);
+      response.end('{}');
+    }
+  });
+  const warn = t.mock.method(console, 'warn', () => {});
+  const messages = await new AiOpenCodeClient(url, '/fixture').request(
+    'GET',
+    `/session/${sessionID}/message?limit=1000`
+  );
+  assert.deepEqual(messages[0].parts[0].time, { start: 1200, end: 1900 });
+  assert.deepEqual(logRequest, {
+    url: `/api/experimental/session/${sessionID}/log?follow=false&after=0`,
+    directory: undefined,
+  });
+  assert.equal(warn.mock.callCount(), 0);
+});
+
+test('raw log support still rejects HTML and malformed JSON on normal API routes', async (t) => {
+  const url = await serve(t, (request, response) => {
+    if (request.url.startsWith('/api/experimental/session/')) {
+      response.setHeader('content-type', 'text/html');
+      response.end('<!doctype html>');
+    } else {
+      response.end('not JSON');
+    }
+  });
+  const client = new AiOpenCodeClient(url, '/fixture');
+  await assert.rejects(
+    client.wire('GET', '/api/experimental/session/ses_one/log'),
+    /received HTML/
+  );
+  await assert.rejects(client.wire('GET', '/api/session'), /Invalid OpenCode JSON/);
+});
+
 test('authentication failures and unknown versions cannot fall through to a different backend', async (t) => {
   const requests = [];
   const url = await serve(t, (request, response) => {

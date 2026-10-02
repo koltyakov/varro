@@ -221,6 +221,22 @@ await new Promise((resolve, reject) => {
 
 const codePid =
   process.platform === 'darwin' ? await waitForVscodeProcess(executable, userData) : child.pid;
+// Keep birth-aware recovery metadata even when focusing or sizing the webview fails.
+const metadataPath = path.join(profileRoot, 'launch.json');
+const metadata = await writeVscodeLaunchMetadata(metadataPath, {
+  pid: codePid,
+  executable,
+  profileRoot,
+  userDataDir: userData,
+  extensionsDir: extensions,
+  workspace,
+  remoteDebuggingPort,
+});
+metadata.testServerUrl = testServerUrl;
+metadata.varroTestStateRoot = environment.VARRO_TEST_STATE_ROOT;
+metadata.isolation = isolation ?? { kind: 'read-only-replay' };
+if (managedServer) metadata.managedServerRoot = managedServer.root;
+await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 });
 const focusDeadline = Date.now() + 30_000;
 let sidebarWidth;
 while (true) {
@@ -233,21 +249,7 @@ while (true) {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
 }
-const metadataPath = path.join(profileRoot, 'launch.json');
-const metadata = await writeVscodeLaunchMetadata(metadataPath, {
-  pid: codePid,
-  executable,
-  profileRoot,
-  userDataDir: userData,
-  extensionsDir: extensions,
-  workspace,
-  remoteDebuggingPort,
-  sidebarWidth,
-});
-metadata.testServerUrl = testServerUrl;
-metadata.varroTestStateRoot = environment.VARRO_TEST_STATE_ROOT;
-metadata.isolation = isolation ?? { kind: 'read-only-replay' };
-if (managedServer) metadata.managedServerRoot = managedServer.root;
+metadata.sidebarWidth = sidebarWidth;
 await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 });
 
 child.unref();
