@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MessageEntry, UserMessage } from '../../types';
-import { matchesActiveTurnSelection } from './active-turn-selection';
+import { getActiveTurnSelection, matchesActiveTurnSelection } from './active-turn-selection';
 
 const model = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
 function user(overrides: Partial<UserMessage> = {}): MessageEntry {
@@ -81,5 +81,44 @@ describe('active turn selection', () => {
     expect(matchesActiveTurnSelection([], 'session-1', 'build', model)).toBe(false);
     expect(matchesActiveTurnSelection([user()], 'session-1', null, model)).toBe(false);
     expect(matchesActiveTurnSelection([user()], 'session-1', 'build', null)).toBe(false);
+  });
+
+  it('does not subscribe active-turn selection to distant historical message metadata', () => {
+    let historyReads = 0;
+    const history = Array.from({ length: 6000 }, (_, index) => {
+      const message = user({ id: `history-${index}` });
+      return {
+        get info() {
+          historyReads += 1;
+          return message.info;
+        },
+        parts: message.parts,
+      };
+    });
+    const messages: MessageEntry[] = [
+      ...history,
+      user(),
+      {
+        info: {
+          id: 'assistant-1',
+          sessionID: 'session-1',
+          role: 'assistant',
+          parentID: 'user-1',
+          time: { created: 2 },
+          providerID: model.providerID,
+          modelID: model.modelID,
+          mode: 'default',
+          path: { cwd: '/repo', root: '/repo' },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+        parts: [],
+      },
+      user({ sessionID: 'child', model: { ...model, variant: 'xhigh' } }),
+      user({ id: 'steer', delivery: 'steer', model: { ...model, variant: 'xhigh' } }),
+    ];
+
+    expect(getActiveTurnSelection(messages, 'session-1')).toEqual({ agent: 'build', model });
+    expect(historyReads).toBe(0);
   });
 });

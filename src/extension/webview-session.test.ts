@@ -463,6 +463,26 @@ describe('WebviewSession', () => {
     expect(view.webview.html).toBe('<html>fresh</html>');
   });
 
+  it.each([false, true])(
+    'shows the logo before asynchronous HTML rendering, editor=%s',
+    async (editorSurface) => {
+      const html = createDeferred<string>();
+      const { session, bridge } = createSession({ editorSurface, renderHtml: () => html.promise });
+      const view = createWebviewView(true);
+      bridge.emptyStateLogoUri.mockReturnValue('vscode-resource://icon');
+
+      await session.resolve(view as never);
+
+      expect(view.webview.html).toContain('class="varro-startup-logo"');
+      expect(view.webview.html).toContain('src="vscode-resource://icon"');
+      expect(view.webview.html).toContain('img-src vscode-webview-resource: data:;');
+      expect(view.webview.html).not.toContain('class="varro-startup-dots"');
+      html.resolve('<html>ready</html>');
+      await flushMicrotasks();
+      expect(view.webview.html).toBe('<html>ready</html>');
+    }
+  );
+
   it('reloads the current view through a fresh resolve', async () => {
     const { session, bridge } = createSession();
     const view = createWebviewView(true);

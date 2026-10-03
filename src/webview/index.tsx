@@ -89,6 +89,10 @@ function trackWebviewWidth(root: HTMLElement) {
   let width = window.innerWidth;
   let pixelRatio = window.devicePixelRatio;
   let frame: number | undefined;
+  // Reattaching a retained VS Code tab briefly gives its iframe the browser's
+  // default dimensions, even while document.visibilityState remains visible.
+  const isUnsizedIframe = () => window.innerWidth === 300 && window.innerHeight === 150;
+  let awaitingHostViewport = isUnsizedIframe();
   const cancelExpansion = () => {
     if (frame !== undefined) window.cancelAnimationFrame(frame);
     frame = undefined;
@@ -100,6 +104,8 @@ function trackWebviewWidth(root: HTMLElement) {
   const handleVisibilityChange = () => {
     cancelExpansion();
     if (document.visibilityState === 'hidden') return;
+    awaitingHostViewport = isUnsizedIframe();
+    if (awaitingHostViewport) return;
     // A retained tab has no painted surface to preserve. Its hidden viewport can
     // have a temporary host width; restore the current width before revealing it.
     pixelRatio = window.devicePixelRatio;
@@ -107,6 +113,18 @@ function trackWebviewWidth(root: HTMLElement) {
   };
   const handleResize = () => {
     if (document.visibilityState === 'hidden') return;
+    if (isUnsizedIframe()) {
+      awaitingHostViewport = true;
+      cancelExpansion();
+      return;
+    }
+    if (awaitingHostViewport) {
+      awaitingHostViewport = false;
+      cancelExpansion();
+      pixelRatio = window.devicePixelRatio;
+      applyWidth();
+      return;
+    }
     // Zoom changes CSS pixels without resizing the host's painted surface.
     if (pixelRatio !== window.devicePixelRatio) {
       pixelRatio = window.devicePixelRatio;

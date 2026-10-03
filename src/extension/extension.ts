@@ -7,6 +7,9 @@ import { registerCommands } from './commands';
 import { logger } from './logger';
 import { readServerPortSetting, sweepStaleInjectedConfigDirectories } from './open-code-process';
 import { disposeProcessInspection } from './process-inspection';
+import { diagnosticTimeline } from './diagnostics';
+import { measureStartupPhase } from '../shared/startup';
+import { prepareVarroScratchDirectory } from './varro-state-paths';
 
 const DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS = 4096;
 const CONTEXT_RESCOPE_RETRY_MS = 50;
@@ -143,7 +146,27 @@ function createSidebarRevealer(destinationId: string): () => Promise<void> {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
+  const operationId = diagnosticTimeline.nextId('startup');
+  return measureStartupPhase(
+    'activation',
+    () => activateExtension(context),
+    (timing) =>
+      diagnosticTimeline.record({
+        event: 'startup-phase',
+        operationId,
+        ...timing,
+        platform: process.platform,
+        arch: process.arch,
+        runtime: process.version,
+        editorVersion: vscode.version,
+        remoteKind: vscode.env?.remoteName ?? 'local',
+      })
+  );
+}
+
+async function activateExtension(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
+  if (!vscode.workspace.workspaceFolders?.length) await prepareVarroScratchDirectory();
 
   const config = vscode.workspace.getConfiguration('varro');
   const port = readServerPortSetting(config.get<unknown>('server.port', 'auto'));
@@ -158,7 +181,8 @@ export async function activate(context: vscode.ExtensionContext) {
       context.globalState.get<boolean>(key) ??
       context.globalState.get<boolean>(INITIAL_SIDEBAR_REVEAL_KEY) === true;
     try {
-      await context.globalState.update(key, legacyDefaultEndpoint);
+      if (context.globalState.get<boolean>(key) === undefined)
+        await context.globalState.update(key, legacyDefaultEndpoint);
     } catch (error) {
       logger.warn(
         `Could not remember automatic-port migration: ${error instanceof Error ? error.message : String(error)}`
@@ -191,6 +215,10 @@ export async function activate(context: vscode.ExtensionContext) {
       for (;;) {
         if (generation !== contextUpdateGeneration) return;
         try {
+          if (ctx.workspaceFolders?.length === 0) {
+            await prepareVarroScratchDirectory();
+            if (generation !== contextUpdateGeneration) return;
+          }
           const result = await server?.rescopeEventStream(ctx.workspacePath || undefined);
           if (generation !== contextUpdateGeneration || result?.state === 'superseded') return;
           if (result?.state === 'cancelled') {
@@ -287,7 +315,6 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  await placeViewInPrimarySidebar(context);
   const sidebarDestination = usesPrimarySidebarForExtensions()
     ? PRIMARY_SIDEBAR_CONTAINER
     : SECONDARY_SIDEBAR_CONTAINER;
@@ -298,7 +325,18 @@ export async function activate(context: vscode.ExtensionContext) {
     server!,
     createSidebarRevealer(sidebarDestination)
   );
-  await revealSidebarOnFirstActivation(context, sidebarDestination);
+  // View commands can wait for this extension's activation before resolving.
+  // Do not make activation wait for its own first-run reveal or placement.
+  void (async () => {
+    try {
+      await placeViewInPrimarySidebar(context);
+      await revealSidebarOnFirstActivation(context, sidebarDestination);
+    } catch (err) {
+      logger.warn(
+        `Failed to initialize Varro's sidebar placement: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  })();
 
   void vscode.commands.executeCommand('setContext', 'varro:activated', true);
   sidebarProvider.startProviderFileObservation();

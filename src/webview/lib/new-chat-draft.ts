@@ -1,4 +1,5 @@
 import { batch } from 'solid-js';
+import { getDefaultPrimaryAgentName } from '../hooks/routing-state';
 import {
   clearMessages,
   inputText,
@@ -9,6 +10,7 @@ import {
   setError,
   setInputText,
   setPersistentShowSessionPicker,
+  setSelectedAgent,
   setShowModelPicker,
   setShowModels,
   setState,
@@ -79,6 +81,10 @@ export function startNewChatDraft() {
     stopLoading();
     setPersistentShowSessionPicker(false);
     restoreSelectedModelForComposer(null);
+    setSelectedAgent(getDefaultPrimaryAgentName(state.agents), {
+      sessionId: blankSessionId || null,
+      persistGlobal: false,
+    });
     requestComposerFocus();
   });
 

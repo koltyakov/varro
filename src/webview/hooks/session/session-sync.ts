@@ -24,7 +24,7 @@ export class SessionSyncOperations {
   ) {}
 
   readonly selectSession = async (id: string, options?: SessionSelectionOptions) => {
-    await selectSessionWithDependencies(
+    return await selectSessionWithDependencies(
       this.deps,
       { next: this.generations.nextSelection },
       id,

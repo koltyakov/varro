@@ -73,6 +73,10 @@ type SessionSelectionDeps = {
   importLegacySession?(sessionId: string, directory: string): void;
 };
 
+export type SessionSelectionResult = {
+  state: 'loaded' | 'failed' | 'unavailable' | 'superseded';
+};
+
 function isV1Session(session: Session | undefined): boolean {
   return Boolean(session && /^v?1(?:\.|$)/i.test(session.version.trim()));
 }
@@ -82,7 +86,7 @@ export async function selectSessionWithDependencies(
   generationRef: { next(): number },
   id: string,
   options?: SessionSelectionOptions
-) {
+): Promise<SessionSelectionResult> {
   const generation = generationRef.next();
   let persistedAgent: string | null = null;
   let persistedModel: SelectedModel | null = null;
@@ -138,7 +142,7 @@ export async function selectSessionWithDependencies(
   } catch (error) {
     if (!isCurrentSelection()) {
       clearMessagesLoadingIfOwned();
-      return;
+      return { state: 'superseded' };
     }
     clearMessagesLoadingIfOwned();
     if (error instanceof Error && /^404\b.*session not found/i.test(error.message)) {
@@ -147,18 +151,18 @@ export async function selectSessionWithDependencies(
       deps.removeUnavailableSession?.(id);
       if (directory && isV1Session(legacySession)) {
         deps.importLegacySession?.(id, directory);
-        return;
+        return { state: 'unavailable' };
       }
       deps.setError('This conversation is unavailable on the connected OpenCode server.');
-      return;
+      return { state: 'unavailable' };
     }
     deps.setError('Failed to load messages');
-    return;
+    return { state: 'failed' };
   }
 
   if (!isCurrentSelection()) {
     clearMessagesLoadingIfOwned();
-    return;
+    return { state: 'superseded' };
   }
 
   const { session, messages } = loaded;
@@ -192,12 +196,12 @@ export async function selectSessionWithDependencies(
   }
 
   await todoSync;
-  if (!isCurrentSelection()) return;
+  if (!isCurrentSelection()) return { state: 'superseded' };
   clearMessagesLoadingIfOwned();
   deps.requestMessageListScrollToBottom();
 
   const statuses = await statusSync;
-  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
+  if (!isCurrentSelection()) return { state: 'superseded' };
   if (statuses) {
     const reconciledStatuses = deps.mergeSessionStatuses(statuses, {
       snapshotStartedAt: statusSnapshotStartedAt,
@@ -228,9 +232,10 @@ export async function selectSessionWithDependencies(
   // Sending still reconciles MCPs before dispatch. Startup can render restored
   // history while this already-started, error-handled reconciliation finishes.
   if (options?.waitForMcpSync !== false) await mcpSync;
-  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
+  if (!isCurrentSelection()) return { state: 'superseded' };
   await deps.loadQuestions().catch(() => {});
-  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
+  if (!isCurrentSelection()) return { state: 'superseded' };
+  return { state: 'loaded' };
 }
 
 export async function syncSessionMessagesWithDependencies(

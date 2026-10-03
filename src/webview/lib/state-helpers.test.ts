@@ -1265,6 +1265,10 @@ describe('state helpers', () => {
       providerID: 'openai',
       modelID: 'gpt-5',
     });
+    expect(stateModule.getModelPreferencesSnapshot().lastSelectedModel).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5',
+    });
 
     stateModule.clearSelectedModelForSession('session-1');
     expect(stateModule.getSelectedModelForSession('session-1')).toBeNull();
@@ -1293,6 +1297,20 @@ describe('state helpers', () => {
       repoBModel
     );
     expect(window.localStorage.getItem('varro.selectedModel')).toBeNull();
+    expect(stateModule.getModelPreferencesSnapshot().lastSelectedModel).toEqual(repoBModel);
+  });
+
+  it('syncs the last choice from another view without changing the active composer', async () => {
+    const stateModule = await loadState();
+    const selected = { providerID: 'openai', modelID: 'current' };
+    const lastSelectedModel = { providerID: 'openai', modelID: 'other-view', variant: 'high' };
+    stateModule.setSelectedModel(selected);
+    stateModule.applyModelPreferencesSnapshot({
+      ...stateModule.getModelPreferencesSnapshot(),
+      lastSelectedModel,
+    });
+    expect(stateModule.state.selectedModel).toEqual(selected);
+    expect(stateModule.state.lastSelectedModel).toEqual(lastSelectedModel);
   });
 
   it('does not promote a temporary session model or reasoning to global defaults', async () => {

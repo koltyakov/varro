@@ -269,10 +269,14 @@ export class WebviewSession {
     this.deps.cancelApiRequestsBeforeGeneration(webviewLoadGeneration);
 
     webviewView.webview.options = this.bridge.webviewOptions();
+    const startupLogo = {
+      logoUri: this.bridge.emptyStateLogoUri() || '',
+      cspSource: webviewView.webview.cspSource,
+    };
     webviewView.webview.html =
       this.webviewContext?.surface === 'editor'
-        ? renderEditorWebviewPlaceholderHtml()
-        : renderWebviewLoadingHtml();
+        ? renderEditorWebviewPlaceholderHtml(startupLogo)
+        : renderWebviewLoadingHtml(startupLogo);
     this.disposeWebviewDisposables();
 
     this.registerMessageListener(webviewView, webviewLoadGeneration);

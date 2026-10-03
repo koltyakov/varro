@@ -17,6 +17,7 @@ const OPTIONAL_SCENARIOS = ['v2-first-run'];
 
 const SCENARIOS = [
   'clean-install-missing-cli',
+  'empty-window-missing-cli',
   'invalid-cli-path',
   'auto-start-disabled',
   'version-command-failure',
@@ -24,7 +25,7 @@ const SCENARIOS = [
   'startup-process-exit',
   'runtime-crash-recovery',
   'event-stream-failure',
-  'port-conflict-fallback',
+  'explicit-port-conflict',
   'required-update-disabled',
   'required-update-failure',
   'required-update-no-change',
@@ -136,6 +137,7 @@ function getScenarioSettings(scenario, port, fakeCommand, missingCommand) {
 
   switch (scenario) {
     case 'clean-install-missing-cli':
+    case 'empty-window-missing-cli':
       return { ...common, 'varro.debug.simulateMissingCli': true };
     case 'invalid-cli-path':
       return { ...common, 'varro.server.command': missingCommand };
@@ -160,7 +162,7 @@ function getScenarioSettings(scenario, port, fakeCommand, missingCommand) {
 }
 
 function getScenarioEnvironment(scenario, root) {
-  if (scenario === 'clean-install-missing-cli') {
+  if (scenario === 'clean-install-missing-cli' || scenario === 'empty-window-missing-cli') {
     const home = path.join(root, 'home');
     if (process.platform === 'win32') {
       const cleanPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
@@ -281,9 +283,12 @@ async function runScenario(scenario, vscodeExecutable) {
     await mkdir(parent, { recursive: true });
     dataRoot = await mkdtemp(path.join(parent, 'vscode-v2-'));
   }
-  const workspace = path.join(root, 'w');
-  const settingsDirectory = path.join(workspace, '.vscode');
+  const emptyWindow = scenario === 'empty-window-missing-cli';
+  const workspace = emptyWindow ? undefined : path.join(root, 'w');
   const userData = path.join(root, 'u');
+  const settingsDirectory = emptyWindow
+    ? path.join(userData, 'User')
+    : path.join(root, 'w', '.vscode');
   const extensions = path.join(root, 'e');
   const launchFile = path.join(root, 'launches.log');
   const pidFile = path.join(root, 'fake.pid');
@@ -291,7 +296,7 @@ async function runScenario(scenario, vscodeExecutable) {
 
   try {
     await mkdir(settingsDirectory, { recursive: true });
-    await mkdir(userData);
+    await mkdir(userData, { recursive: true });
     await mkdir(extensions);
     await mkdir(path.join(root, 'home'));
     let fileLinkRoot = '';
@@ -333,7 +338,7 @@ async function runScenario(scenario, vscodeExecutable) {
       `${JSON.stringify(settings, null, 2)}\n`
     );
 
-    if (scenario === 'port-conflict-fallback') conflictServer = await occupyPort(port);
+    if (scenario === 'explicit-port-conflict') conflictServer = await occupyPort(port);
 
     process.stdout.write(`\nRunning VS Code sandbox scenario: ${scenario}\n`);
     await runCode(
@@ -356,7 +361,7 @@ async function runScenario(scenario, vscodeExecutable) {
         `--extensions-dir=${extensions}`,
         `--extensionDevelopmentPath=${projectRoot}`,
         `--extensionTestsPath=${suitePath}`,
-        workspace,
+        ...(workspace ? [workspace] : []),
       ],
       {
         ...environment,

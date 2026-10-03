@@ -213,10 +213,8 @@ test('running tool updates preserve the node and its current entrance animation'
   );
   await expect(item).toBeVisible();
   const result = await item.evaluate(async (original) => {
-    const siblingControl = document.querySelector<HTMLButtonElement>(
-      '[data-activity-part-id="tool-active-0"] button'
-    )!;
-    siblingControl.focus();
+    const control = original.querySelector<HTMLButtonElement>('button')!;
+    control.focus();
     const entrance = original
       .getAnimations()
       .find(
@@ -263,7 +261,7 @@ test('running tool updates preserve the node and its current entrance animation'
       sameAnimation: current?.getAnimations().includes(entrance) ?? false,
       currentTime: entrance.currentTime,
       playState: entrance.playState,
-      siblingPreserved: siblingControl.isConnected && document.activeElement === siblingControl,
+      controlPreserved: control.isConnected && document.activeElement === control,
     };
     entrance.play();
     return snapshot;
@@ -280,26 +278,24 @@ test('running tool updates preserve the node and its current entrance animation'
     .toBe(true);
   expect.soft(result.currentTime).toBe(70);
   expect.soft(result.playState).toBe('paused');
-  expect(result.siblingPreserved, 'An unchanged sibling must keep its controls and focus').toBe(
-    true
-  );
+  expect(result.controlPreserved, 'The visible tool must keep its controls and focus').toBe(true);
 });
 
-test('tool completion preserves the running outer node through retention and exit', async ({
-  page,
-}) => {
+test('tool completion preserves the running outer node until direct grouping', async ({ page }) => {
   await page.goto(
     '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=2&activeTrayCompletedPrefix=1'
   );
   const items = page.locator('.assistant-active-activity-item');
-  await expect(items).toHaveCount(2);
+  await expect(items).toHaveCount(1);
+  await expect(items).toHaveAttribute('data-activity-part-id', 'tool-active-0');
   const result = await page.evaluate(async () => {
     // SAFETY: The controlled tool-cards harness exposes this typed test API.
     const harness = (window as HarnessWindow).__varroE2E;
     const running = harness
       .getSessionMessages('session-tool-cards')
       .flatMap((message) => message.parts)
-      .filter((part): part is ToolPart => part.type === 'tool' && part.state.status === 'running');
+      .filter((part): part is ToolPart => part.type === 'tool' && part.state.status === 'running')
+      .slice(0, 1);
     const originals = running.map((part) =>
       document.querySelector(`.assistant-active-activity-item[data-activity-part-id="${part.id}"]`)
     );
@@ -332,7 +328,11 @@ test('tool completion preserves the running outer node through retention and exi
     const start = performance.now();
     do {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const current = [...document.querySelectorAll('.assistant-active-activity-item')];
+      const current = [
+        ...document.querySelectorAll(
+          '.assistant-active-activity-item[data-activity-part-id="tool-active-0"]'
+        ),
+      ];
       samples.push({
         sameNodes: current.every((node) => originals.includes(node)),
         retained: current.filter((node) => node.classList.contains('is-completed')).length,
@@ -343,39 +343,40 @@ test('tool completion preserves the running outer node through retention and exi
     return { samples, originalsDisconnected: originals.every((node) => !node!.isConnected) };
   });
   expect(
-    result.samples.some((sample) => sample.retained === 2),
+    result.samples.some((sample) => sample.retained === 1),
     'Must observe minimum retention'
   ).toBe(true);
   expect(
     result.samples.some((sample) => sample.exiting > 0),
-    'Must observe the real exit'
-  ).toBe(true);
+    'Tools must group without an exit animation'
+  ).toBe(false);
   expect(
     result.samples.every((sample) => sample.sameNodes),
     'Completion must not replace a running outer node'
   ).toBe(true);
   expect(result.samples.at(-1)?.count).toBe(0);
   expect(result.originalsDisconnected).toBe(true);
-  await expect(items).toHaveCount(0);
-  await expect(page.locator('.assistant-active-activity-items')).toHaveCount(0);
+  await expect(items).toHaveCount(1);
+  await expect(items).toHaveAttribute('data-activity-part-id', 'tool-active-1');
+  await expect(page.locator('.assistant-active-activity-items')).toHaveCount(1);
   await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
 });
 
-for (const removedIndex of [0, 1]) {
-  test(`a ${removedIndex === 0 ? 'leading' : 'trailing'} completion does not restart its sibling exit when a queued tool enters`, async ({
+for (const completedIndex of [0, 1]) {
+  test(`a ${completedIndex === 0 ? 'visible' : 'queued'} completion preserves the single-slot tool handoff`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 504, height: 800 });
     await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=3');
     const items = page.locator('.assistant-active-activity-item');
-    await expect(items).toHaveCount(2);
+    await expect(items).toHaveCount(1);
+    await expect(items).toHaveAttribute('data-activity-part-id', 'tool-active-0');
     await expect(page.locator('.assistant-active-activity-items')).toHaveCount(1);
     await items.last().evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
-    // Use the already-visible branch without bypassing production minimum retention.
-    await page.waitForTimeout(2_100);
-    const result = await page.evaluate(async (completedIndex) => {
+    // Complete before retention expires, so the already-painted node must survive the update.
+    const result = await page.evaluate(async (firstCompletedIndex) => {
       // SAFETY: The controlled tool-cards harness exposes this typed test API.
       const harness = (window as HarnessWindow).__varroE2E;
       const running = harness
@@ -408,80 +409,71 @@ for (const removedIndex of [0, 1]) {
           '*'
         );
       };
-      const targetSelector = `.assistant-active-activity-item[data-activity-part-id="${CSS.escape(running[1 - completedIndex]!.id)}"]`;
-      const middleSelector = `.assistant-active-activity-item[data-activity-part-id="${CSS.escape(running[completedIndex]!.id)}"]`;
+      const targetSelector =
+        '.assistant-active-activity-item[data-activity-part-id="tool-active-0"]';
+      const original = document.querySelector(targetSelector);
+      if (!original) throw new Error('Expected the initially painted tool');
       const samples: Array<{
         ms: number;
-        opacity: number | null;
         count: number;
-        exiting: boolean;
-        middleCount: number;
+        exiting: number;
+        visibleIds: Array<string | undefined>;
         trays: number;
+        summaries: number;
         remounted: boolean;
       }> = [];
       let secondCompletionAt: number | null = null;
-      let firstExitingNode: Element | null = null;
       const start = performance.now();
-      complete(running[completedIndex]!);
+      complete(running[firstCompletedIndex]!);
       while (performance.now() - start < 3_500) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         const ms = performance.now() - start;
         if (secondCompletionAt === null && ms >= 200) {
           secondCompletionAt = ms;
-          complete(running[1 - completedIndex]!);
+          complete(running[1 - firstCompletedIndex]!);
         }
         const matches = document.querySelectorAll(targetSelector);
         const current = matches[0];
-        const exiting = current?.classList.contains('is-exiting') ?? false;
-        if (exiting && !firstExitingNode) firstExitingNode = current ?? null;
         samples.push({
           ms,
           count: matches.length,
-          exiting,
-          opacity: current ? Number.parseFloat(getComputedStyle(current).opacity) : null,
-          middleCount: document.querySelectorAll(middleSelector).length,
+          exiting: document.querySelectorAll('.assistant-active-activity-item.is-exiting').length,
+          visibleIds: [
+            ...document.querySelectorAll<HTMLElement>('.assistant-active-activity-item'),
+          ].map((item) => item.dataset.activityPartId),
           trays: document.querySelectorAll('.assistant-active-activity-items').length,
-          remounted: exiting && current !== firstExitingNode,
+          summaries: document.querySelectorAll('.assistant-activity-summary').length,
+          remounted: !!current && current !== original,
         });
       }
       return { samples, secondCompletionAt };
-    }, removedIndex);
-    await test.info().attach('tool-exit-frames', {
+    }, completedIndex);
+    await test.info().attach('tool-handoff-frames', {
       body: JSON.stringify(result, null, 2),
       contentType: 'application/json',
     });
-    const exiting = result.samples.filter((sample) => sample.exiting);
-    expect(exiting.length, 'Must sample the actual exit, not just settled cleanup').toBeGreaterThan(
-      5
-    );
-    expect(result.secondCompletionAt).toBeGreaterThanOrEqual(200);
-    expect(result.secondCompletionAt).toBeLessThan(300);
     expect(
-      exiting.some((sample) => sample.middleCount === 0),
-      'The first completed tool must leave while its sibling is still exiting'
+      result.samples.some((sample) => sample.count === 1),
+      'Must observe retention'
     ).toBe(true);
-    expect(
-      exiting.some((sample) => sample.remounted),
-      'The exiting node must survive the split'
-    ).toBe(false);
+    expect(result.secondCompletionAt).toBeGreaterThanOrEqual(200);
+    expect(result.samples.every((sample) => sample.exiting === 0)).toBe(true);
+    expect(result.samples.every((sample) => !sample.remounted)).toBe(true);
+    expect(result.samples.every((sample) => sample.visibleIds.length <= 1)).toBe(true);
+    expect(result.samples.every((sample) => sample.trays === 1 && sample.summaries === 1)).toBe(
+      true
+    );
+    expect(new Set(result.samples.flatMap((sample) => sample.visibleIds))).toEqual(
+      new Set(['tool-active-0', 'tool-active-1', 'tool-active-2'])
+    );
     expect(
       Math.max(...result.samples.map((sample) => sample.count)),
       'No duplicate target tool'
     ).toBe(1);
-    expect(result.samples.at(-1)?.count, 'Exit cleanup must finish within 3.5 seconds').toBe(0);
+    expect(result.samples.at(-1)?.count, 'Grouping must finish within 3.5 seconds').toBe(0);
     await expect(items).toHaveCount(1);
     await expect(items).toHaveAttribute('data-activity-part-id', 'tool-active-2');
     await expect(page.locator('.assistant-active-activity-item.is-exiting')).toHaveCount(0);
     await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
-    const jumps = exiting.slice(1).map((sample, index) => ({
-      ms: sample.ms,
-      rise: sample.opacity! - exiting[index]!.opacity!,
-      remounted: sample.remounted,
-    }));
-    const worst = jumps.reduce((largest, jump) => (jump.rise > largest.rise ? jump : largest));
-    expect(
-      worst.rise,
-      `Exit opacity flashed at ${worst.ms.toFixed(1)}ms; remounted=${worst.remounted}`
-    ).toBeLessThanOrEqual(0.05);
   });
 }

@@ -13,6 +13,7 @@ import {
   resolveWorkspaceRelativePath,
 } from './util/path';
 import { delay } from './server-utils';
+import { getWorkingFolder, getWorkingFolders } from './working-folders';
 
 export type WorkspaceResolutionOptions = {
   /** Resolve paths that do not exist on disk yet (e.g. a deleted file in a diff). */
@@ -641,6 +642,7 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   private getWorkspaceDirectory(): string | null {
+    if (!vscode.workspace.workspaceFolders?.length) return this.getPreferredWorkspacePath();
     const firstFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
     const workspaceFile = vscode.workspace.workspaceFile;
     if (!workspaceFile || workspaceFile.scheme === 'untitled') return firstFolder;
@@ -917,8 +919,7 @@ export class ContextProvider implements vscode.Disposable {
       'node_modules',
       'out',
     ]);
-    const pending =
-      searchRoots ?? (vscode.workspace.workspaceFolders || []).map((folder) => folder.uri);
+    const pending = searchRoots ?? getWorkingFolders().map((folder) => folder.uri);
     let match: vscode.Uri | undefined;
     let visitedEntries = 0;
 
@@ -1027,7 +1028,7 @@ export class ContextProvider implements vscode.Disposable {
         const workspaceFolder =
           (restrictToWorkspace && !allowSiblingWorkspaceFolders
             ? requestedWorkspaceFolder
-            : undefined) ?? vscode.workspace.getWorkspaceFolder(uri);
+            : undefined) ?? getWorkingFolder(uri);
         if (!restrictToWorkspace) return workspaceFolder ? { uri, workspaceFolder } : { uri };
         const verifiedUri = await resolveInsideWorkspace(uri, workspaceFolder);
         return verifiedUri ? { uri, workspaceFolder, verifiedUri } : null;
@@ -1037,7 +1038,7 @@ export class ContextProvider implements vscode.Disposable {
         const workspaceFolder =
           (restrictToWorkspace && !allowSiblingWorkspaceFolders
             ? requestedWorkspaceFolder
-            : undefined) ?? vscode.workspace.getWorkspaceFolder(uri);
+            : undefined) ?? getWorkingFolder(uri);
         if (!restrictToWorkspace) return workspaceFolder ? { uri, workspaceFolder } : { uri };
         const verifiedUri = await resolveInsideWorkspace(uri, workspaceFolder);
         return verifiedUri ? { uri, workspaceFolder, verifiedUri } : null;
@@ -1073,12 +1074,7 @@ export class ContextProvider implements vscode.Disposable {
       const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
       try {
         await vscode.workspace.fs.stat(candidate);
-        if (
-          !isSameWorkspacePath(
-            vscode.workspace.getWorkspaceFolder(candidate)?.uri.fsPath,
-            folder.uri.fsPath
-          )
-        ) {
+        if (!isSameWorkspacePath(getWorkingFolder(candidate)?.uri.fsPath, folder.uri.fsPath)) {
           continue;
         }
         if (!restrictToWorkspace) return { uri: candidate, workspaceFolder: folder };
@@ -1114,7 +1110,7 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   private getWorkspaceFoldersInResolutionOrder(): vscode.WorkspaceFolder[] {
-    const folders = Array.from(vscode.workspace.workspaceFolders || []);
+    const folders = Array.from(getWorkingFolders());
     const preferredPath = this.getPreferredWorkspacePath();
     if (!preferredPath) return folders;
 
@@ -1124,9 +1120,7 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   private getOpenWorkspaceFolder(path: string): vscode.WorkspaceFolder | undefined {
-    return vscode.workspace.workspaceFolders?.find((folder) =>
-      isSameWorkspacePath(folder.uri.fsPath, path)
-    );
+    return getWorkingFolders().find((folder) => isSameWorkspacePath(folder.uri.fsPath, path));
   }
 
   private getPreferredWorkspacePath(): string | null {
@@ -1140,7 +1134,7 @@ export class ContextProvider implements vscode.Disposable {
     const activeFolder = activeUri ? vscode.workspace.getWorkspaceFolder(activeUri) : undefined;
     if (activeFolder) return activeFolder.uri.fsPath;
 
-    const fallbackFolder = vscode.workspace.workspaceFolders?.[0];
+    const fallbackFolder = getWorkingFolders()[0];
     return fallbackFolder?.uri.fsPath || null;
   }
 

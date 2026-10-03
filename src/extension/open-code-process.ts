@@ -36,6 +36,7 @@ import {
 } from '../shared/opencode-install';
 import type { ServerStatus } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
+import { STARTUP_CREDENTIAL_TIMEOUT_MS, withStartupDeadline } from '../shared/startup';
 import {
   parseManagedServerOwnershipLease,
   type ManagedServerOwnershipLease,
@@ -72,6 +73,7 @@ import {
   signalProcessGroup,
   terminateCliProcessTree,
 } from './process-inspection';
+import { ManagedServerConnectionChangedError } from './process-inspection-error';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
 import { runWindowsCliUpdate } from './util/windows-cli-update';
 import { getVarroTestStateDirectory } from './varro-test-state';
@@ -225,6 +227,8 @@ export function areCompactionSettingsEqual(
 }
 
 interface MaintenanceCallbacks {
+  /** Reuse permits only verified ownership and an already-installed same-family CLI. */
+  reusedServer?: boolean;
   isDisposing: () => boolean;
   getStatus: () => ServerStatus;
   readInstalledCliVersion: () => Promise<string | null>;
@@ -833,7 +837,8 @@ export class OpenCodeProcess {
             state: 'relinquished',
             createdAt: marker.createdAt,
           };
-          if (await this.matchesOwnershipLease(candidate)) {
+          const verification = await this.inspectOwnershipLease(candidate);
+          if (verification.matches) {
             this._port = candidate.port;
             return true;
           }
@@ -844,7 +849,7 @@ export class OpenCodeProcess {
               matchesBirthIdentity(marker.birthIdentity, birthIdentity, marker.createdAt)
             )
               throw new Error(
-                'The marked OpenCode process is still alive but cannot be verified; it was left untouched'
+                `The marked OpenCode process is still alive but cannot be verified; it was left untouched. ${verification.reason}`
               );
           }
         } else if (isProcessAlive(marker.pid)) {
@@ -874,7 +879,8 @@ export class OpenCodeProcess {
         throw new Error('Cannot verify the existing OpenCode registration; it was left untouched');
     }
     this.registrationObserved = true;
-    if (!(await this.matchesOwnershipLease(lease))) {
+    const verification = await this.inspectOwnershipLease(lease);
+    if (!verification.matches) {
       if (isProcessAlive(lease.pid)) {
         const birthIdentity = await readProcessBirthIdentity(lease.pid, this.linuxProcRoot);
         if (
@@ -882,7 +888,7 @@ export class OpenCodeProcess {
           matchesBirthIdentity(lease.birthIdentity, birthIdentity, lease.createdAt)
         )
           throw new Error(
-            'The registered OpenCode process is still alive but its listener cannot be verified'
+            `The registered OpenCode process is still alive but its listener cannot be verified. ${verification.reason}`
           );
       }
       // Defer removal to coordinated recovery/publication. Never signal this PID.
@@ -1128,14 +1134,14 @@ export class OpenCodeProcess {
     const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
     if (!lease) return;
     if (lease.port !== this._port)
-      throw new Error(
+      throw new ManagedServerConnectionChangedError(
         'The managed OpenCode endpoint changed; reconnect to verify its registration'
       );
     if (!reconnect && Date.now() - this.lastConnectionVerification < 1000) return;
     if (this.connectionVerification) return this.connectionVerification;
     const operation = (async () => {
       if (!(await this.matchesOwnershipLease(lease)))
-        throw new Error(
+        throw new ManagedServerConnectionChangedError(
           'The managed OpenCode listener changed; its registration was retained for recovery'
         );
       this.lastConnectionVerification = Date.now();
@@ -1154,6 +1160,20 @@ export class OpenCodeProcess {
       : Number.POSITIVE_INFINITY;
   }
 
+  get connectionIdentity():
+    | Pick<ManagedServerOwnershipLease, 'port' | 'pid' | 'birthIdentity' | 'executable'>
+    | undefined {
+    const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
+    return lease
+      ? {
+          port: lease.port,
+          pid: lease.pid,
+          birthIdentity: lease.birthIdentity,
+          executable: lease.executable,
+        }
+      : undefined;
+  }
+
   async persistManagedServerCredentials(secrets: Pick<vscode.SecretStorage, 'store'>) {
     const lease = this.ownershipLease;
     if (!lease?.password || lease.port !== this._port) return;
@@ -1169,15 +1189,24 @@ export class OpenCodeProcess {
     // own this live process. SecretStorage is not a cross-editor lock or registry.
   }
 
-  async restoreManagedServerCredentials(secrets: Pick<vscode.SecretStorage, 'get'>) {
+  async restoreManagedServerCredentials(
+    secrets: Pick<vscode.SecretStorage, 'get'>,
+    signal?: AbortSignal
+  ) {
     const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
     if (!lease || lease.port !== this._port) return;
     // Registration already copied this verified private lease credential. The
     // editor vault can be slow/unavailable on Windows and is only a fallback.
     if (lease.password) return;
-    const encoded = await secrets.get(
-      `varro.opencode.managedCredentials:${this.ownershipLeasePath}`
+    const url = this.url;
+    const encoded = await withStartupDeadline(
+      () => secrets.get(`varro.opencode.managedCredentials:${this.ownershipLeasePath}`),
+      STARTUP_CREDENTIAL_TIMEOUT_MS,
+      'Managed credential lookup',
+      signal
     );
+    signal?.throwIfAborted();
+    if (this.url !== url || (this.ownershipLeaseCandidate ?? this.ownershipLease) !== lease) return;
     if (!encoded) return;
     let credentials: Record<string, unknown> | null;
     try {
@@ -1299,6 +1328,15 @@ export class OpenCodeProcess {
       this.ownershipLease?.host === this.hostOwner &&
       this.ownershipLease.state === 'active'
     );
+  }
+
+  get needsRuntimeConfigRecovery(): boolean {
+    return this.isAdoptedManagedServer && !this.ownershipLease?.configPath;
+  }
+
+  get hasRuntimeConfigRecoveryCandidate(): boolean {
+    const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
+    return !!lease && !lease.configPath;
   }
 
   get serverOwnership(): OpenCodeServerOwnership {
@@ -1573,7 +1611,14 @@ export class OpenCodeProcess {
       }
       return false;
     }
-    if (!(await this.matchesOwnershipLease(lease))) {
+    const verification = await this.inspectOwnershipLease(lease);
+    if (!verification.matches) {
+      if (!(await this.isRegisteredProcessRetired(lease))) {
+        logger.warn(
+          `Managed OpenCode ownership refresh could not verify the live process; its lease was retained. ${verification.reason}`
+        );
+        return false;
+      }
       await this.removeOwnershipLease(lease.owner, lease.host);
       this.foreignActiveOwnership = false;
       return false;
@@ -1818,7 +1863,13 @@ export class OpenCodeProcess {
   async syncInjectedConfigFile() {
     await this.runInjectedConfigOperation(async () => {
       this.injectedConfigServerVersion = null;
-      await sweepStaleInjectedConfigDirectories();
+      // Age-based cleanup does not prepare this new config. In particular, a
+      // slow remote/temp directory scan must not re-enter the launch critical path.
+      void sweepStaleInjectedConfigDirectories().catch((error: unknown) => {
+        logger.warn(
+          `Failed to clean up stale temporary configs: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
       if (getEnvironmentValue(process.env, 'OPENCODE_CONFIG')?.trim()) {
         await this.removeInjectedConfigFile(this.injectedConfigPath);
         logger.warn(
@@ -1871,6 +1922,11 @@ export class OpenCodeProcess {
       config.providers = { openai: { settings: { chunkTimeout: 5 * 60_000 } } };
     }
     return `${JSON.stringify(config, null, 2)}\n`;
+  }
+
+  async shouldRestoreRuntimeAskAgent(): Promise<boolean> {
+    if (getEnvironmentValue(process.env, 'OPENCODE_CONFIG')?.trim()) return false;
+    return !(await this.hasConfiguredValue(containsAskAgent, 'an existing Ask agent', 'ancestors'));
   }
 
   rememberRunningServerVersion(version: string) {
@@ -2513,8 +2569,18 @@ export class OpenCodeProcess {
   }
 
   private async matchesOwnershipLease(lease: ManagedServerOwnershipLease): Promise<boolean> {
+    return (await this.inspectOwnershipLease(lease)).matches;
+  }
+
+  private async inspectOwnershipLease(
+    lease: ManagedServerOwnershipLease
+  ): Promise<{ matches: true } | { matches: false; reason: string }> {
     const listeners = await findListeningPids(lease.port, this.linuxProcRoot);
-    if (!listeners.includes(lease.pid)) return false;
+    if (!listeners.includes(lease.pid))
+      return {
+        matches: false,
+        reason: `Expected PID ${lease.pid} on port ${lease.port}; observed listening PIDs: ${listeners.join(', ') || 'none'}.`,
+      };
     const windowsIdentity =
       process.platform === 'win32' ? await readWindowsProcessIdentity(lease.pid) : undefined;
     const executable = windowsIdentity
@@ -2523,14 +2589,22 @@ export class OpenCodeProcess {
     if (!executable)
       throw new Error(`Cannot verify executable identity for managed OpenCode PID ${lease.pid}`);
     if (normalizeExecutableIdentity(executable) !== normalizeExecutableIdentity(lease.executable)) {
-      return false;
+      return {
+        matches: false,
+        reason: `Executable identity differs for PID ${lease.pid} on port ${lease.port}: expected ${JSON.stringify(lease.executable)}, observed ${JSON.stringify(executable)}.`,
+      };
     }
     const birthIdentity = windowsIdentity
       ? windowsIdentity.birthIdentity
       : await readProcessBirthIdentity(lease.pid, this.linuxProcRoot);
     if (!birthIdentity)
       throw new Error(`Cannot verify process start identity for managed OpenCode PID ${lease.pid}`);
-    return matchesBirthIdentity(lease.birthIdentity, birthIdentity, lease.createdAt);
+    if (!matchesBirthIdentity(lease.birthIdentity, birthIdentity, lease.createdAt))
+      return {
+        matches: false,
+        reason: `Process start identity differs for PID ${lease.pid} on port ${lease.port}: expected ${JSON.stringify(lease.birthIdentity)}, observed ${JSON.stringify(birthIdentity)}.`,
+      };
+    return { matches: true };
   }
 
   private async readOwnershipHostIdentity() {
@@ -2884,7 +2958,14 @@ export class OpenCodeProcess {
     const claim = await this.acquireOwnershipClaim();
     if (!claim) return;
     try {
-      if (!(await this.matchesOwnershipLease(lease))) {
+      const verification = await this.inspectOwnershipLease(lease);
+      if (!verification.matches) {
+        if (!(await this.isRegisteredProcessRetired(lease))) {
+          logger.warn(
+            `Managed OpenCode disconnect could not verify the live process; its lease was retained. ${verification.reason}`
+          );
+          return;
+        }
         await this.removeOwnershipLease(lease.owner, lease.host);
         return;
       }
@@ -3046,22 +3127,33 @@ export class OpenCodeProcess {
     this.maintenanceInFlight = true;
     try {
       if (
-        (this.ownershipLease || this.foreignActiveOwnership) &&
+        (callbacks.reusedServer || this.ownershipLease || this.foreignActiveOwnership) &&
         !(await this.refreshManagedServerOwnership())
       )
         return;
       const installedCliVersion = await callbacks.readInstalledCliVersion();
       const health =
         callbacks.getStatus().state === 'running' ? await callbacks.readHealthInfo() : null;
+      // Reusing a server permits an owned same-family restart, not an implicit
+      // migration or another CLI install. Missing version evidence leaves it running.
+      if (
+        callbacks.reusedServer &&
+        (!health?.healthy ||
+          !openCodeApiVersion(health.version ?? '') ||
+          openCodeApiVersion(health.version ?? '') !==
+            openCodeApiVersion(installedCliVersion ?? ''))
+      )
+        return;
       // Switch to the installed v2 CLI before checking for further updates. The
       // v1 server's upgrade endpoint would update its own binary, not the v2 CLI.
       const switchingToV2 =
         health?.healthy &&
         openCodeApiVersion(health.version ?? '') === 1 &&
         openCodeApiVersion(installedCliVersion ?? '') === 2;
-      const updatedCliVersion = switchingToV2
-        ? null
-        : await callbacks.maybeSuggestCliUpdate(installedCliVersion);
+      const updatedCliVersion =
+        callbacks.reusedServer || switchingToV2
+          ? null
+          : await callbacks.maybeSuggestCliUpdate(installedCliVersion);
       const restartCliVersion = updatedCliVersion || installedCliVersion;
 
       if (callbacks.getStatus().state !== 'running' || !restartCliVersion) {
@@ -3082,6 +3174,7 @@ export class OpenCodeProcess {
         return;
       }
 
+      if (callbacks.reusedServer && !this._managedProcess) return;
       if (!this._managedProcess && this.autoStart) {
         await callbacks.takeOwnershipOfExistingServer();
       }
@@ -3142,7 +3235,10 @@ export class OpenCodeProcess {
     }
 
     let backgroundFailure: UpgradeFailureReport | null = null;
-    if (this.isBackgroundCliAutoUpdateEnabled() && process.platform !== 'win32') {
+    if (
+      this.isBackgroundCliAutoUpdateEnabled() &&
+      (process.platform !== 'win32' || openCodeApiVersion(installedCliVersion) === 2)
+    ) {
       if (this.lastSuggestedCliVersion === latestCliVersion) {
         return null;
       }
@@ -3371,7 +3467,7 @@ export class OpenCodeProcess {
     }
 
     const { stdout, stderr } = await this.runCliCommandWithDiagnostics(
-      ['upgrade', targetVersion],
+      this.cliUpgradeArgs(targetVersion),
       OpenCodeProcess.CLI_BACKGROUND_UPGRADE_TIMEOUT_MS
     );
     // Everything the command printed, so the caller can classify the real cause
@@ -3387,7 +3483,10 @@ export class OpenCodeProcess {
     logger.info(
       `Automatically updating OpenCode CLI from ${installedCliVersion} to ${latestCliVersion} in background`
     );
-    if (await callbacks.upgradeRunningServer(latestCliVersion)) {
+    // V2's Windows updater retains the running image while replacing the install.
+    // Use that CLI directly rather than the legacy server upgrade endpoint.
+    const windowsV2 = process.platform === 'win32' && openCodeApiVersion(installedCliVersion) === 2;
+    if (!windowsV2 && (await callbacks.upgradeRunningServer(latestCliVersion))) {
       logger.info(
         `Updated OpenCode CLI to ${latestCliVersion} through the running OpenCode server`
       );
@@ -3435,7 +3534,15 @@ export class OpenCodeProcess {
   private cliUpgradeCommand(targetVersion: string): string {
     const command = this.resolveCommand();
     const quoted = `'${command.replace(/'/g, process.platform === 'win32' ? "''" : "'\\''")}'`;
-    return `${process.platform === 'win32' ? '& ' : ''}${quoted} upgrade ${targetVersion}`;
+    return `${process.platform === 'win32' ? '& ' : ''}${quoted} ${this.cliUpgradeArgs(targetVersion).join(' ')}`;
+  }
+
+  private cliUpgradeArgs(targetVersion: string): string[] {
+    const subcommand =
+      process.platform === 'win32' && openCodeApiVersion(targetVersion) === 2
+        ? 'update'
+        : 'upgrade';
+    return [subcommand, targetVersion];
   }
 
   resolveCommand(): string {
@@ -3719,7 +3826,9 @@ export class OpenCodeProcess {
     }
 
     const folders = vscode.workspace.workspaceFolders;
-    return folders && folders.length > 0 ? folders[0]!.uri.fsPath : undefined;
+    return folders && folders.length > 0
+      ? folders[0]!.uri.fsPath
+      : getVarroStateDirectory('scratch');
   }
 
   private serverPathEntries(): string[] {

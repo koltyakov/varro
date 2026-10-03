@@ -8,8 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const DEFAULT_DATABASE = 'varro-playback.db';
-const DEFAULT_SHORT_GAP_MS = 250;
-const DEFAULT_MAX_GAP_MS = 500;
+export const DEFAULT_SHORT_GAP_MS = 250;
+// Long recorded waits are compressed, but must still outlast the transcript's 600 ms Thinking
+// reappearance delay. A shorter cap makes replay skip the Thinking row that a live wait shows.
+export const DEFAULT_MAX_GAP_MS = 1_500;
 const DEFAULT_HISTORY_DATABASE = path.join(
   os.homedir(),
   '.local',

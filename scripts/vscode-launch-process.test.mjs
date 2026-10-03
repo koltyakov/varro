@@ -85,6 +85,92 @@ test('never types a command into an editor when the palette did not receive focu
   assert.ok(!sent.some((request) => request.params.key === 'Enter'));
 });
 
+for (const scenario of [
+  {
+    name: 'opens the cold Varro tab when its generated focus command is unavailable',
+    label: 'Varro: Focus on Varro View',
+    point: { x: 1230, y: 50 },
+    clicks: true,
+  },
+  {
+    name: 'rejects a missing or ambiguous cold Varro tab',
+    label: 'Varro: Focus on Varro View',
+    point: null,
+    clicks: false,
+  },
+  {
+    name: 'does not substitute a Varro tab click for another missing command',
+    label: 'View: Close Editor',
+    point: { x: 1230, y: 50 },
+    clicks: false,
+  },
+]) {
+  test(scenario.name, async (t) => {
+    const sent = [];
+    t.mock.method(globalThis, 'fetch', async () => ({
+      json: async () => [
+        {
+          type: 'page',
+          title: '[Extension Development Host]',
+          webSocketDebuggerUrl: 'ws://127.0.0.1/test',
+        },
+      ],
+    }));
+    let now = 0;
+    t.mock.method(Date, 'now', () => (now += 1_000));
+    const originalWebSocket = globalThis.WebSocket;
+    t.after(() => {
+      globalThis.WebSocket = originalWebSocket;
+    });
+    globalThis.WebSocket = class extends FakeSocket {
+      constructor() {
+        super();
+        queueMicrotask(() => this.emit('open'));
+      }
+      send(value) {
+        const request = JSON.parse(value);
+        sent.push(request);
+        const expression = request.params.expression ?? '';
+        const result =
+          request.method === 'Runtime.evaluate'
+            ? {
+                result: {
+                  value: expression.includes('a[aria-label="Varro"]')
+                    ? scenario.point
+                    : !expression.includes('.quick-input-list'),
+                },
+              }
+            : {};
+        queueMicrotask(() =>
+          this.emit('message', { data: JSON.stringify({ id: request.id, result }) })
+        );
+      }
+      close() {}
+    };
+    if (scenario.clicks) await executeVscodeCommand(12345, scenario.label);
+    else
+      await assert.rejects(
+        executeVscodeCommand(12345, scenario.label),
+        /did not find the requested command/
+      );
+    const clicks = sent.filter((request) => request.method === 'Input.dispatchMouseEvent');
+    assert.equal(clicks.length, scenario.clicks ? 2 : 0);
+    assert.ok(!sent.some((request) => request.params.key === 'Enter'));
+    if (scenario.clicks) {
+      assert.deepEqual(
+        clicks.map((request) => request.params),
+        [
+          { type: 'mousePressed', x: 1230, y: 50, button: 'left', buttons: 1, clickCount: 1 },
+          { type: 'mouseReleased', x: 1230, y: 50, button: 'left', buttons: 0, clickCount: 1 },
+        ]
+      );
+      const escape = sent.findIndex((request) => request.params.key === 'Escape');
+      const click = sent.findIndex((request) => request.method === 'Input.dispatchMouseEvent');
+      assert.ok(escape >= 0 && escape < click);
+    }
+  });
+}
+
 function fakeElement(rect, { src = '', title = '' } = {}) {
   return {
     src,

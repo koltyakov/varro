@@ -28,6 +28,7 @@ import { createExternalLinkIconElement } from './ExternalLinkIcon';
 import { createFileTypeIconElement, hasRecognizedFileType } from './FileTypeIcon';
 import { createMaterialChipIconElement } from './MaterialChipIcon';
 import { createUiIconElement, UiIcon } from './UiIcon';
+import { Tooltip } from './Tooltip';
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 
 interface MarkdownProps {
@@ -1262,6 +1263,15 @@ function renderIncompleteStreamingMarkdown(
       trailingOrderedListMarker[1]!.length
     : null;
   if (visiblePendingStart !== null) pendingStart = Math.min(pendingStart, visiblePendingStart);
+  // An empty bullet paints an orphan marker and gives the preceding block list spacing. Hide
+  // it until visible content arrives, so a hidden leading token cannot remove that space again.
+  const trailingBulletMarker = blockSafeContent.match(/(?:^|\r?\n)([ \t]{0,3}[-+*][ \t]*)$/);
+  if (trailingBulletMarker) {
+    pendingStart = Math.min(
+      pendingStart,
+      trailingBulletMarker.index! + trailingBulletMarker[0].length - trailingBulletMarker[1]!.length
+    );
+  }
   const trailingPath = blockSafeContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
   if (trailingPath) {
     const candidateStart = trailingPath.index! + trailingPath[0].length - trailingPath[1]!.length;
@@ -1455,9 +1465,12 @@ function parseIncompleteStreamingMarkdown(content: string, options: ParseMarkdow
   if (!prepared.marker || prepared.pendingText === null) return html;
 
   const blockHtml = prepared.hidePendingText
-    ? html.replace(
-        `<p>${prepared.marker}</p>`,
-        `<p class="streaming-markdown-pending-block">${prepared.marker}</p>`
+    ? hidePendingOnlyListItem(
+        html.replace(
+          `<p>${prepared.marker}</p>`,
+          `<p class="streaming-markdown-pending-block">${prepared.marker}</p>`
+        ),
+        prepared.marker
       )
     : html;
   return blockHtml.replace(
@@ -1466,19 +1479,66 @@ function parseIncompleteStreamingMarkdown(content: string, options: ParseMarkdow
   );
 }
 
+// A list item holding only hidden pending text has no line box, but its marker still paints
+// and overflows the item. Measured entrances then hold that overflow as height and release it
+// on cleanup, clamping a bottom-followed transcript. Hide the item, and a list it would empty.
+function hidePendingOnlyListItem(html: string, marker: string) {
+  // The marker is alphanumeric, so it is safe inside these patterns.
+  const content = `\\s*(?:${marker}|<p class="streaming-markdown-pending-block">${marker}</p>)\\s*</li>`;
+  const hiddenItem = '<li class="streaming-markdown-pending-block">';
+  const withItem = html.replace(new RegExp(`<li>(${content})`), `${hiddenItem}$1`);
+  if (withItem === html) return html;
+  return withItem.replace(
+    new RegExp(`<(ul|ol)((?: start="\\d+")?)>(\\s*${hiddenItem}${content}\\s*</\\1>)`),
+    '<$1 class="streaming-markdown-pending-block"$2>$3'
+  );
+}
+
 function getAppendOnlyStableDelta(
   previousContent: string,
   nextContent: string,
   previousContentWasSafe: boolean
 ) {
-  if (!previousContent || !previousContentWasSafe || !nextContent.startsWith(previousContent)) {
+  if (!previousContent || !nextContent.startsWith(previousContent)) {
     return null;
   }
 
   const suffix = nextContent.slice(previousContent.length);
   if (!/^(?:\r?\n){2,}/.test(suffix)) return null;
   const delta = suffix.replace(/^(?:\r?\n)+/, '');
-  return delta && isAppendOnlySafeMarkdown(delta) ? delta : null;
+  if (!delta) return null;
+  if (previousContentWasSafe && isAppendOnlySafeMarkdown(delta)) return delta;
+
+  // Rich blocks can also be appended, but only when lexing the whole document preserves
+  // both sides of the boundary. Lists and blockquotes may otherwise merge across blank lines.
+  // Raw HTML and reference definitions need whole-document parsing/sanitization context.
+  if (/[<>]/.test(nextContent)) return null;
+  const previousTokens = marked.lexer(previousContent);
+  const nextTokens = marked.lexer(nextContent);
+  const deltaTokens = marked.lexer(delta);
+  if (
+    Object.keys(previousTokens.links).length > 0 ||
+    Object.keys(nextTokens.links).length > 0 ||
+    Object.keys(deltaTokens.links).length > 0
+  ) {
+    return null;
+  }
+  const expected = [...previousTokens, ...deltaTokens].filter((token) => token.type !== 'space');
+  const actual = nextTokens.filter((token) => token.type !== 'space');
+  if (
+    actual.length !== expected.length ||
+    expected.some((token, index) => {
+      const next = actual[index]!;
+      return (
+        token.type !== next.type ||
+        token.raw.trimEnd() !== next.raw.trimEnd() ||
+        (token.type === 'list' && next.type === 'list' && token.loose !== next.loose)
+      );
+    })
+  ) {
+    return null;
+  }
+  return delta;
 }
 
 function parseMarkdown(content: string, options: ParseMarkdownOptions): string {
@@ -2031,7 +2091,44 @@ export function MarkdownRenderer(props: MarkdownProps) {
     initialSegments.stableContent
   );
   const inlineSlotDisposers = new Map<HTMLElement, () => void>();
+  const linkTooltips = new Map<
+    HTMLAnchorElement,
+    { dispose: () => void; setContent: (content: string) => void }
+  >();
   let disposed = false;
+
+  function disposeLinkTooltips(root?: HTMLElement) {
+    for (const [anchor, tooltip] of linkTooltips) {
+      if (root && !root.contains(anchor)) continue;
+      tooltip.dispose();
+      linkTooltips.delete(anchor);
+    }
+  }
+
+  function hydrateLinkTooltips(root: HTMLDivElement | undefined) {
+    if (!root) return;
+    for (const anchor of root.querySelectorAll<HTMLAnchorElement>(
+      'a[title], a[data-external="true"]'
+    )) {
+      if (linkTooltips.has(anchor)) continue;
+      const href = anchor.getAttribute('href');
+      const content =
+        anchor.dataset.external === 'true' && href && anchor.textContent?.trim() !== href
+          ? href
+          : anchor.getAttribute('title');
+      if (!content) continue;
+      anchor.removeAttribute('title');
+      const [tooltipContent, setContent] = createSignal(content);
+      const host = document.createElement('div');
+      linkTooltips.set(anchor, {
+        dispose: render(
+          () => <Tooltip target={anchor} content={tooltipContent()} delay={400} />,
+          host
+        ),
+        setContent,
+      });
+    }
+  }
 
   function disposeInlineSlots(root?: HTMLElement) {
     for (const [element, dispose] of inlineSlotDisposers) {
@@ -2104,6 +2201,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     if (disposed) return;
     hydrateRenderedMarkdown(root, flags);
     hydrateInlineSlots(root);
+    hydrateLinkTooltips(root);
   }
 
   const [stableHtml, setStableHtml] = createSignal(lastAppliedStableHtml);
@@ -2145,6 +2243,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
       lastAppliedTailHtml = highlightedTailHtml;
       lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(highlightedTailHtml);
+      disposeLinkTooltips(tailRef);
       setTailHtml(highlightedTailHtml);
       queueMicrotask(() => {
         hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
@@ -2260,12 +2359,14 @@ export function MarkdownRenderer(props: MarkdownProps) {
           stableRef.append(...appendedRoot.childNodes);
         } else {
           disposeInlineSlots(stableRef);
+          disposeLinkTooltips(stableRef);
           if (stableRef) stableRef.innerHTML = nextStableHtml;
         }
         lastAppliedStableContent = segments.stableContent;
         lastAppliedStableHtml = nextStableHtml;
         lastAppliedStableContentWasAppendOnlySafe = appendOnlyStableDelta
-          ? true
+          ? lastAppliedStableContentWasAppendOnlySafe &&
+            isAppendOnlySafeMarkdown(appendOnlyStableDelta)
           : isAppendOnlySafeMarkdown(segments.stableContent);
         lastAppliedStableHydrationFlags = getMarkdownHydrationFlags(nextStableHtml);
         setStableHtml(nextStableHtml);
@@ -2277,6 +2378,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       }
       if (tailChanged) {
         disposeInlineSlots(tailRef);
+        disposeLinkTooltips(tailRef);
         lastAppliedTailContent = segments.tailContent;
         lastAppliedTailHtml = nextTailHtml;
         lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(nextTailHtml);
@@ -2373,6 +2475,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     cancelIdleWork(idleHighlightId);
     idleHighlightId = null;
     disposeInlineSlots();
+    disposeLinkTooltips();
     for (const id of copyTimeouts) clearTimeout(id);
     copyTimeouts.clear();
   });
@@ -2444,7 +2547,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
             link.removeAttribute('href');
             const label = link.getAttribute('aria-label') || link.textContent || 'file';
             const message = `File not found: ${label}`;
-            link.title = message;
+            linkTooltips.get(link)?.setContent(message);
             showSessionActionFeedback(message, 'warning');
           })
           .catch(() => showSessionActionFeedback('Could not open file', 'warning'));

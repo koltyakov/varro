@@ -230,8 +230,10 @@ export function getAssistantFlowSpacingSize(
     startsBordered: boolean;
     endsBordered: boolean;
     permissionPrompt?: boolean;
+    startsSummary?: boolean;
   }[],
-  gap: number
+  gap: number,
+  summaryAfterBorderedGap = 0
 ): number {
   let spacing = Math.max(0, blocks.length - 1) * gap;
   for (let index = 1; index < blocks.length; index += 1) {
@@ -242,6 +244,8 @@ export function getAssistantFlowSpacingSize(
       (previous.permissionPrompt && current.startsBordered)
     ) {
       spacing -= gap * 0.25;
+    } else if (previous.endsBordered && current.startsSummary) {
+      spacing += summaryAfterBorderedGap;
     }
   }
   return spacing;

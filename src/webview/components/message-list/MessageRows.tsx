@@ -450,7 +450,7 @@ function AssistantDialogSummary(props: {
   const tokensPerSecond = () => {
     const value = props.summary.tokensPerSecond;
     return value !== undefined && Number.isFinite(value) && value > 0
-      ? `${value.toFixed(1)} tok/s`
+      ? `${value.toFixed(0)} tok/s`
       : '';
   };
   const statusSuffix = () =>

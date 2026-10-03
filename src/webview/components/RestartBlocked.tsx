@@ -1,7 +1,8 @@
 import { For, Show, createSignal, onCleanup } from 'solid-js';
 import { postMessage } from '../lib/bridge';
 import { defaultAppState } from '../lib/state';
-import { clockIcon, xmarkIcon } from '../lib/ui-icons';
+import { statusIcons } from '../lib/status-icons';
+import { xmarkIcon } from '../lib/ui-icons';
 import { UiIcon } from './UiIcon';
 
 const RECHECK_INTERVAL_MS = 3000;
@@ -47,7 +48,12 @@ export function RestartBlocked() {
 
       <div class="server-status-content">
         <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-accent/10">
-          <UiIcon source={clockIcon} class="h-5 w-5 text-vscode-accent" width={20} height={20} />
+          <UiIcon
+            source={statusIcons.clock}
+            class="h-5 w-5 text-vscode-accent"
+            width={20}
+            height={20}
+          />
         </div>
 
         <div class="w-full">

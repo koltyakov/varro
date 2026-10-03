@@ -23,9 +23,11 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import type { TestContext } from 'vitest';
 import type { ManagedServerOwnershipLease } from '../shared/server-ownership';
 import { asRecord } from '../shared/type-utils';
+import { getPathVariableKey } from './util/server-path';
 import type * as ServerUtils from './server-utils';
 import { Service } from '@opencode/client/service';
 import * as processInspection from './process-inspection';
+import { getVarroStateDirectory } from './varro-state-paths';
 
 const { loggerMock, spawnMock, vscodeMock, waitForProcessExitMock } = vi.hoisted(() => ({
   loggerMock: {
@@ -494,6 +496,16 @@ afterAll(async () => {
   await rm(tmpdir(), { recursive: true, force: true });
 });
 
+it('uses the persistent isolated scratch cwd only when no project folder is open', () => {
+  const manager = new OpenCodeProcess(4096, true, 'opencode');
+  const scratch = getVarroStateDirectory('scratch');
+  expect(manager.getWorkspaceCwd()).toBe(scratch);
+  vscodeMock.workspace.workspaceFolders = [];
+  expect(manager.getWorkspaceCwd()).toBe(scratch);
+  vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: '/repo' } }];
+  expect(manager.getWorkspaceCwd()).toBe('/repo');
+});
+
 function mockLinuxLeaseProcess(options?: {
   birthIdentity?: (pid: number) => string;
   executable?: string;
@@ -877,22 +889,78 @@ describe('OpenCodeProcess update notification actions', () => {
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
-  it('automatically updates the selected v2 CLI', async () => {
-    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
-    const manager = new OpenCodeProcess(4096, false, '/custom/opencode2');
-    const upgradeCli = vi.spyOn(manager, 'upgradeCli').mockResolvedValue('');
-    vi.spyOn(manager, 'readInstalledCliVersion').mockResolvedValue('2.0.1');
+  it.each(['linux', 'win32'])(
+    'automatically updates the selected v2 CLI on %s',
+    async (platform) => {
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      const manager = new OpenCodeProcess(4096, false, '/custom/opencode2');
+      const upgradeCli = vi.spyOn(manager, 'upgradeCli').mockResolvedValue('');
+      const upgradeRunningServer = vi.fn().mockResolvedValue(false);
+      const prepareForWindowsCliUpgrade = vi.fn();
+      vi.spyOn(manager, 'readInstalledCliVersion').mockResolvedValue('2.0.1');
+      await expect(
+        manager.maybeSuggestCliUpdate('2.0.0', {
+          readLatestCliVersion: vi.fn().mockResolvedValue('2.0.1'),
+          upgradeRunningServer,
+          requestMaintenanceCheck: vi.fn(),
+          getWorkspaceCwd: () => undefined,
+          prepareForWindowsCliUpgrade,
+        })
+      ).resolves.toBe('2.0.1');
+      expect(upgradeCli).toHaveBeenCalledWith('2.0.1');
+      expect(upgradeRunningServer).toHaveBeenCalledTimes(platform === 'win32' ? 0 : 1);
+      expect(prepareForWindowsCliUpgrade).not.toHaveBeenCalled();
+      expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not auto-update a Windows v1 CLI even when it is named opencode2', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const manager = new OpenCodeProcess(4096, false, 'C:\\OpenCode\\opencode2.exe');
+    const upgradeCli = vi.spyOn(manager, 'upgradeCli');
+    const upgradeRunningServer = vi.fn();
+
     await expect(
-      manager.maybeSuggestCliUpdate('2.0.0', {
-        readLatestCliVersion: vi.fn().mockResolvedValue('2.0.1'),
-        upgradeRunningServer: vi.fn().mockResolvedValue(false),
+      manager.maybeSuggestCliUpdate('1.18.33', {
+        readLatestCliVersion: vi.fn().mockResolvedValue('1.18.34'),
+        upgradeRunningServer,
         requestMaintenanceCheck: vi.fn(),
         getWorkspaceCwd: () => undefined,
         prepareForWindowsCliUpgrade: vi.fn(),
       })
-    ).resolves.toBe('2.0.1');
-    expect(upgradeCli).toHaveBeenCalledWith('2.0.1');
-    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+    ).resolves.toBeNull();
+
+    expect(upgradeCli).not.toHaveBeenCalled();
+    expect(upgradeRunningServer).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining('upgrade 1.18.34'),
+      'Run Upgrade'
+    );
+  });
+
+  it('honors disabled auto-update for the Windows v2 CLI', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const manager = new OpenCodeProcess(4096, false, 'C:\\OpenCode\\opencode2.exe');
+    vi.spyOn(manager, 'isAutoUpdateEnabled', 'get').mockReturnValue(false);
+    const upgradeCli = vi.spyOn(manager, 'upgradeCli');
+    const upgradeRunningServer = vi.fn();
+
+    await expect(
+      manager.maybeSuggestCliUpdate('2.0.21', {
+        readLatestCliVersion: vi.fn().mockResolvedValue('2.0.22'),
+        upgradeRunningServer,
+        requestMaintenanceCheck: vi.fn(),
+        getWorkspaceCwd: () => undefined,
+        prepareForWindowsCliUpgrade: vi.fn(),
+      })
+    ).resolves.toBeNull();
+
+    expect(upgradeCli).not.toHaveBeenCalled();
+    expect(upgradeRunningServer).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining('update 2.0.22'),
+      'Run Upgrade'
+    );
   });
 
   it('logs a rejected update action chain instead of leaving it unhandled', async () => {
@@ -1669,6 +1737,24 @@ describe('OpenCodeProcess server ownership leases', () => {
       expect(manager.serverAuthorization).toBe(authorization);
       secrets.get.mockRejectedValue(new Error('storage unavailable'));
       await expect(manager.restoreManagedServerCredentials(secrets)).rejects.toThrow('unavailable');
+      vi.useFakeTimers();
+      let resolveLate!: (value: string) => void;
+      secrets.get.mockImplementation(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveLate = resolve;
+          })
+      );
+      const stalled = manager.restoreManagedServerCredentials(secrets);
+      const rejected = expect(stalled).rejects.toThrow('Managed credential lookup timed out');
+      await vi.advanceTimersByTimeAsync(5_000);
+      await rejected;
+      resolveLate(
+        JSON.stringify({ owner: lease.owner, username: 'late', password: 'late-password' })
+      );
+      await Promise.resolve();
+      expect(manager.serverAuthorization).toBe(authorization);
+      vi.useRealTimers();
       secrets.get.mockResolvedValue(
         JSON.stringify({ owner: lease.owner, username: 'custom-user', password: 'vault-password' })
       );
@@ -1677,6 +1763,7 @@ describe('OpenCodeProcess server ownership leases', () => {
         `Basic ${Buffer.from('custom-user:vault-password').toString('base64')}`
       );
     } finally {
+      vi.useRealTimers();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -1924,6 +2011,80 @@ describe('OpenCodeProcess server ownership leases', () => {
     }
   });
 
+  it.each(
+    (['marker', 'lease'] as const).flatMap((record) =>
+      (['missing-listener', 'different-listener', 'executable'] as const).map((mismatch) => ({
+        record,
+        mismatch,
+      }))
+    )
+  )(
+    'explains a live $record verification failure for $mismatch without changing it',
+    async ({ record, mismatch }) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-ownership-diagnostics-'));
+      const path = join(root, 'lease.json');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: MOCK_LINUX_PID,
+        port: 50001,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+        owner: 'existing-launch',
+        host: 'old-window',
+        state: 'active',
+        createdAt: Date.now(),
+        password: 'private-password',
+      };
+      const recordPath = record === 'marker' ? `${path}.managed` : path;
+      const raw = JSON.stringify(lease);
+      await writeFile(recordPath, raw);
+      mockLinuxLeaseProcess({
+        executable: mismatch === 'executable' ? '/other/opencode' : lease.executable,
+      });
+      const listeners =
+        mismatch === 'missing-listener'
+          ? []
+          : [mismatch === 'different-listener' ? MOCK_LINUX_PID + 1 : MOCK_LINUX_PID];
+      vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue(listeners);
+      const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+      try {
+        const manager = new OpenCodeProcess(
+          'auto',
+          true,
+          '',
+          false,
+          undefined,
+          path,
+          join(root, 'proc')
+        );
+        let failure: unknown;
+        try {
+          await manager.refreshStartupRegistration();
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toBeInstanceOf(Error);
+        const message = failure instanceof Error ? failure.message : '';
+        expect(message).toContain(`PID ${lease.pid} on port ${lease.port}`);
+        if (mismatch === 'executable') {
+          expect(message).toContain('Executable identity differs');
+          expect(message).toContain('expected "/usr/bin/opencode", observed "/other/opencode"');
+        } else {
+          expect(message).toContain(`observed listening PIDs: ${listeners.join(', ') || 'none'}`);
+        }
+        expect(message).not.toContain(lease.password);
+        expect(message).not.toContain(lease.owner);
+        expect(await readFile(recordPath, 'utf8')).toBe(raw);
+        expect(kill).toHaveBeenCalled();
+        expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+        expect(manager.managedProcess).toBe(false);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('does not redirect an explicit port to a newly registered automatic endpoint', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const root = await mkdtemp(join(tmpdir(), 'varro-fixed-migration-'));
@@ -1959,6 +2120,63 @@ describe('OpenCodeProcess server ownership leases', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it.each(
+    (['refresh', 'disconnect'] as const).flatMap((action) =>
+      (['missing-listener', 'executable', 'unknown-birth'] as const).map((mismatch) => ({
+        action,
+        mismatch,
+      }))
+    )
+  )(
+    'retains live ownership credentials during $action with $mismatch evidence',
+    async ({ action, mismatch }) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-live-lease-retention-'));
+      const path = join(root, 'lease.json');
+      const procRoot = join(root, 'proc');
+      const manager = new OpenCodeProcess('auto', true, '', false, undefined, path, procRoot);
+      const lease = {
+        ...(await setAdoptedOwnership(manager, path, 'linux:Fri Jul 10 12:00:00 2026')),
+        password: 'retained-private-password',
+      };
+      (manager as unknown as { ownershipLease: Record<string, unknown> }).ownershipLease = lease;
+      const raw = JSON.stringify(lease);
+      await writeFile(path, raw);
+      await writeFile(`${path}.managed`, raw);
+      mockLinuxLeaseProcess({
+        executable: mismatch === 'executable' ? '/other/opencode' : lease.executable,
+        birthIdentity: mismatch === 'unknown-birth' ? () => '' : undefined,
+      });
+      const listeners = vi
+        .spyOn(processInspection, 'findListeningPids')
+        .mockResolvedValue(mismatch === 'executable' ? [lease.pid] : []);
+      const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+      try {
+        if (action === 'refresh')
+          await expect(manager.refreshManagedServerOwnership()).resolves.toBe(false);
+        else await manager.disposeProcess({ stopProcess: false });
+
+        expect(await readFile(path, 'utf8')).toBe(raw);
+        expect(await readFile(`${path}.managed`, 'utf8')).toBe(raw);
+        expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+
+        // A fresh editor can verify the same server once inspection recovers,
+        // without stopping it or recovering a credentialless marker.
+        listeners.mockResolvedValue([lease.pid]);
+        mockLinuxLeaseProcess();
+        const reloaded = new OpenCodeProcess('auto', true, '', false, undefined, path, procRoot);
+        await expect(reloaded.refreshStartupRegistration()).resolves.toBe(true);
+        expect(reloaded.serverAuthorization).toBe(
+          `Basic ${Buffer.from(`opencode:${lease.password}`).toString('base64')}`
+        );
+        expect(await readFile(path, 'utf8')).toBe(raw);
+        expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('does not start over corrupt registration or failed process inspection', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
@@ -1998,6 +2216,47 @@ describe('OpenCodeProcess server ownership leases', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it.each(
+    (['refresh', 'disconnect'] as const).flatMap((action) =>
+      (['exited', 'reused-pid'] as const).map((retirement) => ({ action, retirement }))
+    )
+  )(
+    'retires ownership during $action after verified $retirement',
+    async ({ action, retirement }) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-retired-lease-cleanup-'));
+      const path = join(root, 'lease.json');
+      const manager = new OpenCodeProcess(
+        'auto',
+        true,
+        '',
+        false,
+        undefined,
+        path,
+        join(root, 'proc')
+      );
+      await setAdoptedOwnership(manager, path, 'linux:original-process');
+      mockLinuxLeaseProcess({ birthIdentity: () => 'replacement-process' });
+      vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue([]);
+      const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+        if (retirement === 'exited')
+          throw Object.assign(new Error('Process exited'), { code: 'ESRCH' });
+        return true;
+      });
+      try {
+        if (action === 'refresh')
+          await expect(manager.refreshManagedServerOwnership()).resolves.toBe(false);
+        else await manager.disposeProcess({ stopProcess: false });
+
+        await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(manager.managedProcess).toBe(false);
+        expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('serializes competing initial launches and releases the claim idempotently', async () => {
     const root = await mkdtemp(join(tmpdir(), 'varro-launch-claim-'));
@@ -3489,6 +3748,153 @@ describe('OpenCodeProcess server ownership leases', () => {
     expect(tick).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    {
+      name: 'v1 upgrade',
+      serverVersion: '1.17.13',
+      cliVersion: '1.18.34',
+      owned: true,
+      active: false,
+      restart: true,
+    },
+    {
+      name: 'v2 upgrade',
+      serverVersion: '2.0.20',
+      cliVersion: '2.0.22',
+      owned: true,
+      active: false,
+      restart: true,
+    },
+    {
+      name: 'same version',
+      serverVersion: '1.18.34',
+      cliVersion: '1.18.34',
+      owned: true,
+      active: false,
+      restart: false,
+    },
+    {
+      name: 'older CLI',
+      serverVersion: '1.18.34',
+      cliVersion: '1.17.13',
+      owned: true,
+      active: false,
+      restart: false,
+    },
+    {
+      name: 'family migration',
+      serverVersion: '1.17.13',
+      cliVersion: '2.0.22',
+      owned: true,
+      active: false,
+      restart: false,
+    },
+    {
+      name: 'unknown server',
+      serverVersion: undefined,
+      cliVersion: '1.18.34',
+      owned: true,
+      active: false,
+      restart: false,
+    },
+    {
+      name: 'unknown CLI',
+      serverVersion: '1.17.13',
+      cliVersion: null,
+      owned: true,
+      active: false,
+      restart: false,
+    },
+    {
+      name: 'busy server',
+      serverVersion: '1.17.13',
+      cliVersion: '1.18.34',
+      owned: true,
+      active: true,
+      restart: false,
+    },
+    {
+      name: 'unverified owner',
+      serverVersion: '1.17.13',
+      cliVersion: '1.18.34',
+      owned: false,
+      active: false,
+      restart: false,
+    },
+  ])(
+    'reconciles a reused server safely: $name',
+    async ({ serverVersion, cliVersion, owned, active, restart }) => {
+      const manager = new OpenCodeProcess(4096, true);
+      const ownership = vi
+        .spyOn(manager, 'refreshManagedServerOwnership')
+        .mockImplementation(async () => {
+          manager.managedProcess = owned;
+          return owned;
+        });
+      const callbacks = {
+        reusedServer: true,
+        isDisposing: () => false,
+        getStatus: () => ({ state: 'running' as const, url: manager.url }),
+        readInstalledCliVersion: vi.fn().mockResolvedValue(cliVersion),
+        maybeSuggestCliUpdate: vi.fn().mockResolvedValue('2.0.22'),
+        readHealthInfo: vi.fn().mockResolvedValue({ healthy: true, version: serverVersion }),
+        hasActiveSessions: vi.fn().mockResolvedValue(active),
+        takeOwnershipOfExistingServer: vi.fn().mockResolvedValue(false),
+        restartServerForCliUpdate: vi.fn().mockResolvedValue(undefined),
+      };
+      await manager.runMaintenanceTick(callbacks);
+      expect(ownership).toHaveBeenCalledOnce();
+      expect(callbacks.maybeSuggestCliUpdate).not.toHaveBeenCalled();
+      expect(callbacks.takeOwnershipOfExistingServer).not.toHaveBeenCalled();
+      if (restart) {
+        expect(callbacks.restartServerForCliUpdate).toHaveBeenCalledExactlyOnceWith(
+          serverVersion,
+          cliVersion
+        );
+      } else {
+        expect(callbacks.restartServerForCliUpdate).not.toHaveBeenCalled();
+      }
+      if (!owned) expect(callbacks.readInstalledCliVersion).not.toHaveBeenCalled();
+      if (active) {
+        callbacks.hasActiveSessions.mockResolvedValue(false);
+        await manager.runMaintenanceTick(callbacks);
+        expect(callbacks.restartServerForCliUpdate).toHaveBeenCalledExactlyOnceWith(
+          serverVersion,
+          cliVersion
+        );
+      }
+    }
+  );
+
+  it.each(['ownership', 'health', 'activity'] as const)(
+    'leaves a reused server running after a failed %s check',
+    async (failedCheck) => {
+      const manager = new OpenCodeProcess(4096, true);
+      manager.managedProcess = true;
+      const ownership = vi.spyOn(manager, 'refreshManagedServerOwnership').mockResolvedValue(true);
+      const health = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.13' });
+      const activity = vi.fn().mockResolvedValue(false);
+      ({ ownership, health, activity })[failedCheck].mockRejectedValue(
+        new Error('Inspection unavailable')
+      );
+      const restart = vi.fn().mockResolvedValue(undefined);
+      const update = vi.fn().mockResolvedValue(null);
+      await manager.runMaintenanceTick({
+        reusedServer: true,
+        isDisposing: () => false,
+        getStatus: () => ({ state: 'running', url: manager.url }),
+        readInstalledCliVersion: vi.fn().mockResolvedValue('1.18.34'),
+        maybeSuggestCliUpdate: update,
+        readHealthInfo: health,
+        hasActiveSessions: activity,
+        takeOwnershipOfExistingServer: vi.fn().mockResolvedValue(false),
+        restartServerForCliUpdate: restart,
+      });
+      expect(restart).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+    }
+  );
+
   it('throttles repeated opportunistic maintenance requests', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-30T12:00:00Z'));
@@ -3887,6 +4293,53 @@ describe('OpenCodeProcess server ownership leases', () => {
 });
 
 describe('OpenCodeProcess config ownership', () => {
+  it.each(['replacement', 'runtime-present', 'foreign', 'unmanaged'])(
+    'identifies runtime config recovery only for an owned replacement: %s',
+    (scenario) => {
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      const state = manager as unknown as {
+        hostOwner: string;
+        ownershipLease: ManagedServerOwnershipLease;
+      };
+      state.ownershipLease = {
+        version: 1,
+        pid: 777,
+        port: 4096,
+        executable: 'fixture',
+        birthIdentity: 'fixture:1',
+        owner: 'fixture-owner',
+        host: scenario === 'foreign' ? 'other-host' : state.hostOwner,
+        state: 'active',
+        createdAt: Date.now(),
+      };
+      if (scenario === 'runtime-present')
+        state.ownershipLease.configPath = '/fixture/opencode.json';
+      manager.managedProcess = scenario !== 'unmanaged';
+      expect(manager.needsRuntimeConfigRecovery).toBe(scenario === 'replacement');
+      expect(manager.hasRuntimeConfigRecoveryCandidate).toBe(scenario !== 'runtime-present');
+    }
+  );
+
+  it.each(['missing', 'caller-config', 'native-ask', 'legacy-ask', 'malformed'])(
+    'preserves caller configuration during runtime Ask recovery: %s',
+    async (scenario) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-ask-recovery-'));
+      process.env.XDG_CONFIG_HOME = root;
+      if (scenario === 'caller-config') process.env.OPENCODE_CONFIG = '/fixture/opencode.json';
+      if (scenario === 'native-ask')
+        process.env.OPENCODE_CONFIG_CONTENT = '{"agents":{"Ask":{"disabled":true}}}';
+      if (scenario === 'legacy-ask')
+        process.env.OPENCODE_CONFIG_CONTENT = '{"agent":{"ask":{"mode":"subagent"}}}';
+      if (scenario === 'malformed') process.env.OPENCODE_CONFIG_CONTENT = '{broken';
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      try {
+        await expect(manager.shouldRestoreRuntimeAskAgent()).resolves.toBe(scenario === 'missing');
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it.each([
     { installed: '1.18.33', running: '2.0.20', expected: true },
     { installed: '2.0.20', running: '2.0.19', expected: false },
@@ -4934,7 +5387,8 @@ describe('OpenCodeProcess install resolution', () => {
     const directory = await mkdtemp(join(tmpdir(), 'varro-opencode-path-'));
     const binary = join(directory, 'opencode');
     await writeFile(binary, '#!/bin/sh\n', 'utf-8');
-    process.env.PATH = directory;
+    // Windows worker environments are case-sensitive, unlike the native host.
+    vi.stubEnv(getPathVariableKey(), directory);
     try {
       const manager = new OpenCodeProcess(4096, true, 'opencode');
 

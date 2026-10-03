@@ -1,4 +1,5 @@
 import type { LocalServerAccount } from './process-inspection';
+import { ProcessInspectionTimeoutError } from './process-inspection-error';
 
 /** Coordinates consent; process management remains governed by the ownership lease. */
 export class ServerConnectionAdmission {
@@ -8,6 +9,7 @@ export class ServerConnectionAdmission {
   private checkedAt = 0;
   private external = false;
   private streamOpened = false;
+  private requiresUncertaintyConsent = false;
 
   constructor(
     private readonly getUrl: () => string,
@@ -17,6 +19,10 @@ export class ServerConnectionAdmission {
 
   get isExternal(): boolean {
     return this.external;
+  }
+
+  get confirmedAccount(): LocalServerAccount | undefined {
+    return this.admitted?.url === this.getUrl() ? this.admitted.account : undefined;
   }
 
   get verificationExpiresAt(): number {
@@ -29,6 +35,7 @@ export class ServerConnectionAdmission {
     this.checkedAt = 0;
     this.external = false;
     this.streamOpened = false;
+    this.requiresUncertaintyConsent = false;
     this.operation = null;
   }
 
@@ -44,7 +51,11 @@ export class ServerConnectionAdmission {
       // A supplied Authorization header does not prove the server enforces it.
       let account = await this.inspect();
       assertCurrent();
-      const approvedAccount = this.admitted?.url === url ? this.admitted.account : undefined;
+      const previousAccount = this.admitted?.url === url ? this.admitted.account : undefined;
+      const approvedAccount =
+        this.requiresUncertaintyConsent && previousAccount?.kind === 'unknown'
+          ? undefined
+          : previousAccount;
       if (
         account.kind === 'unknown' &&
         !(approvedAccount?.kind === 'unknown' && approvedAccount.identity === account.identity)
@@ -59,7 +70,7 @@ export class ServerConnectionAdmission {
         (account.identity !== undefined || account.kind === 'unknown') &&
         account.identity === approvedAccount.identity;
       // Explicit uncertainty consent covers this connection only. verify(true)
-      // clears it on reconnect; fresh observations still detect known changes.
+      // requires a new decision on reconnect; fresh observations detect known changes.
       if (account.kind !== 'same-user' && !consentApplies) {
         const confirmed = await this.confirm(account, url);
         assertCurrent();
@@ -85,29 +96,37 @@ export class ServerConnectionAdmission {
       this.admitted = { url, account };
       this.external = account.kind !== 'same-user';
       this.checkedAt = Date.now();
+      this.requiresUncertaintyConsent = false;
     })();
     this.operation = operation;
     try {
       await operation;
     } catch (error) {
-      if (generation === this.generation) this.admitted = null;
+      // Retain the prior decision, not its expired verification window. No
+      // request can use it until a new inspection succeeds. Refusal and real
+      // uncertainty still revoke admission as before.
+      if (generation === this.generation) {
+        this.checkedAt = 0;
+        if (!(error instanceof ProcessInspectionTimeoutError)) this.admitted = null;
+      }
       throw error;
     } finally {
       if (this.operation === operation) this.operation = null;
     }
   }
 
-  async verify(reconnect = false) {
+  async verify(reconnect = false, force = false) {
     if (this.operation) await this.operation;
     if (!this.admitted || this.admitted.url !== this.getUrl())
       throw new Error('OpenCode connection has not been approved');
     if (reconnect && !this.streamOpened) {
       this.streamOpened = true;
-      return;
+      if (!force) return;
     }
-    if (reconnect || Date.now() - this.checkedAt >= 1000) {
+    if (reconnect || force || Date.now() - this.checkedAt >= 1000) {
       // An unverifiable listener's approval lasts only for the current connection.
-      if (reconnect && this.admitted.account.kind === 'unknown') this.admitted = null;
+      if (reconnect && this.admitted.account.kind === 'unknown')
+        this.requiresUncertaintyConsent = true;
       await this.admit();
     }
   }

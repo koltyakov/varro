@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
 import type { Agent, QuestionRequest, Session, SessionStatus } from '../types';
 import {
+  applyModelPreferencesSnapshot,
+  getModelPreferencesSnapshot,
   getPersistedSelectedModel,
   getSelectedModelForSession,
   resetDefaultAppState,
@@ -115,6 +117,39 @@ function deferred<T>() {
 }
 
 describe('data loaders', () => {
+  it('shares essential in-flight snapshots and reports failed and superseded readiness', async () => {
+    const pending = deferred<Session[]>();
+    const deps = createLoaderDeps({ listSessions: vi.fn(() => pending.promise) });
+    const operations = createDataLoaderOperations(deps);
+    const first = operations.loadSessions();
+    expect(operations.loadSessions()).toBe(first);
+    const essential = operations.loadEssentialSnapshots();
+    pending.resolve([session('session-1')]);
+    await expect(essential).resolves.toEqual({ state: 'loaded', failed: [] });
+    expect(deps.listSessions).toHaveBeenCalledOnce();
+
+    const failed = createDataLoaderOperations(
+      createLoaderDeps({
+        listQuestions: async () => {
+          throw new Error('question snapshot unavailable');
+        },
+      })
+    );
+    await expect(failed.loadEssentialSnapshots()).resolves.toEqual({
+      state: 'failed',
+      failed: ['pending questions'],
+    });
+
+    const staleSessions = deferred<Session[]>();
+    const stale = createDataLoaderOperations(
+      createLoaderDeps({ listSessions: () => staleSessions.promise })
+    );
+    const load = stale.loadEssentialSnapshots();
+    stale.invalidateWorkspace();
+    staleSessions.resolve([]);
+    await expect(load).resolves.toEqual({ state: 'superseded', failed: [] });
+  });
+
   it('preserves the selected draft agent when no session is active', async () => {
     const setAllAgents = vi.fn();
     const setPrimaryAgents = vi.fn();
@@ -380,10 +415,10 @@ describe('data loaders', () => {
       vi.fn()
     );
 
-    expect(setSelectedModel).toHaveBeenCalledWith({
-      providerID: 'openai',
-      modelID: 'gpt-server',
-    });
+    expect(setSelectedModel).toHaveBeenCalledWith(
+      { providerID: 'openai', modelID: 'gpt-server' },
+      { rememberLastSelected: false }
+    );
   });
 
   it('keeps a hidden selected model while an existing session is active', async () => {
@@ -557,6 +592,64 @@ describe('data loaders', () => {
       setStateSelectedModel({ ...sessionModel }, { sessionId: 'session-1', persistGlobal: false });
     }
 
+    it('inherits the last selected model in a new project without replacing the shared preference', async () => {
+      setStateSelectedModel(sessionModel);
+      setState('editorContext', 'workspacePath', '/new-project');
+      setStateSelectedModel(null, { persistGlobal: false });
+
+      await createStateBoundLoader().loadProviders();
+
+      expect(state.selectedModel).toEqual(sessionModel);
+      expect(getPersistedSelectedModel()).toEqual(sessionModel);
+      expect(state.lastSelectedModel).toEqual(sessionModel);
+    });
+
+    it('falls back to a visible model without forgetting the last choice for other projects', async () => {
+      const unavailable = { providerID: 'other-project-provider', modelID: 'model' };
+      setState('lastSelectedModel', unavailable);
+      setState('hiddenModels', ['openai:gpt-global']);
+
+      await createStateBoundLoader().loadProviders();
+
+      expect(state.selectedModel).toEqual(sessionModel);
+      expect(getPersistedSelectedModel()).toEqual(sessionModel);
+      expect(state.lastSelectedModel).toEqual(unavailable);
+    });
+
+    it.each(['project draft', 'active session'])(
+      'keeps an open %s unchanged when another instance selects a model',
+      async (composer) => {
+        setState('editorContext', 'workspacePath', '/existing-project');
+        if (composer === 'active session') selectSessionModel();
+        else setStateSelectedModel(globalModel);
+        const selected = composer === 'active session' ? sessionModel : globalModel;
+        const lastSelectedModel = {
+          ...(composer === 'active session' ? globalModel : sessionModel),
+          variant: 'high',
+        };
+
+        applyModelPreferencesSnapshot({ ...getModelPreferencesSnapshot(), lastSelectedModel });
+
+        expect(state.selectedModel).toEqual(selected);
+        expect(getPersistedSelectedModel()).toEqual(globalModel);
+        const loader = createStateBoundLoader();
+        await loader.loadProviders();
+        await loader.loadProviders();
+
+        expect(state.selectedModel).toEqual(selected);
+        expect(getPersistedSelectedModel()).toEqual(globalModel);
+        expect(state.lastSelectedModel).toEqual(lastSelectedModel);
+        if (composer === 'active session') {
+          expect(getSelectedModelForSession('session-1')).toEqual(sessionModel);
+        }
+
+        setPersistentShowSessionPicker(true);
+        expect(state.selectedModel).toEqual(globalModel);
+        setPersistentShowSessionPicker(false);
+        expect(state.selectedModel).toEqual(selected);
+      }
+    );
+
     it('keeps the global draft model when the session picker retains an active session', async () => {
       selectSessionModel();
       setPersistentShowSessionPicker(true);
@@ -660,7 +753,7 @@ describe('data loaders', () => {
     expect(setProviders).toHaveBeenLastCalledWith(providers, {}, []);
   });
 
-  it('retries only failed workspace catalogs and releases the reload lock after exhaustion', async () => {
+  it('retries only failed workspace catalogs and retains the send gate after exhaustion', async () => {
     const listAgents = vi
       .fn<DataLoaderDependencies['listAgents']>()
       .mockRejectedValueOnce(new Error('agents unavailable'))
@@ -684,7 +777,7 @@ describe('data loaders', () => {
     expect(listAgents).toHaveBeenCalledTimes(2);
     expect(listCommands).toHaveBeenCalledOnce();
     expect(listProviders).toHaveBeenCalledTimes(2);
-    expect(finishWorkspaceCatalogReload).toHaveBeenCalledOnce();
+    expect(finishWorkspaceCatalogReload).not.toHaveBeenCalled();
   });
 
   it('bounds workspace catalog reloads that do not settle', async () => {
@@ -711,7 +804,7 @@ describe('data loaders', () => {
       expect(listAgents).toHaveBeenCalledTimes(2);
       expect(listCommands).toHaveBeenCalledTimes(2);
       expect(listProviders).toHaveBeenCalledTimes(2);
-      expect(finishWorkspaceCatalogReload).toHaveBeenCalledOnce();
+      expect(finishWorkspaceCatalogReload).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -800,10 +893,10 @@ describe('data loaders', () => {
     expect(Object.keys(loadedProviders[1].models)).toEqual(['pro']);
     expect(setProviders).toHaveBeenCalledWith(loadedProviders, { other: 'pro' });
     expect(setProviderDefaults).toHaveBeenCalledWith({ other: 'pro' });
-    expect(setSelectedModel).toHaveBeenCalledWith({
-      providerID: 'openai',
-      modelID: 'gpt-5.5',
-    });
+    expect(setSelectedModel).toHaveBeenCalledWith(
+      { providerID: 'openai', modelID: 'gpt-5.5' },
+      { rememberLastSelected: false }
+    );
   });
 
   it('hydrates session statuses and usage-limit state for loaded sessions', async () => {
@@ -1319,7 +1412,7 @@ describe('data loaders', () => {
     );
 
     const staleLoad = operations.loadSessions();
-    const latestLoad = operations.loadSessions();
+    const latestLoad = operations.loadSessions({ fresh: true });
     second.resolve([session('latest')]);
     await latestLoad;
     first.resolve([session('stale')]);

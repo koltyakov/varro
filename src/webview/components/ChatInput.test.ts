@@ -6390,6 +6390,67 @@ describe('ChatInput', () => {
     expect(container?.querySelector('[aria-label="Retry send as Steer"]')).not.toBeNull();
   });
 
+  it('waits for restored inline-edit images to decode before accepting Enter', async () => {
+    setupModelState();
+    setState('providers', 0, 'models', 'gpt-4o', 'capabilities', 'vision', true);
+    setState('activeSessionId', 'session-1');
+    setState('messages', [
+      {
+        info: {
+          id: 'message-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-4o' },
+        },
+        parts: [],
+      },
+    ]);
+    let finishDecode: ((image: HTMLImageElement) => void) | undefined;
+    vi.mocked(imageLoading.loadImage).mockImplementationOnce(
+      () => new Promise((resolve) => (finishDecode = resolve))
+    );
+    const image = {
+      id: 'edit-img',
+      url: 'data:image/png;base64,restored',
+      mime: 'image/png',
+      filename: 'Image 1',
+      size: 10,
+    };
+    cleanup = render(() => ChatInput(), container!);
+    startEditingMessage('message-1', 'session-1', 'edited prompt', {
+      files: [],
+      images: [image],
+      terminalSelection: null,
+    });
+    await flushAsyncWork();
+
+    const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
+    const send = container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!;
+    expect(container!.querySelector('.chat-attachment-chip')).not.toBeNull();
+    expect(send.disabled).toBe(true);
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(editMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('edited prompt');
+
+    expect(finishDecode).toBeDefined();
+    finishDecode?.(document.createElement('img'));
+    await flushAsyncWork();
+    expect(send.disabled).toBe(false);
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+    expect(editMessageMock).toHaveBeenCalledWith(
+      'message-1',
+      'edited prompt',
+      expect.objectContaining({
+        queuedAttachments: expect.objectContaining({
+          clipboardImages: [expect.objectContaining(image)],
+        }),
+      })
+    );
+  });
+
   it('restores edited message context and restores draft context on cancel', async () => {
     setState('activeSessionId', 'session-1');
     setInputText('draft prompt');
@@ -6891,6 +6952,32 @@ describe('ChatInput', () => {
     expect(option?.disabled).toBe(true);
     option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(container?.querySelector('.workspace-popover')).not.toBeNull();
+  });
+
+  it('sends a new no-project chat in scratch without presenting it as an open folder', async () => {
+    setState('activeSessionId', null);
+    setState('editorContext', {
+      workspacePath: '/varro/scratch',
+      workspaceDirectory: '/varro/scratch',
+      workspaceFolders: [],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    cleanup = render(() => ChatInput(), container!);
+    expect(container?.querySelector('.workspace-picker-button')).toBeNull();
+    setInputText('Help me write notes');
+    sendMessageMock.mockResolvedValue(true);
+    await flushAsyncWork();
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+    expect(sendMessageMock).toHaveBeenCalledWith('Help me write notes', {
+      noReply: false,
+      queuedAttachments: undefined,
+      newSessionWorkspace: { scope: 'folder', directory: '/varro/scratch' },
+    });
   });
 
   it('switches an active blank workspace chat to a folder-scoped lazy chat', async () => {
@@ -9781,6 +9868,60 @@ describe('ChatInput', () => {
     } finally {
       fileReader.restore();
     }
+  });
+
+  it.each([20, 10_000])('does not reread %i loaded messages on keystrokes', async (count) => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    let infoReads = 0;
+    let partsReads = 0;
+    setState(
+      'messages',
+      Array.from({ length: count }, (_, index): MessageEntry => {
+        const id = `history-${index}`;
+        const entry =
+          index % 2 === 0
+            ? historyEntry(id, `Prompt ${index}`)
+            : assistantMessageEntry({ input: 100, output: 20 });
+        const info = { ...entry.info, id, time: { created: index, completed: index + 1 } };
+        const parts: TextPart[] = [
+          {
+            id: `text-${index}`,
+            messageID: id,
+            sessionID: 'session-1',
+            type: 'text',
+            text: `Content ${index}`,
+          },
+        ];
+        return {
+          get info() {
+            infoReads += 1;
+            return info;
+          },
+          get parts() {
+            partsReads += 1;
+            return parts;
+          },
+        };
+      })
+    );
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    expect(infoReads).toBeGreaterThan(0);
+    expect(partsReads).toBeGreaterThan(0);
+    infoReads = 0;
+    partsReads = 0;
+
+    const text = 'Keep this long conversation responsive while I type.';
+    for (let length = 1; length <= text.length; length += 1) {
+      enterComposerText(editor, text.slice(0, length));
+      await flushAsyncWork();
+    }
+
+    expect(inputText()).toBe(text);
+    expect(infoReads).toBe(0);
+    expect(partsReads).toBe(0);
   });
 
   it('does not inspect historical prompts while typing without images', async () => {

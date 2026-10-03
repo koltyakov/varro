@@ -17,6 +17,7 @@ import {
   controlRequest,
   createBootstrapProxy,
   createControl,
+  DEFAULT_MAX_GAP_MS,
   installObserver,
   inspectCapture,
   isSidebarContext,
@@ -98,7 +99,7 @@ test('CLI parses explicit sources and timing, rejecting ambiguous or unsafe argu
     ['status', '--control', 'a', '--control', 'b'],
     ['run', '--capture', 'x', '--output', 'x', '--max-gap-ms', 'NaN'],
     ['run', '--capture', 'x', '--output', 'x', '--start-timeout-ms', '0'],
-    ['run', '--capture', 'x', '--output', 'x', '--short-gap-ms', '501'],
+    ['run', '--capture', 'x', '--output', 'x', '--short-gap-ms', '1501'],
     ['run', '--capture', 'x', '--output', 'x', '--max-gap-ms', '2147483648'],
     ['run', '--capture', 'x', '--output', 'x', '--checkpoints', '2,1'],
     ['run', '--capture', 'x', '--output', 'x', '--checkpoints', '1,1'],
@@ -139,7 +140,7 @@ test('capture inspection identifies exact part and tool boundaries without expos
     })),
     [
       { afterEvents: 1, scheduledMs: 0, state: 'running' },
-      { afterEvents: 3, scheduledMs: 510, state: 'completed' },
+      { afterEvents: 3, scheduledMs: 1_510, state: 'completed' },
     ]
   );
   assert.equal(JSON.stringify(result).includes('private output'), false);
@@ -564,4 +565,16 @@ test('observer reports unavailable longtask instrumentation instead of a pass', 
   const result = context.varroAiStreamingObserver.stop();
   assert.equal(result.longtasksSupported, false);
   assert.equal(result.status, 'NEEDS_AI_REVIEW');
+});
+
+test('default long-gap cap lets replay show the Thinking row', async () => {
+  // A recorded wait longer than the transcript's Thinking reappearance delay must replay long
+  // enough for the row to paint, or playback hides a state that live sessions show.
+  const source = await readFile(
+    new URL('../src/webview/components/MessageList.tsx', import.meta.url),
+    'utf8'
+  );
+  const reappearDelay = Number(source.match(/const LOADING_ROW_REAPPEAR_DELAY_MS = (\d+);/)?.[1]);
+  assert.ok(Number.isFinite(reappearDelay));
+  assert.ok(DEFAULT_MAX_GAP_MS >= reappearDelay + 500);
 });

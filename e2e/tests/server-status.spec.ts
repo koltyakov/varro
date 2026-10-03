@@ -43,6 +43,35 @@ test('retries transient startup health without needing another server status eve
   await expect(page.getByText(/Failed to connect to OpenCode server/)).toHaveCount(0);
 });
 
+test('keeps failed essential catalogs gated and retries without restarting the server', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank&startupCatalogFailure');
+  await expect(
+    page.getByText('Failed to load OpenCode startup data: Could not load routing catalogs', {
+      exact: true,
+    })
+  ).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toHaveCount(0);
+  await page.evaluate(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('startupCatalogRecovered', '');
+    window.history.replaceState(null, '', url);
+  });
+  await page.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
+  await expect(page.getByText(/Failed to load OpenCode startup data/)).toHaveCount(0);
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const state = (window as Window & { __varroE2E?: { requests: Array<{ path: string }> } })
+          .__varroE2E;
+        return state?.requests.filter((request) => request.path === '/global/health').length ?? 0;
+      })
+    )
+    .toBe(2);
+});
+
 test('shows no-provider setup actions and triggers provider setup commands', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=no-providers');
 
@@ -89,7 +118,7 @@ test('recovers when the webview reloads while startup is still in progress', asy
   await expect(
     page.getByText('Startup completed without losing the restored session.', { exact: true })
   ).toBeVisible();
-  await expect(page.getByText('OpenCode could not start', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('OpenCode is unavailable', { exact: true })).toHaveCount(0);
 });
 
 test('recovers when the first startup connection attempt loses the race', async ({ page }) => {

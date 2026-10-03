@@ -153,7 +153,7 @@ test.describe('auto-scroll', () => {
       JSON.stringify(samples)
     ).toBe(true);
     await expect(page.locator('.permission-prompt')).toHaveCount(0);
-    await expect(page.locator('.assistant-active-activity-item')).toHaveCount(2);
+    await expect(page.locator('.assistant-active-activity-item')).toHaveCount(1);
     await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
   });
 
@@ -617,11 +617,9 @@ test.describe('auto-scroll', () => {
 
     await expect(activeReasoning).toBeVisible();
     const laterCommand = page.locator('[data-activity-part-id="command-after-streamed-reasoning"]');
-    await expect(laterCommand).toBeVisible();
+    // Reasoning owns the single preview slot until its text handoff frees it.
+    await expect(laterCommand).toHaveCount(0);
     await activeReasoning.evaluate(async (element) => {
-      await Promise.all(element.getAnimations().map((animation) => animation.finished));
-    });
-    await laterCommand.evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
     await waitForAnimationFrames(page, 35);
@@ -1651,7 +1649,7 @@ test.describe('auto-scroll', () => {
           remainingItems: element.querySelectorAll('.assistant-active-activity-item').length,
         };
       }, anchor.id);
-    expect(sawExit).toBe(true);
+    expect(sawExit).toBe(false);
     expect(remainingItems).toBe(0);
     expect(
       exitSamples.every((top) => top !== null && Math.abs(top - anchor.top) <= 1.5),
@@ -1919,7 +1917,7 @@ test.describe('auto-scroll', () => {
       '[data-activity-part-id^="message-first-turn-activity-command-"]'
     );
     await expect(summary).toContainText('Explored: 1 file');
-    await expect(activeItems).toHaveCount(2);
+    await expect(activeItems).toHaveCount(1);
     await activeItems.last().evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
@@ -1981,7 +1979,7 @@ test.describe('auto-scroll', () => {
       shuffledSamples.every((top) => top !== null && Math.abs(top - before) <= 1),
       JSON.stringify({ before, shuffledSamples })
     ).toBe(true);
-    await expect(activeItems).toHaveCount(2);
+    await expect(activeItems).toHaveCount(1);
 
     const groupedSamples = await completeAndSample([0, 1]);
     expect(
@@ -2031,7 +2029,7 @@ test.describe('auto-scroll', () => {
       }
     });
 
-    await expect(activeItems).toHaveCount(2);
+    await expect(activeItems).toHaveCount(1);
     await activeItems.last().evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
@@ -2153,7 +2151,7 @@ test.describe('auto-scroll', () => {
       }
     });
     const activeItems = page.locator('.assistant-active-activity-item');
-    await expect(activeItems).toHaveCount(2);
+    await expect(activeItems).toHaveCount(1);
     await page.waitForTimeout(1_250);
 
     await page.evaluate(() => {
@@ -2183,6 +2181,10 @@ test.describe('auto-scroll', () => {
           time: { start: Date.now() - 1_000, end: Date.now() },
         };
         harnessWindow.__varroE2E?.updateMessagePart?.(part);
+        window.postMessage(
+          { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
+          '*'
+        );
       }
     });
 
@@ -2311,7 +2313,7 @@ test.describe('auto-scroll', () => {
       }
     });
 
-    await expect(activeItems).toHaveCount(2);
+    await expect(activeItems).toHaveCount(1);
     await expect
       .poll(() =>
         getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
@@ -2364,7 +2366,7 @@ test.describe('auto-scroll', () => {
       leadingExitSamples.every((top) => top !== null && Math.abs(top - anchor.top) <= 0.1),
       JSON.stringify({ anchor, leadingExitSamples })
     ).toBe(true);
-    await expect(activeItems).toHaveCount(2);
+    await expect(activeItems).toHaveCount(1);
     const collapseAnchor = await getVisibleMessageAnchor(list);
     const exploredTop = await page
       .locator('.assistant-activity-summary')

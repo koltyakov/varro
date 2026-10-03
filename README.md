@@ -151,7 +151,7 @@ Varro selects and remembers a local port by default with `varro.server.port: "au
 
 Attachment to a different OS user's listener, or one whose owner cannot be verified, requires confirmation before sessions or events are loaded, even with supplied credentials. This prevents accidental attachment; it does not secure an unauthenticated server against other clients. See [ownership and migration](docs/server-ownership.md).
 
-The status bar shows the active OpenCode version and available updates. On macOS and Linux, `varro.server.autoUpdate` installs updates within the installed CLI family: `@opencode/cli` for v2 or `opencode-ai` for v1. Updating v1 does not migrate it to v2. Native Windows does not replace the CLI in the background. It shows an update prompt, waits for active work to finish, and stops a Varro-managed server before opening the update command so Windows releases its lock on `opencode.exe`. Stop a separately managed server yourself before updating.
+The status bar shows the active OpenCode version and available updates. `varro.server.autoUpdate` installs updates within the installed CLI family: `@opencode/cli` for v2 on Windows, macOS, and Linux, or `opencode-ai` for v1 on macOS and Linux. Updating v1 does not migrate it to v2. Native Windows v2 runs the resolved CLI's `update <latest-version>` command in the background and verifies the installed version; server restarts still wait for active work to finish and require Varro ownership. Native Windows v1 shows an update prompt, waits for active work to finish, and stops a Varro-managed server before opening the update command so Windows releases its lock on `opencode.exe`. Stop a separately managed server yourself before a prompted Windows update.
 
 Varro reloads global OpenCode configuration when OpenCode is idle. Changes to project configuration may require `Varro: Restart Server`. This command waits for active work and only restarts a server managed by Varro. Restart a manually launched server in its terminal.
 
@@ -159,7 +159,7 @@ Varro reloads global OpenCode configuration when OpenCode is idle. Changes to pr
 
 - [VS Code](https://code.visualstudio.com/) or [VSCodium](https://vscodium.com/) 1.120 or newer
 - [Node.js](https://nodejs.org/) 22.22.2+ on Node 22, or Node 24.15.0+
-- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or [v1 CLI](https://opencode.ai/docs/) 1.16.0+, on `PATH` or configured through `varro.server.command`. Tested with v2 2.0.21 and v1 1.18.34
+- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or [v1 CLI](https://opencode.ai/docs/) 1.16.0+, on `PATH` or configured through `varro.server.command`. Tested with v2 2.0.22 and v1 1.18.34
 - A trusted, non-virtual workspace. Remote workspaces run Varro and OpenCode on the remote extension host
 
 ## Documentation

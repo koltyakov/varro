@@ -260,6 +260,7 @@ export function hasActivePermission() {
 }
 
 export function isSessionAwaitingInput(sessionId: string) {
+  if (state.permissions.length === 0 && state.questions.length === 0) return false;
   const rootId = getSessionTreeRootId(sessionId) || sessionId;
   const sessionIds = new Set(getSessionTreeIds(rootId));
   return [

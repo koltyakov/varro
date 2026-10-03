@@ -2,6 +2,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import packageJson from '../../package.json';
 
+const scratchMock = vi.hoisted(() => ({
+  prepare: vi.fn(() => Promise.resolve()),
+  folders: undefined as { uri: { fsPath: string } }[] | undefined,
+}));
+vi.mock('./varro-state-paths', async (importOriginal) => ({
+  ...(await importOriginal()),
+  prepareVarroScratchDirectory: scratchMock.prepare,
+}));
+
 const { disposeProcessInspectionMock } = vi.hoisted(() => ({
   disposeProcessInspectionMock: vi.fn(),
 }));
@@ -24,7 +33,7 @@ const {
   sweepStaleInjectedConfigDirectoriesMock,
 } = vi.hoisted(() => ({
   envMock: { appName: 'Visual Studio Code', uriScheme: 'vscode' },
-  executeCommandMock: vi.fn(() => Promise.resolve()),
+  executeCommandMock: vi.fn((_command: string, ..._args: unknown[]) => Promise.resolve()),
   getCommandsMock: vi.fn(() => Promise.resolve([] as string[])),
   getMock: vi.fn((key: string, fallback?: unknown) => {
     switch (key) {
@@ -70,6 +79,7 @@ const {
       | null
       | ((context: {
           workspacePath: string | null;
+          workspaceFolders?: { name: string; path: string }[];
           activeFile: null;
           selection: null;
           diagnostics: never[];
@@ -103,8 +113,12 @@ const {
 }));
 
 vi.mock('vscode', () => ({
+  version: '1.110.0',
   env: envMock,
   workspace: {
+    get workspaceFolders() {
+      return scratchMock.folders;
+    },
     getConfiguration: vi.fn(() => ({ get: getMock })),
     onDidChangeConfiguration: onDidChangeConfigurationMock,
   },
@@ -199,6 +213,7 @@ describe('extension activation', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    executeCommandMock.mockImplementation(() => Promise.resolve());
     latestContextProviderInstance.current = null;
     contextChangeCallback.current = null;
     latestServerInstance.current = null;
@@ -207,6 +222,8 @@ describe('extension activation', () => {
     envMock.uriScheme = 'vscode';
     getMock.mockImplementation(readDefaultConfig);
     sweepStaleInjectedConfigDirectoriesMock.mockResolvedValue(undefined);
+    scratchMock.folders = undefined;
+    scratchMock.prepare.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -238,6 +255,10 @@ describe('extension activation', () => {
       secrets,
       false
     );
+    expect(scratchMock.prepare).toHaveBeenCalledOnce();
+    expect(scratchMock.prepare.mock.invocationCallOrder[0]).toBeLessThan(
+      openCodeServerMock.mock.invocationCallOrder[0]!
+    );
   });
 
   it('passes global state to the sidebar provider for shared model preferences', async () => {
@@ -266,6 +287,59 @@ describe('extension activation', () => {
       undefined,
       secrets
     );
+  });
+
+  it('does not prepare scratch when a project is open', async () => {
+    scratchMock.folders = [{ uri: { fsPath: '/repo' } }];
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    expect(scratchMock.prepare).not.toHaveBeenCalled();
+  });
+
+  it('prepares scratch before rescoping after the last folder closes', async () => {
+    scratchMock.folders = [{ uri: { fsPath: '/repo' } }];
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    contextChangeCallback.current?.({
+      workspacePath: '/varro/scratch',
+      workspaceFolders: [],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    await vi.waitFor(() =>
+      expect(latestServerInstance.current?.rescopeEventStream).toHaveBeenCalledWith(
+        '/varro/scratch'
+      )
+    );
+    expect(scratchMock.prepare).toHaveBeenCalledOnce();
+    expect(scratchMock.prepare.mock.invocationCallOrder[0]).toBeLessThan(
+      latestServerInstance.current!.rescopeEventStream.mock.invocationCallOrder[0]!
+    );
+  });
+
+  it('fails activation rather than inheriting a cwd if scratch cannot be created', async () => {
+    scratchMock.prepare.mockRejectedValueOnce(new Error('Scratch is not writable'));
+    const { activate } = await import('./extension');
+    await expect(
+      activate({
+        extensionUri: {},
+        extension: { id: 'koltyakov.varro' },
+        workspaceState: {},
+        subscriptions: [],
+      } as never)
+    ).rejects.toThrow('Scratch is not writable');
+    expect(openCodeServerMock).not.toHaveBeenCalled();
   });
 
   it.each([false, true])(
@@ -595,6 +669,57 @@ describe('extension activation', () => {
     );
   });
 
+  it.each(['workbench.view.extension.varro', 'varro.chat.focus', 'vscode.moveViews'])(
+    'finishes first-run activation while %s waits for activation',
+    async (blockedCommand) => {
+      vi.useFakeTimers();
+      if (blockedCommand === 'vscode.moveViews') {
+        envMock.appName = 'Cursor';
+        envMock.uriScheme = 'cursor';
+        getCommandsMock.mockResolvedValueOnce(['vscode.moveViews']);
+      }
+      let releaseCommand!: () => void;
+      const commandPending = new Promise<void>((resolve) => {
+        releaseCommand = resolve;
+      });
+      executeCommandMock.mockImplementation((command: string) =>
+        command === blockedCommand ? commandPending : Promise.resolve()
+      );
+      const globalState = {
+        get: vi.fn(() => false),
+        update: vi.fn(() => Promise.resolve()),
+      };
+      const { activate } = await import('./extension');
+      let activated = false;
+      const activation = activate({
+        extensionUri: {},
+        extension: { id: 'koltyakov.varro' },
+        globalState,
+        workspaceState: {},
+        subscriptions: [],
+      } as never).then(() => {
+        activated = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(50);
+      const finishedBeforeCommand = activated;
+      expect(executeCommandMock.mock.calls.some(([command]) => command === blockedCommand)).toBe(
+        true
+      );
+      expect(globalState.update).not.toHaveBeenCalledWith('layout.initialSidebarReveal.v1', true);
+      releaseCommand();
+      await activation;
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(finishedBeforeCommand).toBe(true);
+      expect(globalState.update).toHaveBeenCalledWith('layout.initialSidebarReveal.v1', true);
+      expect(
+        latestSidebarProviderInstance.current?.startProviderFileObservation
+      ).toHaveBeenCalledOnce();
+      executeCommandMock.mockImplementation(() => Promise.resolve());
+    }
+  );
+
   it('reveals the secondary sidebar once after installation in VS Code', async () => {
     const globalState = {
       get: vi.fn(() => false),
@@ -612,12 +737,44 @@ describe('extension activation', () => {
 
     expect(executeCommandMock).toHaveBeenCalledWith('workbench.view.extension.varro');
     expect(executeCommandMock).toHaveBeenCalledWith('varro.chat.focus');
-    expect(executeCommandMock.mock.calls.slice(1, 3)).toEqual([
+    expect(executeCommandMock.mock.calls.filter(([command]) => command !== 'setContext')).toEqual([
       ['workbench.view.extension.varro'],
       ['varro.chat.focus'],
     ]);
     expect(globalState.update).toHaveBeenCalledWith('layout.initialSidebarReveal.v1', true);
   });
+
+  it.each(['workbench.view.extension.varro', 'varro.chat.focus'])(
+    'does not remember the initial reveal when %s fails',
+    async (failedCommand) => {
+      executeCommandMock.mockImplementation((command: string) =>
+        command === failedCommand
+          ? Promise.reject(new Error('view unavailable'))
+          : Promise.resolve()
+      );
+      const globalState = {
+        get: vi.fn(() => false),
+        update: vi.fn(() => Promise.resolve()),
+      };
+      const { activate } = await import('./extension');
+
+      await activate({
+        extensionUri: {},
+        extension: { id: 'koltyakov.varro' },
+        globalState,
+        workspaceState: {},
+        subscriptions: [],
+      } as never);
+
+      await vi.waitFor(() => {
+        expect(loggerMock.warn).toHaveBeenCalledWith(
+          'Failed to reveal Varro after installation: view unavailable'
+        );
+      });
+      expect(globalState.update).not.toHaveBeenCalledWith('layout.initialSidebarReveal.v1', true);
+      expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:activated', true);
+    }
+  );
 
   it('does not reveal the sidebar again after the initial activation', async () => {
     const globalState = {

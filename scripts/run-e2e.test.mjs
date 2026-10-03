@@ -25,7 +25,7 @@ test('E2E startup avoids an occupied default port and preserves explicit and pla
     if (error.code !== 'EADDRINUSE') throw error;
   }
 
-  for (const mode of ['', 'raster', 'playback']) {
+  for (const mode of ['', 'raster', 'diagnostics', 'playback']) {
     for (const explicitPort of [undefined, '4174']) {
       const env = {
         ...process.env,
@@ -54,6 +54,31 @@ test('E2E startup avoids an occupied default port and preserves explicit and pla
         assert.match(stderr, /E2E port 4174 is occupied; using \d+\./);
       }
       assert.ok(report.suites.length > 0);
+      const titles = [];
+      const collectTitles = (suite) => {
+        for (const spec of suite.specs ?? []) titles.push(spec.title);
+        for (const child of suite.suites ?? []) collectTitles(child);
+      };
+      for (const suite of report.suites) collectTitles(suite);
+      assert.equal(titles.includes('reported short transcript geometry'), mode === 'diagnostics');
+      assert.equal(
+        titles.includes('static native wheel raster diagnostic'),
+        mode === 'raster' || mode === 'diagnostics'
+      );
+      assert.equal(
+        titles.includes(
+          'slowly scrolls a cold large session through every history page without jumps'
+        ),
+        mode === ''
+      );
+      if (mode === 'diagnostics') {
+        assert.equal(report.config.workers, 1);
+        assert.equal(report.config.projects[0].retries, 0);
+        assert.match(
+          report.config.outputDir ?? report.config.projects[0].outputDir,
+          /playwright-diagnostics$/
+        );
+      }
     }
   }
 });

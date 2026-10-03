@@ -10,6 +10,19 @@ This guide covers the current Varro workflow inside VS Code.
 
 VS Code forks have limited support. See [VS Code Fork Compatibility](vscode-forks.md) for details.
 
+### Chat without opening a project
+
+Varro also works in an empty VS Code window. It uses a persistent `scratch/` folder
+under its [per-user state root](#local-state-files) for commands and relative paths.
+No-project chats have their own directory-scoped history. Files in scratch survive
+window reloads and are shared by empty windows for the same OS user on the same host.
+
+The agent receives an explicit system instruction that no project is open and that
+scratch is not a project root. Other repositories are not automatically in scope.
+Normal tool permissions still apply; this mode is not a filesystem sandbox.
+Opening a project restores the usual workspace scope. Project AGENTS.md initialization
+requires an open project.
+
 ## First Run And Connection
 
 Install the recommended [OpenCode v2 CLI](https://opencode.ai/v2/docs/) on macOS, Linux, or WSL:
@@ -50,7 +63,7 @@ For WSL, open the project in a VS Code WSL window, then install and authenticate
 
 | Version | Minimum supported | Tested with this release | npm package |
 | --- | --- | --- | --- |
-| v2, recommended | 2.0.5 | 2.0.21 | `@opencode/cli` |
+| v2, recommended | 2.0.5 | 2.0.22 | `@opencode/cli` |
 | v1, still supported | 1.16.0 | 1.18.34 | `opencode-ai` |
 
 To keep using v1, retain your installation or run `npm install -g opencode-ai`. Set `varro.server.command` to its executable path. Setting it to `opencode` selects v1 only if that command resolves to a v1 installation. Varro detects the API automatically.
@@ -59,7 +72,7 @@ Both package families now provide the same `opencode` command. When switching fr
 
 If you previously used v1, installing v2 may leave Varro connected to the running v1 server. Check that `varro.server.command` points to the v2 executable if you set it explicitly. Let active work finish, then run `Varro: Restart Server` from the Command Palette. This is also needed after changing `varro.server.command`. The command only restarts a Varro-managed server; restart a manually managed server in its own terminal using the v2 executable. Confirm that Varro's status bar shows OpenCode v2 after reconnecting.
 
-Updates stay within the installed CLI family. For an npm installation, use `npm install -g @opencode/cli@latest` for v2 or `npm install -g opencode-ai@latest` for v1. Use the original installer for other installation methods. `varro.server.autoUpdate` does not switch v1 users to v2. Native Windows uses a prompt instead of replacing a running binary in the background; standalone installations should use the current download from their version's install page.
+Updates stay within the installed CLI family. For an npm installation, use `npm install -g @opencode/cli@latest` for v2 or `npm install -g opencode-ai@latest` for v1. Use the original installer for other installation methods. `varro.server.autoUpdate` does not switch v1 users to v2. Native Windows v2 supports background updates using the resolved CLI's `update <latest-version>` command; Windows v1 still uses a prompt. Standalone installations should use the current download from their version's install page if the CLI cannot determine its installation method.
 
 Supported v1 configuration remains accepted by v2. Native v2 configuration uses fields such as `agents`, `permissions`, and `mcp.servers`; v1 cannot read those native-v2-only shapes. Keep compatible configuration if switching between versions. Plugins require a v2 port. See the [upstream migration guide](https://opencode.ai/v2/docs/migrate-v1/).
 
@@ -105,7 +118,7 @@ Varro uses one per-user state root for files shared across editor windows and di
 - Linux: `$XDG_STATE_HOME/varro/`, defaulting to `~/.local/state/varro/`
 
 Relative or empty `LOCALAPPDATA` and `XDG_STATE_HOME` values are ignored for new paths.
-The root contains `servers/` for server ownership records, `opencode-v2/` for
+The root contains `scratch/` for no-project files, `servers/` for server ownership records, `opencode-v2/` for
 `<sessionID>.json` annotations and session locks, and `provider-quota-v2/` for shared
 quota snapshots and polling locks. Annotation JSON includes `generationTiming`,
 the text/reasoning boundaries used with OpenCode's token counts to estimate tok/s.
@@ -337,7 +350,9 @@ Define primary agents in OpenCode configuration. Varro lists them in the agent p
 
 Varro automatically adds its read-only `Ask` primary agent to the managed OpenCode runtime. This does not modify `opencode.json`; if inherited, global, or project OpenCode configuration already defines an agent named `ask` (case-insensitive), Varro uses that definition instead.
 
-Runtime injection requires Varro to launch the server itself. When Varro attaches to an existing OpenCode v2 shared service or an external server, it cannot inject Ask. OpenCode's shared-service API does not support runtime agent registration. Agents already configured on the server remain available.
+Runtime injection requires Varro to launch the server itself. If an OpenCode upgrade replaces a Varro-managed service without its runtime config, Varro detects the missing Ask agent and safely relaunches the owned server with that config. Startup restores it before publishing the agent catalog when the server is idle. Active sessions, pending questions, and pending approvals defer recovery until work finishes. User-defined Ask agents and caller-provided configuration are preserved; global and project config files are not modified.
+
+When Varro attaches to an unmanaged OpenCode v2 shared service or an external server, it cannot inject Ask. OpenCode's shared-service API does not support runtime agent registration. Agents already configured on the server remain available.
 
 Choose the config scope based on where you want the agent to appear:
 
@@ -665,6 +680,8 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - A jump-to-latest button when you scroll away from the bottom of the chat; clicking it returns to the newest message and re-enables auto-follow
 - Completed turn summaries expose `Copy final response` and `Fork chat from here` actions. Copying uses the final assistant text from that turn.
 
+Hold `Option`/`Alt` to show turn numbers and message timestamps. While the chat has focus on Windows, bare `Alt` does not activate the native menu bar.
+
 Hold `Alt` or `Option` while viewing a sufficiently long final answer to reveal its read-mode action. Read mode opens the rendered answer in a focused dialog; close it with `Escape`, the close button, or a click outside the content.
 
 Editable user messages expose an edit action. Sending the replacement removes that user message and the later conversation history before resending, but it does not restore files changed in the workspace. Use session `/undo` or `/revert` when you need OpenCode's revert workflow instead.
@@ -700,7 +717,7 @@ Server:
 - `varro.server.autoStart` - auto-start `opencode serve` when Varro first needs it; defaults to `true` and is marked deprecated/debug-only in VS Code
 - `varro.server.port` - `"auto"` selects and remembers a local port; an integer from 1 through 65535 selects a fixed endpoint without fallback. Reload the VS Code window after changing it
 - `varro.server.command` - optional path to the OpenCode CLI executable. Empty prefers `opencode2`, then `opencode`; use your v1 executable's path to keep v1 selected
-- `varro.server.autoUpdate` - automatically install updates within the installed CLI family in the background on macOS and Linux. V1 stays on v1; v2 stays on v2. Native Windows uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Failed automatic updates show tailored recovery guidance.
+- `varro.server.autoUpdate` - automatically install updates within the installed CLI family in the background: v2 on Windows, macOS, and Linux; v1 on macOS and Linux. V1 stays on v1; v2 stays on v2. Native Windows v2 runs `update <latest-version>` through the resolved CLI and verifies the installed version without stopping the server first. Server restarts still wait for active work and require Varro ownership. Native Windows v1 uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a prompted Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Failed automatic updates show tailored recovery guidance.
 
 Chat view:
 
@@ -730,7 +747,7 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install v2 with `npm install -g @opencode/cli` on macOS, Linux, or WSL, or download the native Windows CLI from the [v2 install page](https://opencode.ai/v2/docs/). V1 remains available with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.34` and v2 `2.0.21`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
+- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.34` and v2 `2.0.22`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
 - OpenCode v2 authentication: Varro captures managed-server credentials automatically and redacts them from output. Existing local services use their registered credentials. An externally managed server can also use `OPENCODE_SERVER_PASSWORD` and `OPENCODE_SERVER_USERNAME` from the extension host's environment.
 - OpenCode v2 session settings: Varro stores mutable session annotations locally because the released v2 API cannot update session metadata. Session sharing is unavailable through this API, so its menu action is disabled. Existing v1-format configuration remains supported.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.

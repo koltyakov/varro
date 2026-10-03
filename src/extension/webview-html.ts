@@ -25,6 +25,21 @@ body { background: var(--vscode-sideBar-background, #181818); }
   font-family: var(--vscode-font-family, system-ui, sans-serif);
   color: var(--vscode-foreground, #cccccc);
 }
+.varro-startup-logo {
+  width: clamp(64px, 12vw, 88px);
+  height: auto;
+  filter: grayscale(1);
+  user-select: none;
+  -webkit-user-drag: none;
+  animation: varro-startup-logo-pulse 1.5s ease-in-out infinite;
+}
+@keyframes varro-startup-logo-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .varro-startup-logo { animation: none; }
+}
 .varro-startup-dots { display: flex; gap: 8px; }
 .varro-startup-dot {
   width: 8px;
@@ -48,34 +63,47 @@ const LOADING_MARKUP = `<div class="varro-startup-loading" role="status" aria-la
     </div>
   </div>`;
 
-export function renderWebviewLoadingHtml() {
+type StartupLogoOptions = {
+  logoUri: string;
+  cspSource: string;
+};
+
+function renderStartupMarkup(logoUri: string) {
+  if (!logoUri) return LOADING_MARKUP;
+  return `<div class="varro-startup-loading" role="status" aria-label="Loading workspace">
+    <img class="varro-startup-logo" src="${escapeHtmlAttribute(logoUri)}" width="256" height="256" alt="Varro" draggable="false" fetchpriority="high" />
+  </div>`;
+}
+
+export function renderWebviewLoadingHtml(options?: StartupLogoOptions) {
   return /*html*/ `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${options?.cspSource ?? ''} data:; style-src 'unsafe-inline';" />
   <title>Varro</title>
   <style>${LOADING_STYLES}</style>
 </head>
 <body>
-  <div id="root">${LOADING_MARKUP}</div>
+  <div id="root">${renderStartupMarkup(options?.logoUri ?? '')}</div>
 </body>
 </html>`;
 }
 
-export function renderEditorWebviewPlaceholderHtml() {
+export function renderEditorWebviewPlaceholderHtml(options?: StartupLogoOptions) {
   return /*html*/ `<!DOCTYPE html>
 <html lang="en" style="height:100%;background:var(--vscode-editor-background,#1e1e1e)">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${options?.cspSource ?? ''} data:; style-src 'unsafe-inline';" />
   <style>${LOADING_STYLES}
     body { background: var(--vscode-editor-background, #1e1e1e); }
   </style>
 </head>
 <body>
-  <div id="root">${LOADING_MARKUP}</div>
+  <div id="root">${renderStartupMarkup(options?.logoUri ?? '')}</div>
 </body>
 </html>`;
 }
@@ -89,6 +117,9 @@ export function renderWebviewHtml(
   const serializedInitialState = serializeForInlineScript(initialState);
   const scriptUri = appendCacheKey(assets.scriptUri, assets.version);
   const cssUri = appendCacheKey(assets.cssUri, assets.version);
+  const logoPreload = initialState.emptyStateLogoUri
+    ? `\n  <link rel="preload" as="image" href="${escapeHtmlAttribute(initialState.emptyStateLogoUri)}" fetchpriority="high" />`
+    : '';
   const serializedImportMap = serializeForInlineScript({
     imports: { [assets.scriptUri]: scriptUri },
   });
@@ -108,11 +139,11 @@ export function renderWebviewHtml(
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}' ${cspSource}; style-src 'unsafe-inline' ${cspSource}; font-src data:;" />
   <title>Varro</title>
-  <style>${LOADING_STYLES}${editorLoadingStyles}</style>
+  <style>${LOADING_STYLES}${editorLoadingStyles}</style>${logoPreload}
   <link rel="stylesheet" href="${escapeHtmlAttribute(cssUri)}" />
 </head>
 <body>
-  <div id="root">${LOADING_MARKUP}</div>
+  <div id="root">${renderStartupMarkup(initialState.emptyStateLogoUri)}</div>
   <script nonce="${nonce}">
     (function() {
       var active = true;

@@ -428,6 +428,21 @@ describe('bordered message projection', () => {
     ).toBe(6);
   });
 
+  it('includes the summary margin after a bordered block in flow spacing', () => {
+    const tray = { startsBordered: true, endsBordered: true };
+    const summary = { startsBordered: false, endsBordered: false, startsSummary: true };
+
+    // Removing a tray above its summary also removes the summary's 4 px margin. A collapse
+    // reserve that omits it lets the browser clamp a bottom-pinned transcript backward.
+    expect(getAssistantFlowSpacingSize([tray, summary], 8, 4)).toBe(12);
+    expect(
+      getAssistantFlowSpacingSize([tray, summary], 8, 4) -
+        getAssistantFlowSpacingSize([summary], 8, 4)
+    ).toBe(12);
+    expect(getAssistantFlowSpacingSize([summary, tray], 8, 4)).toBe(8);
+    expect(getAssistantFlowSpacingSize([tray, summary], 8)).toBe(8);
+  });
+
   it('excludes delayed activity from a visible row boundary', () => {
     const runningPart: Part = {
       ...toolPart('running-1', 'assistant-1'),
@@ -922,6 +937,33 @@ describe('MessageList history pagination', () => {
     harness.animationFrames.restore();
   });
 
+  it('bounds measurement work when history arrives after input becomes idle', async () => {
+    const buildMessages = (prefix: string, messageCount: number) =>
+      Array.from({ length: messageCount }, (_, index) => {
+        const messageId = `${prefix}-${index}`;
+        return {
+          info: index % 2 === 0 ? userMessage(messageId) : assistantMessage(messageId),
+          parts: [{ ...textPart(`${messageId}-text`, 'History row'), messageID: messageId }],
+        };
+      });
+    // SAFETY: The fixture uses the complete SDK message/part shapes consumed by pagination.
+    const olderPage = buildMessages('older', 200) as Awaited<
+      ReturnType<typeof client.session.messages>
+    >;
+    const harness = await mountDeferredHistory(buildMessages('current', 200), undefined, olderPage);
+    await harness.startLoad(0);
+    // Slow page responses must still have one history owner, not a generic anchor per mounted row.
+    await vi.advanceTimersByTimeAsync(1000);
+    const rectSpy = vi.mocked(HTMLElement.prototype.getBoundingClientRect);
+    rectSpy.mockClear();
+    await harness.resolveLoad();
+
+    expect(rectSpy.mock.calls.length).toBeLessThan(500);
+    expect(container?.querySelector('.interactive-list-track.virtualized')).not.toBeNull();
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
+    harness.animationFrames.restore();
+  });
+
   it('does not publish a cached history prepend inside the native scroll event', async () => {
     // SAFETY: The fixture provides the complete domain shape read by this statement.
     const olderPage = [
@@ -1205,6 +1247,8 @@ describe('MessageList history pagination', () => {
     await vi.advanceTimersByTimeAsync(100);
     hydratedRowRectReads = 0;
     animationFrames.flush(performance.now());
+    await Promise.resolve();
+    // Hydration registers a mount measurement, then the list batches it before the next paint.
     await Promise.resolve();
     const hydratedRow = container?.querySelector<HTMLElement>('[data-msg-id="older-49"]');
     expect(hydratedRow).toBeInstanceOf(HTMLDivElement);

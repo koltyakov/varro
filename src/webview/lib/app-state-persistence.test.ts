@@ -99,6 +99,23 @@ describe('composer draft persistence', () => {
     expect(createAppState().state.selectedModel).toBeNull();
   });
 
+  it('loads the shared last model separately from the project and session choices', () => {
+    const lastSelectedModel = { providerID: 'openai', modelID: 'sol', variant: 'high' };
+    // SAFETY: The fixture provides the host-owned initial webview state.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/new-project',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      modelPreferences: { lastSelectedModel },
+    };
+    const appState = createAppState();
+    expect(appState.state.lastSelectedModel).toEqual(lastSelectedModel);
+    expect(appState.state.selectedModel).toBeNull();
+  });
+
   it('restores draft text when app state is recreated', () => {
     const first = createAppState();
     first.setInputText('Keep this draft');

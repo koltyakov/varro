@@ -138,7 +138,7 @@ import {
 } from '../session/session-send';
 import { SessionStatusOperations } from '../session/session-status';
 import { resolveMessagesSelectedModel, SessionSyncOperations } from '../session/session-sync';
-import { createTodoSyncOperations, resetTodoSync } from '../todo-sync';
+import { createTodoSyncOperations } from '../todo-sync';
 import { asRecord, isString } from '../../lib/runtime-values';
 
 const client = clientModule.client;
@@ -1062,7 +1062,7 @@ export function resetWorkspaceDerivedState(options?: { preserveWorkspaceCatalog?
     appStore.setState('workspaceStatuses', []);
     appStore.setState('workspaceStatusSummary', reconcile({ entries: [] }));
     appStore.setState('draftSelectedMcps', null);
-    routingStore.setSelectedAgent(routingStore.getPersistedSelectedAgent(), {
+    routingStore.setSelectedAgent(null, {
       persistGlobal: false,
     });
     routingStore.setSelectedModel(routingStore.getPersistedSelectedModel(), {
@@ -1109,6 +1109,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let restoredPermissionsClassified = false;
   const permissionDecisionReferencesByTree = new Map<string, AutoApproveJudgeReference[]>();
   const permissionJudgeAttempts = new Map<string, PermissionJudgeAttempt>();
+  const pendingPermissionSnapshot = new Map<string, Permission>();
+  let permissionSynchronization: { ready: Promise<void>; complete: Promise<void> } | null = null;
+  let initializationOperation: Promise<void> | null = null;
+  let startupStatusSnapshot: { workspace: number; snapshot: SessionStatusSnapshot } | null = null;
   const permissionSessionSyncs = new Map<string, Promise<void>>();
   const hiddenRestoredPermissions = new Map<
     string,
@@ -1148,11 +1152,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   );
 
   const todoSyncOperations = createTodoSyncOperations({
-    loadSessionTodos: (sessionId) =>
-      client.session.todos(sessionId, { directory: getSessionDirectory(sessionId) }),
+    loadSessionTodos: (sessionId, signal) =>
+      client.session.todos(sessionId, { directory: getSessionDirectory(sessionId), signal }),
   });
 
-  const { syncTodosForSession, syncTodosFromMessages, handoffTodosToMessages } = todoSyncOperations;
+  const { resetTodoSync, syncTodosForSession, syncTodosFromMessages, handoffTodosToMessages } =
+    todoSyncOperations;
 
   const sessionStatusOperations = new SessionStatusOperations({
     pendingAbortRetryAttempts,
@@ -1356,7 +1361,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           if (!permissionAutomationOwner) return;
           if (appStore.state.permissions.some((permission) => permission.id === permissionId))
             return;
-          void syncPendingPermissions().catch((err) => logError('permission.actionable', err));
+          void syncPendingPermissions({ fresh: true }).catch((err) =>
+            logError('permission.actionable', err)
+          );
         },
         queueInterruptedSessionRecovery: (claimId, sessionIds) =>
           connectionBootstrapOperations.queueInterruptedSessionRecovery(claimId, sessionIds),
@@ -1508,9 +1515,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           : undefined,
       getActiveSessionId: () => appStore.state.activeSessionId,
       getSessionStatuses: () => appStore.state.sessionStatus,
-      loadSessions,
-      hydrateSessionStatuses: hydratePolledSessionStatuses,
-      loadQuestions,
+      loadSessions: async () => {
+        await loadSessions();
+      },
+      hydrateSessionStatuses: async () => {
+        await hydratePolledSessionStatuses();
+      },
+      loadQuestions: async () => {
+        await loadQuestions();
+      },
       loadPendingPermissions: syncPendingPermissions,
       syncSessionMessages: syncPolledSessionMessages,
       logError,
@@ -1586,13 +1599,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function loadCurrentSessionStatusSnapshot(): Promise<SessionStatusSnapshot> {
     const generation = workspaceGeneration;
+    if (initializationOperation && startupStatusSnapshot?.workspace === generation)
+      return startupStatusSnapshot.snapshot;
     const snapshot = await statusSnapshots.load();
     if (generation !== workspaceGeneration) throw new WorkspaceLoadInvalidatedError();
     return snapshot;
   }
 
-  async function hydratePolledSessionStatuses(): Promise<void> {
-    await hydrateSessionStatusesWithDependencies(
+  async function hydratePolledSessionStatuses(): Promise<boolean> {
+    return await hydrateSessionStatusesWithDependencies(
       {
         loadSessionStatuses: () => client.session.status(),
         loadSessionStatusSnapshot: loadCurrentSessionStatusSnapshot,
@@ -1608,7 +1623,44 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     return recheckSessionStatusWithState(sessionId);
   }
 
-  async function syncPendingPermissions() {
+  function syncPendingPermissions(options?: {
+    waitForAutomation?: boolean;
+    fresh?: boolean;
+  }): Promise<void> {
+    if (permissionSynchronization && !options?.fresh)
+      return options?.waitForAutomation === false
+        ? permissionSynchronization.ready
+        : permissionSynchronization.complete;
+    let ready!: () => void;
+    let failed!: (error: Error) => void;
+    const snapshot = new Promise<void>((resolve, reject) => {
+      ready = resolve;
+      failed = reject;
+    });
+    // Ordinary callers await completion; still observe the snapshot's failure.
+    void snapshot.catch(() => {});
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejections are an untyped asynchronous I/O boundary.
+    const complete = performPendingPermissionSync(ready).catch((error: unknown) => {
+      failed(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    });
+    const synchronization = { ready: snapshot, complete };
+    permissionSynchronization = synchronization;
+    void snapshot.then(
+      () => {
+        if (permissionSynchronization === synchronization) permissionSynchronization = null;
+      },
+      () => {
+        if (permissionSynchronization === synchronization) permissionSynchronization = null;
+      }
+    );
+    if (options?.waitForAutomation !== false) return complete;
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Preserve arbitrary thrown values from background automation.
+    void complete.catch((error: unknown) => logError('permission.automation', error));
+    return snapshot;
+  }
+
+  async function performPendingPermissionSync(snapshotReady: () => void) {
     const syncGeneration = ++permissionSyncGeneration;
     const reconciliation = permissionsStore.beginPermissionReconciliation();
     const workspacePath = normalizeProjectPath(
@@ -1621,22 +1673,25 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       .map((entry) => entry.permission);
     try {
       const pendingPermissions = await client.permission.list();
-      if (syncGeneration < latestPermissionSyncGeneration) return;
+      if (syncGeneration < latestPermissionSyncGeneration) {
+        snapshotReady();
+        return;
+      }
       latestPermissionSyncGeneration = syncGeneration;
       const normalizedPendingPermissions = pendingPermissions
         .map((item) => normalizePermissionEvent(item))
         .filter((permission): permission is Permission => permission !== null);
-      await Promise.all(
-        normalizedPendingPermissions.map((permission) =>
-          ensurePermissionSessionKnown(permission.sessionID).catch((err) =>
-            logError('permission.session', err)
-          )
-        )
-      );
-      if (syncGeneration !== permissionSyncGeneration) return;
       const pendingPermissionIds = new Set(
         normalizedPendingPermissions.map((permission) => permission.id)
       );
+      for (const [id] of pendingPermissionSnapshot) {
+        if (!pendingPermissionIds.has(id) && !reconciliation.changedPermissionIds.has(id))
+          pendingPermissionSnapshot.delete(id);
+      }
+      for (const permission of normalizedPendingPermissions) {
+        if (!reconciliation.changedPermissionIds.has(permission.id))
+          pendingPermissionSnapshot.set(permission.id, permission);
+      }
       for (const [permissionId] of permissionJudgeAttempts) {
         if (
           !pendingPermissionIds.has(permissionId) &&
@@ -1655,34 +1710,64 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       const visiblePermissions: Permission[] = [];
       const pendingPermissionHandlers: Promise<void>[] = [];
 
+      const respondFull = (permission: Permission) =>
+        sessionApprovalOperations
+          .respondPermission(permission.sessionID, permission.id, 'once', {
+            rethrow: true,
+            automatic: true,
+            permissionAutomationLease,
+          })
+          .then(() => {
+            if (pendingPermissionSnapshot.get(permission.id) === permission)
+              pendingPermissionSnapshot.delete(permission.id);
+          })
+          .catch(() => {
+            if (
+              isCurrent() &&
+              permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'full'
+            ) {
+              permissionsStore.addPermission(permission);
+              postMessage({ type: 'permission/reveal', payload: { permissionId: permission.id } });
+            }
+          });
+
       for (const permission of normalizedPendingPermissions) {
-        if (!isCurrent()) return;
+        if (!isCurrent()) break;
+        if (reconciliation.changedPermissionIds.has(permission.id)) continue;
+        if (!isPermissionSessionKnown(permission.sessionID)) {
+          // Unknown ancestry stays actionable while its read-only classification
+          // continues. Never infer an automatic mode to make startup faster.
+          visiblePermissions.push(permission);
+          postMessage({ type: 'permission/reveal', payload: { permissionId: permission.id } });
+          pendingPermissionHandlers.push(
+            ensurePermissionSessionKnown(permission.sessionID)
+              .then(async () => {
+                if (
+                  !isCurrent() ||
+                  pendingPermissionSnapshot.get(permission.id) !== permission ||
+                  reconciliation.changedPermissionIds.has(permission.id) ||
+                  !isPermissionSessionKnown(permission.sessionID) ||
+                  !permissionAutomationOwner ||
+                  permissionsStore.isSessionPermissionModePending(permission.sessionID) ||
+                  permissionsStore.isPermissionModeRecoveryPending(permission.sessionID)
+                )
+                  return;
+                const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
+                if (mode === 'auto') await judgeAndRespondPermission(permission, true);
+                else if (mode === 'full') await respondFull(permission);
+              })
+              // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Ancestry API reads may reject with arbitrary thrown values.
+              .catch((error: unknown) => logError('permission.session', error))
+          );
+          continue;
+        }
         const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
         const modePending = permissionsStore.isSessionPermissionModePending(permission.sessionID);
         const modeRecovering = permissionsStore.isPermissionModeRecoveryPending(
           permission.sessionID
         );
         if (permissionAutomationOwner && !modePending && !modeRecovering && mode === 'full') {
-          pendingPermissionHandlers.push(
-            sessionApprovalOperations
-              .respondPermission(permission.sessionID, permission.id, 'once', {
-                rethrow: true,
-                automatic: true,
-                permissionAutomationLease,
-              })
-              .catch(() => {
-                if (
-                  isCurrent() &&
-                  permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'full'
-                ) {
-                  permissionsStore.addPermission(permission);
-                  postMessage({
-                    type: 'permission/reveal',
-                    payload: { permissionId: permission.id },
-                  });
-                }
-              })
-          );
+          pendingPermissionHandlers.push(respondFull(permission));
           continue;
         }
         if (permissionAutomationOwner && !modePending && !modeRecovering && mode === 'auto') {
@@ -1695,14 +1780,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         postMessage({ type: 'permission/reveal', payload: { permissionId: permission.id } });
       }
 
-      await Promise.all(pendingPermissionHandlers);
-
       if (isCurrent()) {
         permissionsStore.reconcilePermissions(visiblePermissions, reconciliation);
         for (const permission of restoredPermissions) {
           hiddenRestoredPermissions.delete(permission.id);
         }
       }
+      snapshotReady();
+      await Promise.all(pendingPermissionHandlers);
     } catch (err) {
       if (syncGeneration === permissionSyncGeneration) {
         for (const permission of restoredPermissions) {
@@ -1863,6 +1948,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           permissionAutomationLease: attempt.automationLease,
         }
       );
+      if (pendingPermissionSnapshot.get(permission.id) === permission)
+        pendingPermissionSnapshot.delete(permission.id);
       const counts = appStore.state.sessionAutoPermissionCounts[permission.sessionID];
       const key = outcome.response.decision === 'allow' ? 'approved' : 'rejected';
       updateSessionAutoPermissionCounts(permission.sessionID, {
@@ -1982,6 +2069,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   function markPermissionJudgeResponded(permissionId: string) {
+    pendingPermissionSnapshot.delete(permissionId);
     const attempt = permissionJudgeAttempts.get(permissionId);
     if (!attempt) return;
     attempt.status = 'responded';
@@ -1990,7 +2078,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   function initConnection() {
-    return connectionBootstrapOperations.initConnection();
+    if (initializationOperation) return initializationOperation;
+    const operation = connectionBootstrapOperations.initConnection().finally(() => {
+      if (initializationOperation === operation) {
+        initializationOperation = null;
+        startupStatusSnapshot = null;
+      }
+    });
+    initializationOperation = operation;
+    return operation;
   }
 
   const dataLoaders = createStateBoundDataLoaderOperations({
@@ -2049,6 +2145,17 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   async function reconcileServerState() {
+    // An initial SSE attachment must not supersede the snapshots bootstrap is
+    // waiting for. Reconcile after that attempt, with fresh generation guards.
+    if (
+      !initialized &&
+      (initializationOperation || appStore.state.serverStatus.state === 'running')
+    ) {
+      ensureConnectionInitialized();
+      const workspace = workspaceGeneration;
+      await initializationOperation;
+      if (!initialized || workspace !== workspaceGeneration) return;
+    }
     const activeSessionId = appStore.state.activeSessionId;
     const connection = connectionGeneration;
     const workspace = workspaceGeneration;
@@ -2057,7 +2164,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       loadRecycleBin(),
       hydrateSessionStatuses(),
       loadQuestions(),
-      syncPendingPermissions(),
+      syncPendingPermissions({ waitForAutomation: false }),
       loadMcps(),
       loadLsps(),
       reloadWorkspaceCatalogs(),
@@ -2108,6 +2215,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   function invalidateInitializationAttempt() {
     initializationAttemptGeneration += 1;
     activeInitializationAttempt = null;
+    initializationOperation = null;
+    startupStatusSnapshot = null;
   }
 
   function invalidateWorkspaceAsyncWork(
@@ -2144,6 +2253,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       clearReviewingAutoApproveActivity(attempt.permission);
     }
     permissionJudgeAttempts.clear();
+    pendingPermissionSnapshot.clear();
+    permissionSynchronization = null;
     permissionSessionSyncs.clear();
   }
 
@@ -2199,12 +2310,20 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   const connectionBootstrapOperations = createConnectionBootstrapOperations({
     health: client.health,
     loadInitialData: async () => {
-      await Promise.all([
-        loadSessions(),
-        reloadWorkspaceCatalogs(),
-        loadQuestions(),
-        syncPendingPermissions().catch((err) => logError('permission.list', err)),
+      const workspace = workspaceGeneration;
+      const [snapshots, , statuses] = await Promise.all([
+        dataLoaders.loadEssentialSnapshots(),
+        syncPendingPermissions({ waitForAutomation: false }),
+        loadCurrentSessionStatusSnapshot(),
       ]);
+      if (snapshots.state !== 'loaded')
+        throw new Error(
+          snapshots.state === 'superseded'
+            ? 'Startup snapshots were superseded by a workspace change'
+            : `Could not load ${snapshots.failed.join(', ')}`
+        );
+      if (workspace === workspaceGeneration)
+        startupStatusSnapshot = { workspace, snapshot: statuses };
     },
     loadBackgroundData: async () => {
       await Promise.all([loadCompatibilityState(), loadMcps(), loadLsps(), loadRecycleBin()]);
@@ -2230,7 +2349,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getSessionDirectory: (sessionId) =>
       appStore.state.sessions.find((session) => session.id === sessionId)?.directory,
     selectSession: (sessionId, directory) =>
-      selectSession(sessionId, { directory, reportActivationError: false, waitForMcpSync: false }),
+      selectSession(sessionId, {
+        directory,
+        reportActivationError: false,
+        throwOnLoadFailure: true,
+        waitForMcpSync: false,
+      }),
     startNewSession: startNewChatDraft,
     setShowSessionPicker: uiStore.setShowSessionPicker,
     setInitialized: (value) => {
@@ -2238,8 +2362,16 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       uiStore.setConnectionInitialized(value);
       if (value) appStore.setState('serverReconnecting', false);
     },
-    setError: uiStore.setError,
+    setError: (message) => {
+      uiStore.setError(message);
+      if (message) uiStore.setErrorRetry(ensureConnectionInitialized);
+    },
     getError: uiStore.error,
+    recordStartupTiming: (timing, generation) =>
+      postMessage({
+        type: 'log',
+        payload: { msg: `Startup ${JSON.stringify({ ...timing, generation })}`, level: 'info' },
+      }),
     nextConnectionGeneration: () => ++connectionGeneration,
     isCurrentConnectionGeneration: (generation) =>
       isCurrentGeneration(generation, connectionGeneration),
@@ -2255,7 +2387,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     hasPendingQuestion: (sessionId) =>
       appStore.state.questions.some((item) => item.sessionID === sessionId),
     hasPendingPermission: (sessionId) =>
-      appStore.state.permissions.some((item) => item.sessionID === sessionId),
+      [...appStore.state.permissions, ...pendingPermissionSnapshot.values()].some(
+        (item) =>
+          !isPermissionSessionKnown(item.sessionID) ||
+          getPermissionDecisionScopeId(item.sessionID) === getPermissionDecisionScopeId(sessionId)
+      ),
     loadSessionMessages: (sessionId) => {
       const generation = workspaceGeneration;
       return loadSessionMessagesAllowingEmpty(sessionId, () => generation === workspaceGeneration);
@@ -2791,6 +2927,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
             appStore.setState('messagesLoading', false);
           });
         }
+        if (
+          activation === sessionActivationGeneration &&
+          getNewChatDraftGeneration() === draftGeneration &&
+          !activationController.signal.aborted &&
+          options?.throwOnLoadFailure === true
+        )
+          throw err;
         return false;
       }
     }
@@ -2804,8 +2947,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     if (appStore.state.pendingSessionSelectionId === id) {
       appStore.setState('pendingSessionSelectionId', null);
     }
-    await selection;
-    if (appStore.state.activeSessionId === id) {
+    const result = await selection;
+    if (result.state === 'failed' && options?.throwOnLoadFailure === true)
+      throw new Error('Failed to load restored conversation history');
+    const selected =
+      result.state === 'loaded' &&
+      activation === sessionActivationGeneration &&
+      appStore.state.activeSessionId === id;
+    if (selected) {
       const directory = getSessionDirectory(id);
       sessionStore.persistLastOpenedView(
         directory
@@ -2813,7 +2962,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           : { type: 'session', sessionId: id }
       );
     }
-    return appStore.state.activeSessionId === id;
+    return selected;
   }
 
   function runSessionMessageSync(sessionId: string): Promise<boolean> {
@@ -3112,6 +3261,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         rethrow: true,
         groupMembers: response === 'reject' && permission ? groupMembers : undefined,
       });
+      pendingPermissionSnapshot.delete(permissionId);
+      if (response !== 'once') {
+        for (const member of groupMembers) pendingPermissionSnapshot.delete(member.id);
+      }
     } catch (err) {
       for (const member of permission
         ? permissionsStore.getPermissionGroupMembers(permission)

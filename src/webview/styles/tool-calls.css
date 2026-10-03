@@ -1,5 +1,6 @@
 /* Rich Composer (contenteditable with inline chips) */
 .rich-composer {
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
   --rich-composer-line-height: calc(
     var(--varro-chat-font-size, var(--vscode-font-size, 13px)) * 1.7
   );
@@ -20,6 +21,10 @@
   white-space: pre-wrap;
   word-wrap: break-word;
   cursor: text;
+}
+
+.chat-input-container:hover .rich-composer {
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 16%, transparent);
 }
 
 .rich-composer[data-empty='true']::before {
@@ -2970,11 +2975,11 @@ kbd {
   overscroll-behavior-y: auto;
   margin-right: -14px;
   padding-right: 14px;
-  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
 }
 
 .user-message-card:hover .user-message-text-scroll {
-  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 16%, transparent);
 }
 
 .user-message-text-scroll.has-more-below {

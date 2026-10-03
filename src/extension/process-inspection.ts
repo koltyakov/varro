@@ -6,12 +6,14 @@ import { readFile, readdir, readlink, realpath } from 'fs/promises';
 import { uptime } from 'os';
 import { join } from 'path';
 import { logger } from './logger';
+import { ProcessInspectionTimeoutError } from './process-inspection-error';
 import { WindowsProcessInspector } from './windows-process-inspector';
 
 type CommandResult = {
   stdout: string;
   stderr: string;
   code: number | null;
+  timedOut?: boolean;
 };
 interface WindowsManagedListenerInspection {
   pid: number;
@@ -21,12 +23,14 @@ interface WindowsManagedListenerInspection {
 }
 
 const PROCESS_COMMAND_TIMEOUT_MS = 2000;
+const LISTENER_INSPECTION_RETRY_TIMEOUT_MS = 5000;
 const PROCESS_COMMAND_KILL_GRACE_MS = 1000;
 const WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS = 10_000;
 const WINDOWS_PROCESS_INSPECTION_ATTEMPTS = 2;
 export const PROCESS_STOP_TIMEOUT_MS = 5000;
 const PROCESS_COMMAND_MAX_OUTPUT_CHARS = 1_000_000;
 const windowsInspector = new WindowsProcessInspector();
+const listenerInspections = new Map<string, Promise<number[]>>();
 
 export function disposeProcessInspection(): void {
   windowsInspector.dispose();
@@ -35,6 +39,8 @@ export function disposeProcessInspection(): void {
 export type LocalServerAccount = {
   kind: 'same-user' | 'different-user' | 'unknown';
   identity?: string;
+  pid?: number;
+  birthIdentity?: string;
 };
 
 /** Inspect the listener in the extension host's namespace, not the desktop login. */
@@ -58,6 +64,8 @@ export async function inspectLocalServerAccount(port: number): Promise<LocalServ
       return {
         kind: details.listenerSid === details.hostSid ? 'same-user' : 'different-user',
         identity: `${pid}:${details.birthIdentity}:${details.listenerSid}`,
+        pid,
+        birthIdentity: details.birthIdentity,
       };
     }
     const birth = await readProcessBirthIdentity(pid);
@@ -74,8 +82,13 @@ export async function inspectLocalServerAccount(port: number): Promise<LocalServ
     return {
       kind: listenerAccount === hostAccount ? 'same-user' : 'different-user',
       identity: `${pid}:${birth}:${listenerAccount}`,
+      pid,
+      birthIdentity: birth,
     };
   } catch (error) {
+    // A timeout blocks traffic, but must not turn a quiet existing connection
+    // into an unknown-account consent prompt. A later request inspects afresh.
+    if (error instanceof ProcessInspectionTimeoutError) throw error;
     // Restricted process visibility must never be interpreted as same-user.
     logger.warn(
       `Cannot verify the account on port ${port}: ${error instanceof Error ? error.message : String(error)}`
@@ -120,6 +133,22 @@ export async function inspectWindowsManagedListener(
   if (netstat.code === 0) {
     const listenerPids = parseWindowsNetstatListeningPids(netstat.stdout, port);
     if (listenerPids.length === 0) return null;
+    // Never select one side of an ambiguous IPv4/IPv6 listener set as ownership proof.
+    if (listenerPids.length !== 1) return null;
+    try {
+      const pid = listenerPids[0]!;
+      const details = await windowsInspector.read(pid, ancestorPid);
+      if (details.ancestorPid === ancestorPid && details.hostBirthIdentity)
+        return {
+          pid,
+          executable: details.executable,
+          birthIdentity: details.birthIdentity,
+          hostBirthIdentity: details.hostBirthIdentity,
+        };
+    } catch {
+      // Native ancestry can be unavailable for exited wrappers or restricted handles.
+      // Fresh bounded CIM observation remains the fallback, never cached PID evidence.
+    }
     listenerExpression = `@(${listenerPids.join(',')})`;
   } else {
     logger.warn(
@@ -130,6 +159,7 @@ export async function inspectWindowsManagedListener(
 
   const script = [
     `$listenerIds = ${listenerExpression}`,
+    'if (@($listenerIds).Count -ne 1) { exit 0 }',
     '$processes = @(Get-CimInstance Win32_Process)',
     '$byId = @{}',
     'foreach ($process in $processes) { $byId[[int]$process.ProcessId] = $process }',
@@ -217,7 +247,12 @@ export function runProcess(
         }, PROCESS_COMMAND_KILL_GRACE_MS);
         killTimer.unref?.();
       }
-      finish({ stdout, stderr, code: null });
+      finish({
+        stdout,
+        stderr: `${command} timed out after ${timeoutMs}ms${stderr.trim() ? `: ${stderr.trim()}` : ''}`,
+        code: null,
+        timedOut: true,
+      });
     }, timeoutMs);
 
     try {
@@ -350,6 +385,21 @@ async function findLinuxListeningPids(port: number, procRoot: string) {
 }
 
 export async function findListeningPids(port: number, procRoot = '/proc') {
+  const key = `${process.platform}:${procRoot}:${port}`;
+  const pending = listenerInspections.get(key);
+  if (pending) return pending;
+  // Ownership and account admission can inspect the same port concurrently.
+  // Share only the in-flight observation, never a completed PID-only snapshot.
+  const inspection = findListeningPidsOnce(port, procRoot);
+  listenerInspections.set(key, inspection);
+  try {
+    return await inspection;
+  } finally {
+    if (listenerInspections.get(key) === inspection) listenerInspections.delete(key);
+  }
+}
+
+async function findListeningPidsOnce(port: number, procRoot: string): Promise<number[]> {
   if (process.platform === 'win32') {
     // Avoid loading PowerShell's networking module on every admission/ownership check.
     const netstat = await runProcess(
@@ -375,8 +425,18 @@ export async function findListeningPids(port: number, procRoot = '/proc') {
     return parsePids(result.stdout);
   }
 
-  const result = await runProcess('lsof', ['-nP', `-tiTCP:${port}`, '-sTCP:LISTEN']);
-  const pids = parsePids(result.stdout);
+  const args = ['-nP', `-tiTCP:${port}`, '-sTCP:LISTEN'];
+  let result = await runProcess('lsof', args);
+  if (process.platform === 'darwin' && result.timedOut) {
+    logger.warn(`Listener inspection on port ${port}: ${result.stderr}; retrying fresh evidence`);
+    result = await runProcess('lsof', args, LISTENER_INSPECTION_RETRY_TIMEOUT_MS);
+    if (result.timedOut)
+      throw new ProcessInspectionTimeoutError(
+        `Cannot inspect the listener on port ${port}: ${result.stderr}. Retry when local process inspection recovers; the server was left untouched.`
+      );
+  }
+  // Partial output from a failed/timed-out command is not a complete listener set.
+  const pids = result.code === 0 ? parsePids(result.stdout) : [];
   if (
     process.platform !== 'linux' &&
     pids.length === 0 &&
@@ -398,7 +458,9 @@ export async function findListeningPids(port: number, procRoot = '/proc') {
   const fallback = await runProcess('ss', ['-ltnp']);
   const portPattern = new RegExp(`(?:\\]|:|\\*)${port}(?:\\s|$)`);
   const fallbackPids = new Set<number>();
-  for (const line of fallback.stdout.split(/\r?\n/)) {
+  for (const line of (fallback.code === 0 && !fallback.timedOut ? fallback.stdout : '').split(
+    /\r?\n/
+  )) {
     if (!portPattern.test(line)) continue;
     for (const match of line.matchAll(/\bpid=(\d+)\b/g)) {
       const pid = Number.parseInt(match[1]!, 10);

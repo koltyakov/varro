@@ -1,0 +1,104 @@
+import { expect, test } from '@playwright/test';
+import type { MessageEntry, Session } from '../../src/webview/types';
+
+for (const withImage of [false, true]) {
+  test(`only highlights editable prompts on hover with image=${withImage}`, async ({ page }) => {
+    const session: Session = {
+      id: 'session-edit-hover',
+      projectID: 'test',
+      directory: '/workspace',
+      title: 'Edit hover',
+      version: '1',
+      time: { created: 1, updated: 1 },
+    };
+    const message: MessageEntry = {
+      info: {
+        id: 'prompt',
+        sessionID: session.id,
+        role: 'user',
+        time: { created: 1 },
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'test' },
+      },
+      parts: [
+        {
+          id: 'prompt-text',
+          sessionID: session.id,
+          messageID: 'prompt',
+          type: 'text',
+          text: 'Check the hover border.',
+        },
+      ],
+    };
+    if (withImage) {
+      message.parts.push({
+        id: 'prompt-image',
+        sessionID: session.id,
+        messageID: 'prompt',
+        type: 'file',
+        mime: 'image/png',
+        url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==',
+      });
+    }
+    await page.addInitScript(
+      (fixture) => {
+        // SAFETY: The isolated playback harness reads this fixture before mounting.
+        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
+          fixture;
+      },
+      { session, initialMessages: [message] }
+    );
+    await page.goto('/e2e/harness/index.html?scenario=session-playback');
+
+    const row = page.locator('[data-msg-id="prompt"]');
+    const card = row.locator('.user-message-card');
+    const bubble = withImage ? card.locator('.user-message-image-text-bubble') : card;
+    await expect(card).toHaveClass(/user-message-card-editable/);
+    const border = await bubble.evaluate((element) => getComputedStyle(element).borderColor);
+    const shadow = await bubble.evaluate((element) => getComputedStyle(element).boxShadow);
+    await bubble.hover();
+    await expect(row).toHaveClass(/interactive-item-turn-hovered/);
+    await expect(bubble).not.toHaveCSS('border-color', border);
+
+    for (const sessionStatus of [
+      { type: 'busy' } as const,
+      { type: 'retry', attempt: 1, message: 'Retrying', next: Date.now() + 60_000 } as const,
+    ]) {
+      await page.evaluate(
+        ({ sessionID, status }) => {
+          window.postMessage(
+            {
+              type: 'server/event',
+              payload: { type: 'session.status', properties: { sessionID, status } },
+            },
+            '*'
+          );
+        },
+        { sessionID: session.id, status: sessionStatus }
+      );
+      await expect(card).not.toHaveClass(/user-message-card-editable/);
+      await expect(bubble).toHaveCSS('border-color', border);
+      await expect(bubble).toHaveCSS('box-shadow', shadow);
+      await bubble.click();
+      await expect(page.locator('.inline-edit-composer-slot')).toHaveCount(0);
+    }
+
+    await page.evaluate((sessionID) => {
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'session.status',
+            properties: { sessionID, status: { type: 'idle' } },
+          },
+        },
+        '*'
+      );
+    }, session.id);
+    await expect(card).toHaveClass(/user-message-card-editable/);
+    await expect(bubble).not.toHaveCSS('border-color', border);
+    await bubble.click();
+    await expect(page.locator('.inline-edit-composer-slot')).toBeVisible();
+    await expect(card).toHaveCount(0);
+  });
+}

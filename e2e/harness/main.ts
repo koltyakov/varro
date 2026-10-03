@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- This E2E harness decodes and synthesizes extension-host protocol payloads at the browser boundary. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Harness assertions bridge controlled scenario fixtures and browser globals to their protocol-owned shapes. */
 import type {
+  EditorContext,
   InitialWebviewState,
   PermissionMode,
   RecycleBinEntry,
@@ -76,6 +77,7 @@ const SCENARIO_NAMES = [
   'busy-stop-send',
   'new-session-command',
   'session-search',
+  'session-list-load',
   'model-search',
   'mcp-search',
   'full-access',
@@ -213,7 +215,8 @@ type HarnessWindow = Window & {
   };
 };
 
-const WORKSPACE_PATH = '/workspace/varro';
+const NO_PROJECT = new URLSearchParams(window.location.search).get('noProject') === '1';
+const WORKSPACE_PATH = NO_PROJECT ? '/varro/scratch' : '/workspace/varro';
 const TMP_WORKSPACE_PATH = '/workspace/varro/tmp/e2e-workspace';
 const BASE_TIME = Date.now();
 const THEME = getThemeKind();
@@ -1939,8 +1942,16 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         text: ['[Selection from /workspace/src/app.ts: 10-18]'],
       },
       {
+        id: 'pasted',
+        text: [] as string[],
+      },
+      {
         id: 'image',
         text: [] as string[],
+      },
+      {
+        id: 'image-text',
+        text: ['Review the attached image.'],
       },
       {
         id: 'agent',
@@ -1974,9 +1985,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         variant.text,
         BASE_TIME - 100_000 + index * 10_000
       );
-      if (variant.id === 'image') {
+      if (variant.id === 'image' || variant.id === 'image-text') {
         user.parts.push({
-          id: 'message-sticky-variant-image-file',
+          id: `message-sticky-variant-${variant.id}-file`,
           sessionID: session.id,
           messageID: user.info.id,
           type: 'file',
@@ -1987,6 +1998,17 @@ function createScenarioState(name: ScenarioName): ScenarioState {
             encodeURIComponent(
               '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"/>'
             ),
+        });
+      }
+      if (variant.id === 'pasted') {
+        user.parts.push({
+          id: 'message-sticky-variant-pasted-file',
+          sessionID: session.id,
+          messageID: user.info.id,
+          type: 'file',
+          mime: 'text/plain',
+          filename: 'pasted-text-18f20017.txt',
+          url: 'data:text/plain;base64,' + btoa('Review the dependency audit output.'),
         });
       }
       if (variant.id === 'agent') {
@@ -2415,6 +2437,36 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.persistedActiveSessionId = session.id;
     state.postReadyMessages.push({ type: 'command/new-session' });
     state.nextSequence = 160;
+    return state;
+  }
+
+  if (name === 'session-list-load') {
+    state.sessions = Array.from({ length: 1_000 }, (_, index) => {
+      const session = makeSession(
+        `load-${index}`,
+        `Load session ${String(index).padStart(4, '0')}`,
+        BASE_TIME - index * 10_000
+      );
+      if (index >= 250) session.parentID = `load-${index % 250}`;
+      const user = makeUserMessage(
+        session.id,
+        `load-user-${index}`,
+        [`Prompt ${index}`],
+        BASE_TIME
+      );
+      state.messagesBySessionId[session.id] = [
+        user,
+        makeAssistantMessage(
+          session.id,
+          `load-assistant-${index}`,
+          user.info.id,
+          `Response ${index}`,
+          BASE_TIME + 1
+        ),
+      ];
+      state.sessionStatuses[session.id] = { type: 'idle' };
+      return session;
+    });
     return state;
   }
 
@@ -2961,6 +3013,19 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           },
         })),
       ];
+      if (new URLSearchParams(window.location.search).get('activeTrayReasoning') === '1') {
+        assistant.parts = assistant.parts.map((part) =>
+          part.type === 'tool' && part.state.status === 'running'
+            ? makeReasoningPart(
+                session.id,
+                assistant.info.id,
+                part.id,
+                `Checking activity ${part.id}.`,
+                BASE_TIME - 1_000
+              )
+            : part
+        );
+      }
     }
     state.sessions = [session];
     state.sessionStatuses[session.id] = activeTray ? { type: 'busy' } : { type: 'idle' };
@@ -3110,6 +3175,17 @@ function createScenarioState(name: ScenarioName): ScenarioState {
             time: { start: createdAt + 1 },
           },
         }));
+        if (searchParams.get('activeTrayReasoning') === '1') {
+          assistant.parts = assistant.parts.map((part) =>
+            makeReasoningPart(
+              session.id,
+              messageId,
+              part.id,
+              `Checking virtualized activity ${part.id}.`,
+              createdAt + 1
+            )
+          );
+        }
       }
 
       messages.push(user, assistant);
@@ -5065,15 +5141,20 @@ function isCoveredPermission(source: Record<string, unknown>, candidate: Record<
 }
 
 function buildInitialState(state: ScenarioState): InitialWebviewState {
+  const editorContext: EditorContext = {
+    workspacePath: state.workspacePath,
+    activeFile: null,
+    selection: null,
+    diagnostics: [],
+  };
+  if (NO_PROJECT) {
+    editorContext.workspaceDirectory = state.workspacePath;
+    editorContext.workspaceFolders = [];
+  }
   return {
     theme: THEME,
     serverStatus: { state: 'stopped' },
-    editorContext: {
-      workspacePath: state.workspacePath,
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    },
+    editorContext,
     terminalSelection: null,
     droppedFiles: [],
     emptyStateLogoUri: '/assets/icon.png',
@@ -5388,6 +5469,15 @@ async function handleApiRequest(
 
   if (method === 'GET' && path === '/agent') {
     return state.agents;
+  }
+
+  if (method === 'GET' && path === '/command') {
+    if (
+      startupOptions.has('startupCatalogFailure') &&
+      !startupOptions.has('startupCatalogRecovered')
+    )
+      throw new Error('Command catalog unavailable');
+    return [];
   }
 
   if (method === 'GET' && path === '/config/providers') {
@@ -6088,12 +6178,7 @@ function installBridge(state: ScenarioState) {
         });
         dispatchToWebview({
           type: 'context/update',
-          payload: {
-            workspacePath: state.workspacePath,
-            activeFile: null,
-            selection: null,
-            diagnostics: [],
-          },
+          payload: buildInitialState(state).editorContext,
         });
         queueMicrotask(() => {
           for (const msg of state.postReadyMessages) {

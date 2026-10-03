@@ -56,14 +56,40 @@ Both CI jobs keep all tests, and Linux keeps the full-project coverage threshold
 Unit, script, coverage, and E2E commands execute tests on every invocation; successful test results
 are not cached. `npm test` runs unit and Node script tests, `npm run test:scripts:browser` runs browser
 script tests, and `npm run test:coverage` runs the full unit suite with coverage thresholds.
-CI runs these suites fresh and caches only npm dependency downloads. Its pinned Playwright container
+Linux CI runners are pinned to `ubuntu-24.04` to avoid automatic `ubuntu-latest` image migrations.
+CI runs these suites fresh and caches only npm dependency downloads. E2E duration history is saved
+as an artifact, not as cached test results. Its pinned Playwright container
 already includes Chromium, so CI skips the browser install hook and runs E2E across four shards.
 
 The Playwright suite is browser-level webview E2E coverage. It runs the real Solid webview in Chromium through `e2e/harness/index.html`, while the harness mocks the VS Code message bridge and the OpenCode/Varro request and event boundary. It does not launch VS Code, an extension host, or a real OpenCode CLI/server.
 
-Local E2E runs use half the available CPU cores, capped at four workers to leave room for frame-sensitive browser checks. Override this with `npm run test:e2e -- --workers=2` on a busy machine. Playback and raster diagnostics default to one worker. CI splits the suite across four jobs with two workers each.
+Local E2E runs use half the available CPU cores, capped at four workers to leave room for frame-sensitive browser checks. Override this with `npm run test:e2e -- --workers=2` on a busy machine. Playback and diagnostics default to one worker. CI splits the suite across four jobs with two workers each.
+
+Each spec file belongs to exactly one shard, including all of its parameterized cases and projects.
+Shards balance estimated total duration using the latest successful CI run on the current
+branch, falling back to the default branch. All four jobs use the same timing artifact. The planner
+sums each file's test durations and assigns the longest files first to the shard with the lowest
+estimated duration; new tests use the average known duration. Without valid history, file weights
+use test counts. A large spec file can limit how evenly the four jobs balance.
+Timings include retry attempts and identify tests by project, file and full title, not line number.
+Every test still runs fresh. Actual job times can differ because of retries, hooks and runner load.
+Locally, `npm run test:e2e -- --shard=1/4` uses the same planner; optional history belongs at
+`tmp/e2e-sharding/history/timings.json`. Every shard prints its owned files and test counts. CI uploads
+its assignment JSON and exact test list alongside its timing report; merging reports rejects files
+that appear in multiple shards. These files stay in `tmp/e2e-sharding/`, outside Playwright's cleaned
+output directory.
 
 For shorter feedback loops, select a spec as above, filter test names with `npm run test:e2e -- --grep "composer"`, or rerun failures with `npm run test:e2e -- --last-failed`. Standard and raster E2E runs use port 4174 when available and automatically select a free port when it is occupied. To require a specific port, set `VARRO_E2E_PORT`, for example `VARRO_E2E_PORT=4184 npm run test:e2e` in macOS/Linux shells. Playback keeps its existing-server behavior.
+
+The normal E2E suite excludes `e2e/tests/diagnostics/`. Run those investigations explicitly with
+`npm run test:e2e:diagnostics`; their evidence stays in `tmp/playwright-diagnostics/`. For the local
+captured-transcript replay, use `npm run test:e2e:diagnostics -- scroll-reported.spec.ts`. It reads
+`tmp/scroll-reported-messages.json` and skips when that capture is absent. The strict application
+raster check remains separately available through `npm run test:e2e:raster`.
+
+Repeated streaming bottom-follow assertions use shorter polling intervals without changing their
+timeouts, pixel tolerances, frame waits, or chunk counts. Long-history traversal and repeated
+tool-exit regressions still run in full in the normal suite.
 
 For first-run and recovery checks in a disposable real Extension Host, run `npm run test:vscode-sandbox`. See [Onboarding Verification](onboarding-verification.md) for the scenario matrix and manual non-happy-path checks.
 
@@ -92,7 +118,12 @@ npm run build
 This produces:
 
 - `dist/extension/extension.js` for the extension host bundle
-- `dist/webview/webview.js` and `dist/webview/webview.css` for the sidebar UI
+- `dist/webview/webview.mjs`, `dist/webview/webview.css`, and lazy chunks for the sidebar UI
+
+The webview build groups D3 diagram helpers into one shared chunk while keeping Mermaid
+renderers lazy-loaded. A build regression test checks the VSCE JavaScript file budget and
+verifies that diagram helpers and Mermaid stay out of the initial import graph. VSIX packaging
+uses the `package.json` file allowlist; do not add a `.vscodeignore` alongside it.
 
 ## Load The Extension
 
@@ -442,6 +473,8 @@ docs/
 | `npm run fmt` | Format `src/` with oxfmt |
 | `npm run test` | Run the Vitest suite |
 | `npm run test:e2e` | Run the Playwright webview E2E suite |
+| `npm run test:e2e:diagnostics` | Run opt-in browser diagnostics and save their evidence |
+| `npm run test:e2e:raster` | Run strict application and static native wheel raster checks |
 | `npm run test:vscode-sandbox` | Run onboarding scenarios in disposable VS Code Extension Hosts |
 | `npm run ai:vscode` | Build and launch the persistent Extension Development Host used by the [AI/fuzzy verification guide](ai-fuzzy-verification.md) |
 | `npm run test:coverage` | Run tests with coverage output |

@@ -54,10 +54,52 @@ test('shows the missing-cli error state and offers install actions', async ({ pa
     .toEqual({ command: 'npm i -g opencode-ai', title: 'OpenCode Install' });
 });
 
+test('centers install button labels without font-metric padding', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=server-error-missing-cli');
+
+  const button = page.getByRole('button', { name: 'Open terminal and install', exact: true });
+  const label = button.locator('span');
+  await expect(label).toHaveCSS('text-box-trim', 'trim-both');
+  await expect(label).toHaveCSS('text-box-edge', 'cap alphabetic');
+
+  for (const fontFamily of ['Arial, sans-serif', 'serif', 'monospace']) {
+    await button.evaluate((element, font) => {
+      element.style.fontFamily = font;
+    }, fontFamily);
+
+    const buttonBox = await button.boundingBox();
+    const labelBox = await label.boundingBox();
+    expect(buttonBox).not.toBeNull();
+    expect(labelBox).not.toBeNull();
+    if (!buttonBox || !labelBox) throw new Error('Install button or label is not rendered');
+    expect(
+      Math.abs(labelBox.y + labelBox.height / 2 - (buttonBox.y + buttonBox.height / 2))
+    ).toBeLessThanOrEqual(0.5);
+    expect(buttonBox.height).toBeGreaterThanOrEqual(32);
+    // Cap-height trimming removes the extra leading from the 16.8px line box.
+    expect(labelBox.height).toBeLessThan(12);
+  }
+
+  await page.setViewportSize({ width: 220, height: 700 });
+  // Force wrapping independently of the platform's monospace fallback width.
+  await button.evaluate((element) => {
+    element.style.maxWidth = '140px';
+  });
+  await expect(button).toBeVisible();
+  await expect.poll(async () => (await label.boundingBox())?.height ?? 0).toBeGreaterThan(12);
+  const buttonBox = await button.boundingBox();
+  const labelBox = await label.boundingBox();
+  if (!buttonBox || !labelBox) throw new Error('Wrapped install button or label is not rendered');
+  expect(
+    Math.abs(labelBox.y + labelBox.height / 2 - (buttonBox.y + buttonBox.height / 2))
+  ).toBeLessThanOrEqual(0.5);
+  await button.click();
+});
+
 test('shows a generic startup error message', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=server-error-generic');
 
-  await expect(page.getByText('OpenCode could not start', { exact: true })).toBeVisible();
+  await expect(page.getByText('OpenCode is unavailable', { exact: true })).toBeVisible();
   await expect(page.getByText('Failed to bind local server port', { exact: true })).toBeVisible();
 });
 

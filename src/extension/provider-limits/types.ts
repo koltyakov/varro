@@ -12,6 +12,7 @@ export interface ProviderLimitAdapterContext {
   authStore: Record<string, ProviderAuthRecord>;
   modelID: string | null;
   checkedAt: number;
+  signal?: AbortSignal;
   coordinate?(
     identity: string[],
     poll: () => Promise<ProviderLimitStatus>,

@@ -1,6 +1,10 @@
 import type { Locator, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 
+// Repeated streaming checks should not pay the default polling backoff for every chunk.
+// Keep the normal assertion timeout and tolerances; only sample settlement more often.
+export const STREAMING_SCROLL_POLL_OPTIONS = { intervals: [16, 32, 50] };
+
 export async function selectConversationTurn(page: Page, turnNumber: number) {
   const rail = page.getByRole('navigation', { name: 'Conversation turns' });
   await expect(rail).toBeVisible();

@@ -9,12 +9,13 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
 
   build-and-test:
     name: Linux build and test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -94,9 +95,46 @@ jobs:
       - name: Package
         run: npm run package:vsix
 
+  e2e-history:
+    # Select once so all shards use the same immutable timing snapshot.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      artifact-id: ${{ steps.history.outputs.artifact-id }}
+      run-id: ${{ steps.history.outputs.run-id }}
+    steps:
+      - name: Find previous E2E timings
+        id: history
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const branches = [...new Set([
+              context.payload.pull_request?.head.ref ?? context.ref.replace('refs/heads/', ''),
+              context.payload.repository.default_branch,
+            ])];
+            for (const branch of branches) {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                ...context.repo, workflow_id: 'ci.yml', branch, status: 'success', per_page: 10,
+              });
+              for (const run of data.workflow_runs) {
+                if (run.id === context.runId) continue;
+                const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
+                  ...context.repo, run_id: run.id,
+                });
+                const history = artifacts.artifacts.find((artifact) => artifact.name === 'e2e-timings' && !artifact.expired);
+                if (!history) continue;
+                core.setOutput('artifact-id', String(history.id));
+                core.setOutput('run-id', String(run.id));
+                core.info(`Using E2E timings from run ${run.id} on ${branch}`);
+                return;
+              }
+            }
+            core.info('No previous E2E timings available; shards will use equal test weights.');
+
   e2e:
-    needs: [build-and-test, windows]
-    runs-on: ubuntu-latest
+    # E2E installs and serves its own checkout; it does not consume build-job artifacts.
+    needs: e2e-history
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     container:
       # Keep this version aligned with @playwright/test in package.json.
@@ -132,6 +170,67 @@ jobs:
       - name: Test browser scripts
         run: npm run test:scripts:browser
 
+      - name: Download previous E2E timings
+        if: needs.e2e-history.outputs.artifact-id != ''
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.e2e-history.outputs.artifact-id }}
+          run-id: ${{ needs.e2e-history.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: tmp/e2e-sharding/history
+          merge-multiple: true
+
       - name: Run e2e tests
         # Bypass pretest:e2e; the matching container already includes the browsers.
         run: node scripts/run-e2e.mjs --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+      - name: Upload E2E shard timings and assignment
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-results-${{ matrix.shard }}
+          path: |
+            tmp/e2e-sharding/results-${{ matrix.shard }}.json
+            tmp/e2e-sharding/assignment-${{ matrix.shard }}.json
+            tmp/e2e-sharding/shard-${{ matrix.shard }}.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload failed e2e evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-shard-${{ matrix.shard }}
+          path: tmp/playwright/
+          retention-days: 7
+
+  e2e-timings:
+    needs: e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.21.0
+
+      - name: Download E2E shard reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: e2e-results-*
+          path: tmp/e2e-sharding
+          merge-multiple: true
+
+      - name: Merge E2E timings
+        run: node scripts/e2e-sharding.mjs tmp/e2e-sharding/timings.json tmp/e2e-sharding/results-*.json
+
+      - name: Save E2E timings for the next run
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-timings
+          path: tmp/e2e-sharding/timings.json
+          if-no-files-found: error
+          retention-days: 30

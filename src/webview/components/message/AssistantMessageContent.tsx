@@ -95,6 +95,11 @@ function getActivityGroupRevealTrackingKey(parts: readonly AssistantActivityPart
 
 function getRevealTrackingKey(item: AssistantRenderItem) {
   if (item.kind === 'activity-group') return getActivityGroupRevealTrackingKey(item.parts);
+  // File metadata can arrive after the same tool has already painted as Editing.
+  // Changing its wrapper to an edit stack must not replay the entrance height.
+  if (item.kind === 'file-edit-stack') {
+    return `part:${item.key.slice('file-edit-stack:'.length)}`;
+  }
   return item.key;
 }
 
@@ -270,7 +275,7 @@ function samePartList(previous: readonly Part[], next: readonly Part[]) {
   return previous.length === next.length && previous.every((part, index) => part === next[index]);
 }
 
-const MAX_VISIBLE_ACTIVE_ACTIVITY_ITEMS = 3;
+const MAX_VISIBLE_ACTIVE_ACTIVITY_ITEMS = 1;
 
 function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
   let updateQueued = false;
@@ -381,7 +386,7 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
     const itemSignature = items.map((item) => item.dataset.activityPartId).join('\u0000');
     if (items.length <= 1) {
       cancelFollow();
-      element.scrollTop = 0;
+      if (itemSignature !== previousItemSignature) element.scrollTop = 0;
     } else {
       followLatest();
     }
@@ -599,7 +604,8 @@ export function AssistantMessageContent(props: {
       };
       for (const part of orderedDisplayParts()) {
         if (isLocallyCompactActivityPart(part)) activityParts.push(part);
-        else flush();
+        // Preview lifecycle is not a semantic boundary between completed siblings.
+        else if (!isLocallyCompactActivityCandidate(part)) flush();
       }
       flush();
       return groups.length > 0 ? groups : null;

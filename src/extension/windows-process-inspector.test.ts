@@ -39,6 +39,8 @@ function respond(worker: ReturnType<typeof setup>['children'][number], birth = '
         birthIdentity: birth,
         listenerSid: 'S-1-5-21-1',
         hostSid: 'S-1-5-21-1',
+        ancestorPid: Number(request?.[3] ?? 0),
+        hostBirthIdentity: 'win32:100',
       },
     }) + '\n'
   );
@@ -51,6 +53,48 @@ afterEach(() => {
 });
 
 describe('Windows native process inspector', () => {
+  it('verifies launch ancestry independently of ordinary identity reads', async () => {
+    const { inspector, children } = setup();
+    const identity = inspector.read(1234);
+    respond(children[0]!);
+    await identity;
+    const ancestry = inspector.read(1234, 5678);
+    expect(inspector.read(1234, 5678)).toBe(ancestry);
+    respond(children[0]!);
+    await expect(ancestry).resolves.toMatchObject({
+      ancestorPid: 5678,
+      hostBirthIdentity: 'win32:100',
+    });
+    expect(spawnMock).toHaveBeenCalledOnce();
+    // SAFETY: The helper launch always provides an encoded script as its final argument.
+    const args = spawnMock.mock.calls[0]![1] as string[];
+    const script = Buffer.from(args.at(-1)!, 'base64').toString('utf16le');
+    expect(script).toContain('NtQueryInformationProcess');
+    expect(script).toContain('parentCreated > childCreated');
+    expect(script).toContain('VerifyAlive(ancestors[index], births[index])');
+    expect(script).toContain('foreach (IntPtr ancestor in ancestors) CloseHandle(ancestor)');
+    expect(script).not.toContain('Get-CimInstance');
+  });
+
+  it('does not accept ordinary identity evidence as launch ancestry', async () => {
+    const { inspector, children } = setup();
+    const rejected = expect(inspector.read(1234, 5678)).rejects.toThrow('ancestry');
+    children[0]!.stdin.read();
+    children[0]!.stdout.write(
+      JSON.stringify({
+        id: 1,
+        details: {
+          executable: 'C:\\opencode.exe',
+          birthIdentity: 'win32:123',
+          listenerSid: '',
+          hostSid: '',
+        },
+      }) + '\n'
+    );
+    await rejected;
+    expect(children[0]!.kill).toHaveBeenCalledOnce();
+  });
+
   it('shares in-flight identity/account reads but obtains a fresh identity on the next read', async () => {
     const { inspector, children } = setup();
     const first = inspector.read(1234);
@@ -76,13 +120,17 @@ describe('Windows native process inspector', () => {
     const { inspector, children } = setup();
     const first = inspector.read(1234);
     const rejected = expect(first).rejects.toThrow('timed out');
+    const concurrent = expect(inspector.read(5678)).rejects.toThrow('timed out');
     children[0]!.stdout.write('{"id":1');
-    await vi.advanceTimersByTimeAsync(5000);
-    await rejected;
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(children[0]!.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.all([rejected, concurrent]);
     expect(children[0]!.kill).toHaveBeenCalledOnce();
     const next = inspector.read(1234);
     respond(children[1]!, 'win32:456');
     await expect(next).resolves.toMatchObject({ birthIdentity: 'win32:456' });
+    expect(spawnMock).toHaveBeenCalledTimes(2);
   });
 
   it('rejects every pending inspection when its helper exits', async () => {

@@ -58,13 +58,24 @@ const testServerUrl = testServerOrigin(
 );
 // A failed editor launch must not leave its automatically provisioned server running.
 let launchComplete = false;
-process.once('beforeExit', async () => {
-  if (!launchComplete) await managedServer?.stop();
+process.once('beforeExit', () => {
+  if (!launchComplete)
+    managedServer?.stop().catch((error) => {
+      process.stderr.write(`Failed to stop AI test server: ${error.stack || error.message}\n`);
+      process.exitCode = 1;
+    });
 });
-process.once('uncaughtException', async (error) => {
-  await managedServer?.stop();
-  process.stderr.write(`${error.stack || error.message}\n`);
-  process.exit(1);
+process.once('uncaughtException', (error) => {
+  const fail = () => {
+    process.stderr.write(`${error.stack || error.message}\n`);
+    process.exit(1);
+  };
+  (managedServer?.stop() ?? Promise.resolve()).then(fail, (cleanupError) => {
+    process.stderr.write(
+      `Failed to stop AI test server: ${cleanupError.stack || cleanupError.message}\n`
+    );
+    fail();
+  });
 });
 let isolation;
 if (replayUrl) {
@@ -221,6 +232,22 @@ await new Promise((resolve, reject) => {
 
 const codePid =
   process.platform === 'darwin' ? await waitForVscodeProcess(executable, userData) : child.pid;
+// Keep birth-aware recovery metadata even when focusing or sizing the webview fails.
+const metadataPath = path.join(profileRoot, 'launch.json');
+const metadata = await writeVscodeLaunchMetadata(metadataPath, {
+  pid: codePid,
+  executable,
+  profileRoot,
+  userDataDir: userData,
+  extensionsDir: extensions,
+  workspace,
+  remoteDebuggingPort,
+});
+metadata.testServerUrl = testServerUrl;
+metadata.varroTestStateRoot = environment.VARRO_TEST_STATE_ROOT;
+metadata.isolation = isolation ?? { kind: 'read-only-replay' };
+if (managedServer) metadata.managedServerRoot = managedServer.root;
+await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 });
 const focusDeadline = Date.now() + 30_000;
 let sidebarWidth;
 while (true) {
@@ -233,21 +260,7 @@ while (true) {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
 }
-const metadataPath = path.join(profileRoot, 'launch.json');
-const metadata = await writeVscodeLaunchMetadata(metadataPath, {
-  pid: codePid,
-  executable,
-  profileRoot,
-  userDataDir: userData,
-  extensionsDir: extensions,
-  workspace,
-  remoteDebuggingPort,
-  sidebarWidth,
-});
-metadata.testServerUrl = testServerUrl;
-metadata.varroTestStateRoot = environment.VARRO_TEST_STATE_ROOT;
-metadata.isolation = isolation ?? { kind: 'read-only-replay' };
-if (managedServer) metadata.managedServerRoot = managedServer.root;
+metadata.sidebarWidth = sidebarWidth;
 await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 });
 
 child.unref();

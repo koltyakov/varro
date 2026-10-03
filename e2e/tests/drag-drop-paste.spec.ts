@@ -550,6 +550,7 @@ test('reloads and inline-edits an image prompt without losing its attachment', a
   });
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'Image' })).toBeVisible();
   await composer.fill(initialText);
+  await expect(page.getByRole('button', { name: 'Send (Enter)', exact: true })).toBeEnabled();
   await page.keyboard.press('Enter');
 
   const initialRow = page.locator('.chat-turn-user').filter({ hasText: initialText });
@@ -591,6 +592,12 @@ test('reloads and inline-edits an image prompt without losing its attachment', a
     page.locator('.inline-edit-composer-slot .chat-attachment-chip').filter({ hasText: 'Image' })
   ).toBeVisible();
   await inlineComposer.fill(editedText);
+  // Restoring the chip starts an asynchronous decode check; visibility alone is not send readiness.
+  await expect(
+    page
+      .locator('.inline-edit-composer-slot')
+      .getByRole('button', { name: 'Send (Enter)', exact: true })
+  ).toBeEnabled();
   await inlineComposer.press('Enter');
 
   const editedRow = page.locator('.chat-turn-user').filter({ hasText: editedText });

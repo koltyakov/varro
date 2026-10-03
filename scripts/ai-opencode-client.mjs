@@ -71,10 +71,12 @@ export class AiOpenCodeClient {
     const response = await fetch(url, init);
     if (!response.ok) throw new Error(`${response.status} ${method} ${url.pathname} failed`);
     const text = await response.text();
-    if (!text) return null;
     if (response.headers.get('content-type')?.includes('text/html')) {
       throw new Error(`Expected OpenCode JSON from ${url.pathname}, received HTML`);
     }
+    // The adapter replays this finite SSE log to restore text/reasoning boundaries.
+    if (/^\/api\/experimental\/session\/[^/]+\/log$/.test(url.pathname)) return text;
+    if (!text) return null;
     try {
       return JSON.parse(text);
     } catch (cause) {

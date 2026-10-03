@@ -116,6 +116,82 @@ describe('MarkdownRenderer performance regressions', () => {
     expect(getMarkdownCacheStatsForTests()).toMatchObject({ bytes: 0, entries: 0 });
   });
 
+  it('sanitizes only new stable blocks in a rich streaming response', async () => {
+    vi.useFakeTimers();
+    const sections = Array.from(
+      { length: 40 },
+      (_, index) =>
+        `## Section ${index}\n\nRead [source](src/module-${index}.ts).\n\n- First item\n- **Second** item\n\n\`\`\`ts\nconst value${index} = ${index};\n\`\`\``
+    );
+    const [content, setContent] = createSignal(`${sections[0]}\n\nTail`);
+    const sanitize = vi.spyOn(DOMPurify, 'sanitize');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    const firstHeading = container.querySelector('h2');
+    for (let index = 1; index < sections.length; index += 1) {
+      setContent(`${sections.slice(0, index + 1).join('\n\n')}\n\nTail`);
+      await vi.advanceTimersByTimeAsync(16);
+    }
+    const sanitizedBytes = sanitize.mock.calls.reduce(
+      (sum, [html]) => sum + String(html).length,
+      0
+    );
+    expect(sanitizedBytes).toBeLessThan(content().length * 8);
+    expect(container.querySelector('h2')).toBe(firstHeading);
+    const expected = document.createElement('div');
+    expected.innerHTML = __parseMarkdownForTests(content(), { cacheByContent: false });
+    const blocks = (root: HTMLElement) =>
+      [...root.querySelectorAll('h2, p, li, pre code')].map((element) => [
+        element.tagName,
+        element.textContent,
+      ]);
+    expect(blocks(container)).toEqual(blocks(expected));
+  });
+
+  it.each([
+    ['- First item', '- Second item'],
+    ['1. First item', '2. Second item'],
+    ['- First item\n- Second item', '  Continued paragraph'],
+    ['> First quote', '> Continued quote'],
+    ['A [reference][target].', '[target]: https://example.com'],
+    ['<div>First block', 'Second block</div>'],
+    ['## Heading', 'A **bold** paragraph with `code`.'],
+    ['```ts\nconst value = 1;\n```', '## Next section'],
+    ['| Name | Value |\n| --- | --- |\n| one | two |', 'A following paragraph.'],
+  ])('preserves full-document rendering across %s / %s', async (prefix, suffix) => {
+    vi.useFakeTimers();
+    const [content, setContent] = createSignal(`${prefix}\n\nTail`);
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    setContent(`${prefix}\n\n${suffix}\n\nTail`);
+    await vi.advanceTimersByTimeAsync(16);
+    const expected = document.createElement('div');
+    expected.innerHTML = __parseMarkdownForTests(content(), { cacheByContent: false });
+    const blocks = (root: HTMLElement) =>
+      [...root.querySelectorAll('h2, p, li, blockquote, pre code, a, td, th')].map((element) => [
+        element.tagName,
+        element.textContent,
+        element.getAttribute('href'),
+      ]);
+    expect(blocks(container)).toEqual(blocks(expected));
+  });
+
   it('enforces one total byte budget across finalized markdown caches', () => {
     for (let index = 0; index < 40; index += 1) {
       __parseMarkdownForTests(`Final ${index}\n\n${'cache payload '.repeat(6_000)}`, {

@@ -86,6 +86,16 @@ function dispatchAnchorClick(anchor: HTMLAnchorElement | null | undefined) {
   anchor?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 }
 
+function withoutLinkTooltipAttributes(html: string) {
+  const root = document.createElement('div');
+  root.innerHTML = html;
+  for (const anchor of root.querySelectorAll('a')) {
+    anchor.removeAttribute('title');
+    anchor.removeAttribute('aria-describedby');
+  }
+  return root.innerHTML;
+}
+
 function expectUiIcon(element: Element | null | undefined, source: string, size: number) {
   expect(element).toBeInstanceOf(HTMLSpanElement);
   expect(element?.classList).toContain('ui-icon');
@@ -290,28 +300,30 @@ describe('MarkdownRenderer', () => {
       setContent(`${content()}\n\n${paragraph}\n\nEnd`);
       await vi.advanceTimersByTimeAsync(16);
       expect(stable.firstChild).toBe(first);
-      expect(stable.innerHTML).toBe(
-        __parseMarkdownForTests(splitStreamingMarkdownContent(content()).stableContent, {
-          cacheByContent: false,
-        })
+      expect(withoutLinkTooltipAttributes(stable.innerHTML)).toBe(
+        withoutLinkTooltipAttributes(
+          __parseMarkdownForTests(splitStreamingMarkdownContent(content()).stableContent, {
+            cacheByContent: false,
+          })
+        )
       );
     }
     setComplete(true);
     await vi.advanceTimersByTimeAsync(16);
     const tail = container!.querySelector('[data-markdown-segment="tail"]')!;
-    expect(stable.innerHTML + tail.innerHTML).toBe(
-      __parseMarkdownForTests(content(), { cacheByContent: true })
+    expect(withoutLinkTooltipAttributes(stable.innerHTML + tail.innerHTML)).toBe(
+      withoutLinkTooltipAttributes(__parseMarkdownForTests(content(), { cacheByContent: true }))
     );
     expect(container!.querySelector('script')).toBeNull();
   });
 
   it.each([
-    ['unsafe delta', 'First\n\n**Second**\n\nTail'],
-    ['unsafe prefix', '**First**\n\nSecond\n\nTail'],
+    ['formatted delta', 'First\n\n**Second**\n\nTail'],
+    ['formatted prefix', '**First**\n\nSecond\n\nTail'],
     ['non-append edit', 'Changed\n\nTail'],
-  ])('replaces stable DOM for %s with normal parsing', async (_label, next) => {
+  ])('matches normal parsing for %s while retaining unchanged blocks', async (_label, next) => {
     vi.useFakeTimers();
-    const initial = _label === 'unsafe prefix' ? '**First**\n\nTail' : 'First\n\nTail';
+    const initial = _label === 'formatted prefix' ? '**First**\n\nTail' : 'First\n\nTail';
     const [content, setContent] = createSignal(initial);
     cleanup = render(
       () =>
@@ -327,7 +339,8 @@ describe('MarkdownRenderer', () => {
     const first = stable.firstChild;
     setContent(next);
     await vi.advanceTimersByTimeAsync(16);
-    expect(stable.firstChild).not.toBe(first);
+    if (_label === 'non-append edit') expect(stable.firstChild).not.toBe(first);
+    else expect(stable.firstChild).toBe(first);
     expect(stable.innerHTML).toBe(
       __parseMarkdownForTests(splitStreamingMarkdownContent(next).stableContent, {
         cacheByContent: false,
@@ -365,11 +378,13 @@ describe('MarkdownRenderer', () => {
       setContent(`${content()}\n\nEnd`);
       await vi.advanceTimersByTimeAsync(16);
       expect(stable.firstChild).not.toBe(first);
-      expect(stable.innerHTML).toBe(
-        __parseMarkdownForTests(splitStreamingMarkdownContent(content()).stableContent, {
-          cacheByContent: false,
-          disablePathLinkify: disablePathLinkify(),
-        })
+      expect(withoutLinkTooltipAttributes(stable.innerHTML)).toBe(
+        withoutLinkTooltipAttributes(
+          __parseMarkdownForTests(splitStreamingMarkdownContent(content()).stableContent, {
+            cacheByContent: false,
+            disablePathLinkify: disablePathLinkify(),
+          })
+        )
       );
       if (change === 'workspace') {
         expect(stable.querySelector('a')?.getAttribute('href')).toBe('/new/src/first.ts');
@@ -830,6 +845,196 @@ describe('MarkdownRenderer', () => {
     });
   });
 
+  it.each(['Docs', '**Docs**', '`Docs`', 'Docs &amp; examples'])(
+    'shows the URL in a custom tooltip after 400 ms for %s',
+    async (label) => {
+      vi.useFakeTimers();
+      const href = 'https://example.test/docs?one=1&two=2';
+      cleanup = render(
+        () =>
+          MarkdownRenderer({ content: `[${label}](${href} "Old title")`, cacheByContent: true }),
+        container!
+      );
+      const link = container!.querySelector('a')!;
+      expect(link.hasAttribute('title')).toBe(false);
+      link.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(399);
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      const tooltip = document.querySelector('[role="tooltip"]')!;
+      expect(tooltip.textContent).toBe(href);
+      expect(tooltip.classList.contains('themed-tooltip')).toBe(true);
+      expect(link.getAttribute('aria-describedby')).toBe(tooltip.id);
+      link.dispatchEvent(new MouseEvent('mouseleave'));
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    }
+  );
+
+  it.each([
+    [
+      '`src/test/development-compatibility.test.ts`',
+      '/repo/src/test/development-compatibility.test.ts',
+    ],
+    [
+      'src/test/development-compatibility.test.ts',
+      '/repo/src/test/development-compatibility.test.ts',
+    ],
+    [
+      '[Test file](./src/test/development-compatibility.test.ts)',
+      '/repo/src/test/development-compatibility.test.ts',
+    ],
+    ['`src/App.tsx:12-15`', '/repo/src/App.tsx (line 12-15)'],
+    ['`C:\\work\\project\\App.tsx`', 'C:/work/project/App.tsx'],
+  ])('uses the same 400 ms custom tooltip for file link %s', async (content, expected) => {
+    vi.useFakeTimers();
+    setState('editorContext', 'workspacePath', '/repo');
+    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    const link = container!.querySelector('a')!;
+    expect(link.hasAttribute('title')).toBe(false);
+    link.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(399);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(expected);
+    link.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  });
+
+  it('uses a custom tooltip for session-reference links too', async () => {
+    vi.useFakeTimers();
+    setState('sessions', [
+      {
+        id: 'ses_reference123',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Reference session',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+    ]);
+    cleanup = render(
+      () => MarkdownRenderer({ content: 'Open session:ses_reference123', cacheByContent: true }),
+      container!
+    );
+    const link = container!.querySelector('a')!;
+    expect(link.hasAttribute('title')).toBe(false);
+    link.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(399);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'Open session ses_reference123'
+    );
+  });
+
+  it('does not add URL tooltips to URL labels or unsafe links', async () => {
+    vi.useFakeTimers();
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content:
+            'https://example.test/docs [https://example.test/docs](https://example.test/docs) ' +
+            '[Unsafe](javascript:alert) [Insecure](http://example.test/docs)',
+          cacheByContent: true,
+        }),
+      container!
+    );
+    for (const link of container!.querySelectorAll('a')) {
+      expect(link.hasAttribute('aria-describedby')).toBe(false);
+      link.dispatchEvent(new MouseEvent('mouseenter'));
+    }
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  });
+
+  it('cancels a link tooltip on early leave and hides it on click without changing navigation', async () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    cleanup = render(
+      () =>
+        MarkdownRenderer({ content: '[Docs](https://example.test/docs)', cacheByContent: true }),
+      container!
+    );
+    const link = container!.querySelector('a')!;
+    link.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(200);
+    link.dispatchEvent(new MouseEvent('mouseleave'));
+    await vi.advanceTimersByTimeAsync(400);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    link.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(400);
+    expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+    dispatchAnchorClick(link);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: 'https://example.test/docs' },
+    });
+  });
+
+  it.each([200, 400])(
+    'disposes link tooltips on content replacement after %i ms',
+    async (delay) => {
+      vi.useFakeTimers();
+      const [content, setContent] = createSignal('[Docs](https://example.test/old)');
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            cacheByContent: true,
+          }),
+        container!
+      );
+      const oldLink = container!.querySelector('a')!;
+      oldLink.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(delay);
+      setContent('[New docs](https://example.test/new)');
+      await vi.advanceTimersByTimeAsync(16);
+      expect(oldLink.hasAttribute('aria-describedby')).toBe(false);
+      await vi.advanceTimersByTimeAsync(400);
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+      container!.querySelector('a')!.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(400);
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+        'https://example.test/new'
+      );
+      cleanup!();
+      cleanup = undefined;
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    }
+  );
+
+  it('hydrates tooltips for completed streaming links in stable and tail segments', async () => {
+    vi.useFakeTimers();
+    const [content, setContent] = createSignal('See [Docs](https://example.test');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    expect(container!.querySelector('a')).toBeNull();
+    setContent('See [Docs](https://example.test/docs)\n\n[More](https://example.test/more)');
+    await vi.advanceTimersByTimeAsync(16);
+    const links = container!.querySelectorAll('a');
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      link.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(400);
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+        link.getAttribute('href')
+      );
+      link.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    }
+  });
+
   it.each([
     ['`claude-agent-acp`', 'code'],
     ['**claude-agent-acp**', 'strong'],
@@ -1143,7 +1348,14 @@ describe('MarkdownRenderer', () => {
     expect(link?.classList.contains('is-unavailable')).toBe(true);
     expect(link?.getAttribute('aria-disabled')).toBe('true');
     expect(link?.hasAttribute('href')).toBe(false);
-    expect(link?.title).toBe('File not found: missing-file.ts');
+    expect(link?.hasAttribute('title')).toBe(false);
+    link?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.waitFor(() =>
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+        'File not found: missing-file.ts'
+      )
+    );
+    link?.dispatchEvent(new MouseEvent('mouseleave'));
     expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
       'File not found: missing-file.ts',
       'warning'
@@ -1372,7 +1584,7 @@ describe('MarkdownRenderer', () => {
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(1);
     expect(link?.textContent).toBe('protocol.ts');
     expect(link?.querySelector('code')).toBeNull();
-    expect(link?.title).toBe('/repo/src/shared/protocol.ts');
+    expect(link?.getAttribute('href')).toBe('/repo/src/shared/protocol.ts');
     expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
     expect(link?.firstElementChild?.classList).toContain('link-leading-content');
     expect(link?.querySelector('.link-leading-label')?.textContent).toBe('protocol.ts');
@@ -1869,7 +2081,7 @@ describe('MarkdownRenderer', () => {
     expect(stableLinks).toHaveLength(0);
     expect(tailLinks).toHaveLength(1);
     expect(tailLinks?.[0]?.textContent).toBe('App.tsx');
-    expect(tailLinks?.[0]?.getAttribute('title')).toBe('/repo/src/webview/App.tsx');
+    expect(tailLinks?.[0]?.getAttribute('href')).toBe('/repo/src/webview/App.tsx');
   });
 
   it('reserves an unclosed inline-code suffix without linking it', async () => {
@@ -1914,10 +2126,95 @@ describe('MarkdownRenderer', () => {
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link?.textContent).toBe('MarkdownRenderer.test.ts');
-    expect(link?.title).toBe('/repo/src/webview/components/MarkdownRenderer.test.ts');
+    expect(link?.getAttribute('href')).toBe(
+      '/repo/src/webview/components/MarkdownRenderer.test.ts'
+    );
     expect(container?.textContent).not.toContain('src/webview/components/');
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
   });
+
+  it.each([
+    { name: 'a bullet list', prefix: 'Two corrections:\n\n- ', visibleItems: 0 },
+    { name: 'a numbered list', prefix: 'Two corrections:\n\n3. ', visibleItems: 0 },
+    {
+      name: 'a later bullet',
+      prefix: 'Two corrections:\n\n- First visible item.\n- ',
+      visibleItems: 1,
+    },
+  ])(
+    'hides an item in $name whose only content is unfinished inline code',
+    async ({ prefix, visibleItems }) => {
+      const [content, setContent] = createSignal(`${prefix}\`Open as Edi`);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            forceStreaming: true,
+          }),
+        container!
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+      // An empty list item still paints its marker and overflows its zero-height box.
+      const paintedItems = () =>
+        Array.from(container!.querySelectorAll('li')).filter(
+          (item) => !item.closest('.streaming-markdown-pending-block')
+        );
+      expect(container?.querySelector('.streaming-markdown-pending-hidden')?.textContent).toContain(
+        '`Open as Edi'
+      );
+      expect(paintedItems()).toHaveLength(visibleItems);
+
+      setContent(`${content()}tor\` is not a model-change event.`);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(container?.querySelector('.streaming-markdown-pending-block')).toBeNull();
+      expect(paintedItems()).toHaveLength(visibleItems + 1);
+      expect(container?.querySelector('li:last-child code')?.textContent).toBe('Open as Editor');
+    }
+  );
+
+  it.each(['- ', '* ', '-'])(
+    'does not paint an empty trailing %j bullet before its content arrives',
+    async (marker) => {
+      const [content, setContent] = createSignal(`Two corrections:\n\n${marker}`);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            forceStreaming: true,
+          }),
+        container!
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+      // An empty item paints an orphan marker and gives the paragraph list spacing that
+      // disappears again when the item's first token is still hidden.
+      const visibleItems = () =>
+        Array.from(container!.querySelectorAll('li')).filter(
+          (item) => !item.closest('.streaming-markdown-pending-block')
+        );
+      expect(visibleItems()).toHaveLength(0);
+      expect(
+        container?.querySelector('[data-markdown-tail-tag]')?.getAttribute('data-markdown-tail-tag')
+      ).toBe('');
+
+      setContent(`Two corrections:\n\n- \`Open as Edi`);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(visibleItems()).toHaveLength(0);
+      expect(
+        container?.querySelector('[data-markdown-tail-tag]')?.getAttribute('data-markdown-tail-tag')
+      ).toBe('');
+
+      setContent(`Two corrections:\n\n- \`Open as Editor\` is not a model-change event.`);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(visibleItems()).toHaveLength(1);
+      expect(visibleItems()[0]?.querySelector('code')?.textContent).toBe('Open as Editor');
+    }
+  );
 
   it.each([
     { delimiter: '`', chunks: ['npm', ' run', ' test'] },
@@ -2115,7 +2412,9 @@ describe('MarkdownRenderer', () => {
     const links = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
     expect(links).toHaveLength(2);
     expect(links?.[1]?.textContent).toBe('its test suite');
-    expect(links?.[1]?.title).toBe('/repo/src/webview/components/MarkdownRenderer.test.ts');
+    expect(links?.[1]?.getAttribute('href')).toBe(
+      '/repo/src/webview/components/MarkdownRenderer.test.ts'
+    );
   });
 
   it('reserves trailing bare paths and linkifies them when complete', async () => {
@@ -2177,7 +2476,7 @@ describe('MarkdownRenderer', () => {
 
       const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
       expect(link?.textContent).toBe('FileTypeIcon.tsx');
-      expect(link?.title).toBe(testCase.title);
+      expect(link?.getAttribute('href')).toBe(testCase.title);
       expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
 
       cleanup();
@@ -2254,9 +2553,9 @@ describe('MarkdownRenderer', () => {
     const links = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
     expect(links).toHaveLength(2);
     expect(links?.[0]?.textContent).toBe('App.tsx');
-    expect(links?.[0]?.title).toBe('C:/work/project/App.tsx');
+    expect(links?.[0]?.dataset.file).toBe(JSON.stringify({ path: 'C:/work/project/App.tsx' }));
     expect(links?.[1]?.textContent).toBe('open it');
-    expect(links?.[1]?.title).toBe('C:/work/project/App.tsx');
+    expect(links?.[1]?.dataset.file).toBe(JSON.stringify({ path: 'C:/work/project/App.tsx' }));
     expect(container?.textContent).toContain('https://example.test/folder/App');
     expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe(
       'https://example.test/folder/App'
@@ -2322,9 +2621,9 @@ describe('MarkdownRenderer', () => {
     const links = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
     expect(links).toHaveLength(2);
     expect(links?.[0]?.textContent).toBe('protocol.ts');
-    expect(links?.[0]?.title).toBe('/repo/src/shared/protocol.ts');
+    expect(links?.[0]?.getAttribute('href')).toBe('/repo/src/shared/protocol.ts');
     expect(links?.[1]?.textContent).toBe('onboarding-verification.md');
-    expect(links?.[1]?.title).toBe('/repo/docs/onboarding-verification.md');
+    expect(links?.[1]?.getAttribute('href')).toBe('/repo/docs/onboarding-verification.md');
     expect(container?.querySelectorAll('.file-path-icon')).toHaveLength(2);
     expect(links?.[0]).toBe(streamingLinks?.[0]);
     expect(links?.[1]).toBe(streamingLinks?.[1]);
@@ -2495,7 +2794,7 @@ describe('MarkdownRenderer', () => {
     expect(link?.textContent).toBe('protocol.ts');
     expect(link?.textContent).not.toContain('`');
     expect(link?.querySelector('code')).toBeNull();
-    expect(link?.title).toBe('/repo/src/shared/protocol.ts');
+    expect(link?.getAttribute('href')).toBe('/repo/src/shared/protocol.ts');
   });
 
   it('renders the target session file formats as isolated canonical links', () => {
@@ -2553,7 +2852,7 @@ describe('MarkdownRenderer', () => {
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link?.textContent).toBe('global.d.ts');
     expect(container?.textContent).not.toContain('`');
-    expect(link?.title).toBe('/repo/src/webview/global.d.ts');
+    expect(link?.getAttribute('href')).toBe('/repo/src/webview/global.d.ts');
     expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
   });
 

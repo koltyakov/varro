@@ -79,8 +79,11 @@ export function createCodexAdapter(): ProviderLimitAdapter {
       modelID,
       checkedAt,
       coordinate,
+      signal,
     }: ProviderLimitAdapterContext) {
+      signal?.throwIfAborted();
       const credentials = await resolveCodexCredentials(authStore);
+      signal?.throwIfAborted();
       if (!credentials) {
         return unsupportedProviderStatus(
           provider.id,
@@ -96,9 +99,12 @@ export function createCodexAdapter(): ProviderLimitAdapter {
 
         try {
           for (const endpoint of CODEX_USAGE_ENDPOINTS) {
+            signal?.throwIfAborted();
             const response = await fetch(endpoint.usage, {
               headers,
-              signal: AbortSignal.timeout(10_000),
+              signal: signal
+                ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])
+                : AbortSignal.timeout(10_000),
             });
 
             if (response.status === 404) {
@@ -125,6 +131,7 @@ export function createCodexAdapter(): ProviderLimitAdapter {
             }
 
             const payload = await readBoundedResponseJson(response);
+            signal?.throwIfAborted();
             const windows = extractCodexWindows(payload, checkedAt);
             const planName = extractCodexPlanName(payload);
             if (windows.length === 0) {
@@ -149,7 +156,8 @@ export function createCodexAdapter(): ProviderLimitAdapter {
             const resetCredits = await fetchCodexResetCredits(
               payload,
               endpoint.resetCredits,
-              headers
+              headers,
+              signal
             );
             if (resetCredits) status.usageLimitResets = resetCredits;
             return status;
@@ -201,7 +209,8 @@ export function createCodexAdapter(): ProviderLimitAdapter {
 async function fetchCodexResetCredits(
   usagePayload: unknown,
   endpoint: string,
-  headers: CodexHeaders
+  headers: CodexHeaders,
+  signal?: AbortSignal
 ): Promise<ProviderLimitResetCredits | null> {
   const summaryCount = extractCodexResetCreditCount(usagePayload);
   if (summaryCount == null || summaryCount <= 0) return null;
@@ -214,7 +223,9 @@ async function fetchCodexResetCredits(
   try {
     const response = await fetch(endpoint, {
       headers,
-      signal: AbortSignal.timeout(10_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])
+        : AbortSignal.timeout(10_000),
     });
     if (!response.ok) return summary;
 

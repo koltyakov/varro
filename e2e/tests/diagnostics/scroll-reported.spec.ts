@@ -4,9 +4,9 @@ import type { SessionMessageInfo } from '@opencode/client';
 import {
   projectV2Message,
   isV2TranscriptMessage,
-} from '../../src/extension/opencode-v2-projection';
-import type { ServerEvent } from '../../src/shared/protocol';
-import type { MessageEntry } from '../../src/webview/types';
+} from '../../../src/extension/opencode-v2-projection';
+import type { ServerEvent } from '../../../src/shared/protocol';
+import type { MessageEntry } from '../../../src/webview/types';
 
 test('reported short transcript geometry', async ({ page }, testInfo) => {
   const transcriptPath = 'tmp/scroll-reported-messages.json';

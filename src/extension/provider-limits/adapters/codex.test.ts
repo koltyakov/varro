@@ -60,6 +60,52 @@ describe('createCodexAdapter', () => {
     ).toBe(false);
   });
 
+  it('cancels an active quota fetch with the caller signal', async () => {
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    vi.mocked(fetch).mockImplementation(async (_input, options) => {
+      requestSignal = options?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener('abort', () => reject(requestSignal?.reason), {
+          once: true,
+        });
+      });
+    });
+    const request = adapter.fetch({
+      provider: oauthProvider,
+      authStore: { openai: { type: 'oauth', access: 'token-1' } },
+      modelID: null,
+      checkedAt: 1000,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    controller.abort(new Error('Quota deadline'));
+    await expect(request).resolves.toMatchObject({ status: 'error' });
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it('does not start a fetch after cancellation during credential discovery', async () => {
+    const controller = new AbortController();
+    let resolveCredentials: ((value: string) => void) | undefined;
+    vi.mocked(readFile).mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveCredentials = resolve;
+      })
+    );
+    const request = adapter.fetch({
+      provider: oauthProvider,
+      authStore: {},
+      modelID: null,
+      checkedAt: 1000,
+      signal: controller.signal,
+    });
+    const result = expect(request).rejects.toThrow('Quota deadline');
+    controller.abort(new Error('Quota deadline'));
+    resolveCredentials?.(JSON.stringify({ tokens: { access_token: 'late-token' } }));
+    await result;
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('coordinates using the resolved file token and account without resolving again for fetch', async () => {
     vi.mocked(readFile).mockResolvedValue(
       JSON.stringify({ tokens: { access_token: 'original', account_id: 'account-a' } })

@@ -11,6 +11,7 @@ import {
   untrack,
   type Accessor,
 } from 'solid-js';
+import chatLogoUri from '../../../assets/icon.png?inline';
 import {
   isAbortedAssistantError,
   isPermissionRejectedToolError,
@@ -271,13 +272,20 @@ function getFontLayoutSignature(element: HTMLElement): string {
 }
 
 function getAssistantFlowSpacingForElements(elements: readonly Element[], gap: number): number {
+  const flow = elements[0]?.parentElement;
   return getAssistantFlowSpacingSize(
     elements.map((element) => ({
       startsBordered: element.classList.contains('assistant-flow-block-starts-bordered'),
       endsBordered: element.classList.contains('assistant-flow-block-ends-bordered'),
       permissionPrompt: element.classList.contains('permission-prompt'),
+      startsSummary: element.classList.contains('assistant-flow-block-starts-summary'),
     })),
-    gap
+    gap,
+    flow
+      ? Number.parseFloat(
+          getComputedStyle(flow).getPropertyValue('--assistant-summary-after-bordered-gap')
+        ) || 0
+      : 0
   );
 }
 
@@ -499,6 +507,7 @@ export function MessageList() {
   let promptNumberSessionWindowVersion = 0;
   let promptNumberHoldGeneration = 0;
   let timestampAnimationSuppressionTimer: ReturnType<typeof setTimeout> | undefined;
+  const suppressAltMenu = /Windows/.test(navigator.userAgent);
   let altHeld = false;
   let disposed = false;
 
@@ -595,17 +604,26 @@ export function MessageList() {
   }
 
   const handleAltDown = (event: KeyboardEvent) => {
-    if (event.key === 'Alt') showPromptNumbersForAlt();
+    if (event.key !== 'Alt') return;
+    if (suppressAltMenu && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      event.preventDefault();
+    }
+    showPromptNumbersForAlt();
   };
   const handleAltUp = (event: KeyboardEvent) => {
-    if (event.key === 'Alt') hidePromptNumbersForAlt();
+    if (event.key !== 'Alt') return;
+    if (suppressAltMenu && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      event.preventDefault();
+    }
+    hidePromptNumbersForAlt();
   };
   const syncAltState = (event: MouseEvent) => {
     if (event.altKey) showPromptNumbersForAlt();
     else hidePromptNumbersForAlt();
   };
-  window.addEventListener('keydown', handleAltDown);
-  window.addEventListener('keyup', handleAltUp);
+  // Cancel bare Alt before the webview host forwards it to the Windows menu bar.
+  window.addEventListener('keydown', handleAltDown, true);
+  window.addEventListener('keyup', handleAltUp, true);
   window.addEventListener('mousemove', syncAltState);
   window.addEventListener('blur', hidePromptNumbersForAlt);
   onCleanup(() => {
@@ -614,8 +632,8 @@ export function MessageList() {
     cancelPendingScroll();
     clearActivityExitSummaryAnchor();
     if (timestampAnimationSuppressionTimer) clearTimeout(timestampAnimationSuppressionTimer);
-    window.removeEventListener('keydown', handleAltDown);
-    window.removeEventListener('keyup', handleAltUp);
+    window.removeEventListener('keydown', handleAltDown, true);
+    window.removeEventListener('keyup', handleAltUp, true);
     window.removeEventListener('mousemove', syncAltState);
     window.removeEventListener('blur', hidePromptNumbersForAlt);
   });
@@ -892,6 +910,9 @@ export function MessageList() {
   });
   const observedVisibleMessageBounds = new Map<string, { top: number; bottom: number }>();
   const mountedMessageRows = new Map<string, HTMLDivElement>();
+  const pendingMountedRowMeasurements = new Map<string, HTMLDivElement>();
+  let mountedRowMeasurementScheduled = false;
+  onCleanup(() => pendingMountedRowMeasurements.clear());
   let previousVisibleStructureSessionId: string | null = null;
   let previousVisibleStructureMessageIds: readonly string[] | null = null;
   const messages = createMemo(() => {
@@ -1099,7 +1120,11 @@ export function MessageList() {
   }));
   const visibleBlockingStreamingPart = createMemo(() => {
     const part = streamingPart();
-    const streamingText = (part && presentation.textForPart(part)) ?? state.streamingText;
+    // Arriving text groups the preceding tool preview before its first paced chunk paints.
+    // Count the queued text as visible so Thinking cannot flash for the frames between them.
+    const streamingText =
+      (part && (presentation.textForPart(part) || presentation.targetTextForPart(part))) ??
+      state.streamingText;
     return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
   });
   // History scans are tracked so they stay current whenever the untracked tail scan runs.
@@ -1665,6 +1690,7 @@ export function MessageList() {
   let loadingRowHiddenByVisibleStream = false;
   let loadingRowReservedForMessageHydration = false;
   let appendBottomReserveTarget = 0;
+  let appendReserveReconcileFrame = 0;
   let permissionRemovalBottomTarget: {
     createdAt: number;
     permissionIds: Set<string>;
@@ -1715,6 +1741,8 @@ export function MessageList() {
     const detachedAnchor = widthResizeCanOwnScroll()
       ? (pendingThinkingLayoutAnchor ?? widthResizeAnchor)
       : null;
+    // Account for pending rounding reductions before they shrink the physical scroll range.
+    reconcileAppendBottomReserve();
     let changed = false;
     for (const [element, correction] of pendingRowHeightCorrections) {
       if (!element.isConnected) continue;
@@ -1913,8 +1941,11 @@ export function MessageList() {
 
   function hasMeasuredEveryMessage() {
     if (!shouldMeasureRows()) return false;
+    const zeroHeightIds = knownZeroHeightMessageIds();
     for (const id of messageIds()) {
-      if (!measuredHeights.has(id)) return false;
+      // Complete render-empty projections already have an exact zero in the prefix. Waiting for
+      // another observer delivery after grouping invalidates their cache can strand bootstrap.
+      if (!measuredHeights.has(id) && !zeroHeightIds.has(id)) return false;
     }
     return true;
   }
@@ -2319,6 +2350,49 @@ export function MessageList() {
         null)
   );
 
+  const trailingAssistantTurn = createMemo(() => {
+    messageInfoVersion();
+    const visibleMessages = messages();
+    let userMessageId: string | null = null;
+
+    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+      const { info, parts } = visibleMessages[index]!;
+      if (info.role === 'user') {
+        // Automatic notices and metadata-only arrivals do not start a new turn.
+        // Switching away and back would requeue already-visible assistant content.
+        if (
+          !isSessionResumeMessage(parts) &&
+          !hasUserMessageContent(parseUserMessageContent(parts))
+        )
+          continue;
+        userMessageId = info.id;
+        break;
+      }
+      if (info.mode !== 'subagent') {
+        userMessageId = info.parentID;
+        break;
+      }
+    }
+
+    if (!userMessageId) return null;
+
+    const assistantMessageIds = new Set<string>();
+    let latestAssistant: AssistantMessage | null = null;
+    for (const entry of visibleMessages) {
+      if (
+        entry.info.role !== 'assistant' ||
+        entry.info.mode === 'subagent' ||
+        entry.info.parentID !== userMessageId
+      ) {
+        continue;
+      }
+      assistantMessageIds.add(entry.info.id);
+      latestAssistant = entry.info;
+    }
+
+    return { userMessageId, assistantMessageIds, latestAssistant };
+  });
+
   const loadingRowEligible = createMemo(
     () =>
       !!state.activeSessionId &&
@@ -2329,6 +2403,67 @@ export function MessageList() {
       !hasActivePermission() &&
       !activeUsageLimit()
   );
+
+  const waitingForTools = createMemo(() => {
+    if (!loadingRowEligible()) return false;
+    const turn = trailingAssistantTurn();
+    if (!turn) return false;
+    const entries = messages();
+    const indexes = messageIndexById();
+    return [...turn.assistantMessageIds].some((messageId) => {
+      const index = indexes.get(messageId);
+      const message = index === undefined ? undefined : entries[index];
+      if (!message || message.info.role !== 'assistant' || message.info.error) return false;
+      return message.parts.some(
+        (part) =>
+          part.type === 'tool' &&
+          (part.state.status === 'pending' || part.state.status === 'running') &&
+          shouldShowAssistantPartInline(part)
+      );
+    });
+  });
+
+  const loadingTurnStartedAt = createMemo(() => {
+    messageInfoVersion();
+    const startedAt = loadingStartedAt();
+    if (startedAt !== null) return startedAt;
+    const turn = trailingAssistantTurn();
+    const index = turn ? messageIndexById().get(turn.userMessageId) : undefined;
+    return (
+      (index === undefined ? undefined : messages()[index]?.info.time.created) ??
+      turn?.latestAssistant?.time.created
+    );
+  });
+
+  const loadingElapsedStartedAt = createMemo(() => {
+    messageInfoVersion();
+    const turn = trailingAssistantTurn();
+    let completedAt: number | undefined;
+    const entries = messages();
+    const indexes = messageIndexById();
+    const recordCompletion = (end: number | undefined) => {
+      if (end !== undefined && Number.isFinite(end)) {
+        completedAt = Math.max(completedAt ?? end, end);
+      }
+    };
+    for (const messageId of turn?.assistantMessageIds ?? []) {
+      const index = indexes.get(messageId);
+      const entry = index === undefined ? undefined : entries[index];
+      if (!entry || entry.info.role !== 'assistant') continue;
+      recordCompletion(entry.info.time.completed);
+      for (const part of entry.parts) {
+        if (part.type === 'text' || part.type === 'reasoning') {
+          recordCompletion(part.time?.end);
+        } else if (
+          part.type === 'tool' &&
+          (part.state.status === 'completed' || part.state.status === 'error')
+        ) {
+          recordCompletion(part.state.time.end);
+        }
+      }
+    }
+    return completedAt ?? loadingTurnStartedAt();
+  });
 
   const shouldShowLoadingRow = createMemo(
     () =>
@@ -2776,7 +2911,7 @@ export function MessageList() {
     previousCompactActivityLayoutSignatures = new Map(current);
   });
 
-  const stickyUserMessagePreviewCandidate = createMemo(() => {
+  const stickyPreviewGeometry = createMemo(() => {
     // Sticky state must follow current painted geometry. IntersectionObserver bounds can remain
     // stale while a fully visible prompt moves or an assistant row grows. Geometry changes are
     // explicitly coalesced so row measurement publication does not rerun this DOM pass by itself.
@@ -2828,6 +2963,22 @@ export function MessageList() {
       });
     }
 
+    return {
+      firstVisibleMessageIndex,
+      virtualized,
+      currentVisibleRange,
+      containerRect,
+      currentViewportHeight,
+    };
+  });
+  const stickyFirstVisibleMessageIndex = createMemo(
+    () => stickyPreviewGeometry()?.firstVisibleMessageIndex ?? null
+  );
+  // Scrolling within a row changes its geometry, not its prompt. Keep prompt parsing reactive
+  // to content and history changes without repeating the transcript search on every frame.
+  const stickyPreviewSelection = createMemo(() => {
+    const firstVisibleMessageIndex = stickyFirstVisibleMessageIndex();
+    const visibleMessages = messages();
     let preview = getStickyUserMessagePreview(
       visibleMessages,
       firstVisibleMessageIndex,
@@ -2840,7 +2991,7 @@ export function MessageList() {
       firstVisibleMessageIndex !== null &&
       visibleMessages[firstVisibleMessageIndex]
     ) {
-      const loadedMessageIds = new Set(visibleMessages.map((entry) => entry.info.id));
+      const loadedMessageIds = messageIndexById();
       const boundaryPrompts = getSessionHistoryPrompts(state.activeSessionId)
         .filter((entry) => !loadedMessageIds.has(entry.info.id))
         .toSorted((left, right) => left.info.time.created - right.info.time.created);
@@ -2857,7 +3008,14 @@ export function MessageList() {
         }
       }
     }
-    if (!preview) return null;
+    return preview ? { preview, usesBoundaryPrompt } : null;
+  });
+  const stickyUserMessagePreviewCandidate = createMemo(() => {
+    const geometry = stickyPreviewGeometry();
+    const selection = stickyPreviewSelection();
+    if (!geometry || !selection) return null;
+    const { virtualized, currentVisibleRange, containerRect, currentViewportHeight } = geometry;
+    const { preview, usesBoundaryPrompt } = selection;
 
     const previewElement = getStickyUserMessageSourceElement(preview.id);
     const rowRect = previewElement?.getBoundingClientRect();
@@ -2882,7 +3040,9 @@ export function MessageList() {
       stickyPreviewTop: stickyPreviewBounds?.top ?? null,
       stickyPreviewBottom: stickyPreviewBounds?.bottom ?? null,
     });
-    return shouldShow ? preview : null;
+    // Collision/handoff effects must still run for new painted geometry, even when the
+    // selected prompt is unchanged. Only the content lookup is cached.
+    return shouldShow ? { ...preview } : null;
   });
 
   function getMessageRenderGeometrySignature(
@@ -3045,7 +3205,9 @@ export function MessageList() {
     const measurements = rows.flatMap(({ element, messageId }) => {
       const rect = element.getBoundingClientRect();
       measuredRowInlineSizes.set(element, rect.width);
-      if (rect.height <= 0) return [];
+      // Collapsed cross-message activity can already be empty when the batch runs. Certify those
+      // projected zeros too; ResizeObserver may not redeliver a zero after its cache was invalidated.
+      if (rect.height <= 0 && !knownZeroHeightMessageIds().has(messageId)) return [];
       const height = alignMeasuredRowBlockSize(element, rect.height);
       if (!shouldAcceptRowHeight(element, messageId, height)) return [];
       return [{ messageId, height }];
@@ -3053,10 +3215,6 @@ export function MessageList() {
     if (!applyRowHeightMeasurements(measurements)) return false;
     if (publish) scheduleMeasurementPublish('content');
     return true;
-  }
-
-  function measureMountedRow(element: HTMLDivElement, messageId: string) {
-    return measureMountedRows([{ element, messageId }]);
   }
 
   function applyRowHeightMeasurements(
@@ -3926,7 +4084,14 @@ export function MessageList() {
       return;
     }
 
-    if (diffFocusPauseActive || pendingStructuralScrollAnchor) {
+    // A slow page can outlive direct input. Its exact history anchor still owns measurements;
+    // generic per-mount anchors must not queue competing restorations after the prepend.
+    const sessionId = state.activeSessionId;
+    if (
+      diffFocusPauseActive ||
+      pendingStructuralScrollAnchor ||
+      (sessionId && getCurrentPendingHistoryAnchor(sessionId)?.anchor)
+    ) {
       setMeasurementVersion((version) => version + 1);
       return;
     }
@@ -3951,6 +4116,9 @@ export function MessageList() {
   function observeMeasuredRow(element: HTMLDivElement, messageId: string, active: boolean) {
     if (!active) {
       if (mountedMessageRows.get(messageId) === element) mountedMessageRows.delete(messageId);
+      if (pendingMountedRowMeasurements.get(messageId) === element) {
+        pendingMountedRowMeasurements.delete(messageId);
+      }
       measuredRowObserver?.unobserve(element);
       return;
     }
@@ -3972,8 +4140,41 @@ export function MessageList() {
     }
     if (!shouldMeasureRows()) return;
 
-    measureMountedRow(element, messageId);
-    restorePendingHistoryAnchorIfMounted();
+    if (shouldVirtualize() && userScrollRecentlyActive()) {
+      // A direct gesture's newly mounted overscan can correct height above its painted destination.
+      // Apply that bounded correction before the scroll event remembers the destination anchor.
+      measureMountedRows([{ element, messageId }]);
+      restorePendingHistoryAnchorIfMounted();
+      if (element.isConnected && mountedMessageRows.get(messageId) === element) {
+        measuredRowObserver?.observe(element);
+      }
+      return;
+    }
+
+    // Solid mounts a whole range in one update. Publishing each row's measurement synchronously
+    // reconciles that range again and interleaves layout reads with DOM/scroll writes for every row.
+    // One microtask measures the connected batch and aligns its history owner before paint.
+    pendingMountedRowMeasurements.set(messageId, element);
+    if (!mountedRowMeasurementScheduled) {
+      mountedRowMeasurementScheduled = true;
+      queueMicrotask(() => {
+        mountedRowMeasurementScheduled = false;
+        if (disposed || !shouldMeasureRows()) {
+          pendingMountedRowMeasurements.clear();
+          return;
+        }
+        const rows = [...pendingMountedRowMeasurements].flatMap(([pendingId, pendingElement]) =>
+          pendingElement.isConnected &&
+          mountedMessageRows.get(pendingId) === pendingElement &&
+          !pendingElement.classList.contains('interactive-item-virtual-placeholder')
+            ? [{ element: pendingElement, messageId: pendingId }]
+            : []
+        );
+        pendingMountedRowMeasurements.clear();
+        measureMountedRows(rows);
+        restorePendingHistoryAnchorIfMounted();
+      });
+    }
     if (element.isConnected && mountedMessageRows.get(messageId) === element) {
       measuredRowObserver?.observe(element);
     }
@@ -4466,6 +4667,18 @@ export function MessageList() {
     const summaries = containerRef.querySelectorAll<HTMLElement>('.assistant-activity-summary');
     const summary = summaries[summaries.length - 1];
     if (!summary) return;
+    // A tray collapsing above a separate summary moves that summary up while the bottom reserve
+    // holds the viewport. Anchoring its old top would scroll the transcript back by the tray.
+    const flow = summary.closest('.assistant-message-flow');
+    const trayAboveSummary = [
+      ...(flow?.querySelectorAll<HTMLElement>(':scope > .assistant-active-activity-tray') ?? []),
+    ].some(
+      (tray) =>
+        tray.getClientRects().length > 0 &&
+        !tray.contains(summary) &&
+        (tray.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+    );
+    if (trayAboveSummary) return;
     activityExitSummaryAnchor = {
       sessionId,
       element: summary,
@@ -4658,8 +4871,11 @@ export function MessageList() {
       }
       activityExitBottomTarget = null;
       reconcileAppendBottomReserve();
-      setPreservedScrollTop(collapseTarget);
-      lastAutoScrolledBottomScrollTop = collapseTarget;
+      // Coalescing groups can finish while a retained summary still owns the viewport.
+      // Do not jump to the collapse target and let that owner undo it on the next frame.
+      if (activityExitSummaryAnchor) restoreActivityExitSummaryAnchor(activityExitSummaryAnchor);
+      else setPreservedScrollTop(collapseTarget);
+      lastAutoScrolledBottomScrollTop = containerRef.scrollTop;
       const sessionId = state.activeSessionId;
       if (sessionId) startFollowLoop(sessionId);
     });
@@ -5009,10 +5225,49 @@ export function MessageList() {
 
   function reconcileAppendBottomReserve() {
     if (!containerRef) return;
+    // Diff-view replacement owns the new physical bottom, not the previous painted target.
+    // Its settling loop clears reserves; deferred rounding must not recreate one between frames.
+    if (
+      inlinePreviewBottomFollow?.sessionId === state.activeSessionId &&
+      inlinePreviewBottomFollow?.inputEpoch === directScrollInputEpoch
+    ) {
+      return;
+    }
     const reserve = untrack(appendBottomReserve);
-    if (reserve <= 0) return;
+    // Deferred row rounding can still remove height from an entering replacement tool, or from a
+    // row whose tray just collapsed under a fixed exit target. Keep that space until the
+    // correction lands so neither consuming reserve nor the correction can clamp the viewport.
+    let pendingHeightReduction = 0;
+    for (const [element, correction] of pendingRowHeightCorrections) {
+      if (element.isConnected)
+        pendingHeightReduction += Math.max(
+          0,
+          (appliedRowHeightCorrections.get(element) ?? 0) - correction
+        );
+    }
+    if (reserve <= 0) {
+      // Replacement growth can consume the last reserve before the next rounding write.
+      // Keep the painted bottom reachable even when there is no existing spacer to grow.
+      if (
+        pendingHeightReduction <= 0 ||
+        !autoScroll() ||
+        !pinnedToBottom ||
+        stickyNavigationOwnsScroll() ||
+        pointerScrollOwnershipActive
+      ) {
+        return;
+      }
+      appendBottomReserveTarget = containerRef.scrollTop;
+    }
     // Exit space temporarily overlaps the departing tray; it is not replacement content.
-    if (activityExitBottomTarget !== null || untrack(exitingActivityPartKeys).size > 0) return;
+    if (activityExitBottomTarget !== null || untrack(exitingActivityPartKeys).size > 0) {
+      if (activityExitBottomTarget === null || pendingHeightReduction <= 0) return;
+      const shortfall =
+        activityExitBottomTarget -
+        (containerRef.scrollHeight - containerRef.clientHeight - pendingHeightReduction);
+      if (shortfall > 0) setAppendBottomReserve(reserve + Math.ceil(shortfall));
+      return;
+    }
     if (
       activityExitSummaryAnchor &&
       isLoading() &&
@@ -5026,18 +5281,12 @@ export function MessageList() {
 
     // A short transcript also needs reserve for the space below its natural content.
     // Clamping this to zero drops that space before an entering block has grown into it.
-    // Deferred row rounding can still remove height from an entering replacement tool. Keep that
-    // space until the correction lands so consuming the final reserve cannot clamp the viewport.
-    let pendingHeightReduction = 0;
-    for (const [element, correction] of pendingRowHeightCorrections) {
-      if (element.isConnected)
-        pendingHeightReduction += Math.max(
-          0,
-          (appliedRowHeightCorrections.get(element) ?? 0) - correction
-        );
-    }
     const unreservedBottom =
       containerRef.scrollHeight - reserve - containerRef.clientHeight - pendingHeightReduction;
+    if (autoScroll() && pinnedToBottom && !stickyNavigationOwnsScroll()) {
+      // A newer follow position is a lower bound, including while deferred rounding settles.
+      appendBottomReserveTarget = Math.max(appendBottomReserveTarget, containerRef.scrollTop);
+    }
     const nextReserve = Math.max(0, Math.ceil(appendBottomReserveTarget - unreservedBottom));
     if (Math.abs(nextReserve - reserve) <= 0.5) return;
     setAppendBottomReserve(nextReserve);
@@ -5173,6 +5422,12 @@ export function MessageList() {
   }
 
   function startPendingAppendScrollTransition(sessionId: string) {
+    if (activityExitBottomTarget !== null || activityExitSummaryAnchor) {
+      // New assistant steps must not restore an append anchor or animate the viewport
+      // against the current activity-collapse owner. Real response growth releases it.
+      cancelAppendScrollTransition();
+      return false;
+    }
     if (appendScrollSessionId === sessionId && appendScrollRafId) {
       pendingMeasuredAppendScroll = false;
       const appendAnchor = pendingMeasuredAppendAnchor;
@@ -6836,7 +7091,14 @@ export function MessageList() {
       } else if (containerHeightDelta < -0.5) {
         consumeBottomReserve(-containerHeightDelta);
       }
-      if (trackChanged) reconcileAppendBottomReserve();
+      if (trackChanged && !appendReserveReconcileFrame) {
+        // Consuming a reserve changes the observed track itself. A microtask still runs
+        // inside resize delivery, so coalesce that write into the next animation frame.
+        appendReserveReconcileFrame = requestAnimationFrame(() => {
+          appendReserveReconcileFrame = 0;
+          if (!disposed) reconcileAppendBottomReserve();
+        });
+      }
       if (trackChanged && shouldMeasureRows() && !autoScroll()) {
         setTrackLayoutVersion((version) => version + 1);
       }
@@ -6920,6 +7182,8 @@ export function MessageList() {
       measuredRowObserver = null;
       if (rowHeightCorrectionFrame) cancelAnimationFrame(rowHeightCorrectionFrame);
       rowHeightCorrectionFrame = 0;
+      if (appendReserveReconcileFrame) cancelAnimationFrame(appendReserveReconcileFrame);
+      appendReserveReconcileFrame = 0;
       pendingRowHeightCorrections.clear();
       mountedMessageRows.clear();
       clearObservedVisibleMessages();
@@ -6959,18 +7223,20 @@ export function MessageList() {
     if (wasMeasuring === measuring) return measuring;
 
     queueMicrotask(() => {
-      if (shouldMeasureRows() !== measuring) return;
+      if (disposed || shouldMeasureRows() !== measuring) return;
+      const rows: Array<{ element: HTMLDivElement; messageId: string }> = [];
       for (const [messageId, row] of mountedMessageRows) {
         if (measuring) {
           if (!row.isConnected) continue;
-          measureMountedRow(row, messageId);
-          if (row.isConnected && mountedMessageRows.get(messageId) === row) {
-            measuredRowObserver?.observe(row);
+          if (!row.classList.contains('interactive-item-virtual-placeholder')) {
+            rows.push({ element: row, messageId });
           }
+          measuredRowObserver?.observe(row);
         } else {
           measuredRowObserver?.unobserve(row);
         }
       }
+      if (measuring) measureMountedRows(rows);
     });
     return measuring;
   });
@@ -7116,6 +7382,8 @@ export function MessageList() {
     cancelWidthResize();
     setHasBootstrappedVirtualization(false);
     setAppendBottomReserve(0);
+    if (appendReserveReconcileFrame) cancelAnimationFrame(appendReserveReconcileFrame);
+    appendReserveReconcileFrame = 0;
     clearActivityExitReserve();
     appendBottomReserveTarget = 0;
     newTurnReserveSessionId = null;
@@ -7540,48 +7808,6 @@ export function MessageList() {
         getTrailingFileEventSignatureSegment(tail, history.trailingSignature).result
       );
     });
-  });
-  const trailingAssistantTurn = createMemo(() => {
-    messageInfoVersion();
-    const visibleMessages = messages();
-    let userMessageId: string | null = null;
-
-    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
-      const { info, parts } = visibleMessages[index]!;
-      if (info.role === 'user') {
-        // Automatic notices and metadata-only arrivals do not start a new turn.
-        // Switching away and back would requeue already-visible assistant content.
-        if (
-          !isSessionResumeMessage(parts) &&
-          !hasUserMessageContent(parseUserMessageContent(parts))
-        )
-          continue;
-        userMessageId = info.id;
-        break;
-      }
-      if (info.mode !== 'subagent') {
-        userMessageId = info.parentID;
-        break;
-      }
-    }
-
-    if (!userMessageId) return null;
-
-    const assistantMessageIds = new Set<string>();
-    let latestAssistant: AssistantMessage | null = null;
-    for (const entry of visibleMessages) {
-      if (
-        entry.info.role !== 'assistant' ||
-        entry.info.mode === 'subagent' ||
-        entry.info.parentID !== userMessageId
-      ) {
-        continue;
-      }
-      assistantMessageIds.add(entry.info.id);
-      latestAssistant = entry.info;
-    }
-
-    return { userMessageId, assistantMessageIds, latestAssistant };
   });
   const trailingTurnInlineEditRetention = createMemo<{
     sessionId: string | null;
@@ -8079,6 +8305,16 @@ export function MessageList() {
             partId: part.id,
             kind: 'activity',
             running: isAssistantActivityPartRunning(part),
+            animateExit: part.type === 'reasoning',
+            startedAt:
+              part.type === 'tool' && part.state.status === 'running'
+                ? part.state.time.start
+                : undefined,
+            durationMs:
+              part.type === 'tool' &&
+              (part.state.status === 'completed' || part.state.status === 'error')
+                ? Math.max(0, part.state.time.end - part.state.time.start)
+                : undefined,
             active: (part.type === 'reasoning'
               ? activeActivityMessageIds()
               : activeToolActivityMessageIds()
@@ -8140,9 +8376,11 @@ export function MessageList() {
     const activeMessageIds = segment.activeMessageIds();
     const streaming = segment.streaming();
     const isBoundaryPart = (part: Part) =>
-      part.type === 'text'
-        ? hasVisibleProjectedText(part, streaming)
-        : shouldShowAssistantPartInline(part);
+      isAssistantActivityPart(part) && segment.canCompact(part)
+        ? false
+        : part.type === 'text'
+          ? hasVisibleProjectedText(part, streaming)
+          : shouldShowAssistantPartInline(part);
     const isNormallyIncluded = (part: AssistantActivityPart) =>
       segment.canCompact(part) &&
       !segment.hiddenParts().has(getPresentationPartKey(part)) &&
@@ -9377,6 +9615,30 @@ export function MessageList() {
     state.messagesLoading ||
     (!!state.activeSessionId && initialPositioningSessionId() === state.activeSessionId);
 
+  // These renderer-local marks include the existing geometry/viewport-fill hold.
+  // They observe readiness without shortening it or taking scroll ownership.
+  let measuredHydration = false;
+  createEffect(() => {
+    const hydrating = hydratingSession();
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Test renderers may omit the browser Performance Timeline API.
+    if (typeof performance.mark !== 'function' || typeof performance.measure !== 'function') return;
+    if (hydrating && !measuredHydration) {
+      performance.clearMarks('varro.transcript.hydration-start');
+      performance.clearMarks('varro.transcript.ready');
+      performance.clearMeasures('varro.transcript.hydration');
+      performance.mark('varro.transcript.hydration-start');
+      measuredHydration = true;
+    } else if (!hydrating && measuredHydration) {
+      performance.mark('varro.transcript.ready');
+      performance.measure(
+        'varro.transcript.hydration',
+        'varro.transcript.hydration-start',
+        'varro.transcript.ready'
+      );
+      measuredHydration = false;
+    }
+  });
+
   return (
     <div class="interactive-list-shell min-h-0 flex-1">
       <Show when={hydratingSession()}>
@@ -9432,7 +9694,8 @@ export function MessageList() {
                   <Show when={state.emptyStateLogoUri}>
                     <img
                       class="chat-empty-logo"
-                      src={state.emptyStateLogoUri}
+                      src={chatLogoUri}
+                      decoding="sync"
                       width="256"
                       height="256"
                       alt=""
@@ -9441,18 +9704,20 @@ export function MessageList() {
                     />
                   </Show>
                   <div class="chat-empty-hints">
-                    <span class="chat-empty-hint">
-                      <kbd>@</kbd> add files and agents
-                    </span>
-                    <span class="chat-empty-hint">
-                      <kbd>/</kbd> run commands
-                    </span>
-                    <span class="chat-empty-hint">
-                      <kbd>$</kbd> select skills
-                    </span>
-                    <span class="chat-empty-hint">
-                      <kbd>&amp;</kbd> link sessions
-                    </span>
+                    <div class="chat-empty-hint-grid">
+                      <span class="chat-empty-hint">
+                        <kbd>@</kbd> add files / agents
+                      </span>
+                      <span class="chat-empty-hint">
+                        <kbd>/</kbd> run commands
+                      </span>
+                      <span class="chat-empty-hint">
+                        <kbd>$</kbd> select skills
+                      </span>
+                      <span class="chat-empty-hint">
+                        <kbd>&amp;</kbd> link sessions
+                      </span>
+                    </div>
                     <span class="chat-empty-hint">
                       <kbd>Shift</kbd>
                       <kbd>Enter</kbd> new line
@@ -9574,7 +9839,10 @@ export function MessageList() {
                 <LoadingRow
                   compacting={isSessionCompacting()}
                   waiting={waitingForBackground()}
+                  toolsRunning={waitingForTools()}
                   waitingStartedAt={backgroundWorkStartedAt()}
+                  turnStartedAt={loadingTurnStartedAt()}
+                  elapsedStartedAt={loadingElapsedStartedAt()}
                   visible={!state.messagesLoading && showLoadingRow()}
                 />
               </Show>

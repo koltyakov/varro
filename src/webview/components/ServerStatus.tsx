@@ -10,15 +10,8 @@ import type { ServerErrorDetail } from '../../shared/protocol';
 import { postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
 import { defaultAppState } from '../lib/state';
-import {
-  brainWarningIcon,
-  checkIcon,
-  clockIcon,
-  copyIcon,
-  downloadIcon,
-  warningCircleSolidIcon,
-  warningTriangleIcon,
-} from '../lib/ui-icons';
+import { statusIcons } from '../lib/status-icons';
+import { checkIcon, copyIcon } from '../lib/ui-icons';
 import { writeClipboard } from '../lib/write-clipboard';
 import { Tooltip } from './Tooltip';
 import { UiIcon } from './UiIcon';
@@ -133,7 +126,7 @@ function WarningIcon() {
   return (
     <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-warning/10">
       <UiIcon
-        source={warningTriangleIcon}
+        source={statusIcons.warningTriangle}
         class="h-5 w-5 text-vscode-warning"
         width={20}
         height={20}
@@ -145,7 +138,12 @@ function WarningIcon() {
 function UpdateIcon() {
   return (
     <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-warning/10">
-      <UiIcon source={downloadIcon} class="h-5 w-5 text-vscode-warning" width={20} height={20} />
+      <UiIcon
+        source={statusIcons.download}
+        class="h-5 w-5 text-vscode-warning"
+        width={20}
+        height={20}
+      />
     </div>
   );
 }
@@ -153,7 +151,12 @@ function UpdateIcon() {
 function WaitingIcon() {
   return (
     <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-accent/10">
-      <UiIcon source={clockIcon} class="h-5 w-5 text-vscode-accent" width={20} height={20} />
+      <UiIcon
+        source={statusIcons.clock}
+        class="h-5 w-5 text-vscode-accent"
+        width={20}
+        height={20}
+      />
     </div>
   );
 }
@@ -255,7 +258,12 @@ export function ServerStatus() {
             class="flex shrink-0 items-center justify-center rounded-full bg-vscode-accent/10"
             style={{ width: '40px', height: '40px', 'aspect-ratio': '1 / 1' }}
           >
-            <UiIcon source={brainWarningIcon} width={20} height={20} class="text-vscode-accent" />
+            <UiIcon
+              source={statusIcons.brainWarning}
+              width={20}
+              height={20}
+              class="text-vscode-accent"
+            />
           </div>
           <div class="flex w-full flex-col gap-1.5">
             <p class="text-[13px] font-medium text-vscode-fg">No providers configured</p>
@@ -268,7 +276,7 @@ export function ServerStatus() {
           </div>
           <SetupCommandCard label="Setup" command="opencode auth login" />
           <button type="button" class="server-status-action-button" onClick={openProviderSetup}>
-            Open terminal and add a provider
+            <span>Open terminal and add a provider</span>
           </button>
           <button
             type="button"
@@ -316,7 +324,7 @@ function MissingCliState() {
         class="server-status-action-button"
         onClick={() => runInTerminal(OPENCODE_INSTALL_COMMAND, 'OpenCode Install')}
       >
-        Open terminal and install
+        <span>Open terminal and install</span>
       </button>
       <p class="text-[11px] leading-normal text-vscode-muted">
         Use npm on macOS, Linux, or WSL. On native Windows, download the CLI from the install docs
@@ -378,7 +386,7 @@ function InvalidPathState(props: { message: string; detail: ServerErrorDetail })
         class="server-status-action-button"
         onClick={() => openSettings(props.detail.settingId || 'varro.server.command')}
       >
-        Open settings
+        <span>Open settings</span>
       </button>
       <RecoveryActions showOutput />
     </div>
@@ -415,7 +423,7 @@ function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
           class="server-status-action-button"
           onClick={() => runInTerminal(props.detail.suggestedCommand || '', 'OpenCode Update')}
         >
-          Open terminal and update
+          <span>Open terminal and update</span>
         </button>
       </Show>
 
@@ -436,14 +444,14 @@ function GenericErrorState(props: { message: string }) {
     <div class="server-status-content">
       <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-error/10">
         <UiIcon
-          source={warningCircleSolidIcon}
+          source={statusIcons.warningCircle}
           class="h-5 w-5 text-vscode-error"
           width={20}
           height={20}
         />
       </div>
       <div class="flex w-full flex-col gap-1.5">
-        <p class="text-[13px] font-medium text-vscode-fg">OpenCode could not start</p>
+        <p class="text-[13px] font-medium text-vscode-fg">OpenCode is unavailable</p>
         <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
       </div>
       <RecoveryActions showOutput />

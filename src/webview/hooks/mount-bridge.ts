@@ -270,7 +270,6 @@ export function handleExtensionMessageWithDependencies(
         deps.setRestartBlocked?.(null);
       }
       if (msg.payload.state === 'running') {
-        deps.clearError();
         deps.ensureConnectionInitialized();
       } else {
         if (previousServerState === 'running') deps.invalidateConnection();

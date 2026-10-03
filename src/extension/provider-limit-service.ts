@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import { createHash } from 'crypto';
 import type { ProviderLimitStatus, ProviderLimitUpdate, ServerStatus } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
+import { withStartupDeadline } from '../shared/startup';
 import { fetchProviderLimitFromAdapter } from './provider-limits';
 import { ProviderQuotaCoordinator } from './provider-quota-coordinator';
 import { readOpenCodeV2AuthStore } from './provider-v2-auth-store';
@@ -25,7 +26,7 @@ export class ProviderLimitService {
   } as const;
   private static readonly RATE_LIMIT_ERROR_CACHE_TTL_MS = 60_000;
   private static readonly MAX_RATE_LIMIT_ERROR_CACHE_TTL_MS = 60 * 60_000;
-  private static readonly PROVIDER_LIMIT_ADAPTER_TIMEOUT_MS = 45_000;
+  private static readonly PROVIDER_LIMIT_TIMEOUT_MS = 12_000;
   private static readonly CACHE_TTL_MS = 60_000;
 
   private readonly providerLimitCache = new Map<
@@ -108,7 +109,23 @@ export class ProviderLimitService {
     if (cached && cached.expiresAt > now) return cached.promise;
 
     const generation = this.providerSnapshotGeneration;
-    const loadPromise = this.load(providerID, modelID, generation);
+    // Include catalogs and credentials in the optional deadline, not just the
+    // provider poll. A quota refresh must settle before the bridge's slow warning.
+    const loadPromise = withStartupDeadline(
+      (signal) => this.load(providerID, modelID, generation, signal),
+      ProviderLimitService.PROVIDER_LIMIT_TIMEOUT_MS,
+      'Provider quota lookup'
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection values are untrusted and narrowed before presentation.
+    ).catch((error: unknown) =>
+      this.withLastKnownGoodFallback(cacheKey, {
+        providerID,
+        modelID,
+        status: 'error',
+        source: 'provider',
+        checkedAt: Date.now(),
+        note: `Provider quota lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    );
     const promise = loadPromise
       .then((result) => result.status)
       .catch((err) => {
@@ -119,7 +136,7 @@ export class ProviderLimitService {
       });
 
     this.providerLimitCache.set(cacheKey, {
-      expiresAt: now + ProviderLimitService.PROVIDER_LIMIT_ADAPTER_TIMEOUT_MS,
+      expiresAt: now + ProviderLimitService.PROVIDER_LIMIT_TIMEOUT_MS,
       promise,
     });
 
@@ -178,7 +195,8 @@ export class ProviderLimitService {
   private async load(
     providerID: string,
     modelID: string | null,
-    generation: number
+    generation: number,
+    signal: AbortSignal
   ): Promise<ProviderLimitLoadResult> {
     const cacheKey = `${providerID}:${modelID || ''}`;
     this.coordinator.clearObservations(
@@ -203,8 +221,10 @@ export class ProviderLimitService {
     let providers: ProviderMetadata[];
     const canCoordinate = ['openrouter', 'openai', 'anthropic', 'claude-code'].includes(providerID);
     try {
-      providers = await this.getProviderMetadata(canCoordinate);
+      providers = await this.getProviderMetadata(canCoordinate, signal);
+      signal.throwIfAborted();
     } catch (err) {
+      signal.throwIfAborted();
       return createProviderLimitLoadResult({
         providerID,
         modelID,
@@ -233,8 +253,13 @@ export class ProviderLimitService {
     const cachedAuthFailure = this.providerAuthFailureCache.get(provider.id);
     let authStore: Record<string, ProviderAuthRecord>;
     try {
-      authStore = await this.readProviderAuthStore(canCoordinate || Boolean(cachedAuthFailure));
+      authStore = await this.readProviderAuthStore(
+        canCoordinate || Boolean(cachedAuthFailure),
+        signal
+      );
+      signal.throwIfAborted();
     } catch {
+      signal.throwIfAborted();
       return createProviderLimitLoadResult({
         providerID,
         modelID,
@@ -255,72 +280,76 @@ export class ProviderLimitService {
     let shared = false;
     let loading = true;
     try {
-      providerLimit = await withTimeout(
-        fetchProviderLimitFromAdapter({
-          provider,
-          authStore,
-          modelID,
-          checkedAt,
-          coordinate: async (identity, poll, observation) => {
-            if (process.platform === 'win32') return poll();
-            shared = true;
-            const token = JSON.stringify(identity);
-            const status = await this.coordinator.get(token, modelID, poll, providerID);
-            const canObserve =
-              this.onUpdate &&
-              observation?.enabled !== false &&
-              (!observation?.isIdentityCurrent || (await observation.isIdentityCurrent(authStore)));
-            if (
-              this.onUpdate &&
-              canObserve &&
-              loading &&
-              !this.disposed &&
-              generation === this.providerSnapshotGeneration
-            ) {
-              this.coordinator.observe(
-                this.observationOwner,
-                JSON.stringify([this.directory ?? null, providerID, modelID]),
-                token,
-                status,
-                async (next, isCurrent) => {
-                  const metadataPromise = this.providerMetadataPromise;
-                  const currentProviders = await metadataPromise;
-                  const currentAuth = await this.readProviderAuthStore(true);
-                  const currentProvider = currentProviders?.find((item) => item.id === providerID);
-                  const identityCurrent = observation?.isIdentityCurrent
-                    ? await observation.isIdentityCurrent(currentAuth)
-                    : true;
-                  if (
-                    !identityCurrent ||
-                    !currentProvider ||
-                    metadataPromise !== this.providerMetadataPromise ||
-                    !isCurrent() ||
-                    this.disposed ||
-                    generation !== this.providerSnapshotGeneration ||
-                    credentialFingerprint !==
-                      getProviderCredentialFingerprint(currentProvider, currentAuth)
-                  )
-                    return false;
-                  this.onUpdate?.({ directory: this.directory ?? null, status: next });
-                  return true;
-                }
-              );
-            }
-            return status;
-          },
-          // V2 owns OAuth rotation and has no API for replacing credential secrets.
-          setProviderAuth:
-            this.server.apiVersion === 2
-              ? undefined
-              : async (id, auth) => {
-                  await this.server.request('PUT', `/auth/${encodeURIComponent(id)}`, auth, {
-                    directory: this.directory,
-                  });
-                },
-        }),
-        ProviderLimitService.PROVIDER_LIMIT_ADAPTER_TIMEOUT_MS
-      );
+      providerLimit = await fetchProviderLimitFromAdapter({
+        provider,
+        authStore,
+        modelID,
+        checkedAt,
+        signal,
+        coordinate: async (identity, poll, observation) => {
+          signal.throwIfAborted();
+          if (process.platform === 'win32') return poll();
+          shared = true;
+          const token = JSON.stringify(identity);
+          const status = await this.coordinator.get(token, modelID, poll, providerID);
+          const canObserve =
+            this.onUpdate &&
+            observation?.enabled !== false &&
+            (!observation?.isIdentityCurrent || (await observation.isIdentityCurrent(authStore)));
+          if (
+            this.onUpdate &&
+            canObserve &&
+            !signal.aborted &&
+            loading &&
+            !this.disposed &&
+            generation === this.providerSnapshotGeneration
+          ) {
+            this.coordinator.observe(
+              this.observationOwner,
+              JSON.stringify([this.directory ?? null, providerID, modelID]),
+              token,
+              status,
+              async (next, isCurrent) => {
+                const metadataPromise = this.providerMetadataPromise;
+                const currentProviders = await metadataPromise;
+                const currentAuth = await this.readProviderAuthStore(true);
+                const currentProvider = currentProviders?.find((item) => item.id === providerID);
+                const identityCurrent = observation?.isIdentityCurrent
+                  ? await observation.isIdentityCurrent(currentAuth)
+                  : true;
+                if (
+                  !identityCurrent ||
+                  !currentProvider ||
+                  metadataPromise !== this.providerMetadataPromise ||
+                  !isCurrent() ||
+                  this.disposed ||
+                  generation !== this.providerSnapshotGeneration ||
+                  credentialFingerprint !==
+                    getProviderCredentialFingerprint(currentProvider, currentAuth)
+                )
+                  return false;
+                this.onUpdate?.({ directory: this.directory ?? null, status: next });
+                return true;
+              }
+            );
+          }
+          return status;
+        },
+        // V2 owns OAuth rotation and has no API for replacing credential secrets.
+        setProviderAuth:
+          this.server.apiVersion === 2
+            ? undefined
+            : async (id, auth) => {
+                signal.throwIfAborted();
+                await this.server.request('PUT', `/auth/${encodeURIComponent(id)}`, auth, {
+                  directory: this.directory,
+                  signal,
+                });
+              },
+      });
+      signal.throwIfAborted();
     } catch (err) {
+      signal.throwIfAborted();
       providerLimit = {
         providerID,
         modelID,
@@ -358,10 +387,14 @@ export class ProviderLimitService {
     try {
       const rawConsole = await this.server.request('GET', '/experimental/console', undefined, {
         directory: this.directory,
+        signal,
       });
+      signal.throwIfAborted();
       const consoleLimit = extractOpenCodeConsoleLimit(rawConsole, providerID, modelID, checkedAt);
       if (consoleLimit) return createProviderLimitLoadResult(consoleLimit, true);
-    } catch {}
+    } catch {
+      signal.throwIfAborted();
+    }
 
     return createProviderLimitLoadResult({
       providerID,
@@ -397,7 +430,7 @@ export class ProviderLimitService {
     };
   }
 
-  private async readProviderAuthStore(forceFresh = false) {
+  private async readProviderAuthStore(forceFresh = false, signal?: AbortSignal) {
     const now = Date.now();
     if (
       !forceFresh &&
@@ -428,10 +461,21 @@ export class ProviderLimitService {
       this.providerAuthStoreFetchedAt = now;
       this.providerAuthStorePromise = promise;
     }
+    const abandon = () => {
+      if (this.providerAuthStorePromise === promise) {
+        this.providerAuthStorePromise = null;
+        this.providerAuthStoreFetchedAt = 0;
+      }
+    };
+    signal?.addEventListener('abort', abandon, { once: true });
+    void promise.then(
+      () => signal?.removeEventListener('abort', abandon),
+      () => signal?.removeEventListener('abort', abandon)
+    );
     return promise;
   }
 
-  private async getProviderMetadata(forceFresh = false) {
+  private async getProviderMetadata(forceFresh = false, signal?: AbortSignal) {
     const now = Date.now();
     if (
       !forceFresh &&
@@ -445,7 +489,9 @@ export class ProviderLimitService {
     const promise = (async () => {
       const rawConfig = (await this.server.request('GET', '/config/providers', undefined, {
         directory: this.directory,
+        signal,
       })) as unknown;
+      signal?.throwIfAborted();
       const config = asRecord(rawConfig);
       return Array.isArray(config?.providers)
         ? config.providers.filter((item): item is ProviderMetadata => Boolean(asRecord(item)))
@@ -465,6 +511,17 @@ export class ProviderLimitService {
       this.providerMetadataFetchedAt = now;
       this.providerMetadataPromise = promise;
     }
+    const abandon = () => {
+      if (this.providerMetadataPromise === promise) {
+        this.providerMetadataPromise = null;
+        this.providerMetadataFetchedAt = 0;
+      }
+    };
+    signal?.addEventListener('abort', abandon, { once: true });
+    void promise.then(
+      () => signal?.removeEventListener('abort', abandon),
+      () => signal?.removeEventListener('abort', abandon)
+    );
     return promise;
   }
 }
@@ -487,20 +544,6 @@ function createProviderLimitLoadResult(
     ttlStatus: status,
     rememberLastKnownGood: rememberLastKnownGood && status.status === 'available',
   };
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
 }
 
 function isRateLimitedProviderError(status: ProviderLimitStatus) {

@@ -779,6 +779,7 @@ export type WebviewInstanceContext = {
 };
 
 export type ModelPreferences = {
+  lastSelectedModel?: ChatModelSelection;
   modelVariantSelections: Record<string, string | null>;
   providerOrder: string[];
   modelOrder: string[];

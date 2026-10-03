@@ -11,6 +11,11 @@ const EXPECTATIONS = {
     '  - **Status:** `error: OpenCode CLI not found.',
     '  - **Health:** unhealthy',
   ],
+  'empty-window-missing-cli': [
+    '  - **Version:** `not found`',
+    '  - **Status:** `error: OpenCode CLI not found.',
+    '  - **Health:** unhealthy',
+  ],
   'invalid-cli-path': [
     '  - **Binary:**',
     '  - **Status:** `error: OpenCode CLI not found at the configured path:',
@@ -47,10 +52,11 @@ const EXPECTATIONS = {
     '  - **Status:** `running, event stream degraded`',
     '  - **Health:** healthy',
   ],
-  'port-conflict-fallback': [
+  'explicit-port-conflict': [
     '  - **Version:** `1.18.15`',
-    '  - **Status:** `running, event stream healthy`',
-    '  - **Health:** healthy',
+    'Explicit ports never fall back.',
+    'Set varro.server.port to auto or an available integer between 1 and 65535.',
+    '  - **Health:** unhealthy',
   ],
   'required-update-disabled': [
     '  - **Version:** `1.15.0`',
@@ -83,7 +89,7 @@ const EXPECTATIONS = {
     '  - **Health:** healthy',
   ],
   'v2-first-run': [
-    '- **Version:** `2.0.21`',
+    '- **Version:** `2.0.22`',
     '- **Ownership:** managed by Varro',
     '  - **Status:** `running, event stream healthy`',
     '  - **Health:** healthy',
@@ -155,15 +161,33 @@ async function run() {
     '  - **Health:**',
     '- **Auto updates:**'
   );
-  if (scenario === 'port-conflict-fallback') {
+  if (scenario === 'explicit-port-conflict') {
     const originalPort = Number(process.env.VARRO_SANDBOX_PORT);
     assert.ok(Number.isInteger(originalPort), 'Sandbox port was not provided');
-    expected.push(`  - **URL:** [http://127.0.0.1:${String(originalPort + 1)}]`);
+    expected.push(`  - **URL:** [http://127.0.0.1:${String(originalPort)}]`);
+    expected.push(`  - **Status:** \`error: Port ${String(originalPort)} is already in use.`);
   }
 
   const extension = vscode.extensions.getExtension('koltyakov.varro');
   assert.ok(extension, 'Varro extension was not loaded in the Extension Development Host');
-  await extension.activate();
+  if (scenario === 'empty-window-missing-cli') {
+    assert.equal(vscode.workspace.workspaceFolders, undefined, 'Sandbox must have no folder open');
+  }
+  let activationTimer;
+  try {
+    await Promise.race([
+      extension.activate(),
+      new Promise((_, reject) => {
+        activationTimer = setTimeout(
+          () =>
+            reject(new Error('Varro activation did not finish before first-run view resolution')),
+          DEFAULT_WAIT_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(activationTimer);
+  }
 
   const commands = await vscode.commands.getCommands(true);
   assert.ok(commands.includes('varro.about'), 'Varro commands were not registered');
@@ -173,6 +197,10 @@ async function run() {
   // activation as well as the host-side outcome for each scenario.
   if (scenario === 'runtime-crash-recovery') await waitForLaunchCount(2);
   const about = await waitForExpectedAboutText(expected);
+  if (scenario === 'explicit-port-conflict') {
+    const launches = await waitForLaunchCount(1);
+    assert.equal(launches.length, 1, 'An explicit port conflict must not launch a fallback server');
+  }
   if (scenario === 'startup-process-exit') {
     const launches = await waitForLaunchCount(4);
     assert.equal(launches.length, 4, 'Varro did not exhaust all three startup retries');

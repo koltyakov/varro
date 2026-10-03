@@ -225,12 +225,66 @@ describe('ProviderLimitService', () => {
     const second = service.get('openai', 'gpt-5.4');
 
     expect(first).toBe(second);
+    await Promise.resolve();
     expect(server.request).toHaveBeenCalledTimes(1);
 
     configRequest.resolve({ providers: [{ id: 'openai', models: { 'gpt-5.4': {} } }] });
 
     await expect(first).resolves.toEqual(available);
     expect(mocks.extractOpenCodeProviderLimitMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds the whole optional quota load and cancels stalled provider metadata', async () => {
+    const metadata = deferred<unknown>();
+    const request = vi.fn(
+      (_method: string, _path: string, _body?: unknown, _options?: { signal?: AbortSignal }) =>
+        metadata.promise
+    );
+    const service = new ProviderLimitService({ request });
+    let result: ProviderLimitStatus | undefined;
+    const load = service.get('openai', 'gpt-5.4').then((value) => {
+      result = value;
+    });
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(result).toMatchObject({ status: 'error', note: expect.stringContaining('timed out') });
+    expect(request.mock.calls[0]?.[3]?.signal?.aborted).toBe(true);
+    await load;
+    metadata.resolve({ providers: [{ id: 'openai', models: {} }] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.fetchProviderLimitFromAdapterMock).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('does not replace a timed-out quota result with a late adapter success', async () => {
+    const adapter = deferred<ProviderLimitStatus | null>();
+    mocks.fetchProviderLimitFromAdapterMock.mockReturnValue(adapter.promise);
+    const service = new ProviderLimitService(createServer());
+    let result: ProviderLimitStatus | undefined;
+    const load = service.get('openai', 'gpt-5.4').then((value) => {
+      result = value;
+    });
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(result).toMatchObject({ status: 'error', note: expect.stringContaining('timed out') });
+    await load;
+    adapter.resolve(createStatus('available'));
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(service.get('openai', 'gpt-5.4')).resolves.toEqual(result);
+    service.dispose();
+  });
+
+  it('retries metadata after its timeout even when the abandoned request never settles', async () => {
+    const request = vi
+      .fn()
+      .mockReturnValueOnce(new Promise<unknown>(() => {}))
+      .mockResolvedValue({ providers: [{ id: 'custom', models: {} }] });
+    const service = new ProviderLimitService({ request });
+    const first = service.get('custom', null);
+    await vi.advanceTimersByTimeAsync(12_000);
+    await expect(first).resolves.toMatchObject({ status: 'error' });
+    await vi.advanceTimersByTimeAsync(15_001);
+    await service.get('custom', null);
+    expect(request.mock.calls.filter(([, path]) => path === '/config/providers')).toHaveLength(2);
+    service.dispose();
   });
 
   it('invalidates metadata snapshots without letting an older failure clear the replacement', async () => {
@@ -250,6 +304,7 @@ describe('ProviderLimitService', () => {
     const service = new ProviderLimitService(server);
 
     const stale = service.get('old-provider', null);
+    await Promise.resolve();
     service.clearCache();
     await expect(service.get('new-provider', null)).resolves.not.toMatchObject({
       note: 'Provider not found in OpenCode config',
@@ -798,13 +853,13 @@ describe('ProviderLimitService', () => {
       expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(1)
     );
 
-    await vi.advanceTimersByTimeAsync(45_000);
+    await vi.advanceTimersByTimeAsync(12_000);
     await expect(first).resolves.toMatchObject({
       providerID: 'openai',
       modelID: 'gpt-5.4',
       status: 'error',
       source: 'provider',
-      note: 'Provider limit adapter failed: timed out after 45000ms',
+      note: 'Provider quota lookup failed: Provider quota lookup timed out after 12000ms',
     });
 
     mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue(null);

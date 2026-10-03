@@ -56,6 +56,15 @@ ownership token so late cleanup from its former host cannot remove its records.
 Retired injected configuration is not attributed to the replacement. Other live
 services, credentials, and sessions are left unchanged.
 
+A recovered replacement without runtime configuration is checked for Varro's Ask
+agent. If no user definition exists and the owned server is globally idle, startup
+relaunches it with a fresh temporary config before publishing routing catalogs.
+Recovery checks work again under verified restart ownership. If sessions, questions,
+or approvals block startup repair, catalog/send preflight and maintenance retry it;
+an idle event bypasses the ordinary maintenance throttle while repair is pending.
+This does not edit global/project configuration, invent a client-only agent, or
+grant restart rights over another host's or an unmanaged server.
+
 ## Editor distributions and test isolation
 
 VS Code, VS Code Nightly/Insiders, VSCodium, and Varro OpenJet coordinate through
@@ -109,6 +118,19 @@ one contender can claim the server after validating its process identity.
 Explicit restarts coordinate ownership transfer with the same claim file.
 Startup confirmation and disconnect handoff also participate in that coordination.
 
+When a live marker or lease blocks startup, the error includes the expected PID
+and port, observed listener PIDs, or the mismatching executable/start identity.
+It does not include lease credentials or ownership tokens. An explicit restart
+failure is reported through the error hub even if startup already left the server
+in an error state, with a Show Output action. This feedback does not relax process
+verification or authorize stopping an unverified server.
+
+Ownership refresh and editor disconnect retain the lease, credentials, marker,
+and temporary configuration when listener or executable verification fails but
+the original process is still alive or its retirement is uncertain. A failed
+inspection is not proof of retirement. Cleanup requires process exit or a changed
+birth identity; subsequent attachment still needs fresh complete verification.
+
 ## Automatic ports and upgrade compatibility
 
 `varro.server.port` defaults to `"auto"`. New managed launches choose a random
@@ -155,12 +177,14 @@ later candidates when an earlier `opencode2` command actually runs v1. A connect
 server's version is not evidence of the installed executable's version and does
 not select launch flags.
 
-Reused servers are excluded from background CLI
-maintenance for that connection, avoiding a migration-triggered restart or family
-switch. Their configuration and credentials are unchanged. Explicit restart remains
-subject to the existing active-session and pending-attention preflight. Reload
-disconnects rather than stopping the process. A surviving registered server is
-recoverable, not a stale process to kill based on age.
+Reused servers do not run background CLI installation or implicit server-family
+migration. Maintenance can restart a reused Varro-owned server when the installed
+CLI is newer within the same API family, after fresh lease/process verification and
+the existing global active-session and pending-attention preflight. Unmanaged servers,
+another live host's ownership, unknown versions, and failed safety reads leave the
+server running. Explicit restart retains its existing safety checks. Reload disconnects
+rather than stopping the process. A surviving registered server is recoverable, not a
+stale process to kill based on age.
 
 New launches use an existing nonempty environment password or generate a
 cryptographically random password before spawning. Credentials never enter the
@@ -179,14 +203,33 @@ ownership use distinct native modal warnings. Dismissal leaves the server untouc
 A migrated automatic-mode user can instead choose to start their own server on
 another port, but cannot abandon a registered live process through this action.
 
-Consent binds to the observed PID, birth identity, account, and endpoint. Ownership
-is rechecked on stream reconnect and ordinary requests using a one-second inspection
-cache. Unknown-owner consent covers only the current connection and requires a new
-decision on reconnect. Concurrent callers share the decision; disposal invalidates
-late answers. Refusal blocks subsequent requests rather than starting retry prompts.
+Consent binds to the observed PID, birth identity, account, and endpoint. Initial
+attachment and stream reconnect inspect fresh evidence. Foreign, unknown, and
+incomplete identities retain the strict one-second request-admission cache.
+Unknown-owner consent covers only the current connection and requires a new decision
+on reconnect. Concurrent callers share the decision; disposal invalidates late
+answers. Refusal blocks subsequent requests rather than starting retry prompts.
+
+Once the running connection has a complete same-user PID/birth/account identity,
+routine REST traffic reuses that confirmed connection. A managed lease must identify
+the same PID and birth identity. The request path checks the endpoint, registration,
+admission identity, and process liveness without starting OS inspection commands.
+Full listener/account and managed-identity checks run independently in the background
+every thirty seconds, with no overlapping scans. Slow, failed, or inconclusive
+background reads are diagnostics, not proof of replacement or server failure. They
+do not hold up sends, prompt for consent, stop SSE, or hide the chat.
+
+Confirmed process exit, changed registration/endpoint, fresh PID/birth/account change,
+disconnect, and SSE reconnect invalidate reuse. The next request then needs fresh
+admission even if an old one-second cache has not expired. Background results and
+outstanding confirmations are generation-bound and cannot restore a reset connection.
+Adapter tickets remain endpoint-bound and expire after at most one second. This is
+connection-lifetime attachment monitoring, not a permanent PID-only ownership cache.
+It does not grant adoption, restart, upgrade, or cleanup authority; those operations
+still verify the current private registration and process identity independently.
 
 Before requesting new uncertainty consent, admission retries one fresh account
-inspection. Ordinary rechecks still inspect at least every second, but persistent
+inspection. Strict request rechecks inspect at least every second, but persistent
 uncertainty does not repeat an already approved warning within that connection.
 Newly identified foreign listeners still require consent. If inspection recovers
 to verified same-user evidence after the dialog, admission uses that fresh evidence
@@ -194,17 +237,28 @@ instead of treating recovered visibility as listener replacement. A changed know
 identity still blocks confirmation. Generation and endpoint changes invalidate
 each inspection and dialog result before further use.
 
+On macOS, a timed-out `lsof` listener scan retries one fresh scan with a five-second
+deadline after the ordinary two-second deadline. Failed command output is never
+accepted as a complete listener set. Concurrent ownership/account scans share only
+their in-flight observation. A persistent timeout during initial/fresh admission
+blocks that request without granting unknown-account consent or stopping the server.
+An established confirmed same-user connection continues while background inspection
+recovers. SSE admission retries with its normal reconnect backoff.
+Actual unknown or foreign account evidence still follows the consent rules above.
+
 On Windows, ordinary listener checks use `netstat` first, with PowerShell networking
 discovery only when `netstat` fails. A shared read-only helper obtains executable,
 creation identity, and token SIDs using Windows APIs, holding the process handle
 through its final liveness check. Concurrent reads share only their in-flight
 observation; no PID-only identity cache is introduced. Creation ticks match existing
-CIM leases. The one-second admission cache and fresh reconnect checks are unchanged.
+CIM leases. Strict admission keeps its one-second cache and fresh reconnect checks;
+complete same-user running connections use the background monitoring described above.
 If native inspection is unavailable, fresh PID-reuse-checked CIM snapshots remain
 the bounded fallback, with one retry for failed or incomplete executable/account
-reads. Persistent inspection failures still block managed requests and retain records.
-Internal request admission tickets expire at the earlier original verification expiry;
-adapter wire requests cannot extend trust or transfer approval to another endpoint.
+reads. Persistent failures still block fresh admission and retain records, but do not
+revoke an established connection without evidence of replacement. Strict admission
+tickets expire at the earlier original verification expiry; confirmed-connection
+tickets last at most one second. Neither transfers approval to another endpoint.
 
 Manual servers and consented foreign or unverifiable connections remain attach-only even
 with auto-start enabled. They cannot be adopted or restarted and do not run automatic
@@ -233,10 +287,14 @@ lease is missing. Recovery validates the marker's process identity before claimi
 the server.
 
 Restart preflight checks v2's process-global active sessions before inspecting
-location-scoped questions and permissions. It skips deleted historical directories
-that would fail location initialization. Running sessions and observed pending
-attention still block restart even when their directory has been deleted. Other
-inspection errors continue to block restart.
+questions, permissions, and shells in the server's loaded locations. Historical
+session directories are used only to label blockers, not for filesystem probes or
+location initialization, so deleted paths and unavailable UNC shares do not prevent
+an idle restart. Loaded locations are checked even when absent from session history
+or no longer accessible on disk. Running sessions and observed pending attention
+still block restart. Invalid location lists and failed loaded-location reads block
+restart rather than treating missing evidence as idle. V1 retains historical
+directory probing because its session status is location-scoped.
 
 ## Verification
 
@@ -250,7 +308,10 @@ Connection-admission tests cover concurrent consent, dismissal, listener replace
 uncertain ownership, reconnect, and cancellation during ordinary requests. The
 startup integration test checks authentication enforcement, second-window attachment,
 disconnect/automatic-mode rediscovery, and explicit restart using isolated databases.
-Its latest macOS run passes against released OpenCode 1.16.0, 1.18.34, and 2.0.21.
+Its latest macOS run passes against released OpenCode 1.16.0 and 1.18.34.
+OpenCode 2.0.22 passes configured startup and shadowed discovery, but replacement
+recovery hits a 30-second health timeout. A focused rerun against 2.0.21 also
+reproduces that timeout, despite the previous matrix passing on that release.
 OpenCode 2.0.5 passes configured startup and shadowed discovery, but replacement
 recovery attaches as unmanaged because that path still probes `/api/info` instead
 of the older `/api/status` endpoint.

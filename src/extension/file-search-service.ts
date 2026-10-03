@@ -6,6 +6,7 @@ import { getWorkspaceFolderLabel } from '../shared/workspace-folders';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { getRelativePath } from './util/path';
 import { logger } from './logger';
+import { getWorkingFolders } from './working-folders';
 
 export type WorkspaceFileSearchEntry = DroppedFile & {
   relativePathLower: string;
@@ -126,9 +127,9 @@ export class FileSearchService {
   }
 
   private setWorkspaceScope(workspaceDirectory: string | null | undefined) {
-    const openFolders = vscode.workspace.workspaceFolders ?? [];
+    const openFolders = getWorkingFolders();
     const primaryFolder = workspaceDirectory
-      ? vscode.workspace.workspaceFolders?.find((candidate) =>
+      ? openFolders.find((candidate) =>
           isSameWorkspacePath(candidate.uri.fsPath, workspaceDirectory)
         )
       : undefined;

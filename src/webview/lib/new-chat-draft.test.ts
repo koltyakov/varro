@@ -3,12 +3,14 @@ import { editingMessage, resetMessageEditState, startEditingMessage } from './me
 import { startNewChatDraft } from './new-chat-draft';
 import {
   getPersistedSelectedModel,
+  getSelectedAgentForSession,
   getSelectedModelForSession,
   composerFocusKey,
   inputText,
   resetDefaultAppState,
   setInputText,
   setSelectedModel,
+  setSelectedAgent,
   setState,
   state,
 } from './state';
@@ -109,6 +111,21 @@ describe('startNewChatDraft', () => {
 
     expect(inputText()).toBe('Start a separate conversation');
     expect(editingMessage()).toBeNull();
+  });
+
+  it.each(['ask', 'plan'])('starts in build without changing the previous %s session', (agent) => {
+    setState('agents', [
+      { name: 'ask', mode: 'primary', builtIn: false, permission: {}, tools: {} },
+      { name: 'build', mode: 'primary', builtIn: true, permission: {}, tools: {} },
+    ]);
+    setState('activeSessionId', 'session-1');
+    setSelectedAgent(agent, { sessionId: 'session-1' });
+
+    startNewChatDraft();
+
+    expect(state.activeSessionId).toBeNull();
+    expect(state.selectedAgent).toBe('build');
+    expect(getSelectedAgentForSession('session-1')).toBe(agent);
   });
 
   it('clears message loading immediately when a slow session load is abandoned', () => {
@@ -233,7 +250,11 @@ describe('startNewChatDraft', () => {
     expect(state.messagesLoading).toBe(false);
   });
 
-  it('focuses the composer when reusing an untouched blank session', () => {
+  it('focuses the composer and resets to build when reusing an untouched blank session', () => {
+    setState('agents', [
+      { name: 'ask', mode: 'primary', builtIn: false, permission: {}, tools: {} },
+      { name: 'build', mode: 'primary', builtIn: true, permission: {}, tools: {} },
+    ]);
     setState('sessions', [
       {
         id: 'session-1',
@@ -247,9 +268,13 @@ describe('startNewChatDraft', () => {
     setState('activeSessionId', 'session-1');
     const previousFocusKey = composerFocusKey();
 
+    setSelectedAgent('ask', { sessionId: 'session-1' });
+
     startNewChatDraft();
 
     expect(state.activeSessionId).toBe('session-1');
+    expect(state.selectedAgent).toBe('build');
+    expect(getSelectedAgentForSession('session-1')).toBe('build');
     expect(composerFocusKey()).toBe(previousFocusKey + 1);
   });
 

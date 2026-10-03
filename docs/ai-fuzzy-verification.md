@@ -422,7 +422,7 @@ local database. They retain up to 120 preceding messages and estimate text/reaso
 part start/end times, with database creation/update times as fallback. Nonempty chunks cover the full
 span with gaps at most 250 ms where text length and the 4,096-chunk limit permit; sparse text and extreme
 spans can still be compressed. Missing trustworthy timing uses a 32 ms estimate bounded by the next
-part or message completion. Long idle CLI/subagent gaps cap at 500 ms without globally accelerating
+part or message completion. Long idle CLI/subagent gaps cap at 1,500 ms without globally accelerating
 interleaved streaming. Existing captures are unchanged; select again or reimport for the new timing.
 Imports reconstruct tool parts through pending, running, and terminal states. Their scenario is `HISTORY` so
 they cannot be mistaken for exact live captures. Use live capture when the original sub-frame event
@@ -450,8 +450,9 @@ playback traces are retained under `tmp/playwright-playback/` until the next loc
 an active browser evaluation. `scripts/ai-session-playback.test.mjs` covers the subprocess deadline,
 interruption, descendant cleanup, and fixture cleanup without relying on a working browser.
 
-Replay preserves source gaps of 250 ms or less. It caps longer waits at 500 ms, so token bursts and fast
+Replay preserves source gaps of 250 ms or less. It caps longer waits at 1,500 ms, so token bursts and fast
 tool handoffs keep their original spacing while model and command idle time does not make the test drag.
+The cap stays above the 600 ms Thinking reappearance delay so replay still shows Thinking during waits.
 Use `--short-gap-ms` and `--max-gap-ms` to tune those limits. The replay runs through the normal webview
 event handlers in the Playwright harness and samples consecutive animation frames. It fails on blank
 transcript frames, duplicate message or activity identities, brief disappear/reappear flashes, rising

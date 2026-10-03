@@ -600,6 +600,90 @@ describe('RestProxy handleRequest', () => {
     }
   });
 
+  it.each([1, 2] as const)(
+    'scopes no-project creation, prompts, and history to scratch on API v%s',
+    async (apiVersion) => {
+      const scratch = '/varro/scratch';
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, apiVersion },
+      });
+      callbacks.contextProvider.context.workspacePath = scratch;
+      callbacks.contextProvider.context.workspaceDirectory = scratch;
+      callbacks.contextProvider.context.workspaceFolders = [];
+      vi.mocked(callbacks.server.getWorkspaceCwd).mockReturnValue(scratch);
+      vi.mocked(callbacks.contextProvider.getOpenWorkspaceRoot).mockImplementation((path) =>
+        path === scratch ? scratch : null
+      );
+      const session = {
+        id: 'scratch-session',
+        directory: scratch,
+        title: 'Notes',
+        time: { created: 1, updated: 2 },
+      };
+      vi.mocked(callbacks.server.request).mockResolvedValueOnce(session);
+
+      await proxy.handleRequest(
+        makePayload(1, 'POST', '/session?directory=%2Fvarro%2Fscratch', {})
+      );
+      expect(callbacks.server.request).toHaveBeenLastCalledWith(
+        'POST',
+        '/session?directory=%2Fvarro%2Fscratch',
+        {},
+        withSignal({ directory: scratch })
+      );
+      vi.mocked(callbacks.server.request).mockClear();
+      await proxy.handleRequest(
+        makePayload(
+          2,
+          'POST',
+          '/session/scratch-session/prompt_async?directory=%2Fvarro%2Fscratch',
+          {
+            system: 'Keep this instruction',
+            agent: 'build',
+            parts: [{ type: 'text', text: 'Write notes' }],
+          }
+        )
+      );
+      const body = vi.mocked(callbacks.server.request).mock.calls[0]?.[2];
+      for (const instruction of [
+        'Keep this instruction',
+        'No project or workspace folder is open in VS Code.',
+        'general-purpose Varro scratch folder, not a project root',
+        'Do not assume any repository or project is in scope',
+        'subject to tool permissions',
+        'do not retry the denied action',
+        'The selected agent for this turn is "build".',
+      ]) {
+        expect(body).toEqual(
+          expect.objectContaining({ system: expect.stringContaining(instruction) })
+        );
+      }
+      expect(body).not.toEqual(
+        expect.objectContaining({ system: expect.stringContaining('multi-root workspace') })
+      );
+
+      vi.mocked(callbacks.server.request).mockResolvedValue([
+        session,
+        { ...session, id: 'project-session', directory: '/repo' },
+      ]);
+      await proxy.handleRequest(makePayload(3, 'GET', '/session'));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 3,
+        error: 'OpenCode returned a session outside workspace root /varro/scratch',
+      });
+      vi.mocked(callbacks.server.request).mockResolvedValue([session]);
+      await proxy.handleRequest(makePayload(5, 'GET', '/session'));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 5, data: [session] });
+      vi.mocked(callbacks.server.request).mockClear();
+      await proxy.handleRequest(makePayload(4, 'POST', '/session?directory=%2Frepo', {}));
+      expect(callbacks.server.request).not.toHaveBeenCalled();
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 4,
+        error: 'Workspace directory is not an open workspace folder',
+      });
+    }
+  );
+
   it('persists inherited workspace metadata when OpenCode omits it from a fork', async () => {
     const { proxy, callbacks } = createProxy();
     const metadata = {

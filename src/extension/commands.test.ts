@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These tests exercise command import boundaries with malformed VS Code and process results. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as VSCode from 'vscode';
+import type { ReportedError } from './error-hub';
 
 const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = vi.hoisted(() => {
   const commands = new Map<string, (...args: unknown[]) => unknown>();
@@ -96,7 +97,7 @@ vi.mock('./open-code-process', () => ({
   getOpenCodeConfigDirectory: () => '/config/opencode',
 }));
 const { errorHubMock, loggerMock } = vi.hoisted(() => ({
-  errorHubMock: { report: vi.fn() },
+  errorHubMock: { report: vi.fn<(error: ReportedError) => void>() },
   loggerMock: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), show: vi.fn() },
 }));
 
@@ -144,7 +145,10 @@ function register(
     }),
   };
   const contextProvider = {
-    context: { workspacePath },
+    context: {
+      workspacePath,
+      workspaceFolders: workspacePath ? [{ name: 'repo', path: workspacePath }] : [],
+    },
     terminalSelection: null as { text: string; terminalName: string } | null,
     captureTerminalSelection: vi.fn(),
   };
@@ -720,6 +724,17 @@ describe('AGENTS.md commands', () => {
     expect(vscodeMock.workspace.fs.createDirectory).not.toHaveBeenCalled();
     expect(sidebar.post).not.toHaveBeenCalled();
   });
+
+  it('does not initialize project AGENTS.md in the no-project scratch folder', async () => {
+    const { contextProvider, sidebar } = register('/varro/scratch');
+    contextProvider.context.workspaceFolders = [];
+    await runCommand('varro.agents.initializeProject');
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
+      'Varro: Open a project before initializing AGENTS.md.'
+    );
+    expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    expect(sidebar.postCommand).not.toHaveBeenCalled();
+  });
 });
 
 describe('terminal selection command', () => {
@@ -1289,6 +1304,7 @@ describe('varro.server.restart', () => {
       payload: blockers,
     });
     expect(errorHubMock.report).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showErrorMessage).not.toHaveBeenCalled();
   });
 
   it('passes the force option to the server', async () => {
@@ -1311,11 +1327,12 @@ describe('varro.server.restart', () => {
     expect(errorHubMock.report).toHaveBeenCalledWith({
       code: 'server-start',
       message: 'Failed to restart server: port busy',
+      actions: [{ title: 'Show Output', run: expect.any(Function) }],
     });
     expect(sidebar.post).not.toHaveBeenCalled();
   });
 
-  it('only logs a restart failure when the server already reported an error', async () => {
+  it('reports an explicit restart failure even when startup already reported an error', async () => {
     register('/repo', {
       restart: vi.fn().mockRejectedValue(new Error('port busy')),
       status: { state: 'error' },
@@ -1323,8 +1340,14 @@ describe('varro.server.restart', () => {
 
     await runCommand('varro.server.restart');
 
-    expect(errorHubMock.report).not.toHaveBeenCalled();
-    expect(loggerMock.error).toHaveBeenCalledWith('Failed to restart server: port busy');
+    expect(errorHubMock.report).toHaveBeenCalledExactlyOnceWith({
+      code: 'server-start',
+      message: 'Failed to restart server: port busy',
+      actions: [{ title: 'Show Output', run: expect.any(Function) }],
+    });
+    const [report] = errorHubMock.report.mock.calls[0]!;
+    await report.actions![0]!.run();
+    expect(loggerMock.show).toHaveBeenCalledOnce();
   });
 });
 
