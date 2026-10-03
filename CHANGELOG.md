@@ -5,9 +5,9 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 ## 0.31.x - October 2026
 
 - Defaulted to authenticated managed servers on automatic loopback ports, preserving fixed ports and verified reuse. Remembered confirmation for foreign or unverified ownership.
-- Added background OpenCode v2 updates on Windows and safe same-family restarts for reused managed servers after active work finishes. Improved recovery, ownership checks, and startup responsiveness; skipped automatic cleanup on attach-only connections.
-- Added chats without an open project in a persistent per-user scratch folder, startup logos, responsive starter hints, a refreshed icon, and themed Markdown link tooltips.
-- Added live About diagnostics and local v2 session summaries. Preserved models, drafts, and attachments during provider outages, with retryable refreshes and stable composer choices.
+- Added background OpenCode v2 updates on Windows and safe same-family restarts for reused managed servers when idle. Improved recovery, ownership checks, and startup responsiveness; skipped automatic cleanup on attach-only connections.
+- Added no-project chats in a persistent scratch folder, startup logos, responsive hints, a refreshed icon, and themed Markdown link tooltips.
+- Added live About diagnostics and local v2 session summaries. Preserved models, drafts, and attachments during provider outages, with retryable refreshes.
 - Added generation-speed estimates, restored v2 timings, and clarified Fast and Ultrafast labels. Prioritized token counts in narrow summaries.
 - Queued prompts with mismatched agent, model, or reasoning settings. Added Resume steering after cancellation without duplicate prompts, and refreshed interrupted responses immediately.
 - Added a five-minute OpenAI WebSocket no-data timeout on managed OpenCode v2 servers from 2.0.20 onward, respecting explicit settings.

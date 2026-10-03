@@ -5200,8 +5200,15 @@ export function MessageList() {
 
   function reconcileAppendBottomReserve() {
     if (!containerRef) return;
+    // Diff-view replacement owns the new physical bottom, not the previous painted target.
+    // Its settling loop clears reserves; deferred rounding must not recreate one between frames.
+    if (
+      inlinePreviewBottomFollow?.sessionId === state.activeSessionId &&
+      inlinePreviewBottomFollow?.inputEpoch === directScrollInputEpoch
+    ) {
+      return;
+    }
     const reserve = untrack(appendBottomReserve);
-    if (reserve <= 0) return;
     // Deferred row rounding can still remove height from an entering replacement tool, or from a
     // row whose tray just collapsed under a fixed exit target. Keep that space until the
     // correction lands so neither consuming reserve nor the correction can clamp the viewport.
@@ -5212,6 +5219,20 @@ export function MessageList() {
           0,
           (appliedRowHeightCorrections.get(element) ?? 0) - correction
         );
+    }
+    if (reserve <= 0) {
+      // Replacement growth can consume the last reserve before the next rounding write.
+      // Keep the painted bottom reachable even when there is no existing spacer to grow.
+      if (
+        pendingHeightReduction <= 0 ||
+        !autoScroll() ||
+        !pinnedToBottom ||
+        stickyNavigationOwnsScroll() ||
+        pointerScrollOwnershipActive
+      ) {
+        return;
+      }
+      appendBottomReserveTarget = containerRef.scrollTop;
     }
     // Exit space temporarily overlaps the departing tray; it is not replacement content.
     if (activityExitBottomTarget !== null || untrack(exitingActivityPartKeys).size > 0) {

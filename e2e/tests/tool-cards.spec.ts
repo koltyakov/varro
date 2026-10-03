@@ -286,7 +286,8 @@ for (const theme of ['dark', 'light']) {
     await expect(summary).toContainText('2 thoughts');
 
     await summary.focus();
-    await expect(summary).toHaveCSS('outline-style', 'solid');
+    await expect(summary).toBeFocused();
+    await expect(summary).toHaveCSS('outline-style', 'none');
     await page.keyboard.press('Enter');
     await expect(summary).toHaveAttribute('aria-expanded', 'true');
 

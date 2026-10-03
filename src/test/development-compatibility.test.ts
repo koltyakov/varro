@@ -20,7 +20,7 @@ describe('development compatibility', () => {
     const advertisedFloors = '22.22.2+ on Node 22, or Node 24.15.0+';
 
     expect(packageJson.engines.node).toBe('^22.22.2 || >=24.15.0');
-    expect(workflow.match(/^\s*node-version: 24\.21\.0$/gm)).toHaveLength(3);
+    expect(workflow.match(/^\s*node-version: 24\.21\.0$/gm)).toHaveLength(4);
     expect(workflow).not.toContain('matrix.node-version');
     expect(workflow).not.toMatch(/^\s*node-version:\s+(?:22|24)\s*$/m);
     expect(readme).toContain(advertisedFloors);
@@ -43,7 +43,9 @@ describe('development compatibility', () => {
       expect(job).toContain('run: npm ci --no-audit --no-fund');
     }
     const e2e = workflow.slice(e2eStart);
-    expect(e2e).not.toMatch(/^    (?:needs|if):/m);
+    expect(e2e).toContain('needs: e2e-history');
+    expect(e2e).not.toContain('needs: build-and-test');
+    expect(e2e).not.toContain('needs: windows');
   });
 
   it('trusts the mounted E2E checkout before browser script tests run', async () => {
@@ -90,5 +92,20 @@ describe('development compatibility', () => {
       'run: node scripts/run-e2e.mjs --shard=${{ matrix.shard }}/${{ strategy.job-total }}'
     );
     expect(developmentGuide).toContain('four jobs with two workers each');
+  });
+
+  it('shares one timing snapshot across shards and saves timings only after successful E2E', async () => {
+    const workflow = await readFile(resolve('.github/workflows/ci.yml'), 'utf8');
+    expect(workflow).toContain('actions: read');
+    expect(workflow).toContain("workflow_id: 'ci.yml', branch, status: 'success'");
+    expect(workflow).toContain('artifact-ids: ${{ needs.e2e-history.outputs.artifact-id }}');
+    expect(workflow).toContain('run-id: ${{ needs.e2e-history.outputs.run-id }}');
+    expect(workflow).toContain('path: tmp/e2e-sharding/history');
+    expect(workflow).toContain('name: e2e-results-${{ matrix.shard }}');
+    expect(workflow).toContain('pattern: e2e-results-*');
+    const mergeJob = workflow.slice(workflow.indexOf('\n  e2e-timings:\n'));
+    expect(mergeJob).toContain('needs: e2e\n');
+    expect(mergeJob).not.toContain('if: always()');
+    expect(mergeJob).toContain('name: e2e-timings');
   });
 });

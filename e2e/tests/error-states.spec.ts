@@ -81,9 +81,18 @@ test('centers install button labels without font-metric padding', async ({ page 
   }
 
   await page.setViewportSize({ width: 220, height: 700 });
+  // Force wrapping independently of the platform's monospace fallback width.
+  await button.evaluate((element) => {
+    element.style.maxWidth = '140px';
+  });
   await expect(button).toBeVisible();
-  const wrappedBox = await label.boundingBox();
-  expect(wrappedBox?.height).toBeGreaterThan(12);
+  await expect.poll(async () => (await label.boundingBox())?.height ?? 0).toBeGreaterThan(12);
+  const buttonBox = await button.boundingBox();
+  const labelBox = await label.boundingBox();
+  if (!buttonBox || !labelBox) throw new Error('Wrapped install button or label is not rendered');
+  expect(
+    Math.abs(labelBox.y + labelBox.height / 2 - (buttonBox.y + buttonBox.height / 2))
+  ).toBeLessThanOrEqual(0.5);
   await button.click();
 });
 

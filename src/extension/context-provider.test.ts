@@ -187,7 +187,7 @@ vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
 
 import { ContextProvider } from './context-provider';
-import { getVarroStateDirectory } from './varro-state-paths';
+import * as varroStatePaths from './varro-state-paths';
 
 function noop() {}
 
@@ -263,7 +263,7 @@ describe('ContextProvider', () => {
   });
 
   it('uses scratch in an empty window without claiming a project or an active file directory', () => {
-    const scratch = getVarroStateDirectory('scratch');
+    const scratch = vscodeMock.Uri.file(varroStatePaths.getVarroStateDirectory('scratch')).fsPath;
     vscodeMock.window.activeTextEditor = {
       document: {
         uri: { fsPath: '/other/project/file.ts' },
@@ -295,7 +295,7 @@ describe('ContextProvider', () => {
   it('returns to scratch when the last project closes and revokes scratch when a project opens', async () => {
     vi.useFakeTimers();
     const provider = new ContextProvider(noop);
-    const scratch = getVarroStateDirectory('scratch');
+    const scratch = vscodeMock.Uri.file(varroStatePaths.getVarroStateDirectory('scratch')).fsPath;
     const workspaceChanged =
       vscodeMock.workspace.onDidChangeWorkspaceFolders.mock.calls.at(-1)![0]!;
     try {
@@ -318,7 +318,7 @@ describe('ContextProvider', () => {
 
   it('resolves scratch files but keeps restricted reads inside scratch, including symlinks', async () => {
     const provider = new ContextProvider(noop);
-    const scratch = getVarroStateDirectory('scratch');
+    const scratch = vscodeMock.Uri.file(varroStatePaths.getVarroStateDirectory('scratch')).fsPath;
     const options = { restrictToWorkspace: true, workspaceDirectory: scratch };
     vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
     try {
@@ -341,7 +341,7 @@ describe('ContextProvider', () => {
 
   it('opens relative scratch file links with the captured working directory', async () => {
     const provider = new ContextProvider(noop);
-    const scratch = getVarroStateDirectory('scratch');
+    const scratch = vscodeMock.Uri.file(varroStatePaths.getVarroStateDirectory('scratch')).fsPath;
     vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
     vscodeMock.workspace.openTextDocument.mockResolvedValue({});
     vscodeMock.window.showTextDocument.mockResolvedValue({});
@@ -354,6 +354,45 @@ describe('ContextProvider', () => {
       });
     } finally {
       provider.dispose();
+    }
+  });
+
+  it('uses the URI path representation when the scratch state path has Windows separators', async () => {
+    const nativeScratch = 'C:\\Users\\runneradmin\\AppData\\Local\\Varro\\scratch';
+    const statePath = vi
+      .spyOn(varroStatePaths, 'getVarroStateDirectory')
+      .mockReturnValue(nativeScratch);
+    const scratch = vscodeMock.Uri.file(nativeScratch).fsPath;
+    const provider = new ContextProvider(noop);
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({});
+    vscodeMock.window.showTextDocument.mockResolvedValue({});
+    try {
+      expect(provider.context).toMatchObject({
+        workspacePath: scratch,
+        workspaceDirectory: scratch,
+        workspaceFolders: [],
+      });
+      expect(provider.getOpenWorkspaceRoot(nativeScratch)).toBe(scratch);
+      await expect(
+        provider.resolvePath('notes/todo.txt', {
+          restrictToWorkspace: true,
+          workspaceDirectory: nativeScratch,
+        })
+      ).resolves.toEqual({
+        path: `${scratch}/notes/todo.txt`,
+        relativePath: 'notes/todo.txt',
+        type: 'file',
+      });
+      await expect(
+        provider.openPath('notes.txt', { workspaceDirectory: nativeScratch })
+      ).resolves.toBe('opened');
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith({
+        fsPath: `${scratch}/notes.txt`,
+      });
+    } finally {
+      provider.dispose();
+      statePath.mockRestore();
     }
   });
 

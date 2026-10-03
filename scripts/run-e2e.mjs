@@ -1,5 +1,6 @@
 // @ts-check
 import { createServer } from 'node:net';
+import { prepareShard } from './e2e-sharding.mjs';
 
 /** @param {number} port @returns {Promise<number>} */
 function availablePort(port) {
@@ -35,5 +36,10 @@ if (process.env.VARRO_E2E_PORT === undefined && process.env.VARRO_E2E_MODE !== '
 }
 
 // Run in this process so Playwright retains control of signals and server cleanup.
-process.argv.splice(2, 0, 'test');
+process.argv.splice(
+  2,
+  process.argv.length - 2,
+  'test',
+  ...(await prepareShard(process.argv.slice(2)))
+);
 await import(import.meta.resolve('@playwright/test/cli'));

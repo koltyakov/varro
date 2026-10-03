@@ -254,13 +254,23 @@ for (const trayFraction of [0.1, 0.3, 0.6]) {
           },
         });
       }
-      for (let frame = 0; frame < 40; frame += 1) {
+      // Hydrated previews retain their slot for 2 seconds. Sample through grouping and
+      // deferred row rounding rather than treating a machine-dependent frame count as a timer.
+      const deadline = performance.now() + 5_000;
+      let groupedFrames = 0;
+      while (performance.now() < deadline && (result.length <= 40 || groupedFrames < 4)) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        result.push(sample());
+        const next = sample();
+        result.push(next);
+        groupedFrames = next.active === 0 ? groupedFrames + 1 : 0;
       }
       return result;
     });
-    expect(samples.at(-1)?.active).toBe(0);
+    await test.info().attach('fractional-tool-grouping-frames', {
+      body: JSON.stringify(samples),
+      contentType: 'application/json',
+    });
+    expect(samples.at(-1)?.active, JSON.stringify(samples.slice(-6))).toBe(0);
     const reversals = samples
       .slice(1)
       .filter((sample, index) => sample.top > samples[index]!.top + 0.1);
@@ -275,8 +285,10 @@ for (const virtualized of [false, true]) {
     page,
   }) => {
     await page.setViewportSize({ width: 486, height: 800 });
-    const sessionID = virtualized ? 'session-tool-cards-large-transcript' : 'session-tool-cards';
-    const messageID = virtualized
+    const fixtureSessionID = virtualized
+      ? 'session-tool-cards-large-transcript'
+      : 'session-tool-cards';
+    const fixtureMessageID = virtualized
       ? 'message-tool-cards-assistant-69'
       : 'message-tool-cards-assistant';
     await page.goto(
@@ -379,7 +391,7 @@ for (const virtualized of [false, true]) {
         }
         return result;
       },
-      { sessionID, messageID }
+      { sessionID: fixtureSessionID, messageID: fixtureMessageID }
     );
     expect(samples.at(-1)).toMatchObject({ active: 0, text: true });
     expect(

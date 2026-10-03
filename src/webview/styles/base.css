@@ -358,6 +358,15 @@ body:is(.vscode-light, .vscode-high-contrast-light) .material-chip-icon[data-chi
     margin: 0;
     padding: 0;
   }
+
+  /* No outlines anywhere in the webview, including Portal menus and custom
+     controls. Important in the base layer overrides component/theme rings
+     that Chromium can reveal when macOS screenshot shortcuts are pressed. */
+  *,
+  *::before,
+  *::after {
+    outline: 0 !important;
+  }
 }
 
 html > body {

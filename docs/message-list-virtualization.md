@@ -140,7 +140,8 @@ the shared invariants below remain true.
 - An unmounted height invalidated by a view change becomes provisional. It must not remain marked as
   an exact measurement from the old view.
 - Toggling inline file diffs while bottom-follow owns the viewport positions at the new physical bottom
-  before paint, without streaming easing or retaining removed content as trailing reserve. Bounded
+  before paint, without streaming easing or retaining removed content as trailing reserve. Pending
+  row rounding must not recreate reserve while this view-change owner is active. Bounded
   settling covers virtual row hydration and yields to direct input, session replacement, editing, and
   diff focus. Detached readers keep their visible anchor instead of returning to latest.
 - Width reflow owns a stable visible message captured before the first changed-height batch is
@@ -364,7 +365,9 @@ Direct input acquires ownership only when it can affect the transcript:
   appended growth consumes it while its original bottom target remains fixed.
 - Reserve consumption accounts for pending row-rounding reductions. A queued tool entering a freed
   tray slot can otherwise consume the last reserved pixel before a deferred correction removes it,
-  clamping the viewport backward. `scroll-auto-scroll.spec.ts` checks the same anchor every frame
+  clamping the viewport backward. A deferred rounding write must recreate the required reserve even
+  when replacement growth has already consumed the spacer completely.
+  `scroll-auto-scroll.spec.ts` checks the same anchor every frame
   through this replacement and the subsequent full collapse.
 - A fixed collapse target does not consume reserve, but it still reserves pending row-rounding
   reductions. A fractional tray reserves its exact height while its row also loses a whole-pixel

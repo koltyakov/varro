@@ -35,8 +35,9 @@ for (const theme of ['dark', 'light', 'high-contrast', 'high-contrast-light']) {
     await page.screenshot({ path: testInfo.outputPath('plan-actions.png') });
 
     await open.focus();
-    await expect(open).toHaveCSS('outline-style', 'solid');
-    await expect(open).toHaveCSS('outline-width', '1px');
+    await expect(open).toBeFocused();
+    await expect(open).toHaveCSS('outline-style', 'none');
+    await expect(open).toHaveCSS('outline-width', '0px');
 
     for (const width of [480, 280]) {
       await page.setViewportSize({ width, height: 800 });
