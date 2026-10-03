@@ -82,6 +82,7 @@ import {
   readStoredQueuedMessageEdit,
   readStoredQueuedMessages,
   readStoredNullableStringRecord,
+  readStoredSelectedModel,
   readStoredSelectedModelForWorkspace,
   readStoredSelectedModels,
   readStoredStringArray,
@@ -173,6 +174,7 @@ export interface AppState {
   selectedAgent: string | null;
   sessionSelectedAgents: SessionSelectedAgents;
   selectedModel: SelectedModel | null;
+  lastSelectedModel: SelectedModel | null;
   sessionSelectedModels: SessionSelectedModels;
   modelVariantSelections: ModelVariantSelections;
   providerOrder: string[];
@@ -433,6 +435,9 @@ export function createAppState(): AppStateInstance {
     selectedModel: readStoredSelectedModelForWorkspace(
       initialWebviewState.editorContext?.workspacePath
     ),
+    lastSelectedModel: modelPreferences
+      ? (modelPreferences.lastSelectedModel ?? null)
+      : readStoredSelectedModel(STORAGE_KEYS.lastSelectedModel),
     sessionSelectedModels:
       initialWebviewState.webviewContext?.surface === 'editor'
         ? (initialWebviewState.sessionSelectedModels ?? {})

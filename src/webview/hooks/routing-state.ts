@@ -1,5 +1,5 @@
 import type { SelectedModel } from '../lib/app-state-types';
-import { resolveSelectedModel } from '../lib/state';
+import { isModelVisible, resolveSelectedModel } from '../lib/state';
 import type { Agent, MessageEntry, Provider, Session, SessionStatus } from '../types';
 
 type AgentSelectionUpdate = {
@@ -113,6 +113,7 @@ export function reconcileLoadedProviders(args: {
   providers: Provider[];
   providerDefaults: Record<string, string>;
   defaultModel?: SelectedModel | null;
+  lastSelectedModel?: SelectedModel | null;
   allowHiddenSelectedModel?: boolean;
 }) {
   const effectiveModel = resolveSelectedModel(
@@ -124,13 +125,15 @@ export function reconcileLoadedProviders(args: {
 
   if (args.selectedModel && !effectiveModel) {
     const provider = args.providers.find((item) => item.id === args.selectedModel?.providerID);
-    if (!provider?.models[args.selectedModel.modelID]) {
+    if (
+      !provider?.models[args.selectedModel.modelID] &&
+      (args.allowHiddenSelectedModel ||
+        isModelVisible(args.selectedModel.providerID, args.selectedModel.modelID))
+    ) {
       // A catalog refresh can temporarily omit a route. Keep the explicit choice
       // rather than letting the next refresh replace it with another provider.
       return { effectiveModel, nextSelectedModel: undefined };
     }
-    // SAFETY: The surrounding shape or discriminator check establishes the SelectedModel contract used below.
-    return { effectiveModel, nextSelectedModel: null as SelectedModel | null | undefined };
   }
 
   if (effectiveModel && args.selectedModel?.variant && !effectiveModel.variant) {
@@ -143,22 +146,28 @@ export function reconcileLoadedProviders(args: {
     };
   }
 
-  if (!args.selectedModel && args.providers.length > 0) {
-    const fallback =
-      args.defaultModel === undefined
-        ? (() => {
-            const firstProvider = args.providers[0]!;
-            const modelID =
-              args.providerDefaults[firstProvider.id] || Object.keys(firstProvider.models)[0];
-            return modelID ? { providerID: firstProvider.id, modelID } : null;
-          })()
-        : resolveSelectedModel(args.defaultModel, args.providers, args.providerDefaults);
-    if (fallback) {
-      return {
-        effectiveModel,
-        nextSelectedModel: fallback,
-      };
+  if (!effectiveModel && args.providers.length > 0) {
+    const candidates = [args.lastSelectedModel, args.defaultModel];
+    for (const provider of args.providers) {
+      const modelIDs = [args.providerDefaults[provider.id], ...Object.keys(provider.models)];
+      for (const modelID of modelIDs) {
+        if (modelID) candidates.push({ providerID: provider.id, modelID });
+      }
     }
+    for (const candidate of candidates) {
+      const fallback = resolveSelectedModel(
+        candidate ?? null,
+        args.providers,
+        args.providerDefaults
+      );
+      if (fallback) {
+        return {
+          effectiveModel,
+          nextSelectedModel: fallback,
+        };
+      }
+    }
+    if (args.selectedModel) return { effectiveModel, nextSelectedModel: null };
   }
 
   return { effectiveModel, nextSelectedModel: undefined };

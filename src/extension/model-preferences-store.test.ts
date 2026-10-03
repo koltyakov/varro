@@ -31,6 +31,21 @@ function createMemoryPersistence() {
 }
 
 describe('ModelPreferencesStore', () => {
+  it('shares the last model with new instances and preserves it through unrelated stale updates', async () => {
+    const { persistence } = createMemoryPersistence();
+    const store = new ModelPreferencesStore(persistence);
+    await store.migrateLegacy(preferences);
+    const base = store.get();
+    const lastSelectedModel = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
+    await store.update(base, { ...base, lastSelectedModel });
+    await store.update(base, { ...base, pinnedModels: [] });
+    expect(new ModelPreferencesStore(persistence).get().lastSelectedModel).toEqual(
+      lastSelectedModel
+    );
+    const next = { providerID: 'zai', modelID: 'glm' };
+    await store.update(base, { ...base, lastSelectedModel: next });
+    expect(store.get().lastSelectedModel).toEqual(next);
+  });
   it('migrates browser preferences once and persists later updates', async () => {
     const persistence: Persistence = {
       get: vi.fn(),

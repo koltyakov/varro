@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
 import type { Agent, QuestionRequest, Session, SessionStatus } from '../types';
 import {
+  applyModelPreferencesSnapshot,
+  getModelPreferencesSnapshot,
   getPersistedSelectedModel,
   getSelectedModelForSession,
   resetDefaultAppState,
@@ -413,10 +415,10 @@ describe('data loaders', () => {
       vi.fn()
     );
 
-    expect(setSelectedModel).toHaveBeenCalledWith({
-      providerID: 'openai',
-      modelID: 'gpt-server',
-    });
+    expect(setSelectedModel).toHaveBeenCalledWith(
+      { providerID: 'openai', modelID: 'gpt-server' },
+      { rememberLastSelected: false }
+    );
   });
 
   it('keeps a hidden selected model while an existing session is active', async () => {
@@ -589,6 +591,64 @@ describe('data loaders', () => {
       setState('activeSessionId', 'session-1');
       setStateSelectedModel({ ...sessionModel }, { sessionId: 'session-1', persistGlobal: false });
     }
+
+    it('inherits the last selected model in a new project without replacing the shared preference', async () => {
+      setStateSelectedModel(sessionModel);
+      setState('editorContext', 'workspacePath', '/new-project');
+      setStateSelectedModel(null, { persistGlobal: false });
+
+      await createStateBoundLoader().loadProviders();
+
+      expect(state.selectedModel).toEqual(sessionModel);
+      expect(getPersistedSelectedModel()).toEqual(sessionModel);
+      expect(state.lastSelectedModel).toEqual(sessionModel);
+    });
+
+    it('falls back to a visible model without forgetting the last choice for other projects', async () => {
+      const unavailable = { providerID: 'other-project-provider', modelID: 'model' };
+      setState('lastSelectedModel', unavailable);
+      setState('hiddenModels', ['openai:gpt-global']);
+
+      await createStateBoundLoader().loadProviders();
+
+      expect(state.selectedModel).toEqual(sessionModel);
+      expect(getPersistedSelectedModel()).toEqual(sessionModel);
+      expect(state.lastSelectedModel).toEqual(unavailable);
+    });
+
+    it.each(['project draft', 'active session'])(
+      'keeps an open %s unchanged when another instance selects a model',
+      async (composer) => {
+        setState('editorContext', 'workspacePath', '/existing-project');
+        if (composer === 'active session') selectSessionModel();
+        else setStateSelectedModel(globalModel);
+        const selected = composer === 'active session' ? sessionModel : globalModel;
+        const lastSelectedModel = {
+          ...(composer === 'active session' ? globalModel : sessionModel),
+          variant: 'high',
+        };
+
+        applyModelPreferencesSnapshot({ ...getModelPreferencesSnapshot(), lastSelectedModel });
+
+        expect(state.selectedModel).toEqual(selected);
+        expect(getPersistedSelectedModel()).toEqual(globalModel);
+        const loader = createStateBoundLoader();
+        await loader.loadProviders();
+        await loader.loadProviders();
+
+        expect(state.selectedModel).toEqual(selected);
+        expect(getPersistedSelectedModel()).toEqual(globalModel);
+        expect(state.lastSelectedModel).toEqual(lastSelectedModel);
+        if (composer === 'active session') {
+          expect(getSelectedModelForSession('session-1')).toEqual(sessionModel);
+        }
+
+        setPersistentShowSessionPicker(true);
+        expect(state.selectedModel).toEqual(globalModel);
+        setPersistentShowSessionPicker(false);
+        expect(state.selectedModel).toEqual(selected);
+      }
+    );
 
     it('keeps the global draft model when the session picker retains an active session', async () => {
       selectSessionModel();
@@ -833,10 +893,10 @@ describe('data loaders', () => {
     expect(Object.keys(loadedProviders[1].models)).toEqual(['pro']);
     expect(setProviders).toHaveBeenCalledWith(loadedProviders, { other: 'pro' });
     expect(setProviderDefaults).toHaveBeenCalledWith({ other: 'pro' });
-    expect(setSelectedModel).toHaveBeenCalledWith({
-      providerID: 'openai',
-      modelID: 'gpt-5.5',
-    });
+    expect(setSelectedModel).toHaveBeenCalledWith(
+      { providerID: 'openai', modelID: 'gpt-5.5' },
+      { rememberLastSelected: false }
+    );
   });
 
   it('hydrates session statuses and usage-limit state for loaded sessions', async () => {

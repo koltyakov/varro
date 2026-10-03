@@ -81,6 +81,7 @@ export function createStateBoundDataLoaderOperations(deps: {
     setProviders: routingStore.setProviders,
     setProviderDefaults: routingStore.setProviderDefaults,
     getSelectedModel: () => appStore.state.selectedModel,
+    getLastSelectedModel: () => appStore.state.lastSelectedModel,
     getSelectedModelForSession: routingStore.getSelectedModelForSession,
     setSelectedModel: routingStore.setSelectedModel,
     loadProviderLimit: (providerID, modelID) => client.config.providerLimit(providerID, modelID),
@@ -149,10 +150,11 @@ export function createDataLoaderOperations(deps: {
   ): void;
   setProviderDefaults(defaults: Record<string, string>): void;
   getSelectedModel(): SelectedModel | null;
+  getLastSelectedModel?(): SelectedModel | null;
   getSelectedModelForSession(sessionId: string): SelectedModel | null;
   setSelectedModel(
     model: SelectedModel | null,
-    options?: { sessionId?: string | null; persistGlobal?: boolean }
+    options?: { sessionId?: string | null; persistGlobal?: boolean; rememberLastSelected?: boolean }
   ): void;
   loadProviderLimit(providerID: string, modelID?: string | null): Promise<ProviderLimitStatus>;
   setProviderLimit(
@@ -325,6 +327,7 @@ export function createDataLoaderOperations(deps: {
         },
         setProviderDefaults: deps.setProviderDefaults,
         getSelectedModel: deps.getSelectedModel,
+        getLastSelectedModel: deps.getLastSelectedModel,
         getSelectedModelForSession: deps.getSelectedModelForSession,
         getComposerSessionId: deps.getComposerSessionId,
         setSelectedModel: deps.setSelectedModel,
@@ -793,11 +796,16 @@ export async function loadProvidersWithDependencies(
     setProviders(providers: Provider[], defaults?: Record<string, string>): void;
     setProviderDefaults(defaults: Record<string, string>): void;
     getSelectedModel(): SelectedModel | null;
+    getLastSelectedModel?(): SelectedModel | null;
     getSelectedModelForSession?(sessionId: string): SelectedModel | null;
     getComposerSessionId?(): string | null;
     setSelectedModel(
       model: SelectedModel | null,
-      options?: { sessionId?: string | null; persistGlobal?: boolean }
+      options?: {
+        sessionId?: string | null;
+        persistGlobal?: boolean;
+        rememberLastSelected?: boolean;
+      }
     ): void;
   },
   logError: Logger,
@@ -840,6 +848,7 @@ export async function loadProvidersWithDependencies(
       providers,
       providerDefaults,
       defaultModel: res.defaultModel,
+      lastSelectedModel: composerSessionId ? null : deps.getLastSelectedModel?.(),
       allowHiddenSelectedModel: !!composerSessionId,
     });
     if (routingState.nextSelectedModel !== undefined) {
@@ -851,7 +860,7 @@ export async function loadProvidersWithDependencies(
             : { persistGlobal: false }
         );
       } else {
-        deps.setSelectedModel(routingState.nextSelectedModel);
+        deps.setSelectedModel(routingState.nextSelectedModel, { rememberLastSelected: false });
       }
     } else if (composerSessionId && sessionSelectedModel) {
       deps.setSelectedModel(routingState.effectiveModel ?? sessionSelectedModel, {

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { resetDefaultAppState, setState } from '../lib/state';
 import type { Provider, Agent } from '../types';
 import {
   deriveSelectedAgentFromMessages,
@@ -34,6 +35,7 @@ function agent(name: string, overrides?: Partial<Agent>): Agent {
 }
 
 describe('routing-state helpers', () => {
+  afterEach(() => resetDefaultAppState());
   it('counts busy and retry sessions for the provider regardless of the active tree', () => {
     const statuses = {
       active: { type: 'idle' as const },
@@ -214,7 +216,7 @@ describe('routing-state helpers', () => {
     });
   });
 
-  it('uses provider defaults only when the exact default endpoint is unsupported', () => {
+  it('uses visible provider defaults when the exact default is unavailable', () => {
     const providers = [
       provider('openai', {
         'gpt-provider': {
@@ -233,7 +235,7 @@ describe('routing-state helpers', () => {
         providerDefaults: { openai: 'gpt-provider' },
         defaultModel: null,
       }).nextSelectedModel
-    ).toBeUndefined();
+    ).toEqual({ providerID: 'openai', modelID: 'gpt-provider' });
     expect(
       reconcileLoadedProviders({
         selectedModel: null,
@@ -241,6 +243,141 @@ describe('routing-state helpers', () => {
         providerDefaults: { openai: 'gpt-provider' },
       }).nextSelectedModel
     ).toEqual({ providerID: 'openai', modelID: 'gpt-provider' });
+  });
+
+  it.each(['provider', 'model', 'removed'])('skips a %s-hidden automatic default', (hidden) => {
+    const models = {
+      hidden: {
+        id: 'hidden',
+        name: 'Hidden',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+      visible: {
+        id: 'visible',
+        name: 'Visible',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+    };
+    const providers = [provider('hidden-provider', models), provider('openai', models)];
+    setState('providers', providers);
+    if (hidden === 'provider') setState('hiddenProviders', ['hidden-provider']);
+    if (hidden === 'model') setState('hiddenModels', ['hidden-provider:hidden']);
+    if (hidden === 'removed') setState('removedModels', ['hidden-provider:hidden']);
+
+    for (const selectedModel of [null, { providerID: 'hidden-provider', modelID: 'hidden' }]) {
+      expect(
+        reconcileLoadedProviders({
+          selectedModel,
+          providers,
+          providerDefaults: { 'hidden-provider': 'hidden', openai: 'visible' },
+          defaultModel: { providerID: 'hidden-provider', modelID: 'hidden' },
+        }).nextSelectedModel
+      ).toEqual({
+        providerID: hidden === 'provider' ? 'openai' : 'hidden-provider',
+        modelID: 'visible',
+      });
+    }
+  });
+
+  it('does not select anything when all configured models are hidden', () => {
+    setState('hiddenProviders', ['openai']);
+    expect(
+      reconcileLoadedProviders({
+        selectedModel: null,
+        providers: [
+          provider('openai', {
+            model: {
+              id: 'model',
+              name: 'Model',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
+          }),
+        ],
+        providerDefaults: { openai: 'model' },
+      }).nextSelectedModel
+    ).toBeUndefined();
+  });
+
+  it('replaces a hidden draft provider even when it is no longer connected', () => {
+    setState('hiddenProviders', ['disconnected']);
+    expect(
+      reconcileLoadedProviders({
+        selectedModel: { providerID: 'disconnected', modelID: 'old' },
+        providers: [
+          provider('openai', {
+            model: {
+              id: 'model',
+              name: 'Model',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
+          }),
+        ],
+        providerDefaults: { openai: 'model' },
+      }).nextSelectedModel
+    ).toEqual({ providerID: 'openai', modelID: 'model' });
+  });
+
+  it('only defaults to added models in a large provider catalog', () => {
+    const models = Object.fromEntries(
+      Array.from({ length: 60 }, (_, index) => [
+        `model-${index}`,
+        {
+          id: `model-${index}`,
+          name: `Model ${index}`,
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      ])
+    );
+    const providers = [provider('catalog', models)];
+    setState('providers', providers);
+    setState('addedModels', ['catalog:model-59']);
+    expect(
+      reconcileLoadedProviders({
+        selectedModel: null,
+        providers,
+        providerDefaults: { catalog: 'model-0' },
+        defaultModel: { providerID: 'catalog', modelID: 'model-1' },
+      }).nextSelectedModel
+    ).toEqual({ providerID: 'catalog', modelID: 'model-59' });
+  });
+
+  it('prefers the last selected available model over the server default', () => {
+    const models = {
+      last: {
+        id: 'last',
+        name: 'Last',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+        variants: { high: {} },
+      },
+      default: {
+        id: 'default',
+        name: 'Default',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+    };
+    const args = {
+      selectedModel: null,
+      providers: [provider('openai', models)],
+      providerDefaults: { openai: 'default' },
+      defaultModel: { providerID: 'openai', modelID: 'default' },
+      lastSelectedModel: { providerID: 'openai', modelID: 'last', variant: 'high' },
+    };
+    expect(reconcileLoadedProviders(args).nextSelectedModel).toEqual(args.lastSelectedModel);
+    expect(
+      reconcileLoadedProviders({
+        ...args,
+        lastSelectedModel: { providerID: 'missing', modelID: 'last' },
+      }).nextSelectedModel
+    ).toEqual(args.defaultModel);
+    setState('hiddenModels', ['openai:last']);
+    expect(reconcileLoadedProviders(args).nextSelectedModel).toEqual(args.defaultModel);
   });
 
   it('keeps a valid selected model over the exact server default', () => {

@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- Persisted and protocol model preferences are decoded at this shared I/O boundary. */
-import type { ModelPreferences } from './protocol';
+import type { ChatModelSelection, ModelPreferences } from './protocol';
 import type { UnknownRecord } from './type-utils';
 import { asRecord } from './type-utils';
 
@@ -9,7 +9,8 @@ const MAX_MODEL_PREFERENCE_STRING_LENGTH = 4_096;
 
 export function parseModelPreferences(value: unknown): ModelPreferences {
   const record = asRecord(value);
-  return {
+  const lastSelectedModel = parseSelectedModel(record?.lastSelectedModel);
+  const preferences: ModelPreferences = {
     modelVariantSelections: parseNullableStringRecord(record?.modelVariantSelections),
     providerOrder: parseStringArray(record?.providerOrder),
     modelOrder: parseStringArray(record?.modelOrder),
@@ -20,12 +21,15 @@ export function parseModelPreferences(value: unknown): ModelPreferences {
     pinnedModels: parseStringArray(record?.pinnedModels),
     modelDisplayNames: parseStringRecord(record?.modelDisplayNames),
   };
+  if (lastSelectedModel) preferences.lastSelectedModel = lastSelectedModel;
+  return preferences;
 }
 
 export function parseRequiredModelPreferences(value: unknown): ModelPreferences | null {
   const record = asRecord(value);
   if (
     !record ||
+    (record.lastSelectedModel !== undefined && !parseSelectedModel(record.lastSelectedModel)) ||
     !isNullableStringRecord(record.modelVariantSelections) ||
     !isStringArray(record.providerOrder) ||
     !isStringArray(record.modelOrder) ||
@@ -39,6 +43,26 @@ export function parseRequiredModelPreferences(value: unknown): ModelPreferences 
     return null;
   }
   return parseModelPreferences(record);
+}
+
+function parseSelectedModel(value: unknown): ChatModelSelection | null {
+  const record = asRecord(value);
+  if (
+    !record ||
+    !isBoundedString(record.providerID) ||
+    !record.providerID ||
+    !isBoundedString(record.modelID) ||
+    !record.modelID ||
+    (record.variant !== undefined && !isBoundedString(record.variant))
+  ) {
+    return null;
+  }
+  const model: ChatModelSelection = {
+    providerID: record.providerID,
+    modelID: record.modelID,
+  };
+  if (record.variant) model.variant = record.variant;
+  return model;
 }
 
 function parseStringArray(value: unknown): string[] {

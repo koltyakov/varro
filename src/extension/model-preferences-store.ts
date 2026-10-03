@@ -107,7 +107,12 @@ function mergeModelPreferences(
   base: ModelPreferences,
   next: ModelPreferences
 ): ModelPreferences {
-  return {
+  const selectionChanged =
+    base.lastSelectedModel?.providerID !== next.lastSelectedModel?.providerID ||
+    base.lastSelectedModel?.modelID !== next.lastSelectedModel?.modelID ||
+    base.lastSelectedModel?.variant !== next.lastSelectedModel?.variant;
+  const lastSelectedModel = selectionChanged ? next.lastSelectedModel : current.lastSelectedModel;
+  const merged: ModelPreferences = {
     modelVariantSelections: mergeRecord(
       current.modelVariantSelections,
       base.modelVariantSelections,
@@ -134,6 +139,8 @@ function mergeModelPreferences(
       next.modelDisplayNames
     ),
   };
+  if (lastSelectedModel) merged.lastSelectedModel = { ...lastSelectedModel };
+  return merged;
 }
 
 function mergeOrder(current: string[], base: string[], next: string[]) {
@@ -173,7 +180,7 @@ function mergeRecord<T extends string | null>(
 }
 
 function cloneModelPreferences(preferences: ModelPreferences): ModelPreferences {
-  return {
+  const cloned: ModelPreferences = {
     modelVariantSelections: { ...preferences.modelVariantSelections },
     providerOrder: [...preferences.providerOrder],
     modelOrder: [...preferences.modelOrder],
@@ -184,4 +191,7 @@ function cloneModelPreferences(preferences: ModelPreferences): ModelPreferences 
     pinnedModels: [...preferences.pinnedModels],
     modelDisplayNames: { ...preferences.modelDisplayNames },
   };
+  if (preferences.lastSelectedModel)
+    cloned.lastSelectedModel = { ...preferences.lastSelectedModel };
+  return cloned;
 }

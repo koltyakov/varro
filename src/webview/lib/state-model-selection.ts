@@ -82,11 +82,14 @@ export function setSelectedModel(
   options?: {
     sessionId?: string | null;
     persistGlobal?: boolean;
+    rememberLastSelected?: boolean;
     rememberVariant?: string | null;
     selectionId?: string;
   }
 ) {
   const persistGlobal = options?.persistGlobal ?? true;
+  const preferencesBase = persistGlobal ? getModelPreferencesSnapshot() : null;
+  let preferencesChanged = false;
   const sessionId = options?.sessionId;
   if (sessionId && options?.selectionId) pendingModelSelections.set(sessionId, options.selectionId);
   if (sessionId) {
@@ -103,10 +106,19 @@ export function setSelectedModel(
     : null;
 
   if (!modelsEqual(state.selectedModel, model)) {
-    setState('selectedModel', reconcile(model));
+    setState('selectedModel', reconcile(model ? { ...model } : null));
   }
   if (persistGlobal) {
     writeStoredSelectedModelForWorkspace(state.editorContext.workspacePath, model);
+    if (
+      model &&
+      options?.rememberLastSelected !== false &&
+      !modelsEqual(state.lastSelectedModel, model)
+    ) {
+      setState('lastSelectedModel', reconcile({ ...model }));
+      writeStored(STORAGE_KEYS.lastSelectedModel, model);
+      preferencesChanged = true;
+    }
   }
 
   const rememberedVariant =
@@ -114,13 +126,13 @@ export function setSelectedModel(
   if (persistGlobal && model && rememberedVariant !== undefined) {
     const key = getModelVariantSelectionKey(model.providerID, model.modelID);
     if (state.modelVariantSelections[key] !== rememberedVariant) {
-      const base = getModelPreferencesSnapshot();
       const nextSelections = { ...state.modelVariantSelections, [key]: rememberedVariant };
       setState('modelVariantSelections', nextSelections);
       writeStored(STORAGE_KEYS.modelVariantSelections, nextSelections);
-      publishModelPreferences(base);
+      preferencesChanged = true;
     }
   }
+  if (preferencesChanged && preferencesBase) publishModelPreferences(preferencesBase);
 
   if (sessionId) {
     if (!modelsEqual(previousSessionModel, model)) {
@@ -635,8 +647,8 @@ export function resetModelVisibility() {
   publishModelPreferences(base);
 }
 
-export function getModelPreferencesSnapshot() {
-  return {
+export function getModelPreferencesSnapshot(): ModelPreferences {
+  const preferences: ModelPreferences = {
     modelVariantSelections: { ...state.modelVariantSelections },
     providerOrder: [...state.providerOrder],
     modelOrder: [...state.modelOrder],
@@ -647,9 +659,16 @@ export function getModelPreferencesSnapshot() {
     pinnedModels: [...state.pinnedModels],
     modelDisplayNames: { ...state.modelDisplayNames },
   };
+  if (state.lastSelectedModel) preferences.lastSelectedModel = { ...state.lastSelectedModel };
+  return preferences;
 }
 
 export function applyModelPreferencesSnapshot(preferences: ModelPreferences) {
+  setState(
+    'lastSelectedModel',
+    reconcile(preferences.lastSelectedModel ? { ...preferences.lastSelectedModel } : null)
+  );
+  writeStored(STORAGE_KEYS.lastSelectedModel, preferences.lastSelectedModel ?? null);
   setState('modelVariantSelections', reconcile(preferences.modelVariantSelections));
   setState('providerOrder', reconcile(preferences.providerOrder));
   setState('modelOrder', reconcile(preferences.modelOrder));
