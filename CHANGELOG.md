@@ -4,14 +4,14 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.31.x - October 2026
 
-- Defaulted to automatic loopback ports with authenticated managed servers, while preserving fixed ports and verified server reuse. Added remembered confirmation for foreign or unverified ownership.
-- Improved shared-server recovery, Windows ownership checks, and startup responsiveness. Attach-only connections no longer run automatic recycle-bin cleanup.
-- Added live About diagnostics for server uptime, client counts, and CLI installation age, plus direct local OpenCode v2 session summaries.
-- Preserved selected models, drafts, and attachments when providers are unavailable. Kept deferred provider refreshes retryable and composer choices stable.
-- Added generation-speed estimates with restored v2 timings and clearer Fast and Ultrafast labels. Prioritized token counts in narrow summaries.
-- Queued prompts with mismatched agent, model, or reasoning settings. Added Resume steering after cancellation without duplicating prompts, and refreshed interrupted responses immediately.
+- Defaulted to authenticated managed servers on automatic loopback ports, preserving fixed ports and verified reuse. Remembered confirmation for foreign or unverified ownership.
+- Added background OpenCode v2 updates on Windows and safe same-family restarts for reused managed servers after active work finishes. Improved recovery, ownership checks, and startup responsiveness; skipped automatic cleanup on attach-only connections.
+- Added chats without an open project in a persistent per-user scratch folder, startup logos, responsive starter hints, a refreshed icon, and themed Markdown link tooltips.
+- Added live About diagnostics and local v2 session summaries. Preserved models, drafts, and attachments during provider outages, with retryable refreshes and stable composer choices.
+- Added generation-speed estimates, restored v2 timings, and clarified Fast and Ultrafast labels. Prioritized token counts in narrow summaries.
+- Queued prompts with mismatched agent, model, or reasoning settings. Added Resume steering after cancellation without duplicate prompts, and refreshed interrupted responses immediately.
 - Added a five-minute OpenAI WebSocket no-data timeout on managed OpenCode v2 servers from 2.0.20 onward, respecting explicit settings.
-- Fixed IME input handling and excluded broken images from sends. Improved scrolling, history-loading stability, question visibility, background waiting, and queued activity grouping at compaction boundaries.
+- Fixed IME input, broken-image sends, and Windows Alt menu activation during turn navigation. Stabilized scrolling, history loading, and activity grouping; reduced streaming jumps and Thinking flashes.
 
 ## 0.30.x - September 2026
 
