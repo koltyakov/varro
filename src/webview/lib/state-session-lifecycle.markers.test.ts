@@ -123,6 +123,26 @@ describe('catalog marker restoration', () => {
     expect(state.isSessionCompletedResponseUnread('chat')).toBe(true);
   });
 
+  it('uses the latest completion or metadata timestamp for plan markers', async () => {
+    const state = await import('./state');
+    state.setSessions([session('plan', '/repo')]);
+    expect(state.getSessionPlanUpdatedAt('plan', 200)).toBe(200);
+    state.markSessionResponseCompleted('plan', 300);
+    expect(state.getSessionPlanUpdatedAt('plan', 200)).toBe(300);
+    expect(state.getSessionPlanUpdatedAt('plan', 400)).toBe(400);
+    state.skipPlanSession('plan');
+    expect(state.isSkippedPlanSession('plan', state.getSessionPlanUpdatedAt('plan', 200))).toBe(
+      true
+    );
+    state.markSessionSeen('plan', 300);
+    expect(state.isSessionUnread('plan', state.getSessionPlanUpdatedAt('plan', 200))).toBe(false);
+    state.markSessionResponseCompleted('plan', 301);
+    expect(state.isSessionUnread('plan', state.getSessionPlanUpdatedAt('plan', 200))).toBe(true);
+    expect(state.isSkippedPlanSession('plan', state.getSessionPlanUpdatedAt('plan', 200))).toBe(
+      false
+    );
+  });
+
   it('keeps zero timestamps, skipped-plan updates, and selective removal synchronous', async () => {
     const state = await import('./state');
     state.setSessions([session('first', '/repo'), session('second', '/repo')]);

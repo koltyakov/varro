@@ -10,6 +10,7 @@ import {
   isSessionAwaitingInput,
   isSessionCompletedResponseUnread,
   isSessionUnread,
+  getSessionPlanUpdatedAt,
   isSkippedPlanSession,
   markSessionSeen,
   setPersistentShowSessionPicker as setShowSessionPicker,
@@ -1358,7 +1359,10 @@ export function SessionListView(props: {
             case 'completed':
               return isSessionCompletedResponseUnread(session.id);
             case 'plan-ready':
-              return isSessionUnread(session.id, session.time.updated);
+              return isSessionUnread(
+                session.id,
+                getSessionPlanUpdatedAt(session.id, session.time.updated)
+              );
             case 'failed':
               return isSessionFailureUnread(session.id);
             default:
@@ -2186,7 +2190,11 @@ function SessionListItem(props: {
   const status = () => state.sessionStatus[props.session.id];
   const hasUnreadCompletion = () =>
     props.isNewlyCompleted ||
-    (props.isCompletedPlanSession && isSessionUnread(props.session.id, props.session.time.updated));
+    (props.isCompletedPlanSession &&
+      isSessionUnread(
+        props.session.id,
+        getSessionPlanUpdatedAt(props.session.id, props.session.time.updated)
+      ));
   const hasUnreadFailure = () => props.isFailed && isSessionFailureUnread(props.session.id);
   const hasPendingInput = () =>
     props.hasPermissionRequest || props.hasQuestionRequest || props.needsAttention;
@@ -2809,7 +2817,10 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     if (selectedAgent === 'plan') {
       // An empty session cannot contain a plan; the plan agent may have been
       // registered for it merely by selecting the session in the list.
-      if (!isEmptySession(session) && !isSkippedPlanSession(sessionId, session.time.updated)) {
+      if (
+        !isEmptySession(session) &&
+        !isSkippedPlanSession(sessionId, getSessionPlanUpdatedAt(sessionId, session.time.updated))
+      ) {
         planReadyIds.add(sessionId);
       }
       continue;
