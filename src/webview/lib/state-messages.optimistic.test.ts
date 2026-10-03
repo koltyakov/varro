@@ -577,6 +577,115 @@ describe('optimistic image parts carried onto the server message', () => {
 });
 
 describe('optimistic image part de-duplication', () => {
+  it('reserves filename matches before acknowledging a renamed image by order', () => {
+    upsertMessage({
+      info: userMessage('msg-1'),
+      parts: [
+        imagePart('msg-1-part-0', 'msg-1', {
+          filename: 'first.png',
+          url: 'data:image/png;base64,FIRST',
+        }),
+        imagePart('msg-1-part-1', 'msg-1', {
+          filename: 'second.png',
+          url: 'data:image/png;base64,SECOND',
+        }),
+      ],
+    });
+    const renamed = imagePart('server-second', 'msg-1', {
+      filename: 'renamed.png',
+      url: 'varro-content:/second',
+    });
+    const first = imagePart('server-first', 'msg-1', {
+      filename: 'first.png',
+      url: 'varro-content:/first',
+    });
+    setMessagesIncremental([{ info: userMessage('msg-1'), parts: [renamed, first] }], {
+      preserveExtraParts: true,
+    });
+    expect(partIds()).toEqual([['server-first', 'server-second']]);
+  });
+
+  it('reconciles deferred history before metadata without duplicating three local images', () => {
+    const local = [0, 1, 2].map((index) =>
+      imagePart(`msg-1-part-${index + 1}`, 'msg-1', {
+        filename: `${index}.png`,
+        url: `data:image/png;base64,IMAGE${index}`,
+      })
+    );
+    const canonical = local.map((part, index) => ({
+      ...part,
+      id: `server-${index}`,
+      url: `varro-content:/session/session-1/message/msg-1/part/server-${index}`,
+    }));
+    upsertMessage({
+      info: userMessage('msg-1'),
+      parts: [textPart('msg-1-part-0', 'msg-1', 'Compare these'), ...local],
+    });
+    setMessagesIncremental(
+      [
+        {
+          info: userMessage('msg-1'),
+          parts: [textPart('server-text', 'msg-1', 'Compare these'), ...canonical],
+        },
+      ],
+      { preserveExtraParts: true }
+    );
+    expect(partIds()).toEqual([['server-text', 'server-0', 'server-1', 'server-2']]);
+  });
+
+  it('does not relabel acknowledged images when metadata repeats before text acknowledgement', () => {
+    upsertMessage({
+      info: userMessage('msg-1'),
+      parts: [
+        textPart('msg-1-part-0', 'msg-1', 'Compare these'),
+        imagePart('msg-1-part-1', 'msg-1'),
+      ],
+    });
+    upsertMessageInfo(userMessage('msg-1'));
+    upsertPart(imagePart('server-image', 'msg-1', { url: 'varro-content:/image' }));
+    upsertMessageInfo(userMessage('msg-1'));
+    expect(partIds()).toEqual([['msg-1-part-0', 'server-image']]);
+  });
+
+  it('keeps pending images through repeated canonical events and partial snapshots', () => {
+    const local = [0, 1, 2].map((index) =>
+      imagePart(`msg-1-optimistic-file-${index}`, 'msg-1', {
+        filename: `${index}.png`,
+        url: `data:image/png;base64,IMAGE${index}`,
+      })
+    );
+    const first = imagePart('server-0', 'msg-1', {
+      filename: '0.png',
+      url: 'varro-content:/image-0',
+    });
+    upsertMessage({ info: userMessage('msg-1'), parts: local });
+    upsertPart(first);
+    upsertPart(first);
+    expect(partIds()).toEqual([['server-0', 'msg-1-optimistic-file-1', 'msg-1-optimistic-file-2']]);
+    setMessagesIncremental([{ info: userMessage('msg-1'), parts: [first] }], {
+      preserveExtraParts: true,
+    });
+    expect(partIds()).toEqual([['server-0', 'msg-1-optimistic-file-1', 'msg-1-optimistic-file-2']]);
+  });
+
+  it('matches projected images by filename and retains their slots when acknowledgement arrives out of order', () => {
+    const local = [0, 1, 2].map((index) =>
+      imagePart(`msg-1-part-${index}`, 'msg-1', {
+        filename: `${index}.png`,
+        url: `data:image/png;base64,IMAGE${index}`,
+      })
+    );
+    upsertMessage({ info: userMessage('msg-1'), parts: local });
+    const second = imagePart('server-1', 'msg-1', {
+      filename: '1.png',
+      url: 'varro-content:/image-1',
+    });
+    setMessagesIncremental([{ info: userMessage('msg-1'), parts: [second] }], {
+      preserveExtraParts: true,
+    });
+    expect(partIds()).toEqual([['msg-1-part-0', 'server-1', 'msg-1-part-2']]);
+  });
+
   function seedServerMessageWithOptimisticImage(overrides?: Partial<FilePart>) {
     // SAFETY: The fixture provides the FilePart fields read by this statement.
     upsertMessage({
@@ -640,7 +749,7 @@ describe('optimistic image part de-duplication', () => {
     expect(partIds()).toEqual([['server-image']]);
   });
 
-  it('removes the optimistic twin when an existing server part is updated', () => {
+  it('does not consume an unacknowledged image when an existing server part is updated', () => {
     seedServerMessageWithOptimisticImage();
     upsertMessage({
       info: userMessage('msg-1'),
@@ -652,7 +761,7 @@ describe('optimistic image part de-duplication', () => {
 
     upsertPart(imagePart('server-image', 'msg-1', { url: 'https://cdn/img.png' }));
 
-    expect(partIds()).toEqual([['server-image']]);
+    expect(partIds()).toEqual([['msg-1-optimistic-file-0', 'server-image']]);
   });
 
   it('does not remove an optimistic image for a non-image file part', () => {

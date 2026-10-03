@@ -1,5 +1,6 @@
 import type { SessionWorkspaceScope } from './protocol';
 import type { UnknownRecord } from './type-utils';
+import type { FileChange } from './tool-file-change';
 
 export type OutputFormatText = {
   type: 'text';
@@ -183,6 +184,7 @@ export type TextPart = {
 };
 
 export type ReasoningPart = {
+  deferred?: string;
   id: string;
   sessionID: string;
   messageID: string;
@@ -230,6 +232,7 @@ export type ToolStateRunning = {
 };
 
 export type ToolStateCompleted = {
+  deferredFiles?: FileChange[];
   status: 'completed';
   input: UnknownRecord;
   output: string;
@@ -240,6 +243,7 @@ export type ToolStateCompleted = {
 };
 
 export type ToolStateError = {
+  deferredFiles?: FileChange[];
   status: 'error';
   input: UnknownRecord;
   error: string;
@@ -250,6 +254,7 @@ export type ToolStateError = {
 export type ToolState = ToolStatePending | ToolStateRunning | ToolStateCompleted | ToolStateError;
 
 export type ToolPart = {
+  deferred?: string;
   id: string;
   sessionID: string;
   messageID: string;

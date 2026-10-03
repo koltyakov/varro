@@ -33,6 +33,45 @@ vi.mock('./logger', () => ({
 import { ServerEventBridge } from './server-event-bridge';
 import { HiddenSessionManager } from './hidden-session-manager';
 
+it('projects live file and tool attachments without changing streaming content', () => {
+  const { bridge, handlers, post } = createMocks();
+  bridge.attach();
+  const file = {
+    id: 'image-1',
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'file',
+    mime: 'image/png',
+    url: 'data:image/png;base64,original-image-bytes',
+  };
+  for (const part of [
+    file,
+    {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      tool: 'read',
+      state: { status: 'completed', output: 'keep full streaming output', attachments: [file] },
+    },
+  ]) {
+    mocks.parseServerEvent.mockReturnValue({
+      type: 'message.part.updated',
+      workspaceDirectory: '/workspace',
+      properties: { part },
+    });
+    mocks.getSessionIdsForEvent.mockReturnValue(['session-1']);
+    handlers.event?.({});
+    const payload = JSON.stringify(post.mock.calls.at(-1));
+    expect(payload).toContain(
+      'varro-content:/session/session-1/message/message-1/part/image-1?directory=%2Fworkspace'
+    );
+    expect(payload).not.toContain('original-image-bytes');
+    if (part.type === 'tool') expect(payload).toContain('keep full streaming output');
+  }
+  void bridge.dispose();
+});
+
 interface CapturedHandlers {
   status: ((status: ServerStatus) => void) | undefined;
   event: ((event: unknown) => void) | undefined;

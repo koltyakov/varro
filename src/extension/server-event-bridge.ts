@@ -10,6 +10,7 @@ import { logger } from './logger';
 import type { StreamingTextCache } from './streaming-text-cache';
 import type { SessionStateManager } from './session-state-manager';
 import { getSessionIdsForEvent } from './sidebar-provider-utils';
+import { projectDeferredPart, projectPartAttachments } from './message-content';
 import {
   projectFileDiffs,
   projectPartFileLists,
@@ -358,7 +359,13 @@ function projectEventSummaryDiffs(event: ServerEvent): ServerEvent {
   }
   const part = asRecord(properties.part);
   if (part) {
-    const projectedPart = projectPartFileLists(part);
+    const fileLists = projectPartFileLists(part);
+    // Live snapshots must use the same attachment references as a cold history load.
+    // Keep streaming text/tool state intact; only attachments are deferred here.
+    const projectedPart =
+      part.type === 'file'
+        ? projectDeferredPart(fileLists, event.workspaceDirectory)
+        : projectPartAttachments(fileLists, event.workspaceDirectory);
     if (projectedPart !== part)
       projectedProperties = { ...projectedProperties, part: projectedPart };
   }

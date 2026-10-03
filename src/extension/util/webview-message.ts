@@ -1955,6 +1955,13 @@ const API_ROUTES: ApiRoute[] = [
       (!url.searchParams.has('before') || requiredQuery(url, 'limit'))
   ),
   route(
+    '/session/:id/message/:messageId/part/:partId',
+    ({ method, url }) =>
+      method === 'GET' &&
+      queryWithOptionalDirectory(url, 'view') &&
+      (!url.searchParams.has('view') || url.searchParams.get('view') === 'thumbnail')
+  ),
+  route(
     '/session/:id/message/:messageId',
     ({ method, url }) => method === 'DELETE' && optionalDirectoryQuery(url)
   ),

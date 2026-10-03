@@ -2358,6 +2358,11 @@ kbd {
   border-color: color-mix(in srgb, var(--color-vscode-border) 62%, transparent);
 }
 
+.chat-image-figure-deferred {
+  width: 384px;
+  max-width: 100%;
+}
+
 .chat-image-figure .chat-image-img {
   position: relative;
   z-index: 1;

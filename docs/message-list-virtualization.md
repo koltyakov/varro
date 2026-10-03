@@ -134,6 +134,26 @@ the shared invariants below remain true.
   prefixes. Switching states must not briefly mount both the loading label and dialog summary.
 - Asynchronous content must reserve its final layout space where practical. Images are the primary
   example: loading an image after its row remounts must not add hundreds of pixels to the row.
+- History file parts carry scoped content references. Request bounded image thumbnails only near the
+  viewport, and request the original only for an open preview or an edit draft. Single thumbnails reserve
+  a 384 px frame, capped by the available width, with the existing 16:9 aspect ratio. Their intrinsic
+  dimensions must not resize the row on arrival. Unsupported formats retain a placeholder until opened.
+  Thumbnails are generated on demand in a lazy host-side ImageMagick WASM worker, including for uncached
+  sessions created in other clients. The bounded memory cache has fixed expiry and periodic cleanup;
+  generation must not depend on cache contents. See `docs/thumbnail-distribution.md` for runtime limits,
+  lifecycle, packaging and licenses.
+- Sending attachments preserves their image slots through local-to-server acknowledgement, repeated
+  events, and overlapping history refreshes. Replacing local part IDs with deferred references must
+  neither duplicate images nor consume another pending attachment. Keep an already-painted local
+  image until its thumbnail is decoded; release that local preview on replacement or unmount.
+  `image-send-handoff.spec.ts` checks count, order, DOM identity, decoded content, and tile height every
+  frame while three pasted images are acknowledged and assistant text streams.
+- Completed reasoning and tool bodies use short history summaries. Disclosure requests own their local
+  detail data and release it on collapse or unmount; they must not replace canonical streaming parts.
+  Preserve file-change identities and counts in summaries. Inline diff preferences may request details
+  for mounted full-content rows. Cancel obsolete requests and expose retryable errors in the disclosure.
+  The current upstream message APIs still send complete message records to the extension. Apply the
+  webview payload budget after projection, retaining the separate upstream response limit.
 - A view setting that changes rendered row content must participate in height invalidation even when
   the affected row is unmounted. This includes thinking visibility, inline file previews, disclosure
   state, and any future lightweight rendering mode.

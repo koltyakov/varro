@@ -25,6 +25,7 @@ import { InlineMessageImage } from './InlineMessageImage';
 import { FileTypeIcon } from './FileTypeIcon';
 import { lightBulbIcon, navArrowRightIcon } from '../lib/ui-icons';
 import { UiIcon } from './UiIcon';
+import { createDeferredPart, deferredFilePath } from '../lib/deferred-content';
 
 export function MessagePart(props: {
   part: Part;
@@ -161,12 +162,15 @@ function ReasoningBlock(props: {
   const [expanded, setExpanded] = createSignal(
     isAutoExpansionRequested() || (getMessageBlockExpanded(currentExpansionKey) ?? false)
   );
-  const reasoningText = createMemo(() => props.streamedText ?? props.part.text);
+  const detail = createDeferredPart(() => props.part, expanded);
+  const reasoningText = createMemo(() =>
+    detail.part() !== props.part ? detail.part().text : (props.streamedText ?? props.part.text)
+  );
   const subjectLabel = createMemo(() => getReasoningSubject(reasoningText()));
   const reasoningBody = createMemo(() => splitReasoningText(reasoningText()).body);
   const reasoningDescription = createMemo(() => reasoningBody().replace(/\s+/g, ' ').trim());
   const bodyText = createMemo(() => (expanded() ? reasoningBody() : ''));
-  const hasBody = () => hasVisibleReasoningContent(reasoningBody());
+  const hasBody = () => !!props.part.deferred || hasVisibleReasoningContent(reasoningBody());
   const detailLabel = () => getReasoningDetailLabel(props.messageInfo);
   const headerLabel = () =>
     formatReasoningHeader(
@@ -333,12 +337,25 @@ function ReasoningBlock(props: {
           onScroll={handleContentScroll}
         >
           <div class="thinking-item">
-            <MarkdownRenderer
-              content={bodyText()}
-              cacheByContent={!isStreaming()}
-              forceStreaming={isStreaming()}
-              class="thinking-text"
-            />
+            <Show when={detail.loading()}>
+              <span role="status">Loading thinking…</span>
+            </Show>
+            <Show when={detail.error()}>
+              <div role="alert">
+                {detail.error()}{' '}
+                <button type="button" onClick={detail.retry}>
+                  Retry
+                </button>
+              </div>
+            </Show>
+            <Show when={!detail.loading() && !detail.error()}>
+              <MarkdownRenderer
+                content={bodyText()}
+                cacheByContent={!isStreaming()}
+                forceStreaming={isStreaming()}
+                class="thinking-text"
+              />
+            </Show>
           </div>
         </div>
       </Show>
@@ -504,7 +521,10 @@ function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {
           </div>
         }
       >
-        <figure class="chat-image-figure">
+        <figure
+          class="chat-image-figure"
+          classList={{ 'chat-image-figure-deferred': !!deferredFilePath(props.part.url) }}
+        >
           <button
             type="button"
             class="chat-image-preview-trigger"

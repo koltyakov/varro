@@ -1,6 +1,7 @@
 import {
   $PROXY,
   For,
+  Index,
   Show,
   createEffect,
   createMemo,
@@ -98,6 +99,7 @@ import {
 import type { IssueAttachment } from '../../lib/editor-problems';
 import { ProblemsIcon } from '../ProblemsIcon';
 import { ProblemsTooltip } from '../ProblemsTooltip';
+import { deferredFilePath, loadFileContent } from '../../lib/deferred-content';
 
 export type MessageAttachment =
   | { type: 'extension-context'; context: ExtensionContext }
@@ -902,6 +904,12 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
 
 export function hasUserMessageEditableContent(parts: Part[]): boolean {
   if (getUserMessageEditText(parts).trim().length > 0) return true;
+  if (
+    parts.some(
+      (part) => part.type === 'file' && part.mime === 'text/plain' && deferredFilePath(part.url)
+    )
+  )
+    return true;
 
   const context = getUserMessageEditContext(parts);
   return (
@@ -1935,7 +1943,10 @@ function UserMessageImage(props: { part: FilePart; onOpenPreview: () => void }) 
   const displayName = () => getImageDisplayName(props.part);
 
   return (
-    <figure class="chat-image-figure">
+    <figure
+      class="chat-image-figure"
+      classList={{ 'chat-image-figure-deferred': !!deferredFilePath(props.part.url) }}
+    >
       <button
         type="button"
         class="chat-image-preview-trigger"
@@ -2013,9 +2024,10 @@ function UserMessageImageTiles(props: {
         aria-label="Attached images"
         onScroll={updateScrollState}
       >
-        <For each={props.imageParts}>
+        {/* Acknowledgement preserves attachment slots while replacing local IDs and objects. */}
+        <Index each={props.imageParts}>
           {(part, index) => {
-            const displayName = () => getImageDisplayName(part);
+            const displayName = () => getImageDisplayName(part());
             return (
               <button
                 type="button"
@@ -2023,14 +2035,14 @@ function UserMessageImageTiles(props: {
                 aria-label={`Open image preview: ${displayName()}`}
                 on:click={(event) => {
                   event.stopPropagation();
-                  props.onOpenPreview(index());
+                  props.onOpenPreview(index);
                 }}
               >
-                <InlineMessageImage src={part.url} alt={displayName()} allowCover={false} />
+                <InlineMessageImage src={part().url} alt={displayName()} allowCover={false} />
               </button>
             );
           }}
-        </For>
+        </Index>
       </div>
     </div>
   );
@@ -2675,7 +2687,38 @@ function getInlineFileMarker(part: FilePart): string | null {
 function MessageFileAttachment(props: { part: FilePart; inline?: boolean; marker?: string }) {
   const label = () => getMessageFileAttachmentLabel(props.part);
   const path = () => props.part.source?.path || props.part.filename;
-  const text = () => readPastedTextDataUrl(props.part.url);
+  const canOpen = () =>
+    props.part.mime === 'text/plain' &&
+    (!!deferredFilePath(props.part.url) || props.part.url.startsWith('data:'));
+  const [loading, setLoading] = createSignal(false);
+  const [error, setError] = createSignal('');
+  let requestController: AbortController | undefined;
+  onCleanup(() => requestController?.abort());
+  const open = async () => {
+    if (!canOpen() || loading()) return;
+    setLoading(true);
+    setError('');
+    const part = props.part;
+    const controller = new AbortController();
+    requestController = controller;
+    try {
+      const content = readPastedTextDataUrl(
+        deferredFilePath(part.url) ? await loadFileContent(part.url, controller.signal) : part.url
+      );
+      if (controller.signal.aborted || props.part !== part) return;
+      if (content === null) throw new Error('Attachment is not a text document');
+      postMessage({
+        type: 'vscode/open-text',
+        payload: { content, title: label(), language: 'plaintext' },
+      });
+    } catch (reason) {
+      if (!controller.signal.aborted)
+        setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      requestController = undefined;
+      setLoading(false);
+    }
+  };
 
   return (
     <span
@@ -2685,20 +2728,17 @@ function MessageFileAttachment(props: { part: FilePart; inline?: boolean; marker
           : 'chat-attachment-chip message-attachment-chip'
       }
       data-copy-marker={props.marker}
-      title={label()}
-      role={text() !== null ? 'button' : undefined}
-      tabIndex={text() !== null ? 0 : undefined}
+      title={error() || label()}
+      aria-label={error() ? `${label()}: ${error()}. Click to retry` : label()}
+      aria-busy={loading()}
+      role={canOpen() ? 'button' : undefined}
+      tabIndex={canOpen() ? 0 : undefined}
       on:click={(event) => {
         event.stopPropagation();
-        const content = text();
-        if (content !== null)
-          postMessage({
-            type: 'vscode/open-text',
-            payload: { content, title: label(), language: 'plaintext' },
-          });
+        void open();
       }}
       onKeyDown={(event) => {
-        if (text() !== null && (event.key === 'Enter' || event.key === ' ')) {
+        if (canOpen() && (event.key === 'Enter' || event.key === ' ')) {
           event.preventDefault();
           event.currentTarget.click();
         }
