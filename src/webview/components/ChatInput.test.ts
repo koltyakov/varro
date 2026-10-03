@@ -9870,6 +9870,60 @@ describe('ChatInput', () => {
     }
   });
 
+  it.each([20, 10_000])('does not reread %i loaded messages on keystrokes', async (count) => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    let infoReads = 0;
+    let partsReads = 0;
+    setState(
+      'messages',
+      Array.from({ length: count }, (_, index): MessageEntry => {
+        const id = `history-${index}`;
+        const entry =
+          index % 2 === 0
+            ? historyEntry(id, `Prompt ${index}`)
+            : assistantMessageEntry({ input: 100, output: 20 });
+        const info = { ...entry.info, id, time: { created: index, completed: index + 1 } };
+        const parts: TextPart[] = [
+          {
+            id: `text-${index}`,
+            messageID: id,
+            sessionID: 'session-1',
+            type: 'text',
+            text: `Content ${index}`,
+          },
+        ];
+        return {
+          get info() {
+            infoReads += 1;
+            return info;
+          },
+          get parts() {
+            partsReads += 1;
+            return parts;
+          },
+        };
+      })
+    );
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    expect(infoReads).toBeGreaterThan(0);
+    expect(partsReads).toBeGreaterThan(0);
+    infoReads = 0;
+    partsReads = 0;
+
+    const text = 'Keep this long conversation responsive while I type.';
+    for (let length = 1; length <= text.length; length += 1) {
+      enterComposerText(editor, text.slice(0, length));
+      await flushAsyncWork();
+    }
+
+    expect(inputText()).toBe(text);
+    expect(infoReads).toBe(0);
+    expect(partsReads).toBe(0);
+  });
+
   it('does not inspect historical prompts while typing without images', async () => {
     setupVisionDelegationModelState();
     setState('activeSessionId', 'session-1');

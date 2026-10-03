@@ -2977,7 +2977,7 @@ describe('MessageList empty state', () => {
     const hints = container?.querySelectorAll('.chat-empty-hint');
     expect(hints).toHaveLength(5);
     expect([...hints!].map((hint) => hint.textContent)).toEqual([
-      '@ add files and agents',
+      '@ add files / agents',
       '/ run commands',
       '$ select skills',
       '& link sessions',

@@ -25,7 +25,7 @@ const SCENARIOS = [
   'startup-process-exit',
   'runtime-crash-recovery',
   'event-stream-failure',
-  'port-conflict-fallback',
+  'explicit-port-conflict',
   'required-update-disabled',
   'required-update-failure',
   'required-update-no-change',
@@ -338,7 +338,7 @@ async function runScenario(scenario, vscodeExecutable) {
       `${JSON.stringify(settings, null, 2)}\n`
     );
 
-    if (scenario === 'port-conflict-fallback') conflictServer = await occupyPort(port);
+    if (scenario === 'explicit-port-conflict') conflictServer = await occupyPort(port);
 
     process.stdout.write(`\nRunning VS Code sandbox scenario: ${scenario}\n`);
     await runCode(

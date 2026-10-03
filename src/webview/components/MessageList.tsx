@@ -9706,7 +9706,7 @@ export function MessageList() {
                   <div class="chat-empty-hints">
                     <div class="chat-empty-hint-grid">
                       <span class="chat-empty-hint">
-                        <kbd>@</kbd> add files and agents
+                        <kbd>@</kbd> add files / agents
                       </span>
                       <span class="chat-empty-hint">
                         <kbd>/</kbd> run commands

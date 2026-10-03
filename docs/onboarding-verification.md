@@ -20,7 +20,7 @@ Run one or more scenarios by name:
 
 ```sh
 npm run test:vscode-sandbox -- clean-install-missing-cli
-npm run test:vscode-sandbox -- startup-process-exit port-conflict-fallback
+npm run test:vscode-sandbox -- startup-process-exit explicit-port-conflict
 node scripts/vscode-sandbox/run.mjs --list
 ```
 
@@ -41,7 +41,7 @@ The Extension Host matrix covers:
 | `startup-process-exit` | CLI version succeeds but `serve` exits | Retries and reports startup diagnostics |
 | `runtime-crash-recovery` | A healthy managed server exits unexpectedly | Restarts the server and returns to a healthy event stream |
 | `event-stream-failure` | Health remains available but the global event endpoint fails | Keeps the server usable while reporting a degraded event stream |
-| `port-conflict-fallback` | Configured port is occupied by another HTTP process | Moves to a nearby port and reaches healthy state |
+| `explicit-port-conflict` | Configured integer port is occupied by another HTTP process | Keeps the configured URL and reports the conflict without launching a fallback server |
 | `required-update-disabled` | CLI is below the supported floor and updates are disabled | Blocks startup with the update setting guidance |
 | `required-update-failure` | Required CLI update encounters a network failure | Reports install-aware update recovery |
 | `required-update-no-change` | Updater exits successfully but leaves the old CLI in place | Rejects the false success and explains that an older CLI may be shadowing the update |
