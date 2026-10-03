@@ -20,6 +20,8 @@ describe('development compatibility', () => {
     const advertisedFloors = '22.22.2+ on Node 22, or Node 24.15.0+';
 
     expect(packageJson.engines.node).toBe('^22.22.2 || >=24.15.0');
+    expect(workflow.match(/^\s*runs-on: ubuntu-24\.04$/gm)).toHaveLength(4);
+    expect(workflow).not.toContain('ubuntu-latest');
     expect(workflow.match(/^\s*node-version: 24\.21\.0$/gm)).toHaveLength(4);
     expect(workflow).not.toContain('matrix.node-version');
     expect(workflow).not.toMatch(/^\s*node-version:\s+(?:22|24)\s*$/m);
@@ -92,6 +94,7 @@ describe('development compatibility', () => {
       'run: node scripts/run-e2e.mjs --shard=${{ matrix.shard }}/${{ strategy.job-total }}'
     );
     expect(developmentGuide).toContain('four jobs with two workers each');
+    expect(developmentGuide).toContain('Each spec file belongs to exactly one shard');
   });
 
   it('shares one timing snapshot across shards and saves timings only after successful E2E', async () => {
@@ -102,6 +105,8 @@ describe('development compatibility', () => {
     expect(workflow).toContain('run-id: ${{ needs.e2e-history.outputs.run-id }}');
     expect(workflow).toContain('path: tmp/e2e-sharding/history');
     expect(workflow).toContain('name: e2e-results-${{ matrix.shard }}');
+    expect(workflow).toContain('tmp/e2e-sharding/assignment-${{ matrix.shard }}.json');
+    expect(workflow).toContain('tmp/e2e-sharding/shard-${{ matrix.shard }}.txt');
     expect(workflow).toContain('pattern: e2e-results-*');
     const mergeJob = workflow.slice(workflow.indexOf('\n  e2e-timings:\n'));
     expect(mergeJob).toContain('needs: e2e\n');

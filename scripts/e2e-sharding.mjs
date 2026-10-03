@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 /** @typedef {import('@playwright/test/reporter').JSONReport} JSONReport */
-/** @typedef {{ key: string, description: string, duration: number }} TestTiming */
+/** @typedef {{ key: string, file: string, description: string, duration: number }} TestTiming */
+/** @typedef {{ file: string, tests: TestTiming[], duration: number }} SpecTiming */
 
 const exec = promisify(execFile);
 const directory = path.resolve('tmp/e2e-sharding');
@@ -30,6 +31,7 @@ export function reportTests(report) {
         tests.push({
           // File, project and title survive line-number changes and checkout relocation.
           key: JSON.stringify([project, file, ...titlePath]),
+          file,
           description: `[${project}] › ${file} › ${titlePath.join(' › ')}`,
           duration: test.results
             .filter((result) => result.status !== 'skipped' && result.status !== 'interrupted')
@@ -80,26 +82,38 @@ export function balanceTests(tests, timings, count) {
     timings.has(test.key) ? [timings.get(test.key) ?? 1] : []
   );
   const fallback = known.length ? known.reduce((sum, value) => sum + value, 0) / known.length : 1;
-  const weighted = tests.map((test) => ({ test, weight: timings.get(test.key) ?? fallback }));
+  /** @type {Map<string, SpecTiming>} */
+  const byFile = new Map();
+  for (const test of tests) {
+    const spec = byFile.get(test.file) ?? { file: test.file, tests: [], duration: 0 };
+    spec.tests.push(test);
+    spec.duration += timings.get(test.key) ?? fallback;
+    byFile.set(test.file, spec);
+  }
+  const weighted = [...byFile.values()].map((spec) => ({
+    ...spec,
+    tests: spec.tests.toSorted((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
+  }));
   // Stable tie-breaking makes independently planned shards use the same partition.
   weighted.sort(
-    (a, b) =>
-      b.weight - a.weight || (a.test.key < b.test.key ? -1 : a.test.key > b.test.key ? 1 : 0)
+    (a, b) => b.duration - a.duration || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0)
   );
-  /** @type {{ tests: TestTiming[], duration: number }[]} */
+  /** @type {{ files: SpecTiming[], tests: TestTiming[], duration: number }[]} */
   const shards = Array.from({ length: count }, () => ({
+    files: [],
     tests: [],
     duration: 0,
   }));
-  for (const { test, weight } of weighted) {
+  for (const spec of weighted) {
     const shard = shards.reduce((best, candidate) =>
       candidate.duration < best.duration ||
       (candidate.duration === best.duration && candidate.tests.length < best.tests.length)
         ? candidate
         : best
     );
-    shard.tests.push(test);
-    shard.duration += weight;
+    shard.files.push(spec);
+    shard.tests.push(...spec.tests);
+    shard.duration += spec.duration;
   }
   return shards;
 }
@@ -164,9 +178,35 @@ export async function prepareShard(args) {
   await mkdir(directory, { recursive: true });
   const list = path.join(directory, `shard-${current}.txt`);
   await writeFile(list, selected.tests.map((test) => test.description).join('\n') + '\n');
-  process.stderr.write(
-    `E2E shard ${current}/${count}: ${selected.tests.length}/${tests.length} tests, ${hasHistory ? `${Math.round(selected.duration)}ms estimated` : 'equal-weight fallback'}.\n`
+  const totalFiles = shards.reduce((total, shard) => total + shard.files.length, 0);
+  const files = selected.files.toSorted((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  await writeFile(
+    path.join(directory, `assignment-${current}.json`),
+    JSON.stringify(
+      {
+        shard: current,
+        shardCount: count,
+        totalFiles,
+        totalTests: tests.length,
+        estimate: hasHistory ? 'historical-duration' : 'test-count',
+        files: files.map((spec) => ({
+          file: spec.file,
+          tests: spec.tests.length,
+          estimatedDurationMs: hasHistory ? Math.round(spec.duration) : null,
+        })),
+      },
+      null,
+      2
+    ) + '\n'
   );
+  process.stderr.write(
+    `E2E shard ${current}/${count}: ${selected.files.length}/${totalFiles} spec files, ${selected.tests.length}/${tests.length} tests, ${hasHistory ? `${Math.round(selected.duration)}ms estimated` : 'test-count fallback'}.\n`
+  );
+  for (const spec of files) {
+    process.stderr.write(
+      `  ${spec.file}: ${spec.tests.length} tests${hasHistory ? `, ${Math.round(spec.duration)}ms estimated` : ''}\n`
+    );
+  }
   if (!remaining.includes('--list')) {
     process.env.PLAYWRIGHT_JSON_OUTPUT_NAME = path.join(directory, `results-${current}.json`);
     if (!remaining.some((arg) => arg === '--reporter' || arg.startsWith('--reporter='))) {
@@ -180,12 +220,17 @@ export async function prepareShard(args) {
 export async function mergeTimings(files, output) {
   const durations = new Map();
   const seen = new Set();
+  const fileOwners = new Map();
   for (const file of files) {
     /** @type {JSONReport} */
     const report = JSON.parse(await readFile(file, 'utf8'));
     for (const test of reportTests(report)) {
       if (seen.has(test.key)) throw new Error(`Test appeared in multiple E2E shards: ${test.key}`);
       seen.add(test.key);
+      const owner = fileOwners.get(test.file);
+      if (owner !== undefined && owner !== file)
+        throw new Error(`Spec file appeared in multiple E2E shards: ${test.file}`);
+      fileOwners.set(test.file, file);
       if (Number.isFinite(test.duration) && test.duration > 0)
         durations.set(test.key, test.duration);
     }

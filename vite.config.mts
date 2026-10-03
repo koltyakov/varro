@@ -41,6 +41,10 @@ export default defineConfig(({ mode }) => ({
         entryFileNames: 'webview.mjs',
         chunkFileNames: 'chunks/[name]-[hash].js',
         assetFileNames: 'webview.[ext]',
+        // Share diagram helpers without combining the lazy diagram renderers.
+        codeSplitting: {
+          groups: [{ name: 'diagram-utils', test: /node_modules[\\/]d3-/ }],
+        },
       },
     },
     minify: 'oxc',

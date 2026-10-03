@@ -15,7 +15,7 @@ jobs:
 
   build-and-test:
     name: Linux build and test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -97,7 +97,7 @@ jobs:
 
   e2e-history:
     # Select once so all shards use the same immutable timing snapshot.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       artifact-id: ${{ steps.history.outputs.artifact-id }}
@@ -134,7 +134,7 @@ jobs:
   e2e:
     # E2E installs and serves its own checkout; it does not consume build-job artifacts.
     needs: e2e-history
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     container:
       # Keep this version aligned with @playwright/test in package.json.
@@ -184,12 +184,15 @@ jobs:
         # Bypass pretest:e2e; the matching container already includes the browsers.
         run: node scripts/run-e2e.mjs --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
-      - name: Upload E2E shard timings
+      - name: Upload E2E shard timings and assignment
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: e2e-results-${{ matrix.shard }}
-          path: tmp/e2e-sharding/results-${{ matrix.shard }}.json
+          path: |
+            tmp/e2e-sharding/results-${{ matrix.shard }}.json
+            tmp/e2e-sharding/assignment-${{ matrix.shard }}.json
+            tmp/e2e-sharding/shard-${{ matrix.shard }}.txt
           if-no-files-found: error
           retention-days: 7
 
@@ -203,7 +206,7 @@ jobs:
 
   e2e-timings:
     needs: e2e
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Check out repository
