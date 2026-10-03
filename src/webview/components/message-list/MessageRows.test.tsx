@@ -203,9 +203,20 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect([...actions].map((button) => button.disabled)).toEqual([false, false, false]);
   });
 
-  it.each([50, undefined, 0, Number.NaN, Number.POSITIVE_INFINITY])(
-    'shows valid TPS with the dashboard icon: %s',
-    (tokensPerSecond) => {
+  it.each([
+    { tokensPerSecond: 50, expected: '50 tok/s' },
+    { tokensPerSecond: 38.7, expected: '39 tok/s' },
+    { tokensPerSecond: 38.4, expected: '38 tok/s' },
+    { tokensPerSecond: 38.5, expected: '39 tok/s' },
+    { tokensPerSecond: 0.4, expected: '0 tok/s' },
+    { tokensPerSecond: undefined, expected: null },
+    { tokensPerSecond: 0, expected: null },
+    { tokensPerSecond: -1, expected: null },
+    { tokensPerSecond: Number.NaN, expected: null },
+    { tokensPerSecond: Number.POSITIVE_INFINITY, expected: null },
+  ])(
+    'shows rounded valid TPS with the dashboard icon: $tokensPerSecond',
+    ({ tokensPerSecond, expected }) => {
       cleanup = render(
         () => (
           <AssistantDialogSummaryForMessage
@@ -224,8 +235,8 @@ describe('AssistantDialogSummaryForMessage', () => {
         container
       );
       const metric = container.querySelector('.assistant-dialog-summary-tps');
-      if (tokensPerSecond === 50) {
-        expect(metric?.textContent).toBe('50.0 tok/s');
+      if (expected !== null) {
+        expect(metric?.textContent).toBe(expected);
         expect(metric?.querySelector('[aria-label="Tokens per second"]')).not.toBeNull();
         expect(metric?.getAttribute('title')).toContain('Estimated generation speed');
       } else {

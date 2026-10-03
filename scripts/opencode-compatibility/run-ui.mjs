@@ -42,7 +42,14 @@ const debugPort = await reserveLoopbackPort();
 const serverUrl = `http://127.0.0.1:${port}`;
 const errors = [];
 const requests = [];
-const provider = createServer(async (request, response) => {
+const provider = createServer((request, response) => {
+  handleProviderRequest(request, response).catch((error) => {
+    errors.push(`UI fixture provider: ${error.stack || error.message}`);
+    if (!response.headersSent) response.writeHead(500);
+    response.end();
+  });
+});
+async function handleProviderRequest(request, response) {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
   const source = Buffer.concat(chunks).toString();
@@ -91,7 +98,7 @@ const provider = createServer(async (request, response) => {
   response.end(
     `data: ${JSON.stringify({ id: 'completion-ui', object: 'chat.completion.chunk', created: 1, model: 'fixture', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } })}\n\ndata: [DONE]\n\n`
   );
-});
+}
 await new Promise((done) => provider.listen(0, '127.0.0.1', done));
 const modelUrl = `http://127.0.0.1:${provider.address().port}/v1`;
 await writeFile(

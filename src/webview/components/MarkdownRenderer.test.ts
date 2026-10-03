@@ -318,12 +318,12 @@ describe('MarkdownRenderer', () => {
   });
 
   it.each([
-    ['unsafe delta', 'First\n\n**Second**\n\nTail'],
-    ['unsafe prefix', '**First**\n\nSecond\n\nTail'],
+    ['formatted delta', 'First\n\n**Second**\n\nTail'],
+    ['formatted prefix', '**First**\n\nSecond\n\nTail'],
     ['non-append edit', 'Changed\n\nTail'],
-  ])('replaces stable DOM for %s with normal parsing', async (_label, next) => {
+  ])('matches normal parsing for %s while retaining unchanged blocks', async (_label, next) => {
     vi.useFakeTimers();
-    const initial = _label === 'unsafe prefix' ? '**First**\n\nTail' : 'First\n\nTail';
+    const initial = _label === 'formatted prefix' ? '**First**\n\nTail' : 'First\n\nTail';
     const [content, setContent] = createSignal(initial);
     cleanup = render(
       () =>
@@ -339,7 +339,8 @@ describe('MarkdownRenderer', () => {
     const first = stable.firstChild;
     setContent(next);
     await vi.advanceTimersByTimeAsync(16);
-    expect(stable.firstChild).not.toBe(first);
+    if (_label === 'non-append edit') expect(stable.firstChild).not.toBe(first);
+    else expect(stable.firstChild).toBe(first);
     expect(stable.innerHTML).toBe(
       __parseMarkdownForTests(splitStreamingMarkdownContent(next).stableContent, {
         cacheByContent: false,

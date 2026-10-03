@@ -657,6 +657,55 @@ describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
     expect(stickyPreviewMessageReads.value).toBeLessThan(10);
   });
 
+  it('reuses sticky prompt selection while scrolling inside the same message', async () => {
+    let list: HTMLElement | null = null;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      const index = Number(this.dataset.msgId?.replace('message-', ''));
+      if (this.hasAttribute('data-msg-id')) {
+        return new DOMRect(0, index * 120 - (list?.scrollTop ?? 0), 500, 120);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, -(list?.scrollTop ?? 0), 500, 24_000);
+      }
+      return new DOMRect(0, 0, 500, 500);
+    });
+    replaceMessages(
+      Array.from({ length: 200 }, (_, index) => {
+        const id = `message-${index}`;
+        const info = index % 2 === 0 ? createUserMessage(id) : createAssistantMessage(id);
+        if (info.role === 'assistant') info.parentID = `message-${index - 1}`;
+        return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
+      })
+    );
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => MessageList(), container!);
+    await settlePerfEffects();
+    list = container!.querySelector<HTMLElement>('.interactive-list')!;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 24_000 });
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    list.scrollTop = 7_330;
+    list.dispatchEvent(new Event('scroll'));
+    await settlePerfEffects();
+    await settlePerfEffects();
+
+    stickyPreviewSelectionPasses.value = 0;
+    for (let step = 0; step < 20; step += 1) {
+      list.scrollTop += 1;
+      list.dispatchEvent(new Event('scroll'));
+      await settlePerfEffects();
+    }
+    expect(stickyPreviewSelectionPasses.value).toBe(0);
+
+    setState('messages', 60, 'parts', 0, (part) =>
+      part.type === 'text' ? { ...part, text: 'Updated prompt' } : part
+    );
+    await settlePerfEffects();
+    expect(stickyPreviewSelectionPasses.value).toBeGreaterThan(0);
+  });
+
   it('keeps the rendered row window bounded across width changes', async () => {
     vi.useFakeTimers();
     const observers: Array<{

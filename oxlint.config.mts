@@ -121,8 +121,26 @@ export default defineConfig({
   overrides: [
     {
       // Async mock implementations and fixture servers are intentional in tests.
-      files: ['**/*.test.ts', '**/*.test.tsx', '**/*.test-support.ts', '**/*.test-utils.ts'],
+      files: [
+        '**/*.test.ts',
+        '**/*.test.tsx',
+        '**/*.test.mjs',
+        '**/*.test-support.ts',
+        '**/*.test-utils.ts',
+      ],
       rules: { 'typescript/no-misused-promises': 'off' },
+    },
+    {
+      files: ['scripts/**/*.test.mjs'],
+      rules: {
+        // Node's test runner records failures; registration promises need not be awaited.
+        'typescript/no-floating-promises': [
+          'error',
+          {
+            allowForKnownSafeCalls: [{ from: 'package', name: ['test', 'skip'], package: 'node' }],
+          },
+        ],
+      },
     },
   ],
 });

@@ -2911,7 +2911,7 @@ export function MessageList() {
     previousCompactActivityLayoutSignatures = new Map(current);
   });
 
-  const stickyUserMessagePreviewCandidate = createMemo(() => {
+  const stickyPreviewGeometry = createMemo(() => {
     // Sticky state must follow current painted geometry. IntersectionObserver bounds can remain
     // stale while a fully visible prompt moves or an assistant row grows. Geometry changes are
     // explicitly coalesced so row measurement publication does not rerun this DOM pass by itself.
@@ -2963,6 +2963,22 @@ export function MessageList() {
       });
     }
 
+    return {
+      firstVisibleMessageIndex,
+      virtualized,
+      currentVisibleRange,
+      containerRect,
+      currentViewportHeight,
+    };
+  });
+  const stickyFirstVisibleMessageIndex = createMemo(
+    () => stickyPreviewGeometry()?.firstVisibleMessageIndex ?? null
+  );
+  // Scrolling within a row changes its geometry, not its prompt. Keep prompt parsing reactive
+  // to content and history changes without repeating the transcript search on every frame.
+  const stickyPreviewSelection = createMemo(() => {
+    const firstVisibleMessageIndex = stickyFirstVisibleMessageIndex();
+    const visibleMessages = messages();
     let preview = getStickyUserMessagePreview(
       visibleMessages,
       firstVisibleMessageIndex,
@@ -2975,7 +2991,7 @@ export function MessageList() {
       firstVisibleMessageIndex !== null &&
       visibleMessages[firstVisibleMessageIndex]
     ) {
-      const loadedMessageIds = new Set(visibleMessages.map((entry) => entry.info.id));
+      const loadedMessageIds = messageIndexById();
       const boundaryPrompts = getSessionHistoryPrompts(state.activeSessionId)
         .filter((entry) => !loadedMessageIds.has(entry.info.id))
         .toSorted((left, right) => left.info.time.created - right.info.time.created);
@@ -2992,7 +3008,14 @@ export function MessageList() {
         }
       }
     }
-    if (!preview) return null;
+    return preview ? { preview, usesBoundaryPrompt } : null;
+  });
+  const stickyUserMessagePreviewCandidate = createMemo(() => {
+    const geometry = stickyPreviewGeometry();
+    const selection = stickyPreviewSelection();
+    if (!geometry || !selection) return null;
+    const { virtualized, currentVisibleRange, containerRect, currentViewportHeight } = geometry;
+    const { preview, usesBoundaryPrompt } = selection;
 
     const previewElement = getStickyUserMessageSourceElement(preview.id);
     const rowRect = previewElement?.getBoundingClientRect();
@@ -3017,7 +3040,9 @@ export function MessageList() {
       stickyPreviewTop: stickyPreviewBounds?.top ?? null,
       stickyPreviewBottom: stickyPreviewBounds?.bottom ?? null,
     });
-    return shouldShow ? preview : null;
+    // Collision/handoff effects must still run for new painted geometry, even when the
+    // selected prompt is unchanged. Only the content lookup is cached.
+    return shouldShow ? { ...preview } : null;
   });
 
   function getMessageRenderGeometrySignature(

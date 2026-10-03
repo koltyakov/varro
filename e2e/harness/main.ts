@@ -77,6 +77,7 @@ const SCENARIO_NAMES = [
   'busy-stop-send',
   'new-session-command',
   'session-search',
+  'session-list-load',
   'model-search',
   'mcp-search',
   'full-access',
@@ -2436,6 +2437,36 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.persistedActiveSessionId = session.id;
     state.postReadyMessages.push({ type: 'command/new-session' });
     state.nextSequence = 160;
+    return state;
+  }
+
+  if (name === 'session-list-load') {
+    state.sessions = Array.from({ length: 1_000 }, (_, index) => {
+      const session = makeSession(
+        `load-${index}`,
+        `Load session ${String(index).padStart(4, '0')}`,
+        BASE_TIME - index * 10_000
+      );
+      if (index >= 250) session.parentID = `load-${index % 250}`;
+      const user = makeUserMessage(
+        session.id,
+        `load-user-${index}`,
+        [`Prompt ${index}`],
+        BASE_TIME
+      );
+      state.messagesBySessionId[session.id] = [
+        user,
+        makeAssistantMessage(
+          session.id,
+          `load-assistant-${index}`,
+          user.info.id,
+          `Response ${index}`,
+          BASE_TIME + 1
+        ),
+      ];
+      state.sessionStatuses[session.id] = { type: 'idle' };
+      return session;
+    });
     return state;
   }
 

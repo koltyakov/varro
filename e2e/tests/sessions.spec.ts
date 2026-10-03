@@ -1,4 +1,52 @@
 import { expect, test } from '@playwright/test';
+import type { ServerEvent } from '../../src/shared/protocol';
+
+test('keeps large-list search, status filtering, and session switching working', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 650, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=session-list-load');
+  const search = page.getByRole('textbox', { name: 'Search sessions' });
+  await expect(search).toBeVisible();
+  await search.fill('Load session 001');
+  await expect(page.locator('.session-item')).toHaveCount(10);
+  await search.fill('');
+  await page.evaluate(() => {
+    // SAFETY: The isolated session-list fixture installs this event transport.
+    const harness = (
+      window as typeof window & {
+        __varroE2E: { replayServerEvent: (event: ServerEvent) => void };
+      }
+    ).__varroE2E;
+    for (let index = 0; index < 100; index += 1) {
+      harness.replayServerEvent({
+        type: 'session.status',
+        properties: {
+          sessionID: `load-${250 + index}`,
+          status: { type: index % 2 ? 'idle' : 'busy' },
+        },
+      });
+    }
+    harness.replayServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'load-0', status: { type: 'busy' } },
+    });
+  });
+  await page.getByRole('button', { name: /\d+ running sessions?/ }).click();
+  await expect(page.locator('.session-item')).toHaveCount(50);
+  await page.getByRole('button', { name: 'Clear Running filter' }).click();
+  await search.fill('Load session 0019');
+  await expect(page.locator('.session-item')).toHaveCount(1);
+  await page.locator('.session-item').click();
+  await expect(page.locator('.chat-header-title-text').first()).toHaveText('Load session 0019');
+  await expect(page.getByText('Response 19', { exact: true })).toBeVisible();
+  await page.getByLabel('Back to sessions').click();
+  await search.fill('Load session 0018');
+  await expect(page.locator('.session-item')).toHaveCount(1);
+  await search.press('ArrowDown');
+  await search.press('Enter');
+  await expect(page.getByText('Response 18', { exact: true })).toBeVisible();
+});
 
 test('keeps session row geometry unchanged with empty and hover-only metadata', async ({
   page,

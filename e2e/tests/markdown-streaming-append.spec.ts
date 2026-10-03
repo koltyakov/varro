@@ -445,8 +445,8 @@ for (const width of [1280, 390]) {
   test.describe(`Markdown prose append at ${width}px`, () => {
     test.use({ viewport: { width, height: 800 } });
 
-    for (const fallback of [false, true]) {
-      test(`preserves paragraph identity and selection before ${fallback ? 'unsafe fallback' : 'safe completion'}`, async ({
+    for (const appendKind of ['plain', 'formatted', 'raw HTML']) {
+      test(`preserves paragraph identity and selection with ${appendKind} append boundaries`, async ({
         page,
       }, testInfo) => {
         const errors: string[] = [];
@@ -508,33 +508,45 @@ for (const width of [1280, 390]) {
           });
         }
 
-        if (fallback) {
-          await appendDeltaToRapidStreaming(
-            page,
-            '\n\n**Bold fallback** and `inline code`\n\nFinal tail'
-          );
-          paragraphs.push('**Bold fallback** and `inline code`', 'Final tail');
+        if (appendKind !== 'plain') {
+          const formatted =
+            appendKind === 'formatted'
+              ? '**Bold fallback** and `inline code`'
+              : '<strong>Bold fallback</strong> and <code>inline code</code>';
+          await appendDeltaToRapidStreaming(page, `\n\n${formatted}\n\nFinal tail`);
+          paragraphs.push(formatted, 'Final tail');
           await expect(stable.locator('strong')).toHaveText('Bold fallback');
           await expect(stable.locator('code')).toHaveText('inline code');
-          expect(await selected.evaluate((paragraph) => paragraph.isConnected)).toBe(false);
+          expect(await selected.evaluate((paragraph) => paragraph.isConnected)).toBe(
+            appendKind === 'formatted'
+          );
+          if (appendKind === 'formatted') {
+            expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(
+              'Selected prose'
+            );
+          }
         }
         await completeResponse(page, paragraphs.join('\n\n'));
         await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
         await waitForAnimationFrames(page, 6);
         await expect(markdown.locator('p')).toHaveText(
           paragraphs.map((text) =>
-            text.replace('&amp;', '&').replaceAll('**', '').replaceAll('`', '')
+            text
+              .replace('&amp;', '&')
+              .replaceAll('**', '')
+              .replaceAll('`', '')
+              .replace(/<\/?(?:strong|code)>/g, '')
           )
         );
         await expect(markdown.locator('.streaming-markdown-pending')).toHaveCount(0);
-        if (fallback) {
+        if (appendKind !== 'plain') {
           await expect(markdown.locator('strong')).toHaveText('Bold fallback');
           await expect(markdown.locator('code')).toHaveText('inline code');
         }
         await attachEvidence(
           testInfo,
           'append-identity.json',
-          JSON.stringify({ width, fallback, evidence, errors }, null, 2)
+          JSON.stringify({ width, appendKind, evidence, errors }, null, 2)
         );
         expect(errors).toEqual([]);
       });

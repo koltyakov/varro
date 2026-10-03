@@ -58,13 +58,24 @@ const testServerUrl = testServerOrigin(
 );
 // A failed editor launch must not leave its automatically provisioned server running.
 let launchComplete = false;
-process.once('beforeExit', async () => {
-  if (!launchComplete) await managedServer?.stop();
+process.once('beforeExit', () => {
+  if (!launchComplete)
+    managedServer?.stop().catch((error) => {
+      process.stderr.write(`Failed to stop AI test server: ${error.stack || error.message}\n`);
+      process.exitCode = 1;
+    });
 });
-process.once('uncaughtException', async (error) => {
-  await managedServer?.stop();
-  process.stderr.write(`${error.stack || error.message}\n`);
-  process.exit(1);
+process.once('uncaughtException', (error) => {
+  const fail = () => {
+    process.stderr.write(`${error.stack || error.message}\n`);
+    process.exit(1);
+  };
+  (managedServer?.stop() ?? Promise.resolve()).then(fail, (cleanupError) => {
+    process.stderr.write(
+      `Failed to stop AI test server: ${cleanupError.stack || cleanupError.message}\n`
+    );
+    fail();
+  });
 });
 let isolation;
 if (replayUrl) {

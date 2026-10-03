@@ -2736,18 +2736,16 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
   const descendantSubagentCountBySession = new Map<string, number>();
   const isManuallyStoppedRalphManager = (sessionId: string) =>
     ralphManagerManualStopIds.has(sessionId);
-  const isAwaitingInput = (sessionId: string) =>
-    permissionIds.has(rootSessionId(sessionId)) || questionIds.has(rootSessionId(sessionId));
   const isFailed = (sessionId: string) => {
     if (isManuallyStoppedRalphManager(sessionId)) return false;
     if (hasActiveUsageLimit(sessionId)) return true;
     return state.sessionStatus[sessionId]?.type !== 'busy' && failedSessionIds.has(sessionId);
   };
-  const isRunning = (sessionId: string) => {
+  const isRunning = (sessionId: string, rootId: string) => {
     if (hasActiveUsageLimit(sessionId)) return false;
-    if (isAwaitingInput(sessionId)) return false;
-    if (questionResponsePendingIds.has(rootSessionId(sessionId))) return true;
-    const ralphRun = ralphStore.getRun(rootSessionId(sessionId));
+    if (permissionIds.has(rootId) || questionIds.has(rootId)) return false;
+    if (questionResponsePendingIds.has(rootId)) return true;
+    const ralphRun = ralphStore.getRun(rootId);
     if (ralphRun && ralphRun.status !== 'running') return false;
     const type = state.sessionStatus[sessionId]?.type;
     return (
@@ -2780,8 +2778,8 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     const displaySessionId = rootSessionId(sessionId);
     const failed = isFailed(sessionId);
     const hasPrompt = permissionIds.has(displaySessionId) || questionIds.has(displaySessionId);
-    const needsAttention = !failed && (hasPrompt || isAwaitingInput(sessionId));
-    const running = !needsAttention && isRunning(sessionId);
+    const needsAttention = !failed && hasPrompt;
+    const running = !needsAttention && isRunning(sessionId, displaySessionId);
 
     if (failed) {
       if (!isManuallyStoppedRalphManager(displaySessionId)) {
