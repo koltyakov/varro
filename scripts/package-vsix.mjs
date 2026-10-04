@@ -4,6 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { smokeThumbnailWorker } from './verify-extension-bundle.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifestPath = join(projectRoot, 'package.json');
@@ -22,6 +23,8 @@ try {
     await mkdir(dirname(destination), { recursive: true });
     await cp(join(projectRoot, relativePath), destination, { recursive: true });
   }
+
+  await smokeThumbnailWorker(join(stagingRoot, 'dist/extension'));
 
   const vscePath = join(projectRoot, 'node_modules', '@vscode', 'vsce', 'vsce');
   const exitCode = await new Promise((resolveExitCode, reject) => {

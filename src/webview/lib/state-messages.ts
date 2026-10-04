@@ -83,6 +83,11 @@ export function upsertMessageInfo(info: Message) {
 function getAcknowledgedOptimisticParts(optimisticEntry: MessageEntry, info: Message): Part[] {
   return optimisticEntry.parts.map((part, index) => {
     if (!isImageFilePart(part)) return part;
+    if (
+      !isLocalOptimisticPartId(part.id, optimisticEntry.info.id) &&
+      !isOptimisticUserMessageId(optimisticEntry.info.id)
+    )
+      return part;
     return {
       ...cloneValue(part),
       id: getOptimisticImagePartId(info.id, index),
@@ -143,7 +148,6 @@ export function upsertPart(part: Part) {
           const currentPart = msgs[idx]!.parts[location.partIdx];
           const mergedPart = mergePartUpdate(currentPart, nextPart);
           msgs[idx]!.parts[location.partIdx] = mergedPart;
-          removeAcknowledgedOptimisticImageFilePart(msgs[idx]!, nextPart);
           if (
             getAssistantDialogPartSignature(currentPart) !==
               getAssistantDialogPartSignature(mergedPart) ||
@@ -231,6 +235,8 @@ function areMatchingOptimisticParts(left: Part, right: Part) {
     );
   }
   if (left.type !== 'file' || right.type !== 'file') return false;
+  if (isImageFilePart(left) && isImageFilePart(right))
+    return areMatchingImageFileParts(left, right);
   return left.url === right.url && left.mime === right.mime && left.filename === right.filename;
 }
 
@@ -905,7 +911,7 @@ function mergeMessageEntry(
 
   preserveLongerToolExecutionTimes(current, next);
   preserveCompletionState(current, next);
-  preserveOptimisticImageFileParts(current, next);
+  preserveOptimisticImageFileParts(current, next, options?.preserveExtraParts);
   if (!options?.preserveExtraParts || current.parts.length === 0) {
     materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
     return next;
@@ -941,39 +947,54 @@ function mergeMessageEntry(
   return next;
 }
 
-function preserveOptimisticImageFileParts(current: MessageEntry | undefined, next: MessageEntry) {
+function preserveOptimisticImageFileParts(
+  current: MessageEntry | undefined,
+  next: MessageEntry,
+  preserveExtraParts = false
+) {
   if (!current || current.info.role !== 'user' || next.info.role !== 'user') return;
-
-  const optimisticParts = current.parts.filter(
-    (part) =>
-      isOptimisticImageFilePart(part) && !next.parts.some((nextPart) => nextPart.id === part.id)
+  const pending = current.parts.filter(isOptimisticImageFilePart);
+  if (!pending.length) return;
+  const knownIds = new Set(
+    current.parts.filter((part) => !isOptimisticImageFilePart(part)).map((part) => part.id)
   );
-  const canonicalParts = next.parts.filter(
-    (part) => isImageFilePart(part) && !isOptimisticImageFilePart(part)
-  );
-  const matchedCanonicalIndexes = new Set<number>();
-  const unmatchedOptimisticParts: Part[] = [];
-
-  for (const part of optimisticParts) {
-    const matchIndex = canonicalParts.findIndex(
-      (canonical, index) =>
-        !matchedCanonicalIndexes.has(index) && areMatchingImageFileParts(part, canonical)
+  const replacements = new Map<string, Part>();
+  const unmatched: Part[] = [];
+  for (const canonical of next.parts.filter(isImageFilePart)) {
+    // An already acknowledged image cannot consume another pending attachment on a stale refresh.
+    if (isOptimisticImageFilePart(canonical) || knownIds.has(canonical.id)) continue;
+    const match = pending.find(
+      (part) => !replacements.has(part.id) && areMatchingImageFileParts(part, canonical)
     );
-    if (matchIndex === -1) {
-      unmatchedOptimisticParts.push(part);
-    } else {
-      matchedCanonicalIndexes.add(matchIndex);
+    if (match) replacements.set(match.id, canonical);
+    else unmatched.push(canonical);
+  }
+  // Reserve exact matches before using order for servers that rewrite filenames or MIME types.
+  for (const canonical of unmatched) {
+    const match = pending.find((part) => !replacements.has(part.id));
+    if (match) replacements.set(match.id, canonical);
+  }
+  const incoming = new Map(next.parts.filter(isImageFilePart).map((part) => [part.id, part]));
+  const ordered: Part[] = [];
+  for (const part of current.parts.filter(isImageFilePart)) {
+    const replacement = replacements.get(part.id) ?? incoming.get(part.id);
+    if (replacement) {
+      ordered.push(replacement);
+      incoming.delete(replacement.id);
+      incoming.delete(part.id);
+    } else if (isOptimisticImageFilePart(part) || preserveExtraParts) {
+      ordered.push(cloneValue(part));
     }
   }
-
-  let remainingCanonicalCount = canonicalParts.length - matchedCanonicalIndexes.size;
-  for (const part of unmatchedOptimisticParts) {
-    if (remainingCanonicalCount > 0) {
-      remainingCanonicalCount -= 1;
-      continue;
-    }
-    next.parts.push(cloneValue(part));
-  }
+  ordered.push(...incoming.values());
+  // Keep image slots in their original order without changing the ordering of other part types.
+  let imageIndex = 0;
+  next.parts = next.parts.flatMap((part) => {
+    if (!isImageFilePart(part)) return [part];
+    const replacement = ordered[imageIndex++];
+    return replacement ? [replacement] : [];
+  });
+  next.parts.push(...ordered.slice(imageIndex));
 }
 
 function removeAcknowledgedOptimisticImageFilePart(entry: MessageEntry, incoming: Part) {
@@ -1001,8 +1022,11 @@ function isImageFilePart(part: Part): part is Extract<Part, { type: 'file' }> {
   return part.type === 'file' && part.mime.startsWith('image/');
 }
 
-function isOptimisticImageFilePart(part: Part): part is Extract<Part, { type: 'file' }> {
-  return isImageFilePart(part) && part.id.includes('-optimistic-file-');
+function isOptimisticImageFilePart(part: Part): boolean {
+  return (
+    isImageFilePart(part) &&
+    (part.id.includes('-optimistic-file-') || isLocalOptimisticPartId(part.id, part.messageID))
+  );
 }
 
 function getOptimisticImagePartId(messageId: string, index: number) {
@@ -1011,7 +1035,12 @@ function getOptimisticImagePartId(messageId: string, index: number) {
 
 function areMatchingImageFileParts(left: Part, right: Part) {
   if (!isImageFilePart(left) || !isImageFilePart(right)) return false;
-  return left.url === right.url && left.mime === right.mime && left.filename === right.filename;
+  if (left.mime !== right.mime || left.filename !== right.filename) return false;
+  return (
+    left.url === right.url ||
+    (Boolean(left.filename) &&
+      (left.url.startsWith('varro-content:') || right.url.startsWith('varro-content:')))
+  );
 }
 
 function preserveCompletionState(current: MessageEntry | undefined, next: MessageEntry) {

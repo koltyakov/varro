@@ -1,6 +1,66 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 
+test('shows an unseen plan in the narrow header after switching to another chat', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 400, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=status-filters');
+  const planRow = page
+    .locator('.session-item:visible')
+    .filter({ hasText: 'Plan awaiting implementation' });
+  await expect(planRow.locator('.is-plan-completed')).toBeVisible();
+  await page.evaluate(() => {
+    // SAFETY: The isolated session-list fixture installs this event transport.
+    const harness = (
+      window as typeof window & {
+        __varroE2E: { replayServerEvent: (event: ServerEvent) => void };
+      }
+    ).__varroE2E;
+    harness.replayServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-plan-filter', status: { type: 'busy' } },
+    });
+  });
+  await planRow.click();
+  await expect(
+    page.locator('.interactive-session > .chat-header .chat-header-title-text')
+  ).toHaveText('Plan awaiting implementation');
+  await page.getByLabel('Back to sessions').click();
+  await page
+    .locator('.session-item:visible')
+    .filter({ hasText: 'Completed sticky cleanup' })
+    .click();
+  const header = page.locator('.interactive-session > .chat-header');
+  await expect(header.locator('.chat-header-title-text')).toHaveText('Completed sticky cleanup');
+  await expect(header.locator('.chat-header-plan-badge')).toHaveCount(0);
+  await page.evaluate(() => {
+    // SAFETY: The isolated session-list fixture installs this event transport.
+    const harness = (
+      window as typeof window & {
+        __varroE2E: { replayServerEvent: (event: ServerEvent) => void };
+      }
+    ).__varroE2E;
+    harness.replayServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-plan-filter', status: { type: 'idle' } },
+    });
+  });
+  await expect(header.locator('.chat-header-plan-badge')).toBeVisible();
+  await page.getByLabel('Back to sessions').click();
+  await expect(planRow.locator('.is-plan-completed')).toBeVisible();
+  await page
+    .locator('.session-item:visible')
+    .filter({ hasText: 'Completed sticky cleanup' })
+    .click();
+  await header.locator('.chat-header-plan-badge').click();
+  await expect(header.locator('.chat-header-title-text')).toHaveText(
+    'Plan awaiting implementation'
+  );
+  await page.getByLabel('Back to sessions').click();
+  await expect(planRow.locator('.is-plan-completed')).toHaveCount(0);
+});
+
 test('keeps large-list search, status filtering, and session switching working', async ({
   page,
 }) => {

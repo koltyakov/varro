@@ -10,6 +10,7 @@ import { navArrowDownIcon, navArrowUpIcon, xmarkIcon } from '../lib/ui-icons';
 import type { FileDiff } from '../types';
 import { FileTypeIcon } from './FileTypeIcon';
 import { renderHighlightedCodeHtml } from './MarkdownRenderer';
+import { codeHighlighter, highlightCode, resolveCodeLanguage } from '../lib/code-highlighter';
 import { UiIcon } from './UiIcon';
 
 type UnifiedDiffLine = {
@@ -603,8 +604,25 @@ function DiffLinesContent(props: {
 }
 
 function HighlightedDiffLineContent(props: { content: string; language?: string }) {
-  const html = createMemo(() => renderHighlightedCodeHtml(props.content, props.language));
-  return <span class="diff-view-line-content hljs" innerHTML={html()} />;
+  // oxlint-disable-next-line no-unassigned-vars -- Solid assigns the JSX ref before effects run.
+  let element!: HTMLSpanElement;
+  createEffect(() => {
+    const text = props.content;
+    const language = resolveCodeLanguage(props.language);
+    element.innerHTML = renderHighlightedCodeHtml(text, language);
+    if (!language || highlightCode(text, language) !== null) return;
+    const cancel = codeHighlighter.request(
+      text,
+      language,
+      (html) => {
+        if (html !== null && element.isConnected && element.textContent === text)
+          element.innerHTML = html;
+      },
+      1
+    );
+    onCleanup(cancel);
+  });
+  return <span ref={element} class="diff-view-line-content hljs" />;
 }
 
 export function DiffView(props: {

@@ -4,8 +4,10 @@ import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import {
   smokeLoadExtensionBundle,
+  smokeThumbnailWorker,
   verifyExtensionBundleMetafile,
 } from './scripts/verify-extension-bundle.mjs';
+import { thumbnailWorkerBuildOptions } from './scripts/build-thumbnail-worker.mjs';
 
 const { build, context } = pkg;
 const projectRoot = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +45,10 @@ const common = {
 };
 
 if (isWatch) {
+  const thumbnailContext = await context(
+    thumbnailWorkerBuildOptions(dirname(extensionOutfile), true)
+  );
+  await thumbnailContext.watch();
   const ctx = await context({
     ...common,
     logLevel: 'info',
@@ -51,6 +57,8 @@ if (isWatch) {
   // oxlint-disable-next-line no-console
   console.log('[esbuild] watching extension...');
 } else {
+  await build(thumbnailWorkerBuildOptions(dirname(extensionOutfile)));
+  await smokeThumbnailWorker(dirname(extensionOutfile));
   await build(common);
   // oxlint-disable-next-line no-console
   console.log('[esbuild] built extension');

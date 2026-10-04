@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { installHighlightWorker } from '../lib/highlight-worker.test-support';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
@@ -34,6 +35,7 @@ declare global {
 let container: HTMLDivElement | null = null;
 let messageListShell: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
+beforeEach(installHighlightWorker);
 
 function makeAddedPatch(lineCount: number) {
   return [

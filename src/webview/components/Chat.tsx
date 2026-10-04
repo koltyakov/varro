@@ -11,6 +11,7 @@ import {
   isLoading,
   isSessionAwaitingInput,
   isSessionUnread,
+  getSessionPlanUpdatedAt,
   isActiveSessionWorking,
   getSessionTreeRootId,
   getSelectedAgentForSession,
@@ -195,11 +196,12 @@ export function Chat() {
           if (completedAt === undefined) continue;
           next = { kind, unread: true, markerAt: completedAt };
         } else {
-          const unread = isSessionUnread(session.id, session.time.updated);
+          const updatedAt = getSessionPlanUpdatedAt(session.id, session.time.updated);
+          const unread = isSessionUnread(session.id, updatedAt);
           next = {
             kind,
             unread,
-            markerAt: unread ? session.time.updated : (seenAt ?? session.time.updated),
+            markerAt: unread ? updatedAt : (seenAt ?? updatedAt),
           };
         }
       } else if (
@@ -489,7 +491,7 @@ export function Chat() {
       (sessionId) => indicators.failedIds.has(sessionId) && isSessionFailureUnread(sessionId),
       (session) =>
         indicators.planReadyIds.has(session.id) &&
-        isSessionUnread(session.id, session.time.updated),
+        isSessionUnread(session.id, getSessionPlanUpdatedAt(session.id, session.time.updated)),
       (session) => indicators.newlyCompletedIds.has(session.id)
     );
   });

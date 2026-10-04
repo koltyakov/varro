@@ -481,6 +481,14 @@ export function readReplaySnapshot() {
       messageID: row.getAttribute('data-msg-id'),
       ...bounds(row),
       text: row.textContent.slice(0, 2_000),
+      images: [...row.querySelectorAll('.chat-image-img')].slice(0, 64).map((image) => ({
+        sourcePrefix: image.getAttribute('src')?.slice(0, 32),
+        sourceLength: image.getAttribute('src')?.length ?? 0,
+        complete: image.complete,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        ...bounds(image),
+      })),
     })),
   };
 }

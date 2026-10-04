@@ -33,6 +33,122 @@ vi.mock('./logger', () => ({
 import { ServerEventBridge } from './server-event-bridge';
 import { HiddenSessionManager } from './hidden-session-manager';
 
+it('projects live file and tool attachments without changing streaming content', () => {
+  const { bridge, handlers, post } = createMocks();
+  bridge.attach();
+  const file = {
+    id: 'image-1',
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'file',
+    mime: 'image/png',
+    url: 'data:image/png;base64,original-image-bytes',
+  };
+  for (const part of [
+    file,
+    {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      tool: 'read',
+      state: { status: 'completed', output: 'keep full streaming output', attachments: [file] },
+    },
+  ]) {
+    mocks.parseServerEvent.mockReturnValue({
+      type: 'message.part.updated',
+      workspaceDirectory: '/workspace',
+      properties: { part },
+    });
+    mocks.getSessionIdsForEvent.mockReturnValue(['session-1']);
+    handlers.event?.({});
+    const payload = JSON.stringify(post.mock.calls.at(-1));
+    expect(payload).toContain(
+      'varro-content:/session/session-1/message/message-1/part/image-1?directory=%2Fworkspace'
+    );
+    expect(payload).not.toContain('original-image-bytes');
+    if (part.type === 'tool') expect(payload).toContain('keep full streaming output');
+  }
+  void bridge.dispose();
+});
+
+it('defers heavy legacy tool snapshots while retaining status and identity', () => {
+  const { bridge, handlers, post } = createMocks();
+  useParsedEvents();
+  bridge.attach();
+  for (const status of ['running', 'completed'] as const) {
+    handlers.event!({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          type: 'tool',
+          id: 'p1',
+          callID: 'c1',
+          sessionID: 's1',
+          messageID: 'm1',
+          tool: 'bash',
+          state: {
+            status,
+            input: { command: 'npm test' },
+            title: 'Run tests',
+            time: { start: 1, end: 2 },
+            output: 'output'.repeat(100000),
+            metadata: { output: 'progress'.repeat(100000) },
+          },
+        },
+      },
+    });
+    const message = post.mock.calls.at(-1)![0];
+    expect(JSON.stringify(message).length).toBeLessThan(2500);
+    expect(message).toMatchObject({
+      payload: {
+        properties: {
+          part: {
+            id: 'p1',
+            deferred: '/session/s1/message/m1/part/p1',
+            state: { status, input: { command: 'npm test' } },
+          },
+        },
+      },
+    });
+  }
+  void bridge.dispose();
+});
+
+it('does not consume the native input budget twice for sequenced twins or resend their heavy payloads', () => {
+  const { bridge, handlers, post } = createMocks();
+  useParsedEvents();
+  bridge.attach();
+  const first = {
+    id: 'input-1',
+    type: 'session.next.tool.input.delta',
+    properties: {
+      sessionID: 's1',
+      assistantMessageID: 'm1',
+      callID: 'c1',
+      delta: 'a'.repeat(400),
+    },
+  } satisfies ServerEvent;
+  handlers.event!(first);
+  handlers.event!({ ...first, seq: 1 });
+  handlers.event!({
+    ...first,
+    id: 'input-2',
+    seq: 2,
+    properties: { ...first.properties, delta: 'b'.repeat(400) },
+  });
+  bridge.flushPendingEvents();
+  const messages = post.mock.calls.map(([message]) => message);
+  expect(messages[1]).toMatchObject({
+    payload: { seq: 1, sequenceOnly: true, properties: { sessionID: 's1' } },
+  });
+  expect(JSON.stringify(messages[1])).not.toContain('aaaa');
+  expect(messages[2]).toMatchObject({
+    payload: { properties: { delta: 'b'.repeat(112), deferred: expect.any(String) } },
+  });
+  void bridge.dispose();
+});
+
 interface CapturedHandlers {
   status: ((status: ServerStatus) => void) | undefined;
   event: ((event: unknown) => void) | undefined;
@@ -667,8 +783,6 @@ describe('ServerEventBridge', () => {
         sequenceOnly: true,
         properties: {
           sessionID: 'session-1',
-          callID: 'call-3',
-          structured: { percent: 3 },
         },
       },
     ]);

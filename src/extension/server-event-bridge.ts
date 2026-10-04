@@ -10,6 +10,8 @@ import { logger } from './logger';
 import type { StreamingTextCache } from './streaming-text-cache';
 import type { SessionStateManager } from './session-state-manager';
 import { getSessionIdsForEvent } from './sidebar-provider-utils';
+import { projectDeferredPart } from './message-content';
+import { StreamingToolContent } from './streaming-tool-content';
 import {
   projectFileDiffs,
   projectPartFileLists,
@@ -72,6 +74,7 @@ export class ServerEventBridge {
   private readonly pendingEvents = new Map<string, PendingEvent>();
   private readonly pendingSequenceRanges = new Map<string, PendingSequenceRange>();
   private pendingEventTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly toolContent = new StreamingToolContent();
 
   constructor(
     private readonly server: Pick<OpenCodeServer, 'on' | 'off'>,
@@ -159,6 +162,7 @@ export class ServerEventBridge {
     await this.streamingText?.flush();
     this.unknownEventLoggedAt.clear();
     this.recentEvents.clear();
+    this.toolContent.clear();
     this.attentionStatusBarItem.dispose();
     this.openCodeStatusBarItem.dispose();
   }
@@ -179,7 +183,13 @@ export class ServerEventBridge {
               this.flushPendingServerEvents();
               this.post({
                 type: 'server/event',
-                payload: { ...event, sequenceOnly: true } as ServerEvent,
+                payload: {
+                  ...event,
+                  properties: event.type.startsWith('session.next.tool.')
+                    ? { sessionID: asRecord(event.properties)?.sessionID }
+                    : event.properties,
+                  sequenceOnly: true,
+                } as ServerEvent,
               });
             }
           }
@@ -196,6 +206,7 @@ export class ServerEventBridge {
       }
     }
 
+    event = this.toolContent.project(event);
     const coalescable = getCoalescableEvent(event);
     if (!coalescable) this.flushPendingServerEvents();
     this.hiddenSessions.observeEvent?.(event);
@@ -358,7 +369,13 @@ function projectEventSummaryDiffs(event: ServerEvent): ServerEvent {
   }
   const part = asRecord(properties.part);
   if (part) {
-    const projectedPart = projectPartFileLists(part);
+    const fileLists = projectPartFileLists(part);
+    // Tool details belong to an open disclosure, including during streaming.
+    // Text and live reasoning still stream directly into the transcript.
+    const projectedPart =
+      part.type === 'file' || part.type === 'tool'
+        ? projectDeferredPart(fileLists, event.workspaceDirectory)
+        : fileLists;
     if (projectedPart !== part)
       projectedProperties = { ...projectedProperties, part: projectedPart };
   }

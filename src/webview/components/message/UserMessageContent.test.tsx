@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { installHighlightWorker } from '../../lib/highlight-worker.test-support';
 import { render } from 'solid-js/web';
 import { navArrowLeftIcon, navArrowRightIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
@@ -33,6 +34,7 @@ vi.mock('../../hooks/useOpenCode', () => ({
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
+beforeAll(installHighlightWorker);
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
 
 function textPart(id: string, text: string): TextPart {
@@ -514,6 +516,16 @@ describe('UserMessageContent', () => {
       'https://example.test/docs\n'
     );
     expect(container?.querySelector('a.external-link')).toBeNull();
+  });
+
+  it('upgrades user code in place after the worker responds', async () => {
+    renderUserContent([textPart('text-1', '```ts\nconst userValue = 17;\n```')]);
+    const block = container?.querySelector('.user-message-code-block');
+    const code = block?.querySelector('code');
+    expect(code?.textContent).toBe('const userValue = 17;\n');
+    await vi.waitFor(() => expect(code?.querySelector('.hljs-keyword')?.textContent).toBe('const'));
+    expect(container?.querySelector('.user-message-code-block')).toBe(block);
+    expect(code?.textContent).toBe('const userValue = 17;\n');
   });
 
   it('renders unsaved editor text as an attachment and opens its captured content', () => {

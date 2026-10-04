@@ -1,5 +1,16 @@
 # Third-Party Notices
 
+## ImageMagick WASM
+
+Varro uses [magick-wasm](https://github.com/dlemstra/magick-wasm), Copyright Dirk Lemstra,
+under Apache-2.0, and ImageMagick, Copyright ImageMagick Studio LLC, under the ImageMagick License.
+The thumbnail worker's JavaScript wrapper is bundled and minified; the upstream WASM binary is unmodified.
+The VSIX includes the wrapper license in `dist/extension/thumbnail-LICENSE.txt` and the complete upstream
+ImageMagick and delegate license notices in `dist/extension/thumbnail-NOTICE.txt`, including applicable
+LGPL and GPL license texts. These third-party components retain their own licenses, rather than Varro's MIT license.
+Source locations, build instructions and library replacement instructions are in
+[Thumbnail distribution](docs/thumbnail-distribution.md).
+
 ## Material Design Icons
 
 Varro includes the [account-cog icon from Material Design Icons](https://github.com/Templarian/MaterialDesign/blob/master/svg/account-cog.svg), distributed by Pictogrammers under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). The bundled SVG separates the account and cog into paths with different colors.

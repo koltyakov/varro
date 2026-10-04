@@ -8,12 +8,15 @@ import type { Mermaid, MermaidConfig } from 'mermaid';
 import { writeClipboard } from '../lib/write-clipboard';
 import { openPathWithResult, postMessage } from '../lib/bridge';
 import { logWarn } from '../lib/log';
+import { highlightCode, resolveCodeLanguage } from '../lib/code-highlighter';
+import { CodeHighlightBinding } from '../lib/code-highlight-binding';
 import {
-  codeHighlighterVersion,
-  highlightCode,
-  loadCodeHighlighter,
-  resolveCodeLanguage,
-} from '../lib/code-highlighter';
+  getCachedValue,
+  setCachedValue,
+  resetMarkdownCaches,
+  markdownCacheStats,
+} from '../lib/markdown-cache';
+import type { MarkdownStringCache } from '../lib/markdown-cache';
 import { state, theme } from '../lib/state';
 import { getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
@@ -88,7 +91,6 @@ type IncompleteStreamingMarkdown = {
 };
 
 type MarkdownHydrationFlags = {
-  tables: boolean;
   copyButtons: boolean;
   mermaid: boolean;
 };
@@ -100,24 +102,6 @@ type RenderMarkdownContext = {
   allowMermaidHydration: boolean;
   escapeHtml: boolean;
 };
-
-type MarkdownStringCache = Map<string, MarkdownCacheEntry>;
-
-type MarkdownCacheEntry = {
-  cache: MarkdownStringCache;
-  key: string;
-  value: string;
-  bytes: number;
-};
-
-type IdleSchedulerGlobal = typeof globalThis & {
-  requestIdleCallback?: (callback: () => void) => number;
-  cancelIdleCallback?: (id: number) => void;
-};
-
-type IdleWorkHandle =
-  | { kind: 'idle'; id: number }
-  | { kind: 'timeout'; id: ReturnType<typeof setTimeout> };
 
 const renderer = new marked.Renderer();
 class MarkdownTokenizer extends Tokenizer {
@@ -175,6 +159,7 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'data-external',
   'data-file',
   'data-lang',
+  'data-highlight-lang',
   'data-mermaid-source',
   'data-varro-generated',
   'd',
@@ -197,8 +182,6 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'y1',
   'y2',
 ];
-const MARKDOWN_CACHE_ENTRY_LIMIT = 100;
-const MARKDOWN_CACHE_BYTE_BUDGET = 2 * 1024 * 1024;
 const MAX_COPY_TEXT_LENGTH = 20_000;
 const MAX_MERMAID_SOURCE_LENGTH = 100_000;
 const MERMAID_SVG_CACHE_LIMIT = 20;
@@ -209,14 +192,12 @@ const PRIVATE_RENDERER_ATTRIBUTES = [
   'data-external',
   'data-file',
   'data-lang',
+  'data-highlight-lang',
   'data-mermaid-source',
 ];
 const codeBlockHtmlCache: MarkdownStringCache = new Map();
-const highlightedCodeCache: MarkdownStringCache = new Map();
 const renderedMarkdownCache: MarkdownStringCache = new Map();
 const sanitizeHtmlCache: MarkdownStringCache = new Map();
-const markdownCacheLru = new Map<MarkdownCacheEntry, true>();
-let markdownCacheBytes = 0;
 interface CodeBlockHtmlParams {
   text: string;
   lang?: string;
@@ -238,78 +219,12 @@ function escapeHtml(value: string) {
     .replace(/'/g, '&#39;');
 }
 
-function getUtf8ByteLength(value: string) {
-  let bytes = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 0x7f) {
-      bytes += 1;
-    } else if (code <= 0x7ff) {
-      bytes += 2;
-    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
-      const next = value.charCodeAt(index + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        bytes += 4;
-        index += 1;
-      } else {
-        bytes += 3;
-      }
-    } else {
-      bytes += 3;
-    }
-  }
-  return bytes;
-}
-
-function deleteMarkdownCacheEntry(entry: MarkdownCacheEntry) {
-  if (entry.cache.get(entry.key) === entry) {
-    entry.cache.delete(entry.key);
-  }
-  markdownCacheLru.delete(entry);
-  markdownCacheBytes -= entry.bytes;
-}
-
-function getCachedValue(cache: MarkdownStringCache, key: string) {
-  const entry = cache.get(key);
-  if (!entry) return undefined;
-
-  cache.delete(key);
-  cache.set(key, entry);
-  markdownCacheLru.delete(entry);
-  markdownCacheLru.set(entry, true);
-  return entry.value;
-}
-
-function setCachedValue(cache: MarkdownStringCache, key: string, value: string) {
-  const existing = cache.get(key);
-  if (existing) deleteMarkdownCacheEntry(existing);
-
-  const bytes = getUtf8ByteLength(key) + getUtf8ByteLength(value);
-  if (bytes > MARKDOWN_CACHE_BYTE_BUDGET) return;
-
-  while (cache.size >= MARKDOWN_CACHE_ENTRY_LIMIT) {
-    const oldest = cache.values().next().value;
-    if (!oldest) break;
-    deleteMarkdownCacheEntry(oldest);
-  }
-  while (markdownCacheBytes + bytes > MARKDOWN_CACHE_BYTE_BUDGET) {
-    const oldest = markdownCacheLru.keys().next().value;
-    if (!oldest) break;
-    deleteMarkdownCacheEntry(oldest);
-  }
-
-  const entry = { cache, key, value, bytes } satisfies MarkdownCacheEntry;
-  cache.set(key, entry);
-  markdownCacheLru.set(entry, true);
-  markdownCacheBytes += bytes;
-}
-
 function getRenderedMarkdownCacheKey(content: string, options: ParseMarkdownOptions) {
   return JSON.stringify([
     state.editorContext.workspacePath || '',
     getSessionReferenceContextKey(content),
     options.disablePathLinkify ? 'no-paths' : 'paths',
-    options.disableCodeHighlighting ? 'plain-code' : `highlight-code:${codeHighlighterVersion()}`,
+    options.disableCodeHighlighting ? 'plain-code' : 'highlight-code',
     options.allowMermaidHydration ? 'hydrate-mermaid' : 'defer-mermaid',
     options.escapeHtml ? 'escaped-html' : 'rendered-html',
     content,
@@ -321,29 +236,10 @@ export function renderHighlightedCodeHtml(
   lang?: string,
   disableCache = false
 ): string {
-  let cacheKey: string | null = null;
-  if (!disableCache) {
-    cacheKey = `${codeHighlighterVersion()}\u0000${lang || ''}\u0000${text}`;
-    const cached = getCachedValue(highlightedCodeCache, cacheKey);
-    if (cached !== undefined) return cached;
-  }
-
   const resolvedLanguage = resolveCodeLanguage(lang);
-  const highlighted = (() => {
-    if (!resolvedLanguage) return escapeHtml(text);
-    try {
-      const result = highlightCode(text, resolvedLanguage);
-      if (result !== null) return result;
-      // Highlighting is optional; escaped plaintext remains safe if the chunk cannot load.
-      void loadCodeHighlighter().catch(() => {});
-      return escapeHtml(text);
-    } catch {
-      return escapeHtml(text);
-    }
-  })();
-
-  if (cacheKey !== null) setCachedValue(highlightedCodeCache, cacheKey, highlighted);
-  return highlighted;
+  return (
+    (!disableCache && resolvedLanguage && highlightCode(text, resolvedLanguage)) || escapeHtml(text)
+  );
 }
 
 export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
@@ -356,7 +252,7 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
   let cacheKey: string | null = null;
   if (!disableCache) {
     cacheKey = [
-      disableHighlighting ? 'plain' : codeHighlighterVersion(),
+      disableHighlighting ? 'plain' : 'highlight',
       className || '',
       lang || '',
       params.headerLabel || '',
@@ -370,9 +266,12 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
     if (cached !== undefined) return cached;
   }
 
-  const highlighted = disableHighlighting
-    ? escapeHtml(params.text)
-    : renderHighlightedCodeHtml(params.text, lang, disableCache);
+  // Keep streaming HTML independent of asynchronous token results so completion does
+  // not replace stable nodes just because their code has since been highlighted.
+  const resolvedLanguage = !disableHighlighting && resolveCodeLanguage(lang);
+  const cachedHighlight =
+    !disableCache && resolvedLanguage ? highlightCode(params.text, resolvedLanguage) : null;
+  const highlighted = cachedHighlight ?? escapeHtml(params.text);
   const headerLabel = params.headerLabel ?? lang;
   const langLabel = headerLabel
     ? `<span class="code-block-lang">${escapeHtml(headerLabel)}</span>`
@@ -389,9 +288,13 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
       : '';
   const langAttr = lang ? ` ${TRUSTED_RENDERER_ATTRIBUTE} data-lang="${escapeHtml(lang)}"` : '';
   const classAttr = ['interactive-result-code-block', className].filter(Boolean).join(' ');
-  const html = `<div class="${classAttr}"${langAttr}>${header}<pre class="code-block"><code class="hljs">${highlighted}</code></pre></div>`;
+  const highlightAttr =
+    !disableHighlighting && lang && cachedHighlight === null
+      ? ` ${TRUSTED_RENDERER_ATTRIBUTE} data-highlight-lang="${escapeHtml(lang)}"`
+      : '';
+  const html = `<div class="${classAttr}"${langAttr}>${header}<pre class="code-block"><code class="hljs"${highlightAttr}>${highlighted}</code></pre></div>`;
 
-  if (cacheKey !== null) setCachedValue(codeBlockHtmlCache, cacheKey, html);
+  if (cacheKey !== null && !highlightAttr) setCachedValue(codeBlockHtmlCache, cacheKey, html);
   return html;
 }
 
@@ -687,29 +590,6 @@ const CANONICAL_SPECIAL_FILE_NAMES = new Set([
   'Makefile',
 ]);
 const MARKDOWN_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
-const MARKDOWN_FENCE_INFO_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-
-function requestIdleWork(callback: () => void): IdleWorkHandle {
-  // SAFETY: The surrounding shape or discriminator check establishes the IdleSchedulerGlobal contract used below.
-  const idleScheduler = globalThis as IdleSchedulerGlobal;
-  if (idleScheduler.requestIdleCallback) {
-    return { kind: 'idle', id: idleScheduler.requestIdleCallback(callback) };
-  }
-  return { kind: 'timeout', id: setTimeout(callback, 0) };
-}
-
-function cancelIdleWork(handle: IdleWorkHandle | null) {
-  if (!handle) return;
-
-  if (handle.kind === 'idle') {
-    // SAFETY: The surrounding shape or discriminator check establishes the IdleSchedulerGlobal contract used below.
-    const idleScheduler = globalThis as IdleSchedulerGlobal;
-    idleScheduler.cancelIdleCallback?.(handle.id);
-    return;
-  }
-
-  clearTimeout(handle.id);
-}
 
 function isLocalFileHref(href: string | null): boolean {
   if (!href) return false;
@@ -898,6 +778,9 @@ function sanitizeHtml(
 
   const container = document.createElement('div');
   container.append(fragment);
+  // Virtual rows can measure immediately on mount, before Markdown hydration runs.
+  // Classify columns in the cached HTML so remounting cannot shrink a measured table.
+  applyTableColumnClasses(container);
   const result = container.innerHTML;
 
   if (!disableCache) setCachedValue(sanitizeHtmlCache, cacheKey, result);
@@ -1072,41 +955,6 @@ function getStreamingMarkdownSegments(
 export function splitStreamingMarkdownContent(content: string): StreamingMarkdownSegments {
   const { stableContent, tailContent } = getStreamingMarkdownSegments(content);
   return { stableContent, tailContent };
-}
-
-function hasCompletedHighlightableFence(content: string) {
-  let index = 0;
-  // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
-  let openFence = null as (MarkdownFenceState & { highlightable: boolean }) | null;
-
-  while (index < content.length) {
-    const nextBreak = content.indexOf('\n', index);
-    const lineEnd = nextBreak === -1 ? content.length : nextBreak;
-    const rawLine = content.slice(index, lineEnd);
-    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
-    const fenceMatch = line.match(MARKDOWN_FENCE_INFO_RE);
-
-    if (fenceMatch) {
-      const marker = fenceMatch[1]!;
-      if (!openFence) {
-        const lang = fenceMatch[2]!.trim().split(/\s+/, 1)[0];
-        openFence = {
-          char: marker[0]!,
-          length: marker.length,
-          highlightable: !!resolveCodeLanguage(lang),
-        };
-      } else if (marker[0] === openFence.char && marker.length >= openFence.length) {
-        if (openFence.highlightable) {
-          return true;
-        }
-        openFence = null;
-      }
-    }
-
-    index = nextBreak === -1 ? content.length : nextBreak + 1;
-  }
-
-  return false;
 }
 
 function getMarkdownRenderSegments(
@@ -1580,22 +1428,13 @@ export function __parseMarkdownForTests(
 }
 
 export function __resetMarkdownCachesForTests() {
-  codeBlockHtmlCache.clear();
-  highlightedCodeCache.clear();
-  renderedMarkdownCache.clear();
-  sanitizeHtmlCache.clear();
-  markdownCacheLru.clear();
+  resetMarkdownCaches();
   mermaidSvgCache.clear();
   mermaidHydrationGeneration += 1;
-  markdownCacheBytes = 0;
 }
 
 export function getMarkdownCacheStatsForTests() {
-  return {
-    bytes: markdownCacheBytes,
-    byteBudget: MARKDOWN_CACHE_BYTE_BUDGET,
-    entries: markdownCacheLru.size,
-  };
+  return markdownCacheStats();
 }
 
 function linkifyPaths(fragment: DocumentFragment) {
@@ -1710,7 +1549,6 @@ function applyCodeBlockCopyIcons(root: HTMLDivElement | undefined) {
 
 function getMarkdownHydrationFlags(html: string): MarkdownHydrationFlags {
   return {
-    tables: html.includes('<table'),
     copyButtons: html.includes('data-copy'),
     mermaid: html.includes('data-mermaid-source'),
   };
@@ -2027,7 +1865,6 @@ export async function hydrateMermaidDiagramsForTests(root: HTMLDivElement | unde
 }
 
 function hydrateRenderedMarkdown(root: HTMLDivElement | undefined, flags: MarkdownHydrationFlags) {
-  if (flags.tables) applyTableColumnClasses(root);
   if (flags.copyButtons) applyCodeBlockCopyIcons(root);
   if (flags.mermaid) void hydrateMermaidDiagramsForTests(root);
 }
@@ -2052,8 +1889,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   let pendingContent: string | null = null;
   let rafId: number | null = null;
-  let idleHighlightId: IdleWorkHandle | null = null;
-  let hasProcessedStreamingUpdate = false;
+  const stableHighlights = new CodeHighlightBinding();
+  const tailHighlights = new CodeHighlightBinding();
   const initialCacheByContent = !!props.cacheByContent && !props.forceStreaming;
   const initialSegments = getMarkdownRenderSegments(props.content || '', initialCacheByContent);
   let lastAppliedScanState = initialSegments.scanState;
@@ -2063,7 +1900,6 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let lastAppliedEscapeHtml = !!props.escapeHtml;
   let lastAppliedWorkspacePath = state.editorContext.workspacePath || '';
   let lastAppliedSessionContextKey = getSessionReferenceContextKey(props.content || '');
-  let lastAppliedCodeHighlighterVersion = codeHighlighterVersion();
   let lastAppliedStableContent = initialSegments.stableContent;
   let lastAppliedTailContent = initialSegments.tailContent;
   let lastAppliedStableHtml = initialSegments.stableContent
@@ -2220,44 +2056,11 @@ export function MarkdownRenderer(props: MarkdownProps) {
     }
   });
 
-  function scheduleDeferredTailHighlight(
-    content: string,
-    workspacePath: string,
-    sessionContextKey: string
-  ) {
-    if (lw()) return;
-    cancelIdleWork(idleHighlightId);
-    idleHighlightId = requestIdleWork(() => {
-      idleHighlightId = null;
-      if (pendingContent !== null) return;
-      if (workspacePath !== lastAppliedWorkspacePath) return;
-      if (sessionContextKey !== lastAppliedSessionContextKey) return;
-      if (content !== lastAppliedTailContent) return;
-
-      const highlightedTailHtml = parseIncompleteStreamingMarkdown(content, {
-        cacheByContent: false,
-        disablePathLinkify: !!props.disablePathLinkify,
-        escapeHtml: !!props.escapeHtml,
-      });
-      if (highlightedTailHtml === lastAppliedTailHtml) return;
-
-      lastAppliedTailHtml = highlightedTailHtml;
-      lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(highlightedTailHtml);
-      disposeLinkTooltips(tailRef);
-      setTailHtml(highlightedTailHtml);
-      queueMicrotask(() => {
-        hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
-      });
-    });
-  }
-
   function flushPending() {
     rafId = null;
     if (pendingContent !== null) {
       const content = pendingContent;
       pendingContent = null;
-      cancelIdleWork(idleHighlightId);
-      idleHighlightId = null;
       const isLightweight = lw();
       // Compact link labels determine wrapping, so off-core rendering must preserve them.
       const disablePathLinkify = !!props.disablePathLinkify;
@@ -2278,24 +2081,18 @@ export function MarkdownRenderer(props: MarkdownProps) {
         : getMarkdownRenderSegments(content, cacheByContent, lastAppliedScanState);
       const workspacePath = state.editorContext.workspacePath || '';
       const sessionContextKey = getSessionReferenceContextKey(content);
-      const currentCodeHighlighterVersion = codeHighlighterVersion();
-      const codeHighlighterChanged =
-        currentCodeHighlighterVersion !== lastAppliedCodeHighlighterVersion;
       const stableContentChanged =
         workspacePath !== lastAppliedWorkspacePath ||
         sessionContextKey !== lastAppliedSessionContextKey ||
         segments.stableContent !== lastAppliedStableContent ||
-        renderModeChanged ||
-        codeHighlighterChanged;
+        renderModeChanged;
       const tailContentChanged =
         workspacePath !== lastAppliedWorkspacePath ||
         sessionContextKey !== lastAppliedSessionContextKey ||
         segments.tailContent !== lastAppliedTailContent ||
-        renderModeChanged ||
-        codeHighlighterChanged;
+        renderModeChanged;
       const appendOnlyStableDelta =
         !renderModeChanged &&
-        !codeHighlighterChanged &&
         workspacePath === lastAppliedWorkspacePath &&
         sessionContextKey === lastAppliedSessionContextKey
           ? getAppendOnlyStableDelta(
@@ -2327,18 +2124,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
                   escapeHtml: escapeRawHtml,
                 })
             : lastAppliedStableHtml;
-      const shouldDeferTailHighlight =
-        !isLightweight &&
-        hasProcessedStreamingUpdate &&
-        tailContentChanged &&
-        !cacheByContent &&
-        !segments.hasUnclosedFence &&
-        hasCompletedHighlightableFence(segments.tailContent);
       const tailParseOptions = {
         cacheByContent: segments.stableContent.length === 0 && cacheByContent,
         disablePathLinkify,
-        disableCodeHighlighting:
-          segments.hasUnclosedFence || shouldDeferTailHighlight || isLightweight,
+        disableCodeHighlighting: segments.hasUnclosedFence || isLightweight,
         allowMermaidHydration: isLightweight && !segments.hasUnclosedFence,
         escapeHtml: escapeRawHtml,
       };
@@ -2356,6 +2145,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
           const appendedRoot = document.createElement('div');
           appendedRoot.innerHTML = appendedStableHtml;
           hydrateMarkdownRoot(appendedRoot, getMarkdownHydrationFlags(appendedStableHtml));
+          stableHighlights.add(appendedRoot, cacheByContent ? 0 : 1);
           stableRef.append(...appendedRoot.childNodes);
         } else {
           disposeInlineSlots(stableRef);
@@ -2388,24 +2178,20 @@ export function MarkdownRenderer(props: MarkdownProps) {
       }
       lastAppliedWorkspacePath = workspacePath;
       lastAppliedSessionContextKey = sessionContextKey;
-      lastAppliedCodeHighlighterVersion = currentCodeHighlighterVersion;
       lastAppliedScanState = segments.scanState;
       lastAppliedCacheByContent = cacheByContent;
       lastAppliedLightweight = isLightweight;
       lastAppliedDisablePathLinkify = disablePathLinkify;
       lastAppliedEscapeHtml = escapeRawHtml;
-      hasProcessedStreamingUpdate = true;
-
-      if (shouldDeferTailHighlight) {
-        scheduleDeferredTailHighlight(segments.tailContent, workspacePath, sessionContextKey);
-      }
 
       queueMicrotask(() => {
         if (stableChanged && appendedStableHtml === null) {
           hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
+          if (!disposed) stableHighlights.reconcile([stableRef], cacheByContent ? 0 : 1);
         }
         if (tailChanged) {
           hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
+          if (!disposed) tailHighlights.reconcile([tailRef], cacheByContent ? 0 : 1);
         }
       });
     }
@@ -2420,7 +2206,6 @@ export function MarkdownRenderer(props: MarkdownProps) {
     const escapeRawHtml = !!props.escapeHtml;
     const workspacePath = state.editorContext.workspacePath;
     const sessionContextKey = getSessionReferenceContextKey(content);
-    const highlighterVersion = codeHighlighterVersion();
     if (rafId !== null) {
       pendingContent = content;
       return;
@@ -2429,7 +2214,6 @@ export function MarkdownRenderer(props: MarkdownProps) {
     rafId = requestAnimationFrame(flushPending);
     void workspacePath;
     void sessionContextKey;
-    void highlighterVersion;
     void cacheByContent;
     void forceStreaming;
     void isLightweight;
@@ -2472,8 +2256,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
       cancelAnimationFrame(rafId);
       rafId = null;
     }
-    cancelIdleWork(idleHighlightId);
-    idleHighlightId = null;
+    stableHighlights.dispose();
+    tailHighlights.dispose();
     disposeInlineSlots();
     disposeLinkTooltips();
     for (const id of copyTimeouts) clearTimeout(id);
@@ -2596,6 +2380,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
     ref?.addEventListener('click', handleClick);
     hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
     hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
+    stableHighlights.reconcile([stableRef], initialCacheByContent ? 0 : 1);
+    tailHighlights.reconcile([tailRef], initialCacheByContent ? 0 : 1);
   });
   onCleanup(() => {
     ref?.removeEventListener('click', handleClick);

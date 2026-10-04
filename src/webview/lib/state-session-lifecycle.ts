@@ -145,9 +145,10 @@ export function clearSessionSeen(id: string) {
 }
 
 export function skipPlanSession(sessionId: string, updatedAt?: number) {
-  const skippedAt =
+  const sessionUpdatedAt =
     updatedAt ?? state.sessions.find((session) => session.id === sessionId)?.time.updated;
-  if (!isNumber(skippedAt)) return;
+  if (!isNumber(sessionUpdatedAt)) return;
+  const skippedAt = updatedAt ?? getSessionPlanUpdatedAt(sessionId, sessionUpdatedAt);
   setState('skippedPlanSessions', sessionId, skippedAt);
   writeMarkerForSession(STORAGE_KEYS.skippedPlanSessions, sessionId, skippedAt);
   postMessage({
@@ -191,6 +192,11 @@ export function isSkippedPlanSession(sessionId: string, updatedAt: number) {
 
 export function isSessionUnread(sessionId: string, updatedAt: number) {
   return isSessionUnreadMarker(state.lastSeenSessions, sessionId, updatedAt);
+}
+
+export function getSessionPlanUpdatedAt(sessionId: string, updatedAt: number) {
+  // A plan can finish after it was viewed without advancing session metadata.
+  return Math.max(updatedAt, state.completedSessionResponses[sessionId] ?? 0);
 }
 
 export function isSessionCompletedResponseUnread(sessionId: string) {

@@ -1418,6 +1418,53 @@ describe('header status badges', () => {
     );
   });
 
+  it('shows a background plan completion in the narrow header without a metadata update', async () => {
+    const selectSessionSpy = vi.spyOn(openCodeModule, 'selectSession').mockResolvedValue(undefined);
+    const now = Date.now();
+    setState('sessions', [session('active', now), session('plan-1', now - 1000)]);
+    setState('activeSessionId', 'plan-1');
+    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState('sessionStatus', { 'plan-1': { type: 'busy' } });
+    setState('lastSeenSessions', { active: now, 'plan-1': now });
+
+    cleanup = render(() => Chat(), container!);
+
+    setShowSessionPicker(true);
+    setState('activeSessionId', 'active');
+    setShowSessionPicker(false);
+    const header = container?.querySelector('.interactive-session > .chat-header');
+    expect(header?.querySelector('.chat-header-plan-badge')).toBeNull();
+
+    vi.advanceTimersByTime(100);
+    sessionStore.setSessionStatusEntry('plan-1', { type: 'idle' });
+    vi.advanceTimersByTime(1200);
+
+    expect(state.sessions.find((entry) => entry.id === 'plan-1')?.time.updated).toBe(now - 1000);
+
+    const badge = header?.querySelector<HTMLButtonElement>('.chat-header-plan-badge');
+    expect(badge).toBeInstanceOf(HTMLButtonElement);
+    badge?.click();
+    await Promise.resolve();
+    expect(selectSessionSpy).toHaveBeenCalledWith('plan-1');
+
+    setShowSessionPicker(true);
+    expect(
+      container?.querySelector(
+        '[data-session-id="plan-1"] .session-item-indicator.is-plan-completed'
+      )
+    ).not.toBeNull();
+    sessionStore.markSessionSeen('plan-1');
+    setShowSessionPicker(false);
+    expect(
+      container?.querySelector('.interactive-session > .chat-header .chat-header-plan-badge')
+    ).toBeNull();
+    expect(
+      container?.querySelector(
+        '[data-session-id="plan-1"] .session-item-indicator.is-plan-completed'
+      )
+    ).toBeNull();
+  });
+
   it('omits the session header in editor panels', () => {
     hostWindow.__initialWebviewState = {
       webviewContext: {
@@ -1553,6 +1600,34 @@ describe('header status badges', () => {
           kind: 'plan-ready',
           markerAt: 501,
           unread: true,
+        },
+      });
+
+      setState('lastSeenSessions', 'plan-read', 501);
+      setState('completedSessionResponses', 'plan-read', 600);
+      expect(
+        sent.filter((message) => message.type === 'session-unread-state/update').at(-1)
+      ).toEqual({
+        type: 'session-unread-state/update',
+        payload: {
+          sessionId: 'plan-read',
+          directory: '/repo',
+          kind: 'plan-ready',
+          markerAt: 600,
+          unread: true,
+        },
+      });
+      sessionStore.markSessionSeen('plan-read', 600);
+      expect(
+        sent.filter((message) => message.type === 'session-unread-state/update').at(-1)
+      ).toEqual({
+        type: 'session-unread-state/update',
+        payload: {
+          sessionId: 'plan-read',
+          directory: '/repo',
+          kind: 'plan-ready',
+          markerAt: 600,
+          unread: false,
         },
       });
     } finally {
@@ -1779,6 +1854,7 @@ describe('header status badges', () => {
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
 
       sessionStore.setSessionStatusEntry('plan-1', { type: 'busy' });
+      const completedAt = Date.now();
       sessionStore.setSessionStatusEntry('plan-1', { type: 'idle' });
       vi.advanceTimersByTime(1_200);
 
@@ -1790,7 +1866,7 @@ describe('header status badges', () => {
             sessionId: 'plan-1',
             directory: '/repo',
             kind: 'plan-ready',
-            markerAt: 600,
+            markerAt: completedAt,
             unread: true,
           },
         },

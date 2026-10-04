@@ -18,6 +18,8 @@ import { asRecord } from '../../shared/type-utils';
 import type { UnknownRecord } from '../../shared/type-utils';
 import type { AssistantMessage, QuestionRequest, ToolPart } from '../types';
 import { postMessage } from '../lib/bridge';
+import { createDeferredPart } from '../lib/deferred-content';
+import { getSearchResultCount, parseIntLike } from '../../shared/tool-summary';
 import {
   state as appState,
   getMessageLookup,
@@ -340,44 +342,6 @@ function formatVisibleToolDuration(ms: number | null | undefined) {
   return formatDuration(ms) || null;
 }
 
-function parseIntLike<T>(value: T): number | null {
-  if (isNumber(value) && Number.isFinite(value)) return Math.trunc(value);
-  if (isString(value) && /^\d+$/.test(value.trim())) return Number.parseInt(value, 10);
-  return null;
-}
-
-type SearchResultCount = {
-  count: number;
-  truncated: boolean;
-};
-
-function getSearchResultCount(
-  toolName: string,
-  state: ToolPart['state']
-): SearchResultCount | null {
-  if (getToolKind(toolName) !== 'search' || state.status !== 'completed') return null;
-
-  const output = state.output || '';
-  const truncated =
-    state.metadata.truncated === true ||
-    /\bmore matches available\b|\bresults (?:are )?truncated\b/i.test(output);
-  const metadataCount = parseIntLike(state.metadata.matches) ?? parseIntLike(state.metadata.count);
-  if (metadataCount !== null && metadataCount >= 0) return { count: metadataCount, truncated };
-
-  const found = output.match(/^\s*Found\s+(\d+)\s+(?:matches|files|results)\b/im);
-  if (found?.[1]) return { count: Number.parseInt(found[1], 10), truncated };
-  if (/^\s*No (?:files|matches|search results?) found\b/im.test(output)) {
-    return { count: 0, truncated: false };
-  }
-
-  if (normalizeToolName(toolName) !== 'glob') return null;
-  const files = output
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('(Results are truncated'));
-  return files.length > 0 ? { count: files.length, truncated } : null;
-}
-
 function extractTaggedOutput(output: string, tagName: string): string | null {
   const match = output.match(new RegExp(`<${tagName}>\\s*([\\s\\S]*?)\\s*<\\/${tagName}>`, 'i'));
   if (!match) return null;
@@ -463,9 +427,18 @@ export function ToolCall(props: {
   compactFileChanges?: boolean;
   diffPreviewStateKey?: string;
 }) {
-  const tool = () => props.part;
-  const expansionKey = () => getToolCallExpansionKey(tool());
+  const expansionKey = () => getToolCallExpansionKey(props.part);
   const [expanded, setExpanded] = createSignal(getToolCallExpanded(expansionKey()));
+  const detail = createDeferredPart(
+    () => props.part,
+    () =>
+      expanded() ||
+      (!props.lightweight &&
+        !props.compactFileChanges &&
+        showFileDiffs() &&
+        getToolFileChanges(props.part.tool, props.part.state).length > 0)
+  );
+  const tool = detail.part;
   const state = () => tool().state;
   const toolSessionRootId = createMemo(
     () => getSessionTreeRootId(tool().sessionID) || tool().sessionID
@@ -668,6 +641,9 @@ export function ToolCall(props: {
         runningOutput={runningOutput()}
         waitingForPermission={isWaitingForPermission()}
         lightweight={props.lightweight && !expanded()}
+        detailLoading={detail.loading()}
+        detailError={detail.error()}
+        retryDetails={detail.retry}
       />
     );
   };
@@ -1420,6 +1396,9 @@ type StructuredToolResult = {
 };
 
 function GenericToolCall(props: {
+  detailLoading?: boolean;
+  detailError?: string;
+  retryDetails?: () => void;
   tool: ToolPart;
   state: ToolPart['state'];
   statusClass: string;
@@ -1664,6 +1643,7 @@ function GenericToolCall(props: {
   const hasOnlyHeaderCommand = () => isBash() && commandMatchesTitle() && !hasBashResultRow();
   const hasExpandableContent = () => {
     if (props.lightweight) return false;
+    if (props.tool.deferred) return true;
     if (props.state.status === 'error') return true;
     if (hasOnlyHeaderCommand()) return false;
     if (detailInputEntries().length > 0) return true;
@@ -1678,6 +1658,7 @@ function GenericToolCall(props: {
   const showBashCommandRow = () => !hasBashResultRow() || !commandMatchesTitle();
   const showHeaderCommandCopy = () =>
     isBash() &&
+    !props.tool.deferred &&
     !props.lightweight &&
     commandMatchesTitle() &&
     (isExpanded() || !hasBashResultRow());
@@ -1774,90 +1755,106 @@ function GenericToolCall(props: {
       </div>
       <Show when={isExpanded()}>
         <div id={bodyId} class="tool-invocation-detail animate-fade-in">
-          <Show
-            when={isBash() && bashCommand()}
-            fallback={
-              <StructuredToolCard
-                inputEntries={detailInputEntries()}
-                result={structuredResult()}
-                onOpenPath={openGenericToolFile}
-                toolTitle={props.title}
-                previewMarkdown={isTask()}
-              />
-            }
-          >
-            <div class="terminal-command-card">
-              <Show when={showBashCommandRow()}>
-                <TerminalCommandRow command={bashCommand()} />
-              </Show>
-              <Show when={props.state.status === 'completed'}>
-                <div class="terminal-command-row terminal-command-row-output">
-                  <Show
-                    when={!bashOutputIsEmpty()}
-                    fallback={
-                      <pre class="terminal-command-text terminal-command-output terminal-command-output-empty">
-                        {bashOutput()}
-                      </pre>
-                    }
-                  >
-                    <ClampedToolText
-                      content={props.fullOutput}
-                      title={`${props.title} (output)`}
-                      class="terminal-command-text terminal-command-output"
-                    />
-                  </Show>
-                </div>
-              </Show>
-              <Show when={props.state.status === 'running' && !isBlank(props.runningOutput)}>
-                <div class="terminal-command-row terminal-command-row-output">
-                  <LiveTerminalOutput content={props.runningOutput} />
-                </div>
-              </Show>
-              <Show when={props.state.status === 'error'}>
-                <div
-                  class={`terminal-command-row terminal-command-row-output terminal-command-row-error${isAborted() ? ' is-aborted' : ''}`}
-                >
-                  <ClampedToolText
-                    content={props.state.status === 'error' ? props.state.error : ''}
-                    title={`${props.title} (error)`}
-                    language="plaintext"
-                    class={`terminal-command-text terminal-command-output tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}
-                    role="alert"
-                  />
-                </div>
-              </Show>
+          <Show when={props.detailLoading}>
+            <span role="status">Loading tool details…</span>
+          </Show>
+          <Show when={props.detailError}>
+            <div role="alert">
+              {props.detailError}{' '}
+              <button type="button" onClick={props.retryDetails}>
+                Retry
+              </button>
             </div>
           </Show>
-          <Show when={props.state.status === 'running' && !isBash()}>
-            <Show when={isTask()} fallback={<div class="tool-invocation-running">Running…</div>}>
-              <button
-                type="button"
-                class={`tool-invocation-running tool-invocation-subagent-running${taskRetryStatus() ? ' is-retrying' : ''}`}
-                onClick={openTaskSession}
-                disabled={!taskSessionId()}
-                aria-live="polite"
-                title={taskSessionId() ? 'Open subagent session' : undefined}
-              >
-                <UiIcon
-                  source={hourglassIcon}
-                  class="tool-invocation-working-icon"
-                  width="12"
-                  height="12"
-                  aria-hidden="true"
+          <Show when={!props.detailLoading && !props.detailError}>
+            <Show
+              when={isBash() && bashCommand()}
+              fallback={
+                <StructuredToolCard
+                  inputEntries={detailInputEntries()}
+                  result={structuredResult()}
+                  onOpenPath={openGenericToolFile}
+                  toolTitle={props.title}
+                  previewMarkdown={isTask()}
                 />
-                <span class="tool-invocation-running-copy">
-                  <strong class="tool-invocation-running-label">
-                    {taskRetryStatus()
-                      ? `${taskAgentLabel()} is retrying`
-                      : `${taskAgentLabel()} is working`}
-                  </strong>
-                  <span class="tool-invocation-running-detail">
-                    <Show when={taskRetryStatus()} fallback="Results will appear here when ready.">
-                      {(retry) => `Attempt ${retry().attempt} · ${retry().message}`}
+              }
+            >
+              <div class="terminal-command-card">
+                <Show when={showBashCommandRow()}>
+                  <TerminalCommandRow command={bashCommand()} />
+                </Show>
+                <Show when={props.state.status === 'completed'}>
+                  <div class="terminal-command-row terminal-command-row-output">
+                    <Show
+                      when={!bashOutputIsEmpty()}
+                      fallback={
+                        <pre class="terminal-command-text terminal-command-output terminal-command-output-empty">
+                          {bashOutput()}
+                        </pre>
+                      }
+                    >
+                      <ClampedToolText
+                        content={props.fullOutput}
+                        title={`${props.title} (output)`}
+                        class="terminal-command-text terminal-command-output"
+                      />
                     </Show>
+                  </div>
+                </Show>
+                <Show when={props.state.status === 'running' && !isBlank(props.runningOutput)}>
+                  <div class="terminal-command-row terminal-command-row-output">
+                    <LiveTerminalOutput content={props.runningOutput} />
+                  </div>
+                </Show>
+                <Show when={props.state.status === 'error'}>
+                  <div
+                    class={`terminal-command-row terminal-command-row-output terminal-command-row-error${isAborted() ? ' is-aborted' : ''}`}
+                  >
+                    <ClampedToolText
+                      content={props.state.status === 'error' ? props.state.error : ''}
+                      title={`${props.title} (error)`}
+                      language="plaintext"
+                      class={`terminal-command-text terminal-command-output tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}
+                      role="alert"
+                    />
+                  </div>
+                </Show>
+              </div>
+            </Show>
+            <Show when={props.state.status === 'running' && !isBash()}>
+              <Show when={isTask()} fallback={<div class="tool-invocation-running">Running…</div>}>
+                <button
+                  type="button"
+                  class={`tool-invocation-running tool-invocation-subagent-running${taskRetryStatus() ? ' is-retrying' : ''}`}
+                  onClick={openTaskSession}
+                  disabled={!taskSessionId()}
+                  aria-live="polite"
+                  title={taskSessionId() ? 'Open subagent session' : undefined}
+                >
+                  <UiIcon
+                    source={hourglassIcon}
+                    class="tool-invocation-working-icon"
+                    width="12"
+                    height="12"
+                    aria-hidden="true"
+                  />
+                  <span class="tool-invocation-running-copy">
+                    <strong class="tool-invocation-running-label">
+                      {taskRetryStatus()
+                        ? `${taskAgentLabel()} is retrying`
+                        : `${taskAgentLabel()} is working`}
+                    </strong>
+                    <span class="tool-invocation-running-detail">
+                      <Show
+                        when={taskRetryStatus()}
+                        fallback="Results will appear here when ready."
+                      >
+                        {(retry) => `Attempt ${retry().attempt} · ${retry().message}`}
+                      </Show>
+                    </span>
                   </span>
-                </span>
-              </button>
+                </button>
+              </Show>
             </Show>
           </Show>
         </div>

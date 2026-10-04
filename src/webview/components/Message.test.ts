@@ -3,6 +3,7 @@ import { render } from 'solid-js/web';
 import { createSignal } from 'solid-js';
 import type { FilePart, MessageEntry, Part, Session, TextPart, ToolPart } from '../types';
 import { client } from '../lib/client';
+import { installHighlightWorker } from '../lib/highlight-worker.test-support';
 import { editingMessage, resetMessageEditState } from '../lib/message-edit-state';
 import {
   providerConnectionRequest,
@@ -43,6 +44,7 @@ let resizeObserverObserveMock: (target: Element, options?: ResizeObserverOptions
 let resizeObserverDisconnectMock: () => void;
 
 beforeEach(() => {
+  installHighlightWorker();
   container = document.createElement('div');
   document.body.appendChild(container);
   originalResizeObserver = globalThis.ResizeObserver;
@@ -76,6 +78,7 @@ afterEach(() => {
   resetToolCallExpansionState();
   // SAFETY: The fixture provides the unknown fields read by this statement.
   delete window.__sendToExtension;
+  vi.unstubAllGlobals();
 });
 
 function textPart(id: string, text: string): TextPart {

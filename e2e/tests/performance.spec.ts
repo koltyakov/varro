@@ -721,84 +721,95 @@ test('narrowing after PageDown preserves a short response below a clipped prompt
   ).toBeLessThanOrEqual(3);
 });
 
-test('viewport narrowing preserves an inner block in a viewport-tall markdown item', async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 486, height: 808 });
-  await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');
-  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+for (const mainThreadWheel of [false, true]) {
+  test(`viewport narrowing preserves an inner block in a viewport-tall markdown item${mainThreadWheel ? ' after main-thread wheel delivery' : ''}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 486, height: 808 });
+    await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
 
-  const list = page.locator('.interactive-list');
-  const heading = page.getByRole('heading', { name: 'Huge section 45' });
-  await list.evaluate((element) => {
-    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
-  });
-  for (let step = 2; step < 19; step += 1) {
-    await list.evaluate((element, ratio) => {
-      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * ratio);
+    const list = page.locator('.interactive-list');
+    const heading = page.getByRole('heading', { name: 'Huge section 45' });
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+    });
+    for (let step = 2; step < 19; step += 1) {
+      await list.evaluate((element, ratio) => {
+        element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * ratio);
+        element.dispatchEvent(new Event('scroll'));
+      }, step / 20);
+      await waitForAnimationFrame(page);
+      if ((await heading.count()) > 0) break;
+    }
+    await expect(heading).toBeAttached();
+    await list.evaluate((element) => {
+      const target = [...element.querySelectorAll<HTMLElement>('h2')]
+        .find((candidate) => candidate.innerText === 'Huge section 45')
+        ?.closest<HTMLElement>('[data-msg-id]');
+      if (!target) throw new Error('Tall Markdown target row is not mounted');
+      element.scrollTop +=
+        target.getBoundingClientRect().top - element.getBoundingClientRect().top + 700;
       element.dispatchEvent(new Event('scroll'));
-    }, step / 20);
-    await waitForAnimationFrame(page);
-    if ((await heading.count()) > 0) break;
-  }
-  await expect(heading).toBeAttached();
-  await list.evaluate((element) => {
-    const target = [...element.querySelectorAll<HTMLElement>('h2')]
-      .find((candidate) => candidate.innerText === 'Huge section 45')
-      ?.closest<HTMLElement>('[data-msg-id]');
-    if (!target) throw new Error('Tall Markdown target row is not mounted');
-    element.scrollTop +=
-      target.getBoundingClientRect().top - element.getBoundingClientRect().top + 700;
-    element.dispatchEvent(new Event('scroll'));
+    });
+
+    const listBounds = await list.boundingBox();
+    if (mainThreadWheel) {
+      // Require native wheel delivery before scrolling, rather than allowing the compositor to
+      // move first. The handler deliberately leaves the browser's default scroll action enabled.
+      await list.evaluate((element) => {
+        element.addEventListener('wheel', () => {}, { passive: false });
+      });
+    }
+    await page.mouse.move(listBounds!.x + 30, listBounds!.y + listBounds!.height / 2);
+    await page.mouse.wheel(0, 32);
+    await page.waitForTimeout(80);
+
+    const anchor = await list.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const item = [...element.querySelectorAll<HTMLElement>('.rendered-markdown li')].find(
+        (candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return rect.top >= bounds.top + 20 && rect.bottom < bounds.bottom;
+        }
+      );
+      if (!item) return null;
+      return {
+        text: item.innerText,
+        top: item.getBoundingClientRect().top - bounds.top,
+      };
+    });
+    expect(anchor).not.toBeNull();
+
+    const samples: Array<{ connected: boolean; top: number | null }> = [];
+    await page.setViewportSize({ width: 359, height: 808 });
+    for (let frame = 0; frame < 8; frame += 1) {
+      await waitForAnimationFrame(page);
+      samples.push(
+        await list.evaluate((element, text) => {
+          const item = [...element.querySelectorAll<HTMLElement>('.rendered-markdown li')].find(
+            (candidate) => candidate.innerText === text
+          );
+          return {
+            connected: !!item?.isConnected,
+            top: item
+              ? item.getBoundingClientRect().top - element.getBoundingClientRect().top
+              : null,
+          };
+        }, anchor!.text)
+      );
+    }
+
+    expect(
+      samples.every((sample) => sample.connected),
+      JSON.stringify(samples)
+    ).toBe(true);
+    expect(
+      Math.max(...samples.map((sample) => Math.abs(sample.top! - anchor!.top))),
+      JSON.stringify({ anchor, samples })
+    ).toBeLessThanOrEqual(3);
   });
-
-  const listBounds = await list.boundingBox();
-  await page.mouse.move(listBounds!.x + 30, listBounds!.y + listBounds!.height / 2);
-  await page.mouse.wheel(0, 32);
-  await page.waitForTimeout(80);
-
-  const anchor = await list.evaluate((element) => {
-    const bounds = element.getBoundingClientRect();
-    const item = [...element.querySelectorAll<HTMLElement>('.rendered-markdown li')].find(
-      (candidate) => {
-        const rect = candidate.getBoundingClientRect();
-        return rect.top >= bounds.top + 20 && rect.bottom < bounds.bottom;
-      }
-    );
-    if (!item) return null;
-    return {
-      text: item.innerText,
-      top: item.getBoundingClientRect().top - bounds.top,
-    };
-  });
-  expect(anchor).not.toBeNull();
-
-  const samples: Array<{ connected: boolean; top: number | null }> = [];
-  await page.setViewportSize({ width: 359, height: 808 });
-  for (let frame = 0; frame < 8; frame += 1) {
-    await waitForAnimationFrame(page);
-    samples.push(
-      await list.evaluate((element, text) => {
-        const item = [...element.querySelectorAll<HTMLElement>('.rendered-markdown li')].find(
-          (candidate) => candidate.innerText === text
-        );
-        return {
-          connected: !!item?.isConnected,
-          top: item ? item.getBoundingClientRect().top - element.getBoundingClientRect().top : null,
-        };
-      }, anchor!.text)
-    );
-  }
-
-  expect(
-    samples.every((sample) => sample.connected),
-    JSON.stringify(samples)
-  ).toBe(true);
-  expect(
-    Math.max(...samples.map((sample) => Math.abs(sample.top! - anchor!.top))),
-    JSON.stringify({ anchor, samples })
-  ).toBeLessThanOrEqual(3);
-});
+}
 
 test('cold scrollbar positioning preserves an inner block during width reflow', async ({
   page,

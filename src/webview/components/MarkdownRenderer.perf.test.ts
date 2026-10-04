@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/core';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadCodeHighlighter } from '../lib/code-highlighter';
+import { installHighlightWorker } from '../lib/highlight-worker.test-support';
 import {
   __parseMarkdownForTests,
   __resetMarkdownCachesForTests,
@@ -15,7 +15,7 @@ import {
 let container: HTMLDivElement;
 let cleanup: (() => void) | undefined;
 
-beforeAll(() => loadCodeHighlighter());
+beforeAll(installHighlightWorker);
 
 beforeEach(() => {
   __resetMarkdownCachesForTests();

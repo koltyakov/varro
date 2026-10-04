@@ -147,6 +147,17 @@ describe('getToolErrorMessage', () => {
 });
 
 describe('toolOutputToString', () => {
+  it('does not treat embedded tool-returned images as display text', () => {
+    expect(
+      toolOutputToString(
+        [
+          { type: 'text', text: 'Image read successfully' },
+          { type: 'file', uri: `data:image/png;base64,${'IMAGE'.repeat(10000)}` },
+        ],
+        undefined
+      )
+    ).toBe('Image read successfully');
+  });
   it('joins text blocks from a content array', () => {
     expect(
       toolOutputToString(

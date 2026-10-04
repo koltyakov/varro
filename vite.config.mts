@@ -27,6 +27,7 @@ const webviewAssetVersionPlugin: Plugin = {
 export default defineConfig(({ mode }) => ({
   base: './',
   plugins: [solid(), tailwindcss(), webviewAssetVersionPlugin],
+  worker: { format: 'iife' },
   optimizeDeps: {
     entries: ['preview.html', 'e2e/harness/index.html'],
   },

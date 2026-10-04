@@ -15,7 +15,7 @@ import {
   splitStreamingMarkdownContent,
 } from './MarkdownRenderer';
 import { setState, setTheme } from '../lib/state';
-import { loadCodeHighlighter } from '../lib/code-highlighter';
+import { installHighlightWorker, requestHighlight } from '../lib/highlight-worker.test-support';
 import { clearDirectSessionReturn, getDirectSessionReturnId } from '../lib/session-navigation';
 import { checkIcon, copyIcon, expandIcon, xmarkIcon } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
@@ -62,7 +62,7 @@ vi.mock('./chat/SessionActionFeedback', () => ({
 }));
 vi.mock('mermaid', () => ({ default: mermaidMock }));
 
-beforeAll(() => loadCodeHighlighter());
+beforeAll(installHighlightWorker);
 
 function assertInertWithSafeAnchor(root: ParentNode) {
   expect(root.querySelector('script')).toBeNull();
@@ -139,6 +139,23 @@ afterEach(() => {
 });
 
 describe('MarkdownRenderer', () => {
+  it.each([
+    { header: '**#**', values: ['First stage', 'Second stage'], compact: true },
+    { header: 'Stage', values: ['**1**', '`2`'], compact: true },
+    { header: 'File', values: ['`src/first.ts`', '`src/second.ts`'], compact: false },
+  ])('classifies the $header column before mounting the table', ({ header, values, compact }) => {
+    const content = [
+      `| ${header} | Description |`,
+      '| --- | --- |',
+      ...values.map((value) => `| ${value} | A description that needs room to wrap. |`),
+    ].join('\n');
+    container!.innerHTML = __parseMarkdownForTests(content, { cacheByContent: true });
+    // Virtual rows can measure this HTML before MarkdownRenderer's onMount hydration runs.
+    expect(container!.querySelector('table')?.classList.contains('table-first-col-compact')).toBe(
+      compact
+    );
+  });
+
   it.each([false, true])(
     'preserves compact file links across lightweight transitions starting at %s',
     async (initialLightweight) => {
@@ -1712,7 +1729,7 @@ describe('MarkdownRenderer', () => {
       () => MarkdownRenderer({ content: '```ts\nconst value = 1;\n```' }),
       container!
     );
-    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    await vi.waitFor(() => expect(container?.querySelector('.hljs-keyword')).not.toBeNull());
 
     const code = container?.querySelector('.interactive-result-code-block code');
     expect(code?.classList.contains('hljs')).toBe(true);
@@ -1726,7 +1743,8 @@ describe('MarkdownRenderer', () => {
     ['sql', 'select * from users;'],
     ['java', 'class Main {}'],
     ['cpp', '#include <iostream>\nint main() { return 0; }'],
-  ])('highlights common language %s', (lang, source) => {
+  ])('highlights common language %s', async (lang, source) => {
+    await requestHighlight(source, lang);
     expect(renderHighlightedCodeHtml(source, lang)).toContain('hljs-');
   });
 
@@ -1736,7 +1754,8 @@ describe('MarkdownRenderer', () => {
     ['py', 'def greet():\n    pass', 'hljs-keyword'],
     ['html', '<main>hello</main>', 'hljs-tag'],
     ['yml', 'key: value', 'hljs-attr'],
-  ])('highlights language alias %s', (lang, source, expectedClass) => {
+  ])('highlights language alias %s', async (lang, source, expectedClass) => {
+    await requestHighlight(source, lang);
     expect(renderHighlightedCodeHtml(source, lang)).toContain(expectedClass);
   });
 
@@ -1765,7 +1784,8 @@ describe('MarkdownRenderer', () => {
     expect(sanitizeSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('separates finalized markdown cache entries by render options', () => {
+  it('separates finalized markdown cache entries by render options', async () => {
+    await requestHighlight('const value = 1;', 'ts');
     setState('editorContext', {
       workspacePath: '/repo',
       activeFile: null,
@@ -1798,12 +1818,23 @@ describe('MarkdownRenderer', () => {
     expect(withHighlighting).toContain('hljs-keyword');
   });
 
-  it('separates code block cache entries by highlighting mode', () => {
+  it('separates code block cache entries by highlighting mode', async () => {
+    await requestHighlight('const value = 1;', 'ts');
     const params = { text: 'const value = 1;', lang: 'ts' };
     expect(renderCodeBlockHtml({ ...params, disableHighlighting: true })).not.toContain(
       'hljs-keyword'
     );
     expect(renderCodeBlockHtml(params)).toContain('hljs-keyword');
+  });
+
+  it('does not cache a pending code block as a completed highlighted block', async () => {
+    const params = { text: 'const pendingCacheValue = 2;', lang: 'ts' };
+    expect(renderCodeBlockHtml(params)).toContain('data-highlight-lang');
+    await requestHighlight(params.text, params.lang);
+    const completed = renderCodeBlockHtml(params);
+    expect(completed).toContain('hljs-keyword');
+    expect(completed).not.toContain('data-highlight-lang');
+    expect(renderCodeBlockHtml(params)).toBe(completed);
   });
 
   it('does not cache transient sanitization across remounts', async () => {
@@ -2871,14 +2902,14 @@ describe('MarkdownRenderer', () => {
     cleanup?.();
     container!.innerHTML = '';
     cleanup = render(() => MarkdownRenderer({ content }), container!);
-    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    await vi.waitFor(() => expect(container?.querySelector('.hljs-keyword')).not.toBeNull());
 
     code = container?.querySelector('.interactive-result-code-block code');
     expect(code?.querySelector('.hljs-keyword')?.textContent).toBe('const');
     expect(code?.querySelector('.hljs-number')?.textContent).toBe('1');
   });
 
-  it('defers first-pass highlighting for completed streaming tail fences until idle', async () => {
+  it('defers first-pass highlighting for completed streaming tail fences to the worker', async () => {
     vi.useFakeTimers();
     const [content, setContent] = createSignal('Stable paragraph\n\nTail');
 
@@ -2901,7 +2932,7 @@ describe('MarkdownRenderer', () => {
     expect(code?.querySelector('[class^="hljs-"]')).toBeNull();
     expect(code?.textContent).toBe('const value = 1;');
 
-    await vi.runOnlyPendingTimersAsync();
+    await vi.advanceTimersByTimeAsync(100);
 
     code = container?.querySelector('.interactive-result-code-block code');
     expect(code?.querySelector('.hljs-keyword')?.textContent).toBe('const');

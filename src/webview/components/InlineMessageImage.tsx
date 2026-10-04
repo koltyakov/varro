@@ -1,5 +1,6 @@
-import { Show, createEffect, createSignal, onMount } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { isFunction } from '../lib/runtime-values';
+import { createDeferredImage, deferredFilePath, IMAGE_PLACEHOLDER } from '../lib/deferred-content';
 
 export type InlineImagePresentation = 'contain' | 'cover' | 'ambient';
 
@@ -35,6 +36,7 @@ function getCachedImageDimensions(src: string) {
 }
 
 export async function preloadInlineImageDimensions(src: string) {
+  if (deferredFilePath(src)) return;
   if (getCachedImageDimensions(src) || globalThis.Image === undefined) return;
 
   const image = new globalThis.Image();
@@ -81,8 +83,56 @@ export function getInlineImagePresentation(
 }
 
 export function InlineMessageImage(props: { src: string; alt: string; allowCover?: boolean }) {
+  const [visible, setVisible] = createSignal(false);
+  // Repeated snapshots replace FilePart objects without changing the attachment URL.
+  // Do not restart visibility observation or cancel an in-flight thumbnail in that case.
+  const source = createMemo(() => props.src);
+  const name = createMemo(() => props.alt);
+  const content = createDeferredImage(source, true, visible);
+  const [src, setSrc] = createSignal(content.url());
+  let previousSource = props.src;
+  let previousAlt = props.alt;
+  let handoffSource: string | undefined;
+  createEffect(() => {
+    const original = source();
+    const alt = name();
+    const next = content.url();
+    if (original !== previousSource || alt !== previousAlt) {
+      // Only retain the same local attachment during its acknowledgement. Carousel navigation
+      // and replacement attachments must never display the previous attachment as a fallback.
+      handoffSource =
+        deferredFilePath(original) &&
+        previousSource.startsWith('data:image/') &&
+        alt === previousAlt
+          ? original
+          : undefined;
+      previousSource = original;
+      previousAlt = alt;
+    }
+    if (handoffSource === original) {
+      if (next === IMAGE_PLACEHOLDER) return;
+      const image = new Image();
+      image.src = next;
+      let cancelled = false;
+      void image
+        .decode()
+        .then(() => {
+          if (cancelled) return;
+          handoffSource = undefined;
+          setSrc(next);
+        })
+        .catch(() => {
+          // Keep the already painted local image if a generated thumbnail cannot be decoded.
+        });
+      onCleanup(() => {
+        cancelled = true;
+      });
+      return;
+    }
+    setSrc(next);
+  });
   const [presentation, setPresentation] = createSignal<InlineImagePresentation>('contain');
-  let currentSrc = props.src;
+  let currentSrc = src();
   let imageRef: HTMLImageElement | undefined;
 
   const updatePresentationFromDimensions = (
@@ -109,7 +159,7 @@ export function InlineMessageImage(props: { src: string; alt: string; allowCover
   };
 
   createEffect(() => {
-    const nextSrc = props.src;
+    const nextSrc = src();
     if (nextSrc === currentSrc) return;
     currentSrc = nextSrc;
     setPresentation('contain');
@@ -129,6 +179,24 @@ export function InlineMessageImage(props: { src: string; alt: string; allowCover
     });
   });
 
+  createEffect(() => {
+    if (!deferredFilePath(source()) || !imageRef) return;
+    setVisible(false);
+    if (typeof IntersectionObserver === 'undefined') setVisible(true);
+    else {
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (!entries.some((entry) => entry.isIntersecting)) return;
+          setVisible(true);
+          observer.disconnect();
+        },
+        { rootMargin: '200px' }
+      );
+      observer.observe(imageRef);
+      onCleanup(() => observer.disconnect());
+    }
+  });
+
   onMount(() => {
     if (!imageRef) return;
     const cachedDimensions = getCachedImageDimensions(currentSrc);
@@ -146,13 +214,13 @@ export function InlineMessageImage(props: { src: string; alt: string; allowCover
   return (
     <>
       <Show when={presentation() === 'ambient'}>
-        <img src={props.src} alt="" aria-hidden="true" class="chat-image-ambient" />
+        <img src={src()} alt="" aria-hidden="true" class="chat-image-ambient" />
       </Show>
       <img
         ref={(element) => {
           imageRef = element;
         }}
-        src={props.src}
+        src={src()}
         alt={props.alt}
         class={`chat-image-img chat-image-img-${presentation()}`}
         onLoad={handleLoad}

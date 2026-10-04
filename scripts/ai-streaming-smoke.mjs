@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { controlRequest, runCapture } from './ai-streaming.mjs';
+import {
+  ImageMagick,
+  initializeImageMagick,
+  MagickColors,
+  MagickFormat,
+} from '@imagemagick/magick-wasm';
 
 // A real-editor infrastructure check with generated data. No provider or source database is used.
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -12,6 +19,28 @@ const output = path.join(root, 'artifacts/ai-streaming', `runner-smoke-${Date.no
 await mkdir(output, { recursive: true, mode: 0o700 });
 const sessionID = 'ses_runner_smoke';
 const now = Date.now();
+const require = createRequire(import.meta.url);
+await initializeImageMagick(
+  await readFile(require.resolve('@imagemagick/magick-wasm/magick.wasm'))
+);
+const images = [
+  [MagickFormat.Png, 'png', MagickColors.Red],
+  [MagickFormat.Jpeg, 'jpeg', MagickColors.Blue],
+  [MagickFormat.Gif, 'gif', MagickColors.Green],
+].map(([format, mime, color], index) => ({
+  id: `prt_smoke_image_${index}`,
+  messageID: 'msg_smoke_user',
+  sessionID,
+  type: 'file',
+  mime: `image/${mime}`,
+  filename: `replayed-${index}.${mime}`,
+  url: ImageMagick.read(color, 1600, 900, (image) =>
+    image.write(
+      format,
+      (data) => `data:image/${mime};base64,${Buffer.from(data).toString('base64')}`
+    )
+  ),
+}));
 const user = {
   info: {
     id: 'msg_smoke_user',
@@ -29,6 +58,7 @@ const user = {
       type: 'text',
       text: 'Verify replay checkpoint delivery.',
     },
+    ...images.slice(0, 2),
   ],
 };
 const info = {
@@ -63,7 +93,10 @@ const capture = {
     time: { created: now, updated: now },
   },
   initialMessages: [user, { info, parts: [part] }],
-  finalMessages: [user, { info: completed, parts: [{ ...part, text }] }],
+  finalMessages: [
+    { ...user, parts: [...user.parts, images[2]] },
+    { info: completed, parts: [{ ...part, text }] },
+  ],
   events: [
     {
       offsetMs: 0,
@@ -71,6 +104,7 @@ const capture = {
     },
     { offsetMs: 50, event: delta('CHECKPOINT-ONE\n\n') },
     { offsetMs: 150, event: delta('CHECKPOINT-TWO') },
+    { offsetMs: 175, event: { type: 'message.part.updated', properties: { part: images[2] } } },
     { offsetMs: 200, event: { type: 'message.updated', properties: { info: completed } } },
     { offsetMs: 250, event: { type: 'session.idle', properties: { sessionID } } },
   ],
@@ -82,7 +116,7 @@ let finished = false;
 const run = runCapture({
   capture: capturePath,
   output: runDirectory,
-  checkpoints: [0, 2, 5],
+  checkpoints: [0, 2, 6],
   'start-timeout-ms': 30_000,
   'replay-timeout-ms': 60_000,
 })
@@ -126,7 +160,7 @@ try {
     'armed editor'
   );
   await controlRequest(control, 'start');
-  for (const count of [0, 2, 5]) {
+  for (const count of [0, 2, 6]) {
     const state = await waitFor(
       () => controlRequest(control, 'status'),
       (value) => value.playbackState === 'paused',
@@ -141,6 +175,18 @@ try {
     const rendered = evidence.dom.rows.map((row) => row.text).join('\n');
     assert.equal(rendered.includes('CHECKPOINT-ONE'), count >= 2);
     assert.equal(rendered.includes('CHECKPOINT-TWO'), count >= 5);
+    const thumbnails = evidence.dom.rows.flatMap((row) => row.images ?? []);
+    assert.equal(thumbnails.length, count >= 6 ? 3 : 2);
+    assert.ok(
+      thumbnails.every(
+        (image) =>
+          image.complete &&
+          image.naturalWidth === 384 &&
+          image.naturalHeight === 216 &&
+          image.sourcePrefix.startsWith('data:image/webp;base64,')
+      ),
+      'Replay images must use real bounded WASM thumbnails, including the live base64 attachment'
+    );
     assert.ok((await readFile(snapshot.evidence.screenshot)).length > 100);
     await controlRequest(control, 'resume');
   }

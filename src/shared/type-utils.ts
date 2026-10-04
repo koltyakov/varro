@@ -37,3 +37,11 @@ export function isBoolean<T>(value: T): value is T & boolean {
 export function getString<T>(value: T): string {
   return isString(value) ? value.trim() : '';
 }
+
+export function isObject<T>(value: T): value is T & object {
+  return asRecord(value) !== null || Array.isArray(value);
+}
+
+export function isRecord<T>(value: T): value is T & UnknownRecord {
+  return asRecord(value) !== null;
+}

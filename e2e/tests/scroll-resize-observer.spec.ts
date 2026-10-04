@@ -1,7 +1,103 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry } from '../../src/webview/types';
-import { getScrollMetrics } from './helpers';
+import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+
+test('remounted Markdown tables have their final column layout at the first row measurement', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 810 });
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+  const list = page.locator('.interactive-list');
+  await expect(list).toBeVisible();
+  await expect
+    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+    .toBeLessThanOrEqual(1);
+
+  const observation = await page.evaluateHandle(() => {
+    const measure = Element.prototype.getBoundingClientRect;
+    const rows = new Map<Element, { compact: boolean; min: number; max: number }>();
+    const errors: string[] = [];
+    const onError = (event: ErrorEvent) => errors.push(event.message);
+    window.addEventListener('error', onError);
+    Element.prototype.getBoundingClientRect = function () {
+      const rect = measure.call(this);
+      const table = this.hasAttribute('data-msg-id') ? this.querySelector('table') : null;
+      if (this.isConnected && table) {
+        const compact = table.classList.contains('table-first-col-compact');
+        const previous = rows.get(this);
+        rows.set(this, {
+          compact: compact && (previous?.compact ?? true),
+          min: Math.min(previous?.min ?? rect.height, rect.height),
+          max: Math.max(previous?.max ?? rect.height, rect.height),
+        });
+      }
+      return rect;
+    };
+    return {
+      rows,
+      errors,
+      stop: () => {
+        Element.prototype.getBoundingClientRect = measure;
+        window.removeEventListener('error', onError);
+      },
+    };
+  });
+  await page.evaluate(() => {
+    // SAFETY: The isolated harness owns these history and event APIs.
+    const harness = (
+      window as Window & {
+        __varroE2E?: {
+          getSessionMessages(sessionId: string): MessageEntry[];
+          replayServerEvent(event: ServerEvent): void;
+        };
+      }
+    ).__varroE2E;
+    if (!harness) throw new Error('Missing E2E harness');
+    const sessionID = 'session-large-transcript';
+    const text = [
+      '## Table measurement regression',
+      '',
+      '| # | Stage | Description |',
+      '| --- | --- | --- |',
+      ...Array.from(
+        { length: 4 },
+        (_, index) =>
+          `| ${index + 1} | Stage ${index + 1} | ${'The description needs room to wrap beside the compact stage number. '.repeat(3)} |`
+      ),
+    ].join('\n');
+    for (const index of [228, 229, 230]) {
+      const message = harness
+        .getSessionMessages(sessionID)
+        .find((entry) => entry.info.id === `message-large-assistant-${index}`)!;
+      const part = message.parts.find((candidate) => candidate.type === 'text')!;
+      harness.replayServerEvent({
+        type: 'message.part.updated',
+        properties: { part: { ...part, type: 'text', text } },
+      });
+    }
+  });
+  await list.hover();
+  for (const delta of [-420, -420, -420, -420, -420, 420, 420, 420, 420, 420, -420, -420]) {
+    await page.mouse.wheel(0, delta);
+    await waitForAnimationFrames(page, 4);
+  }
+  await waitForAnimationFrames(page, 8);
+  const result = await observation.evaluate((state) => {
+    state.stop();
+    return { rows: [...state.rows.values()], errors: state.errors };
+  });
+  expect(result.rows.length).toBeGreaterThanOrEqual(3);
+  expect(
+    result.rows.every((row) => row.compact),
+    JSON.stringify(result.rows)
+  ).toBe(true);
+  expect(
+    result.rows.every((row) => row.max - row.min <= 1),
+    JSON.stringify(result.rows)
+  ).toBe(true);
+  expect(result.errors).toEqual([]);
+});
 
 for (const scenario of ['mixed-small-transcript', 'large-transcript']) {
   test(`streaming in ${scenario} does not resize boxes during observer delivery`, async ({

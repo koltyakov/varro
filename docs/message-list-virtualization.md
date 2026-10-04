@@ -68,6 +68,11 @@ the shared invariants below remain true.
   wrapping and can repeatedly move a row into and out of the core. The September 12 replay exposed
   alternating 1,320 px height changes from this cycle. `scroll-streaming-markdown.spec.ts` preserves
   the streamed core-boundary regression and its every-frame link-count and row-height assertions.
+- Markdown table column classes belong in the sanitized HTML before mounting. Adding compact-column
+  layout during hydration lets gesture-driven row measurement cache the taller, unclassified table.
+  The issue #36 replay repeatedly shrank a remounted row by 178 px, then unmounted it during resize
+  delivery. `scroll-resize-observer.spec.ts` checks that table rows have their final column layout at
+  every measurement and retain their height through virtual remounts.
 - A distant history anchor may extend the mounted range beyond ordinary overscan. Only the viewport,
   forced rows, and pinned anchor require full content; the intervening gap may use prefix-sized inert
   placeholders.
@@ -134,6 +139,31 @@ the shared invariants below remain true.
   prefixes. Switching states must not briefly mount both the loading label and dialog summary.
 - Asynchronous content must reserve its final layout space where practical. Images are the primary
   example: loading an image after its row remounts must not add hundreds of pixels to the row.
+- History file parts carry scoped content references. Request bounded image thumbnails only near the
+  viewport, and request the original only for an open preview or an edit draft. Single thumbnails reserve
+  a 384 px frame, capped by the available width, with the existing 16:9 aspect ratio. Their intrinsic
+  dimensions must not resize the row on arrival. Unsupported formats retain a placeholder until opened.
+  Thumbnails are generated on demand in a lazy host-side ImageMagick WASM worker, including for uncached
+  sessions created in other clients. The bounded memory cache has fixed expiry and periodic cleanup;
+  generation must not depend on cache contents. See `docs/thumbnail-distribution.md` for runtime limits,
+  lifecycle, packaging and licenses.
+- Sending attachments preserves their image slots through local-to-server acknowledgement, repeated
+  events, and overlapping history refreshes. Replacing local part IDs with deferred references must
+  neither duplicate images nor consume another pending attachment. Keep an already-painted local
+  image until its thumbnail is decoded; release that local preview on replacement or unmount.
+  `image-send-handoff.spec.ts` checks count, order, DOM identity, decoded content, and tile height every
+  frame while three pasted images are acknowledged and assistant text streams.
+- Completed reasoning and tool bodies use short history summaries. Disclosure requests own their local
+  detail data and release it on collapse or unmount; they must not replace canonical streaming parts.
+  Streaming tool snapshots and native tool events also carry bounded summaries. Drop native tool-returned
+  image bodies and redundant output aliases before webview transport. Bound cumulative pending input,
+  preserve tool status, file-change summaries, search counts, and child-session links, and fetch full
+  details only for an open disclosure or an exposed inline diff. Open disclosures coalesce stream-driven
+  refreshes to one request at a time and at most ten per second; collapsed tools make no detail requests.
+  Preserve file-change identities and counts in summaries. Inline diff preferences may request details
+  for mounted full-content rows. Cancel obsolete requests and expose retryable errors in the disclosure.
+  The current upstream message APIs still send complete message records to the extension. Apply the
+  webview payload budget after projection, retaining the separate upstream response limit.
 - A view setting that changes rendered row content must participate in height invalidation even when
   the affected row is unmounted. This includes thinking visibility, inline file previews, disclosure
   state, and any future lightweight rendering mode.
@@ -256,6 +286,10 @@ the shared invariants below remain true.
   must never interpolate to a smaller `scrollTop` and visibly reverse the gesture.
 - Width-resize anchoring is established before applying the first resize measurement. Wheel,
   keyboard, or scrollbar input publishes pending measurements and releases that resize anchor.
+- After direct movement, refine a tall-row anchor within its whole render item, ignoring both its
+  saved element and descendant recovery tag. Otherwise refinement can stay trapped in the old,
+  now-clipped block, whose wrapping shifts the next visible block during width reflow.
+  `performance.spec.ts` covers both default and main-thread-first native wheel delivery.
 - A width correction can synchronously change the virtual core and reflow a remounted row. Recheck
   the same anchor in a bounded synchronous settle before yielding, rather than exposing the first
   correction until the next animation frame.

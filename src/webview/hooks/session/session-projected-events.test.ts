@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssistantMessage, MessageEntry, Part } from '../../types';
 import { getToolFileChanges } from '../../lib/tool-file-change';
 import type { ServerEvent } from '../../../shared/protocol';
+import { StreamingToolContent } from '../../../extension/streaming-tool-content';
 
 const { upsertPart, applyMessagePartDelta } = vi.hoisted(() => ({
   upsertPart: vi.fn(),
@@ -93,6 +94,50 @@ beforeEach(() => {
 });
 
 describe('projected event routing', () => {
+  it('keeps native tool state bounded through input, progress, and completion without losing edit identity', () => {
+    const harness = createHarness();
+    const projection = new StreamingToolContent();
+    const input = {
+      patchText: `*** Begin Patch\n*** Add File: src/new.ts\n+${'code'.repeat(10000)}\n*** End Patch`,
+    };
+    for (const [name, properties] of [
+      ['input.started', { name: 'apply_patch' }],
+      ['input.delta', { delta: JSON.stringify(input) }],
+      ['input.ended', { text: JSON.stringify(input) }],
+      ['called', { input }],
+      ['progress', { content: [{ type: 'text', text: 'progress'.repeat(10000) }] }],
+      [
+        'success',
+        {
+          content: [
+            { type: 'text', text: 'done'.repeat(10000) },
+            { type: 'file', uri: `data:image/png;base64,${'IMAGE'.repeat(10000)}` },
+          ],
+        },
+      ],
+    ] as const) {
+      // SAFETY: The fixtures supply a complete native tool lifecycle with stable routing.
+      const source = {
+        type: `session.next.tool.${name}`,
+        properties: {
+          sessionID: SESSION_ID,
+          assistantMessageID: MESSAGE_ID,
+          callID: CALL_ID,
+          ...properties,
+        },
+      } as ServerEvent;
+      const projected = projection.project(source);
+      expect(harness.handle(projected.type, projected.properties!)).toBe(true);
+      expect(JSON.stringify(harness.messages).length).toBeLessThan(5000);
+    }
+    const part = currentToolPart(harness);
+    expect(part.state.status).toBe('completed');
+    expect(part.deferred).toBe(`/session/${SESSION_ID}/message/${MESSAGE_ID}/part/${CALL_ID}`);
+    expect(getToolFileChanges(part.tool, part.state)).toMatchObject([
+      { kind: 'added', path: 'src/new.ts', additions: 1 },
+    ]);
+    expect(JSON.stringify(part)).not.toContain('IMAGE');
+  });
   it('ignores events without a session id or outside the active tree', () => {
     const harness = createHarness();
     expect(harness.handle('session.next.tool.called', { callID: CALL_ID })).toBe(false);

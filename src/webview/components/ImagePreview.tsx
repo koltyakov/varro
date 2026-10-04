@@ -5,6 +5,7 @@ import { trapModalFocus } from '../lib/modal-focus';
 import { navArrowLeftIcon, navArrowRightIcon, xmarkIcon } from '../lib/ui-icons';
 import { Tooltip } from './Tooltip';
 import { UiIcon } from './UiIcon';
+import { createDeferredImage } from '../lib/deferred-content';
 
 export type PreviewImage = {
   url: string;
@@ -66,6 +67,11 @@ export function ImagePreviewOverlay(props: {
   position?: number;
   total?: number;
 }) {
+  const content = createDeferredImage(
+    () => props.image?.url ?? '',
+    false,
+    () => !!props.image
+  );
   return (
     <Portal>
       <Show when={props.image}>
@@ -100,7 +106,20 @@ export function ImagePreviewOverlay(props: {
                   class="chat-image-preview-figure"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <img src={image().url} alt={image().alt} class="chat-image-preview-img" />
+                  <img
+                    src={content.url()}
+                    alt={image().alt}
+                    class="chat-image-preview-img"
+                    decoding="async"
+                  />
+                  <Show when={content.error()}>
+                    <div role="alert">
+                      {content.error()}{' '}
+                      <button type="button" onClick={content.retry}>
+                        Retry
+                      </button>
+                    </div>
+                  </Show>
                   <Show when={props.showNavigation}>
                     <div class="chat-image-preview-nav-group">
                       <Tooltip content="Previous image">

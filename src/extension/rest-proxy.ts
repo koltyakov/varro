@@ -40,6 +40,8 @@ import { getWorkspaceProblems } from './workspace-problems';
 import type { LocalSessionSummaryData } from './local-session-summary';
 import { sessionSummary } from './session-summary';
 import { logger } from './logger';
+import { projectDeferredPart, projectPartAttachments } from './message-content';
+import { ImageThumbnails } from './image-thumbnails';
 import { ModelPricingCatalog } from './model-pricing';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
@@ -419,6 +421,7 @@ export interface RestProxyCallbacks {
 }
 
 export class RestProxy {
+  private readonly imageThumbnails = new ImageThumbnails();
   private readonly modelPricing = new ModelPricingCatalog();
   private readonly requestWorkspaceDirectory = new AsyncLocalStorage<string | undefined>();
   private sessionDirectories = new Map<string, string>();
@@ -666,6 +669,7 @@ export class RestProxy {
     if (this.disposed) return;
     this.disposed = true;
     this.cancelAllRequests('REST proxy disposed');
+    this.imageThumbnails.dispose();
   }
 
   handleRequest(payload: ApiRequestPayload, defaultWorkspaceDirectory?: string) {
@@ -846,6 +850,66 @@ export class RestProxy {
           sessionWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
           sessionWorkspaceDirectory ?? explicitWorkspaceDirectory ?? undefined
         );
+      }
+
+      const contentMatch = requestPathname.match(
+        /^\/session\/([^/]+)\/message\/([^/]+)\/part\/([^/]+)$/
+      );
+      if (method === 'GET' && contentMatch) {
+        if (this.isHiddenSession(directSessionID)) throw new Error('404 Session not found');
+        const thumbnail =
+          new URL(payload.path, 'http://localhost').searchParams.get('view') === 'thumbnail';
+        const thumbnailKey = `${this.requestWorkspaceDirectory.getStore() ?? this.getCurrentWorkspacePath()}:${requestPathname}`;
+        const cachedThumbnail = thumbnail ? this.imageThumbnails.peek(thumbnailKey) : undefined;
+        if (cachedThumbnail !== undefined) {
+          this.callbacks.postApiResponse(requestGeneration, {
+            id: payload.id,
+            data: { url: cachedThumbnail },
+          });
+          return;
+        }
+        const messagePath = `/session/${contentMatch[1]}/message/${contentMatch[2]}`;
+        const message = asRecord(
+          await this.requestServer('GET', messagePath, undefined, {
+            signal: requestSignal,
+            maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
+          })
+        );
+        const partID = decodeURIComponent(contentMatch[3]!);
+        const parts = Array.isArray(message?.parts)
+          ? message.parts.map(asRecord).filter((part): part is Record<string, unknown> => !!part)
+          : [];
+        const info = asRecord(message?.info);
+        const candidates = (info && this.callbacks.restoreStreamingText?.(info, parts)) || parts;
+        const part =
+          candidates.find((candidate) => candidate?.id === partID) ??
+          candidates
+            .flatMap((candidate) => {
+              const attachments = asRecord(candidate?.state)?.attachments;
+              return Array.isArray(attachments) ? attachments.map(asRecord) : [];
+            })
+            .find((candidate) => candidate?.id === partID);
+        if (
+          !part ||
+          part.sessionID !== directSessionID ||
+          part.messageID !== decodeURIComponent(contentMatch[2]!)
+        ) {
+          throw new Error('404 Message content not found');
+        }
+        const data = thumbnail
+          ? {
+              url:
+                part.type === 'file' && typeof part.url === 'string'
+                  ? await this.imageThumbnails.get(thumbnailKey, part.url, requestSignal)
+                  : null,
+            }
+          : projectPartAttachments(
+              projectPartFileLists(part),
+              this.requestWorkspaceDirectory.getStore() ?? this.getCurrentWorkspacePath()
+            );
+        requestSignal?.throwIfAborted();
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
       }
 
       const recycleBinRequest = this.parseRecycleBinRequest(method, payload.path);
@@ -1801,7 +1865,8 @@ export class RestProxy {
     const options: OpenCodeRequestOptions = {
       captureNextCursor: true,
       maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
-      maxProjectedResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
+      // The webview budget applies after attachment and disclosure projection below.
+      maxProjectedResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
       stripSummaryDiffs: true,
     };
     if (signal) options.signal = signal;
@@ -2558,6 +2623,9 @@ export class RestProxy {
       items: await this.filterApiResponse(method, path, response.data),
     };
     if (response.nextCursor) result.nextCursor = response.nextCursor;
+    if (Buffer.byteLength(JSON.stringify(result)) > SESSION_MESSAGE_RESPONSE_MAX_BYTES) {
+      throw new OpenCodeResponseTooLargeError(SESSION_MESSAGE_RESPONSE_MAX_BYTES);
+    }
     return result;
   }
 
@@ -3546,7 +3614,12 @@ export class RestProxy {
 
       normalized.push({
         info: projectSummaryDiffs(info),
-        parts: this.callbacks.restoreStreamingText?.(info, parts) ?? parts,
+        parts: (this.callbacks.restoreStreamingText?.(info, parts) ?? parts).map((part) =>
+          projectDeferredPart(
+            part,
+            this.requestWorkspaceDirectory.getStore() ?? this.getCurrentWorkspacePath()
+          )
+        ),
       });
     }
 

@@ -9,13 +9,13 @@ import {
   MarkdownRenderer,
 } from '../components/MarkdownRenderer';
 import { setState } from '../lib/state';
-import { loadCodeHighlighter } from '../lib/code-highlighter';
+import { installHighlightWorker } from '../lib/highlight-worker.test-support';
 import { expectCachedCallBudget } from './harness';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
-beforeAll(() => loadCodeHighlighter());
+beforeAll(installHighlightWorker);
 
 async function waitForAnimationFrame() {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -84,7 +84,7 @@ describe('MarkdownRenderer perf guards', () => {
         }),
       container!
     );
-    await waitForAnimationFrame();
+    await vi.waitFor(() => expect(container?.querySelector('.hljs-keyword')).not.toBeNull());
 
     expect(highlightSpy).toHaveBeenCalledTimes(1);
 

@@ -409,7 +409,8 @@ export function toolOutputToString<T, U>(content: T, structured: U): string {
         const record = asRecord(item);
         if (!record) return '';
         if (record.type === 'text' && isString(record.text)) return record.text;
-        if (record.type === 'file' && isString(record.uri)) return record.uri;
+        if (record.type === 'file' && isString(record.uri) && !record.uri.startsWith('data:'))
+          return record.uri;
         return '';
       })
       .filter(Boolean)

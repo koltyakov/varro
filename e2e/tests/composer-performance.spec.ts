@@ -9,6 +9,8 @@ for (const count of [20, 10_000]) {
     page,
   }, testInfo) => {
     test.setTimeout(90_000);
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
     await page.setViewportSize({ width: 650, height: 900 });
     const now = Date.now() - count * 1_000;
     const session: Session = {
@@ -69,23 +71,25 @@ for (const count of [20, 10_000]) {
       { session, initialMessages: messages, events: [] }
     );
     await page.goto(`/e2e/harness/index.html?scenario=session-playback&messagePageSize=${count}`);
+    // Loading this all-at-once history fixture can exceed the default assertion timeout on CI.
+    // Give setup its own budget; input-to-frame latency is measured separately below.
     await expect
-      .poll(() =>
-        page.evaluate(async () => {
-          const path = '/src/webview/lib/state.ts';
-          // SAFETY: This read-only import is served by the isolated Vite E2E harness.
-          const { state } = (await import(path)) as {
-            state: { messages: unknown[]; messagesLoading: boolean };
-          };
-          return state.messagesLoading ? 0 : state.messages.length;
-        })
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const path = '/src/webview/lib/state.ts';
+            // SAFETY: This read-only import is served by the isolated Vite E2E harness.
+            const { state } = (await import(path)) as {
+              state: { messages: unknown[]; messagesLoading: boolean };
+            };
+            return { count: state.messages.length, loading: state.messagesLoading };
+          }),
+        { timeout: 60_000, message: `Load all ${count} messages before measuring typing latency` }
       )
-      .toBe(count);
+      .toEqual({ count, loading: false });
     const editor = page.locator('[role="textbox"][aria-multiline="true"]').first();
     await expect(editor).toBeVisible();
     await page.waitForTimeout(500);
-    const errors: string[] = [];
-    page.on('pageerror', (error) => errors.push(error.message));
     const measurements = [];
 
     for (const streaming of [false, true]) {
@@ -140,9 +144,9 @@ for (const count of [20, 10_000]) {
       await editor.pressSequentially(text, { delay: 12 });
       await expect(editor).toHaveText(text);
       await page.waitForTimeout(100);
-      const samples = await recorder.evaluate((recorder) => {
-        recorder.stop();
-        return recorder.samples;
+      const samples = await recorder.evaluate((inputRecorder) => {
+        inputRecorder.stop();
+        return inputRecorder.samples;
       });
       await recorder.dispose();
       await page.evaluate(() => window.dispatchEvent(new Event('typing-test-stop')));

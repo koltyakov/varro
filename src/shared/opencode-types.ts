@@ -1,5 +1,6 @@
 import type { SessionWorkspaceScope } from './protocol';
 import type { UnknownRecord } from './type-utils';
+import type { FileChange } from './tool-file-change';
 
 export type OutputFormatText = {
   type: 'text';
@@ -183,6 +184,7 @@ export type TextPart = {
 };
 
 export type ReasoningPart = {
+  deferred?: string;
   id: string;
   sessionID: string;
   messageID: string;
@@ -216,12 +218,14 @@ export type FilePart = {
 };
 
 export type ToolStatePending = {
+  deferredFiles?: FileChange[];
   status: 'pending';
   input: UnknownRecord;
   raw: string;
 };
 
 export type ToolStateRunning = {
+  deferredFiles?: FileChange[];
   status: 'running';
   input: UnknownRecord;
   title?: string;
@@ -230,6 +234,7 @@ export type ToolStateRunning = {
 };
 
 export type ToolStateCompleted = {
+  deferredFiles?: FileChange[];
   status: 'completed';
   input: UnknownRecord;
   output: string;
@@ -240,6 +245,7 @@ export type ToolStateCompleted = {
 };
 
 export type ToolStateError = {
+  deferredFiles?: FileChange[];
   status: 'error';
   input: UnknownRecord;
   error: string;
@@ -250,6 +256,7 @@ export type ToolStateError = {
 export type ToolState = ToolStatePending | ToolStateRunning | ToolStateCompleted | ToolStateError;
 
 export type ToolPart = {
+  deferred?: string;
   id: string;
   sessionID: string;
   messageID: string;
@@ -832,6 +839,11 @@ export type ProviderAuthAuthorization = {
   attemptID?: string;
 };
 
+type DeferredToolEventDetails = {
+  deferred?: string | true;
+  deferredFiles?: FileChange[];
+};
+
 export type ServerEventPropertiesByName = {
   'server.connected': ServerLifecycleEventProperties;
   'server.heartbeat': ServerLifecycleEventProperties;
@@ -1026,7 +1038,7 @@ export type ServerEventPropertiesByName = {
     callID?: string;
     name?: string;
   };
-  'session.next.tool.input.delta': {
+  'session.next.tool.input.delta': DeferredToolEventDetails & {
     timestamp?: number;
     sessionID: string;
     assistantMessageID?: string;
@@ -1034,14 +1046,14 @@ export type ServerEventPropertiesByName = {
     delta?: string;
     input?: string;
   };
-  'session.next.tool.input.ended': {
+  'session.next.tool.input.ended': DeferredToolEventDetails & {
     timestamp?: number;
     sessionID: string;
     assistantMessageID?: string;
     callID?: string;
     text?: string;
   };
-  'session.next.tool.called': {
+  'session.next.tool.called': DeferredToolEventDetails & {
     timestamp?: number;
     sessionID: string;
     assistantMessageID?: string;
@@ -1051,7 +1063,7 @@ export type ServerEventPropertiesByName = {
     input?: UnknownRecord;
     provider?: SessionNextProviderResult;
   };
-  'session.next.tool.progress': {
+  'session.next.tool.progress': DeferredToolEventDetails & {
     timestamp?: number;
     sessionID: string;
     assistantMessageID?: string;
@@ -1060,7 +1072,7 @@ export type ServerEventPropertiesByName = {
     structured?: UnknownRecord;
     content?: ToolOutputContent[];
   };
-  'session.next.tool.success': {
+  'session.next.tool.success': DeferredToolEventDetails & {
     timestamp?: number;
     sessionID: string;
     assistantMessageID?: string;
@@ -1072,7 +1084,7 @@ export type ServerEventPropertiesByName = {
     result?: unknown;
     provider?: SessionNextProviderResult;
   };
-  'session.next.tool.failed': {
+  'session.next.tool.failed': DeferredToolEventDetails & {
     timestamp?: number;
     sessionID: string;
     assistantMessageID?: string;

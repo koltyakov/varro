@@ -3740,9 +3740,13 @@ export function MessageList() {
       containerRect.bottom - 1,
       containerRect.top + Math.max(0, preferredViewportOffset)
     );
-    const renderItem = getMountedScrollAnchorElement(
-      anchor.element ? { ...anchor, element: undefined } : anchor
-    );
+    // Refine within the whole render item. Keeping the descendant recovery tag would
+    // resolve the old block again and prevent advancing after it scrolls out of view.
+    const renderItem = getMountedScrollAnchorElement({
+      ...anchor,
+      element: undefined,
+      elementTag: undefined,
+    });
     if (
       !renderItem ||
       (!options?.includeCompact &&

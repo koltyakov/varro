@@ -1,8 +1,11 @@
 // @ts-check
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { createRequire, isBuiltin } from 'node:module';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import vm from 'node:vm';
+import { Worker } from 'node:worker_threads';
 
 export function verifyExtensionBundleMetafile(metafile) {
   if (!metafile?.outputs || Object.keys(metafile.outputs).length === 0) {
@@ -54,5 +57,64 @@ export async function smokeLoadExtensionBundle(bundlePath) {
     typeof module.exports.deactivate !== 'function'
   ) {
     throw new Error('Extension bundle smoke load did not expose activation entry points');
+  }
+}
+
+/** Run against staged assets too: a resolvable JS bundle alone does not prove WASM packaging. */
+export async function smokeThumbnailWorker(extensionDirectory) {
+  const worker = new Worker(join(extensionDirectory, 'thumbnail-worker.js'));
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('Packaged thumbnail worker timed out')),
+        15_000
+      );
+      worker.once('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      worker.once('exit', (code) => {
+        clearTimeout(timer);
+        reject(new Error(`Packaged thumbnail worker exited before responding (${code})`));
+      });
+      worker.on('message', (response) => {
+        if (!('id' in response)) return;
+        clearTimeout(timer);
+        const bytes = response.bytes && Buffer.from(response.bytes);
+        if (
+          response.id !== 1 ||
+          !bytes ||
+          bytes.length > 256 * 1024 ||
+          bytes.toString('ascii', 0, 4) !== 'RIFF' ||
+          bytes.toString('ascii', 8, 12) !== 'WEBP'
+        ) {
+          reject(new Error('Packaged thumbnail worker did not generate a WebP thumbnail'));
+        } else resolve(undefined);
+      });
+      // A complete 1x1 GIF, requiring a real decode and WebP encode with an empty cache.
+      const bytes = Uint8Array.from(
+        Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')
+      );
+      worker.postMessage({ id: 1, bytes, format: 'gif' }, [bytes.buffer]);
+    });
+  } finally {
+    await worker.terminate();
+  }
+  const directory = await mkdtemp(join(tmpdir(), 'varro-thumbnail-smoke-'));
+  const servicePath = join(extensionDirectory, 'thumbnail-service.js');
+  const { SharedThumbnailClient } = createRequire(servicePath)(servicePath);
+  const client = new SharedThumbnailClient({ servicePath, stateDirectory: directory, idleMs: 100 });
+  try {
+    const result = await client.convert(
+      'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+      'gif',
+      new AbortController().signal
+    );
+    if (!result?.startsWith('data:image/webp;base64,'))
+      throw new Error('Packaged shared service did not generate a thumbnail');
+  } finally {
+    client.dispose();
+    await sleep(250);
+    await rm(directory, { recursive: true, force: true });
   }
 }

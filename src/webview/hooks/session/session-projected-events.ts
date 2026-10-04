@@ -1,5 +1,6 @@
 import { sessionStore } from '../../lib/stores/session-store';
 import type { MessageEntry, Part } from '../../types';
+import type { FileChange } from '../../lib/tool-file-change';
 import {
   asToolInput,
   asToolMetadata,
@@ -197,8 +198,26 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
       getEventString(props, 'name') || getEventString(props, 'tool') || existingTool?.tool || '';
     const inputText = getEventString(props, 'text') || getEventString(props, 'input') || '';
     const executionKey = `${sessionId}\u0000${callID}`;
+    const deferred = isString(props.deferred)
+      ? props.deferred
+      : props.deferred === true
+        ? `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(messageID)}/part/${encodeURIComponent(callID)}`
+        : existingTool?.deferred;
+    // SAFETY: The host supplies file-change summaries through the typed tool event contract.
+    const deferredFiles = Array.isArray(props.deferredFiles)
+      ? (props.deferredFiles as FileChange[])
+      : existingTool?.state.deferredFiles;
 
     if (eventName === 'session.next.tool.input.delta') {
+      if (deferred && existingTool?.state.status === 'pending') {
+        pendingToolInput.delete(executionKey);
+        sessionStore.upsertPart({
+          ...existingTool,
+          deferred,
+          state: { ...existingTool.state, raw: '' },
+        });
+        return true;
+      }
       const delta = getEventString(props, 'delta') || inputText;
       if (!delta || !existingTool || existingTool.state.status !== 'pending') return true;
       const existingRaw = existingTool.state.raw ?? '';
@@ -265,7 +284,13 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
         type: 'tool',
         callID,
         tool: toolName,
-        state: { status: 'pending', input: parseToolInput(inputText), raw: inputText },
+        deferred,
+        state: {
+          status: 'pending',
+          input: parseToolInput(inputText),
+          raw: deferred ? '' : inputText,
+          deferredFiles,
+        },
       });
       return true;
     }
@@ -288,10 +313,12 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
         type: 'tool',
         callID,
         tool: toolName,
+        deferred,
         state: {
           status: 'running',
           input,
-          title: toolName,
+          title: getEventString(props, 'title') || toolName,
+          deferredFiles,
           metadata: provider,
           time: { start: timestamp },
         },
@@ -305,8 +332,10 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
       const structured = asToolMetadata(props.structured);
       sessionStore.upsertPart({
         ...existingTool,
+        deferred,
         state: {
           ...existingTool.state,
+          deferredFiles,
           metadata: {
             ...runningToolProviders.get(executionKey),
             ...structured,
@@ -330,11 +359,13 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
         type: 'tool',
         callID,
         tool: toolName,
+        deferred,
         state: {
           status: 'completed',
           input,
           output: toolOutputToString(props.content, props.structured),
           title: toolName,
+          deferredFiles,
           metadata: {
             ...asToolMetadata(props.structured),
             provider: props.provider,
@@ -358,8 +389,10 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
         type: 'tool',
         callID,
         tool: toolName,
+        deferred,
         state: {
           status: 'error',
+          deferredFiles,
           input,
           error: getToolErrorMessage(props.error),
           metadata: { provider: props.provider, result: props.result },

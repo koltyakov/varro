@@ -5,6 +5,7 @@ import {
   createResource,
   createSignal,
   onCleanup,
+  on,
   untrack,
 } from 'solid-js';
 import {
@@ -25,6 +26,7 @@ import {
 } from '../lib/assistant-activity';
 import { client } from '../lib/client';
 import { postMessage } from '../lib/bridge';
+import { deferredFilePath, loadFileContent } from '../lib/deferred-content';
 import { editingMessageId, startEditingMessage } from '../lib/message-edit-state';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
@@ -598,6 +600,21 @@ export function Message(props: {
     !isManagedSubagentSession() &&
     !isActiveSessionWorking() &&
     hasUserMessageEditableContent(normalizedParts());
+  const [editContentLoading, setEditContentLoading] = createSignal(false);
+  const [editContentError, setEditContentError] = createSignal('');
+  let editContentController: AbortController | undefined;
+  createEffect(
+    on(
+      () => [props.info.id, state.activeSessionId, editingMessageId()],
+      () => {
+        onCleanup(() => {
+          editContentController?.abort();
+          editContentController = undefined;
+          setEditContentLoading(false);
+        });
+      }
+    )
+  );
   const handleUserCardClick = (event: MouseEvent) => {
     if (props.info.role !== 'user' || !hasUserContent() || isPlanImplementation()) return;
     const target = event.target;
@@ -621,13 +638,53 @@ export function Message(props: {
     }
 
     if (!canEditUserMessage() || isEditingUserMessage()) return;
-    startEditingMessage(
-      props.info.id,
-      props.info.sessionID,
-      getUserMessageEditText(normalizedParts()),
-      getUserMessageEditContext(normalizedParts()),
-      props.info.model
-    );
+    const info = props.info;
+    const beginEdit = (parts: Part[]) =>
+      startEditingMessage(
+        info.id,
+        info.sessionID,
+        getUserMessageEditText(parts),
+        getUserMessageEditContext(parts),
+        info.model
+      );
+    const parts = normalizedParts();
+    if (!parts.some((part) => part.type === 'file' && deferredFilePath(part.url))) {
+      beginEdit(parts);
+      return;
+    }
+    if (editContentController) return;
+    const controller = new AbortController();
+    editContentController = controller;
+    setEditContentError('');
+    setEditContentLoading(true);
+    void (async () => {
+      const resolved: Part[] = [];
+      for (const part of parts) {
+        controller.signal.throwIfAborted();
+        resolved.push(
+          part.type === 'file'
+            ? { ...part, url: await loadFileContent(part.url, controller.signal) }
+            : part
+        );
+      }
+      if (
+        !controller.signal.aborted &&
+        props.info.id === info.id &&
+        canEditUserMessage() &&
+        !isEditingUserMessage()
+      )
+        beginEdit(resolved);
+    })()
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection values have no typed contract.
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          setEditContentError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (editContentController !== controller) return;
+        editContentController = undefined;
+        setEditContentLoading(false);
+      });
   };
 
   return (
@@ -653,6 +710,12 @@ export function Message(props: {
           }}
         >
           <Show when={!isUser() || hasUserContent()}>
+            <Show when={editContentLoading()}>
+              <div role="status">Loading attachments for editing…</div>
+            </Show>
+            <Show when={editContentError()}>
+              <div role="alert">{editContentError()} Click the message to retry.</div>
+            </Show>
             <div
               class={`value chat-turn-content ${
                 isUser()

@@ -43,6 +43,7 @@ import {
   scopeOpenCodeRequest,
 } from './rest-proxy';
 import type { RestProxyCallbacks } from './rest-proxy';
+import { SharedThumbnailClient } from './image-thumbnail-shared-client';
 import * as workspaceProblems from './workspace-problems';
 import { OpenCodeResponseTooLargeError } from './open-code-transport';
 import { HiddenSessionManager } from './hidden-session-manager';
@@ -4718,7 +4719,7 @@ describe('RestProxy handleRequest', () => {
       withSignal({
         captureNextCursor: true,
         maxResponseBytes: 256 * 1024 * 1024,
-        maxProjectedResponseBytes: 16 * 1024 * 1024,
+        maxProjectedResponseBytes: 256 * 1024 * 1024,
         stripSummaryDiffs: true,
       })
     );
@@ -4726,6 +4727,97 @@ describe('RestProxy handleRequest', () => {
       id: 117,
       data: { items: messages, nextCursor: 'cursor-2' },
     });
+  });
+
+  it('loads original attachment content only through the scoped detail request', async () => {
+    const part = {
+      id: 'image-1',
+      sessionID: 's1',
+      messageID: 'm1',
+      type: 'file',
+      mime: 'image/png',
+      filename: 'shot.png',
+      url: `data:image/png;base64,${'a'.repeat(100_000)}`,
+    };
+    const message = { ...makeSessionMessage('m1', 'image-1'), parts: [part] };
+    const serverRequest = vi.fn(async (_method: string, path: string) =>
+      path.includes('/message/m1') ? message : { data: [message] }
+    );
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    await proxy.handleRequest(makePayload(191, 'GET', '/session/s1/message?limit=200'));
+    const response = vi.mocked(callbacks.postApiResponse).mock.calls.at(-1)?.[1];
+    expect(JSON.stringify(response).length).toBeLessThan(1000);
+    expect(JSON.stringify(response)).toContain('varro-content:');
+    expect(serverRequest).toHaveBeenCalledTimes(1);
+
+    await proxy.handleRequest(makePayload(192, 'GET', '/session/s1/message/m1/part/image-1'));
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 192, data: part });
+    expect(serverRequest).toHaveBeenLastCalledWith(
+      'GET',
+      '/session/s1/message/m1',
+      undefined,
+      withSignal({ maxResponseBytes: 256 * 1024 * 1024 })
+    );
+    await proxy.handleRequest(makePayload(193, 'GET', '/session/s1/message/m1/part/missing'));
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 193,
+      error: '404 Message content not found',
+    });
+  });
+
+  it('generates uncached external-session thumbnails and sends originals only on detail requests', async () => {
+    const part = {
+      id: 'image-1',
+      sessionID: 's1',
+      messageID: 'm1',
+      type: 'file',
+      mime: 'image/png',
+      url: `data:image/png;base64,${Buffer.from('original image bytes').toString('base64')}`,
+    };
+    const message = { ...makeSessionMessage('m1', 'image-1'), parts: [part] };
+    const serverRequest = vi.fn(async () => message);
+    const thumbnail = 'data:image/webp;base64,dGh1bWJuYWls';
+    const convert = vi
+      .spyOn(SharedThumbnailClient.prototype, 'convert')
+      .mockResolvedValue(thumbnail);
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    try {
+      const path = '/session/s1/message/m1/part/image-1';
+      await proxy.handleRequest(makePayload(194, 'GET', `${path}?view=thumbnail`));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 194,
+        data: { url: thumbnail },
+      });
+      expect(convert).toHaveBeenCalledWith(
+        Buffer.from('original image bytes').toString('base64'),
+        'png',
+        expect.any(AbortSignal)
+      );
+      expect(serverRequest).toHaveBeenCalledTimes(1);
+      await proxy.handleRequest(makePayload(195, 'GET', `${path}?view=thumbnail`));
+      expect(serverRequest).toHaveBeenCalledTimes(1);
+      expect(convert).toHaveBeenCalledTimes(1);
+      await proxy.handleRequest(makePayload(196, 'GET', path));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 196, data: part });
+      expect(serverRequest).toHaveBeenCalledTimes(2);
+    } finally {
+      proxy.dispose();
+      convert.mockRestore();
+    }
+  });
+
+  it('applies the webview size limit after removing heavy attachment content', async () => {
+    const url = `data:image/png;base64,${'a'.repeat(17 * 1024 * 1024)}`;
+    const message = {
+      ...makeSessionMessage('m1', 'p1'),
+      parts: [{ id: 'p1', messageID: 'm1', sessionID: 's1', type: 'file', mime: 'image/png', url }],
+    };
+    const items = await requestSanitizedMessagePage([message]);
+    expect(JSON.stringify(items).length).toBeLessThan(1000);
   });
 
   it('retries oversized message pages without tool attachments', async () => {
@@ -4748,7 +4840,7 @@ describe('RestProxy handleRequest', () => {
       withSignal({
         captureNextCursor: true,
         maxResponseBytes: 256 * 1024 * 1024,
-        maxProjectedResponseBytes: 16 * 1024 * 1024,
+        maxProjectedResponseBytes: 256 * 1024 * 1024,
         stripSummaryDiffs: true,
         stripToolAttachments: true,
       })
@@ -4780,7 +4872,7 @@ describe('RestProxy handleRequest', () => {
       withSignal({
         captureNextCursor: true,
         maxResponseBytes: 256 * 1024 * 1024,
-        maxProjectedResponseBytes: 16 * 1024 * 1024,
+        maxProjectedResponseBytes: 256 * 1024 * 1024,
         stripSummaryDiffs: true,
         stripToolAttachments: true,
       })
