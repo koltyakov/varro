@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type -- VS Code and OpenCode boundary values are validated before provider actions. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Provider responses are parsed before command-specific use. */
 import * as vscode from 'vscode';
+import { basename, join } from 'node:path';
 import { replacesOpenCodeBinary } from '../shared/opencode-install';
 import { MAX_NATIVE_PDF_TOTAL_BYTES } from '../shared/native-pdf';
 import {
@@ -85,6 +86,10 @@ const UNSEQUENCED_TRANSCRIPT_DELTA_EVENT_TYPES = new Set<ServerEvent['type']>([
   'session.next.compaction.delta',
 ]);
 import { AutoApproveJudge } from './auto-approve-judge';
+import { AttentionNotifications } from './attention-notifications';
+import { NativeNotifications } from './native-notifications';
+import { MacOSTray, projectTraySessions } from './macos-tray';
+import type { TrayProject, TraySession } from './macos-tray';
 import { DecisionProviders } from './decision-providers';
 import { JevClient, JevDecisions } from './jev-decisions';
 import { CommitMessageService } from './commit-message-service';
@@ -180,6 +185,7 @@ interface WebviewEndpoint {
   workspacePath: string | null;
   siblingAlertsKey: string;
   ready: boolean;
+  focused: boolean;
 }
 
 interface EditorEndpoint extends WebviewEndpoint {
@@ -232,6 +238,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private activeChatModel: ChatModelSelection | null = null;
   private readonly fileSearch: FileSearchService;
   private readonly sessionState: SessionStateManager;
+  private readonly attentionNotifications: AttentionNotifications;
+  private readonly macOSTray: MacOSTray | undefined;
+  private readonly notificationUriHandler: vscode.Disposable;
+  private nativeNotificationErrorShown = false;
   private readonly sessionTrash: SessionTrashManager;
   private readonly pinnedSessions: PinnedSessionManager;
   private readonly queuedMessages: QueuedMessageStore;
@@ -340,7 +350,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly extensionId: string,
     private readonly simulateNoProviders = false,
     providerSignatureFileSystem: ProviderSignatureFileSystem = nodeProviderSignatureFileSystem,
-    secrets?: vscode.SecretStorage
+    secrets?: vscode.SecretStorage,
+    globalStorageUri?: vscode.Uri
   ) {
     this.contextProvider = contextProvider;
     const extensionPackageJson: unknown = vscode.extensions.getExtension(extensionId)?.packageJSON;
@@ -399,7 +410,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionState = new SessionStateManager(
       persistence,
       {
-        onStatusChange: () => this.updateStatusBarItem(),
+        onStatusChange: () => {
+          this.updateStatusBarItem();
+          this.attentionNotifications?.update();
+        },
+        onSessionCompleted: (sessionID, kind) =>
+          this.attentionNotifications.complete(sessionID, kind),
         onSessionMetadata: (session) => {
           if (typeof session.id !== 'string' || this.permissionModeQueues.has(session.id)) return;
           if (this.sessionPermissionModes.restoreSessionMetadata(session))
@@ -421,6 +437,106 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           ) !== false && !this.isAnyChatVisible(),
       }
     );
+    this.attentionNotifications = new AttentionNotifications(
+      {
+        getPending: () => this.sessionState.pendingForUser,
+        completionRevisionFor: (sessionID) => {
+          if (
+            this.sessionState.busy.has(sessionID) ||
+            this.sessionState.failed.has(sessionID) ||
+            this.sessionState.rootSessionIdFor(sessionID) !== sessionID ||
+            [...this.sessionState.pending.values()].some(
+              (request) => this.sessionState.rootSessionIdFor(request.sessionID) === sessionID
+            )
+          )
+            return undefined;
+          // Unread acknowledgements from a visible webview must not cancel a background alert.
+          return this.sessionState.busyEvidenceRevisionFor(sessionID);
+        },
+        getSettings: () => {
+          const config = vscode.workspace.getConfiguration('varro.notifications');
+          const configuredSound = config.get<unknown>('sound');
+          const sound = asRecord(configuredSound);
+          const legacyEnabled = configuredSound === true;
+          return {
+            native: config.get<boolean>('native', false),
+            sound: {
+              permission: legacyEnabled || sound?.permission === true,
+              question: legacyEnabled || sound?.question === true,
+              completed: legacyEnabled || sound?.completed === true,
+              'plan-ready': legacyEnabled || sound?.planReady === true,
+            },
+          };
+        },
+        isFocused: () => vscode.window.state.focused,
+        isInScope: (sessionID) => {
+          const rootID = this.sessionState.rootSessionIdFor(sessionID);
+          return (
+            !vscode.env.remoteName &&
+            !this.sessionTrash.isHidden(sessionID) &&
+            !this.sessionTrash.isHidden(rootID) &&
+            !this.hiddenSessions.isHidden(sessionID) &&
+            !this.hiddenSessions.isHidden(rootID) &&
+            this.sessionState.getSessionWorkspaceMatch(
+              sessionID,
+              this.contextProvider.context.workspacePath
+            ) !== false
+          );
+        },
+        titleFor: (sessionID) => this.sessionState.titleFor(sessionID),
+        projectNameFor: (sessionID) => {
+          const directory =
+            this.sessionState.directoryFor(sessionID) ?? this.contextProvider.context.workspacePath;
+          if (!directory) return undefined;
+          const root = this.contextProvider.getOpenWorkspaceRoot(directory) ?? directory;
+          return (
+            this.contextProvider.context.workspaceFolders?.find((folder) => folder.path === root)
+              ?.name ?? basename(root)
+          );
+        },
+        reportError: (channel, error) => {
+          logger.warn(`Varro ${channel} notification failed`, error);
+          if (channel !== 'native' || this.nativeNotificationErrorShown) return;
+          this.nativeNotificationErrorShown = true;
+          void vscode.window
+            .showWarningMessage(
+              `Varro could not show a system notification: ${error.message}`,
+              'Show Output'
+            )
+            .then((action) => {
+              if (action === 'Show Output') logger.show();
+            });
+        },
+      },
+      new NativeNotifications(
+        join(this.extensionUri.fsPath, 'dist', 'extension', 'notification.wav'),
+        vscode.env.appName === 'VSCodium'
+          ? 'VSCodium.VSCodium'
+          : vscode.env.appName?.includes('Insiders')
+            ? 'Microsoft.VisualStudioCode.Insiders'
+            : 'Microsoft.VisualStudioCode',
+        undefined,
+        undefined,
+        globalStorageUri?.fsPath,
+        () => this.notificationWindowUrl()
+      )
+    );
+    this.notificationUriHandler = vscode.window.registerUriHandler({
+      handleUri: (uri) => this.openNotificationUri(uri),
+    });
+    if (
+      process.platform === 'darwin' &&
+      !vscode.env.remoteName &&
+      !process.env.VARRO_TEST_STATE_ROOT &&
+      !process.env.VITEST
+    ) {
+      this.macOSTray = new MacOSTray(
+        () => this.traySessions(),
+        undefined,
+        () => this.serverEventBridge.getStatus().state === 'running',
+        () => this.trayProjects()
+      );
+    }
     for (const [sessionId, agent] of Object.entries(this.sessionPlanState.listAgents())) {
       this.sessionState.setSessionAgent(sessionId, agent);
     }
@@ -514,8 +630,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     this.windowStateDisposable = vscode.window.onDidChangeWindowState(() => {
       this.updateStatusBarItem();
+      this.attentionNotifications.update();
     });
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('varro.notifications')) this.attentionNotifications.update();
       // VS Code can announce the theme kind before it updates the configured theme name.
       // Also refresh the per-view counterpart after the name changes, including same-kind switches.
       if (
@@ -906,11 +1024,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         setActiveChatModel: (model) => {
           if (webviewContext.surface === 'sidebar') this.activeChatModel = model;
         },
-        acknowledgeSessionSeen: (sessionId) =>
-          this.sessionState.acknowledgeCompletedSession(sessionId),
-        updateSessionReadState: (sessionId, seenAt) => this.sessionReadState.set(sessionId, seenAt),
+        acknowledgeSessionSeen: (sessionId) => {
+          // Legacy seen events have no turn timestamp and may arrive after a newer completion.
+          // Only acknowledge the persisted read marker, never whichever turn is current now.
+          const seenAt = this.sessionReadState.list()[sessionId];
+          if (seenAt !== undefined)
+            this.sessionState.acknowledgeCompletedSession(sessionId, seenAt);
+        },
+        updateSessionReadState: async (sessionId, seenAt) => {
+          this.sessionState.acknowledgeCompletedSession(sessionId, seenAt);
+          this.sessionState.acknowledgePlanSession(sessionId, seenAt);
+          await this.sessionReadState.set(sessionId, seenAt);
+          this.macOSTray?.update();
+        },
         setWebviewFocus: (focused) => {
           if (focused) this.lastFocusedContextViewId = webviewContext.viewId;
+          if (endpointRef.endpoint) endpointRef.endpoint.focused = focused;
+          if (focused) {
+            for (const endpoint of this.endpoints) {
+              if (endpoint !== endpointRef.endpoint) endpoint.focused = false;
+            }
+          }
+          this.attentionNotifications.update();
         },
         revealPermission: (permissionId) => this.revealPermission(permissionId),
         contextFilesState,
@@ -1194,6 +1329,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         updateDraftImages: ({ images }) => this.draftImages.update(images, webviewContext.viewId),
         setMermaidPreviewOpen: (open) => this.setMermaidPreviewOpen(open),
         setActiveRoute: (sessionId) => {
+          this.macOSTray?.update();
           const endpoint = endpointRef.endpoint;
           if (!endpoint || sessionId === undefined) return;
           if (endpoint.surface === 'editor') {
@@ -1219,6 +1355,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                   this.sessionState.directoryFor(sessionId) ?? endpoint.workspacePath ?? undefined,
               }
             : { type: 'new-session' };
+          this.attentionNotifications.update();
           this.updateStatusBarItem();
         },
       })
@@ -1236,6 +1373,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       workspacePath: initialWorkspacePath,
       siblingAlertsKey: '',
       ready: false,
+      focused: false,
     };
     endpointRef.endpoint = endpoint;
     this.endpoints.add(endpoint);
@@ -1256,6 +1394,117 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = '<p>Failed to load Varro webview. Please reload.</p>';
       }
     });
+  }
+
+  private async notificationWindowUrl(): Promise<string> {
+    return this.projectWindowUrl(this.contextProvider.context.workspacePath ?? undefined);
+  }
+
+  private traySessions(): TraySession[] {
+    return projectTraySessions({
+      state: this.sessionState,
+      serverIdentity: this.server.url,
+      readState: this.sessionReadState.list(),
+      // A restored webview can know a turn is running before the host sees a busy SSE event.
+      // Use the same working indicator as its Stop button, including between-step settling.
+      runningSessionIDs: [...this.endpoints].flatMap((endpoint) =>
+        endpoint.ready &&
+        endpoint.route.type === 'session' &&
+        endpoint.webviewSession.isActiveSessionWorking
+          ? [endpoint.route.sessionId]
+          : []
+      ),
+      includes: (sessionID) => {
+        const directory = this.sessionState.directoryFor(sessionID);
+        return (
+          Boolean(directory && this.contextProvider.getOpenWorkspaceRoot(directory)) &&
+          !this.sessionTrash.isHidden(sessionID) &&
+          !this.hiddenSessions.isHidden(sessionID)
+        );
+      },
+      projectFor: (sessionID) => {
+        const directory =
+          this.sessionState.directoryFor(sessionID) ?? this.contextProvider.context.workspacePath;
+        const root = directory
+          ? (this.contextProvider.getOpenWorkspaceRoot(directory) ?? directory)
+          : '';
+        return this.trayProject(root);
+      },
+    });
+  }
+
+  private trayProject(root: string): TrayProject {
+    return {
+      id: normalizeWorkspaceIdentity(root) ?? root,
+      name: (
+        vscode.workspace.workspaceFolders?.find((folder) => folder.uri.fsPath === root)?.name ??
+        basename(root)
+      ).slice(0, 180),
+      url: this.projectWindowUrl(root),
+    };
+  }
+
+  private trayProjects(): TrayProject[] {
+    // The editor owns the project catalog, independently of chat context and backend readiness.
+    const roots = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
+    return [...new Set(roots)]
+      .map((root) => this.trayProject(root))
+      .filter((project) => Boolean(project.url));
+  }
+
+  private projectWindowUrl(directory?: string): string {
+    const workspace = vscode.workspace.workspaceFile;
+    // A saved multi-root workspace identifies its existing window; one of its folders may not.
+    const target =
+      workspace?.scheme === 'file' ? workspace : directory ? vscode.Uri.file(directory) : undefined;
+    if (!target) return '';
+    // The built-in file route finds the project window without activating an extension URI handler.
+    return vscode.Uri.from({
+      scheme: vscode.env.uriScheme,
+      authority: 'file',
+      path: target.path,
+    }).toString();
+  }
+
+  private async openNotificationUri(uri: vscode.Uri): Promise<void> {
+    if (this.disposing || uri.authority !== this.extensionId || uri.path !== '/notification')
+      return;
+    const query = new URLSearchParams(uri.query);
+    const sessionID = query.get('session');
+    const rootID =
+      query.get('root') || (sessionID ? this.sessionState.rootSessionIdFor(sessionID) : '');
+    const directory = query.get('directory') || undefined;
+    if (
+      !sessionID ||
+      sessionID.length > 256 ||
+      rootID.length > 256 ||
+      /\p{Cc}/u.test(sessionID + rootID) ||
+      (directory && (directory.length > 4096 || /\p{Cc}/u.test(directory)))
+    )
+      return;
+    try {
+      if (directory && !this.contextProvider.getOpenWorkspaceRoot(directory)) {
+        throw new Error('The chat workspace folder is not open in this window.');
+      }
+      const existing = this.editorPanels.get(this.sessionEditorKey(rootID, directory));
+      if (existing) {
+        await this.openSessionInEditor(
+          sessionID,
+          this.sessionState.titleFor(sessionID),
+          undefined,
+          rootID,
+          directory
+        );
+      } else {
+        await this.openSessionInSidebar(sessionID, directory);
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn('Could not open notification chat', error);
+      void vscode.window.showWarningMessage(
+        `Varro could not open the notification chat: ${message}`
+      );
+    }
   }
 
   async openSessionInEditor(
@@ -1522,6 +1771,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     endpoint.panel.title = this.editorTitle(route);
     endpoint.route = route;
+    this.attentionNotifications.update();
     endpoint.webviewSession.setInitialRoute(route);
     this.reconcileQueuedMessageOwners();
     this.postEditorTabsState();
@@ -1641,6 +1891,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.updateEditorPanelTitles();
     }
     if (msg.type === 'context/update' && workspaceStructureChanged) {
+      this.macOSTray?.update();
       this.postSiblingWorkspaceAlerts();
     }
   }
@@ -2932,11 +3183,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   openCompletedSessions() {
-    this.sessionState.clearCompletedInWorkspace(this.contextProvider.context.workspacePath);
     this.webviewSession.openCompletedSessions();
   }
 
   async dispose() {
+    this.macOSTray?.dispose();
+    this.notificationUriHandler.dispose();
+    this.attentionNotifications.dispose();
     this.providerLimitService.dispose();
     this.disposing = true;
     if (this.openCodeUptimeTimer) {
@@ -3372,6 +3625,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private updateStatusBarItem() {
+    this.macOSTray?.update();
     this.postSiblingWorkspaceAlerts();
     this.updateSessionReconcileTimer();
     this.refreshOpenCodeVersionStatus();

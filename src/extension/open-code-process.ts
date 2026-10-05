@@ -281,6 +281,7 @@ interface ProcessListeners {
 }
 
 interface ProcessLaunch {
+  credentialsReady?: boolean;
   configPath: string | null;
   listenerPid: number | null;
   owner: string;
@@ -2228,6 +2229,25 @@ export class OpenCodeProcess {
     proc.on('error', listeners.error);
     if (bindError) queueMicrotask(() => listeners.error(bindError));
     return proc;
+  }
+
+  async prepareManagedServerHealth(proc: ChildProcess, signal?: AbortSignal): Promise<boolean> {
+    if (openCodeApiVersion(this.installedCliVersionCache?.value ?? '') !== 2) return true;
+    const launch = this.processLaunches.get(proc);
+    if (!launch || this._process !== proc) return false;
+    if (launch.credentialsReady) return true;
+    const url = this.url;
+    // V2 may choose its persisted service password instead of the launch environment.
+    // Its listener opens before service registration is published. Wait for verified
+    // discovery before probing with credentials, rather than retrying an auth rejection.
+    const endpoint = await this.discoverSharedEndpoint(url);
+    signal?.throwIfAborted();
+    if (this._process !== proc || this.url !== url || !endpoint?.auth?.password) return false;
+    this.serverPassword = endpoint.auth.password;
+    this.serverUsername = endpoint.auth.username;
+    this.credentialUrl = url;
+    launch.credentialsReady = true;
+    return true;
   }
 
   private bindInjectedConfigOwner(configPath: string | null, proc: ChildProcess, owner: string) {

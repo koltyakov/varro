@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installHighlightWorker } from '../lib/highlight-worker.test-support';
-import { createSignal } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
+import { isRecord } from '../../shared/type-utils';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import { collapseExpandedDiffOverlays, hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import { resetDefaultAppState, setState } from '../lib/state';
@@ -817,6 +818,99 @@ describe('DiffView', () => {
 
     expect(container?.querySelectorAll('.diff-view-line')).toHaveLength(6);
     expect(document.querySelectorAll('.diff-view-overlay .diff-view-line')).toHaveLength(500);
+  });
+
+  it('defers full line wrappers while closed and expands the latest diff through updates and remounts', async () => {
+    const makeDiff = (revision: number) => ({
+      file: 'changes.txt',
+      patch: makeAddedPatch(500).replaceAll('line ', `revision ${revision} line `),
+      additions: 500,
+      deletions: 0,
+    });
+    const [diffs, setDiffs] = createSignal([makeDiff(0)]);
+    let fullLineWrappers = 0;
+    const originalMap = Array.prototype.map;
+    // Count actual full-line wrapper allocations without changing the component or its data.
+    vi.spyOn(Array.prototype, 'map').mockImplementation(function (
+      this: readonly unknown[],
+      callback,
+      thisArg
+    ) {
+      const result: unknown[] = originalMap.call(this, callback, thisArg);
+      if (
+        result.length === 500 &&
+        result.every(
+          (entry, index) => isRecord(entry) && entry.index === index && entry.line === this[index]
+        )
+      )
+        fullLineWrappers += result.length;
+      return result;
+    });
+    const mount = () =>
+      render(
+        () =>
+          createComponent(DiffView, {
+            showChanges: true,
+            get diffs() {
+              return diffs();
+            },
+            stateKey: 'lazy-lines',
+          }),
+        container!
+      );
+    const expectRevision = (revision: number) => {
+      expect(
+        Array.from(
+          document.querySelectorAll('.diff-view-overlay .diff-view-line-content'),
+          (line) => line.textContent
+        )
+      ).toEqual(
+        Array.from({ length: 500 }, (_, index) => `revision ${revision} line ${index + 1}`)
+      );
+      expect(container?.querySelectorAll('.diff-view-line')).toHaveLength(6);
+    };
+
+    cleanup = mount();
+    await Promise.resolve();
+    for (let revision = 1; revision <= 20; revision++) setDiffs([makeDiff(revision)]);
+    await Promise.resolve();
+    expect(fullLineWrappers).toBe(0);
+    expect(document.querySelector('.diff-view-overlay')).toBeNull();
+    const toggle = container!.querySelector<HTMLButtonElement>('.diff-view-toggle')!;
+    toggle.click();
+    await Promise.resolve();
+    expectRevision(20);
+    expect(fullLineWrappers).toBe(500);
+
+    const viewport = document.querySelector<HTMLElement>('.diff-view-overlay-lines')!;
+    viewport.scrollTop = 44;
+    viewport.dispatchEvent(new Event('scroll'));
+    setDiffs([makeDiff(21)]);
+    await Promise.resolve();
+    expectRevision(21);
+    expect(document.querySelector('.diff-view-overlay-lines')).toBe(viewport);
+    expect(viewport.scrollTop).toBe(44);
+    expect(fullLineWrappers).toBe(1000);
+
+    cleanup();
+    cleanup = mount();
+    await Promise.resolve();
+    await Promise.resolve();
+    expectRevision(21);
+    expect(document.querySelector<HTMLElement>('.diff-view-overlay-lines')?.scrollTop).toBe(44);
+    expect(container!.querySelector('.diff-view-toggle')?.getAttribute('aria-expanded')).toBe(
+      'true'
+    );
+    document.querySelector<HTMLButtonElement>('.diff-view-overlay-close')!.click();
+    await Promise.resolve();
+    const beforeClosedUpdate = fullLineWrappers;
+    setDiffs([makeDiff(22)]);
+    await Promise.resolve();
+    expect(fullLineWrappers).toBe(beforeClosedUpdate);
+    container!.querySelector<HTMLButtonElement>('.diff-view-toggle')!.click();
+    await Promise.resolve();
+    expectRevision(22);
+    expect(fullLineWrappers).toBe(beforeClosedUpdate + 500);
   });
 
   it('closes an expanded preview from its header or with Escape', async () => {

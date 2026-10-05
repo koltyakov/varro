@@ -213,7 +213,7 @@ export function VirtualizedContent(
       if (!metrics) return undefined;
       const index = absoluteIndex();
       if (index < 0) return undefined;
-      return metrics.prefix[index + 1]! - metrics.prefix[index]!;
+      return metrics.prefix.at(index + 1)! - metrics.prefix.at(index)!;
     });
     const forceVirtualContent = createMemo(
       () => !!props.forceVirtualContent?.(messageId) || needsPinnedActivityContent(messageId)
@@ -352,7 +352,7 @@ export function VirtualizedContent(
               <div
                 class="virtual-spacer virtual-pinned-gap"
                 style={{
-                  height: `${(props.virtualMetrics?.prefix[item.end] ?? 0) - (props.virtualMetrics?.prefix[item.start] ?? 0)}px`,
+                  height: `${(props.virtualMetrics?.prefix.at(item.end) ?? 0) - (props.virtualMetrics?.prefix.at(item.start) ?? 0)}px`,
                 }}
                 aria-hidden="true"
               />

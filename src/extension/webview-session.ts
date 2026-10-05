@@ -69,7 +69,6 @@ export class WebviewSession {
     private readonly bridge: SidebarProviderBridge,
     private readonly sessionState: Pick<
       SessionStateManager,
-      | 'clearCompletedInWorkspace'
       | 'consumeRecoverySnapshot'
       | 'isSessionInWorkspace'
       | 'isSessionVisibleInWorkspace'
@@ -219,6 +218,10 @@ export class WebviewSession {
   ) {
     this.pendingCommands.push(message);
     this.flushPendingCommands();
+  }
+
+  get isActiveSessionWorking(): boolean {
+    return this.commandState?.canAbort === true;
   }
 
   updateCommandState(canAbort: boolean, canSwitchSessions: boolean) {
@@ -419,7 +422,7 @@ export class WebviewSession {
 
   handleVisible() {
     const status = this.deps.renderStatus();
-    this.sessionState.clearCompletedInWorkspace(this.getEditorContext().workspacePath);
+    // Showing the view does not read every chat. Per-session webview read events own that state.
     this.postBootMessages(status);
     void this.deps.handleVisibleSideEffects().catch((err) => {
       logger.error(

@@ -1,7 +1,7 @@
 /* oxlint-disable anti-slop/no-runtime-typeof -- Validate external capture data and HTTP query parameters. */
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, relative } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { isDeepStrictEqual } from 'node:util';
 import { V2_REPLAY_EVENTS } from './ai-streaming-v2.mjs';
@@ -338,9 +338,16 @@ export async function createStreamingServer({ capture, timeline, directory, chec
       const path = url.pathname;
       const scopes = [url.searchParams.get('directory'), request.headers['x-opencode-directory']];
       if (
-        scopes.some(
-          (scope) => scope && scope !== directory && scope !== encodeURIComponent(directory)
-        )
+        scopes.some((scope) => {
+          if (!scope) return false;
+          if (isAbsolute(scope) && relative(directory, scope) === '') return false;
+          try {
+            const decoded = decodeURIComponent(scope);
+            return !isAbsolute(decoded) || relative(directory, decoded) !== '';
+          } catch {
+            return true;
+          }
+        })
       ) {
         send({ error: 'Unknown replay directory' }, 404);
         return;

@@ -16,6 +16,7 @@ import {
 import { MessageList } from './MessageList';
 import { setSessionHistoryCursor } from '../lib/message-window';
 import { setExpandedDiffOverlay } from '../lib/diff-overlay-state';
+import { trackInlineDiffLoad } from '../lib/message-list-layout';
 import { onBeforeShowThinkingPreferenceChange } from '../lib/state-ui-preferences';
 import {
   assistantMessage,
@@ -209,6 +210,58 @@ describe('MessageList auto-scroll', () => {
       animationFrames.restore();
     }
   );
+
+  it('yields diff-toggle settling to paint when range changes release loading previews', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const height = 1200;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return new DOMRect(
+        0,
+        0,
+        500,
+        this.classList.contains('interactive-list-track') ? height : 400
+      );
+    });
+    setShowFileDiffs(false);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+    let releaseDuringMeasurement = false;
+    let released = 0;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => {
+        if (releaseDuringMeasurement && released < 30) {
+          released += 1;
+          trackInlineDiffLoad('session-1', 'unmounted-preview')?.();
+        }
+        return height;
+      },
+    });
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    expect(list.scrollTop).toBe(800);
+    releaseDuringMeasurement = true;
+    setShowFileDiffs(true);
+    for (let task = 0; task < 40; task += 1) await Promise.resolve();
+    // Reentrant completion must leave work for the browser's next frame instead of
+    // consuming every release in an uninterrupted microtask chain.
+    expect(released).toBeGreaterThan(0);
+    expect(released).toBeLessThan(30);
+    releaseDuringMeasurement = false;
+    for (let frame = 0; frame < 4; frame += 1) animationFrames.flush();
+    expect(list.scrollTop).toBe(800);
+    animationFrames.restore();
+  });
 
   it('positions initial layout corrections immediately after the first stable frame', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
@@ -1175,9 +1228,13 @@ describe('MessageList auto-scroll', () => {
     vi.advanceTimersByTime(600);
     publishWidthMeasurement(160, 340);
     list.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 }));
+    expect(list.style.overflowAnchor).toBe('none');
+    expect(list.hasAttribute('data-pointer-scroll-owned')).toBe(true);
     scrollTopValue += 100;
     list.dispatchEvent(new Event('scroll'));
     document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    expect(list.style.overflowAnchor).toBe('');
+    expect(list.hasAttribute('data-pointer-scroll-owned')).toBe(false);
     const pointerOwnedTop = scrollTopValue;
     await Promise.resolve();
     expect(scrollTopValue).toBe(pointerOwnedTop);
@@ -4910,87 +4967,115 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
-  it('never reverses a downward user scroll during the measured append transition', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    const baseMessages = Array.from({ length: 50 }, (_, index) => {
-      const messageId = `assistant-${index}`;
-      return {
-        info: assistantMessage(messageId),
-        parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-      };
-    });
-    let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-    let scrollHeightValue = 5000;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
-        return new DOMRect(0, 0, 500, 400);
-      }
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, scrollHeightValue);
-      }
-      if (this.dataset.msgId) {
-        const index =
-          this.dataset.msgId === 'assistant-appended'
-            ? 50
-            : Number(this.dataset.msgId.replace('assistant-', ''));
-        const height = index === 50 ? 200 : 100;
-        return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
-      }
-      return new DOMRect(0, 0, 500, 40);
-    });
-    setState('activeSessionId', 'session-1');
-    replaceMessages(baseMessages);
+  it.each(['downward wheel', 'held scrollbar', 'scrollbar held before append'] as const)(
+    'respects %s ownership during the measured append transition',
+    async (input) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      const baseMessages = Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      });
+      let list: HTMLDivElement | null = null;
+      let scrollTopValue = 0;
+      let scrollHeightValue = 5000;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, scrollHeightValue);
+        }
+        if (this.dataset.msgId) {
+          const index =
+            this.dataset.msgId === 'assistant-appended'
+              ? 50
+              : Number(this.dataset.msgId.replace('assistant-', ''));
+          const height = index === 50 ? 200 : 100;
+          return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      });
+      setState('activeSessionId', 'session-1');
+      replaceMessages(baseMessages);
 
-    cleanup = render(() => MessageList(), container!);
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
-    for (let frame = 0; frame < 4; frame += 1) {
+      cleanup = render(() => MessageList(), container!);
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+      list = container?.querySelector('.interactive-list') as HTMLDivElement;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
+      Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 500 });
+      Object.defineProperty(list, 'scrollHeight', {
+        configurable: true,
+        get: () => scrollHeightValue,
+      });
+      Object.defineProperty(list, 'scrollTop', {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+      expect(scrollTopValue).toBe(4600);
+
+      if (input === 'scrollbar held before append') {
+        list.dispatchEvent(
+          new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 })
+        );
+      }
+      scrollHeightValue = 5200;
+      replaceMessages([
+        ...baseMessages,
+        {
+          info: assistantMessage('assistant-appended'),
+          parts: [
+            {
+              ...textPart('text-appended', 'Appended response'),
+              messageID: 'assistant-appended',
+            },
+          ],
+        },
+      ]);
       await Promise.resolve();
-      animationFrames.flush();
+      await Promise.resolve();
+      animationFrames.flush(30);
+
+      if (input !== 'downward wheel') {
+        if (input === 'held scrollbar') {
+          list.dispatchEvent(
+            new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 })
+          );
+        } else {
+          expect(scrollTopValue).toBe(4600);
+        }
+        const grabbedTop = scrollTopValue;
+        animationFrames.flush(60);
+        expect(scrollTopValue).toBe(grabbedTop);
+        scrollTopValue -= 100;
+        const userOwnedTop = scrollTopValue;
+        list.dispatchEvent(new Event('scroll'));
+        document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+        animationFrames.flush(90);
+        expect(scrollTopValue).toBe(userOwnedTop);
+      } else {
+        list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 100 }));
+        scrollTopValue += 100;
+        const userOwnedTop = scrollTopValue;
+        list.dispatchEvent(new Event('scroll'));
+        animationFrames.flush(60);
+        expect(scrollTopValue).toBeGreaterThanOrEqual(userOwnedTop);
+      }
+      animationFrames.restore();
     }
-    expect(scrollTopValue).toBe(4600);
-
-    scrollHeightValue = 5200;
-    replaceMessages([
-      ...baseMessages,
-      {
-        info: assistantMessage('assistant-appended'),
-        parts: [
-          {
-            ...textPart('text-appended', 'Appended response'),
-            messageID: 'assistant-appended',
-          },
-        ],
-      },
-    ]);
-    await Promise.resolve();
-    await Promise.resolve();
-    animationFrames.flush(30);
-
-    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 100 }));
-    scrollTopValue += 100;
-    const userOwnedTop = scrollTopValue;
-    list.dispatchEvent(new Event('scroll'));
-    animationFrames.flush(60);
-
-    expect(scrollTopValue).toBeGreaterThanOrEqual(userOwnedTop);
-    animationFrames.restore();
-  });
+  );
 
   it('keeps following new messages after an explicit scroll request from a recent wheel scroll', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();

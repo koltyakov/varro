@@ -48,6 +48,36 @@ function delta(cache: StreamingTextCache, text: string) {
 afterEach(() => vi.useRealTimers());
 
 describe('StreamingTextCache', () => {
+  it('coalesces snapshots behind a slow write and flushes the final state', async () => {
+    vi.useFakeTimers();
+    const { cache, persistence } = setup();
+    let finishWrite: (() => void) | undefined;
+    const set = vi.spyOn(persistence, 'set').mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishWrite = resolve;
+        })
+    );
+    delta(cache, 'first');
+    const first = cache.flush();
+    await Promise.resolve();
+    for (let index = 0; index < 20; index++) {
+      delta(cache, '.');
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    const final = cache.flush();
+    expect(set).toHaveBeenCalledTimes(1);
+    finishWrite?.();
+    await Promise.all([first, final]);
+    expect(set).toHaveBeenCalledTimes(2);
+    expect(set.mock.calls[1]?.[1]).toEqual([
+      expect.objectContaining({ text: `first${'.'.repeat(20)}` }),
+    ]);
+    expect(new StreamingTextCache(persistence).restore(info, [part])[0]?.text).toBe(
+      `first${'.'.repeat(20)}`
+    );
+  });
+
   it('restores the beginning on repeated history reads and after a host reload', async () => {
     vi.useFakeTimers();
     const { cache, persistence } = setup();

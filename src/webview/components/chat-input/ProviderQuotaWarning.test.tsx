@@ -146,7 +146,7 @@ describe('ProviderQuotaWarning', () => {
     expect(banner()).toBeNull();
   });
 
-  it('persists reset closes per provider and expiration across polling and remounts', () => {
+  it('persists reset snoozes per provider and expiration across polling and remounts', () => {
     const expiresAt = NOW + 4 * 24 * HOUR;
     const { setLimit, setModel, remount } = mount(withResets([expiresAt]));
     dismiss();
@@ -163,6 +163,66 @@ describe('ProviderQuotaWarning', () => {
     setLimit({ ...withResets([expiresAt]), windows: [quota('weekly', 8)] });
     expect(banner()?.textContent).toContain('weekly: 8% left');
     expect(banner()?.textContent).not.toContain('Reset expires');
+  });
+
+  it('reminds again at closer milestones after each close, including across remounts', () => {
+    const expiresAt = NOW + 5 * 24 * HOUR;
+    const { setLimit, remount } = mount(withResets([expiresAt]));
+    dismiss();
+
+    for (const hours of [72, 24, 6, 1]) {
+      vi.setSystemTime(expiresAt - hours * HOUR - 2_000);
+      vi.advanceTimersByTime(1_000);
+      setLimit(withResets([expiresAt]));
+      resetWarningDismissals.reload();
+      remount();
+      expect(banner()).toBeNull();
+
+      vi.advanceTimersByTime(1_000);
+      expect(banner()?.textContent).toContain('Reset expires in');
+      expect(banner()?.classList.contains('error')).toBe(hours <= 24);
+      dismiss();
+      expect(banner()).toBeNull();
+      vi.advanceTimersByTime(1_000);
+      remount();
+      expect(banner()).toBeNull();
+    }
+
+    vi.setSystemTime(expiresAt - 2_000);
+    vi.advanceTimersByTime(1_000);
+    expect(banner()).toBeNull();
+    vi.advanceTimersByTime(1_000);
+    expect(banner()).toBeNull();
+  });
+
+  it('reminds after reopening past a milestone and snoozes until the next one', () => {
+    const expiresAt = NOW + 4 * 24 * HOUR;
+    const { remount } = mount(withResets([expiresAt]));
+    dismiss();
+    vi.setSystemTime(expiresAt - 5 * HOUR);
+    remount();
+    expect(banner()?.textContent).toContain('Reset expires in 5h');
+    dismiss();
+    remount();
+    expect(banner()).toBeNull();
+    vi.setSystemTime(expiresAt - HOUR - 1_000);
+    vi.advanceTimersByTime(1_000);
+    expect(banner()?.textContent).toContain('Reset expires in 1h');
+  });
+
+  it('restores reminders at 24 hours for older permanent dismissals', () => {
+    const expiresAt = NOW + 2 * 24 * HOUR;
+    writeStored(STORAGE_KEYS.resetWarningDismissals, [{ providerID: 'openai', expiresAt }]);
+    mount(withResets([expiresAt]));
+    expect(banner()).toBeNull();
+    vi.setSystemTime(expiresAt - 24 * HOUR - 1_000);
+    vi.advanceTimersByTime(1_000);
+    expect(banner()?.textContent).toContain('Reset expires in');
+    dismiss();
+    expect(banner()).toBeNull();
+    vi.setSystemTime(expiresAt - 6 * HOUR - 1_000);
+    vi.advanceTimersByTime(1_000);
+    expect(banner()?.textContent).toContain('Reset expires in 6h');
   });
 
   it('rotates quota and reset warnings in one panel', () => {

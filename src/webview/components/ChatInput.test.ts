@@ -4114,14 +4114,17 @@ describe('ChatInput', () => {
 
     expect(inputText()).toBe("What's this https://iconoir.com/1?");
     expect(container?.querySelector('.composer-external-link')).toBe(reference);
+    expect(reference.textContent).toBe('https://iconoir.com/1');
+    expect(reference.querySelector('.composer-external-link-icon')).not.toBeNull();
     expect(document.activeElement).toBe(editor);
 
-    trailingText.textContent = '/12?';
-    setCollapsedSelection(trailingText, 3);
+    trailingText.textContent = '2?';
+    setCollapsedSelection(trailingText, 1);
     editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
 
     expect(inputText()).toBe("What's this https://iconoir.com/12?");
     expect(container?.querySelector('.composer-external-link')).toBe(reference);
+    expect(reference.textContent).toBe('https://iconoir.com/12');
     expect(document.activeElement).toBe(editor);
   });
 

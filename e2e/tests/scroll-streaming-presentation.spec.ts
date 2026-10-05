@@ -351,9 +351,19 @@ test('keeps a single Explored summary across hidden tools, rotation, and complet
       const row = document.querySelector(`[data-msg-id="${messageID}"]`)!;
       const frames = [];
       const started = performance.now();
+      let tray: Element | null = null;
       while (performance.now() - started < 6_600) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const currentTray = row.querySelector('.assistant-active-activity-tray');
+        tray ??= currentTray;
+        const activeItem = currentTray?.querySelector<HTMLElement>(
+          '.assistant-active-activity-item'
+        );
         frames.push({
+          at: performance.now() - started,
+          sameTray: currentTray === tray,
+          opacity: activeItem ? getComputedStyle(activeItem).opacity : null,
+          height: activeItem?.getBoundingClientRect().height ?? 0,
           summaries: [...row.querySelectorAll('.assistant-activity-summary')].map(
             (summary) => summary.textContent
           ),
@@ -390,12 +400,94 @@ test('keeps a single Explored summary across hidden tools, rotation, and complet
   ).toBe(true);
   expect(result.some((frame) => frame.ids.includes('single-group-long'))).toBe(true);
   expect(result.some((frame) => frame.ids.includes('single-group-next'))).toBe(true);
+  const rotating = result.filter((frame) => frame.at > 2_900);
+  expect(rotating.every((frame) => frame.sameTray && frame.opacity === '1')).toBe(true);
+  expect(Math.min(...rotating.map((frame) => frame.height))).toBeGreaterThan(0);
+  expect(new Set(rotating.map((frame) => frame.height)).size).toBe(1);
   await expect(page.locator(`${ROW} .assistant-active-activity-item`)).toHaveCount(0);
   await expect(page.locator(`${ROW} .assistant-activity-summary`)).toHaveCount(1);
   await expect(page.locator(`${ROW} .assistant-activity-summary`)).toContainText(
     'Explored: 4 searches'
   );
 });
+
+for (const status of ['running', 'completed'] as const) {
+  test(`replaces a completed preview with a ${status} tool without blinking`, async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    await expect(page.locator(`${ROW} .rendered-markdown`)).toHaveText('Starting...');
+    const frames = await page.evaluate(
+      async ({ sessionID, messageID, replacementStatus }) => {
+        // SAFETY: The isolated fixture exposes its typed event transport.
+        const harness = (
+          window as typeof window & {
+            __varroE2E: { replayServerEvent: (event: ServerEvent) => void };
+          }
+        ).__varroE2E;
+        const now = Date.now();
+        for (const id of ['first', 'next']) {
+          const part: ToolPart = {
+            id: `replacement-${id}`,
+            callID: `replacement-${id}-call`,
+            type: 'tool',
+            tool: 'grep',
+            messageID,
+            sessionID,
+            state:
+              id === 'next' && replacementStatus === 'running'
+                ? { status: 'running', input: { pattern: id }, time: { start: now } }
+                : {
+                    status: 'completed',
+                    input: { pattern: id },
+                    title: id,
+                    output: 'Found matches',
+                    metadata: {},
+                    time: { start: now - 1_000, end: now },
+                  },
+          };
+          harness.replayServerEvent({ type: 'message.part.updated', properties: { part } });
+        }
+        const row = document.querySelector(`[data-msg-id="${messageID}"]`)!;
+        const started = performance.now();
+        let tray: Element | null = null;
+        let replacedAt: number | undefined;
+        const samples = [];
+        while (performance.now() - started < 2_500) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const currentTray = row.querySelector('.assistant-active-activity-tray');
+          tray ??= currentTray;
+          const item = currentTray?.querySelector<HTMLElement>('.assistant-active-activity-item');
+          const id = item?.dataset.activityPartId;
+          const at = performance.now() - started;
+          if (id === 'replacement-next') replacedAt ??= at;
+          if (at > 500) {
+            samples.push({
+              id,
+              sameTray: currentTray === tray,
+              height: item?.getBoundingClientRect().height ?? 0,
+              opacity: item ? getComputedStyle(item).opacity : null,
+              animating: !!item?.matches('.is-entering, .is-exiting'),
+            });
+          }
+          if (replacedAt !== undefined && at - replacedAt > 300) break;
+        }
+        return samples;
+      },
+      { sessionID: SESSION, messageID: MESSAGE, replacementStatus: status }
+    );
+    expect([...new Set(frames.map((frame) => frame.id))]).toEqual([
+      'replacement-first',
+      'replacement-next',
+    ]);
+    expect(frames.every((frame) => frame.sameTray && !frame.animating)).toBe(true);
+    expect(Math.min(...frames.map((frame) => frame.height))).toBeGreaterThan(0);
+    expect(new Set(frames.map((frame) => frame.height)).size).toBe(1);
+    for (const frame of frames) {
+      expect(frame.opacity).toBe(
+        frame.id === 'replacement-next' && status === 'running' ? '1' : '0.82'
+      );
+    }
+  });
+}
 
 test('reduced motion publishes available text without a paced reveal', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });

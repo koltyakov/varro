@@ -1,4 +1,13 @@
-import { For, Show, batch, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
+import {
+  For,
+  Show,
+  batch,
+  createEffect,
+  createMemo,
+  createSignal,
+  onMount,
+  onCleanup,
+} from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { splitExternalLinkText } from '../../lib/external-link';
 import { emptyPageIcon, folderIcon, gymIcon } from '../../lib/ui-icons';
@@ -791,19 +800,17 @@ export function RichComposerArea(props: {
   }
 
   let lastSyncedValue = '';
-  let lastSyncedChips = '';
+  let lastSyncedChips: ReturnType<typeof chipSnapshot> | undefined;
   let lastSyncedPendingPaste: RichComposerPasteInsertion | undefined;
-
-  createEffect(() => {
-    const text = props.value;
-    const pendingPaste = props.pendingPaste;
-    const pendingPasteChanged = pendingPaste !== lastSyncedPendingPaste;
-    const requestedCursor = props.cursorOffset;
-    const chips = JSON.stringify(
+  // Compare image URLs by identity/value without serializing their base64 payload on each keypress.
+  const chipSnapshot = createMemo(
+    () =>
       props.chips
         .filter((chip) => chip.type !== 'external-link')
         .map((chip) => [
           chip.id,
+          chip.type,
+          chip.path,
           chip.label,
           chip.title,
           chip.detail,
@@ -813,11 +820,26 @@ export function RichComposerArea(props: {
           chip.previewImage?.alt,
           chip.textMarker,
           chip.severity,
-          chip.problemDetails,
+          JSON.stringify(chip.problemDetails),
           chip.compressible,
           chip.compressionHint,
-        ])
-    );
+        ]),
+    undefined,
+    {
+      equals: (previous, next) =>
+        previous.length === next.length &&
+        previous.every((fields, index) =>
+          fields.every((value, field) => value === next[index]![field])
+        ),
+    }
+  );
+
+  createEffect(() => {
+    const text = props.value;
+    const pendingPaste = props.pendingPaste;
+    const pendingPasteChanged = pendingPaste !== lastSyncedPendingPaste;
+    const requestedCursor = props.cursorOffset;
+    const chips = chipSnapshot();
     const isFocused = props.isFocused || document.activeElement === editorEl;
     // The browser owns the DOM and selection until composition has been flushed.
     // Keep tracking controlled props so deferred updates run when composition ends.
@@ -1519,7 +1541,17 @@ function normalizeEditableExternalLinks(editor: HTMLElement): boolean {
     editor.querySelectorAll<HTMLElement>('.composer-external-link')
   )) {
     const content = element.textContent ?? '';
-    const segments = splitExternalLinkText(content);
+    // A trailing dot is plain text until the next character makes it part of
+    // the hostname. Include adjacent text so the editable link can grow again.
+    let candidate = content;
+    for (
+      let sibling = element.nextSibling;
+      sibling instanceof Text;
+      sibling = sibling.nextSibling
+    ) {
+      candidate += sibling.data;
+    }
+    const segments = splitExternalLinkText(candidate);
     const linkIndex = segments.findIndex((segment) => segment.type === 'external-link');
     if (linkIndex === -1) {
       element.replaceWith(document.createTextNode(content));
@@ -1533,12 +1565,39 @@ function normalizeEditableExternalLinks(editor: HTMLElement): boolean {
       .slice(0, linkIndex)
       .map((segment) => (segment.type === 'text' ? segment.content : segment.href))
       .join('');
-    const linkStart = content.indexOf(link.href, prefix.length);
-    const suffix = content.slice(linkStart + link.href.length);
-    if (!prefix && !suffix) continue;
+    const linkStart = candidate.indexOf(link.href, prefix.length);
+    if (linkStart >= content.length) {
+      element.replaceWith(document.createTextNode(content));
+      changed = true;
+      continue;
+    }
+    const linkEnd = linkStart + link.href.length;
+    const suffix = content.slice(linkEnd);
+    let remaining = Math.max(0, linkEnd - content.length);
+    element.title = link.href;
+    if (!prefix && !suffix && remaining === 0) continue;
+
+    while (remaining > 0 && element.nextSibling instanceof Text) {
+      const sibling = element.nextSibling;
+      const consumed = Math.min(remaining, sibling.length);
+      sibling.deleteData(0, consumed);
+      remaining -= consumed;
+      if (sibling.length === 0) sibling.remove();
+    }
 
     if (prefix) element.before(document.createTextNode(prefix));
-    element.textContent = link.href;
+    const leadingContent = element.querySelector('.link-leading-content');
+    const leadingLabel = leadingContent?.querySelector('.link-leading-label');
+    if (leadingContent && leadingLabel) {
+      const firstCharacter = Array.from(link.href)[0] ?? '';
+      leadingLabel.textContent = firstCharacter;
+      element.replaceChildren(
+        leadingContent,
+        document.createTextNode(link.href.slice(firstCharacter.length))
+      );
+    } else {
+      element.textContent = link.href;
+    }
     if (suffix) element.after(document.createTextNode(suffix));
     changed = true;
   }

@@ -130,8 +130,8 @@ export async function verifyVscodeLaunchIdentity(launch) {
   const [birthIdentity, commandResult] =
     process.platform === 'win32'
       ? await readWindowsProcess(launch.pid).then((processInfo) => [
-          `win32:${processInfo.birthIdentity}`,
-          { stdout: processInfo.command.replaceAll('"', '') },
+          processInfo ? `win32:${processInfo.birthIdentity}` : null,
+          { stdout: processInfo?.command?.replaceAll('"', '') ?? '' },
         ])
       : await Promise.all([
           readProcessBirthIdentity(launch.pid),
@@ -541,6 +541,7 @@ export async function reloadVscodeWindow(
 async function readProcessBirthIdentity(pid) {
   if (process.platform === 'win32') {
     const processInfo = await readWindowsProcess(pid);
+    if (!processInfo) throw new Error(`VS Code process ${String(pid)} is unavailable`);
     return `win32:${processInfo.birthIdentity}`;
   }
   const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'lstart=']);
@@ -549,7 +550,7 @@ async function readProcessBirthIdentity(pid) {
   return `${process.platform}:${startedAt}`;
 }
 
-async function readWindowsProcess(pid) {
+export async function readWindowsProcess(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid VS Code process ID');
   // PowerShell startup plus the first CIM query can exceed 10s on cold Windows CI runners.
   const { stdout } = await execFileAsync(
@@ -559,7 +560,10 @@ async function readWindowsProcess(pid) {
       '-NonInteractive',
       '-Command',
       `$ErrorActionPreference = 'Stop'; $p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; ` +
-        "if (!$p) { throw 'VS Code process is unavailable' }; " +
+        "if (!$p) { 'null'; exit }; " +
+        // CIM can retain a terminated process while Electron/CDP still holds its handle.
+        `$live = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; ` +
+        "if (!$live -or $live.HasExited) { 'null'; exit }; " +
         '@{ command = $p.CommandLine; birthIdentity = $p.CreationDate.ToUniversalTime().Ticks.ToString() } | ConvertTo-Json -Compress',
     ],
     { timeout: 60_000 }

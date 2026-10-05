@@ -174,6 +174,45 @@ describe('webview bootstrap', () => {
   });
 
   it.each(['sidebar', 'editor'] as const)(
+    'applies %s layout breakpoint changes immediately in both directions',
+    (surface) => {
+      vi.useFakeTimers();
+      let width = 486;
+      const widthSpy = vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => width);
+      bootstrapWindow.__initialWebviewState = {
+        webviewContext: { viewId: `${surface}-1`, surface },
+      };
+      try {
+        cleanup = bootstrap(root);
+        for (const expandedWidth of [1280, 1670]) {
+          // Start an ordinary drag delay before maximizing. The breakpoint change must cancel it.
+          width = 600;
+          window.dispatchEvent(new Event('resize'));
+          expect(root.style.maxWidth).toBe('486px');
+          width = expandedWidth;
+          window.dispatchEvent(new Event('resize'));
+          expect(root.style.maxWidth).toBe(`${expandedWidth}px`);
+          width = 486;
+          window.dispatchEvent(new Event('resize'));
+          expect(root.style.maxWidth).toBe('486px');
+          vi.runAllTimers();
+          expect(root.style.maxWidth).toBe('486px');
+        }
+        width = 1280;
+        window.dispatchEvent(new Event('resize'));
+        width = 1670;
+        window.dispatchEvent(new Event('resize'));
+        expect(root.style.maxWidth).toBe('1670px');
+      } finally {
+        cleanup?.();
+        cleanup = undefined;
+        widthSpy.mockRestore();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it.each(['sidebar', 'editor'] as const)(
     'restores the full %s width immediately after hidden viewport changes',
     (surface) => {
       vi.useFakeTimers();

@@ -10,14 +10,25 @@ it does not identify the responsible VS Code/Electron component.
 
 Promoting the plain root with `translateZ(0)`, `will-change: transform`, and
 `contain: layout paint`, while allowing visible overflow, did not eliminate it.
-Varro now limits root expansion for four animation frames in `src/webview/index.tsx`.
+Varro limits root expansion within one responsive layout for four animation frames in `src/webview/index.tsx`.
 The content remains inside the previous painted width while the host surface catches up.
 Shrinking and browser zoom apply immediately; repeated drag events do not restart the
 pending expansion. Message-list anchoring and transcript visibility remain independent.
 Hidden-tab resize events do not update the cap, and hiding cancels a pending expansion.
 Returning to a retained sidebar or editor tab resynchronizes the cap immediately, even
 without a resize event. This avoids briefly squeezing the view to a stale hidden width;
-the four-frame delay still applies to ordinary visible expansion.
+the four-frame delay still applies to ordinary visible expansion within one responsive layout.
+
+The October 4 maximize/restore reproduction exposed an interaction with viewport media queries.
+At a 486px root cap, the 1400px desktop breakpoint displayed a 420px session sidebar, leaving only
+66px for the transcript. Five native maximize/restore cycles produced 20 squeezed animation-frame
+samples. Crossing the 960px content or 1400px sidebar breakpoint now applies the root width immediately
+and cancels a queued expansion. The same isolated-editor retest recorded zero capped or squeezed
+samples across five cycles, with a maximum frame gap of 21.3ms and at most 22 mounted message rows.
+Evidence, including 274 compositor frames, is under `artifacts/fullscreen-resize-20261004/fixed/`.
+The host can still paint one stale clipped frame during the transition, as shown in `frame-001.png`.
+This change removes Varro's extra delay and intermediate squeezed layout; it does not fix that host
+paint defect. Unit and browser regressions cover both breakpoint transitions and restore.
 
 The October 2 sidebar-switch reproduction found a separate host path: returning
 from Chat to Varro emits a 300 x 150 resize followed by the real viewport resize,
@@ -53,8 +64,8 @@ card samples. The real long-history AI-02 resize/zoom sequence also passed its a
 checks. Evidence is under `artifacts/ai-fuzzy/20260928-94312/`, including
 `all-cards-resize-comparison.json` and `resize-source-four/`.
 
-This is an application mitigation, not a repair to VS Code's compositor. Expansion
-intentionally follows the host by four frames. The host-level plain-body reproduction
+This is an application mitigation, not a repair to VS Code's compositor. Expansion within one
+responsive layout intentionally follows the host by four frames. The host-level plain-body reproduction
 remains useful when changing or removing the mitigation.
 
 ## Reduced reproduction

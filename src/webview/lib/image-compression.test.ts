@@ -39,6 +39,47 @@ afterEach(() => {
 });
 
 describe('image compression', () => {
+  it('rejects oversized PNG dimensions before decoding image pixels', async () => {
+    const bytes = new Uint8Array(33);
+    bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(8, 13);
+    bytes.set([73, 72, 68, 82], 12);
+    view.setUint32(16, 10000);
+    view.setUint32(20, 10000);
+    const decode = vi.fn();
+    vi.stubGlobal('Image', decode);
+    expect(
+      await analyzeImageCompression({
+        mime: 'image/png',
+        size: bytes.length,
+        url: `data:image/png;base64,${btoa(String.fromCharCode(...bytes))}`,
+      })
+    ).toBeNull();
+    expect(decode).not.toHaveBeenCalled();
+  });
+
+  it('reads only PNG headers even with a large image body', async () => {
+    const header = '\x89PNG\r\n\x1a\n\x00\x30\x00\x00IDAT';
+    const image = {
+      mime: 'image/png',
+      size: jpeg.size,
+      url: `data:image/png;base64,${btoa(header + 'x'.repeat(3 * 1024 * 1024))}`,
+    };
+    const decode = vi.spyOn(globalThis, 'atob');
+    await analyzeImageCompression(image);
+    expect(decode).toHaveBeenCalled();
+    expect(decode.mock.calls.every(([text]) => text.length <= 24)).toBe(true);
+  });
+
+  it('abandons encoding after cancelled decoding', async () => {
+    const controller = new AbortController();
+    const analysis = analyzeImageCompression(jpeg, controller.signal);
+    controller.abort();
+    await expect(analysis).rejects.toMatchObject({ name: 'AbortError' });
+    expect(drawImage).not.toHaveBeenCalled();
+  });
+
   it('preserves aspect ratio and never upscales', () => {
     expect(scaledImageDimensions(4000, 2000, 2048)).toEqual({ width: 2048, height: 1024 });
     expect(scaledImageDimensions(400, 800, 2048)).toEqual({ width: 400, height: 800 });

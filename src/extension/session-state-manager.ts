@@ -117,6 +117,8 @@ type TerminalWave = {
 export interface SessionStateListener {
   /** Called whenever any state that the status bar renders has changed. */
   onStatusChange(): void;
+  /** A live root turn finished, after continuation, failure, and pending-request checks. */
+  onSessionCompleted?(sessionID: string, kind: CompletionAlertKind): void;
   /** Called when routing learns or changes a session's workspace directory. */
   onSessionDirectoryChange?(): void;
   onSessionMetadata?(session: Record<string, unknown>): void;
@@ -154,6 +156,7 @@ export class SessionStateManager {
   private readonly completedSessionMarkers = new Map<string, number>();
   private readonly acknowledgedCompletedRoots: Map<string, AcknowledgedCompletionMarkers>;
   private readonly failedSessions = new Set<string>();
+  private readonly failedSessionMarkers = new Map<string, number>();
   private readonly sessionAgents = new Map<string, string>();
   private readonly sessionTitles = new Map<string, string>();
   private readonly sessionDirectories = new Map<string, string>();
@@ -245,8 +248,16 @@ export class SessionStateManager {
     return this.completedSessions;
   }
 
+  completionMarkerFor(sessionID: string): number | undefined {
+    return this.completedSessionMarkers.get(sessionID);
+  }
+
   get failed(): ReadonlySet<string> {
     return this.failedSessions;
+  }
+
+  failureMarkerFor(sessionID: string): number | undefined {
+    return this.failedSessionMarkers.get(sessionID);
   }
 
   get pending(): ReadonlyMap<string, PendingAttentionEntry> {
@@ -753,7 +764,7 @@ export class SessionStateManager {
           this.noteSuccessorProgress(sessionID);
         }
         if (!error) {
-          changed = this.failedSessions.delete(sessionID) || changed;
+          changed = this.deleteFailedSession(sessionID) || changed;
         }
         if (error || typeof asRecord(info?.time)?.completed === 'number') {
           if (error) {
@@ -1448,20 +1459,25 @@ export class SessionStateManager {
   }
 
   private evictOldestSessionMetadata<T>(map: Map<string, T>) {
-    while (map.size > MAX_SESSION_METADATA_ENTRIES) {
-      let evicted = false;
-      for (const sessionID of map.keys()) {
-        if (this.isPinnedSessionMetadata(sessionID)) continue;
-        map.delete(sessionID);
-        evicted = true;
-        break;
-      }
-      if (!evicted) break;
+    if (map.size <= MAX_SESSION_METADATA_ENTRIES) return;
+    // Attention outlives catalog pagination. Losing a completed chat's directory hides it
+    // from workspace projections even while its unread marker is still present.
+    const pinned = new Set([
+      ...this.busySessions,
+      ...this.completedSessions,
+      ...this.failedSessions,
+      ...[...this.pendingAttention.values()].map((request) => request.sessionID),
+    ]);
+    // Set iteration also visits added ancestors; cycles stop at already-present IDs.
+    // Read the map directly so eviction cannot change LRU order while traversing it.
+    for (const sessionID of pinned) {
+      const parentID = this.sessionParentIDs.get(sessionID);
+      if (parentID) pinned.add(parentID);
     }
-  }
-
-  private isPinnedSessionMetadata(sessionID: string) {
-    return this.busySessions.has(sessionID) || this.hasPendingAttentionForSession(sessionID);
+    for (const sessionID of map.keys()) {
+      if (map.size <= MAX_SESSION_METADATA_ENTRIES) break;
+      if (!pinned.has(sessionID)) map.delete(sessionID);
+    }
   }
 
   private trackBlockingRequest(
@@ -1513,7 +1529,7 @@ export class SessionStateManager {
     changed = this.busySessions.delete(sessionID) || changed;
     this.serverBusySessions.delete(sessionID);
     changed = this.deleteCompletedSession(sessionID) || changed;
-    changed = this.failedSessions.delete(sessionID) || changed;
+    changed = this.deleteFailedSession(sessionID) || changed;
     changed = this.sessionAgents.delete(sessionID) || changed;
     changed = this.sessionTitles.delete(sessionID) || changed;
     changed = this.sessionDirectories.delete(sessionID) || changed;
@@ -1736,7 +1752,7 @@ export class SessionStateManager {
     }
     this.busySessions.add(sessionID);
     changed = this.deleteCompletedSession(sessionID) || changed;
-    changed = this.failedSessions.delete(sessionID) || changed;
+    changed = this.deleteFailedSession(sessionID) || changed;
     return changed;
   }
 
@@ -1777,6 +1793,10 @@ export class SessionStateManager {
     this.clearBusy(sessionID);
     this.addCompletedSession(sessionID, evidence.completedAt);
     this.trailingBusyAfterCompletion.add(sessionID);
+    this.listener.onSessionCompleted?.(
+      sessionID,
+      this.isPlanSession(sessionID) ? 'plan-ready' : 'completed'
+    );
     this.showCompletionNotification(sessionID);
     return true;
   }
@@ -1855,6 +1875,10 @@ export class SessionStateManager {
 
   busyEvidenceRevisionFor(sessionID: string): number {
     return this.busyEvidenceRevisions.get(sessionID) ?? 0;
+  }
+
+  busyStartedAtFor(sessionID: string): number | undefined {
+    return this.busyStartedAt.get(sessionID);
   }
 
   /**
@@ -1939,17 +1963,26 @@ export class SessionStateManager {
 
   private markSessionFailed(
     sessionID: string,
-    error: Record<string, unknown> | undefined
+    error: Record<string, unknown> | undefined,
+    failedAt?: number
   ): boolean {
-    if (error && isAbortedErrorRecord(error)) return this.failedSessions.delete(sessionID);
+    if (error && isAbortedErrorRecord(error)) return this.deleteFailedSession(sessionID);
 
     const wasFailed = this.failedSessions.has(sessionID);
+    const previousMarker = this.failedSessionMarkers.get(sessionID);
+    const marker = Math.max(previousMarker ?? 0, failedAt ?? previousMarker ?? Date.now());
     this.failedSessions.add(sessionID);
+    this.failedSessionMarkers.set(sessionID, marker);
     this.deleteCompletedSession(sessionID);
     if (!wasFailed && !this.isIgnoredBackgroundSession(sessionID)) {
       this.showFailureNotification(sessionID, error ? describeFailure(error) : undefined);
     }
-    return !wasFailed;
+    return !wasFailed || previousMarker !== marker;
+  }
+
+  private deleteFailedSession(sessionID: string): boolean {
+    this.failedSessionMarkers.delete(sessionID);
+    return this.failedSessions.delete(sessionID);
   }
 
   private failBusySession(
@@ -1967,12 +2000,12 @@ export class SessionStateManager {
       }
       this.clearBusy(sessionID);
     }
-    return this.markSessionFailed(sessionID, error);
+    return this.markSessionFailed(sessionID, error, evidence.completedAt);
   }
 
   private clearAbortedSession(sessionID: string): boolean {
     let changed = this.clearBusy(sessionID);
-    changed = this.failedSessions.delete(sessionID) || changed;
+    changed = this.deleteFailedSession(sessionID) || changed;
     changed = this.deleteCompletedSession(sessionID) || changed;
     return changed;
   }

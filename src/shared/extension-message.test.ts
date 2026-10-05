@@ -85,6 +85,7 @@ describe('parseExtensionMessage', () => {
           source: 'provider',
           status: 'available',
           checkedAt: 10,
+          creditBalance: 62_500,
           windows: [
             {
               id: 'five_hour',
@@ -119,6 +120,11 @@ describe('parseExtensionMessage', () => {
       { checkedAt: NaN },
       { windows: [null] },
       { windows: [{ id: 'bad' }] },
+      { creditBalance: '62500' },
+      { creditBalance: null },
+      { creditBalance: NaN },
+      { creditBalance: Infinity },
+      { creditBalance: -1 },
       { usageLimitResets: { credits: [null] } },
     ]) {
       expect(

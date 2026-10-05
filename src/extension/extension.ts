@@ -262,7 +262,8 @@ async function activateExtension(context: vscode.ExtensionContext) {
     context.extension.id,
     simulateNoProviders,
     undefined,
-    context.secrets
+    context.secrets,
+    context.globalStorageUri
   );
 
   context.subscriptions.push(

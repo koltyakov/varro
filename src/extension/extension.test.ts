@@ -261,10 +261,11 @@ describe('extension activation', () => {
     );
   });
 
-  it('passes global state to the sidebar provider for shared model preferences', async () => {
+  it('passes global state and notification storage to the sidebar provider', async () => {
     const { activate } = await import('./extension');
     const workspaceState = {};
     const globalState = { get: vi.fn(), update: vi.fn(() => Promise.resolve()) };
+    const globalStorageUri = { fsPath: '/extension-storage' };
     const secrets = { get: vi.fn(), store: vi.fn(), delete: vi.fn() };
 
     await activate({
@@ -272,6 +273,7 @@ describe('extension activation', () => {
       extension: { id: 'koltyakov.varro' },
       workspaceState,
       globalState,
+      globalStorageUri,
       secrets,
       subscriptions: [],
     } as never);
@@ -285,7 +287,8 @@ describe('extension activation', () => {
       'koltyakov.varro',
       false,
       undefined,
-      secrets
+      secrets,
+      globalStorageUri
     );
   });
 

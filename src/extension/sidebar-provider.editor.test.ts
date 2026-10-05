@@ -93,6 +93,32 @@ function createPanel() {
 }
 
 describe('SidebarProvider editor panels', () => {
+  it('notification clicks reveal the existing root panel and route to its child chat', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    const vscode = getVscodeMock();
+    vscode.window.createWebviewPanel.mockReturnValue(editor.panel);
+    try {
+      await provider.openSessionInEditor('root', 'Root chat', undefined, 'root', '/repo');
+      const sidebar = vi.spyOn(provider, 'openSessionInSidebar');
+      const open = vi.spyOn(provider, 'openSessionInEditor');
+      const handler = vscode.window.registerUriHandler.mock.calls.at(-1)?.[0];
+      if (!handler) throw new Error('Missing notification URI handler');
+      await handler.handleUri({
+        authority: 'koltyakov.varro',
+        path: '/notification',
+        query: 'session=child&root=root&directory=%2Frepo',
+      } as never);
+      expect(open).toHaveBeenCalledExactlyOnceWith('child', undefined, undefined, 'root', '/repo');
+      expect(vscode.window.createWebviewPanel).toHaveBeenCalledOnce();
+      expect(editor.panel.reveal).toHaveBeenCalledWith(2, false);
+      expect(editor.panel.dispose).not.toHaveBeenCalled();
+      expect(sidebar).not.toHaveBeenCalled();
+    } finally {
+      await provider.dispose();
+    }
+  });
+
   it('restores only the saved reverse flag when window chats are reopened', async () => {
     const values = new Map<string, unknown>();
     const globalState = createWorkspaceState();

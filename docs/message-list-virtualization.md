@@ -125,7 +125,10 @@ the shared invariants below remain true.
   using the same rules as tool activity. They do not receive prompt numbers or sticky
   navigation entries. Preserve explicit attachment chips while keeping generated prompt text out of
   user previews and edit drafts.
-- `virtualMetrics.prefix[index]` must describe the same ordered ID list used by the renderer.
+- `virtualMetrics.prefix.at(index)` must describe the same ordered ID list used by the renderer.
+- Published prefixes are immutable snapshots. Large prefixes share complete 256-entry chunks;
+  a dirty suffix copies its partial boundary chunk before writing. Earlier snapshots must remain
+  readable by scroll anchoring after any append, prepend, removal, or measurement correction.
 - Cached prefix entries may only be reused while both the ID order and all earlier effective heights
   remain valid.
 - A row measurement correction above the visible anchor must preserve that anchor's viewport
@@ -169,11 +172,36 @@ the shared invariants below remain true.
   state, and any future lightweight rendering mode.
 - An unmounted height invalidated by a view change becomes provisional. It must not remain marked as
   an exact measurement from the old view.
+- Deferred file-change summaries participate in inline-preview layout signatures even when their
+  patch bodies are unloaded. Otherwise hiding previews discovers stale heights one mounted range at
+  a time, repeating mount, measurement, and layout before the next paint.
+- Pin a detached layout-change anchor before applying measurement compensation or publishing the
+  invalidated prefix. Keep intervening rows as bounded placeholders and suppress competing generic
+  measurement anchors until settling ends. Release the pin on direct input, owner replacement, or
+  session change; an already-unmounted anchor cannot provide exact DOM restoration.
+- Capture a diff-toggle anchor before DOM replacement can clamp the scroll range. Detached readers
+  may need a temporary bottom deficit reserve; its target must follow the retained marker when the
+  trailing summary slot changes, even if the reserve's size is already sufficient. Native scroll
+  detachment must cancel stale go-to-latest requests so they cannot block this anchor owner.
+- Publish changed heights and the anchor's new virtual scroll coordinate in one batch. Range
+  selection must not mount the old numeric destination against the new prefix and then discard it
+  during anchor restoration. Read the mounted batch's rectangles before writing row corrections.
 - Toggling inline file diffs while bottom-follow owns the viewport positions at the new physical bottom
   before paint, without streaming easing or retaining removed content as trailing reserve. Pending
   row rounding must not recreate reserve while this view-change owner is active. Bounded
   settling covers virtual row hydration and yields to direct input, session replacement, editing, and
   diff focus. Detached readers keep their visible anchor instead of returning to latest.
+  Stable summary heights do not complete this transition while inline diff details are still loading.
+  Their arrival must position immediately before paint too. Mounted overscan rows retain loaded
+  inline diffs when entering lightweight mode; core membership must not collapse and refetch them.
+  When an unloaded diff remounts, reserve its last measured row height until details replace the
+  summary. Unloading may save content, but must preserve exactly the same layout space; loading
+  placeholders are not new exact row measurements.
+  Establish that reservation before mount measurement, and publish hydrated heights before the
+  next virtual-range reconciliation. Waiting for ResizeObserver can repeatedly evict and remount
+  a boundary row, replacing its cached diff height with its shorter summary on each pass.
+  Coalesce completion/unmount wakeups with an executing settle pass or its scheduled animation frame.
+  Replacing that frame with another microtask can starve paint indefinitely during range churn.
 - Width reflow owns a stable visible message captured before the first changed-height batch is
   applied. Deferring prefix publication must not make later resize batches classify rows against an
   already-adjusted `scrollTop` and stale prefixes.
@@ -190,12 +218,23 @@ the shared invariants below remain true.
 - A layout invalidation that already owns an exact anchor must not queue a second generic row anchor
   while publishing measurements. Generic measurement callbacks queued around `/thinking` defer to its
   pending exact anchor. Releasing the temporary virtual pin reconciles that same marker before paint.
+- Publishing row measurements must not capture a generic anchor between prefix-height scroll
+  compensation and spacer publication. That intermediate DOM position applies the same height
+  delta twice when restored, especially after a slow mount outlives the direct-input window.
+  Explicit history, layout, and structural owners retain their normal precedence.
+- Layout invalidation must not acquire a settling anchor while a scrollbar or touch pointer owns
+  scrolling. Activity updates after pointerdown otherwise capture its current input epoch and restore
+  an old position against later drag movement. `scroll-scrollbar-activity.spec.ts` covers this during
+  continued tool grouping and completion, including a hold beyond the input-intent window.
 - A resize batch is a pure width reflow only when every reported inline size changed or the container
   font changed. Concurrent streaming, expansion, or content mutation makes it a content resize and
   uses normal height-correction ownership.
-- The webview root caps expansion for four animation frames while the VS Code painted surface catches
-  up. During that interval, `window.innerWidth` can exceed the content width. Measure the actual
-  container for reflow and anchor calculations. Shrinking and zoom bypass the expansion delay.
+- The webview root caps expansion within one responsive layout for four animation frames while the
+  VS Code painted surface catches up. During that interval, `window.innerWidth` can exceed the content
+  width. Measure the actual container for reflow and anchor calculations. Shrinking, zoom, and crossing
+  the 960px content or 1400px session-sidebar breakpoint bypass the delay and cancel pending expansion.
+  Viewport media queries and the root width must switch together; a desktop sidebar inside the old
+  narrow cap can squeeze the transcript to one character per line.
 - Width measurements may be deferred only while the mounted range still brackets the viewport.
   Publish pending metrics early if stale prefixes could leave uncovered space above or below the
   rendered range.
@@ -205,6 +244,11 @@ the shared invariants below remain true.
 - Host viewport resize and local container resize have different reserve semantics. A host resize
   releases synthetic bottom reserves; local panel growth or shrink reconciles and consumes reserves
   against the existing pinned bottom target.
+- While bottom-follow owns the viewport, width reflow and its final measurement publication position
+  at the new bottom before paint, without easing. Full-screen-to-narrow transitions must not animate
+  through older content. Detached readers retain width anchoring; subsequent content growth resumes
+  normal easing. `scroll-auto-scroll.spec.ts` covers host and container narrowing in short and
+  virtualized transcripts.
 - Scrollbar inset is layout geometry. Track padding, sticky chrome, and bottom overlays must use the
   same current `offsetWidth - clientWidth` inset.
 - Disable native browser scroll anchoring whenever Varro owns bottom-follow, measurement, history
@@ -213,7 +257,7 @@ the shared invariants below remain true.
 
 ### Coordinate Spaces
 
-- Virtual prefixes are row-only coordinates. `prefix[0]` is the start of the first message, not the
+- Virtual prefixes are row-only coordinates. `prefix.at(0)` is the start of the first message, not the
   start of the scroll container or track.
 - Container `scrollTop` includes flow content before the first message. Today that content is track
   top padding plus the optional history banner and its margins.
@@ -286,6 +330,11 @@ the shared invariants below remain true.
   must never interpolate to a smaller `scrollTop` and visibly reverse the gesture.
 - Width-resize anchoring is established before applying the first resize measurement. Wheel,
   keyboard, or scrollbar input publishes pending measurements and releases that resize anchor.
+- When upward movement reveals an earlier message row above a still-visible assistant anchor,
+  transfer the direct-movement anchor to that row and retire the pre-wheel resize prediction.
+  Keep deliberate user-card anchoring. Keeping the old assistant row pinned farther down the viewport
+  lets reflow move the newly visible content. `scroll-arrow-up-growth.spec.ts` checks this through
+  repeated width changes before ArrowUp and subsequent streamed output.
 - After direct movement, refine a tall-row anchor within its whole render item, ignoring both its
   saved element and descendant recovery tag. Otherwise refinement can stay trapped in the old,
   now-clipped block, whose wrapping shifts the next visible block during width reflow.
@@ -303,9 +352,26 @@ the shared invariants below remain true.
   animated tray height. Otherwise the shrinking scroll range reverses the just-completed gesture.
 - Transcript-scrolling keys release the old activity-exit target and summary anchor while handing its
   reserved space to the append reserve. The old exit target must not undo a downward key destination.
+  If downward movement enters the reserved exit range, reserve the remaining animated height at the
+  new destination before the next frame, even when it stops short of the physical bottom. Otherwise
+  the shrinking range clamps the viewport backward. `scroll-activity-collapse.spec.ts` captures the
+  keyboard destination synchronously and checks every subsequent exit and Thinking-handoff frame.
 - Grabbing the scrollbar or beginning a touch scroll also releases the activity-exit target, retained
   summary anchor, and queued collapse correction without shrinking the scroll range. Bottom-follow
   yields while the pointer owns scrolling, including beyond the input-intent timeout.
+  Disable native CSS scroll anchoring during this hold too: a detached non-virtualized list can
+  otherwise let browser anchor adjustments fight its thumb position during activity growth.
+  Restore the stylesheet's anchoring policy on release without writing a scroll position.
+  Track the held scroll range even while detached, reserving lost range when a tray shrinks;
+  the pinned exit-reserve path alone does not cover detached tool churn. Reserve detached activity
+  collapses before removal: resize delivery is too late to prevent native thumb mapping from seeing
+  the shorter range. Keep offscreen reserve through the hold, consume it against the held range,
+  and exclude reserve from new range growth so repeated replacements cannot accumulate blank space.
+  Finish activity-entry height animations immediately while the pointer owns scrolling. Their
+  incremental growth otherwise changes native thumb mapping even when no JavaScript scroll write
+  occurs. Preserve animation-end cleanup and restore normal entry timing on release.
+  Cancel any measured append animation on pointerdown and reject new append animations while the
+  pointer owns scrolling; their direct scroll writes must obey the same hold as the ordinary follower.
   A layout-driven bottom scroll event during that gesture must not recapture the exit anchor.
   `scroll-scrollbar-activity.spec.ts` uses native thumb drags during and after collapse, then checks
   detached streaming and explicit return to latest.
@@ -355,6 +421,12 @@ Direct input acquires ownership only when it can affect the transcript:
 - Bottom follow remains active frame by frame while streaming or geometry is unsettled. It may stop
   only after track height, bottom target, and distance from bottom stabilize; stream observation
   requires consecutive stable frames.
+- Upward outer wheel intent releases bottom-follow even for subpixel trackpad deltas before native
+  movement. Confirmed upward user movement takes precedence over the expected-target tolerance;
+  matching a recent programmatic destination must not swallow the gesture. While following live output,
+  deliver wheel intent with a non-passive listener and apply its first upward step during the ownership
+  handoff. Otherwise Chromium can add an already-submitted follow write to the native destination even
+  after the follow loop is cancelled. Idle and detached reading use passive wheel delivery.
 - Initial positioning also requires consecutive stable frames. Keep initial measurement corrections
   immediate until then, so row sizing delivered after the first frame does not start animated follow.
 - Keep the transcript hidden behind its loading indicator through initial positioning and any initial
@@ -446,6 +518,8 @@ Direct input acquires ownership only when it can affect the transcript:
 - While inline editing is active, the edited row top may not move above the sticky message-jump inset.
   Clamp native and wheel movement at that boundary and settle for bounded frames. Editing never
   re-enables bottom follow.
+- The inline composer replaces a real prompt card and remains a sticky collision boundary. The
+  preceding sticky prompt must yield to it so the edit banner and Cancel control stay actionable.
 - Focused diff content owns local interaction geometry and pauses bottom follow. Resume only if follow
   was active before focus and no user movement superseded it. Expanding or collapsing a diff
   disengages follow before capturing disclosure geometry.
@@ -458,7 +532,9 @@ Direct input acquires ownership only when it can affect the transcript:
 - A compact activity part follows `delayed -> visible active/completed -> retained -> exiting -> grouped`.
   Tool previews skip `exiting`: after retention, group them immediately without a disappearing or
   height-collapse animation. Reserve their disappearing flow space before publishing removal, and
-  admit the next queued tool in the same update. Reasoning retains its animated exit lifecycle.
+  admit the next queued tool in the same update. When one preview replaces another, reuse its tray
+  and skip the replacement's entrance animation, including completed previews waiting to group.
+  Reasoning retains its animated exit lifecycle.
   Newly observed live tools share a 100 ms collection interval and a 1,200 ms preview deadline.
   Admit them one at a time, at least 120 ms after the preceding admission's painted-frame callback.
   At most one item occupies the active tray, including retained and exiting items. Queue the rest until
@@ -476,7 +552,9 @@ Direct input acquires ownership only when it can affect the transcript:
   start time, falling back to observation time, and start each slot from its painted frame. Running
   tools rotated out of the tray remain hidden, not completed or grouped. Completed queued previews
   group after their slot; already-previewed hidden tools group when they complete. Rotation preserves
-  the one-item limit and does not animate removal. Inspecting a tool suspends rotation until closed;
+  the one-item limit and does not animate removal or replay the incoming tool's entrance. Reuse the
+  mounted tray within the same activity segment so its content switches at full height and opacity.
+  Inspecting a tool suspends rotation until closed;
   stop timers when no alternatives remain, on interruption, or when the session/turn is replaced.
 - A height animation publishes intermediate row heights. If it runs above a detached viewport, every
   frame must preserve the same visible anchor; checking only the final grouped layout is insufficient.
@@ -792,6 +870,9 @@ Direct input acquires ownership only when it can affect the transcript:
 
 ### Pagination Progress
 
+- Cached transcript snapshots and prefetched pages share a 24 MiB approximate retained-size budget
+  in addition to their count limits. Eviction releases cached payloads without clearing pagination
+  cursors, prompt-number readiness, or the active transcript. Oversized snapshots are not cached.
 - A successful HTTP response is not necessarily visible pagination progress. Empty pages,
   duplicate-only pages, and stale invalidated responses can leave the DOM unchanged while a cursor
   still points to valid history.

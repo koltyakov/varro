@@ -308,6 +308,22 @@ for (const scenario of exitCases) {
       if (scenario.keyDuring) {
         const beforeKey = await list.evaluate((element) => element.scrollTop);
         await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + 100);
+        await list.evaluate((element, messageId) => {
+          // Observe the key's destination after the application handler, before an exit frame
+          // can clamp it. Waiting for the animation to settle would hide an early reversal.
+          document.addEventListener(
+            'keydown',
+            () => {
+              const summary = element.querySelector(
+                `[data-msg-id="${messageId}"] .assistant-activity-summary`
+              )!;
+              element.dataset.exitTestAnchor = String(
+                summary.getBoundingClientRect().top - element.getBoundingClientRect().top
+              );
+            },
+            { once: true }
+          );
+        }, targetMessageId);
         await page.keyboard.press('ArrowDown');
         await expect
           .poll(() => list.evaluate((element) => element.scrollTop))
@@ -325,7 +341,7 @@ for (const scenario of exitCases) {
       await page.waitForTimeout(100);
       // The new anchor is established by genuine native movement. Later animation/timer cleanup
       // must preserve this destination, not restore the pre-gesture bottom target.
-      if (!scenario.reattachDuring)
+      if (!scenario.reattachDuring && !scenario.keyDuring)
         await list.evaluate((element, messageId) => {
           const summary = element.querySelector(
             `[data-msg-id="${messageId}"] .assistant-activity-summary`
@@ -337,7 +353,7 @@ for (const scenario of exitCases) {
       await pauseExit?.evaluate((element) => element.parentNode?.removeChild(element));
     }
     const result = await sampling;
-    if (scenario.detachDuring || scenario.reattachDuring) {
+    if (scenario.detachDuring || scenario.reattachDuring || scenario.keyDuring) {
       expect(
         result.samples.filter(
           (sample) => sample.expectedTop !== null && sample.expectedTop !== result.before

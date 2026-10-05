@@ -7,6 +7,9 @@ let presentationFlushHandler: ((sessionId: string) => void) | null = null;
 let todoCollapseHandler: ((element: HTMLElement) => void) | null = null;
 let composerCollapseHandler: ((element: HTMLElement, height: number) => void) | null = null;
 let messageBlockRemovalHandler: ((element: HTMLElement) => void) | null = null;
+let inlineDiffLoadHandler:
+  | ((sessionId: string, messageId: string) => (() => void) | undefined)
+  | null = null;
 const permissionRemovalIntents = new Map<string, { removeGroup: boolean; token: object }>();
 
 export function registerTodoCollapseHandler(handler: (element: HTMLElement) => void) {
@@ -42,6 +45,19 @@ export function registerMessageBlockRemovalHandler(handler: (element: HTMLElemen
 
 export function prepareForMessageBlockRemoval(element: HTMLElement) {
   messageBlockRemovalHandler?.(element);
+}
+
+export function registerInlineDiffLoadHandler(
+  handler: (sessionId: string, messageId: string) => (() => void) | undefined
+) {
+  inlineDiffLoadHandler = handler;
+  return () => {
+    if (inlineDiffLoadHandler === handler) inlineDiffLoadHandler = null;
+  };
+}
+
+export function trackInlineDiffLoad(sessionId: string, messageId: string) {
+  return inlineDiffLoadHandler?.(sessionId, messageId);
 }
 
 export function registerPresentationFlushHandler(handler: (sessionId: string) => void) {

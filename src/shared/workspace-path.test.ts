@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { isSameWorkspacePath, normalizeWorkspaceIdentity } from './workspace-path';
+import {
+  getRelativePathWithinWorkspace,
+  isSameWorkspacePath,
+  normalizeWorkspaceIdentity,
+} from './workspace-path';
 
 describe('workspace path identity', () => {
   it('case-folds drive paths and normalizes separators', () => {
@@ -67,5 +71,18 @@ describe('workspace path identity', () => {
 
   it('does not case-fold an incomplete UNC-like POSIX path', () => {
     expect(isSameWorkspacePath('//BuildServer', '//buildserver')).toBe(false);
+  });
+
+  it('preserves each input spelling when equivalent Windows paths are reused', () => {
+    for (let pass = 0; pass < 3; pass += 1) {
+      expect(isSameWorkspacePath('C:\\Repo\\Source\\File.ts', 'c:/repo/source/file.ts')).toBe(true);
+      expect(getRelativePathWithinWorkspace('C:\\Repo\\Source\\File.ts', 'c:/REPO')).toBe(
+        'Source/File.ts'
+      );
+      expect(getRelativePathWithinWorkspace('c:/repo/source/file.ts', 'C:\\Repo')).toBe(
+        'source/file.ts'
+      );
+      expect(getRelativePathWithinWorkspace('C:\\Repository\\File.ts', 'C:\\Repo')).toBeNull();
+    }
   });
 });

@@ -120,6 +120,7 @@ describe('createCodexAdapter', () => {
       checkedAt: 1_000,
       coordinate: async (identity, poll) => {
         expect(identity).toEqual([
+          'codex-usage-v2',
           'https://chatgpt.com/backend-api/wham/usage',
           'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits',
           'https://chatgpt.com/api/codex/usage',
@@ -793,8 +794,52 @@ describe('createCodexAdapter', () => {
           percent: 38,
         },
       ],
+      creditBalance: 123.4,
     });
   });
+
+  it.each([62_500, '62500.50', 0, '0'])(
+    'reads a credit balance of %s even without quota windows',
+    async (balance) => {
+      vi.mocked(fetch).mockResolvedValue(jsonResponse({ credits: { balance } }));
+
+      const status = await adapter.fetch({
+        provider: oauthProvider,
+        authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
+        modelID: null,
+        checkedAt: 1_000,
+      });
+
+      expect(status).toMatchObject({
+        status: 'available',
+        windows: [],
+        creditBalance: Number(balance),
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each([undefined, null, '', 'unknown', 'Infinity', -1, {}, true])(
+    'ignores an unavailable or invalid credit balance of %s',
+    async (balance) => {
+      vi.mocked(fetch).mockResolvedValue(
+        jsonResponse({
+          rate_limit: { primary_window: { used_percent: 20 } },
+          credits: { balance },
+        })
+      );
+
+      const status = await adapter.fetch({
+        provider: oauthProvider,
+        authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
+        modelID: null,
+        checkedAt: 1_000,
+      });
+
+      expect(status.status).toBe('available');
+      expect(status).not.toHaveProperty('creditBalance');
+    }
+  );
 
   it('treats auth failures as unsupported', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 401 }));

@@ -3,7 +3,6 @@ import type { Page } from '@playwright/test';
 import type { ServerEvent } from '../src/shared/protocol';
 import type { MessageEntry, Session } from '../src/webview/types';
 import { asRecord } from '../src/shared/type-utils';
-import { ReplayProjection } from '../scripts/ai-replay-projection.mjs';
 
 export type PlaybackFixture = {
   capture: {
@@ -34,6 +33,9 @@ type BrowserReplayEntry = PlaybackFixture['timeline'][number] & {
 };
 
 export async function verifySessionPlayback(page: Page, playback: PlaybackFixture) {
+  // Keep the replay helper's top-level await and import.meta in Node's ESM loader.
+  // Playwright transforms static imports from this CommonJS test package into require.
+  const { ReplayProjection } = await import('../scripts/ai-replay-projection.mjs');
   const { capture, timeline } = playback;
   const projection = new ReplayProjection(capture.finalMessages);
   const projectedState = {

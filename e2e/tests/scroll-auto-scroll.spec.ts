@@ -10,6 +10,76 @@ import {
 import { appendDeltaToLastLargeAssistant, appendDeltaToRapidStreaming } from './scroll-helpers';
 
 test.describe('auto-scroll', () => {
+  for (const scenario of ['mixed-small-transcript', 'large-transcript']) {
+    for (const resize of ['host', 'container']) {
+      test(`keeps the bottom aligned without easing on ${resize} narrowing in ${scenario}`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 1600, height: 900 });
+        await page.goto(`/e2e/harness/index.html?scenario=${scenario}`);
+        const list = page.locator('.interactive-list');
+        await expect(list).toBeVisible();
+        await expect
+          .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+          .toBeLessThan(1);
+        await waitForAnimationFrames(page, 20);
+
+        const before = await getScrollMetrics(page, '.interactive-list');
+        await list.evaluate((element) => {
+          const samples: Array<{ width: number; distance: number }> = [];
+          (window as typeof window & { narrowingSamples?: typeof samples }).narrowingSamples =
+            samples;
+          const observer = new ResizeObserver(() => {
+            samples.push({
+              width: element.clientWidth,
+              distance: element.scrollHeight - element.clientHeight - element.scrollTop,
+            });
+          });
+          observer.observe(element);
+          observer.observe(element.querySelector('.interactive-list-track')!);
+        });
+        if (resize === 'host') {
+          await page.setViewportSize({ width: 480, height: 900 });
+        } else {
+          await list.evaluate((element) => {
+            element.style.maxWidth = '480px';
+          });
+        }
+        const frames = await list.evaluate(async (element) => {
+          const samples: number[] = [];
+          for (let frame = 0; frame < 30; frame += 1) {
+            // ResizeObserver corrects reflow after rAF, before paint. Read after that delivery.
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => setTimeout(resolve, 0))
+            );
+            samples.push(element.scrollHeight - element.clientHeight - element.scrollTop);
+          }
+          return samples;
+        });
+        const samples = await page.evaluate(
+          () =>
+            (
+              window as typeof window & {
+                narrowingSamples?: Array<{ width: number; distance: number }>;
+              }
+            ).narrowingSamples ?? []
+        );
+        expect(samples.some((sample) => sample.width <= 480)).toBe(true);
+        expect((await getScrollMetrics(page, '.interactive-list')).scrollHeight).toBeGreaterThan(
+          before.scrollHeight + 100
+        );
+        expect(
+          samples.every((sample) => Math.abs(sample.distance) <= 1),
+          JSON.stringify(samples)
+        ).toBe(true);
+        expect(
+          frames.every((distance) => Math.abs(distance) <= 1),
+          JSON.stringify(frames)
+        ).toBe(true);
+      });
+    }
+  }
+
   for (const growth of ['new lines', 'wrapped text', 'attachment'] as const) {
     test(`keeps the bottom aligned immediately when the composer grows from ${growth}`, async ({
       page,
@@ -1803,311 +1873,349 @@ test.describe('auto-scroll', () => {
       .toBeLessThan(2);
   });
 
-  test('keeps first-turn Explored fixed across mixed multi-activity exits', async ({ page }) => {
-    await page.setViewportSize({ width: 504, height: 800 });
-    await page.goto('/e2e/harness/index.html?scenario=blank');
-    await page.evaluate(() => {
-      const harnessWindow = window as typeof window & {
-        __sendToExtension?: (message: unknown) => void | Promise<void>;
-        __varroE2E?: {
-          getSessionMessages?: (sessionId: string) => Array<{
+  for (const promptLines of [10, 30]) {
+    test(`keeps first-turn Explored fixed across mixed multi-activity exits (${promptLines} lines)`, async ({
+      page,
+    }, testInfo) => {
+      test.setTimeout(60_000);
+      await page.setViewportSize({ width: 504, height: 800 });
+      await page.goto('/e2e/harness/index.html?scenario=blank');
+      await page.evaluate(() => {
+        const harnessWindow = window as typeof window & {
+          __sendToExtension?: (message: unknown) => void | Promise<void>;
+          __varroE2E?: {
+            getSessionMessages?: (sessionId: string) => Array<{
+              info: Record<string, unknown>;
+              parts: Array<Record<string, unknown>>;
+            }>;
+            updateMessageInfo?: (info: Record<string, unknown>) => void;
+            updateMessagePart?: (part: Record<string, unknown>) => void;
+            updateSessionStatus?: (sessionId: string, status: { type: 'busy' | 'idle' }) => void;
+          };
+          firstTurnActivityFixture?: {
+            sessionId: string;
             info: Record<string, unknown>;
-            parts: Array<Record<string, unknown>>;
-          }>;
-          updateMessageInfo?: (info: Record<string, unknown>) => void;
-          updateMessagePart?: (part: Record<string, unknown>) => void;
-          updateSessionStatus?: (sessionId: string, status: { type: 'busy' | 'idle' }) => void;
+            running: Array<Record<string, unknown>>;
+          };
         };
-        firstTurnActivityFixture?: {
-          sessionId: string;
-          info: Record<string, unknown>;
-          running: Array<Record<string, unknown>>;
-        };
-      };
-      const originalSend = harnessWindow.__sendToExtension;
-      harnessWindow.__sendToExtension = async (message) => {
-        const request = message as {
-          type?: string;
-          payload?: { path?: string; body?: Record<string, unknown> };
-        };
-        const path = request.payload?.path
-          ? new URL(request.payload.path, 'http://varro.test').pathname
-          : '';
-        const match = path.match(/^\/session\/([^/]+)\/prompt_async$/);
-        if (request.type !== 'api/request' || !match) {
+        const originalSend = harnessWindow.__sendToExtension;
+        harnessWindow.__sendToExtension = async (message) => {
+          const request = message as {
+            type?: string;
+            payload?: { path?: string; body?: Record<string, unknown> };
+          };
+          const path = request.payload?.path
+            ? new URL(request.payload.path, 'http://varro.test').pathname
+            : '';
+          const match = path.match(/^\/session\/([^/]+)\/prompt_async$/);
+          if (request.type !== 'api/request' || !match) {
+            await originalSend?.(message);
+            return;
+          }
+
+          const sessionId = decodeURIComponent(match[1]!);
           await originalSend?.(message);
-          return;
-        }
-
-        const sessionId = decodeURIComponent(match[1]!);
-        await originalSend?.(message);
-        const assistant = harnessWindow.__varroE2E
-          ?.getSessionMessages?.(sessionId)
-          .findLast((entry) => entry.info.role === 'assistant');
-        if (!assistant) throw new Error('Persisted first-turn assistant is missing');
-        const info: Record<string, unknown> = {
-          ...assistant.info,
-          time: { created: Date.now() },
+          const assistant = harnessWindow.__varroE2E
+            ?.getSessionMessages?.(sessionId)
+            .findLast((entry) => entry.info.role === 'assistant');
+          if (!assistant) throw new Error('Persisted first-turn assistant is missing');
+          const info: Record<string, unknown> = {
+            ...assistant.info,
+            time: { created: Date.now() },
+          };
+          delete info.finish;
+          const completed = {
+            id: 'message-first-turn-activity-read',
+            sessionID: sessionId,
+            messageID: String(info.id),
+            type: 'tool',
+            callID: 'message-first-turn-activity-read-call',
+            tool: 'read',
+            state: {
+              status: 'completed',
+              input: { filePath: 'src/webview/components/MessageList.tsx' },
+              output: 'source',
+              title: 'Read MessageList',
+              metadata: {},
+              time: { start: Date.now() - 2, end: Date.now() - 1 },
+            },
+          };
+          const running = Array.from({ length: 3 }, (_, index) => ({
+            id: `message-first-turn-activity-command-${index}`,
+            sessionID: sessionId,
+            messageID: String(info.id),
+            type: 'tool',
+            callID: `message-first-turn-activity-command-${index}-call`,
+            tool: 'bash',
+            state: {
+              status: 'running',
+              input: { command: `npm run test:${index}` },
+              title: `npm run test:${index}`,
+              time: { start: Date.now() + index },
+            },
+          }));
+          harnessWindow.firstTurnActivityFixture = { sessionId, info, running };
+          harnessWindow.__varroE2E?.updateSessionStatus?.(sessionId, { type: 'busy' });
+          harnessWindow.__varroE2E?.updateMessageInfo?.(info);
+          harnessWindow.__varroE2E?.updateMessagePart?.(completed);
+          for (const part of running) harnessWindow.__varroE2E?.updateMessagePart?.(part);
+          for (const payload of [
+            {
+              type: 'session.status',
+              properties: { sessionID: sessionId, status: { type: 'busy' } },
+            },
+            { type: 'message.updated', properties: { info } },
+            { type: 'message.part.updated', properties: { part: completed } },
+            ...running.map((part) => ({
+              type: 'message.part.updated',
+              properties: { part },
+            })),
+          ]) {
+            window.postMessage({ type: 'server/event', payload }, '*');
+          }
         };
-        delete info.finish;
-        const completed = {
-          id: 'message-first-turn-activity-read',
-          sessionID: sessionId,
-          messageID: String(info.id),
-          type: 'tool',
-          callID: 'message-first-turn-activity-read-call',
-          tool: 'read',
-          state: {
-            status: 'completed',
-            input: { filePath: 'src/webview/components/MessageList.tsx' },
-            output: 'source',
-            title: 'Read MessageList',
-            metadata: {},
-            time: { start: Date.now() - 2, end: Date.now() - 1 },
-          },
-        };
-        const running = Array.from({ length: 3 }, (_, index) => ({
-          id: `message-first-turn-activity-command-${index}`,
-          sessionID: sessionId,
-          messageID: String(info.id),
-          type: 'tool',
-          callID: `message-first-turn-activity-command-${index}-call`,
-          tool: 'bash',
-          state: {
-            status: 'running',
-            input: { command: `npm run test:${index}` },
-            title: `npm run test:${index}`,
-            time: { start: Date.now() + index },
-          },
-        }));
-        harnessWindow.firstTurnActivityFixture = { sessionId, info, running };
-        harnessWindow.__varroE2E?.updateSessionStatus?.(sessionId, { type: 'busy' });
-        harnessWindow.__varroE2E?.updateMessageInfo?.(info);
-        harnessWindow.__varroE2E?.updateMessagePart?.(completed);
-        for (const part of running) harnessWindow.__varroE2E?.updateMessagePart?.(part);
-        for (const payload of [
-          {
-            type: 'session.status',
-            properties: { sessionID: sessionId, status: { type: 'busy' } },
-          },
-          { type: 'message.updated', properties: { info } },
-          { type: 'message.part.updated', properties: { part: completed } },
-          ...running.map((part) => ({
-            type: 'message.part.updated',
-            properties: { part },
-          })),
-        ]) {
-          window.postMessage({ type: 'server/event', payload }, '*');
-        }
-      };
-    });
+      });
 
-    const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
-    await composer.fill(
-      Array.from(
-        { length: 10 },
-        (_, index) => `Keep Explored fixed through first-turn completion, line ${index + 1}.`
-      ).join('\n')
-    );
-    await page.getByLabel('Send (Enter)').click();
+      const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+      await composer.fill(
+        Array.from(
+          { length: promptLines },
+          (_, index) => `Keep Explored fixed through first-turn completion, line ${index + 1}.`
+        ).join('\n')
+      );
+      await page.getByLabel('Send (Enter)').click();
 
-    const list = page.locator('.interactive-list');
-    const summary = page.locator('.assistant-activity-summary').last();
-    const activeItems = page.locator(
-      '[data-activity-part-id^="message-first-turn-activity-command-"]'
-    );
-    await expect(summary).toContainText('Explored: 1 file');
-    await expect(activeItems).toHaveCount(1);
-    await activeItems.last().evaluate(async (element) => {
-      await Promise.all(element.getAnimations().map((animation) => animation.finished));
-    });
-    const before = await summary.evaluate((element) => {
-      const container = element.closest<HTMLElement>('.interactive-list');
-      if (!container) throw new Error('Explored container is missing');
-      return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    });
-    const completeAndSample = (indexes: number[]) =>
-      list.evaluate(async (element, completedIndexes) => {
+      const list = page.locator('.interactive-list');
+      const summary = page.locator('.assistant-activity-summary').last();
+      const activeItems = page.locator(
+        '[data-activity-part-id^="message-first-turn-activity-command-"]'
+      );
+      await expect(summary).toContainText('Explored: 1 file');
+      await expect(activeItems).toHaveCount(1);
+      await activeItems.last().evaluate(async (element) => {
+        await Promise.all(element.getAnimations().map((animation) => animation.finished));
+      });
+      // Sending a tall first turn also starts smooth bottom following. Establish
+      // its painted destination before measuring the unrelated activity exits.
+      await expect
+        .poll(() =>
+          getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+        )
+        .toBeLessThanOrEqual(1);
+      const before = await summary.evaluate((element) => {
+        const container = element.closest<HTMLElement>('.interactive-list');
+        if (!container) throw new Error('Explored container is missing');
+        return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      });
+      const initialGeometry = await list.evaluate((element) => ({
+        scrollTop: element.scrollTop,
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight,
+      }));
+      expect(initialGeometry.scrollHeight > initialGeometry.clientHeight).toBe(promptLines === 30);
+      const completeAndSample = (indexes: number[]) =>
+        list.evaluate(async (element, completedIndexes) => {
+          const harnessWindow = window as typeof window & {
+            __varroE2E?: { updateMessagePart?: (part: Record<string, unknown>) => void };
+            firstTurnActivityFixture?: { running: Array<Record<string, unknown>> };
+          };
+          const fixture = harnessWindow.firstTurnActivityFixture;
+          if (!fixture) throw new Error('First-turn activity fixture is missing');
+          for (const index of completedIndexes) {
+            const running = fixture.running[index];
+            if (!running) throw new Error(`Running activity ${index} is missing`);
+            const previousState = running.state as Record<string, unknown>;
+            const completed = {
+              ...running,
+              state: {
+                status: 'completed',
+                input: previousState.input,
+                output: 'Passed',
+                title: previousState.title,
+                metadata: {},
+                time: { start: Date.now() - 1_000, end: Date.now() },
+              },
+            };
+            fixture.running[index] = completed;
+            harnessWindow.__varroE2E?.updateMessagePart?.(completed);
+            window.postMessage(
+              {
+                type: 'server/event',
+                payload: { type: 'message.part.updated', properties: { part: completed } },
+              },
+              '*'
+            );
+          }
+
+          const tops: Array<number | null> = [];
+          for (let frame = 0; frame < 150; frame += 1) {
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => setTimeout(resolve, 0))
+            );
+            const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
+            const explored = summaries[summaries.length - 1];
+            tops.push(
+              explored
+                ? explored.getBoundingClientRect().top - element.getBoundingClientRect().top
+                : null
+            );
+          }
+          return tops;
+        }, indexes);
+
+      const shuffledSamples = await completeAndSample([2]);
+      expect(
+        shuffledSamples.every((top) => top !== null && Math.abs(top - before) <= 1),
+        JSON.stringify({ before, shuffledSamples })
+      ).toBe(true);
+      await expect(activeItems).toHaveCount(1);
+
+      const groupedSamples = await completeAndSample([0, 1]);
+      expect(
+        groupedSamples.every((top) => top !== null && Math.abs(top - before) <= 1),
+        JSON.stringify({ before, groupedSamples })
+      ).toBe(true);
+      await expect(activeItems).toHaveCount(0);
+
+      await page.evaluate(() => {
         const harnessWindow = window as typeof window & {
           __varroE2E?: { updateMessagePart?: (part: Record<string, unknown>) => void };
-          firstTurnActivityFixture?: { running: Array<Record<string, unknown>> };
+          firstTurnActivityFixture?: {
+            sessionId: string;
+            info: Record<string, unknown>;
+            running: Array<Record<string, unknown>>;
+          };
         };
         const fixture = harnessWindow.firstTurnActivityFixture;
         if (!fixture) throw new Error('First-turn activity fixture is missing');
-        for (const index of completedIndexes) {
-          const running = fixture.running[index];
-          if (!running) throw new Error(`Running activity ${index} is missing`);
-          const previousState = running.state as Record<string, unknown>;
-          const completed = {
-            ...running,
+        const next = Array.from({ length: 3 }, (_, offset) => {
+          const index = fixture.running.length + offset;
+          return {
+            id: `message-first-turn-activity-command-${index}`,
+            sessionID: fixture.sessionId,
+            messageID: String(fixture.info.id),
+            type: 'tool',
+            callID: `message-first-turn-activity-command-${index}-call`,
+            tool: 'bash',
             state: {
-              status: 'completed',
-              input: previousState.input,
-              output: 'Passed',
-              title: previousState.title,
-              metadata: {},
-              time: { start: Date.now() - 1_000, end: Date.now() },
+              status: 'running',
+              input: { command: `npm run test:${index}` },
+              title: `npm run test:${index}`,
+              time: { start: Date.now() + offset },
             },
           };
-          fixture.running[index] = completed;
-          harnessWindow.__varroE2E?.updateMessagePart?.(completed);
+        });
+        fixture.running.push(...next);
+        for (const part of next) {
+          harnessWindow.__varroE2E?.updateMessagePart?.(part);
           window.postMessage(
             {
               type: 'server/event',
-              payload: { type: 'message.part.updated', properties: { part: completed } },
+              payload: { type: 'message.part.updated', properties: { part } },
             },
             '*'
           );
         }
-
-        const tops: Array<number | null> = [];
-        for (let frame = 0; frame < 150; frame += 1) {
-          await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
-          const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
-          const explored = summaries[summaries.length - 1];
-          tops.push(
-            explored
-              ? explored.getBoundingClientRect().top - element.getBoundingClientRect().top
-              : null
-          );
-        }
-        return tops;
-      }, indexes);
-
-    const shuffledSamples = await completeAndSample([2]);
-    expect(
-      shuffledSamples.every((top) => top !== null && Math.abs(top - before) <= 1),
-      JSON.stringify({ before, shuffledSamples })
-    ).toBe(true);
-    await expect(activeItems).toHaveCount(1);
-
-    const groupedSamples = await completeAndSample([0, 1]);
-    expect(
-      groupedSamples.every((top) => top !== null && Math.abs(top - before) <= 1),
-      JSON.stringify({ before, groupedSamples })
-    ).toBe(true);
-    await expect(activeItems).toHaveCount(0);
-
-    await page.evaluate(() => {
-      const harnessWindow = window as typeof window & {
-        __varroE2E?: { updateMessagePart?: (part: Record<string, unknown>) => void };
-        firstTurnActivityFixture?: {
-          sessionId: string;
-          info: Record<string, unknown>;
-          running: Array<Record<string, unknown>>;
-        };
-      };
-      const fixture = harnessWindow.firstTurnActivityFixture;
-      if (!fixture) throw new Error('First-turn activity fixture is missing');
-      const next = Array.from({ length: 3 }, (_, offset) => {
-        const index = fixture.running.length + offset;
-        return {
-          id: `message-first-turn-activity-command-${index}`,
-          sessionID: fixture.sessionId,
-          messageID: String(fixture.info.id),
-          type: 'tool',
-          callID: `message-first-turn-activity-command-${index}-call`,
-          tool: 'bash',
-          state: {
-            status: 'running',
-            input: { command: `npm run test:${index}` },
-            title: `npm run test:${index}`,
-            time: { start: Date.now() + offset },
-          },
-        };
       });
-      fixture.running.push(...next);
-      for (const part of next) {
-        harnessWindow.__varroE2E?.updateMessagePart?.(part);
+
+      await expect(activeItems).toHaveCount(1);
+      await activeItems.last().evaluate(async (element) => {
+        await Promise.all(element.getAnimations().map((animation) => animation.finished));
+      });
+      const allAtOnceSamples = await completeAndSample([3, 4, 5]);
+      expect(
+        allAtOnceSamples.every((top) => top !== null && Math.abs(top - before) <= 1),
+        JSON.stringify({ before, allAtOnceSamples })
+      ).toBe(true);
+      await expect(activeItems).toHaveCount(0);
+
+      const reserve = page.locator('.append-scroll-bottom-reserve');
+      await testInfo.attach('first-turn-reserve-geometry', {
+        body: JSON.stringify(
+          await list.evaluate((element) => ({
+            scrollTop: element.scrollTop,
+            scrollHeight: element.scrollHeight,
+            clientHeight: element.clientHeight,
+            reserves: [...element.querySelectorAll<HTMLElement>('[class*="reserve"]')].map(
+              (item) => ({
+                className: item.className,
+                height: item.getBoundingClientRect().height,
+              })
+            ),
+          }))
+        ),
+        contentType: 'application/json',
+      });
+      if (promptLines === 30) await expect(reserve).toBeVisible();
+
+      const samples = await list.evaluate(async (element) => {
+        const harnessWindow = window as typeof window & {
+          __varroE2E?: {
+            updateMessageInfo?: (info: Record<string, unknown>) => void;
+            updateSessionStatus?: (sessionId: string, status: { type: 'idle' }) => void;
+          };
+          firstTurnActivityFixture?: {
+            sessionId: string;
+            info: Record<string, unknown>;
+          };
+        };
+        const fixture = harnessWindow.firstTurnActivityFixture;
+        if (!fixture) throw new Error('First-turn activity fixture is missing');
+        const completedInfo = {
+          ...fixture.info,
+          time: { created: Date.now() - 2_000, completed: Date.now() },
+          finish: 'stop',
+        };
+        harnessWindow.__varroE2E?.updateMessageInfo?.(completedInfo);
+        harnessWindow.__varroE2E?.updateSessionStatus?.(fixture.sessionId, { type: 'idle' });
         window.postMessage(
           {
             type: 'server/event',
-            payload: { type: 'message.part.updated', properties: { part } },
+            payload: { type: 'message.updated', properties: { info: completedInfo } },
           },
           '*'
         );
-      }
-    });
-
-    await expect(activeItems).toHaveCount(1);
-    await activeItems.last().evaluate(async (element) => {
-      await Promise.all(element.getAnimations().map((animation) => animation.finished));
-    });
-    const allAtOnceSamples = await completeAndSample([3, 4, 5]);
-    expect(
-      allAtOnceSamples.every((top) => top !== null && Math.abs(top - before) <= 1),
-      JSON.stringify({ before, allAtOnceSamples })
-    ).toBe(true);
-    await expect(activeItems).toHaveCount(0);
-
-    const reserve = page.locator('.append-scroll-bottom-reserve');
-    await expect(reserve).toBeVisible();
-
-    const samples = await list.evaluate(async (element) => {
-      const harnessWindow = window as typeof window & {
-        __varroE2E?: {
-          updateMessageInfo?: (info: Record<string, unknown>) => void;
-          updateSessionStatus?: (sessionId: string, status: { type: 'idle' }) => void;
-        };
-        firstTurnActivityFixture?: {
-          sessionId: string;
-          info: Record<string, unknown>;
-        };
-      };
-      const fixture = harnessWindow.firstTurnActivityFixture;
-      if (!fixture) throw new Error('First-turn activity fixture is missing');
-      const completedInfo = {
-        ...fixture.info,
-        time: { created: Date.now() - 2_000, completed: Date.now() },
-        finish: 'stop',
-      };
-      harnessWindow.__varroE2E?.updateMessageInfo?.(completedInfo);
-      harnessWindow.__varroE2E?.updateSessionStatus?.(fixture.sessionId, { type: 'idle' });
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: { type: 'message.updated', properties: { info: completedInfo } },
-        },
-        '*'
-      );
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: {
-            type: 'session.status',
-            properties: { sessionID: fixture.sessionId, status: { type: 'idle' } },
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: {
+              type: 'session.status',
+              properties: { sessionID: fixture.sessionId, status: { type: 'idle' } },
+            },
           },
-        },
-        '*'
-      );
+          '*'
+        );
 
-      const result: Array<{ top: number | null; reserveHeight: number }> = [];
-      for (let frame = 0; frame < 30; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
-        const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
-        const explored = summaries[summaries.length - 1];
-        result.push({
-          top: explored
-            ? explored.getBoundingClientRect().top - element.getBoundingClientRect().top
-            : null,
-          reserveHeight:
-            element
-              .querySelector<HTMLElement>('.append-scroll-bottom-reserve')
-              ?.getBoundingClientRect().height ?? 0,
-        });
+        const result: Array<{ top: number | null; reserveHeight: number }> = [];
+        for (let frame = 0; frame < 30; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
+          const explored = summaries[summaries.length - 1];
+          result.push({
+            top: explored
+              ? explored.getBoundingClientRect().top - element.getBoundingClientRect().top
+              : null,
+            reserveHeight:
+              element
+                .querySelector<HTMLElement>('.append-scroll-bottom-reserve')
+                ?.getBoundingClientRect().height ?? 0,
+          });
+        }
+        return result;
+      });
+
+      expect(
+        samples.every((sample) => sample.top !== null && Math.abs(sample.top - before) <= 1),
+        JSON.stringify({ before, samples })
+      ).toBe(true);
+      if (promptLines === 30) {
+        expect(
+          samples.every((sample) => sample.reserveHeight > 0.5),
+          JSON.stringify(samples)
+        ).toBe(true);
       }
-      return result;
     });
-
-    expect(
-      samples.every((sample) => sample.top !== null && Math.abs(sample.top - before) <= 1),
-      JSON.stringify({ before, samples })
-    ).toBe(true);
-    expect(
-      samples.every((sample) => sample.reserveHeight > 0.5),
-      JSON.stringify(samples)
-    ).toBe(true);
-  });
+  }
 
   test('uses trailing activity reserve for the next active tool', async ({ page }) => {
     await page.goto(
@@ -2763,6 +2871,8 @@ test.describe('auto-scroll', () => {
       });
       mountObserver.observe(element, { childList: true, subtree: true });
       let releasedPages = 0;
+      let pendingSince: number | undefined;
+      const releasePositions: number[] = [];
       let steps = 0;
 
       while (steps < 1_200) {
@@ -2796,11 +2906,21 @@ test.describe('auto-scroll', () => {
         element.scrollTop = Math.max(0, previousScrollTop - movement);
         element.dispatchEvent(new Event('scroll'));
 
-        if (
-          element.scrollTop <= 1 &&
-          (harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0) > 0
-        ) {
-          if (harness.__varroE2E?.releaseNextHistoryRequest?.()) releasedPages += 1;
+        if ((harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0) > 0) {
+          pendingSince ??= performance.now();
+          // This fixture defers successful history responses, not network failures.
+          // A slow host can take longer than the bridge's 35s request deadline to
+          // traverse a page. Bound the artificial delay so retries do not replace
+          // the history owner in the middle of this painted-anchor scenario.
+          if (element.scrollTop <= 1 || performance.now() - pendingSince >= 10_000) {
+            if (harness.__varroE2E?.releaseNextHistoryRequest?.()) {
+              releasedPages += 1;
+              releasePositions.push(element.scrollTop);
+            }
+            pendingSince = undefined;
+          }
+        } else {
+          pendingSince = undefined;
         }
 
         const expectedTop = rowTop + movement;
@@ -2859,6 +2979,7 @@ test.describe('auto-scroll', () => {
       mountObserver.disconnect();
       return {
         violations,
+        releasePositions,
         peakMountedRows,
         pinnedGapMounts,
         releasedPages,
@@ -2942,6 +3063,9 @@ test.describe('auto-scroll', () => {
   test('preserves the same row through exact 200 plus 200 plus final pagination', async ({
     page,
   }) => {
+    // Multiple large page reconciliations plus painted-frame checks can exceed
+    // the default 30s budget on Windows, especially with retained failure traces.
+    test.setTimeout(60_000);
     await page.setViewportSize({ width: 486, height: 800 });
     await page.goto(
       '/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1&deferHistory=1'

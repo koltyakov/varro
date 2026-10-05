@@ -262,7 +262,7 @@ test('cancelled frame handshake destroys its socket rather than leaking an acqui
 
 test(
   'owned host cleanup verifies forced exit, debug port closure, repeated cleanup, and identity refusal',
-  { skip: process.platform === 'win32' },
+  { timeout: 90_000 },
   async (t) => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'streaming-host-test-'));
     t.after(() => rm(directory, { recursive: true, force: true }));
@@ -304,6 +304,10 @@ test(
     await assert.rejects(
       cleanupOwnedHost({ ...launch, birthIdentity: 'different' }),
       /identity changed/
+    );
+    await assert.rejects(
+      cleanupOwnedHost({ ...launch, userDataDir: path.join(directory, 'another-profile') }),
+      /argv changed/
     );
     assert.equal(await ownedProcessExists(launch), true);
     const result = await cleanupOwnedHost(launch, { graceMs: 10, exitMs: 2_000 });
@@ -347,7 +351,7 @@ test('launcher shutdown waits for process exit, escalating when SIGTERM is ignor
 
 test(
   'pre-launch timing failure persists failed review metadata and refuses output reuse',
-  { skip: process.platform === 'win32' },
+  {},
   async (t) => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'streaming-cli-test-'));
     t.after(() => rm(directory, { recursive: true, force: true }));

@@ -101,6 +101,49 @@ function renderComposer(props: {
 }
 
 describe('RichComposerArea', () => {
+  it('keeps image chips mounted without serializing their payload while typing', () => {
+    const url = `data:image/png;base64,${'A'.repeat(1024 * 1024)}`;
+    const [value, setValue] = createSignal('[image.png]');
+    const chip: RichComposerChip = {
+      id: 'img:1',
+      type: 'image',
+      label: 'image.png',
+      textMarker: '[image.png]',
+      previewImage: { url, alt: 'image.png' },
+    };
+    renderComposer({
+      get value() {
+        return value();
+      },
+      get cursorOffset() {
+        return value().length;
+      },
+      get chips() {
+        value();
+        return [{ ...chip }];
+      },
+      onInput: (text) => setValue(text),
+    });
+    const original = container?.querySelector('[data-chip-id="img:1"]');
+    expect(original).not.toBeNull();
+    const stringify = vi.spyOn(JSON, 'stringify');
+    try {
+      const editor = container!.querySelector<HTMLElement>('[contenteditable="true"]')!;
+      for (let index = 0; index < 5; index++) {
+        const typed = document.createTextNode('x');
+        editor.append(typed);
+        setCollapsedSelection(typed, 1);
+        editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      }
+      expect(container?.querySelector('[data-chip-id="img:1"]')).toBe(original);
+      expect(stringify.mock.results.every((result) => !String(result.value).includes(url))).toBe(
+        true
+      );
+    } finally {
+      stringify.mockRestore();
+    }
+  });
+
   it('preserves composing DOM and selection until the committed input is flushed', async () => {
     const [value, setValue] = createSignal('caf');
     const [cursor, setCursor] = createSignal(3);

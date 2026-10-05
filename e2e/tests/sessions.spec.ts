@@ -68,6 +68,7 @@ test('keeps large-list search, status filtering, and session switching working',
   await page.goto('/e2e/harness/index.html?scenario=session-list-load');
   const search = page.getByRole('textbox', { name: 'Search sessions' });
   await expect(search).toBeVisible();
+  await expect.poll(() => page.locator('.session-item').count()).toBeLessThan(50);
   await search.fill('Load session 001');
   await expect(page.locator('.session-item')).toHaveCount(10);
   await search.fill('');
@@ -106,6 +107,38 @@ test('keeps large-list search, status filtering, and session switching working',
   await search.press('ArrowDown');
   await search.press('Enter');
   await expect(page.getByText('Response 18', { exact: true })).toBeVisible();
+});
+
+test('windows a large session list while preserving keyboard wrap and visible coverage', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 650, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=session-list-load');
+  const search = page.getByRole('textbox', { name: 'Search sessions' });
+  await expect(search).toBeVisible();
+  await search.press('ArrowUp');
+  const focused = page.locator('.session-item.keyboard-focus');
+  await expect(focused).toBeInViewport();
+  await expect.poll(() => page.locator('.session-item').count()).toBeLessThan(50);
+  const scroll = page.locator('.session-list-scroll:visible').first();
+  await scroll.evaluate((element) => {
+    element.scrollTop = element.scrollHeight / 2;
+  });
+  await expect
+    .poll(() =>
+      scroll.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const center = (bounds.top + bounds.bottom) / 2;
+        return [...element.querySelectorAll('.session-item')].some((row) => {
+          const rect = row.getBoundingClientRect();
+          return rect.top <= center && rect.bottom >= center;
+        });
+      })
+    )
+    .toBe(true);
+  await expect.poll(() => page.locator('.session-item').count()).toBeLessThan(50);
+  await search.press('ArrowDown');
+  await expect(focused).toBeInViewport();
 });
 
 test('keeps session row geometry unchanged with empty and hover-only metadata', async ({

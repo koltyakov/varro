@@ -134,3 +134,74 @@ test('failed tools expose the recorded error only after the native failure event
   emit('tool.failed', { callID: 'call', error: { message: 'Denied' } });
   assert.deepEqual(state.messages[1].parts.at(-1), answer.parts.at(-1));
 });
+
+test('deferred tool inputs validate their wire summary and expose full input only at completion', () => {
+  const { state, emit, answer } = fixture();
+  const input = { patchText: 'x'.repeat(800), filePath: '/workspace/example.ts' };
+  const summary = { ...input, patchText: input.patchText.slice(0, 512) };
+  answer.parts.push({
+    id: 'call',
+    sessionID: 's',
+    messageID: 'a',
+    type: 'tool',
+    callID: 'call',
+    tool: 'patch',
+    state: { status: 'completed', input, output: 'Done', time: { start: 4, end: 6 } },
+  });
+  emit('tool.input.started', { callID: 'call', name: 'patch' });
+  emit('tool.called', { callID: 'call', input: summary, deferred: '/part/call', timestamp: 4 });
+  assert.deepEqual(state.messages[1].parts.at(-1).state.input, summary);
+  state.messages[1].parts.at(-1).state.input = { ...summary, patchText: 'wrong' };
+  assert.throws(() => emit('tool.success', { callID: 'call' }), /input differs/);
+  state.messages[1].parts.at(-1).state.input = summary;
+  emit('tool.success', { callID: 'call' });
+  assert.deepEqual(state.messages[1].parts.at(-1), answer.parts.at(-1));
+});
+
+test('unmarked truncated tool input still fails canonical validation', () => {
+  const { emit, answer } = fixture();
+  answer.parts.push({
+    id: 'call',
+    sessionID: 's',
+    messageID: 'a',
+    type: 'tool',
+    callID: 'call',
+    tool: 'patch',
+    state: { status: 'completed', input: { patchText: 'x'.repeat(800) }, output: 'Done' },
+  });
+  emit('tool.input.started', { callID: 'call', name: 'patch' });
+  emit('tool.called', { callID: 'call', input: { patchText: 'x'.repeat(512) }, timestamp: 4 });
+  assert.throws(() => emit('tool.success', { callID: 'call' }), /input differs/);
+});
+
+for (const arrays of [false, true]) {
+  test(`deferred input validation respects JSON depth-limit encoding with arrays=${arrays}`, () => {
+    const { state, emit, answer } = fixture();
+    let input = 'full value';
+    let summary = arrays ? null : {};
+    for (let depth = 0; depth < 12; depth += 1) {
+      input = arrays ? [input] : { child: input };
+      if (arrays || depth < 11) summary = arrays ? [summary] : { child: summary };
+    }
+    const terminal = {
+      id: 'call',
+      sessionID: 's',
+      messageID: 'a',
+      type: 'tool',
+      callID: 'call',
+      tool: 'custom',
+      state: { status: 'completed', input: { payload: input }, output: 'Done' },
+    };
+    answer.parts.push(terminal);
+    emit('tool.input.started', { callID: 'call', name: 'custom' });
+    // JSON drops undefined object fields and encodes undefined array items as null.
+    emit('tool.called', {
+      callID: 'call',
+      input: { payload: summary },
+      deferred: '/part/call',
+      timestamp: 4,
+    });
+    emit('tool.success', { callID: 'call' });
+    assert.deepEqual(state.messages[1].parts.at(-1), terminal);
+  });
+}

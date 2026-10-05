@@ -19,6 +19,7 @@ import {
   sessionSearchFocusKey,
   state,
 } from '../../lib/state';
+import { WindowedSessionItems } from './WindowedSessionItems';
 import { setHostDragImage } from '../../host/extensions';
 import {
   Show,
@@ -53,7 +54,7 @@ import type {
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { Session } from '../../types';
 import { client, type SessionListPage } from '../../lib/client';
-import { useSecondClock } from '../../lib/clock';
+import { useMinuteClock, useSecondClock } from '../../lib/clock';
 import { postMessage } from '../../lib/bridge';
 import { setManualWorkspaceSelection } from '../../lib/app-state';
 import { requestWorkspaceSelection } from '../../lib/workspace-selection';
@@ -1058,12 +1059,18 @@ export function SessionListView(props: {
   class?: string;
 }) {
   const diffSummaryOwner = Symbol('session-list');
-  const activeNow = useSecondClock();
-  // Relative ages only change per minute, so avoid regrouping sessions every second.
-  const ageNow = createMemo<number>((current) => {
-    const nextNow = activeNow();
-    return Math.floor(current / 60_000) === Math.floor(nextNow / 60_000) ? current : nextNow;
-  }, Date.now());
+  const [visible, setVisible] = createSignal(!document.hidden);
+  onMount(() => {
+    const update = () => setVisible(!document.hidden);
+    document.addEventListener('visibilitychange', update);
+    onCleanup(() => document.removeEventListener('visibilitychange', update));
+  });
+  const activeNow = useSecondClock(
+    () =>
+      visible() &&
+      visibleSessions().some((session) => sessionIndicators().runningIds.has(session.id))
+  );
+  const ageNow = useMinuteClock(visible);
 
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
   const [activeGroupedSection, setActiveGroupedSection] =
@@ -1615,16 +1622,21 @@ export function SessionListView(props: {
     const sessionsById = createMemo(
       () => new Map(orderedSessions().map((session) => [session.id, session]))
     );
+    const visiblePinnedSessionIds = createMemo(() =>
+      orderedSessions()
+        .filter((item) => state.pinnedSessionIds.includes(item.id))
+        .map((item) => item.id)
+    );
 
     return (
-      <For each={orderedSessions().map((session) => session.id)}>
-        {(sessionId, index) => {
+      <WindowedSessionItems
+        ids={orderedSessions().map((session) => session.id)}
+        focusedIndex={focusedIndex() - indexOffset}
+        retainedIds={[sessionActions.sessionId(), draggedPinnedSessionId()]}
+      >
+        {(sessionId, index, observe) => {
           const session = () => sessionsById().get(sessionId)!;
           const diffSummary = createMemo(() => sessionDiffSummaryCache()[sessionId]);
-          const visiblePinnedSessionIds = () =>
-            orderedSessions()
-              .filter((item) => state.pinnedSessionIds.includes(item.id))
-              .map((item) => item.id);
           const canReorderPinned = () =>
             reorderPinnedSessions &&
             state.pinnedSessionIds.includes(sessionId) &&
@@ -1640,6 +1652,7 @@ export function SessionListView(props: {
           };
           return (
             <SessionListItem
+              observe={observe}
               session={session()}
               summaryUpdated={sessionDiffSummaries.getRevision(sessionId)}
               onRequestSummary={(updated) => enqueueDiffSummaryRequest(session(), updated)}
@@ -1717,7 +1730,7 @@ export function SessionListView(props: {
             />
           );
         }}
-      </For>
+      </WindowedSessionItems>
     );
   };
 
@@ -2138,6 +2151,7 @@ function RecycleBinListItem(props: {
 }
 
 function SessionListItem(props: {
+  observe: (element: HTMLElement) => void;
   session: (typeof state.sessions)[number];
   summaryUpdated: number;
   onRequestSummary: (updated: number) => void;
@@ -2412,6 +2426,7 @@ function SessionListItem(props: {
     <div
       ref={(element) => {
         rowRef = element;
+        props.observe(element);
       }}
       class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${props.isDraggingPinned ? 'is-dragging-pinned' : ''} ${props.isDragOverPinned ? 'is-drag-over-pinned' : ''} ${props.startsUnpinnedGroup ? 'starts-unpinned-group' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''} ${modelDetails() ? 'has-model-details' : ''}`}
       data-session-id={props.session.id}

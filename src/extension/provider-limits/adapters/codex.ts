@@ -134,7 +134,9 @@ export function createCodexAdapter(): ProviderLimitAdapter {
             signal?.throwIfAborted();
             const windows = extractCodexWindows(payload, checkedAt);
             const planName = extractCodexPlanName(payload);
-            if (windows.length === 0) {
+            const creditBalance = parseFiniteNumber(asRecord(asRecord(payload)?.credits)?.balance);
+            const hasCreditBalance = creditBalance != null && creditBalance >= 0;
+            if (windows.length === 0 && !hasCreditBalance) {
               return unsupportedProviderStatus(
                 provider.id,
                 modelID,
@@ -153,6 +155,7 @@ export function createCodexAdapter(): ProviderLimitAdapter {
               note: 'Polled Codex OAuth usage endpoint',
             };
             if (planName) status.planName = planName;
+            if (hasCreditBalance) status.creditBalance = creditBalance;
             const resetCredits = await fetchCodexResetCredits(
               payload,
               endpoint.resetCredits,
@@ -183,6 +186,8 @@ export function createCodexAdapter(): ProviderLimitAdapter {
       return coordinate
         ? coordinate(
             [
+              // Older hosts discard credit balances when publishing shared snapshots.
+              'codex-usage-v2',
               ...CODEX_USAGE_ENDPOINTS.flatMap((endpoint) => [
                 endpoint.usage,
                 endpoint.resetCredits,

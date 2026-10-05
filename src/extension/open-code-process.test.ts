@@ -459,6 +459,55 @@ describe('v2 shared service routing', () => {
       expect.anything()
     );
   });
+
+  it.each(['ready', 'cancelled', 'changed endpoint'] as const)(
+    'waits for v2 registered launch credentials: %s',
+    async (mode) => {
+      vi.stubEnv('OPENCODE_SERVER_PASSWORD', undefined);
+      vi.stubEnv('OPENCODE_SERVER_USERNAME', undefined);
+      vi.mocked(Service.discover).mockResolvedValue(undefined);
+      const manager = new OpenCodeProcess(4096, true, 'opencode2');
+      manager.rememberInstalledCliVersion('2.0.20');
+      spawnMock.mockReturnValue(
+        Object.assign(new EventEmitter(), {
+          stdout: new EventEmitter(),
+          stderr: new EventEmitter(),
+          exitCode: null,
+          signalCode: null,
+        })
+      );
+      const child = manager.launchServer({
+        getWorkspaceCwd: () => '/repo',
+        onStdout: vi.fn(),
+        onStderr: vi.fn(),
+        onExit: vi.fn(),
+        onError: vi.fn(),
+      });
+      expect(await manager.prepareManagedServerHealth(child)).toBe(false);
+      const authorization = manager.serverAuthorization;
+      const controller = new AbortController();
+      vi.mocked(Service.discover).mockImplementation(async () => {
+        if (mode === 'cancelled') controller.abort(new Error('cancelled launch'));
+        if (mode === 'changed endpoint') manager.port = 4097;
+        return {
+          url: 'http://127.0.0.1:4096',
+          auth: { type: 'basic', username: 'opencode', password: 'registered-password' },
+        };
+      });
+      const ready = manager.prepareManagedServerHealth(child, controller.signal);
+      if (mode === 'cancelled') {
+        await expect(ready).rejects.toThrow('cancelled launch');
+        expect(manager.serverAuthorization).toBe(authorization);
+      } else {
+        expect(await ready).toBe(mode === 'ready');
+        if (mode === 'ready')
+          expect(manager.serverAuthorization).toBe(
+            `Basic ${Buffer.from('opencode:registered-password').toString('base64')}`
+          );
+        else expect(manager.serverAuthorization).toBeUndefined();
+      }
+    }
+  );
 });
 
 beforeEach(async () => {

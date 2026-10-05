@@ -37,6 +37,53 @@ function createLongMarkdownDocument() {
 }
 
 describe('MarkdownRenderer perf guards', () => {
+  it('does not mount preview portal containers for completed plain markdown', async () => {
+    const bodyChildren = Array.from(document.body.children);
+    cleanup = render(
+      () =>
+        Array.from({ length: 100 }, (_, index) =>
+          createComponent(MarkdownRenderer, {
+            content: `Completed paragraph ${index}`,
+            cacheByContent: true,
+          })
+        ),
+      container!
+    );
+    await waitForAnimationFrame();
+
+    expect(container?.querySelectorAll('.rendered-markdown')).toHaveLength(100);
+    expect(container?.textContent).toContain('Completed paragraph 99');
+    expect(Array.from(document.body.children)).toEqual(bodyChildren);
+
+    cleanup();
+    cleanup = undefined;
+    expect(Array.from(document.body.children)).toEqual(bodyChildren);
+  });
+
+  it('lexes only the rich block boundary as settled streaming history grows', async () => {
+    const lexer = vi.spyOn(marked, 'lexer');
+    const [content, setContent] = createSignal('## First\n\n**First paragraph**\n\nTail');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    await waitForAnimationFrame();
+    let stable = '## First\n\n**First paragraph**';
+    for (let index = 0; index < 40; index++) {
+      stable += `\n\n## Section ${index}\n\n**Paragraph ${index}**`;
+      setContent(`${stable}\n\nTail`);
+      await waitForAnimationFrame();
+    }
+    expect(container?.querySelectorAll('h2')).toHaveLength(41);
+    const lexedCharacters = lexer.mock.calls.reduce((total, [text]) => total + text.length, 0);
+    expect(lexedCharacters).toBeLessThan(stable.length * 8);
+  });
+
   beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);

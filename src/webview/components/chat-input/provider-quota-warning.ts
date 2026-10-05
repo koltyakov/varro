@@ -7,8 +7,9 @@ import { filterCompactProviderLimitForModel } from './toolbar-compact';
 
 const LOW_REMAINING_PERCENT = 25;
 const UNKNOWN_RESET_DISMISSAL_MS = 60 * 60_000;
+const RESET_REMINDER_HOURS = [72, 24, 6, 1];
 
-type ResetWarningDismissal = { providerID: string; expiresAt: number };
+type ResetWarningDismissal = { providerID: string; expiresAt: number; remindAt: number };
 
 const [resetDismissalVersion, setResetDismissalVersion] = createSignal(0);
 
@@ -23,7 +24,17 @@ export const resetWarningDismissals = {
         isString(entry.providerID) &&
         isNumber(entry.expiresAt) &&
         Number.isFinite(entry.expiresAt)
-        ? [{ providerID: entry.providerID, expiresAt: entry.expiresAt }]
+        ? [
+            {
+              providerID: entry.providerID,
+              expiresAt: entry.expiresAt,
+              // Older dismissals were permanent; remind again at the critical 24-hour mark.
+              remindAt:
+                isNumber(entry.remindAt) && Number.isFinite(entry.remindAt)
+                  ? entry.remindAt
+                  : entry.expiresAt - 24 * 60 * 60_000,
+            },
+          ]
         : [];
     });
   },
@@ -33,13 +44,21 @@ export const resetWarningDismissals = {
   },
 
   dismiss(providerID: string, expirations: readonly number[], now: number) {
-    const entries = this.read().filter((entry) => entry.expiresAt > now);
+    const entries = this.read().filter((entry) => entry.expiresAt > now && entry.remindAt > now);
     for (const expiresAt of expirations) {
       if (
         expiresAt > now &&
         !entries.some((entry) => entry.providerID === providerID && entry.expiresAt === expiresAt)
-      )
-        entries.push({ providerID, expiresAt });
+      ) {
+        const nextHours = RESET_REMINDER_HOURS.find(
+          (hours) => expiresAt - hours * 60 * 60_000 > now
+        );
+        entries.push({
+          providerID,
+          expiresAt,
+          remindAt: nextHours === undefined ? expiresAt : expiresAt - nextHours * 60 * 60_000,
+        });
+      }
     }
     writeStored(STORAGE_KEYS.resetWarningDismissals, entries);
     this.reload();

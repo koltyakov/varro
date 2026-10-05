@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- Playwright serializes these browser callbacks, which deliberately inject partial harness and server-event payloads across the page boundary. */
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import type { WebviewMessage } from '../../src/shared/protocol';
 import {
   getScrollMetrics,
   getStickyMessageAlignment,
@@ -105,6 +106,356 @@ async function updateDiffPreviewWithPatch(
 }
 
 test.describe('diff preview anchoring', () => {
+  test('keeps deferred diff row heights and anchors through wheel remounts and detached toggles', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 486, height: 794 });
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1&diffPreviewTurns=60&diffPreviewInline=0&diffPreviewCompleted=1'
+    );
+    await page.evaluate(() => {
+      const host = window as typeof window & {
+        __sendToExtension: (message: WebviewMessage) => void;
+        __varroE2E: {
+          updateMessagePart: (part: unknown) => void;
+          updateMessageInfo: (info: Record<string, unknown>) => void;
+          getSessionMessages: (id: string) => Array<{ info: Record<string, unknown> }>;
+        };
+      };
+      const original = host.__sendToExtension;
+      const details = new Map<string, unknown>();
+      const template = host.__varroE2E
+        .getSessionMessages('session-diff-preview-large-transcript')
+        .at(-1)!.info;
+      host.__sendToExtension = (rawMessage: unknown) => {
+        const message = rawMessage as WebviewMessage;
+        if (message.type !== 'api/request' || !details.has(message.payload.path))
+          return original(message);
+        const { id, path } = message.payload;
+        setTimeout(
+          () =>
+            window.postMessage(
+              { type: 'api/response', payload: { id, data: details.get(path) } },
+              '*'
+            ),
+          30
+        );
+      };
+      for (let index = 0; index < 60; index++) {
+        const messageID = `message-wheel-diff-${index}`;
+        const info = {
+          ...template,
+          id: messageID,
+          time: { created: Date.now() + index, completed: Date.now() + index + 1 },
+        };
+        host.__varroE2E.updateMessageInfo(info);
+        window.postMessage(
+          { type: 'server/event', payload: { type: 'message.updated', properties: { info } } },
+          '*'
+        );
+        const deferred = `/wheel-diff/${index}`;
+        const files = Array.from({ length: 4 }, (_, file) => ({
+          filePath: `src/row-${index}-${file}.ts`,
+          type: 'update',
+          additions: 20,
+          deletions: 1,
+        }));
+        const part = {
+          id: `${messageID}-patch`,
+          sessionID: 'session-diff-preview-large-transcript',
+          messageID,
+          type: 'tool',
+          tool: 'apply_patch',
+          callID: `${messageID}-patch-call`,
+          state: {
+            status: 'completed',
+            input: {},
+            output: 'Done',
+            title: 'Edit',
+            metadata: { files },
+            time: { start: 1, end: 2 },
+          },
+        };
+        details.set(deferred, {
+          ...part,
+          state: {
+            ...part.state,
+            input: {
+              patchText: [
+                '*** Begin Patch',
+                ...files.map((file) =>
+                  [
+                    `*** Update File: ${file.filePath}`,
+                    '@@',
+                    '-const oldValue = 0;',
+                    ...Array.from({ length: 20 }, (_, line) => `+const value${line} = ${line};`),
+                  ].join('\n')
+                ),
+                '*** End Patch',
+              ].join('\n'),
+            },
+            metadata: {},
+          },
+        });
+        host.__varroE2E.updateMessagePart({ ...part, deferred });
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: {
+              type: 'message.part.updated',
+              properties: { part: { ...part, deferred } },
+            },
+          },
+          '*'
+        );
+      }
+    });
+    await expect(
+      page.locator('[data-msg-id="message-wheel-diff-59"] .file-change-card')
+    ).toHaveCount(4);
+    await waitForAnimationFrames(page, 12);
+    await page.evaluate(() => {
+      window.postMessage(
+        {
+          type: 'config/update',
+          payload: {
+            desktopSessionPaneSide: 'left',
+            defaultPermissionMode: 'default',
+            chatFontSize: 13,
+            chatEditorFontSize: 12,
+            chatFontFamily: 'default',
+            showFileDiffs: true,
+          },
+        },
+        '*'
+      );
+    });
+    await expect(page.locator('.diff-view-widget').first()).toBeAttached();
+    await waitForAnimationFrames(page, 30);
+    const tracker = await page.evaluateHandle(() => {
+      const loadedHeights = new Map<string, number>();
+      const violations: Array<{ id: string; expected: number; actual: number }> = [];
+      let frame = 0;
+      const sample = () => {
+        for (const row of document.querySelectorAll<HTMLElement>('[data-msg-id]')) {
+          const id = row.dataset.msgId!;
+          const height = row.getBoundingClientRect().height;
+          if (row.querySelector('.diff-view-widget')) loadedHeights.set(id, Math.ceil(height));
+          else if (
+            loadedHeights.has(id) &&
+            row.querySelector('.file-change-card') &&
+            Math.abs(height - loadedHeights.get(id)!) > 1
+          )
+            violations.push({ id, expected: loadedHeights.get(id)!, actual: height });
+        }
+        frame = requestAnimationFrame(sample);
+      };
+      sample();
+      return {
+        finish: () => {
+          cancelAnimationFrame(frame);
+          return { violations, measured: loadedHeights.size };
+        },
+      };
+    });
+    const bounds = await page.locator('.interactive-list').boundingBox();
+    if (!bounds) throw new Error('Missing transcript');
+    await page.mouse.move(bounds.x + 8, bounds.y + 150);
+    for (const delta of [-96, -180, -420, -2400, -2400, 2400, 2400, 420, 180, 96]) {
+      await page.mouse.wheel(0, delta);
+      await waitForAnimationFrames(page, 12);
+    }
+    const result = await tracker.evaluate((value) => value.finish());
+    await tracker.dispose();
+    expect(result.measured).toBeGreaterThan(5);
+    expect(result.violations).toEqual([]);
+
+    await page.mouse.wheel(0, -96);
+    await waitForAnimationFrames(page, 30);
+    const list = page.locator('.interactive-list');
+    const clipped = await getVisibleMessageAnchor(list);
+    // Keep the retained card's start visible, so removing preview lines does not remove the marker.
+    await page.mouse.wheel(0, clipped.top + 1);
+    await waitForAnimationFrames(page, 30);
+    const anchor = await getVisibleMessageAnchor(list);
+    expect(Math.abs(anchor.top)).toBeLessThanOrEqual(2);
+    expect(await page.locator('.diff-view-widget').count()).toBeGreaterThan(0);
+    const positions = sampleMessageTopAcrossFrames(list, anchor.id, 24);
+    await page.evaluate(() => {
+      window.postMessage(
+        {
+          type: 'config/update',
+          payload: {
+            desktopSessionPaneSide: 'left',
+            defaultPermissionMode: 'default',
+            chatFontSize: 13,
+            chatEditorFontSize: 12,
+            chatFontFamily: 'default',
+            showFileDiffs: false,
+          },
+        },
+        '*'
+      );
+    });
+    await expect(page.locator('.diff-view-widget')).toHaveCount(0);
+    const samples = await positions;
+    expect(samples.every((top) => top !== null && Math.abs(top - anchor.top) <= 1)).toBe(true);
+    const preservedTop = (await getScrollMetrics(page, '.interactive-list')).scrollTop;
+    await page.mouse.wheel(0, -96);
+    await waitForAnimationFrames(page, 12);
+    const movedTop = (await getScrollMetrics(page, '.interactive-list')).scrollTop;
+    expect(movedTop).toBeLessThan(preservedTop - 2);
+    await waitForAnimationFrames(page, 12);
+    expect((await getScrollMetrics(page, '.interactive-list')).scrollTop).toBe(movedTop);
+  });
+
+  test('positions delayed diff hydration immediately after enabling previews', async ({ page }) => {
+    await page.setViewportSize({ width: 486, height: 794 });
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1&diffPreviewTurns=60&diffPreviewInline=0&diffPreviewCompleted=1'
+    );
+    const id = 'message-diff-preview-assistant-59';
+    await page.evaluate((messageId) => {
+      const host = window as typeof window & {
+        __sendToExtension: (message: WebviewMessage) => void;
+        __varroE2E: { updateMessagePart: (part: unknown) => void };
+        releaseDiffDetails?: () => void;
+      };
+      const original = host.__sendToExtension;
+      const part = {
+        id: `${messageId}-patch`,
+        sessionID: 'session-diff-preview-large-transcript',
+        messageID: messageId,
+        type: 'tool',
+        callID: `${messageId}-patch-call`,
+        tool: 'apply_patch',
+        deferred: '/deferred-diff',
+        state: {
+          status: 'completed',
+          input: {},
+          output: 'Done',
+          title: 'apply_patch',
+          metadata: {
+            files: Array.from({ length: 12 }, (_, index) => ({
+              filePath: `src/deferred-${index}.ts`,
+              type: 'update',
+              additions: 20,
+              deletions: 1,
+            })),
+          },
+          time: { start: 1, end: 2 },
+        },
+      };
+      host.__sendToExtension = (rawMessage: unknown) => {
+        const message = rawMessage as WebviewMessage;
+        if (message.type !== 'api/request' || message.payload.path !== '/deferred-diff')
+          return original(message);
+        host.releaseDiffDetails = () =>
+          window.postMessage(
+            {
+              type: 'api/response',
+              payload: {
+                id: message.payload.id,
+                data: {
+                  ...part,
+                  deferred: undefined,
+                  state: {
+                    ...part.state,
+                    input: {
+                      patchText: [
+                        '*** Begin Patch',
+                        ...Array.from({ length: 12 }, (_, index) =>
+                          [
+                            `*** Update File: src/deferred-${index}.ts`,
+                            '@@',
+                            '-const oldValue = 0;',
+                            ...Array.from(
+                              { length: 20 },
+                              (_line, line) => `+const newValue${line} = ${line};`
+                            ),
+                          ].join('\n')
+                        ),
+                        '*** End Patch',
+                      ].join('\n'),
+                    },
+                    metadata: {},
+                  },
+                },
+              },
+            },
+            '*'
+          );
+      };
+      host.__varroE2E.updateMessagePart(part);
+    }, id);
+    await expect(page.locator(`[data-msg-id="${id}"] .file-change-card`)).toHaveCount(12);
+    await waitForAnimationFrames(page, 12);
+    await page.evaluate(() =>
+      window.postMessage(
+        {
+          type: 'config/update',
+          payload: {
+            desktopSessionPaneSide: 'left',
+            defaultPermissionMode: 'default',
+            chatFontSize: 13,
+            chatEditorFontSize: 12,
+            chatFontFamily: 'default',
+            showFileDiffs: true,
+          },
+        },
+        '*'
+      )
+    );
+    // Outlast the old two-stable-frame/12-frame settle while the request is still pending.
+    await page.waitForTimeout(350);
+    const samples = await page.evaluate(async () => {
+      const host = window as typeof window & { releaseDiffDetails?: () => void };
+      if (!host.releaseDiffDetails) throw new Error('Diff detail request did not start');
+      const list = document.querySelector<HTMLElement>('.interactive-list')!;
+      host.releaseDiffDetails();
+      const frames: Array<{ diffs: number; gap: number; reserve: number }> = [];
+      for (let i = 0; i < 60; i++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        frames.push({
+          diffs: list.querySelectorAll('.file-change-inline-diffs').length,
+          gap: list.scrollHeight - list.clientHeight - list.scrollTop,
+          reserve:
+            list.querySelector<HTMLElement>('.append-scroll-bottom-reserve')?.offsetHeight ?? 0,
+        });
+      }
+      return frames;
+    });
+    const hydrated = samples.filter((sample) => sample.diffs > 0);
+    expect(hydrated.length).toBeGreaterThan(0);
+    expect(
+      hydrated.every((sample) => sample.gap <= 1 && sample.reserve === 0),
+      JSON.stringify(samples)
+    ).toBe(true);
+    const row = page.locator(`[data-msg-id="${id}"]`);
+    const loadedHeight = await row.evaluate((element) => element.getBoundingClientRect().height);
+    const listBox = await page.locator('.interactive-list').boundingBox();
+    if (!listBox) throw new Error('Missing transcript');
+    await page.mouse.move(listBox.x + 8, listBox.y + 150);
+    await page.mouse.wheel(0, -20_000);
+    await expect(row).toHaveCount(0);
+    await page.getByRole('button', { name: 'Scroll to latest message' }).click();
+    await expect(row).toHaveCount(1);
+    await waitForAnimationFrames(page, 12);
+    // The remounted summary must occupy the exact loaded height throughout the delayed request.
+    expect(await row.evaluate((element) => element.getBoundingClientRect().height)).toBe(
+      loadedHeight
+    );
+    await page.evaluate(() => {
+      const host = window as typeof window & { releaseDiffDetails?: () => void };
+      host.releaseDiffDetails?.();
+    });
+    await expect(row.locator('.diff-view-widget')).toHaveCount(1);
+    await waitForAnimationFrames(page, 12);
+    expect(await row.evaluate((element) => element.getBoundingClientRect().height)).toBe(
+      loadedHeight
+    );
+  });
+
   for (const turnCount of [1, 60]) {
     for (const enabled of [false, true]) {
       test(`positions diff view immediately when ${enabled ? 'enabled' : 'disabled'} in ${turnCount} turns without trailing reserve`, async ({

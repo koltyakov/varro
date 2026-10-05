@@ -16,6 +16,32 @@ describe('alignBlockSizeToPixel', () => {
 });
 
 describe('buildVirtualMetrics', () => {
+  it('preserves published prefix snapshots across tail updates and chunk boundaries', () => {
+    const itemIds = Array.from({ length: 1024 }, (_, index) => String(index));
+    const measuredHeights = new Map(itemIds.map((id) => [id, 40]));
+    const original = buildVirtualMetrics({ itemIds, measuredHeights });
+    measuredHeights.set('1023', 80);
+    const tail = buildVirtualMetrics({
+      itemIds,
+      measuredHeights,
+      previous: { metrics: original, itemIds },
+      dirtyFromIndex: 1023,
+    });
+    measuredHeights.set('255', 50);
+    const middle = buildVirtualMetrics({
+      itemIds,
+      measuredHeights,
+      previous: { metrics: tail, itemIds },
+      dirtyFromIndex: 255,
+    });
+    expect(original.prefix.at(1024)).toBe(40960);
+    expect(tail.prefix.at(1024)).toBe(41000);
+    expect(middle.prefix.at(1024)).toBe(41010);
+    expect([...middle.prefix]).toEqual([
+      ...buildVirtualMetrics({ itemIds, measuredHeights }).prefix,
+    ]);
+  });
+
   it('builds prefix offsets from measured and default heights', () => {
     expect(
       buildVirtualMetrics({

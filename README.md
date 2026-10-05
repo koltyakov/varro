@@ -77,6 +77,18 @@ OpenCode search covers loaded and older root sessions. Open any session in the s
 
 When Varro is hidden, VS Code notifications report plans, failures, permission requests, and questions from root sessions. The status bar links to sessions that need attention, then to completed background work.
 
+### Desktop notifications
+
+Enable OS banners with `varro.notifications.native` and select sound events with the `varro.notifications.sound` checkboxes. Both are off by default. Alerts cover permission requests, questions, completed replies, and plans ready for review. On macOS, alerts stay quiet while any window from the originating VS Code instance is visible, even when unfocused. Minimized or fully covered windows allow alerts. Other platforms use window focus.
+
+Notifications show `Project: <name>`, the chat title, and event details. Clicking opens the project's VS Code window. Bursts are grouped; automatically handled requests and old completions stay quiet.
+
+Requires a local desktop host; remote SSH, WSL, and containers are unsupported. macOS 11+ uses a bundled [Varro-owned helper](native/macos-notifications/README.md); allow Varro in System Settings > Notifications. Linux needs `notify-send` for banners and `paplay`, `aplay`, or `canberra-gtk-play` for sound. OS permissions and Focus/Do Not Disturb settings apply.
+
+### Experimental macOS menu-bar app
+
+The optional [native companion app](native/macos-tray/README.md) lists active sessions, events needing attention, and unread completions across local VS Code windows. Its badge includes unread completions, which disappear when marked read in VS Code. Clicking a row opens its project window without switching chats. On macOS 13+, build and install it with `make build` and `make install` from `native/macos-tray/`. The extension works as usual without it.
+
 ![Workspace sessions with status, token, and change summaries](https://raw.githubusercontent.com/koltyakov/varro/main/assets/sessions.png)
 
 ## Chat and context

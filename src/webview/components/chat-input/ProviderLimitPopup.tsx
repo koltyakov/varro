@@ -33,6 +33,8 @@ export function ProviderLimitPopup(props: {
   const windows = () => getOrderedProviderLimitWindows(props.limit);
   const planName = () =>
     props.limit?.status === 'available' ? props.limit.planName || null : null;
+  const creditBalance = () =>
+    props.limit?.status === 'available' ? props.limit.creditBalance : undefined;
   const resetCredits = () => {
     if (props.limit?.status !== 'available') return null;
     const resets = props.limit.usageLimitResets;
@@ -67,15 +69,24 @@ export function ProviderLimitPopup(props: {
       <Show
         when={props.limit?.status === 'available' && windows().length > 0}
         fallback={
-          <div class="provider-limit-popup-empty">
-            {props.limit?.status === 'unsupported' || props.limit?.status === 'error'
-              ? props.limit.note || 'Limits unavailable'
-              : 'No active limits'}
-          </div>
+          <Show when={creditBalance() === undefined}>
+            <div class="provider-limit-popup-empty">
+              {props.limit?.status === 'unsupported' || props.limit?.status === 'error'
+                ? props.limit.note || 'Limits unavailable'
+                : 'No active limits'}
+            </div>
+          </Show>
         }
       >
         <div class="provider-limit-popup-rows">
           <For each={windows()}>{(window) => <ProviderLimitRow window={window} />}</For>
+        </div>
+      </Show>
+
+      <Show when={creditBalance() !== undefined}>
+        <div class="provider-limit-credit-section provider-limit-row-head">
+          <span class="provider-limit-row-label">Credits</span>
+          <span class="provider-limit-row-pct">{creditBalance()?.toLocaleString()}</span>
         </div>
       </Show>
 

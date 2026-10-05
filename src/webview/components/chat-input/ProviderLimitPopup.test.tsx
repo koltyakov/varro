@@ -1,5 +1,7 @@
 import { render } from 'solid-js/web';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ProviderLimitStatus } from '../../../shared/protocol';
+import { hasProviderLimitWindowWithinThreshold } from '../../lib/format';
 import { ProviderLimitPopup } from './ProviderLimitPopup';
 
 describe('ProviderLimitPopup', () => {
@@ -12,6 +14,49 @@ describe('ProviderLimitPopup', () => {
     Reflect.deleteProperty(window, '__sendToExtension');
     vi.clearAllMocks();
   });
+
+  it.each([62_500, 0, undefined])(
+    'shows the credit balance %s separately from quotas',
+    (balance) => {
+      const limit: ProviderLimitStatus = {
+        providerID: 'openai',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        creditBalance: balance,
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'unknown',
+            remaining: 80,
+            limit: 100,
+            resetAt: null,
+            percent: 20,
+          },
+        ],
+      };
+      container = document.createElement('div');
+      document.body.append(container);
+      dispose = render(
+        () => <ProviderLimitPopup providerName="OpenAI" onClose={() => {}} limit={limit} />,
+        container
+      );
+
+      const credits = container.querySelector('.provider-limit-credit-section');
+      if (balance === undefined) {
+        expect(credits).toBeNull();
+      } else {
+        expect(credits?.querySelector('.provider-limit-row-label')?.textContent).toBe('Credits');
+        expect(credits?.querySelector('.provider-limit-row-pct')?.textContent).toBe(
+          balance.toLocaleString()
+        );
+        expect(credits?.querySelector('.provider-limit-row-bar')).toBeNull();
+      }
+      expect(container.querySelectorAll('.provider-limit-row-bar')).toHaveLength(1);
+      expect(hasProviderLimitWindowWithinThreshold(limit, 10)).toBe(false);
+    }
+  );
 
   it('expands Grok reset expiration details and opens Grok Usage', () => {
     const sendToExtension = vi.fn();

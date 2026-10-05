@@ -1,6 +1,50 @@
 import { expect, test } from '@playwright/test';
 import type { MessageEntry, Session } from '../../src/webview/types';
 
+test('keeps inline edit controls clear of the preceding sticky prompt', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+  const list = page.locator('.interactive-list');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  await list.hover();
+  await page.mouse.wheel(0, -1500);
+  const sticky = page.locator('[data-sticky-msg-id]');
+  await expect(sticky).toBeVisible();
+  const messageId = await sticky.getAttribute('data-sticky-msg-id');
+  await sticky.click();
+  const card = page.locator(`[data-msg-id="${messageId}"] .user-message-card`);
+  await expect(card).toBeVisible();
+  await page.waitForTimeout(500);
+  const frames = page.evaluate(async () => {
+    const samples: boolean[] = [];
+    for (let frame = 0; frame < 45; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const cancel = document.querySelector('.composer-edit-banner-cancel');
+      if (!cancel) continue;
+      const rect = cancel.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      samples.push(hit === cancel || cancel.contains(hit));
+    }
+    return samples;
+  });
+  await card.click();
+  const cancel = page.locator('.composer-edit-banner-cancel');
+  await expect(cancel).toBeVisible();
+  const samples = await frames;
+  expect(samples.length).toBeGreaterThan(10);
+  expect(samples.every(Boolean), JSON.stringify(samples)).toBe(true);
+  await list.press('End');
+  await page.waitForTimeout(200);
+  const overlap = await cancel.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return { actionable: hit === element || element.contains(hit), hit: hit?.outerHTML };
+  });
+  expect(overlap.actionable, JSON.stringify(overlap)).toBe(true);
+  await cancel.click();
+  await expect(page.locator('.inline-edit-composer-slot')).toHaveCount(0);
+});
+
 for (const withImage of [false, true]) {
   test(`only highlights editable prompts on hover with image=${withImage}`, async ({ page }) => {
     const session: Session = {

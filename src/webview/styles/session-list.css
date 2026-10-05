@@ -246,6 +246,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 }
 
 .session-list-scroll {
+  overflow-anchor: none;
   flex: 1;
   min-height: 0;
   overflow-x: hidden;

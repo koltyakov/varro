@@ -7,6 +7,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { asRecord, isString } from '../shared/type-utils';
 import { OpenCodeServer } from './server';
+import { OpenCodeTransport } from './open-code-transport';
 import { diagnosticTimeline } from './diagnostics';
 
 const editor = vi.hoisted(() => ({ directory: '' }));
@@ -96,6 +97,45 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
       let attached: OpenCodeServer | undefined;
       let replacement: ChildProcess | undefined;
       let phase = 'initial startup';
+      const healthObservations: Array<{
+        phase: string;
+        healthy: boolean;
+        error?: string;
+        durationMs: number;
+      }> = [];
+      const readHealth = OpenCodeTransport.prototype.readHealthInfo;
+      const healthObservation = vi
+        .spyOn(OpenCodeTransport.prototype, 'readHealthInfo')
+        .mockImplementation(async function (this: OpenCodeTransport, signal?: AbortSignal) {
+          const started = performance.now();
+          const result = await readHealth.call(this, signal);
+          healthObservations.push({
+            phase,
+            healthy: result.healthy,
+            error: this.healthError,
+            durationMs: performance.now() - started,
+          });
+          return result;
+        });
+      context.onTestFailed(async () => {
+        await writeFile(join(root, 'startup-diagnostics.md'), diagnosticTimeline.export(''));
+        await writeFile(
+          join(root, 'startup-log.json'),
+          JSON.stringify(
+            {
+              info: logs.info.mock.calls,
+              warn: logs.warn.mock.calls,
+              error: logs.error.mock.calls,
+            },
+            null,
+            2
+          )
+        );
+        await writeFile(
+          join(root, 'failure-status.json'),
+          JSON.stringify({ mode, phase, serverStatus: server.status, healthObservations }, null, 2)
+        );
+      });
       try {
         expect(await server.start()).toBe(url);
         const info = await server.readServerInfo();
@@ -274,6 +314,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
           cause: error,
         });
       } finally {
+        healthObservation.mockRestore();
         await attached?.dispose();
         await server.dispose();
         if (replacement && replacement.exitCode === null && replacement.signalCode === null) {

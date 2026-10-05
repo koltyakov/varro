@@ -1,5 +1,19 @@
 /* oxlint-disable anti-slop/no-runtime-typeof -- Native capture tool input may be JSON text or an object. */
 import { isDeepStrictEqual } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+
+// Validate deferred wire summaries with the same projection that produced them.
+const { outputFiles } = await build({
+  entryPoints: [fileURLToPath(new URL('../src/extension/message-content.ts', import.meta.url))],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  write: false,
+});
+const { projectDeferredPart } = await import(
+  `data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`
+);
 
 export const V2_REPLAY_EVENTS = new Set(
   [
@@ -33,6 +47,7 @@ export const V2_REPLAY_EVENTS = new Set(
 export class V2ReplayProjection {
   constructor(messages) {
     this.recorded = new Map(messages.map((message) => [message.info.id, message]));
+    this.deferredInputs = new Set();
   }
 
   apply(state, event) {
@@ -154,6 +169,7 @@ export class V2ReplayProjection {
       part.state.raw = p.text;
       part.state.input = JSON.parse(p.text);
     } else if (kind === 'tool.called') {
+      if (p.deferred) this.deferredInputs.add(partID);
       const input =
         typeof p.input === 'string' ? JSON.parse(p.input) : (p.input ?? part.state.input);
       put({
@@ -166,8 +182,21 @@ export class V2ReplayProjection {
       if (p.title !== undefined) part.state.title = p.title;
     } else if (kind === 'tool.success' || kind === 'tool.failed') {
       if (part.state.status !== 'running') throw new Error('V2 completion before tool call');
-      if (!isDeepStrictEqual(part.state.input, terminal.state.input))
+      // Captures contain JSON wire values: omitted object fields disappear and
+      // omitted array items become null when the bounded projection is serialized.
+      const expectedInput = this.deferredInputs.has(partID)
+        ? JSON.parse(
+            JSON.stringify(
+              projectDeferredPart({
+                ...terminal,
+                state: { status: 'running', input: terminal.state.input, metadata: {} },
+              }).state.input
+            )
+          )
+        : terminal.state.input;
+      if (!isDeepStrictEqual(part.state.input, expectedInput))
         throw new Error('V2 tool input differs from capture');
+      this.deferredInputs.delete(partID);
       const status = kind === 'tool.success' ? 'completed' : 'error';
       if (terminal.state.status !== status) throw new Error('V2 tool outcome differs from capture');
       if (status === 'error') {

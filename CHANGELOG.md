@@ -2,6 +2,17 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.32.x - October 2026
+
+- Reworked chat performance across typing, streaming, and navigation in long conversations and large session lists. Reduced repeated Markdown processing and history indexing so incoming messages do less work on existing content.
+- Reduced memory use and initial rendering work by loading full tool and reasoning details on demand, reducing memory retained by cached history, and avoiding unused diff and diagram allocations.
+- Moved code and diff syntax highlighting to a background worker, keeping the chat responsive and content readable while highlighting loads.
+- Added bounded image thumbnails and shared thumbnail conversion across extension hosts, reducing image processing and large attachment payloads in conversation views.
+- Improved scrolling and layout stability during streaming, table rendering, diff expansion, and resizing. Preserved measured row heights while deferred diffs reload and reduced layout work when hiding diffs.
+- Added opt-in desktop notifications and per-event sounds for permission requests, questions, completed replies, and plans ready for review. Grouped notification bursts and suppressed alerts already handled automatically.
+- Remembered the last selected model and reasoning variant across projects while preserving each session's choices.
+- Fixed scroll jumps, diff toggling and resizing, repeated tool-preview animations, unread plan indicators.
+
 ## 0.31.x - October 2026
 
 - Defaulted to authenticated managed servers on automatic loopback ports, preserving fixed ports and verified reuse. Remembered confirmation for foreign or unverified ownership.

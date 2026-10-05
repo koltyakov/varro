@@ -628,6 +628,9 @@ into an unbounded model loop or hiding genuine failures.
 
 Run `AI-01` through `AI-08` for the default trigger. Start each scenario from its stated precondition,
 record every fuzzy choice, and preserve the first failing sequence without improvising around it.
+Also complete [required diff scrolling coverage](ai-test-workflow.md#required-diff-scrolling-coverage),
+`DIF-01` through `DIF-07`. Use retained editor playback for those rendering checks when the live
+interaction window is too short; report playback separately from the live AI-07/08 verdicts.
 
 ### AI-01 Virtual Range And Height Bootstrap
 
@@ -638,6 +641,10 @@ Precondition: a completed 32-turn varied-height session, opened at the latest me
 3. Drag the native scrollbar to approximately 25%, 75%, and 50% in that order.
 4. Hold `Alt` or `Option` to expose prompt numbers and verify their ordering at each location.
 5. Return to the bottom with the visible jump-to-latest control when available.
+
+Repeat wheel and held-thumb checks with file diffs disabled and enabled in the prepared diff history.
+Include full drags to the top, return through previously unloaded rows, and frame-level responsiveness
+as specified by DIF-03 through DIF-05; the three fractional thumb destinations alone are insufficient.
 
 Pass invariants:
 
@@ -786,6 +793,10 @@ stress. The deterministic layout suite always verifies native-style nested-to-ou
 5. Return to the bottom before the final tool completes and observe the transition into Explored or
    Worked.
 
+Retain edit-heavy output for DIF-01 through DIF-07. Verify rapid edit arrivals, delayed detail hydration,
+and wheel/held-scrollbar ownership through that playback even when the live model does not produce a
+long enough burst. A settled replay or synthetic burst cannot establish a live active-stream action.
+
 After verifying the native upward wheel, the controller checks detachment using the measured distance
 from the bottom. Jump-to-latest visibility is not a follow-state indicator: the button intentionally
 hides near the bottom. Return uses that button when available, otherwise native `End` on the
@@ -832,6 +843,8 @@ Perform exactly those 50 actions and ensure the sequence contains at least one o
 - sidebar width resize
 - disclosure expansion and collapse
 - file-card and diff expansion, focus, and collapse
+- file-diff visibility toggles at bottom and while detached
+- a held native scrollbar drag during edit/tool arrivals
 - sticky click or jump-to-latest
 - session switch away and back
 - outer transcript movement after disclosure interaction
@@ -867,7 +880,7 @@ Run these when the changed area, observed behavior, or user request calls for th
 | --- | --- | --- |
 | `AI-09` | Async image load and remount | Attachments, row measurement, image preview, or sticky image behavior changed |
 | `AI-10` | Inline edit, delete, and replacement | Inline editing, optimistic messages, append transitions, or navigation ownership changed |
-| `AI-11` | Diff expansion and editor focus | File changes, diff previews, disclosure anchoring, or bottom follow changed |
+| `AI-11` | Diff toggling, deferred remounts, rapid edits, wheel/held-thumb scrolling, and editor focus; complete DIF-01 through DIF-07 | File changes, diff previews, deferred content, row measurement, virtualization, disclosure anchoring, or bottom follow changed; shared DIF coverage is also required in default runs |
 | `AI-12` | Thinking visibility while offscreen | Thinking, activity grouping, settings invalidation, or width batching changed |
 | `AI-13` | Parent/child agent streaming during history prepend | Subagents, session reconciliation, pagination, or attention state changed |
 | `AI-14` | Theme, font, high contrast, and DPI reflow | Typography, CSS, icons, scrollbar geometry, or VS Code theme integration changed |

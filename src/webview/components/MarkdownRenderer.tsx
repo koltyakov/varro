@@ -3,7 +3,7 @@ import type { JSX } from 'solid-js';
 import { Portal, render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
 import { marked, Tokenizer } from 'marked';
-import type { Tokens } from 'marked';
+import type { Token, Tokens } from 'marked';
 import type { Mermaid, MermaidConfig } from 'mermaid';
 import { writeClipboard } from '../lib/write-clipboard';
 import { openPathWithResult, postMessage } from '../lib/bridge';
@@ -1342,51 +1342,64 @@ function hidePendingOnlyListItem(html: string, marker: string) {
   );
 }
 
-function getAppendOnlyStableDelta(
-  previousContent: string,
-  nextContent: string,
-  previousContentWasSafe: boolean
-) {
-  if (!previousContent || !nextContent.startsWith(previousContent)) {
-    return null;
+class StableMarkdownAppend {
+  private content = '';
+  private lastToken: Token | undefined;
+  private contextual = false;
+
+  private remember(content: string) {
+    const tokens = marked.lexer(content);
+    this.content = content;
+    this.lastToken = tokens.findLast((token) => token.type !== 'space');
+    this.contextual = /[<>]/.test(content) || Object.keys(tokens.links).length > 0;
   }
 
-  const suffix = nextContent.slice(previousContent.length);
-  if (!/^(?:\r?\n){2,}/.test(suffix)) return null;
-  const delta = suffix.replace(/^(?:\r?\n)+/, '');
-  if (!delta) return null;
-  if (previousContentWasSafe && isAppendOnlySafeMarkdown(delta)) return delta;
+  getDelta(previousContent: string, nextContent: string, previousContentWasSafe: boolean) {
+    if (!previousContent || !nextContent.startsWith(previousContent)) {
+      this.content = '';
+      this.lastToken = undefined;
+      this.contextual = false;
+      return null;
+    }
 
-  // Rich blocks can also be appended, but only when lexing the whole document preserves
-  // both sides of the boundary. Lists and blockquotes may otherwise merge across blank lines.
-  // Raw HTML and reference definitions need whole-document parsing/sanitization context.
-  if (/[<>]/.test(nextContent)) return null;
-  const previousTokens = marked.lexer(previousContent);
-  const nextTokens = marked.lexer(nextContent);
-  const deltaTokens = marked.lexer(delta);
-  if (
-    Object.keys(previousTokens.links).length > 0 ||
-    Object.keys(nextTokens.links).length > 0 ||
-    Object.keys(deltaTokens.links).length > 0
-  ) {
-    return null;
+    const suffix = nextContent.slice(previousContent.length);
+    if (!/^(?:\r?\n){2,}/.test(suffix)) return null;
+    const delta = suffix.replace(/^(?:\r?\n)+/, '');
+    if (!delta) return null;
+    if (previousContentWasSafe && isAppendOnlySafeMarkdown(delta)) return delta;
+
+    // Only the final block can merge across a blank-line append. Retain its token rather than
+    // lexing the growing settled prefix twice. HTML and reference definitions remain contextual.
+    if (this.content !== previousContent) this.remember(previousContent);
+    if (this.contextual || /[<>]/.test(delta)) return null;
+    const deltaTokens = marked.lexer(delta);
+    if (Object.keys(deltaTokens.links).length > 0) {
+      return null;
+    }
+    const previousToken = this.lastToken;
+    const nextTokens = marked.lexer(`${previousToken?.raw.trimEnd() ?? ''}${suffix}`);
+    const expected = [...(previousToken ? [previousToken] : []), ...deltaTokens].filter(
+      (token) => token.type !== 'space'
+    );
+    const actual = nextTokens.filter((token) => token.type !== 'space');
+    if (
+      actual.length !== expected.length ||
+      expected.some((token, index) => {
+        const next = actual[index]!;
+        return (
+          token.type !== next.type ||
+          token.raw.trimEnd() !== next.raw.trimEnd() ||
+          (token.type === 'list' && next.type === 'list' && token.loose !== next.loose)
+        );
+      })
+    ) {
+      this.remember(nextContent);
+      return null;
+    }
+    this.content = nextContent;
+    this.lastToken = actual.at(-1);
+    return delta;
   }
-  const expected = [...previousTokens, ...deltaTokens].filter((token) => token.type !== 'space');
-  const actual = nextTokens.filter((token) => token.type !== 'space');
-  if (
-    actual.length !== expected.length ||
-    expected.some((token, index) => {
-      const next = actual[index]!;
-      return (
-        token.type !== next.type ||
-        token.raw.trimEnd() !== next.raw.trimEnd() ||
-        (token.type === 'list' && next.type === 'list' && token.loose !== next.loose)
-      );
-    })
-  ) {
-    return null;
-  }
-  return delta;
 }
 
 function parseMarkdown(content: string, options: ParseMarkdownOptions): string {
@@ -2056,6 +2069,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
     }
   });
 
+  const stableMarkdownAppend = new StableMarkdownAppend();
+
   function flushPending() {
     rafId = null;
     if (pendingContent !== null) {
@@ -2095,7 +2110,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
         !renderModeChanged &&
         workspacePath === lastAppliedWorkspacePath &&
         sessionContextKey === lastAppliedSessionContextKey
-          ? getAppendOnlyStableDelta(
+          ? stableMarkdownAppend.getDelta(
               lastAppliedStableContent,
               segments.stableContent,
               lastAppliedStableContentWasAppendOnlySafe
@@ -2421,9 +2436,9 @@ function MermaidPreviewOverlay(props: { preview: { svg: string } | null; onClose
   });
 
   return (
-    <Portal>
-      <Show when={props.preview}>
-        {(preview) => (
+    <Show when={props.preview}>
+      {(preview) => (
+        <Portal>
           <div
             ref={(element) => onCleanup(trapModalFocus(element))}
             class="mermaid-preview-overlay"
@@ -2453,8 +2468,8 @@ function MermaidPreviewOverlay(props: { preview: { svg: string } | null; onClose
               onClick={(event) => event.stopPropagation()}
             />
           </div>
-        )}
-      </Show>
-    </Portal>
+        </Portal>
+      )}
+    </Show>
   );
 }

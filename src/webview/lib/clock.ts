@@ -1,38 +1,43 @@
 import { createEffect, createSignal, onCleanup } from 'solid-js';
 import type { Accessor } from 'solid-js';
 
-const SECOND_CLOCK_INTERVAL_MS = 1_000;
-
 // One shared ticker keeps every elapsed-time label on the same beat and runs
 // only while some component still needs it.
-const [secondClockNow, setSecondClockNow] = createSignal(Date.now());
-let secondClockSubscribers = 0;
-let secondClockHandle: ReturnType<typeof setInterval> | null = null;
+class SharedClock {
+  private readonly time = createSignal(Date.now());
+  private subscribers = 0;
+  private handle: ReturnType<typeof setInterval> | undefined;
 
-function acquireSecondClock(): () => void {
-  secondClockSubscribers += 1;
-  if (secondClockHandle === null) {
-    // The last tick may be from long ago, so start from the current time.
-    setSecondClockNow(Date.now());
-    secondClockHandle = setInterval(() => setSecondClockNow(Date.now()), SECOND_CLOCK_INTERVAL_MS);
+  constructor(private readonly interval: number) {}
+
+  use(enabled: Accessor<boolean>): Accessor<number> {
+    createEffect(() => {
+      if (!enabled()) return;
+      this.subscribers += 1;
+      if (this.handle === undefined) {
+        this.time[1](Date.now());
+        this.handle = setInterval(() => this.time[1](Date.now()), this.interval);
+      }
+      onCleanup(() => {
+        this.subscribers -= 1;
+        if (this.subscribers === 0) {
+          clearInterval(this.handle);
+          this.handle = undefined;
+        }
+      });
+    });
+    return this.time[0];
   }
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    secondClockSubscribers -= 1;
-    if (secondClockSubscribers <= 0 && secondClockHandle !== null) {
-      clearInterval(secondClockHandle);
-      secondClockHandle = null;
-      secondClockSubscribers = 0;
-    }
-  };
+}
+
+const secondClock = new SharedClock(1_000);
+const minuteClock = new SharedClock(60_000);
+
+export function useMinuteClock(enabled: Accessor<boolean> = () => true): Accessor<number> {
+  return minuteClock.use(enabled);
 }
 
 /** Current time, refreshed about once per second while `enabled()` is true. */
 export function useSecondClock(enabled: Accessor<boolean> = () => true): Accessor<number> {
-  createEffect(() => {
-    if (enabled()) onCleanup(acquireSecondClock());
-  });
-  return secondClockNow;
+  return secondClock.use(enabled);
 }

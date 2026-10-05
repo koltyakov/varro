@@ -2,6 +2,7 @@
 import { beforeEach, vi } from 'vitest';
 import type * as FsPromises from 'fs/promises';
 import type { EditorContext } from '../shared/protocol';
+import type { UriHandler } from 'vscode';
 
 const mocks = vi.hoisted(() => ({
   configurationValues: new Map<string, unknown>(),
@@ -20,11 +21,19 @@ const mocks = vi.hoisted(() => ({
   readFile: vi.fn(),
   rm: vi.fn(),
   vscode: {
-    env: { remoteName: undefined as string | undefined },
+    env: {
+      remoteName: undefined as string | undefined,
+      uriScheme: 'vscode',
+      asExternalUri: vi.fn(async (uri: { toString(): string }) => ({
+        toString: () => `${uri.toString()}&windowId=42`,
+      })),
+    },
     extensions: {
       getExtension: vi.fn(() => ({ packageJSON: { version: '0.26.4' } })),
     },
     window: {
+      state: { focused: true, active: true },
+      registerUriHandler: vi.fn((_handler: UriHandler) => ({ dispose: vi.fn() })),
       createStatusBarItem: vi.fn((_id: string, _alignment: number, _priority: number) => ({
         name: '',
         command: '',
@@ -51,6 +60,8 @@ const mocks = vi.hoisted(() => ({
       executeCommand: vi.fn(() => Promise.resolve(undefined)),
     },
     workspace: {
+      workspaceFolders: [{ name: 'repo', uri: { fsPath: '/repo' }, index: 0 }],
+      workspaceFile: undefined as { scheme: string; path: string } | undefined,
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath),
       textDocuments: [] as Array<{
         isDirty: boolean;
@@ -109,11 +120,14 @@ const mocks = vi.hoisted(() => ({
     ConfigurationTarget: { Global: 1 },
     Uri: {
       joinPath: vi.fn(() => ({ toString: () => 'vscode-resource://icon.png' })),
-      file: vi.fn((fsPath: string) => ({ fsPath, toString: () => fsPath })),
-      from: vi.fn((value: { scheme: string; path: string }) => ({
-        ...value,
-        toString: () => `${value.scheme}:${value.path}`,
-      })),
+      file: vi.fn((fsPath: string) => ({ fsPath, path: fsPath, toString: () => fsPath })),
+      from: vi.fn(
+        (value: { scheme: string; path: string; authority?: string; query?: string }) => ({
+          ...value,
+          toString: () =>
+            `${value.scheme}:${value.authority ? `//${value.authority}` : ''}${value.path}${value.query ? `?${value.query}` : ''}`,
+        })
+      ),
     },
   },
 }));
@@ -295,6 +309,8 @@ beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   mocks.configurationValues.clear();
+  mocks.vscode.window.state.focused = true;
+  mocks.vscode.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' }, index: 0 }];
   mocks.vscode.workspace.getConfiguration.mockReset();
   mocks.vscode.workspace.getConfiguration.mockImplementation(() => ({
     get: vi.fn((key: string, fallback?: unknown) =>

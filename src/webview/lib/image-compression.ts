@@ -70,26 +70,46 @@ function isSupportedImage(url: string, mime: string): boolean {
     return false;
   if (mime === 'image/jpeg') return true;
   // Animated PNGs must not silently become a single frame.
-  const bytes = Uint8Array.from(atob(url.slice(url.indexOf(',') + 1)), (char) =>
-    char.charCodeAt(0)
-  );
-  const view = new DataView(bytes.buffer);
-  for (let offset = 8; offset + 12 <= bytes.length;) {
-    const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+  const start = url.indexOf(',') + 1;
+  const byteLength = Math.floor(((url.length - start) * 3) / 4);
+  // Decode only chunk headers. Ancillary chunks can be megabytes long; skip their bodies
+  // using base64-aligned offsets rather than allocating a second copy of the entire PNG.
+  const read = (offset: number, length: number) => {
+    const group = Math.floor(offset / 3);
+    const skip = offset - group * 3;
+    const text = atob(url.slice(start + group * 4, start + Math.ceil((offset + length) / 3) * 4));
+    return Uint8Array.from(text.slice(skip, skip + length), (char) => char.charCodeAt(0));
+  };
+  let chunks = 0;
+  for (let offset = 8; offset + 12 <= byteLength;) {
+    if (++chunks > 4096) return false;
+    const bytes = read(offset, 8);
+    const view = new DataView(bytes.buffer);
+    const type = String.fromCharCode(...bytes.subarray(4, 8));
     if (type === 'acTL') return false;
     if (type === 'IDAT') break;
-    offset += view.getUint32(offset) + 12;
+    const length = view.getUint32(0);
+    if (type === 'IHDR' && length >= 8) {
+      const dimensions = new DataView(read(offset + 8, 8).buffer);
+      if (dimensions.getUint32(0) * dimensions.getUint32(4) > 40_000_000) return false;
+    }
+    offset += length + 12;
   }
   return true;
 }
 
-export async function analyzeImageCompression(image: {
-  url: string;
-  mime: string;
-  size: number;
-}): Promise<ImageCompressionAnalysis | null> {
+export async function analyzeImageCompression(
+  image: {
+    url: string;
+    mime: string;
+    size: number;
+  },
+  signal?: AbortSignal
+): Promise<ImageCompressionAnalysis | null> {
+  signal?.throwIfAborted();
   if (!isSupportedImage(image.url, image.mime)) return null;
   const decoded = await loadImage(image.url);
+  signal?.throwIfAborted();
   const width = decoded.naturalWidth;
   const height = decoded.naturalHeight;
   if (
@@ -98,7 +118,9 @@ export async function analyzeImageCompression(image: {
   )
     return null;
   const recommended = await encodeImage(decoded, image.mime, 2048, 0.85);
+  signal?.throwIfAborted();
   const smaller = await encodeImage(decoded, image.mime, 1280, 0.7);
+  signal?.throwIfAborted();
   return {
     width,
     height,

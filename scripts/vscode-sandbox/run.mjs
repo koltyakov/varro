@@ -1,9 +1,10 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import { writeVscodeLaunchMetadata } from '../vscode-launch-process.mjs';
 import { isolateVarroTestState } from '../varro-test-state.mjs';
@@ -332,6 +333,14 @@ async function runScenario(scenario, vscodeExecutable) {
       environment.VARRO_TEST_SERVER_URL = `http://127.0.0.1:${port}`;
       environment.OPENCODE_CONFIG = path.join(dataRoot, 'opencode.json');
       await writeFile(environment.OPENCODE_CONFIG, JSON.stringify({ enabled_providers: [] }));
+      const { stdout } = await promisify(execFile)(fakeCommand, ['--version'], {
+        env: environment,
+        timeout: 10_000,
+        windowsHide: true,
+      });
+      const version = /^(?:opencode\s+v?)?(2\.\d+\.\d+(?:-[\w.-]+)?)\s*$/.exec(stdout.trim())?.[1];
+      if (!version) throw new Error(`Expected a released v2 executable, got ${stdout.trim()}`);
+      environment.VARRO_SANDBOX_V2_VERSION = version;
     }
     await writeFile(
       path.join(settingsDirectory, 'settings.json'),

@@ -1303,6 +1303,8 @@ export class CdpController {
         type,
         key: 'a',
         code: 'KeyA',
+        windowsVirtualKeyCode: 65,
+        nativeVirtualKeyCode: 65,
         modifiers: selectAllModifier,
       });
     }
@@ -1312,6 +1314,8 @@ export class CdpController {
         type,
         key: 'Enter',
         code: 'Enter',
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13,
       });
     }
     return true;

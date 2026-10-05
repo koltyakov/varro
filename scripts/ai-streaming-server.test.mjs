@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
+import path from 'node:path';
 import { once } from 'node:events';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
@@ -49,6 +50,26 @@ function fixture() {
     ],
   };
 }
+
+test('replay accepts native-equivalent directory scopes and rejects other workspaces', async (t) => {
+  const workspace = path.resolve('artifacts', 'Replay Fixture %');
+  const server = await createStreamingServer({ ...fixture(), directory: workspace });
+  t.after(() => server.close());
+  const equivalent =
+    process.platform === 'win32' ? workspace.toLowerCase().replaceAll('\\', '/') : workspace;
+  for (const scope of [workspace, equivalent, encodeURIComponent(equivalent)]) {
+    const response = await fetch(`${server.url}/session`, {
+      headers: { 'x-opencode-directory': scope },
+    });
+    assert.equal(response.status, 200);
+    await response.body.cancel();
+  }
+  for (const scope of [path.join(workspace, 'other'), '%invalid', 'relative']) {
+    const response = await fetch(`${server.url}/session?directory=${encodeURIComponent(scope)}`);
+    assert.equal(response.status, 404);
+    await response.body.cancel();
+  }
+});
 
 async function connect(server, t) {
   const request = http.get(`${server.url}/global/event`);

@@ -11,6 +11,7 @@ import type { ProviderMetadata } from './util/provider-limit';
 import { ProviderLimitService } from './provider-limit-service';
 import { ProviderQuotaCoordinator } from './provider-quota-coordinator';
 import { createAnthropicAdapter } from './provider-limits/adapters/anthropic';
+import { createCodexAdapter } from './provider-limits/adapters/codex';
 import type { OpenCodeServer } from './server';
 import { getVarroStateDirectory } from './varro-state-paths';
 
@@ -398,6 +399,7 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
         },
       ],
       planName: 'secret account plan',
+      creditBalance: 62_500,
       usageLimitResets: {
         availableCount: 2,
         credits: [
@@ -410,6 +412,7 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
     const status = await first.get('secret identity', 'model-a', poll, 'openai');
     expect(status).toMatchObject({
       providerID: 'openai',
+      creditBalance: 62_500,
       usageLimitResets: {
         availableCount: 2,
         credits: [
@@ -426,6 +429,84 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
     expect(
       await fs.readFile(join(await accountDirectory(), 'snapshot.json'), 'utf8')
     ).not.toContain('secret');
+  });
+
+  it.each([0, 62_500])(
+    'caches credit-only balances of %s across coordinators',
+    async (creditBalance) => {
+      const poll = vi.fn(async (): Promise<ProviderLimitStatus> => ({
+        providerID: 'openai',
+        status: 'available',
+        source: 'provider',
+        checkedAt: now,
+        windows: [],
+        creditBalance,
+      }));
+      const status = await new ProviderQuotaCoordinator(root).get('identity', null, poll, 'openai');
+      expect(status).toMatchObject({ status: 'available', windows: [], creditBalance });
+      expect(
+        await new ProviderQuotaCoordinator(root).get('identity', null, poll, 'openai')
+      ).toEqual(status);
+      expect(poll).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('isolates credit-aware Codex snapshots from older editors sharing the same credentials', async () => {
+    const legacyIdentity = JSON.stringify([
+      'https://chatgpt.com/backend-api/wham/usage',
+      'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits',
+      'https://chatgpt.com/api/codex/usage',
+      'https://chatgpt.com/api/codex/rate-limit-reset-credits',
+      'codex-token',
+      'account-a',
+    ]);
+    const legacy = new ProviderQuotaCoordinator(root);
+    const legacyPoll = async (): Promise<ProviderLimitStatus> => ({
+      providerID: 'openai',
+      status: 'available',
+      source: 'provider',
+      checkedAt: now,
+      windows: [
+        {
+          id: 'seven_day',
+          label: 'Weekly All-Model',
+          unit: 'unknown',
+          remaining: 18,
+          limit: 100,
+          resetAt: null,
+        },
+      ],
+    });
+    await legacy.get(legacyIdentity, null, legacyPoll, 'openai');
+
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            rate_limit: { secondary_window: { used_percent: 82 } },
+            credits: { balance: '62500' },
+          })
+        )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = createCodexAdapter();
+    const load = (coordinator: ProviderQuotaCoordinator) =>
+      adapter.fetch({
+        provider: { id: 'openai', options: {}, models: {} },
+        authStore: { openai: { type: 'oauth', access: 'codex-token', accountId: 'account-a' } },
+        modelID: null,
+        checkedAt: now,
+        coordinate: (identity, poll) =>
+          coordinator.get(JSON.stringify(identity), null, poll, 'openai'),
+      });
+    const current = new ProviderQuotaCoordinator(root);
+    expect(await load(current)).toMatchObject({ creditBalance: 62_500 });
+
+    now += 31_000;
+    await legacy.get(legacyIdentity, null, legacyPoll, 'openai');
+    expect(await load(current)).toMatchObject({ creditBalance: 62_500 });
+    expect(await load(new ProviderQuotaCoordinator(root))).toMatchObject({ creditBalance: 62_500 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('returns unknown quota windows live without persisting arbitrary IDs', async () => {

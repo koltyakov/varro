@@ -2,12 +2,19 @@ import { createEffect } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearMessages,
+  getMessageById,
+  getMessagePartById,
+  messageInfoVersion,
+  messageStructureVersion,
+  removeMessage,
   removePermission,
   resetDefaultAppState,
   setMessagesIncremental,
   setState,
   state,
   removeMessagePart,
+  upsertMessage,
+  upsertMessageInfo,
   upsertPart,
 } from '../lib/state';
 import type { AssistantMessage, FileDiff, NormalizedTodo, Permission, TextPart } from '../types';
@@ -91,6 +98,118 @@ describe('state perf guards', () => {
   afterEach(() => {
     resetDefaultAppState();
   });
+
+  it.each(['upsertMessage', 'upsertMessageInfo'] as const)(
+    '%s appends messages without rescanning historical parts',
+    (operation) => {
+      let historicalPartAccesses = 0;
+      const history = Array.from({ length: 1000 }, (_, index) => {
+        const parts = Array.from({ length: 8 }, (_part, partIndex) =>
+          createTextPart(`part-${index}-${partIndex}`, `message-${index}`, 'History')
+        );
+        return {
+          info: createAssistantMessage(`message-${index}`),
+          get parts() {
+            historicalPartAccesses++;
+            return parts;
+          },
+        };
+      });
+      setState('messages', history);
+      const retained = state.messages.map((entry) => ({ entry, parts: entry.parts.slice() }));
+      messageIndex.ensureIndex(state.messages);
+      historicalPartAccesses = 0;
+      const structureVersion = messageStructureVersion();
+      const infoVersion = messageInfoVersion();
+
+      for (let index = 0; index < 10; index++) {
+        const id = `new-${index}`;
+        const info = createAssistantMessage(id);
+        if (operation === 'upsertMessage') {
+          upsertMessage({ info, parts: [createTextPart(`${id}-initial`, id, 'Initial')] });
+        } else upsertMessageInfo(info);
+        expect(messageStructureVersion()).toBe(structureVersion + index * 2 + 1);
+        expect(messageInfoVersion()).toBe(infoVersion + index + 1);
+        expect(getMessageById(id)).toBe(state.messages[1000 + index]);
+
+        upsertPart(createTextPart(`${id}-received`, id, 'Received'));
+        const entry = state.messages[1000 + index]!;
+        for (let partIdx = 0; partIdx < entry.parts.length; partIdx++) {
+          const part = entry.parts[partIdx]!;
+          expect(messageIndex.getIndexedPartLocation(part.id)).toEqual({
+            msgIdx: 1000 + index,
+            partIdx,
+          });
+          expect(getMessagePartById(id, part.id)).toBe(part);
+        }
+      }
+
+      expect(historicalPartAccesses).toBe(0);
+      expect(messageStructureVersion()).toBe(structureVersion + 20);
+      expect(messageInfoVersion()).toBe(infoVersion + 10);
+      for (let index = 0; index < retained.length; index++) {
+        expect(state.messages[index]).toBe(retained[index]!.entry);
+        for (let partIdx = 0; partIdx < retained[index]!.parts.length; partIdx++) {
+          expect(state.messages[index]!.parts[partIdx]).toBe(retained[index]!.parts[partIdx]);
+        }
+      }
+    }
+  );
+
+  it.each(['upsertMessage', 'upsertMessageInfo'] as const)(
+    '%s keeps append indexes correct across destructive history transitions',
+    (operation) => {
+      const append = (id: string) => {
+        const info = createAssistantMessage(id);
+        if (operation === 'upsertMessage') upsertMessage({ info, parts: [] });
+        else upsertMessageInfo(info);
+        upsertPart(createTextPart(`${id}-part`, id, 'Received'));
+        const entry = getMessageById(id)!;
+        expect(getMessagePartById(id, `${id}-part`)).toBe(entry.parts[0]);
+        expect(messageIndex.getIndexedPartLocation(`${id}-part`)).toEqual({
+          msgIdx: state.messages.length - 1,
+          partIdx: 0,
+        });
+        return entry;
+      };
+      const first = append('first');
+      const firstPart = first.parts[0];
+      append('second');
+
+      setMessagesIncremental([
+        { info: createAssistantMessage('older'), parts: [] },
+        ...state.messages,
+      ]);
+      expect(getMessagePartById('first', 'first-part')).toBe(firstPart);
+      expect(messageIndex.getIndexedPartLocation('first-part')).toEqual({ msgIdx: 1, partIdx: 0 });
+      expect(state.messages[1]).toBe(first);
+      append('after-prepend');
+
+      removeMessage('session-1', 'first');
+      expect(getMessageById('first')).toBeNull();
+      expect(getMessagePartById('first', 'first-part')).toBeNull();
+      expect(getMessagePartById('second', 'second-part')).toBe(state.messages[1]!.parts[0]);
+      append('after-remove');
+
+      upsertMessage({
+        info: createAssistantMessage('second'),
+        parts: [createTextPart('replacement-part', 'second', 'Replacement')],
+      });
+      expect(getMessagePartById('second', 'second-part')).toBeNull();
+      expect(getMessagePartById('second', 'replacement-part')).toBe(state.messages[1]!.parts[0]);
+      append('after-replacement');
+
+      clearMessages();
+      append('second');
+      expect(getMessagePartById('second', 'replacement-part')).toBeNull();
+      expect(getMessageById('after-replacement')).toBeNull();
+
+      resetDefaultAppState();
+      append('first');
+      expect(getMessageById('second')).toBeNull();
+      expect(getMessagePartById('second', 'second-part')).toBeNull();
+    }
+  );
 
   it.each(['upsert', 'delta'] as const)(
     'does not access unrelated historical parts when %s creates parts with a warm index',

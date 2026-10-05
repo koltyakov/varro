@@ -5,10 +5,53 @@ const OVERSCAN = 9;
 const PIXEL_ALIGNMENT_EPSILON = 0.001;
 
 export type VirtualMetrics = {
-  prefix: number[];
+  prefix: VirtualPrefix;
   totalHeight: number;
   itemCount: number;
 };
+
+type VirtualPrefix = Iterable<number> & {
+  readonly length: number;
+  at(index: number): number | undefined;
+};
+const PREFIX_CHUNK_SIZE = 256;
+
+// Published prefixes are immutable snapshots. Tail changes share complete earlier chunks so
+// anchoring can still read old geometry without copying every row on every streamed resize.
+class ChunkedVirtualPrefix implements VirtualPrefix {
+  private readonly chunks: number[][] = [];
+
+  constructor(
+    readonly length: number,
+    previous?: VirtualPrefix,
+    copyCount = 0
+  ) {
+    if (previous instanceof ChunkedVirtualPrefix) {
+      const complete = Math.floor(copyCount / PREFIX_CHUNK_SIZE);
+      for (let index = 0; index < complete; index++) this.chunks.push(previous.chunks[index]!);
+      const remainder = copyCount % PREFIX_CHUNK_SIZE;
+      if (remainder) this.chunks.push(previous.chunks[complete]!.slice(0, remainder));
+    } else if (previous) {
+      for (let index = 0; index < copyCount; index++) this.set(index, previous.at(index)!);
+    }
+  }
+
+  at(index: number): number | undefined {
+    if (index < 0) index += this.length;
+    if (index < 0 || index >= this.length) return undefined;
+    return this.chunks[Math.floor(index / PREFIX_CHUNK_SIZE)]?.[index % PREFIX_CHUNK_SIZE];
+  }
+
+  set(index: number, value: number) {
+    const chunk = Math.floor(index / PREFIX_CHUNK_SIZE);
+    this.chunks[chunk] ??= [];
+    this.chunks[chunk]![index % PREFIX_CHUNK_SIZE] = value;
+  }
+
+  *[Symbol.iterator]() {
+    for (let index = 0; index < this.length; index++) yield this.at(index)!;
+  }
+}
 
 export type VisibleRange = {
   start: number;
@@ -55,7 +98,7 @@ export function buildVirtualMetrics(args: {
   const defaultItemHeight = alignBlockSizeToPixel(args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT);
 
   let rebuildFrom = 0;
-  let prefix: number[];
+  let prefix: ChunkedVirtualPrefix;
 
   if (args.previous) {
     const previousIds = args.previous.itemIds;
@@ -68,16 +111,12 @@ export function buildVirtualMetrics(args: {
     rebuildFrom = isNumber(args.dirtyFromIndex)
       ? Math.max(0, Math.min(commonLen, args.dirtyFromIndex))
       : commonLen;
-    prefix = Array.from<number>({ length: itemCount + 1 });
-    prefix[0] = 0;
     const copyUpTo = Math.min(rebuildFrom, previousPrefix.length - 1);
-    for (let index = 1; index <= copyUpTo; index += 1) {
-      prefix[index] = previousPrefix[index]!;
-    }
+    prefix = new ChunkedVirtualPrefix(itemCount + 1, previousPrefix, copyUpTo + 1);
     rebuildFrom = copyUpTo;
   } else {
-    prefix = Array.from<number>({ length: itemCount + 1 });
-    prefix[0] = 0;
+    prefix = new ChunkedVirtualPrefix(itemCount + 1);
+    prefix.set(0, 0);
   }
 
   for (let index = rebuildFrom; index < itemCount; index += 1) {
@@ -88,12 +127,12 @@ export function buildVirtualMetrics(args: {
       : measuredHeight === undefined
         ? defaultItemHeight
         : alignBlockSizeToPixel(measuredHeight);
-    prefix[index + 1] = prefix[index]! + itemHeight;
+    prefix.set(index + 1, prefix.at(index)! + itemHeight);
   }
 
   return {
-    prefix,
-    totalHeight: prefix[itemCount] || 0,
+    prefix: itemCount < PREFIX_CHUNK_SIZE ? [...prefix] : prefix,
+    totalHeight: prefix.at(itemCount) || 0,
     itemCount,
   };
 }
@@ -134,8 +173,8 @@ export function calculateVirtualRangeFromMetrics(args: {
     end,
     coreStart,
     coreEnd,
-    topPad: args.metrics.prefix[start] || 0,
-    bottomPad: args.metrics.totalHeight - (args.metrics.prefix[end] || 0),
+    topPad: args.metrics.prefix.at(start) || 0,
+    bottomPad: args.metrics.totalHeight - (args.metrics.prefix.at(end) || 0),
   };
 }
 
@@ -178,12 +217,12 @@ export function pruneMeasuredHeights(
   return changed;
 }
 
-function lowerBound(values: number[], target: number) {
+function lowerBound(values: VirtualPrefix, target: number) {
   let low = 0;
   let high = values.length - 1;
   while (low < high) {
     const mid = Math.floor((low + high) / 2);
-    if (values[mid]! < target) low = mid + 1;
+    if (values.at(mid)! < target) low = mid + 1;
     else high = mid;
   }
   return low;

@@ -719,7 +719,9 @@ function DiffItem(props: {
       .slice(start, start + COLLAPSED_DIFF_LINE_COUNT)
       .map((line, index) => ({ line, index: start + index }));
   });
-  const allDisplayLines = createMemo(() => displayLines().map((line, index) => ({ line, index })));
+  const allDisplayLines = createMemo(() =>
+    expanded() ? displayLines().map((line, index) => ({ line, index })) : []
+  );
   const hasLineNumbers = createMemo(() =>
     renderedDisplayLines().some(({ line }) => line.oldLine !== null || line.newLine !== null)
   );

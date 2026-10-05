@@ -26,6 +26,20 @@ function entry(id: string, partIds: string[] = []): MessageEntry {
 }
 
 describe('createMessageIndex', () => {
+  it('keeps positional indexes through metadata notifications', () => {
+    const onInfoChange = vi.fn();
+    const idx = createMessageIndex({ onInfoChange });
+    const msgs = [entry('m1', ['p1']), entry('m2', ['p2'])];
+    idx.ensureIndex(msgs);
+    const original = msgs[0]!.parts;
+    const reads = vi.fn(() => original);
+    Object.defineProperty(msgs[0], 'parts', { get: reads });
+    idx.notifyInfoChange(false);
+    expect(idx.findMessageIndex(msgs, 'm2')).toBe(1);
+    expect(onInfoChange).toHaveBeenCalledWith(false);
+    expect(reads).not.toHaveBeenCalled();
+  });
+
   it('finds message index after ensureIndex', () => {
     const idx = createMessageIndex();
     const msgs = [entry('m1'), entry('m2'), entry('m3')];
@@ -147,6 +161,72 @@ describe('createMessageIndex', () => {
     const newMsgs = [entry('m1'), entry('m2')];
     expect(idx.findMessageIndex(newMsgs, 'm2')).toBe(1);
   });
+
+  it.each(['split', 'legacy'] as const)(
+    'publishes tail message and part indexes before the %s structural callback',
+    (callbacks) => {
+      const onInvalidate = vi.fn();
+      const onPartChange = vi.fn();
+      const idx = createMessageIndex(
+        callbacks === 'legacy' ? onInvalidate : { onInvalidate, onPartChange }
+      );
+      const msgs = [entry('m1', ['p1'])];
+      idx.ensureIndex(msgs);
+      const parts = msgs[0]!.parts;
+      const reads = vi.fn(() => parts);
+      Object.defineProperty(msgs[0], 'parts', { get: reads });
+      msgs.push(entry('m2', ['p2', 'p3']));
+      const fallback = vi.spyOn(msgs, 'findIndex');
+      onInvalidate.mockImplementation(() => {
+        expect(idx.findMessageIndex(msgs, 'm2')).toBe(1);
+        expect(idx.getIndexedPartLocation('p2')).toEqual({ msgIdx: 1, partIdx: 0 });
+        expect(idx.getIndexedPartLocation('p3')).toEqual({ msgIdx: 1, partIdx: 1 });
+      });
+
+      idx.appendMessage(msgs);
+
+      expect(onInvalidate).toHaveBeenCalledOnce();
+      expect(onPartChange).not.toHaveBeenCalled();
+      expect(reads).not.toHaveBeenCalled();
+      expect(fallback).not.toHaveBeenCalled();
+      expect(idx.getIndexedPartLocation('p1')).toEqual({ msgIdx: 0, partIdx: 0 });
+    }
+  );
+
+  it('rebuilds an invalidated index before registering a tail append', () => {
+    const idx = createMessageIndex();
+    const msgs = [entry('removed', ['old']), entry('retained', ['keep'])];
+    idx.ensureIndex(msgs);
+    msgs.shift();
+    idx.invalidate();
+    msgs.push(entry('new', ['new-part']));
+
+    idx.appendMessage(msgs);
+
+    expect(idx.getIndexedPartLocation('old')).toBeNull();
+    expect(idx.getIndexedPartLocation('keep')).toEqual({ msgIdx: 0, partIdx: 0 });
+    expect(idx.getIndexedPartLocation('new-part')).toEqual({ msgIdx: 1, partIdx: 0 });
+    expect(idx.findMessageIndex(msgs, 'retained')).toBe(0);
+    expect(idx.findMessageIndex(msgs, 'new')).toBe(1);
+  });
+
+  it.each([false, true])(
+    'preserves duplicate-part owner lookups after a tail append with warm index %s',
+    (warm) => {
+      const idx = createMessageIndex();
+      const msgs = [entry('history', ['shared', 'retained'])];
+      if (warm) idx.ensureIndex(msgs);
+      msgs.push(entry('new', ['shared', 'shared']));
+
+      idx.appendMessage(msgs);
+
+      expect(idx.getIndexedPartLocation('shared')).toEqual({ msgIdx: 1, partIdx: 1 });
+      expect(idx.findPartLocation(msgs, 'shared', 0)).toEqual({ msgIdx: 0, partIdx: 0 });
+      expect(idx.findPartLocation(msgs, 'shared', 1)).toEqual({ msgIdx: 1, partIdx: 0 });
+      expect(idx.findPartLocation(msgs, 'retained')).toEqual({ msgIdx: 0, partIdx: 1 });
+      expect(idx.findMessageIndex(msgs, 'new')).toBe(1);
+    }
+  );
 
   it('appendPart adds a part to the index', () => {
     const idx = createMessageIndex();

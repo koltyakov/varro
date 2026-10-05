@@ -1,4 +1,4 @@
-import type { MessageEntry } from '../types';
+import type { Message, MessageEntry } from '../types';
 import type { UnknownRecord } from '../../shared/type-utils';
 import { isObject } from './runtime-values';
 
@@ -26,6 +26,17 @@ export function areMessageEntriesEquivalent(left: MessageEntry, right: MessageEn
     }
   }
   return true;
+}
+
+export function areMessageInfosEquivalent(left: Message, right: Message): boolean {
+  return deepEqual(left, right);
+}
+
+export function isMessageLayoutInfoEquivalent(left: Message, right: Message): boolean {
+  if (left.role !== 'assistant' || right.role !== 'assistant') return deepEqual(left, right);
+  const { tokens: _leftTokens, cost: _leftCost, ...leftLayout } = left;
+  const { tokens: _rightTokens, cost: _rightCost, ...rightLayout } = right;
+  return deepEqual(leftLayout, rightLayout);
 }
 
 function deepEqual<T>(a: T, b: T): boolean {

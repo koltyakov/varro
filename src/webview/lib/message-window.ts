@@ -1,5 +1,6 @@
 import { batch, createSignal } from 'solid-js';
 import type { MessageEntry } from '../types';
+import { HistoryCacheBudget } from './history-cache-budget';
 
 export const MESSAGE_HISTORY_WINDOW = 200;
 export const MESSAGE_HISTORY_CACHE_SESSION_LIMIT = 20;
@@ -30,6 +31,7 @@ let defaultMessageWindowStateVersion = 0;
 let nextMessageWindowStateVersion = 0;
 const prefetchedHistoryPages = new Map<string, Map<string, HistoryPage>>();
 const loadedMessagesBySession = new Map<string, MessageEntry[]>();
+const historyCacheBudget = new HistoryCacheBudget();
 const historySessionRecency = new Map<string, true>();
 const historyPageRecency = new Map<string, { sessionId: string; beforeCursor: string }>();
 const [prefetchedHistoryVersion, setPrefetchedHistoryVersion] = createSignal(0);
@@ -99,6 +101,12 @@ export function cacheSessionHistoryPage(
   touchHistorySession(sessionId);
   touchHistoryPage(sessionId, beforeCursor);
   pruneHistoryPageCache();
+  historyCacheBudget.retain(getHistoryPageKey(sessionId, beforeCursor), page, () => {
+    pages.delete(beforeCursor);
+    if (pages.size === 0) prefetchedHistoryPages.delete(sessionId);
+    historyPageRecency.delete(getHistoryPageKey(sessionId, beforeCursor));
+    setPrefetchedHistoryVersion((version) => version + 1);
+  });
   setPrefetchedHistoryVersion((version) => version + 1);
 }
 
@@ -120,6 +128,7 @@ export function getCachedSessionMessages(sessionId: string): MessageEntry[] {
   if (messages.length > 0) {
     loadedMessagesBySession.delete(sessionId);
     loadedMessagesBySession.set(sessionId, messages);
+    historyCacheBudget.touch(sessionId);
     touchHistorySession(sessionId);
   }
   return messages;
@@ -133,10 +142,13 @@ export function setCachedSessionMessages(sessionId: string, messages: MessageEnt
       const oldestSessionId = loadedMessagesBySession.keys().next().value;
       if (!oldestSessionId) break;
       loadedMessagesBySession.delete(oldestSessionId);
+      historyCacheBudget.delete(oldestSessionId);
     }
     touchHistorySession(sessionId);
+    historyCacheBudget.retain(sessionId, messages, () => loadedMessagesBySession.delete(sessionId));
   } else {
     loadedMessagesBySession.delete(sessionId);
+    historyCacheBudget.delete(sessionId);
   }
 }
 
@@ -149,6 +161,7 @@ export function takeCachedSessionHistoryPage(
   if (!page) return undefined;
   pages!.delete(beforeCursor);
   historyPageRecency.delete(getHistoryPageKey(sessionId, beforeCursor));
+  historyCacheBudget.delete(getHistoryPageKey(sessionId, beforeCursor));
   if (pages!.size === 0) prefetchedHistoryPages.delete(sessionId);
   touchHistorySession(sessionId);
   setPrefetchedHistoryVersion((version) => version + 1);
@@ -261,6 +274,7 @@ export function invalidateSessionMessageWindowRequests(sessionId: string) {
 }
 
 export function resetMessageWindowState() {
+  historyCacheBudget.clear();
   historyCursors.clear();
   historyPromptCursors.clear();
   consumedHistoryCursors.clear();
@@ -309,6 +323,7 @@ function touchHistorySession(sessionId: string) {
 
 function touchHistoryPage(sessionId: string, beforeCursor: string) {
   const key = getHistoryPageKey(sessionId, beforeCursor);
+  historyCacheBudget.touch(key);
   historyPageRecency.delete(key);
   historyPageRecency.set(key, { sessionId, beforeCursor });
 }
@@ -319,6 +334,7 @@ function pruneHistoryPageCache() {
     if (!oldestKey) break;
     const oldest = historyPageRecency.get(oldestKey);
     historyPageRecency.delete(oldestKey);
+    historyCacheBudget.delete(oldestKey);
     if (!oldest) continue;
     const pages = prefetchedHistoryPages.get(oldest.sessionId);
     pages?.delete(oldest.beforeCursor);
@@ -339,6 +355,7 @@ function clearSessionMessageWindowStateInternal(sessionId: string) {
   historySessionRecency.delete(sessionId);
   const removedPages = prefetchedHistoryPages.delete(sessionId);
   loadedMessagesBySession.delete(sessionId);
+  historyCacheBudget.delete(sessionId);
   clearHistoryPageRecency(sessionId);
 
   const prompts = historyPromptsBySession();
@@ -364,7 +381,10 @@ function clearSessionMessageWindowStateInternal(sessionId: string) {
 
 function clearHistoryPageRecency(sessionId: string) {
   for (const [key, page] of historyPageRecency) {
-    if (page.sessionId === sessionId) historyPageRecency.delete(key);
+    if (page.sessionId === sessionId) {
+      historyPageRecency.delete(key);
+      historyCacheBudget.delete(key);
+    }
   }
 }
 

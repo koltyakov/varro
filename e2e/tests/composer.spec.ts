@@ -102,6 +102,27 @@ for (const dropCompositionEnd of [false, true]) {
   });
 }
 
+test('keeps a typed URL linked across dots and preserves its icon', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  const composer = page.locator('.rich-composer').first();
+  await composer.click();
+  await page.keyboard.type('https://test');
+  const url = composer.locator('.composer-external-link');
+  await expect(url).toHaveText('https://test');
+
+  for (const suffix of ['.', 'ok', '.', 'com', '/path', '?', 'q=one', '&', 'page=2']) {
+    await page.keyboard.type(suffix);
+    const text = await composer.innerText();
+    await expect(url).toHaveText(text.replace(/[.?]$/, ''));
+    await expect(url.locator('.composer-external-link-icon')).toBeVisible();
+    await expect(composer).toBeFocused();
+  }
+  await expect(composer).toHaveText('https://test.ok.com/path?q=one&page=2');
+  await page.keyboard.type(' done');
+  await expect(url).toHaveText('https://test.ok.com/path?q=one&page=2');
+  await expect(composer).toHaveText('https://test.ok.com/path?q=one&page=2 done');
+});
+
 test('keeps URL boundaries editable in the composer', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 

@@ -5,7 +5,7 @@ import { render } from 'solid-js/web';
 import type { WebviewMessage } from '../../shared/protocol';
 import type { ReasoningPart, ToolPart } from '../types';
 import { cleanupBridge, initializeBridge } from '../lib/bridge';
-import { resetDefaultAppState, setShowThinking, setState } from '../lib/state';
+import { resetDefaultAppState, setShowFileDiffs, setShowThinking, setState } from '../lib/state';
 import { editingMessage, resetMessageEditState } from '../lib/message-edit-state';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import { fixture } from '../test-fixtures';
@@ -167,6 +167,53 @@ it('fetches full tool input and output on expansion', async () => {
     state: { ...part.state, output: 'Full test output, including the final result.' },
   });
   await vi.waitFor(() => expect(container.textContent).toContain('including the final result.'));
+});
+
+it('retains loaded inline diffs across lightweight core transitions', async () => {
+  setShowFileDiffs(true);
+  const [lightweight, setLightweight] = createSignal(false);
+  const part: ToolPart = {
+    id: 'p1',
+    sessionID: 's1',
+    messageID: 'm1',
+    type: 'tool',
+    tool: 'edit',
+    callID: 'call-1',
+    deferred: path,
+    state: {
+      status: 'completed',
+      input: { filePath: 'src/example.ts' },
+      output: 'Edited',
+      title: 'Edit',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    },
+  };
+  dispose = render(() => <ToolCall part={part} lightweight={lightweight()} />, container);
+  expect(requests).toHaveLength(1);
+  respond(requests[0]!, {
+    ...part,
+    deferred: undefined,
+    state: {
+      ...part.state,
+      input: {
+        filePath: 'src/example.ts',
+        oldString: 'const oldValue = 1;',
+        newString: 'const newValue = 2;',
+      },
+    },
+  });
+  await vi.waitFor(() => expect(container.querySelector('.diff-view-widget')).not.toBeNull());
+  const diff = container.querySelector('.diff-view-widget');
+  for (const value of [true, false, true, false]) {
+    setLightweight(value);
+    await Promise.resolve();
+    expect(container.querySelector('.diff-view-widget')).toBe(diff);
+    expect(container.textContent).toContain('newValue');
+    expect(requests).toHaveLength(1);
+  }
+  setShowFileDiffs(false);
+  expect(container.querySelector('.diff-view-widget')).toBeNull();
 });
 
 it('keeps streaming summaries local, coalesces open-detail reads, and releases them on collapse', async () => {

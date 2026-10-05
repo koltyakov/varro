@@ -346,7 +346,7 @@ describe('WebviewSession', () => {
     expect(postedTypes.filter((type) => type === 'command/open-completed-sessions')).toHaveLength(
       1
     );
-    expect(sessionState.clearCompletedInWorkspace).toHaveBeenCalledWith('/repo');
+    expect(sessionState.clearCompletedInWorkspace).not.toHaveBeenCalled();
     expect(deps.handleVisibleSideEffects).toHaveBeenCalledOnce();
   });
 
@@ -1032,7 +1032,7 @@ describe('WebviewSession', () => {
     view.visible = true;
     view.listeners.visibility?.();
 
-    expect(sessionState.clearCompletedInWorkspace).toHaveBeenCalledWith('/repo');
+    expect(sessionState.clearCompletedInWorkspace).not.toHaveBeenCalled();
     expect(deps.handleVisibleSideEffects).toHaveBeenCalledOnce();
     expect(deps.ensureServerStarted).toHaveBeenCalledOnce();
     expect(deps.updateStatusBarItem).toHaveBeenCalledOnce();

@@ -6,6 +6,10 @@ interface NormalizedWorkspacePath {
   root: string;
 }
 
+const NORMALIZED_PATH_CACHE_LIMIT = 256;
+const MAX_CACHED_PATH_LENGTH = 4096;
+const normalizedPaths = new Map<string, NormalizedWorkspacePath | null>();
+
 export function normalizeWorkspaceIdentity(path: string | null | undefined): string | null {
   return normalizeWorkspacePath(path)?.identity ?? null;
 }
@@ -51,6 +55,23 @@ export function isAbsoluteWorkspacePath(path: string | null | undefined): boolea
 function normalizeWorkspacePath(path: string | null | undefined): NormalizedWorkspacePath | null {
   if (!path) return null;
 
+  const cached = normalizedPaths.get(path);
+  if (cached !== undefined) return cached;
+
+  const normalized = parseWorkspacePath(path);
+  // Catalog rows repeatedly use the same directories. Parsing is purely lexical,
+  // so cached results need no filesystem invalidation and stay private to this module.
+  if (path.length <= MAX_CACHED_PATH_LENGTH) {
+    if (normalizedPaths.size >= NORMALIZED_PATH_CACHE_LIMIT) {
+      const oldest = normalizedPaths.keys().next().value;
+      if (oldest !== undefined) normalizedPaths.delete(oldest);
+    }
+    normalizedPaths.set(path, normalized);
+  }
+  return normalized;
+}
+
+function parseWorkspacePath(path: string): NormalizedWorkspacePath | null {
   const extended = path.match(/^(?:\\\\|\/\/)\?[\\/](.*)$/s);
   if (extended) {
     const remainder = extended[1]!;

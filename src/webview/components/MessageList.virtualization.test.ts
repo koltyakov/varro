@@ -122,6 +122,33 @@ describe('inline preview virtualization signatures', () => {
     ).toEqual([]);
   });
 
+  it('invalidates deferred file previews even when their bodies are unloaded', () => {
+    const messages = [
+      { info: { id: 'message-1' }, parts: [{ ...compactFileEdit, deferred: '/parts/edit' }] },
+      {
+        info: { id: 'message-3' },
+        parts: [
+          {
+            ...compactFileEdit,
+            deferred: '/parts/read',
+            tool: 'read',
+            state: {
+              ...compactFileEdit.state,
+              metadata: {},
+            },
+          },
+        ],
+      },
+    ];
+    const hidden = getInlinePreviewLayoutSignatures(messages, false);
+    const shown = getInlinePreviewLayoutSignatures(messages, true);
+    const ids = new Set(['message-1', 'message-3']);
+
+    expect(getChangedInlinePreviewMessageIds(shown, hidden, ids)).toEqual(['message-1']);
+    expect(getChangedInlinePreviewMessageIds(hidden, shown, ids)).toEqual(['message-1']);
+    expect(getChangedInlinePreviewMessageIds(shown, shown, ids)).toEqual([]);
+  });
+
   it('revises preview layout when a completed edit drops its active header', () => {
     const runningMessages = [{ info: { id: 'message-2' }, parts: [previewFileEdit] }];
     const completedMessages = [

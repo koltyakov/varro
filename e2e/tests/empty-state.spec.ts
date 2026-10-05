@@ -11,7 +11,7 @@ test('starter hints use two columns and share a left edge in a centered narrow g
   const hints = grid.locator('.chat-empty-hint');
   const newlineHint = page.locator('.chat-empty-hints > .chat-empty-hint');
   await expect(logo).toBeVisible();
-  await expect(logo).toHaveCSS('opacity', '1');
+  await expect(logo).toHaveCSS('opacity', '0.8');
   await expect(logo).toHaveCSS(
     'filter',
     'grayscale(1) brightness(1.1) drop-shadow(rgba(0, 0, 0, 0.28) 0px 1px 1px)'
@@ -110,7 +110,7 @@ for (const lightTheme of ['vscode-light', 'vscode-high-contrast-light']) {
       element.classList.remove(theme);
       element.classList.add('vscode-dark');
     }, lightTheme);
-    await expect(logo).toHaveCSS('opacity', '1');
+    await expect(logo).toHaveCSS('opacity', '0.8');
     await expect(logo).toHaveCSS(
       'filter',
       'grayscale(1) brightness(1.1) drop-shadow(rgba(0, 0, 0, 0.28) 0px 1px 1px)'

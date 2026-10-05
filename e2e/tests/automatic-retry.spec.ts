@@ -3,6 +3,9 @@ import type { MessageEntry } from '../../src/webview/types';
 import type { ServerEvent } from '../../src/shared/protocol';
 import { waitForAnimationFrames } from './helpers';
 
+// Capture first-attempt startup failures even when the local run has no retries.
+test.use({ trace: 'retain-on-failure', screenshot: 'only-on-failure' });
+
 type RetryHarness = Window & {
   __varroE2E?: {
     getSessionMessages(sessionId: string): MessageEntry[];

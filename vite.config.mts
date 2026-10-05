@@ -44,7 +44,21 @@ export default defineConfig(({ mode }) => ({
         assetFileNames: 'webview.[ext]',
         // Share diagram helpers without combining the lazy diagram renderers.
         codeSplitting: {
-          groups: [{ name: 'diagram-utils', test: /node_modules[\\/]d3-/ }],
+          groups: [
+            {
+              name: 'diagram-utils',
+              test: /node_modules[\\/](?:d3(?:-|[\\/])|mermaid[\\/]dist[\\/]chunks[\\/]mermaid\.core[\\/]chunk-)/,
+              includeDependenciesRecursively: false,
+            },
+            ...['a-c', 'd-f', 'g-i', 'j-l', 'm-o', 'p-r', 's-u', 'v-z0-9'].map(
+              (letters, index) => ({
+                name: `agent-icons-${index}`,
+                test: new RegExp(
+                  `node_modules[/\\\\]iconoir[/\\\\]icons[/\\\\](?:regular|solid)[/\\\\][${letters}][^/\\\\]*\\.svg\\?raw`
+                ),
+              })
+            ),
+          ],
         },
       },
     },

@@ -57,6 +57,46 @@ describe('SessionStateManager notifications', () => {
     vi.clearAllMocks();
   });
 
+  it('tracks error timestamps without advancing on duplicate errors and resets for new work', () => {
+    const manager = createManager(() => false);
+    const fail = (completed: number) =>
+      manager.handleServerEvent({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: `failure-${completed}`,
+            sessionID: 'root',
+            role: 'assistant',
+            time: { created: completed - 1, completed },
+            error: { name: 'UnknownError', data: { message: 'Failure' } },
+          },
+        },
+      });
+    fail(100);
+    expect(manager.failureMarkerFor('root')).toBe(100);
+    fail(100);
+    expect(manager.failureMarkerFor('root')).toBe(100);
+    fail(200);
+    fail(100);
+    expect(manager.failureMarkerFor('root')).toBe(200);
+    manager.markSessionBusy('root');
+    expect(manager.failureMarkerFor('root')).toBeUndefined();
+    manager.handleServerEvent({
+      type: 'session.error',
+      properties: { sessionID: 'root', error: { name: 'UnknownError' } },
+    });
+    const observedAt = manager.failureMarkerFor('root');
+    expect(observedAt).toBeGreaterThan(200);
+    manager.handleServerEvent({
+      type: 'session.error',
+      properties: { sessionID: 'root', error: { name: 'UnknownError' } },
+    });
+    expect(manager.failureMarkerFor('root')).toBe(observedAt);
+    manager.handleServerEvent({ type: 'session.deleted', properties: { info: { id: 'root' } } });
+    expect(manager.failureMarkerFor('root')).toBeUndefined();
+    manager.dispose();
+  });
+
   it('defers a permission warning until the webview reveals it', () => {
     const manager = createManager();
 
@@ -442,6 +482,31 @@ describe('SessionStateManager notifications', () => {
 
     expect(manager.busy.has('session-1')).toBe(false);
     expect(manager.completed.has('session-1')).toBe(true);
+  });
+
+  it('keeps the current turn start through busy updates and advances to the successor', () => {
+    const manager = createManager(() => false);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    try {
+      manager.markSessionBusy('root');
+      expect(manager.busyStartedAtFor('root')).toBe(1_000);
+      clock.mockReturnValue(2_000);
+      markBusy(manager, 'root');
+      expect(manager.busyStartedAtFor('root')).toBe(1_000);
+      clock.mockReturnValue(3_000);
+      manager.markSessionBusy('root');
+      expect(manager.busyStartedAtFor('root')).toBe(1_000);
+      manager.handleServerEvent({
+        type: 'session.next.step.ended',
+        properties: { sessionID: 'root', finish: 'stop' },
+      });
+      expect(manager.busyStartedAtFor('root')).toBe(3_000);
+      manager.handleServerEvent({ type: 'session.deleted', properties: { info: { id: 'root' } } });
+      expect(manager.busyStartedAtFor('root')).toBeUndefined();
+    } finally {
+      clock.mockRestore();
+      manager.dispose();
+    }
   });
 
   it('keeps an overlapping steer busy after an existing SSE turn completes', () => {
@@ -2625,6 +2690,64 @@ describe('SessionStateManager notifications', () => {
     expect(manager.titleFor('session-2')).toBeUndefined();
     expect(manager.titleFor('session-3')).toBeUndefined();
   });
+
+  it.each(['busy', 'error', 'question'] as const)(
+    'retains %s session ancestry during metadata eviction and releases it after deletion',
+    (status) => {
+      const manager = createManager(() => false);
+      manager.handleServerEvent({
+        type: 'session.updated',
+        properties: {
+          info: { id: 'ancestor', title: 'Root chat', directory: '/repo', agent: 'plan' },
+        },
+      });
+      manager.handleServerEvent({
+        type: 'session.updated',
+        properties: { info: { id: 'parent', parentID: 'ancestor' } },
+      });
+      manager.handleServerEvent({
+        type: 'session.updated',
+        properties: { info: { id: 'leaf', parentID: 'parent' } },
+      });
+      if (status === 'busy') manager.markSessionBusy('leaf');
+      else if (status === 'error') {
+        manager.handleServerEvent({
+          type: 'session.error',
+          properties: { sessionID: 'leaf', error: { name: 'UnknownError' } },
+        });
+      } else {
+        manager.handleServerEvent({
+          type: 'question.asked',
+          properties: { id: 'question-1', sessionID: 'leaf', questions: [] },
+        });
+      }
+      const loadCatalog = (prefix: string) => {
+        for (let index = 0; index < 250; index += 1) {
+          manager.handleServerEvent({
+            type: 'session.updated',
+            properties: {
+              info: {
+                id: `${prefix}-${index}`,
+                title: 'Old chat',
+                directory: '/other',
+                parentID: `old-parent-${index}`,
+                agent: 'build',
+              },
+            },
+          });
+        }
+      };
+      loadCatalog('history');
+      expect(manager.rootSessionIdFor('leaf')).toBe('ancestor');
+      expect(manager.titleFor('ancestor')).toBe('Root chat');
+      expect(manager.directoryFor('leaf')).toBe('/repo');
+      expect(manager.isPlanSession('ancestor')).toBe(true);
+      manager.handleServerEvent({ type: 'session.deleted', properties: { info: { id: 'leaf' } } });
+      loadCatalog('later');
+      expect(manager.directoryFor('ancestor')).toBeUndefined();
+      manager.dispose();
+    }
+  );
 
   it('pins busy and pending session directories during metadata eviction', () => {
     const manager = createManager(() => false);

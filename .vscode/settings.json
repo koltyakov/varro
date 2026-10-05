@@ -6,6 +6,14 @@
   "editor.insertSpaces": true,
   "editor.detectIndentation": false,
   "oxc.fmt.configPath": "oxfmt.config.mts",
+  "tailwindCSS.files.exclude": [
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/.hg/**",
+    "**/.svn/**",
+    "**/artifacts/**",
+    "**/tmp/**"
+  ],
   "[javascript]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"
   },

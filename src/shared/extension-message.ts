@@ -760,6 +760,13 @@ function isProviderLimitStatus(value: UnknownRecord | null): value is ProviderLi
   if (value.status === 'error' || value.status === 'unsupported') return isString(value.note);
   if (value.status !== 'available' || !Array.isArray(value.windows)) return false;
   if (value.planName !== undefined && !isString(value.planName)) return false;
+  if (
+    value.creditBalance !== undefined &&
+    (!isNumber(value.creditBalance) ||
+      !Number.isFinite(value.creditBalance) ||
+      value.creditBalance < 0)
+  )
+    return false;
   if (value.usageLimitResets !== undefined) {
     const resets = asRecord(value.usageLimitResets);
     if (

@@ -2,8 +2,6 @@ import { Show, Suspense, createMemo, createSignal, lazy, onCleanup, onMount } fr
 import { Portal } from 'solid-js/web';
 import { MessageList } from '../MessageList';
 import { ChatInput } from '../ChatInput';
-import { ModelsPanel } from '../ModelsPanel';
-import { PermissionSettingsPanel } from '../PermissionSettingsPanel';
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { WindowChatThemeToggle } from './WindowChatThemeToggle';
 import { SessionListView } from './SessionListView';
@@ -17,6 +15,14 @@ import { ManagedSubagentFooter } from './ManagedSubagentFooter';
 
 const LazyRalphDashboard = lazy(() =>
   import('../ralph/RalphDashboard').then((module) => ({ default: module.RalphDashboard }))
+);
+const LazyModelsPanel = lazy(() =>
+  import('../ModelsPanel').then((module) => ({ default: module.ModelsPanel }))
+);
+const LazyPermissionSettingsPanel = lazy(() =>
+  import('../PermissionSettingsPanel').then((module) => ({
+    default: module.PermissionSettingsPanel,
+  }))
 );
 
 function activeRalphSessionId() {
@@ -332,10 +338,14 @@ export function ChatWorkspace(props: {
       </Show>
 
       <Show when={props.showModels}>
-        <ModelsPanel />
+        <Suspense>
+          <LazyModelsPanel />
+        </Suspense>
       </Show>
       <Show when={props.showPermissionSettings}>
-        <PermissionSettingsPanel />
+        <Suspense>
+          <LazyPermissionSettingsPanel />
+        </Suspense>
       </Show>
 
       <Show

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { createStore } from 'solid-js/store';
 import type { MessageEntry, Part } from '../types';
 import {
   advanceSessionHistoryCursor,
@@ -109,6 +110,29 @@ describe('mergeWindowedHistory', () => {
 });
 
 describe('history window state', () => {
+  it('bounds cached transcript bytes across sessions and pages without clearing cursors', () => {
+    const large = (id: string): MessageEntry => ({
+      ...entry(id),
+      parts: [
+        {
+          id: `${id}-text`,
+          sessionID: 'session-1',
+          messageID: id,
+          type: 'text',
+          text: 'x'.repeat(7 * 1024 * 1024),
+        },
+      ],
+    });
+    setSessionHistoryCursor('session-1', 'older');
+    setCachedSessionMessages('session-1', [large('first')]);
+    cacheSessionHistoryPage('session-2', 'page', [large('second')]);
+    expect(getCachedSessionMessages('session-1')).toEqual([]);
+    expect(getSessionHistoryCursor('session-1')).toBe('older');
+    expect(takeCachedSessionHistoryPage('session-2', 'page')).toHaveLength(1);
+    setCachedSessionMessages('session-1', [large('third')]);
+    expect(getCachedSessionMessages('session-1')).toHaveLength(1);
+  });
+
   it('tracks truncated sessions', () => {
     expect(isSessionHistoryTruncated('session-1')).toBe(false);
     markSessionHistoryTruncated('session-1', true);
@@ -117,6 +141,26 @@ describe('history window state', () => {
     expect(isSessionHistoryTruncated(null)).toBe(false);
     markSessionHistoryTruncated('session-1', false);
     expect(isSessionHistoryTruncated('session-1')).toBe(false);
+  });
+
+  it('accounts for updated store snapshots without replacing cached proxy identities', () => {
+    const message = entry('m1');
+    message.parts = [
+      { id: 'p1', sessionID: 'session-1', messageID: 'm1', type: 'text', text: 'Short' },
+    ];
+    const [store, setStore] = createStore({ messages: [message] });
+    const snapshot = [...store.messages];
+    const proxy = store.messages[0];
+    setCachedSessionMessages('session-1', snapshot);
+    expect(getCachedSessionMessages('session-1')[0]).toBe(proxy);
+    setStore('messages', 0, 'parts', 0, (part) => {
+      if (part.type !== 'text') throw new Error('Expected text fixture');
+      return { ...part, text: 'x'.repeat(13 * 1024 * 1024) };
+    });
+    setCachedSessionMessages('session-1', snapshot);
+    expect(getCachedSessionMessages('session-1')).toEqual([]);
+    expect(snapshot[0]).toBe(proxy);
+    expect(store.messages[0]!.parts[0]).toHaveProperty('text', 'x'.repeat(13 * 1024 * 1024));
   });
 
   it('tracks opaque history cursors until reset', () => {

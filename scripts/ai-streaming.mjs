@@ -20,6 +20,7 @@ import { prepareStreamingRun } from './ai-streaming-selection.mjs';
 import { createStreamingServer } from './ai-streaming-server.mjs';
 import {
   createCdpRequestClient,
+  readWindowsProcess,
   vscodeLaunchCommandMatches,
   writeVscodeLaunchMetadata,
 } from './vscode-launch-process.mjs';
@@ -649,6 +650,18 @@ async function findSidebar(port, signal) {
 export async function ownedProcessExists(launch, verifyCommand = true) {
   if (!Number.isInteger(launch.pid) || launch.pid <= 0 || !launch.birthIdentity)
     throw new Error('Invalid owned process identity');
+  if (process.platform === 'win32') {
+    const observed = await readWindowsProcess(launch.pid);
+    if (!observed) return false;
+    if (`win32:${observed.birthIdentity}` !== launch.birthIdentity)
+      throw new Error('Host identity changed; refusing to signal');
+    if (
+      verifyCommand &&
+      !vscodeLaunchCommandMatches(observed.command?.replaceAll('"', '') ?? '', launch)
+    )
+      throw new Error('Host argv changed; refusing to signal');
+    return true;
+  }
   const execute = promisify(execFile);
   let birth;
   try {
@@ -700,7 +713,18 @@ export async function cleanupOwnedHost(launch, { graceMs = 3_000, exitMs = 5_000
   };
   const alreadyExited = !(await ownedProcessExists(launch));
   let escalated = false;
-  if (!alreadyExited) {
+  if (!alreadyExited && process.platform === 'win32') {
+    // Terminate only the verified profile's tree. Children can exit during taskkill;
+    // accept that race only after independently verifying host and endpoint shutdown.
+    try {
+      await promisify(execFile)('taskkill.exe', ['/PID', String(launch.pid), '/T', '/F'], {
+        timeout: 10_000,
+      });
+    } catch (error) {
+      if (await ownedProcessExists(launch, false)) throw error;
+    }
+    escalated = true;
+  } else if (!alreadyExited) {
     signal('SIGTERM');
     const deadline = Date.now() + graceMs;
     while (await ownedProcessExists(launch, false)) {
@@ -745,6 +769,34 @@ export async function stopLauncher(child, exit) {
 
 // Launcher failures can precede its final stdout. Recover only the uniquely owned workspace host.
 async function recoverLaunch(workspace, output) {
+  if (process.platform === 'win32') {
+    const intentPath = path.join(output, 'launch-intent.json');
+    const intent = await readJson(intentPath).catch((error) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (!intent) return null;
+    if (intent.workspace !== workspace) throw new Error('Launch intent workspace changed');
+    const { stdout } = await promisify(execFile)(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        "$ErrorActionPreference = 'Stop'; @(Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine) | ConvertTo-Json -Compress",
+      ],
+      { timeout: 60_000 }
+    );
+    const matches = JSON.parse(stdout).filter((entry) =>
+      vscodeLaunchCommandMatches(entry.CommandLine?.replaceAll('"', '') ?? '', intent)
+    );
+    if (matches.length !== 1)
+      throw new Error(`Host cleanup unverified: ${matches.length} matches for ${intentPath}`);
+    return writeVscodeLaunchMetadata(path.join(output, 'recovered-launch.json'), {
+      ...intent,
+      pid: matches[0].ProcessId,
+    });
+  }
   const deadline = Date.now() + 3_000;
   let matches;
   // macOS open hands launch to LaunchServices. Killing the launcher can precede Code's argv
@@ -792,8 +844,6 @@ async function recoverLaunch(workspace, output) {
 }
 
 export async function runCapture(options) {
-  if (process.platform === 'win32')
-    throw new Error('Owned host cleanup currently requires POSIX ps');
   const output = path.resolve(options.output);
   await mkdir(path.dirname(output), { recursive: true });
   await mkdir(output, { mode: 0o700 });
@@ -863,10 +913,15 @@ export async function runCapture(options) {
     metadata.sessionID = replay.getResult().sessionID;
     metadata.replayUrl = proxy.url;
     await mkdir(path.join(workspace, '.vscode'));
-    const fakeCommand = path.join(workspace, 'fake-opencode');
+    const fakeCommand = path.join(
+      workspace,
+      process.platform === 'win32' ? 'fake-opencode.cmd' : 'fake-opencode'
+    );
     await writeFile(
       fakeCommand,
-      `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(path.join(root, 'scripts/vscode-sandbox/fake-opencode.mjs'))} "$@"\n`,
+      process.platform === 'win32'
+        ? `@echo off\r\n"${process.execPath}" "${path.join(root, 'scripts/vscode-sandbox/fake-opencode.mjs')}" %*\r\n`
+        : `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(path.join(root, 'scripts/vscode-sandbox/fake-opencode.mjs'))} "$@"\n`,
       { mode: 0o700 }
     );
     await json(path.join(workspace, '.vscode/settings.json'), {
@@ -1057,6 +1112,24 @@ export async function runCapture(options) {
   } catch (error) {
     metadata.phase = controller.signal.aborted ? 'stopped' : 'failed';
     metadata.error = error.message;
+    if (frame) {
+      try {
+        await json(
+          path.join(output, 'failure-dom.json'),
+          await frame.evaluate(() => ({
+            text: document.body.innerText,
+            route: globalThis.__initialWebviewState?.activeSessionId,
+            sessions: [...document.querySelectorAll('[data-session-id]')].map((element) => ({
+              id: element.getAttribute('data-session-id'),
+              className: element.className,
+            })),
+          }))
+        );
+        if (browser) await screenshot(path.join(output, 'failure.png'));
+      } catch (captureError) {
+        metadata.failureCaptureError = captureError.message;
+      }
+    }
   } finally {
     controller.abort(new Error('Run cleanup'));
     const clean = async (label, operation, nativeDeadline = false) => {
@@ -1091,6 +1164,11 @@ export async function runCapture(options) {
       });
     if (proxy) await clean('Proxy close', proxy.close);
     if (control) await clean('Control close', control.close);
+    if (browser)
+      await clean('CDP disconnect', async () => {
+        await browser.close();
+        metadata.cdpDisconnected = !browser.isConnected();
+      });
     if (workspace && child)
       await clean(
         'Owned host cleanup',
@@ -1101,11 +1179,6 @@ export async function runCapture(options) {
         },
         true
       );
-    if (browser)
-      await clean('CDP disconnect', async () => {
-        await browser.close();
-        metadata.cdpDisconnected = !browser.isConnected();
-      });
     // Closing the owned host/transport rejects outstanding evaluate calls. Join the polling
     // loops as well, rather than allowing them to outlive the CLI after a deadline.
     await clean('Pending browser operations', async () => {

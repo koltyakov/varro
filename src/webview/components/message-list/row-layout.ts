@@ -11,7 +11,10 @@ import {
   isWorkspaceDirectoryText,
   shouldShowAssistantPartInline,
 } from '../../lib/part-utils';
-import { getToolInlineFileChangesLayoutSignature } from '../../lib/tool-file-change';
+import {
+  getToolFileChangeSignature,
+  getToolInlineFileChangesLayoutSignature,
+} from '../../lib/tool-file-change';
 import type { MessageEntry, Part } from '../../types';
 import {
   hasUserMessageContent,
@@ -271,7 +274,14 @@ export function getInlinePreviewLayoutSignatures(
     const partSignatures: string[] = [];
     for (const part of message.parts) {
       if (part.type !== 'tool') continue;
-      const signature = getToolInlineFileChangesLayoutSignature(part.tool, part.state);
+      // Deferred history keeps file identities but fetches preview bodies only while mounted.
+      // Its unmounted heights must still be invalidated when previews are toggled.
+      const deferredFiles = part.deferred
+        ? getToolFileChangeSignature(part.tool, part.state)
+        : null;
+      const signature =
+        getToolInlineFileChangesLayoutSignature(part.tool, part.state) ??
+        (deferredFiles ? `deferred:${part.deferred}:${deferredFiles}` : null);
       if (signature) {
         const cardLayout = part.state.status === 'completed' ? 'preview-only' : 'preview-with-card';
         partSignatures.push(`${part.id}:${cardLayout}:${signature}`);

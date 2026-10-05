@@ -185,6 +185,32 @@ describe('performScrollToBottom', () => {
 });
 
 describe('resolveAutoScrollOnUserScroll', () => {
+  it('yields to upward movement even within the expected-target tolerance', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 495,
+        distanceFromBottom: 5,
+        nearBottom: true,
+        autoScroll: true,
+        userScrolledUp: true,
+        bottomTargetStable: false,
+        followModeLocked: true,
+        expectedScrollTop: 496,
+        lastObservedScrollTop: 496,
+        ignoreScrollUntil: 1000,
+        now: 500,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: false,
+      nextExpectedScrollTop: -1,
+      nextIgnoreScrollUntil: 0,
+      nextLastObservedScrollTop: 495,
+      nextFollowModeLocked: false,
+      shouldCancelPendingScroll: true,
+    });
+  });
+
   it('keeps auto-scroll active when the scroll matches the expected target', () => {
     expect(
       resolveAutoScrollOnUserScroll({

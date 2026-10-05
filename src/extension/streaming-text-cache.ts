@@ -1,4 +1,4 @@
-/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type, anti-slop/no-unknown-parameters -- Persisted text, server events, and storage failures are validated at this boundary. */
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type -- Persisted text, server events, and storage failures are validated at this boundary. */
 import type { Persistence } from '../shared/persistence';
 import type { ServerEvent } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
@@ -23,7 +23,8 @@ type CachedText = {
 export class StreamingTextCache {
   private readonly parts = new Map<string, CachedText>();
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private writing: Promise<void> = Promise.resolve();
+  private writing: Promise<void> | undefined;
+  private pendingSnapshot: CachedText[] | undefined;
 
   constructor(private readonly persistence: Persistence) {
     const stored = persistence.get<unknown>(STORAGE_KEY);
@@ -150,16 +151,24 @@ export class StreamingTextCache {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
     this.prune();
-    const snapshot = [...this.parts.values()];
-    this.writing = this.writing
-      .then(async () => {
-        await this.persistence.set(STORAGE_KEY, snapshot);
-      })
-      .catch((error: unknown) => {
-        logger.warn(
-          `Could not persist streaming text: ${error instanceof Error ? error.message : String(error)}`
-        );
-      });
+    this.pendingSnapshot = [...this.parts.values()];
+    this.writing ??= Promise.resolve().then(async () => {
+      try {
+        while (this.pendingSnapshot) {
+          const snapshot = this.pendingSnapshot;
+          this.pendingSnapshot = undefined;
+          try {
+            await this.persistence.set(STORAGE_KEY, snapshot);
+          } catch (error: unknown) {
+            logger.warn(
+              `Could not persist streaming text: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        }
+      } finally {
+        this.writing = undefined;
+      }
+    });
     return this.writing;
   }
 

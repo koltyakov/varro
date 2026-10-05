@@ -2,10 +2,80 @@ import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry } from '../../src/webview/types';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import {
+  getScrollMetrics,
+  getVisibleMessageAnchor,
+  sampleMessageTopAcrossFrames,
+  waitForAnimationFrames,
+} from './helpers';
+import { appendDeltaToRapidStreaming } from './scroll-helpers';
+
+type ScrollSample = { top: number; height: number };
 
 // Headless Chromium hides native scrollbars by default, making thumb drags inert.
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
+
+test('streaming yields to a held scrollbar, stays at the top, and follows a drag back to bottom', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  const list = page.locator('.interactive-list');
+  await expect(list).toBeVisible();
+  await expect
+    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+    .toBeLessThanOrEqual(1);
+  const thumb = await getThumb(list);
+  const bounds = await list.boundingBox();
+  if (!bounds) throw new Error('Missing transcript viewport');
+  await page.mouse.move(thumb.x, thumb.y);
+  await page.mouse.down();
+  const heldAnchor = await getVisibleMessageAnchor(list);
+  await appendDeltaToRapidStreaming(
+    page,
+    `\n\nHeld-thumb output: ${'Streaming text. '.repeat(80)}`
+  );
+  // Keep holding beyond the input-intent timeout while paced output grows below the viewport.
+  const heldSamples = await sampleMessageTopAcrossFrames(list, heldAnchor.id, 45);
+  expect(
+    heldSamples.every((top) => top !== null && Math.abs(top - heldAnchor.top) <= 1),
+    JSON.stringify({ heldAnchor, heldSamples })
+  ).toBe(true);
+
+  await page.mouse.move(thumb.x, bounds.y + 2, { steps: 12 });
+  await expect
+    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.scrollTop))
+    .toBe(0);
+  await page.mouse.up();
+  const topAnchor = await getVisibleMessageAnchor(list);
+  for (let index = 0; index < 6; index += 1) {
+    await appendDeltaToRapidStreaming(
+      page,
+      `\n\nDetached output ${index}: ${'More text. '.repeat(20)}`
+    );
+    const samples = await sampleMessageTopAcrossFrames(list, topAnchor.id, 4);
+    expect(
+      samples.every((top) => top !== null && Math.abs(top - topAnchor.top) <= 1),
+      JSON.stringify({ topAnchor, samples })
+    ).toBe(true);
+    expect((await getScrollMetrics(page, '.interactive-list')).scrollTop).toBe(0);
+  }
+
+  // Let the paced detached output finish before measuring the thumb's new range.
+  await waitForAnimationFrames(page, 30);
+  const topThumb = await getThumb(list);
+  await page.mouse.move(topThumb.x, topThumb.y);
+  await page.mouse.down();
+  await page.mouse.move(topThumb.x, bounds.y + bounds.height + 40, { steps: 12 });
+  await expect
+    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+    .toBeLessThanOrEqual(1);
+  await page.mouse.up();
+  await appendDeltaToRapidStreaming(page, `\n\nResumed output: ${'Follow new text. '.repeat(30)}`);
+  await expect(list).toContainText('Resumed output:');
+  await expect
+    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+    .toBeLessThanOrEqual(1);
+});
 
 for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointer'] as const) {
   test(`scrollbar dragging releases the ${phase} activity-collapse anchor`, async ({
@@ -208,7 +278,8 @@ for (const completion of ['one tool groups', 'remaining tools complete'] as cons
       await waitForAnimationFrames(page, 1);
     }
     await waitForAnimationFrames(page, 30);
-    const held = await takeScrollSamples(page);
+    const heldFrames = await takeScrollSamples(page);
+    const held = heldFrames.map((frame) => frame.top);
     // The thumb's destination; a reversed frame may have been sampled last.
     const dragTop = Math.max(...held);
     await page.mouse.up();
@@ -216,16 +287,21 @@ for (const completion of ['one tool groups', 'remaining tools complete'] as cons
     await startScrollSampling(page);
     await appendAssistantText(page, 'scrollbar-post-release', 6);
     await waitForAnimationFrames(page, 60);
-    const released = await takeScrollSamples(page);
+    const releasedFrames = await takeScrollSamples(page);
+    const released = releasedFrames.map((frame) => frame.top);
     await stopToolChurn(page);
 
     await testInfo.attach('scrollbar-drag-frames', {
-      body: JSON.stringify({ thumb, dragTop, held, released }),
+      body: JSON.stringify({ thumb, dragTop, held, released, heldFrames, releasedFrames }),
       contentType: 'application/json',
     });
     // The drag moved the transcript downward, and no frame reversed that user-owned movement.
     expect(dragTop).toBeGreaterThan(thumb.top + 150);
     expect.soft(largestReversal(held)).toBeLessThanOrEqual(2);
+    // A detached collapse must reserve lost range before native thumb mapping can observe it.
+    expect
+      .soft(Math.min(...heldFrames.map((frame) => frame.height)))
+      .toBeGreaterThanOrEqual(thumb.scrollHeight - 1);
     // Release must not return to the position where the drag started.
     expect(Math.min(...released)).toBeGreaterThanOrEqual(dragTop - 2);
   });
@@ -365,6 +441,7 @@ async function getThumb(list: Locator) {
       x: rect.right - 3,
       y: rect.top + thumbTop + thumbHeight / 2,
       top: element.scrollTop,
+      scrollHeight: element.scrollHeight,
       remainingTravel: travel - thumbTop,
     };
   });
@@ -373,14 +450,14 @@ async function getThumb(list: Locator) {
 async function startScrollSampling(page: Page) {
   await page.evaluate(() => {
     // SAFETY: This test owns the optional sample buffer slot on the fixture window.
-    const sampler = window as typeof window & { varroScrollSamples?: number[] };
+    const sampler = window as typeof window & { varroScrollSamples?: ScrollSample[] };
     const list = document.querySelector('.interactive-list');
     if (!list) throw new Error('Missing message list');
-    const samples: number[] = [];
+    const samples: ScrollSample[] = [];
     sampler.varroScrollSamples = samples;
     const sample = () => {
       if (sampler.varroScrollSamples !== samples) return;
-      samples.push(list.scrollTop);
+      samples.push({ top: list.scrollTop, height: list.scrollHeight });
       requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
@@ -390,7 +467,7 @@ async function startScrollSampling(page: Page) {
 async function takeScrollSamples(page: Page) {
   return page.evaluate(() => {
     // SAFETY: startScrollSampling owns this optional sample buffer slot on the fixture window.
-    const sampler = window as typeof window & { varroScrollSamples?: number[] };
+    const sampler = window as typeof window & { varroScrollSamples?: ScrollSample[] };
     const samples = sampler.varroScrollSamples ?? [];
     sampler.varroScrollSamples = undefined;
     return samples;

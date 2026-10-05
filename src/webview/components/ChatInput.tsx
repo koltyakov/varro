@@ -1087,7 +1087,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [compressionError, setCompressionError] = createSignal<string | null>(null);
   let compressionEpoch = 0;
   let imageAnalysisQueue = Promise.resolve();
-  const pendingImageAnalyses = new Set<string>();
+  const pendingImageAnalyses = new Map<
+    string,
+    { id: string; url: string; controller: AbortController }
+  >();
+  const cancelImageAnalyses = () => {
+    for (const pending of pendingImageAnalyses.values()) pending.controller.abort();
+    pendingImageAnalyses.clear();
+  };
+  onCleanup(cancelImageAnalyses);
   const compressionOwner = createMemo(() =>
     JSON.stringify([
       composerSessionId(),
@@ -1850,6 +1858,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   createEffect(() => {
     void compressionOwner();
     compressionEpoch += 1;
+    cancelImageAnalyses();
     setImageLoadResults(new Map());
     setOriginalImages(new Map());
     setImageAnalyses(new Map());
@@ -1919,13 +1928,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     );
     const menu = untrack(compressionMenu);
     if (menu && !images.some((image) => image.id === menu.id)) setCompressionMenu(null);
+    for (const [key, pending] of pendingImageAnalyses) {
+      if (images.some((image) => image.id === pending.id && image.url === pending.url)) continue;
+      pending.controller.abort();
+      pendingImageAnalyses.delete(key);
+    }
     for (const image of images) {
-      const key = `${epoch}:${image.id}:${image.url}`;
+      const key = `${epoch}:${image.id}`;
       if (current.get(image.id)?.url === image.url || pendingImageAnalyses.has(key)) continue;
-      pendingImageAnalyses.add(key);
+      const controller = new AbortController();
+      pendingImageAnalyses.set(key, { id: image.id, url: image.url, controller });
       imageAnalysisQueue = imageAnalysisQueue
         .then(async () => {
           if (
+            controller.signal.aborted ||
             composerDisposed ||
             compressionEpoch !== epoch ||
             !state.clipboardImages.some((item) => item.id === image.id && item.url === image.url)
@@ -1933,11 +1949,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             return;
           let analysis: ImageCompressionAnalysis | null = null;
           try {
-            analysis = await analyzeImageCompression(image);
+            analysis = await analyzeImageCompression(image, controller.signal);
           } catch (error) {
-            logError('chat-input:analyzeImageCompression', error);
+            if (!controller.signal.aborted) logError('chat-input:analyzeImageCompression', error);
           }
           if (
+            controller.signal.aborted ||
             composerDisposed ||
             compressionEpoch !== epoch ||
             !state.clipboardImages.some((item) => item.id === image.id && item.url === image.url)
@@ -1947,7 +1964,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             new Map(entries).set(image.id, { url: image.url, analysis })
           );
         })
-        .finally(() => pendingImageAnalyses.delete(key));
+        .finally(() => {
+          if (pendingImageAnalyses.get(key)?.controller === controller)
+            pendingImageAnalyses.delete(key);
+        });
     }
   });
 

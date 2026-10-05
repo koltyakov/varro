@@ -85,6 +85,11 @@ The local-database session-summary optimization did not fix that readiness barri
 3. Verify health, including API family and supported version. Remember the successful
    endpoint for this URL. OpenCode V2 normally uses `/api/info`; `/api/status` can be
    obsolete. Forget the preference when the URL changes.
+   For a newly launched V2 service, first wait for verified service discovery to
+   supply its actual credential. The listener can open before registration, and
+   V2 can choose a persisted password instead of the launch environment password.
+   This wait shares the startup health deadline and must discard cancelled or
+   replaced-launch results. It does not retry explicit health authentication rejection.
 4. Admit the listener/account before requests or SSE. Ownership and account checks
    may run concurrently, but **both must succeed before any protected HTTP traffic**.
     Preserve fresh reconnect checks, in-flight deduplication, and one-second strict

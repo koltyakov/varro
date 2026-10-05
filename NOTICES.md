@@ -1,5 +1,15 @@
 # Third-Party Notices
 
+## Notification sound
+
+The notification sound is an edited excerpt of [Water Bubble #2](https://bigsoundbank.com/water-bubble-2-s0183.html)
+by Joseph SARDIN, BigSoundBank.com, dedicated to the public domain under
+[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).
+The original records water bubbles made with a straw in a tub. Varro uses seconds 12.55-12.96,
+resampled to 48 kHz mono PCM, with short fades and peak normalization.
+The recording retains its CC0 dedication rather than Varro's MIT license.
+Source and license details: https://bigsoundbank.com/licenses.html.
+
 ## ImageMagick WASM
 
 Varro uses [magick-wasm](https://github.com/dlemstra/magick-wasm), Copyright Dirk Lemstra,

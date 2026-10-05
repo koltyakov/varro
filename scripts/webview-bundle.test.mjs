@@ -7,7 +7,8 @@ await test('bundles diagram helpers within the VSIX file budget and keeps render
   assert.ok(!Array.isArray(result) && 'output' in result);
   const chunks = result.output.filter((output) => output.type === 'chunk');
   // VSCE warns above 100 .js files, including the extension host bundle.
-  assert.ok(chunks.filter((chunk) => chunk.fileName.endsWith('.js')).length + 1 <= 100);
+  const jsFileCount = chunks.filter((chunk) => chunk.fileName.endsWith('.js')).length + 1;
+  assert.ok(jsFileCount <= 100, `Expected at most 100 JavaScript files, got ${jsFileCount}`);
   assert.equal(chunks.filter((chunk) => chunk.name === 'diagram-utils').length, 1);
   assert.ok(chunks.some((chunk) => chunk.name.startsWith('flowDiagram-')));
   assert.ok(chunks.some((chunk) => chunk.name.startsWith('sequenceDiagram-')));
@@ -24,7 +25,11 @@ await test('bundles diagram helpers within the VSIX file budget and keeps render
   }
   visit(entry.fileName);
   for (const chunk of chunks) {
-    if (chunk.name === 'diagram-utils' || chunk.name.startsWith('mermaid.core-')) {
+    if (
+      Object.keys(chunk.modules).some((id) =>
+        /node_modules[\\/](?:mermaid|@mermaid-js[\\/]parser|d3-[^\\/]+)[\\/]/.test(id)
+      )
+    ) {
       assert.ok(!initialChunks.has(chunk.fileName), `${chunk.name} must remain lazy`);
     }
   }

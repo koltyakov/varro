@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createComputed, createRoot } from 'solid-js';
 import type { WebviewMessage } from '../../shared/protocol';
 import type { AssistantMessage, Part, Permission, ToolPart } from '../types';
 import {
@@ -33,6 +34,7 @@ import {
   syncFailedSessionsFromMessages,
   setMessagesIncremental,
   upsertMessage,
+  upsertMessageInfo,
   upsertPart,
 } from './state';
 
@@ -118,6 +120,29 @@ function nextFrame() {
 }
 
 describe('state streaming deltas', () => {
+  it('updates usage without structural invalidation, but preserves completion invalidation', () => {
+    clearMessages();
+    const info = assistantMessage();
+    upsertMessage({ info, parts: [] });
+    let roleReads = 0;
+    const dispose = createRoot((cleanupRoot) => {
+      createComputed(() => {
+        void state.messages[0]?.info.role;
+        roleReads += 1;
+      });
+      return cleanupRoot;
+    });
+    const version = messageStructureVersion();
+    const updated = { ...info, cost: 1, tokens: { ...info.tokens, output: 100 } };
+    upsertMessageInfo(updated);
+    expect(messageStructureVersion()).toBe(version);
+    expect(roleReads).toBe(1);
+    expect(getMessageById(info.id)?.info).toMatchObject({ cost: 1, tokens: { output: 100 } });
+    upsertMessageInfo({ ...updated, time: { ...updated.time, completed: 100 } });
+    expect(messageStructureVersion()).toBeGreaterThan(version);
+    dispose();
+  });
+
   beforeEach(() => {
     clearMessages();
     clearStreamingState();

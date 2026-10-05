@@ -114,6 +114,7 @@ describe('Virtual metrics perf guards', () => {
     });
     const measuredHeights = new Map(rawIds.map((id) => [id, 40]));
     const previous = buildVirtualMetrics({ itemIds, measuredHeights });
+    const prefixReads = vi.spyOn(previous.prefix, 'at');
 
     measuredHeights.set(rawIds.at(-1)!, 80);
     numericReads = 0;
@@ -127,6 +128,9 @@ describe('Virtual metrics perf guards', () => {
     expect(rebuilt.prefix.at(-2)).toBe((rawIds.length - 1) * 40);
     expect(rebuilt.totalHeight).toBe(rawIds.length * 40 + 40);
     expect(numericReads).toBeLessThan(10);
+    expect(prefixReads.mock.calls.length).toBeLessThan(10);
+    expect(previous.prefix.at(-1)).toBe(rawIds.length * 40);
+    prefixReads.mockRestore();
   });
 });
 

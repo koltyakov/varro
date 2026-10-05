@@ -27,6 +27,55 @@ type StickyAppendObservation = {
   done: boolean;
 };
 
+test('switches full-screen layouts without a capped or squeezed transcript frame', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  await expect
+    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+    .toBeLessThan(1);
+  await page.evaluate(() => {
+    const samples: Array<{ viewport: number; root: number; chat: number }> = [];
+    (
+      window as typeof window & { fullscreenLayoutSamples?: typeof samples }
+    ).fullscreenLayoutSamples = samples;
+    const sample = () => {
+      samples.push({
+        viewport: window.innerWidth,
+        root: document.getElementById('root')!.getBoundingClientRect().width,
+        chat: document.querySelector('.interactive-list')!.getBoundingClientRect().width,
+      });
+    };
+    window.addEventListener('resize', sample);
+    const observer = new ResizeObserver(sample);
+    observer.observe(document.getElementById('root')!);
+    observer.observe(document.querySelector('.interactive-list')!);
+  });
+  for (const width of [1670, 486, 1280, 1670, 486]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.locator('#root')).toHaveCSS('max-width', `${width}px`);
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(1);
+    await expect(page.locator('.chat-session-sidebar')).toBeVisible({ visible: width >= 1400 });
+  }
+  const samples = await page.evaluate(
+    () =>
+      (
+        window as typeof window & {
+          fullscreenLayoutSamples?: Array<{ viewport: number; root: number; chat: number }>;
+        }
+      ).fullscreenLayoutSamples ?? []
+  );
+  expect(samples.length).toBeGreaterThan(5);
+  expect(
+    samples.every((s) => Math.abs(s.root - s.viewport) <= 1 && s.chat >= 480),
+    JSON.stringify(samples)
+  ).toBe(true);
+});
+
 test('resets padding injected by legacy webview hosts', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=blank&legacy-host-padding');

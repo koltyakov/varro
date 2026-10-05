@@ -46,6 +46,7 @@ type Quota = {
   checkedAt: number;
   windows: ProviderLimitWindow[];
   planName?: string;
+  creditBalance?: number;
   resetCount?: number;
   resetExpirations?: Array<number | null>;
 };
@@ -466,7 +467,7 @@ function sanitizeQuota(value: unknown, checkedAt: number): Quota | null {
     raw.checkedAt > checkedAt ||
     Date.now() - raw.checkedAt > STALE_MS ||
     !Array.isArray(raw.windows) ||
-    raw.windows.length === 0 ||
+    (raw.windows.length === 0 && !finite(raw.creditBalance)) ||
     raw.windows.length > 16
   )
     return null;
@@ -498,8 +499,8 @@ function sanitizeQuota(value: unknown, checkedAt: number): Quota | null {
       percent: window.percent ?? null,
     });
   }
-  if (windows.length === 0) return null;
   const good: Quota = { checkedAt: raw.checkedAt, windows };
+  if (finite(raw.creditBalance)) good.creditBalance = raw.creditBalance;
   if (typeof raw.planName === 'string' && PLAN_NAMES.has(raw.planName))
     good.planName = raw.planName;
   if (finite(raw.resetCount) && Number.isSafeInteger(raw.resetCount))
@@ -535,6 +536,8 @@ function render(
           : 'Showing the last successful quota snapshot because the latest provider poll failed',
     };
     if (snapshot.good.planName) status.planName = snapshot.good.planName;
+    if (snapshot.good.creditBalance !== undefined)
+      status.creditBalance = snapshot.good.creditBalance;
     if (snapshot.good.resetCount !== undefined)
       status.usageLimitResets = {
         availableCount: snapshot.good.resetCount,

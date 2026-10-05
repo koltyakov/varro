@@ -748,6 +748,99 @@ describe('MarkdownRenderer', () => {
     expectUiIcon(closeButton?.firstElementChild, xmarkIcon, 14);
   });
 
+  it('owns the Mermaid portal, focus and host state only while its preview is open', async () => {
+    setTheme('dark');
+    mermaidMock.render.mockResolvedValue({
+      svg: '<svg viewBox="0 0 10 10"><path d="M0 0h10v10z"></path></svg>',
+    });
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    const outsideButton = document.createElement('button');
+    outsideButton.textContent = 'Outside preview';
+    container!.append(outsideButton);
+    const root = document.createElement('div');
+    container!.append(root);
+    const bodyChildren = Array.from(document.body.children);
+    cleanup = render(
+      () => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }),
+      root
+    );
+    const expandButton = () => root.querySelector<HTMLButtonElement>('[data-mermaid-expand]')!;
+    await vi.waitFor(() => expect(expandButton()).not.toBeNull());
+    expect(Array.from(document.body.children)).toEqual(bodyChildren);
+
+    const openPreview = async () => {
+      expandButton().focus();
+      expandButton().click();
+      await Promise.resolve();
+      expect(document.querySelectorAll('.mermaid-preview-overlay')).toHaveLength(1);
+      expect(document.body.children.length).toBe(bodyChildren.length + 1);
+      expect(document.querySelector('.mermaid-preview-canvas svg path')).not.toBeNull();
+      const closeButton = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Close diagram preview"]'
+      )!;
+      expect(document.activeElement).toBe(closeButton);
+      outsideButton.focus();
+      expect(document.activeElement).toBe(closeButton);
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+      closeButton.dispatchEvent(tab);
+      expect(tab.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(closeButton);
+      return closeButton;
+    };
+    const expectClosed = () => {
+      expect(document.querySelector('.mermaid-preview-overlay')).toBeNull();
+      expect(Array.from(document.body.children)).toEqual(bodyChildren);
+      expect(document.activeElement).toBe(expandButton());
+      outsideButton.focus();
+      expect(document.activeElement).toBe(outsideButton);
+      const escape = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
+      outsideButton.dispatchEvent(escape);
+      expect(escape.defaultPrevented).toBe(false);
+    };
+
+    await openPreview();
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    );
+    expectClosed();
+
+    (await openPreview()).click();
+    expectClosed();
+
+    await openPreview();
+    setTheme('light');
+    expect(document.querySelector('.mermaid-preview-overlay')).toBeNull();
+    expect(Array.from(document.body.children)).toEqual(bodyChildren);
+    outsideButton.focus();
+    expect(document.activeElement).toBe(outsideButton);
+    await vi.waitFor(() => expect(expandButton()).not.toBeNull());
+
+    // Keep the return target mounted when the entire Markdown instance is disposed.
+    outsideButton.focus();
+    expandButton().click();
+    await Promise.resolve();
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Close diagram preview');
+    cleanup();
+    cleanup = undefined;
+    expect(Array.from(document.body.children)).toEqual(bodyChildren);
+    expect(document.activeElement).toBe(outsideButton);
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    outsideButton.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
+    expect(
+      send.mock.calls.filter(([message]) => message.type === 'vscode/mermaid-preview')
+    ).toEqual(
+      [true, false, true, false, true, false, true, false].map((open) => [
+        { type: 'vscode/mermaid-preview', payload: { open } },
+      ])
+    );
+  });
+
   it('mounts Mermaid output without executable or foreign HTML content', async () => {
     mermaidMock.render.mockResolvedValueOnce({
       svg: `<svg onload="alert(1)"><script>alert(1)</script><foreignObject><div onclick="alert(1)">unsafe</div></foreignObject><path d="M0 0h10v10z"></path></svg>`,

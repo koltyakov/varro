@@ -64,6 +64,10 @@ Give each action group its own verified preconditions. Short disposable historie
 are sufficient for composer, queue, steer, question, and permission lifecycle
 checks. Long virtualized histories are required for pagination and scroll tests.
 Real file/diff checks require a recorded fixture edit.
+For ACT-07, also complete [DIF-01 through DIF-07](ai-test-workflow.md#required-diff-scrolling-coverage).
+Opening and closing one diff is insufficient rendering coverage. Include visibility toggles, delayed
+hydration, exact-height remounts, rapid edits, and wheel/held-scrollbar input with diffs off and on.
+Record retained-playback and deterministic cases separately from actual tool execution on each backend.
 
 An incomplete AI-07 scroll-timing check must not prevent independent action rows
 from running. AI-08, AI-18, and AI-19 accept a clean baseline or exact latest fixture

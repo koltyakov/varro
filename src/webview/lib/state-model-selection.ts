@@ -530,8 +530,10 @@ export function setModelsAdded(providerID: string, modelIDs: readonly string[]) 
 }
 
 export function getListedProviderModels(provider: Provider) {
-  return Object.values(provider.models).filter((model) =>
-    isLargeModelCatalog(provider)
+  const models = Object.values(provider.models);
+  const largeCatalog = models.length >= LARGE_MODEL_CATALOG_THRESHOLD;
+  return models.filter((model) =>
+    largeCatalog
       ? isModelAdded(provider.id, model.id)
       : !state.removedModels.includes(modelVisibilityKey(provider.id, model.id))
   );

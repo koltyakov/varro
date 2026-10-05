@@ -68,6 +68,26 @@ describe('StreamingPresentation', () => {
     vi.useRealTimers();
   });
 
+  it('does not revisit grouped tools on paced text timer ticks', async () => {
+    let reads = 0;
+    const completed = Array.from({ length: 1000 }, (_, index) => ({
+      ...tool(`completed-${index}`, false),
+      get kind(): 'activity' {
+        reads += 1;
+        return 'activity';
+      },
+    }));
+    update(completed);
+    update([...completed, text('A streamed response with enough text to pace across ticks.')]);
+    reads = 0;
+    await vi.advanceTimersByTimeAsync(300);
+    expect(reads).toBe(0);
+    expect(queue.textForPart(part())).toBe(
+      'A streamed response with enough text to pace across ticks.'
+    );
+    expect(queue.pending()).toBe(false);
+  });
+
   it('keeps only one running tool visible and admits queued tools after an exit', async () => {
     update([]);
     update([activity('one', true), activity('two', true), activity('three', true)]);

@@ -23,9 +23,8 @@ export function projectDeferredPart<T extends UnknownRecord>(
   part: T,
   directory?: string
 ): T & { deferred?: string } {
-  const deferred = deferredPartPath(part, directory);
   if (part.type === 'file' && isString(part.url)) {
-    return { ...part, url: `varro-content:${deferred}` };
+    return { ...part, url: `varro-content:${deferredPartPath(part, directory)}` };
   }
   if (
     part.type === 'reasoning' &&
@@ -33,7 +32,12 @@ export function projectDeferredPart<T extends UnknownRecord>(
     isString(part.text) &&
     part.text.length > 512
   ) {
-    return { ...part, text: part.text.slice(0, 512), metadata: undefined, deferred };
+    return {
+      ...part,
+      text: part.text.slice(0, 512),
+      metadata: undefined,
+      deferred: deferredPartPath(part, directory),
+    };
   }
   const state = asRecord(part.state);
   if (part.type === 'tool' && state) {
@@ -134,7 +138,7 @@ export function projectDeferredPart<T extends UnknownRecord>(
       const count = getSearchResultCount(String(part.tool), summaryState);
       return {
         ...part,
-        deferred,
+        deferred: deferredPartPath(part, directory),
         metadata: partMetadata,
         state: {
           ...state,

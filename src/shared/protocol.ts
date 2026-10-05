@@ -321,6 +321,7 @@ export type ProviderLimitStatus =
       checkedAt: number;
       windows: ProviderLimitWindow[];
       planName?: string;
+      creditBalance?: number;
       note?: string;
       usageLimitResets?: ProviderLimitResetCredits;
     }

@@ -132,7 +132,17 @@ function trackWebviewWidth(root: HTMLElement) {
       applyWidth();
       return;
     }
-    if (window.innerWidth < width) applyWidth();
+    // The 960px content layout and 1400px session sidebar use viewport media queries.
+    // Holding the old cap across either breakpoint squeezes the new layout into the
+    // narrow surface, then reflows it a second time. Commit these transitions together.
+    const layoutBreakpointChanged = [960, 1400].some(
+      (breakpoint) => width < breakpoint && window.innerWidth >= breakpoint
+    );
+    if (window.innerWidth < width || layoutBreakpointChanged) {
+      cancelExpansion();
+      applyWidth();
+      return;
+    }
     if (window.innerWidth === width || frame !== undefined) return;
     // VS Code can paint a wider layout through the previous, narrower webview
     // surface for a frame. Keep cards inside that surface until it catches up.

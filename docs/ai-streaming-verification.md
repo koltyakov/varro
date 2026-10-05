@@ -46,7 +46,7 @@ diagnostic timings include instrumentation overhead.
 2. Run the preflight below, then prepare responses from three of the longest eligible histories in the requested
    workspace. Without an explicit source workspace, use the current project. Inspect coverage and
    selection reasons before launching the editor.
-3. Run `STR-01` through `STR-03` with AI observation. Reuse a capture and seed when reproducing a
+3. Run `STR-01` through `STR-04` with AI observation. Reuse a capture and seed when reproducing a
    failure. Each capture run has a fresh workspace/profile and stops its owned host before the next
    run. Do not start simultaneous hosts merely to parallelize scenarios.
 4. Write `artifacts/ai-streaming/<run>/ledger.md` with the findings/coverage summary table at the top,
@@ -283,6 +283,12 @@ than 8 MiB of queued output fails explicitly rather than growing an unbounded bu
 | `STR-01` | Text/Markdown and reasoning. Start at latest, observe uninterrupted output through settlement. | Missing or duplicate chunks, transient disappearance, incorrect Markdown transitions, bottom-follow oscillation, stale busy/Worked state. |
 | `STR-02` | Tool-heavy response with an edit and retained disclosure. Observe pending/running/completed transitions; expand a disclosure and recorded inline diff when available. | Duplicate activity, order swaps, one-frame collapse/reappearance, incomplete command output, tool-to-text transition jumps. |
 | `STR-03` | Large output with verified virtualized history. Record a painted marker, detach using native wheel input during playback, resize, then return to latest. | Lost anchor, blank viewport, unbounded row mounts, freezes, input reversal, or follow resuming without user intent. |
+| `STR-04` | Edit-heavy virtualized history. Complete [DIF-01 through DIF-07](ai-test-workflow.md#required-diff-scrolling-coverage): diffs off/on, delayed hydration, wheel and held-thumb scrolling including top, full remounts, rapid successive edits, and nested diff scrolling. | Animated toggle positioning, loss of exact placeholder height, eviction/refetch loops, trembling or low-frame-rate thumb movement, release snapback, and edit bursts overriding direct input. |
+
+Select enough edit history to meet STR-04's content and timing preconditions. Its off/on and settled/
+streaming variations require separate evidence; record unavailable variations as blocked. Keep the
+deterministic delayed-response and rapid-burst regressions required by the shared matrix as additional
+coverage, not substitutes for observing the real editor.
 
 Record native actions and their playback-relative offsets before performing them. Never use DOM
 mutation, `.click()`, or assigned `scrollTop` as substitutes for input. When stream duration is too

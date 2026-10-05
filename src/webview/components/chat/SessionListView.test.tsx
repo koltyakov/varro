@@ -1274,7 +1274,9 @@ describe('SessionListView diff summaries', () => {
 
     cleanup = render(() => <SessionListView />, container);
 
-    expect(getSessionDiffSummaryStateForTests()).toMatchObject({ active: 4, queued: 100 });
+    expect(getSessionDiffSummaryStateForTests().active).toBe(4);
+    expect(getSessionDiffSummaryStateForTests().queued).toBeGreaterThan(0);
+    expect(getSessionDiffSummaryStateForTests().queued).toBeLessThan(30);
 
     setState('sessions', []);
     expect(getSessionDiffSummaryStateForTests().queued).toBe(0);

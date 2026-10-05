@@ -136,6 +136,58 @@ change the wall-clock cadence. Keep an uninterrupted run for flicker and perform
 busy indicator does not prove an action occurred during live streaming. Verify the effect through the
 next resumed events and label the result `checkpointed replay`.
 
+## Required diff scrolling coverage
+
+Default AI/fuzzy and streaming runs must include the cases below in the isolated real VS Code host.
+They are also required for targeted changes to file previews, deferred content, row measurement,
+virtualization, or scroll ownership. Use retained playback for rendering cases; live tool execution
+remains a separate requirement of AI-07 and ACT-07. The basic `runAi01` sequence alone does not cover
+this matrix.
+
+Prepare virtualized, varied-height history containing multiple multi-file diffs and repeated edits to
+the same file. Include deferred details and enough history to completely unmount diff rows. Verify
+those preconditions rather than substituting text-only history or a short transcript.
+
+| Case | Required actions | Pass evidence |
+| --- | --- | --- |
+| DIF-01 | At physical bottom, toggle file diffs off/on repeatedly, both settled and during playback. Include details arriving after the initial summary has settled. | Every toggle/hydration frame reaches the new physical bottom without easing or removed-content reserve; bottom gap is at most 1 CSS px. Separate unrelated later stream growth from the toggle boundary. |
+| DIF-02 | Repeat off/on while detached with a recorded painted marker. While details are pending, wheel away from bottom. | The same marker stays anchored during the setting change; subsequent hydration does not undo the gesture or restart bottom follow. |
+| DIF-03 | With diffs off, then on, wheel up/down using small and large deltas across core, overscan, and full-unmount boundaries. Pause after each sequence. | Visible content follows native input without an additional settling jump, blank viewport, or alternating summary/diff heights. Record native deltas and shared-marker movement. |
+| DIF-04 | With diffs off, then on, drag the native scrollbar slowly and quickly in both directions, to the top and back down. Hold the thumb for at least 350 ms before moving, then for 1 second at its destination; observe another second after release. Repeat with diffs on while edits/tools arrive. | Confirm actual thumb movement. No owner fights the held pointer, visibly reverses it, trembles at the destination, or snaps back after release. Record per-frame input responsiveness, including the long drag to top. |
+| DIF-05 | Load and measure diffs, move them out of the core and fully out of the mounted range, then return while details reload. | Mounted overscan retains geometry. Unloaded content reserves exactly its previous measured height until hydration; a summary/placeholder never overwrites that exact measurement. Record row IDs, node identity, loaded/reserved heights, and remounts to detect eviction/refetch loops. |
+| DIF-06 | Observe successive edits to several files and repeated edits to one file while bottom-following, wheel-detached, and holding the scrollbar. Toggle diffs during the sequence. | Edits remain ordered and appear once; no repeated entrance, collapsed/reappearing diff, stale height, escalating follow lag, or loss of direct-input ownership. Record actual update counts and gaps. |
+| DIF-07 | Expand a scrollable diff, wheel inside it, then close it and resume outer scrolling. | Inner wheel movement stays local while it has range; expansion, focus, and closure do not leave a stale outer-scroll owner. |
+
+For DIF-01 and DIF-05, include a deterministic delayed-response regression that outlasts the initial
+settle window, at least 350 ms. For DIF-06, also exercise a deterministic burst of at least ten edit
+updates within one second, including same-file replacement and multi-file growth. Keep synthetic
+timing tests separate from editor playback/live evidence. Do not alter a retained capture's short
+gaps or inject synthetic state into a live editor to claim the real-editor case passed.
+
+Observe consecutive frames around each boundary, not just the final position. Pair screenshots with
+clipping-aware geometry of the same painted marker. A `scrollTop` correction accompanied by equal
+growth above a stationary marker is valid compensation, not input reversal. Height reservations must
+match the measured row exactly; any visible drift tolerance must be stated in the ledger, no more
+than 2 CSS px, and must not hide repeated oscillation or accumulating drift.
+
+Record frame-gap distributions and maximums during wheel/drag input, gaps above 50 ms, long tasks,
+mounted-row counts, and visible anchor motion. Sustained low frame rate or pauses during a drag are
+failures even if the final destination is correct. A gap or long task above 100 ms requires a
+same-capture reproduction and attribution before a performance pass. Preserve full metrics and mark
+capture/export overhead separately; do not silently discard it or use a good average FPS to clear
+height oscillation.
+
+For detached diff-toggle attribution, verify mounted previews before Hide File Diffs and their removal
+afterward. Include deferred summaries whose patch bodies are unloaded outside the mounted range. Trace
+the first toggle as well as warm repeats; a settled snapshot with no mounted previews is not a valid
+substitute for the original interaction. Inspect repeated mount/measurement and layout passes, not just
+the longest JavaScript stack.
+
+Put each DIF case and its settled/streaming, diffs-off/on, and execution-mode coverage in the ledger.
+Missing deferred content, rapid edits, native thumb movement, or frame evidence leaves that case
+`BLOCKED`, not passed. Continue the independent cases and use the normal bounded recovery workflow.
+Retain a minimal reproduction and a deterministic regression for every confirmed failure.
+
 ## AI judgment beyond the script
 
 Scenario steps are minimum coverage, not a prohibition on investigation. When the AI sees an unexpected

@@ -1503,8 +1503,19 @@ export class OpenCodeServer extends EventEmitter {
         },
         0,
         signal,
-        (probeSignal) =>
-          awaitBoundary(this.measureStartup('health', () => this.readHealthInfo(probeSignal))),
+        async (probeSignal) => {
+          const ready =
+            attemptProcess &&
+            (await awaitBoundary(
+              this.measureStartup('credentials', () =>
+                this.processManager.prepareManagedServerHealth(attemptProcess!, probeSignal)
+              )
+            ));
+          if (!ready) return { healthy: false };
+          return awaitBoundary(
+            this.measureStartup('health', () => this.readHealthInfo(probeSignal))
+          );
+        },
         () =>
           awaitBoundary(
             this.measureStartup('ownership', () =>

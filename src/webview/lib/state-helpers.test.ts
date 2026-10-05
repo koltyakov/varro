@@ -604,9 +604,7 @@ describe('state helpers', () => {
     expect(stateModule.state.lastSeenSessions).toEqual({ 'session-1': 1_000, 'session-2': 1_000 });
     expect(sent).toEqual([
       { type: 'session-read-state/update', payload: { sessionId: 'session-1', seenAt: 1_000 } },
-      { type: 'session/seen', payload: { sessionId: 'session-1' } },
       { type: 'session-read-state/update', payload: { sessionId: 'session-2', seenAt: 1_000 } },
-      { type: 'session/seen', payload: { sessionId: 'session-2' } },
     ]);
     expect(stateModule.isSessionUnread('session-1', 1_000)).toBe(false);
     expect(stateModule.isSessionUnread('session-1', 1_001)).toBe(true);
@@ -620,7 +618,6 @@ describe('state helpers', () => {
     expect(stateModule.state.lastSeenSessions['session-1']).toBe(1_500);
     expect(sent).toEqual([
       { type: 'session-read-state/update', payload: { sessionId: 'session-1', seenAt: 1_500 } },
-      { type: 'session/seen', payload: { sessionId: 'session-1' } },
     ]);
     expect(stateModule.isSessionUnread('session-1', 1_500)).toBe(false);
     expect(window.localStorage.getItem('varro.lastSeenSessions')).toBe(

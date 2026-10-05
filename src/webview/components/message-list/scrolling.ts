@@ -176,6 +176,7 @@ export function resolveAutoScrollOnUserScroll(args: {
     args.top < args.expectedScrollTop - args.autoScrollThresholdPx * 2 &&
     !nextFollowModeLocked;
   const matchesExpected =
+    !intentionalUserBreak &&
     args.expectedScrollTop !== -1 &&
     (Math.abs(args.top - args.expectedScrollTop) < 2 ||
       (args.nearBottom &&

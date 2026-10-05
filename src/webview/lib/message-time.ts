@@ -1,5 +1,8 @@
+let clockFormatter: Intl.DateTimeFormat | undefined;
+
 export function formatClockTime(timestamp: number) {
-  return new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(timestamp);
+  clockFormatter ??= new Intl.DateTimeFormat(undefined, { timeStyle: 'short' });
+  return clockFormatter.format(timestamp);
 }
 
 export function formatMessageSentTime(created: number, now = new Date()) {

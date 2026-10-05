@@ -3809,9 +3809,9 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     dispatchDesktopMediaQueryChange(true);
-    await Promise.resolve();
-
-    expect(container?.querySelector('.models-panel')).toBeInstanceOf(HTMLDivElement);
+    await vi.waitFor(() =>
+      expect(container?.querySelector('.models-panel')).toBeInstanceOf(HTMLDivElement)
+    );
   });
 
   it('opens locked provider re-authentication over chat without showing Models', async () => {
@@ -3879,7 +3879,7 @@ describe('header status badges', () => {
     );
   });
 
-  it('renders Models from the session picker on narrow screens', () => {
+  it('renders Models from the session picker on narrow screens', async () => {
     setState('sessions', [session('session-1', 500), session('session-2', 400)]);
     setState('activeSessionId', 'session-1');
     setShowSessionPicker(true);
@@ -3889,7 +3889,9 @@ describe('header status badges', () => {
 
     expect(container?.querySelector('.chat-workspace')).toBeNull();
     expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
-    expect(container?.querySelector('.models-panel')).toBeInstanceOf(HTMLDivElement);
+    await vi.waitFor(() =>
+      expect(container?.querySelector('.models-panel')).toBeInstanceOf(HTMLDivElement)
+    );
   });
 
   it('renders the desktop session pane on the right when configured', async () => {

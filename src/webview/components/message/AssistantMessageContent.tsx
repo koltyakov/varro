@@ -678,9 +678,18 @@ export function AssistantMessageContent(props: {
     const previousByKey = new Map((previousItems || []).map((item) => [item.key, item]));
     const items: AssistantRenderItem[] = [];
     const parts = orderedDisplayParts();
+    const singleActivitySlot =
+      props.visibleActiveActivityPartKeys !== undefined &&
+      new Set([
+        ...props.visibleActiveActivityPartKeys,
+        ...(props.retainedActivityPartKeys ?? []),
+        ...(props.exitingActivityPartKeys ?? []),
+      ]).size === 1;
+    let activityBoundary = 'start';
 
     for (let index = 0; index < parts.length; index += 1) {
       const part = parts[index]!;
+      if (!isLocallyCompactActivityCandidate(part)) activityBoundary = part.id;
 
       if (
         isLocallyCompactActivityCandidate(part) &&
@@ -707,7 +716,12 @@ export function AssistantMessageContent(props: {
             item.parts.some((candidate) => candidate.id === activityParts[0]!.id) &&
             !items.some((current) => current.key === item.key)
         );
-        const key = previousTray?.key ?? `active-activity-tray:${activityParts[0]!.id}`;
+        // The single preview slot survives replacement even when none of its parts survive.
+        const key =
+          previousTray?.key ??
+          (singleActivitySlot
+            ? `active-activity-tray:slot:${activityBoundary}`
+            : `active-activity-tray:${activityParts[0]!.id}`);
         const previous = previousByKey.get(key);
         if (
           previous?.kind === 'active-activity-tray' &&

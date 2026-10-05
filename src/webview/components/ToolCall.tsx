@@ -3,6 +3,7 @@ import {
   For,
   createEffect,
   createMemo,
+  createRenderEffect,
   createSignal,
   createUniqueId,
   onCleanup,
@@ -33,7 +34,7 @@ import { useSecondClock } from '../lib/clock';
 import { formatCommandDisplay } from '../lib/command-display';
 import { formatCost, formatDuration, formatNumber } from '../lib/message-metrics';
 import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
-import { prepareForMessageBlockRemoval } from '../lib/message-list-layout';
+import { prepareForMessageBlockRemoval, trackInlineDiffLoad } from '../lib/message-list-layout';
 import type { FileChange } from '../lib/tool-file-change';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
@@ -433,11 +434,23 @@ export function ToolCall(props: {
     () => props.part,
     () =>
       expanded() ||
-      (!props.lightweight &&
-        !props.compactFileChanges &&
+      (!props.compactFileChanges &&
         showFileDiffs() &&
         getToolFileChanges(props.part.tool, props.part.state).length > 0)
   );
+  // Overscan rows keep their diff geometry. Dropping details outside the core collapses
+  // their height, which can move them back into the core and repeatedly reload the diff.
+  createRenderEffect(() => {
+    if (
+      !props.compactFileChanges &&
+      showFileDiffs() &&
+      getToolFileChanges(props.part.tool, props.part.state).length > 0 &&
+      detail.loading()
+    ) {
+      const finish = trackInlineDiffLoad(props.part.sessionID, props.part.messageID);
+      if (finish) onCleanup(finish);
+    }
+  });
   const tool = detail.part;
   const state = () => tool().state;
   const toolSessionRootId = createMemo(

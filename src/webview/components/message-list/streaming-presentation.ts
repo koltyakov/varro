@@ -108,6 +108,7 @@ function nextTextEnd(text: string, start: number, count: number) {
 export class StreamingPresentation {
   private entries = new Map<string, Entry>();
   private ordered: Entry[] = [];
+  private scheduled: Entry[] = [];
   private promotedActivities = new Set<string>();
   private inspectedActivities = new Set<string>();
   private scope: string | null = null;
@@ -157,6 +158,7 @@ export class StreamingPresentation {
       beforeRead?: () => void;
       beforeExit: (keys: ReadonlySet<string>) => void;
       beforeGroup: (keys: ReadonlySet<string>) => void;
+      beforeReplaceActivity?: (key: string) => void;
       afterExit: (key: string, complete: () => void) => void;
       afterShow?: (painted: () => void) => void;
       beforeLastExit: () => void;
@@ -210,6 +212,7 @@ export class StreamingPresentation {
             this.lastTextReleaseAt = Number.NEGATIVE_INFINITY;
             this.entries.clear();
             this.ordered = [];
+            this.scheduled = [];
             this.promotedActivities.clear();
             this.inspectedActivities.clear();
             this.toolRotation = null;
@@ -221,7 +224,9 @@ export class StreamingPresentation {
           this.immediate = input.immediate;
           this.keepRunningVisible = input.keepRunningVisible ?? false;
           const now = Date.now();
-          const next = new Map<string, Entry>();
+          let nextOrder: Entry[] | undefined;
+          let itemIndex = 0;
+          let membershipChanged = replaced;
           let previousBurst: Burst | null = null;
           for (const item of input.items) {
             let entry = this.entries.get(item.key);
@@ -302,14 +307,24 @@ export class StreamingPresentation {
             if (item.kind === 'activity')
               previousBurst = entry.phase === 'grouped' ? null : entry.burst;
             else previousBurst = null;
-            next.set(item.key, entry);
+            if (this.entries.get(item.key) !== entry) {
+              this.entries.set(item.key, entry);
+              membershipChanged = true;
+            }
+            if (!nextOrder && this.ordered[itemIndex] !== entry)
+              nextOrder = this.ordered.slice(0, itemIndex);
+            nextOrder?.push(entry);
+            itemIndex += 1;
           }
-          const membershipChanged =
-            replaced ||
-            this.entries.size !== next.size ||
-            [...next].some(([key, entry]) => this.entries.get(key) !== entry);
-          this.entries = next;
-          this.ordered = [...next.values()];
+          if (itemIndex !== this.ordered.length) nextOrder ??= this.ordered.slice(0, itemIndex);
+          if (nextOrder) {
+            this.ordered = nextOrder;
+            if (this.entries.size !== nextOrder.length) {
+              this.entries = new Map(nextOrder.map((entry) => [entry.item.key, entry]));
+              membershipChanged = true;
+            }
+          }
+          this.refreshScheduled();
           if (membershipChanged) this.membership[1]((value) => value + 1);
           this.advance(now, false);
         })
@@ -348,6 +363,7 @@ export class StreamingPresentation {
       pendingPaintKey: null,
       paintDeadline: 0,
     };
+    this.refreshScheduled();
     this.advance(Date.now(), false);
   }
 
@@ -369,6 +385,7 @@ export class StreamingPresentation {
     this.inspectedActivities.clear();
     this.toolRotation = null;
     this.ordered = [];
+    this.scheduled = [];
     this.membership[1]((value) => value + 1);
     this.advance(Date.now(), false);
   }
@@ -397,6 +414,14 @@ export class StreamingPresentation {
     this.inspectedActivities.clear();
     this.toolRotation = null;
     this.ordered = [];
+    this.scheduled = [];
+  }
+
+  private refreshScheduled() {
+    // Grouped activities retain their disclosure identity, but own no deadlines or geometry.
+    this.scheduled = this.ordered.filter(
+      (entry) => entry.item.kind !== 'activity' || entry.phase !== 'grouped'
+    );
   }
 
   private clearTimer() {
@@ -459,14 +484,14 @@ export class StreamingPresentation {
     }
     if (rotation && current?.phase === 'visible' && now < rotation.until) return rotation.until;
 
-    const visible = this.ordered.find(
+    const visible = this.scheduled.find(
       (entry) => entry.phase === 'visible' && this.canRotateTool(entry)
     );
     const primary = rotation ? anchor : visible;
     if (!primary || primary.item.kind !== 'activity' || !primary.item.running)
       return Number.POSITIVE_INFINITY;
 
-    const candidates = this.ordered.filter(
+    const candidates = this.scheduled.filter(
       (entry) =>
         entry !== primary &&
         (entry.phase === 'delayed' || entry.phase === 'paused') &&
@@ -547,13 +572,13 @@ export class StreamingPresentation {
         const afterShow: Array<() => void> = [];
         const beginningExits = new Set<string>();
         const directlyGrouped = new Set<string>();
-        const lastContentIndex = this.ordered.findLastIndex(
+        const lastContentIndex = this.scheduled.findLastIndex(
           ({ item }) => item.kind === 'instant' || (item.kind === 'text' && item.text.trim() !== '')
         );
         let activitySlots = 0;
         // Settle the previous group before admitting content or another queued tool. Count exiting
         // cards too: their slot stays occupied until the animation actually removes them.
-        for (const [index, entry] of this.ordered.entries()) {
+        for (const [index, entry] of this.scheduled.entries()) {
           const { item } = entry;
           if (item.kind !== 'activity') continue;
           if (item.running && entry.phase === 'exiting') {
@@ -580,14 +605,14 @@ export class StreamingPresentation {
           }
           if (entry.phase === 'exiting' && now >= entry.exitDeadline) entry.phase = 'grouped';
         }
-        const hasLongerActivity = this.ordered.some(
+        const hasLongerActivity = this.scheduled.some(
           ({ item, phase }) =>
             phase !== 'grouped' &&
             item.kind === 'activity' &&
             (item.running ||
               (item.durationMs !== undefined && item.durationMs >= SHORT_ACTIVITY_MS))
         );
-        for (const entry of this.ordered) {
+        for (const entry of this.scheduled) {
           const { item } = entry;
           if (item.kind !== 'activity') continue;
           if (
@@ -603,14 +628,14 @@ export class StreamingPresentation {
           }
         }
         const rotationAt = this.advanceToolRotation(now, directlyGrouped, afterShow);
-        for (const entry of this.ordered) {
+        for (const entry of this.scheduled) {
           if (entry.phase === 'visible' || entry.phase === 'exiting') activitySlots += 1;
         }
         let blocked = false;
         let blockingBurst: Burst | null = null;
         let pending = false;
         let nextAt = rotationAt;
-        for (const [index, entry] of this.ordered.entries()) {
+        for (const [index, entry] of this.scheduled.entries()) {
           const { item } = entry;
           const expired = now >= entry.arrivedAt + MAX_WAIT_MS;
           const sharesBurst =
@@ -771,6 +796,12 @@ export class StreamingPresentation {
             !text.trim() ? '' : isWorkspaceDirectoryText(text) ? '[Working directory:' : 'x'
           );
         }
+        const previousPreviews = new Set([...this.visibleActivity(), ...this.retainedActivity()]);
+        if (previousPreviews.size > 0) {
+          for (const key of [...visible, ...retained]) {
+            if (!previousPreviews.has(key)) this.callbacks.beforeReplaceActivity?.(key);
+          }
+        }
         if (directlyGrouped.size > 0) this.callbacks.beforeGroup(directlyGrouped);
         if (beginningExits.size > 0) this.callbacks.beforeExit(beginningExits);
         this.visibleState[1](visible);
@@ -782,6 +813,9 @@ export class StreamingPresentation {
         this.textGeometryState[1](textGeometry);
         this.pendingState[1](pending);
         this.revision[1]((value) => value + 1);
+        this.scheduled = this.scheduled.filter(
+          (entry) => entry.item.kind !== 'activity' || entry.phase !== 'grouped'
+        );
         for (const callback of afterExit) callback();
         for (const callback of afterShow) callback();
         if (Number.isFinite(nextAt)) {

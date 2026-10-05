@@ -68,7 +68,9 @@ export function ProviderQuotaWarning(props: {
           ? debugDismissed()
           : resetDismissals().some(
               (entry) =>
-                entry.providerID === props.limit?.providerID && entry.expiresAt === expiresAt
+                entry.providerID === props.limit?.providerID &&
+                entry.expiresAt === expiresAt &&
+                entry.remindAt > now()
             ))
       )
         continue;
@@ -208,7 +210,7 @@ export function ProviderQuotaWarning(props: {
               props.forceShow
                 ? 'Dismiss debug preview'
                 : expiringResets().length > 0
-                  ? 'Dismiss these reset expirations and current quota warnings'
+                  ? 'Snooze reset reminders until the next milestone and dismiss current quota warnings'
                   : isCritical()
                     ? 'Dismiss until quota resets (1 hour if unknown)'
                     : 'Dismiss until quota becomes critical or resets (1 hour if reset unknown)'

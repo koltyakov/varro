@@ -196,20 +196,26 @@ test('running tool updates preserve the node and its current entrance animation'
     document.addEventListener('animationstart', (event) => {
       if (
         !(event.target instanceof HTMLElement) ||
-        event.target.dataset.activityPartId !== 'tool-active-1'
+        event.target.dataset.activityPartId !== 'tool-active-0'
       )
         return;
       if (event.animationName !== 'assistant-active-activity-in') return;
-      const animation = event.target.getAnimations()[0];
+      const animation = event.target
+        .getAnimations()
+        .find(
+          (candidate) =>
+            candidate instanceof CSSAnimation && candidate.animationName === event.animationName
+        );
       if (animation) {
         animation.pause();
         animation.currentTime = 70;
       }
     });
   });
-  await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=2');
+  // Only the initial tray admission animates; queued tools reuse it without an entrance.
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1');
   const item = page.locator(
-    '.assistant-active-activity-item[data-activity-part-id="tool-active-1"]'
+    '.assistant-active-activity-item[data-activity-part-id="tool-active-0"]'
   );
   await expect(item).toBeVisible();
   const result = await item.evaluate(async (original) => {
@@ -230,16 +236,16 @@ test('running tool updates preserve the node and its current entrance animation'
     const part = harness
       .getSessionMessages('session-tool-cards')
       .flatMap((message) => message.parts)
-      .find((candidate) => candidate.id === 'tool-active-1');
+      .find((candidate) => candidate.id === 'tool-active-0');
     if (part?.type !== 'tool' || part.state.status !== 'running') {
-      throw new Error('Expected a running bash tool');
+      throw new Error('Expected a running search tool');
     }
     const updated: Part = {
       ...part,
       state: {
         ...part.state,
-        title: 'Check updated sources',
-        input: { command: 'npm run check-updated' },
+        title: 'Search updated sources',
+        input: { pattern: 'updated-sources', path: 'src/webview' },
       },
     };
     harness.updateMessagePart(updated);
@@ -254,7 +260,7 @@ test('running tool updates preserve the node and its current entrance animation'
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
     );
     const current = document.querySelector(
-      '.assistant-active-activity-item[data-activity-part-id="tool-active-1"]'
+      '.assistant-active-activity-item[data-activity-part-id="tool-active-0"]'
     );
     const snapshot = {
       sameNode: current === original,
@@ -266,9 +272,9 @@ test('running tool updates preserve the node and its current entrance animation'
     entrance.play();
     return snapshot;
   });
-  await expect(item.locator('.tool-invocation-title')).toHaveText('Check updated sources');
-  await item.getByRole('button', { name: /^Check updated sources\b/ }).click();
-  await expect(item.locator('.terminal-command-row-input')).toContainText('npm run check-updated');
+  await expect(item.locator('.tool-invocation-title')).toHaveText('Search: updated-sources');
+  await item.getByRole('button', { name: /^Search: updated-sources\b/ }).click();
+  await expect(item.locator('.tool-invocation-detail')).toContainText('updated-sources');
   await expect(item).toHaveCount(1);
   expect
     .soft(result.sameNode, 'A running object update must not remount the activity item')

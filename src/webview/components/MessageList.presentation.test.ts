@@ -169,6 +169,7 @@ describe('streaming presentation handoff', () => {
     batch(() => tools.forEach(upsertPart));
     await vi.advanceTimersByTimeAsync(2_999);
     expect(container?.querySelector('[data-activity-part-id="long"]')).not.toBeNull();
+    const tray = container?.querySelector('.assistant-active-activity-tray');
     for (const expected of ['two', 'long', 'three', 'long']) {
       for (let frame = 0; frame < 70; frame += 1) {
         await vi.advanceTimersByTimeAsync(16);
@@ -182,6 +183,8 @@ describe('streaming presentation handoff', () => {
         if (container?.querySelector(`[data-activity-part-id="${expected}"]`)) break;
       }
       expect(container?.querySelector(`[data-activity-part-id="${expected}"]`)).not.toBeNull();
+      expect(container?.querySelector('.assistant-active-activity-tray')).toBe(tray);
+      expect(container?.querySelector('.assistant-active-activity-item.is-entering')).toBeNull();
     }
     expect(
       state.messages
@@ -235,32 +238,43 @@ describe('streaming presentation handoff', () => {
     expect(container?.querySelector('.loading-verb')?.textContent).toBe('Thinking');
   });
 
-  it('replaces a completed tool preview without rendering a collapsing row', async () => {
-    openChat();
-    const completed = completeSearch(searchPart());
-    if (completed.state.status !== 'completed') throw new Error('Expected completed tool fixture');
-    completed.state.time.end = 1_001;
-    const running = { ...searchPart(), id: 'running', callID: 'running-call' };
-    batch(() => {
-      upsertPart(completed);
-      upsertPart(running);
-    });
-    await vi.advanceTimersByTimeAsync(1_299);
-    expect(container?.querySelector('[data-activity-part-id="search"]')).not.toBeNull();
-    expect(container?.querySelector('[data-activity-part-id="running"]')).toBeNull();
-    for (let frame = 0; frame < 20; frame += 1) {
-      await vi.advanceTimersByTimeAsync(16);
+  it.each(['running', 'completed'] as const)(
+    'replaces a completed tool with a %s preview instantly',
+    async (status) => {
+      openChat();
+      const completed = completeSearch(searchPart());
+      if (completed.state.status !== 'completed')
+        throw new Error('Expected completed tool fixture');
+      completed.state.time.end = 1_001;
+      const replacement = {
+        ...(status === 'running' ? searchPart() : completed),
+        id: 'replacement',
+        callID: 'replacement-call',
+      };
+      batch(() => {
+        upsertPart(completed);
+        upsertPart(replacement);
+      });
+      await vi.advanceTimersByTimeAsync(1_299);
+      expect(container?.querySelector('[data-activity-part-id="search"]')).not.toBeNull();
+      expect(container?.querySelector('[data-activity-part-id="replacement"]')).toBeNull();
+      const tray = container?.querySelector('.assistant-active-activity-tray');
+      for (let frame = 0; frame < 20; frame += 1) {
+        await vi.advanceTimersByTimeAsync(16);
+        expect(container?.querySelector('.assistant-active-activity-item.is-exiting')).toBeNull();
+        expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
+        if (!container?.querySelector('[data-activity-part-id="search"]')) break;
+      }
+      expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
+      expect(container?.querySelector('[data-activity-part-id="replacement"]')).not.toBeNull();
+      expect(container?.querySelector('.assistant-active-activity-tray')).toBe(tray);
+      expect(container?.querySelector('.assistant-active-activity-item.is-entering')).toBeNull();
       expect(container?.querySelector('.assistant-active-activity-item.is-exiting')).toBeNull();
-      expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
-      if (!container?.querySelector('[data-activity-part-id="search"]')) break;
+      expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+        'Explored: 1 search'
+      );
     }
-    expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
-    expect(container?.querySelector('[data-activity-part-id="running"]')).not.toBeNull();
-    expect(container?.querySelector('.assistant-active-activity-item.is-exiting')).toBeNull();
-    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored: 1 search'
-    );
-  });
+  );
 
   it.each(['completed', 'error'] as const)(
     'groups a short %s tool and previews the running alternative',

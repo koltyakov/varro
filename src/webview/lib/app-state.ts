@@ -551,6 +551,10 @@ export function createAppState(): AppStateInstance {
   const [sessionUsageLimitVersion, setSessionUsageLimitVersion] = createSignal(0);
   const sessionTreeIndex = createSessionTreeIndex();
   const messageIndex = createMessageIndex({
+    onInfoChange: (layoutChanged) => {
+      if (layoutChanged) setMessageStructureVersion((value) => value + 1);
+      setMessageInfoVersion((value) => value + 1);
+    },
     onInvalidate: () => {
       setMessageStructureVersion((value) => value + 1);
       setMessageInfoVersion((value) => value + 1);

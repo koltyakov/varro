@@ -262,7 +262,8 @@ for (const scenario of [
         (sample) => sample.phase === 'keydown-capture'
       )!;
       expect(
-        Math.abs(keyResizeSample.tops[0]! - result.resizeSamples[0]!.tops[0]!)
+        Math.abs(keyResizeSample.tops[0]! - result.resizeSamples[0]!.tops[0]!),
+        JSON.stringify({ ids: result.resizeIds, samples: result.resizeSamples })
       ).toBeLessThanOrEqual(1.5);
     }
   });

@@ -122,7 +122,6 @@ export function markSessionSeen(id: string, updatedAt?: number) {
   setState('lastSeenSessions', id, timestamp);
   writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, id, timestamp);
   postMessage({ type: 'session-read-state/update', payload: { sessionId: id, seenAt: timestamp } });
-  postMessage({ type: 'session/seen', payload: { sessionId: id } });
   return true;
 }
 

@@ -135,7 +135,14 @@ const waitFor = async (read, accept, label) => {
       throw new Error(
         `Runner exited before ${label}: ${(await run).error?.message ?? 'completed'}`
       );
-    const value = await read();
+    const value = await Promise.resolve()
+      .then(read)
+      .catch(async (error) => {
+        // The runner closes control before owned-host cleanup finishes on failure.
+        // Preserve that failure and wait for cleanup instead of exiting mid-shutdown.
+        const result = await run;
+        throw result.error ?? error;
+      });
     if (accept(value)) return value;
     await sleep(100);
   }
@@ -205,6 +212,10 @@ try {
     'Infrastructure smoke only. This does not award an AI visual or performance verdict.\n'
   );
 } finally {
-  if (!finished && control) await controlRequest(control, 'stop');
+  if (!finished && control) {
+    await controlRequest(control, 'stop').catch(() => {
+      // Best effort: setup failure can already have closed the control listener.
+    });
+  }
   await run;
 }
