@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('sends multiple inline skill chips and shows them above the message', async ({
+test('sends multiple inline skill chips without duplicating them above the message', async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 500, height: 800 });
@@ -17,9 +17,30 @@ test('sends multiple inline skill chips and shows them above the message', async
     'browser-bridge',
     'unslop',
   ]);
+  await expect(message.locator('.message-attachments')).toHaveCount(0);
+  await expect(message).not.toContainText('Use the skill tool');
+  await page.screenshot({ path: testInfo.outputPath('inline-skills.png') });
+});
+
+test('shows multiple leading skill chips above the message', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 500, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=slash-commands');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  const prompt = 'Inspect the page and rewrite the copy without changing its meaning.';
+  await composer.fill(`$[browser-bridge] $[unslop] ${prompt}`);
+  await expect(composer.locator('[data-chip-type="mention-skill"]')).toHaveText([
+    'browser-bridge',
+    'unslop',
+  ]);
+  await composer.press('Enter');
+  const message = page.locator('.user-message-card').last();
+  await expect(message.locator('.user-message-text')).toHaveText(prompt);
+  await expect(message.locator('.user-message-text .inline-chip')).toHaveCount(0);
   const attachments = message.locator('.message-attachments-leading');
-  await expect(attachments).toContainText('browser-bridge');
-  await expect(attachments).toContainText('unslop');
+  await expect(attachments.locator('.message-attachment-chip .chip-label')).toHaveText([
+    'browser-bridge',
+    'unslop',
+  ]);
   await expect(message).not.toContainText('Use the skill tool');
   const railBox = await attachments.boundingBox();
   const textBox = await message.locator('.user-message-text').boundingBox();

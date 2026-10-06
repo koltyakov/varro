@@ -479,6 +479,10 @@ Direct input acquires ownership only when it can affect the transcript:
   reductions. A fractional tray reserves its exact height while its row also loses a whole-pixel
   correction; the October 2 v1 and v2 replays clamped bottom-pinned transcripts by 1 px on most
   tool groupings. `scroll-tool-grouping.spec.ts` amplifies the tray fraction and checks every frame.
+  Animated reasoning exits also reserve the source row's already-applied rounding correction before
+  publishing exit membership. An explicit measurement can remove that correction before it becomes
+  a pending observer reduction, including below the virtualization threshold.
+  `scroll-reasoning-exit.spec.ts` checks the pre-exit budget and a painted marker through the handoff.
 - Automatic todo completion and removal announce their disappearing block, margins, and parent gap
   before changing the layout. A later ResizeObserver correction is insufficient: the September 11
   editor replay briefly clamped the transcript backward by 139 px when its todo panel disappeared.
@@ -508,6 +512,11 @@ Direct input acquires ownership only when it can affect the transcript:
   command exits. Do not guess that a command is detached from its name or elapsed time. Unowned
   processes do not affect session completion; interrupted or failed executions must not be restored
   as waiting by a stale shell snapshot.
+  Metadata-only and automatic user notices do not end the preceding dialog or replace its final
+  response candidate. Keep the background slot and suppress Worked through split notice delivery;
+  only a real prompt or the resumed assistant changes that ownership. Explicit resume markers still
+  preserve the existing pause-summary boundary.
+  `scroll-background-handoff.spec.ts` checks short and measured transcripts frame by frame.
 - A failed assistant attempt with retry metadata is not a final response while the turn is working,
   even if it has completed partial text and `finish: error`. Keep the loading slot through retry and
   the next empty attempt; do not briefly insert Worked. `automatic-retry.spec.ts` checks that handoff

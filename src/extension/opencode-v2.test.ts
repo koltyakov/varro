@@ -19,6 +19,7 @@ import { asRecord } from '../shared/type-utils';
 import { parseServerEvent } from '../shared/protocol';
 import { parseHealthResponse } from '../shared/health';
 import { normalizeRecycleBinSession } from '../shared/recycle-bin';
+import { formatSkillAttachment } from '../shared/skill-reference';
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 afterEach(() => vi.unstubAllGlobals());
@@ -46,6 +47,57 @@ describe('v2 Windows location paths', () => {
 });
 
 describe('v2 prompt delivery', () => {
+  it.each(['steer', 'queue'])(
+    'sends selected skills as native attachments with %s delivery',
+    async (delivery) => {
+      const wire = vi.fn(async () => ({ data: { id: 'ses_skills' } }));
+      const adapter = new OpenCodeV2Adapter(wire);
+      const text = 'Use $[control] and $[code-review]. Again $[control].';
+      await adapter.request('POST', '/session/ses_skills/prompt_async', {
+        parts: [
+          { type: 'text', text },
+          { type: 'text', text: formatSkillAttachment('control') },
+          { type: 'text', text: formatSkillAttachment('code-review') },
+          { type: 'text', text: formatSkillAttachment('control') },
+          { type: 'text', text: '[Attached file: README.md]' },
+          { type: 'file', url: 'data:image/png;base64,aGVsbG8=', filename: 'image.png' },
+          { type: 'agent', name: 'explore' },
+        ],
+        delivery,
+        noReply: true,
+      });
+      expect(wire).toHaveBeenLastCalledWith(
+        'POST',
+        '/api/session/ses_skills/prompt',
+        expect.objectContaining({
+          text: `${text}\n[Attached file: README.md]`,
+          skills: [{ id: 'control' }, { id: 'code-review' }],
+          files: [{ uri: 'data:image/png;base64,aGVsbG8=', name: 'image.png' }],
+          agents: [{ name: 'explore' }],
+          delivery,
+          resume: false,
+        }),
+        expect.anything()
+      );
+      expect(wire).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it('keeps unbacked skill markers and attachment examples as plain text', async () => {
+    const wire = vi.fn(async () => ({ data: { id: 'ses_skills' } }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    const text = `Example: ${formatSkillAttachment('control')}\nUnbacked $[code-review]`;
+    await adapter.request('POST', '/session/ses_skills/prompt_async', {
+      parts: [{ type: 'text', text }],
+    });
+    expect(wire).toHaveBeenLastCalledWith(
+      'POST',
+      '/api/session/ses_skills/prompt',
+      expect.objectContaining({ text, skills: undefined }),
+      expect.anything()
+    );
+  });
+
   it('resumes existing steering without admitting another prompt or touching queued input', async () => {
     const wire = vi.fn(async (method: string) =>
       method === 'GET'
@@ -102,7 +154,7 @@ describe('v2 prompt delivery', () => {
   });
 
   it.each(['', 'Review src/'])(
-    'activates a skill by ID and preserves arguments %j',
+    'attaches a skill command by ID to its prompt with arguments %j',
     async (argumentsText) => {
       const calls: Array<{ path: string; body: unknown }> = [];
       const adapter = new OpenCodeV2Adapter(async (_method, path, body) => {
@@ -118,14 +170,16 @@ describe('v2 prompt delivery', () => {
           arguments: argumentsText,
         })
       ).resolves.toBeUndefined();
-      expect(calls).toContainEqual({
-        path: '/api/experimental/session/ses_skill/skill',
-        body: { id: 'code-review', resume: !argumentsText },
-      });
+      expect(calls.some((call) => call.path === '/api/experimental/session/ses_skill/skill')).toBe(
+        false
+      );
       expect(calls.some((call) => call.path === '/api/session/ses_skill/command')).toBe(false);
       const prompts = calls.filter((call) => call.path === '/api/session/ses_skill/prompt');
-      expect(prompts).toHaveLength(argumentsText ? 1 : 0);
-      if (argumentsText) expect(prompts[0]?.body).toMatchObject({ text: argumentsText });
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]?.body).toMatchObject({
+        text: argumentsText,
+        skills: [{ id: 'code-review' }],
+      });
     }
   );
 

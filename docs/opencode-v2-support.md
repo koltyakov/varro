@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 101 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.34`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.23`, with 21 platform- or family-specific skips and two failures described in the 2.0.23 review below. Both v1 releases passed every applicable check; neither v2 release has a full compatibility pass in this run. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 103 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.34`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.24`, with 21 platform- or family-specific skips and four failures described in the 2.0.24 review below. None of these releases has a full compatibility pass in this run. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,63 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.24 compatibility review
+
+Reviewed v2.0.23 to v2.0.24, `9e96aacd64` through `bd55d4895f`.
+Public HTTP routes, generated request clients, protocol/schema declarations,
+SSE names and payloads, session/message records, permissions, and forms consumed
+by Varro are unchanged. The client shares service-probe and startup-attempt
+bookkeeping between its Promise and Effect implementations; Varro owns its
+transport and managed startup and does not call those helpers. No adapter changes
+are required.
+
+Runtime changes harden portable Bash and PowerShell permission scanning, stop
+instruction discovery at case-variant Windows project roots, preserve subagent
+text-block boundaries, report MCP OAuth token-exchange failures in the callback,
+and filter non-text models from the catalog and default selection. Provider
+updates add native Vercel AI Gateway routing, GitLab Duo reasoning variants,
+Azure completions-shaped routing, and AI SDK v6 provider installation defaults.
+ChatGPT subscription discovery temporarily uses a bundled model allowlist instead
+of its remote model catalog; legacy OpenAI OAuth methods are relabeled Codex.
+These changes need no Varro adaptation. ACP, GUI, TUI, and styling changes are
+optional parity work.
+
+The tested v2 client is `2.0.24`; v1 remains at `1.18.34`.
+Support floors remain v2 `2.0.5` and v1 `1.16.0`.
+The unchanged v1 SDK does not require a new Docker support-range run.
+
+The adapter matrix passed 23 checks on each v1 release, 28 on v2.0.5, and
+29 on v2.0.24. Each release failed one check:
+
+- Both unchanged v1 releases fail multi-window recovery after the owned server is
+  killed. The owner restarts successfully, but the follower reports an authentication
+  failure instead of quietly reattaching. No consent prompt appears. Inspect follower
+  credential refresh and lease-generation ordering during owner replacement; rerun
+  the multi-window check after a targeted fix. Evidence is in
+  `artifacts/ai-test-data/multi-window-FwdPwL/failure.json` and
+  `artifacts/ai-test-data/multi-window-kwTKTM/failure.json`. Later owner-restart and
+  ownerless-recovery phases were not reached on v1.
+- V2.0.5 retains the replacement-server ownership failure: healthy recovery reports
+  `unmanaged` instead of `current-host`. Inspect authenticated floor-endpoint fallback
+  and credential-backed registration identity checks. Evidence is in
+  `artifacts/ai-test-data/startup-YU4yav/`.
+- V2.0.24 passes all managed startup and multi-window recovery checks but retains
+  the stalled-turn steering failure observed on v2.0.23: three user messages enter
+  the transcript instead of two, admitting a queued prompt that should remain parked.
+  Trace native inbox admission and resume ordering, then verify the queued item stays
+  pending after steering resumes. This is the same previously recorded failure
+  signature, not a new consumed-contract change.
+
+The complete matrix logs are under `artifacts/opencode-adapters/run-AjZS5C/`.
+
+The isolated VS Code `v2-first-run` startup scenario passed against the published
+2.0.24 CLI, including activation, managed ownership, health, and event-stream connection.
+All 197 focused adapter/auth/state and compatibility unit tests and 682
+startup/server/admission/transport unit tests passed. Formatting, both TypeScript
+checks, and the build passed. Lint and lint check passed with an existing `no-shadow`
+warning in `e2e/tests/picker-opening.spec.ts`.
+The five shared compatibility tests also passed after the adapter matrix finished.
 
 ### 2.0.23 compatibility review
 

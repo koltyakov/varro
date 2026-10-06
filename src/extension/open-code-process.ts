@@ -36,6 +36,8 @@ import {
 } from '../shared/opencode-install';
 import type { ServerStatus } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
+import { parseHealthResponse } from '../shared/health';
+import { CURRENT_OPENCODE_ENDPOINTS } from '../shared/opencode-endpoints';
 import { STARTUP_CREDENTIAL_TIMEOUT_MS, withStartupDeadline } from '../shared/startup';
 import {
   parseManagedServerOwnershipLease,
@@ -289,6 +291,45 @@ interface ProcessLaunch {
   ownershipMarkerWritten: boolean;
   port: number;
   processGroupId: number | null;
+}
+
+type ConnectionCredentials = Pick<ManagedServerOwnershipLease, 'port' | 'password' | 'username'>;
+
+interface ManagedConnectionRecord extends ConnectionCredentials {
+  version: 1;
+  owner: string;
+  createdAt: number;
+  password: string;
+}
+
+function parseManagedConnectionRecord(value: unknown): ManagedConnectionRecord | null {
+  const record = asRecord(value);
+  if (
+    record?.version !== 1 ||
+    typeof record.port !== 'number' ||
+    !Number.isSafeInteger(record.port) ||
+    record.port < 1 ||
+    record.port > 65535 ||
+    typeof record.owner !== 'string' ||
+    !record.owner ||
+    typeof record.createdAt !== 'number' ||
+    !Number.isFinite(record.createdAt) ||
+    typeof record.password !== 'string' ||
+    !record.password ||
+    record.password.length > 4096 ||
+    (record.username !== undefined &&
+      (typeof record.username !== 'string' || !record.username || record.username.includes(':')))
+  )
+    return null;
+  const parsed: ManagedConnectionRecord = {
+    version: 1,
+    port: record.port,
+    owner: record.owner,
+    createdAt: record.createdAt,
+    password: record.password,
+  };
+  if (typeof record.username === 'string') parsed.username = record.username;
+  return parsed;
 }
 
 interface InjectedConfigOwner {
@@ -627,6 +668,13 @@ export class OpenCodeProcess {
   private serverPassword: string | undefined;
   private serverUsername: string | undefined;
   private credentialUrl: string | undefined;
+  private credentialRegistration: {
+    url: string;
+    path: string;
+    lease: ConnectionCredentials;
+    source: 'lease' | 'connection';
+    discovered: boolean;
+  } | null = null;
   private lastCredentialDiagnostic: string | undefined;
 
   discoverSharedServer(): false | Promise<boolean> {
@@ -808,7 +856,14 @@ export class OpenCodeProcess {
   }
 
   /** Keep the existing default lease/claim path for old windows and rollback. */
-  async refreshStartupRegistration(): Promise<boolean> {
+  async refreshStartupRegistration(signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted();
+    if (
+      !existsSync(this.ownershipLeasePath) &&
+      !existsSync(this.ownershipMarkerPath) &&
+      (await this.reconnectSavedConnection(signal))
+    )
+      return true;
     let lease = await this.readOwnershipLease();
     if (!lease) {
       await this.validateOwnershipRecord(this.ownershipMarkerPath);
@@ -838,11 +893,18 @@ export class OpenCodeProcess {
             state: 'relinquished',
             createdAt: marker.createdAt,
           };
-          const verification = await this.inspectOwnershipLease(candidate);
+          let verification: Awaited<ReturnType<OpenCodeProcess['inspectOwnershipLease']>>;
+          try {
+            verification = await this.inspectOwnershipLease(candidate);
+          } catch (error) {
+            if (await this.reconnectSavedConnection(signal)) return true;
+            throw error;
+          }
           if (verification.matches) {
             this._port = candidate.port;
             return true;
           }
+          if (await this.reconnectSavedConnection(signal)) return true;
           if (isProcessAlive(marker.pid)) {
             const birthIdentity = await readProcessBirthIdentity(marker.pid, this.linuxProcRoot);
             if (
@@ -880,8 +942,18 @@ export class OpenCodeProcess {
         throw new Error('Cannot verify the existing OpenCode registration; it was left untouched');
     }
     this.registrationObserved = true;
-    const verification = await this.inspectOwnershipLease(lease);
+    let verification: Awaited<ReturnType<OpenCodeProcess['inspectOwnershipLease']>>;
+    try {
+      verification = await this.inspectOwnershipLease(lease);
+    } catch (error) {
+      if (await this.reconnectSavedConnection(signal)) return true;
+      if (await this.reconnectWithRegisteredCredentials(lease, signal)) return true;
+      if (await this.reconnectDiscoveredCredentials(lease, signal)) return true;
+      throw error;
+    }
     if (!verification.matches) {
+      if (await this.reconnectSavedConnection(signal)) return true;
+      if (await this.reconnectWithRegisteredCredentials(lease, signal)) return true;
       if (isProcessAlive(lease.pid)) {
         const birthIdentity = await readProcessBirthIdentity(lease.pid, this.linuxProcRoot);
         if (
@@ -903,6 +975,7 @@ export class OpenCodeProcess {
         'A managed automatic-port server is still running. Select auto to reuse it, or stop it explicitly before starting a fixed-port server.'
       );
     this.ownershipLeaseCandidate = lease;
+    this.credentialRegistration = null;
     this._port = lease.port;
     this.lastConnectionVerification = Date.now();
     if (lease.password) {
@@ -913,12 +986,377 @@ export class OpenCodeProcess {
     return true;
   }
 
+  /** Port and enforced private credentials identify attachment, not stop authority. */
+  private async reconnectWithRegisteredCredentials(
+    lease: ConnectionCredentials,
+    signal?: AbortSignal,
+    source: 'lease' | 'connection' = 'lease',
+    discovered = false,
+    currentLaunch?: ChildProcess
+  ): Promise<boolean> {
+    if (!lease.password || (!discovered && lease.port !== this._port)) return false;
+    const url = this.url;
+    const path = this.ownershipLeasePath;
+    if (!(await this.verifyRegisteredCredentials(lease, signal, source, discovered))) return false;
+    signal?.throwIfAborted();
+    if (currentLaunch && this._process !== currentLaunch) return false;
+    if (this.url !== url || this.ownershipLeasePath !== path)
+      throw new ManagedServerConnectionChangedError(
+        'OpenCode endpoint changed during credential verification'
+      );
+    this.clearLocalOwnership();
+    this.credentialRegistration = { url, path, lease, source, discovered };
+    this.serverPassword = lease.password;
+    this.serverUsername = lease.username;
+    this.credentialUrl = url;
+    this.lastConnectionVerification = Date.now();
+    logger.info(
+      `Reconnected to registered OpenCode credentials on port ${lease.port} without claiming process ownership`
+    );
+    return true;
+  }
+
+  private async reconnectDiscoveredCredentials(
+    record: ConnectionCredentials,
+    signal?: AbortSignal,
+    source: 'lease' | 'connection' = 'lease'
+  ): Promise<boolean> {
+    if (!this.isAutomaticPort || !record.password) return false;
+    const url = this.url;
+    const path = this.ownershipLeasePath;
+    let endpoint: Endpoint | undefined;
+    try {
+      endpoint = await withStartupDeadline(
+        () => this.discoverSharedEndpoint(),
+        3000,
+        'Registered OpenCode discovery',
+        signal
+      );
+    } catch {
+      signal?.throwIfAborted();
+      return false;
+    }
+    signal?.throwIfAborted();
+    if (
+      !endpoint ||
+      this.url !== url ||
+      this.ownershipLeasePath !== path ||
+      endpoint.auth?.password !== record.password ||
+      (endpoint.auth.username || 'opencode') !== (record.username || 'opencode')
+    )
+      return false;
+    const target = new URL(endpoint.url);
+    if (
+      target.protocol !== 'http:' ||
+      target.hostname !== '127.0.0.1' ||
+      !target.port ||
+      target.username ||
+      target.password
+    )
+      return false;
+    const port = this._port;
+    this._port = validateServerPort(Number(target.port));
+    let attached = false;
+    try {
+      attached = await this.reconnectWithRegisteredCredentials(
+        record,
+        signal,
+        source,
+        record.port !== this._port
+      );
+      return attached;
+    } finally {
+      if (!attached) this._port = port;
+    }
+  }
+
+  private async verifyRegisteredCredentials(
+    lease: ConnectionCredentials,
+    parentSignal?: AbortSignal,
+    source: 'lease' | 'connection' = 'lease',
+    discovered = false
+  ): Promise<boolean> {
+    if (!lease.password || (!discovered && lease.port !== this._port)) return false;
+    const url = this.url;
+    const path = this.ownershipLeasePath;
+    if (!(await this.verifyEnforcedServerCredentials(lease, parentSignal))) return false;
+    const current =
+      source === 'connection'
+        ? await this.readManagedConnectionRecord()
+        : await this.readOwnershipLease();
+    return (
+      this.url === url &&
+      this.ownershipLeasePath === path &&
+      current?.port === lease.port &&
+      current.password === lease.password &&
+      (current.username || 'opencode') === (lease.username || 'opencode')
+    );
+  }
+
+  private async verifyEnforcedServerCredentials(
+    credentials: ConnectionCredentials,
+    parentSignal?: AbortSignal
+  ): Promise<boolean> {
+    if (!credentials.password) return false;
+    const url = this.url;
+    parentSignal?.throwIfAborted();
+    const deadline = AbortSignal.timeout(3000);
+    const signal = parentSignal ? AbortSignal.any([parentSignal, deadline]) : deadline;
+    try {
+      for (const route of ['/api/info', '/api/status', CURRENT_OPENCODE_ENDPOINTS.health]) {
+        const endpoint = `${url}${route}`;
+        const anonymous = await fetch(endpoint, { redirect: 'error', signal });
+        await anonymous.body?.cancel();
+        if (anonymous.headers.get('content-type')?.includes('text/html')) continue;
+        if (anonymous.status === 404) continue;
+        if (anonymous.status !== 401) return false;
+        // Reject a listener which accepts arbitrary Authorization headers too.
+        const challenge = `varro-check-${randomBytes(16).toString('hex')}`;
+        const wrongPassword =
+          challenge === credentials.password ? `${challenge}.invalid` : challenge;
+        const rejected = await fetch(endpoint, {
+          headers: { Authorization: basicAuthorization(wrongPassword, credentials.username) },
+          redirect: 'error',
+          signal,
+        });
+        await rejected.body?.cancel();
+        if (rejected.status !== 401) return false;
+        const authenticated = await fetch(endpoint, {
+          headers: {
+            Authorization: basicAuthorization(credentials.password, credentials.username),
+          },
+          redirect: 'error',
+          signal,
+        });
+        if (authenticated.status === 404) {
+          await authenticated.body?.cancel();
+          continue;
+        }
+        if (!authenticated.ok) {
+          await authenticated.body?.cancel();
+          return false;
+        }
+        if (authenticated.headers.get('content-type')?.includes('text/html')) {
+          await authenticated.body?.cancel();
+          continue;
+        }
+        const info = asRecord(await authenticated.json());
+        const healthy =
+          route === CURRENT_OPENCODE_ENDPOINTS.health
+            ? parseHealthResponse(info)?.healthy === true
+            : typeof info?.pid === 'number' || info?.ready === true;
+        if (!healthy || typeof info?.version !== 'string') continue;
+        if (!openCodeApiVersion(info.version)) return false;
+        return this.url === url;
+      }
+    } catch {
+      parentSignal?.throwIfAborted();
+      // Credential fallback is read-only. Failure retains the original ownership evidence.
+    }
+    return false;
+  }
+
+  get hasCredentialVerifiedConnection(): boolean {
+    return this.credentialRegistration !== null;
+  }
+
+  private async readManagedConnectionRecord(): Promise<ManagedConnectionRecord | null> {
+    const path = `${this.ownershipLeasePath}.credentials`;
+    await this.validateOwnershipRecord(path);
+    return readJsonFile(path, parseManagedConnectionRecord);
+  }
+
+  /** Older builds stored credentials in the vault even when only a marker survived. */
+  async recoverLegacyConnectionCredentials(
+    secrets: Pick<vscode.SecretStorage, 'get'>,
+    signal?: AbortSignal
+  ): Promise<void> {
+    if (await this.readManagedConnectionRecord()) return;
+    const lease = await this.readOwnershipLease();
+    if (lease?.password) return;
+    await this.validateOwnershipRecord(this.ownershipMarkerPath);
+    const marker = await readJsonFile(this.ownershipMarkerPath, parseInjectedConfigOwner);
+    const owner = lease?.owner ?? marker?.owner;
+    const port = lease?.port ?? marker?.port;
+    if (!owner || !port || (!this.isAutomaticPort && port !== this._port)) return;
+    const path = this.ownershipLeasePath;
+    const encoded = await withStartupDeadline(
+      () => secrets.get(`varro.opencode.managedCredentials:${path}`),
+      STARTUP_CREDENTIAL_TIMEOUT_MS,
+      'Legacy managed credential lookup',
+      signal
+    );
+    signal?.throwIfAborted();
+    if (!encoded || this.ownershipLeasePath !== path) return;
+    let credentials: Record<string, unknown> | null;
+    try {
+      credentials = asRecord(JSON.parse(encoded));
+    } catch {
+      return;
+    }
+    if (credentials?.owner !== owner) return;
+    const record = parseManagedConnectionRecord({
+      version: 1,
+      owner,
+      port,
+      createdAt: Date.now(),
+      password: credentials.password,
+      username: credentials.username,
+    });
+    if (!record) return;
+    // This claim only coordinates a credential copy, never process ownership.
+    const claim = this.startupOwnershipClaim ?? (await this.acquireOwnershipClaim({}));
+    if (!claim) return;
+    try {
+      if (await this.readManagedConnectionRecord()) return;
+      const currentLease = await this.readOwnershipLease();
+      await this.validateOwnershipRecord(this.ownershipMarkerPath);
+      const currentMarker = await readJsonFile(this.ownershipMarkerPath, parseInjectedConfigOwner);
+      if (
+        this.ownershipLeasePath !== path ||
+        (currentLease?.owner ?? currentMarker?.owner) !== owner ||
+        (currentLease?.port ?? currentMarker?.port) !== port
+      )
+        return;
+      signal?.throwIfAborted();
+      await this.writeOwnershipFile(`${path}.credentials`, record);
+    } finally {
+      if (claim !== this.startupOwnershipClaim) await this.releaseOwnershipClaim(claim);
+    }
+  }
+
+  private async reconnectSavedConnection(signal?: AbortSignal): Promise<boolean> {
+    const connection = await this.readManagedConnectionRecord();
+    if (!connection || (!this.isAutomaticPort && connection.port !== this._port)) return false;
+    const port = this._port;
+    this._port = connection.port;
+    let attached = false;
+    try {
+      attached =
+        (await this.reconnectWithRegisteredCredentials(connection, signal, 'connection')) ||
+        (await this.reconnectDiscoveredCredentials(connection, signal, 'connection'));
+      return attached;
+    } finally {
+      if (!attached) this._port = port;
+    }
+  }
+
+  /** Attachment is allowed without claiming process ancestry or lifecycle ownership. */
+  async confirmManagedServerConnection(
+    proc = this._process,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    let ownershipError: unknown;
+    try {
+      if (await this.confirmManagedServerOwnership(proc)) {
+        const lease = this.ownershipLease;
+        if (lease?.password) {
+          try {
+            const record: ManagedConnectionRecord = {
+              version: 1,
+              owner: lease.owner,
+              createdAt: lease.createdAt,
+              port: lease.port,
+              password: lease.password,
+            };
+            if (lease.username) record.username = lease.username;
+            await this.writeOwnershipFile(`${this.ownershipLeasePath}.credentials`, record);
+          } catch (error) {
+            logger.warn(
+              `Could not retain independent OpenCode connection credentials: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        }
+        return true;
+      }
+    } catch (error) {
+      ownershipError = error;
+    }
+    signal?.throwIfAborted();
+    const launch = proc ? this.processLaunches.get(proc) : undefined;
+    const url = this.url;
+    const path = this.ownershipLeasePath;
+    const password = this.serverPassword;
+    if (
+      !proc?.pid ||
+      this._process !== proc ||
+      !launch ||
+      launch.port !== this._port ||
+      !password ||
+      this.credentialUrl !== url
+    ) {
+      if (ownershipError) throw ownershipError;
+      return false;
+    }
+    const record: ManagedConnectionRecord = {
+      version: 1,
+      owner: launch.owner,
+      createdAt: Date.now(),
+      port: launch.port,
+      password,
+    };
+    if (this.serverUsername) record.username = this.serverUsername;
+    if (!(await this.verifyEnforcedServerCredentials(record, signal))) {
+      if (ownershipError) throw ownershipError;
+      return false;
+    }
+    signal?.throwIfAborted();
+    if (
+      this._process !== proc ||
+      this.processLaunches.get(proc) !== launch ||
+      this.url !== url ||
+      this.ownershipLeasePath !== path ||
+      this.serverPassword !== password
+    )
+      return false;
+    await this.writeOwnershipFile(`${path}.credentials`, record);
+    signal?.throwIfAborted();
+    if (!(await this.reconnectWithRegisteredCredentials(record, signal, 'connection', false, proc)))
+      return false;
+    this.detachProcessListeners(proc);
+    this._process = null;
+    logger.warn(
+      'OpenCode is connected with verified credentials; process ownership is unavailable, so lifecycle operations are disabled'
+    );
+    return true;
+  }
+
   /** Discovery may find a server registered under another build's fixed-port key. */
   async refreshDiscoveredServerRegistration(signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
     const port = this._port;
-    if (await this.refreshStartupRegistration()) return true;
+    const discoveredPassword = this.serverPassword;
+    const discoveredUsername = this.serverUsername;
+    const discoveredCredentialUrl = this.credentialUrl;
+    try {
+      if (await this.refreshStartupRegistration(signal)) {
+        if (this._port === port) return true;
+        if (!discoveredPassword || discoveredCredentialUrl !== `http://127.0.0.1:${port}`)
+          throw new ManagedServerConnectionChangedError(
+            'The OpenCode endpoint changed during registration recovery'
+          );
+        // A valid old listener is not the endpoint which discovery selected.
+        this.credentialRegistration = null;
+        this.clearLocalOwnership();
+      }
+    } catch (error) {
+      this._port = port;
+      const lease = await this.readOwnershipLease();
+      if (
+        this.isAutomaticPort &&
+        lease?.password &&
+        this.credentialUrl === this.url &&
+        lease.password === this.serverPassword &&
+        (lease.username || 'opencode') === (this.serverUsername || 'opencode') &&
+        (await this.reconnectWithRegisteredCredentials(lease, signal, 'lease', lease.port !== port))
+      )
+        return true;
+      throw error;
+    }
     this._port = port;
+    this.serverPassword = discoveredPassword;
+    this.serverUsername = discoveredUsername;
+    this.credentialUrl = discoveredCredentialUrl;
     const directories = new Set([dirname(this.ownershipLeasePath)]);
     if (this.checkOwnershipFiles) {
       directories.add(getManagedServerOwnershipDirectory());
@@ -926,6 +1364,11 @@ export class OpenCodeProcess {
     }
     const candidates = new Set<string>();
     const credentialCandidates = new Map<string, ManagedServerOwnershipLease>();
+    const samePortCredentials = new Map<string, ManagedServerOwnershipLease>();
+    const attachmentCandidates = new Map<
+      string,
+      { record: ConnectionCredentials; source: 'lease' | 'connection' }
+    >();
     for (const directory of directories) {
       let entries: Dirent[];
       try {
@@ -935,6 +1378,22 @@ export class OpenCodeProcess {
         throw error;
       }
       for (const entry of entries) {
+        if (/^varro-opencode-server-\d+\.json\.credentials$/.test(entry.name)) {
+          const path = join(directory, entry.name);
+          await this.validateOwnershipRecord(path);
+          const record = await readJsonFile(path, parseManagedConnectionRecord);
+          if (
+            record &&
+            this.credentialUrl === this.url &&
+            record.password === this.serverPassword &&
+            (record.username || 'opencode') === (this.serverUsername || 'opencode')
+          )
+            attachmentCandidates.set(path.slice(0, -'.credentials'.length), {
+              record,
+              source: 'connection',
+            });
+          continue;
+        }
         if (!/^varro-opencode-server-\d+\.json(?:\.managed)?$/.test(entry.name)) continue;
         const path = join(directory, entry.name);
         const leasePath = path.endsWith('.managed') ? path.slice(0, -'.managed'.length) : path;
@@ -946,15 +1405,15 @@ export class OpenCodeProcess {
         if (!record) continue;
         const lease = parseManagedServerOwnershipLease(record);
         const matchingCredentials =
-          this.isAutomaticPort &&
-          port >= 49_152 &&
           this.credentialUrl === this.url &&
           !!lease?.password &&
           lease.password === this.serverPassword &&
           (lease.username || 'opencode') === (this.serverUsername || 'opencode');
         if (matchingCredentials && lease) {
           await this.validateOwnershipRecord(path);
-          credentialCandidates.set(leasePath, lease);
+          attachmentCandidates.set(leasePath, { record: lease, source: 'lease' });
+          if (lease.port === port) samePortCredentials.set(leasePath, lease);
+          else if (this.isAutomaticPort) credentialCandidates.set(leasePath, lease);
         }
         if (record.port !== port || !record.executable || !record.birthIdentity) continue;
         await this.validateOwnershipRecord(path);
@@ -969,7 +1428,12 @@ export class OpenCodeProcess {
           state: 'relinquished',
           createdAt: record.createdAt,
         };
-        if (await this.matchesOwnershipLease(identity)) candidates.add(leasePath);
+        try {
+          if (await this.matchesOwnershipLease(identity)) candidates.add(leasePath);
+        } catch (error) {
+          if (!matchingCredentials || !lease || lease.port !== port) throw error;
+          // Unavailable OS evidence can still permit credential-only attachment.
+        }
       }
     }
     if (candidates.size > 1)
@@ -977,12 +1441,46 @@ export class OpenCodeProcess {
         'Conflicting Varro registrations identify this OpenCode server; the records were left untouched'
       );
     const path = candidates.values().next().value;
-    if (!path) return this.recoverCredentialBackedSharedServer(credentialCandidates, signal);
+    if (!path) {
+      const selected = [...samePortCredentials].toSorted(
+        (a, b) => b[1].createdAt - a[1].createdAt || a[0].localeCompare(b[0])
+      )[0];
+      if (selected) {
+        this.ownershipLeasePath = selected[0];
+        return this.refreshStartupRegistration(signal);
+      }
+      const attach = async () => {
+        const previousPath = this.ownershipLeasePath;
+        for (const [candidatePath, candidate] of attachmentCandidates) {
+          if (!this.isAutomaticPort && candidate.record.port !== port) continue;
+          this.ownershipLeasePath = candidatePath;
+          if (
+            await this.reconnectWithRegisteredCredentials(
+              candidate.record,
+              signal,
+              candidate.source,
+              candidate.record.port !== port
+            )
+          )
+            return true;
+        }
+        this.ownershipLeasePath = previousPath;
+        return false;
+      };
+      try {
+        if (await this.recoverCredentialBackedSharedServer(credentialCandidates, signal))
+          return true;
+      } catch (error) {
+        if (await attach()) return true;
+        throw error;
+      }
+      return attach();
+    }
     // Use the original lease/marker/claim path. Never copy a live registration
     // into the automatic key and create a second ownership authority.
     this.ownershipLeasePath = path;
     this.clearLocalOwnership();
-    return this.refreshStartupRegistration();
+    return this.refreshStartupRegistration(signal);
   }
 
   /** A CLI replacement can keep Varro's credentials while changing PID and port. */
@@ -1004,8 +1502,9 @@ export class OpenCodeProcess {
     if (
       !executable ||
       !birthIdentity ||
-      account.kind !== 'same-user' ||
-      !account.identity?.startsWith(`${pid}:${birthIdentity}:`)
+      account.kind === 'different-user' ||
+      (account.kind === 'same-user' && !account.identity) ||
+      (account.identity !== undefined && !account.identity.startsWith(`${pid}:${birthIdentity}:`))
     )
       return false;
     const retired = [];
@@ -1089,8 +1588,11 @@ export class OpenCodeProcess {
       const verifiedAccount = await inspectLocalServerAccount(port);
       if (
         this.url !== url ||
-        verifiedAccount.kind !== 'same-user' ||
-        verifiedAccount.identity !== account.identity ||
+        verifiedAccount.kind === 'different-user' ||
+        (verifiedAccount.kind === 'same-user' && !verifiedAccount.identity) ||
+        (verifiedAccount.identity !== undefined &&
+          (!verifiedAccount.identity.startsWith(`${pid}:${birthIdentity}:`) ||
+            (account.identity !== undefined && verifiedAccount.identity !== account.identity))) ||
         !(await this.isRegisteredProcessRetired(current)) ||
         !(await this.matchesOwnershipLease(lease))
       )
@@ -1099,6 +1601,9 @@ export class OpenCodeProcess {
         );
       // The replacement did not inherit Varro's injected config. Do not claim
       // that config or retain the old token which late host cleanup could remove.
+      // Unknown account evidence is not same-user proof. Provenance comes from
+      // the private retired Varro lease, enforced matching credentials, and the
+      // reverified listener/executable/birth identity, not OpenCode discovery alone.
       signal?.throwIfAborted();
       await this.writeOwnershipMarker(lease);
       await this.writeOwnershipLease(lease);
@@ -1132,6 +1637,42 @@ export class OpenCodeProcess {
   }
 
   async verifyManagedServerConnection(reconnect = false) {
+    const credentialRegistration = this.credentialRegistration;
+    if (credentialRegistration) {
+      if (
+        credentialRegistration.url !== this.url ||
+        credentialRegistration.path !== this.ownershipLeasePath
+      )
+        throw new ManagedServerConnectionChangedError(
+          'The registered OpenCode endpoint changed; reconnect to verify it'
+        );
+      if (!reconnect && Date.now() - this.lastConnectionVerification < 1000) return;
+      if (this.connectionVerification) return this.connectionVerification;
+      const operation = (async () => {
+        if (
+          credentialRegistration.url !== this.url ||
+          credentialRegistration.path !== this.ownershipLeasePath ||
+          !(await this.verifyRegisteredCredentials(
+            credentialRegistration.lease,
+            undefined,
+            credentialRegistration.source,
+            credentialRegistration.discovered
+          )) ||
+          this.credentialRegistration !== credentialRegistration
+        )
+          throw new ManagedServerConnectionChangedError(
+            'The registered OpenCode endpoint or credentials changed; reconnect to verify them'
+          );
+        this.lastConnectionVerification = Date.now();
+      })();
+      this.connectionVerification = operation;
+      try {
+        await operation;
+      } finally {
+        if (this.connectionVerification === operation) this.connectionVerification = null;
+      }
+      return;
+    }
     const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
     if (!lease) return;
     if (lease.port !== this._port)
@@ -1156,14 +1697,134 @@ export class OpenCodeProcess {
   }
 
   get connectionVerificationExpiresAt(): number {
-    return this.ownershipLeaseCandidate || this.ownershipLease
+    return this.credentialRegistration || this.ownershipLeaseCandidate || this.ownershipLease
       ? this.lastConnectionVerification + 1000
       : Number.POSITIVE_INFINITY;
+  }
+
+  private matchesConnectionRegistration(
+    recorded: ManagedServerOwnershipLease | null,
+    expected: ManagedServerOwnershipLease
+  ): boolean {
+    // Host handoff changes lifecycle ownership, not the admitted listener.
+    return (
+      !!recorded &&
+      recorded.owner === expected.owner &&
+      recorded.port === expected.port &&
+      recorded.pid === expected.pid &&
+      recorded.birthIdentity === expected.birthIdentity &&
+      normalizeExecutableIdentity(recorded.executable) ===
+        normalizeExecutableIdentity(expected.executable)
+    );
+  }
+
+  /** Quiet attachment requires private provenance verified by process identity or enforced credentials. */
+  async verifyManagedServerAdmission(): Promise<boolean> {
+    if (this.credentialRegistration) {
+      await this.verifyManagedServerConnection(true);
+      return true;
+    }
+    const url = this.url;
+    // Registration can be published during editor handoff, or discovered under
+    // a different configured-port key. Recover it before requesting consent.
+    if (!this.ownershipLeaseCandidate && !this.ownershipLease)
+      await this.refreshDiscoveredServerRegistration();
+    if (this.url !== url)
+      throw new ManagedServerConnectionChangedError(
+        'The managed OpenCode endpoint changed during registration recovery'
+      );
+    if (this.credentialRegistration) {
+      await this.verifyManagedServerConnection(true);
+      return true;
+    }
+    const expected = this.ownershipLeaseCandidate ?? this.ownershipLease;
+    const path = this.ownershipLeasePath;
+    if (!expected) {
+      // A surviving private marker still proves Varro launch provenance. Do not
+      // claim lifecycle ownership here; normal ownership preparation does that.
+      await this.validateOwnershipRecord(this.ownershipMarkerPath);
+      const marker = await readJsonFile(this.ownershipMarkerPath, parseInjectedConfigOwner);
+      if (!marker?.port || !marker.executable || !marker.birthIdentity) return false;
+      const listeners = await findListeningPids(this._port, this.linuxProcRoot);
+      const identity: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: marker.pid,
+        port: marker.port,
+        executable: marker.executable,
+        birthIdentity: marker.birthIdentity,
+        owner: marker.owner,
+        host: 'marker-admission',
+        state: 'relinquished',
+        createdAt: marker.createdAt,
+      };
+      if (marker.port !== this._port || listeners.length !== 1 || listeners[0] !== marker.pid)
+        throw new ManagedServerConnectionChangedError(
+          `The marked OpenCode listener changed; expected sole PID ${marker.pid} on port ${marker.port}, observed port ${this._port} with listening PIDs: ${listeners.join(', ') || 'none'}. Its ownership evidence was retained for recovery.`
+        );
+      const verification = await this.inspectOwnershipLease(identity);
+      if (
+        !verification.matches ||
+        this.url !== url ||
+        this.ownershipLeasePath !== path ||
+        ((this.ownershipLeaseCandidate ?? this.ownershipLease) &&
+          !this.matchesConnectionRegistration(
+            this.ownershipLeaseCandidate ?? this.ownershipLease,
+            identity
+          ))
+      )
+        throw new ManagedServerConnectionChangedError(
+          `The marked OpenCode listener changed; its ownership evidence was retained for recovery. ${verification.matches ? 'The endpoint or launch registration changed during verification.' : verification.reason}`
+        );
+      await this.validateOwnershipRecord(this.ownershipMarkerPath);
+      const current = await readJsonFile(this.ownershipMarkerPath, parseInjectedConfigOwner);
+      if (
+        JSON.stringify(current) !== JSON.stringify(marker) ||
+        this.url !== url ||
+        this.ownershipLeasePath !== path ||
+        ((this.ownershipLeaseCandidate ?? this.ownershipLease) &&
+          !this.matchesConnectionRegistration(
+            this.ownershipLeaseCandidate ?? this.ownershipLease,
+            identity
+          ))
+      )
+        throw new ManagedServerConnectionChangedError(
+          'The OpenCode ownership marker changed during verification'
+        );
+      return true;
+    }
+    const recorded = await this.readOwnershipLease();
+    if (
+      !recorded ||
+      !this.matchesConnectionRegistration(recorded, expected) ||
+      recorded.port !== this._port
+    )
+      throw new ManagedServerConnectionChangedError(
+        'The managed OpenCode registration changed; reconnect to verify it'
+      );
+    const listeners = await findListeningPids(recorded.port, this.linuxProcRoot);
+    if (listeners.length !== 1 || listeners[0] !== recorded.pid)
+      throw new ManagedServerConnectionChangedError(
+        'The managed OpenCode listener changed; its registration was retained for recovery'
+      );
+    await this.verifyManagedServerConnection(true);
+    if (
+      this.url !== url ||
+      this.ownershipLeasePath !== path ||
+      !this.matchesConnectionRegistration(
+        this.ownershipLeaseCandidate ?? this.ownershipLease,
+        expected
+      )
+    )
+      throw new ManagedServerConnectionChangedError(
+        'The managed OpenCode connection changed during verification'
+      );
+    return true;
   }
 
   get connectionIdentity():
     | Pick<ManagedServerOwnershipLease, 'port' | 'pid' | 'birthIdentity' | 'executable'>
     | undefined {
+    if (this.credentialRegistration) return undefined;
     const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
     return lease
       ? {
@@ -1389,6 +2050,7 @@ export class OpenCodeProcess {
   }
 
   async prepareForHealthyExistingServer() {
+    if (this.credentialRegistration) return;
     if (this._managedProcess && this.ownershipLease) {
       this.portFallbackAttempts = Math.max(0, this._port - this.originalPort);
       this.portInUseDetected = false;
@@ -1422,6 +2084,7 @@ export class OpenCodeProcess {
   }
 
   async recoverManagedServerOwnership(): Promise<boolean> {
+    if (this.credentialRegistration) return false;
     if (this._process && this._managedProcess) return true;
     const lease = this.ownershipLeaseCandidate;
     if (!lease) return false;
@@ -1458,6 +2121,7 @@ export class OpenCodeProcess {
   }
 
   refreshManagedServerOwnership(): Promise<boolean> {
+    if (this.credentialRegistration) return Promise.resolve(false);
     if (this.ownershipRefreshOperation) return this.ownershipRefreshOperation;
     const operation = this.runManagedServerOwnershipRefresh();
     this.ownershipRefreshOperation = operation;
@@ -1534,6 +2198,7 @@ export class OpenCodeProcess {
   }
 
   async takeOwnershipOfExistingServer(): Promise<boolean> {
+    if (this.credentialRegistration) return false;
     if (this._managedProcess || this._process) {
       return false;
     }
@@ -1582,6 +2247,10 @@ export class OpenCodeProcess {
       createdAt: processOwner.createdAt,
     };
     if (processOwner.configPath) lease.configPath = processOwner.configPath;
+    if (this.serverPassword && this.credentialUrl === this.url) {
+      lease.password = this.serverPassword;
+      if (this.serverUsername) lease.username = this.serverUsername;
+    }
     if (
       !(await this.matchesOwnershipLease(lease)) ||
       !(await this.matchesInjectedConfigOwner(lease))
@@ -2302,6 +2971,11 @@ export class OpenCodeProcess {
   }
 
   private cleanupLaunchProcess(proc: ChildProcess): Promise<void> {
+    if (this.credentialRegistration) {
+      this.detachProcessListeners(proc);
+      if (this._process === proc) this._process = null;
+      return Promise.resolve();
+    }
     const existing = this.processCleanupOperations.get(proc);
     if (existing) return existing;
 
@@ -2812,7 +3486,7 @@ export class OpenCodeProcess {
 
   private async writeOwnershipFile(
     path: string,
-    value: ManagedServerOwnershipLease | InjectedConfigOwner
+    value: ManagedServerOwnershipLease | InjectedConfigOwner | ManagedConnectionRecord
   ) {
     await this.ensureOwnershipDirectory();
     const temporaryPath = `${path}.${this.hostOwner}.${randomBytes(8).toString('hex')}.tmp`;
@@ -3094,6 +3768,13 @@ export class OpenCodeProcess {
   }
 
   async disposeProcess(options: { stopProcess: boolean }) {
+    if (this.credentialRegistration) {
+      this.detachProcessListeners(this._process);
+      this._process = null;
+      this.clearLocalOwnership();
+      this.credentialRegistration = null;
+      return;
+    }
     if (options.stopProcess) {
       this._port = this.originalPort;
       this.automaticPortSelected = false;

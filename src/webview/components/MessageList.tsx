@@ -2387,29 +2387,6 @@ export function MessageList() {
     if (changed) publishMeasurementVersion();
   }
 
-  createEffect(() => {
-    messageStructureVersion();
-    messageInfoVersion();
-    untrack(() =>
-      invalidateChangedZeroHeightRows(
-        zeroHeightRenderGeometrySignatures.keys(),
-        streamingLayoutProjection()
-      )
-    );
-  });
-
-  let previousStreamingMessageId: string | null = null;
-  createEffect(() => {
-    const streaming = streamingLayoutProjection();
-    const currentStreamingMessageId = streamingPart()?.messageID ?? null;
-    const candidateMessageIds = new Set<string>();
-    if (previousStreamingMessageId) candidateMessageIds.add(previousStreamingMessageId);
-    if (currentStreamingMessageId) candidateMessageIds.add(currentStreamingMessageId);
-    previousStreamingMessageId = currentStreamingMessageId;
-
-    untrack(() => invalidateChangedZeroHeightRows(candidateMessageIds, streaming));
-  });
-
   const hasIncompleteLatestVisibleAssistantReply = createMemo(() => {
     messageInfoVersion();
     const latest = messages().at(-1)?.info;
@@ -2423,7 +2400,14 @@ export function MessageList() {
     const entries = messages();
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       const entry = entries[index]!;
-      if (entry.info.role === 'user') return null;
+      if (entry.info.role === 'user') {
+        if (
+          !isSessionResumeMessage(entry.parts) &&
+          !hasUserMessageContent(parseUserMessageContent(entry.parts))
+        )
+          continue;
+        return null;
+      }
       if (entry.info.mode === 'subagent') continue;
       if (isContinuationAssistantFinish(entry.info.finish)) return null;
       // A completed failed attempt does not finish the turn while its retry is active.
@@ -3271,36 +3255,6 @@ export function MessageList() {
       .join('|');
     return `${infoProjection}|${partProjection}`;
   }
-  // Existing placeholders must hydrate when their row projection changes; newly prepended rows stay inert.
-  let previousMessageRenderGeometrySignatures = new Map<string, string | null>();
-  createEffect(() => {
-    messageStructureVersion();
-    const current = untrack(() => {
-      const signatures = new Map<string, string | null>(historyMessageRenderGeometrySignatures());
-      for (const message of tailMessages()) {
-        signatures.set(message.info.id, getMessageRenderGeometrySignature(message.info.id));
-      }
-      return signatures;
-    });
-    let changed = false;
-    for (const [messageId, signature] of current) {
-      if (
-        !previousMessageRenderGeometrySignatures.has(messageId) ||
-        previousMessageRenderGeometrySignatures.get(messageId) === signature
-      ) {
-        continue;
-      }
-      const row = mountedMessageRows.get(messageId);
-      if (!row?.classList.contains('interactive-item-virtual-placeholder')) continue;
-      measuredHeights.delete(messageId);
-      forcedVirtualContentMessageIds.add(messageId);
-      markVirtualMetricsDirty(messageId);
-      changed = true;
-    }
-    previousMessageRenderGeometrySignatures = current;
-    if (changed) publishMeasurementVersion();
-  });
-
   function handleAssistantDiffSettledEmpty(messageId: string) {
     if (
       !forcedVirtualContentMessageIds.has(messageId) ||
@@ -4872,6 +4826,10 @@ export function MessageList() {
         }
       }
     }
+    // An explicit row measurement can release its rounding correction while the tray exits.
+    // Keep that already-painted space too, before the next layout can clamp the fixed target.
+    const row = item.closest<HTMLElement>('.interactive-item-container');
+    if (row) reserve += appliedRowHeightCorrections.get(row) ?? 0;
     if (reserve <= 0.5) return;
     if (pointerScrollOwnershipActive) {
       reserveHeldScrollbarRange(reserve);
@@ -8512,6 +8470,60 @@ export function MessageList() {
       });
     })
   );
+
+  // Register geometry readers after their history memo exists, including during eager effect setup.
+  createEffect(() => {
+    messageStructureVersion();
+    messageInfoVersion();
+    untrack(() =>
+      invalidateChangedZeroHeightRows(
+        zeroHeightRenderGeometrySignatures.keys(),
+        streamingLayoutProjection()
+      )
+    );
+  });
+
+  let previousStreamingMessageId: string | null = null;
+  createEffect(() => {
+    const streaming = streamingLayoutProjection();
+    const currentStreamingMessageId = streamingPart()?.messageID ?? null;
+    const candidateMessageIds = new Set<string>();
+    if (previousStreamingMessageId) candidateMessageIds.add(previousStreamingMessageId);
+    if (currentStreamingMessageId) candidateMessageIds.add(currentStreamingMessageId);
+    previousStreamingMessageId = currentStreamingMessageId;
+
+    untrack(() => invalidateChangedZeroHeightRows(candidateMessageIds, streaming));
+  });
+
+  // Existing placeholders must hydrate when their row projection changes; newly prepended rows stay inert.
+  let previousMessageRenderGeometrySignatures = new Map<string, string | null>();
+  createEffect(() => {
+    messageStructureVersion();
+    const current = untrack(() => {
+      const signatures = new Map<string, string | null>(historyMessageRenderGeometrySignatures());
+      for (const message of tailMessages()) {
+        signatures.set(message.info.id, getMessageRenderGeometrySignature(message.info.id));
+      }
+      return signatures;
+    });
+    let changed = false;
+    for (const [messageId, signature] of current) {
+      if (
+        !previousMessageRenderGeometrySignatures.has(messageId) ||
+        previousMessageRenderGeometrySignatures.get(messageId) === signature
+      ) {
+        continue;
+      }
+      const row = mountedMessageRows.get(messageId);
+      if (!row?.classList.contains('interactive-item-virtual-placeholder')) continue;
+      measuredHeights.delete(messageId);
+      forcedVirtualContentMessageIds.add(messageId);
+      markVirtualMetricsDirty(messageId);
+      changed = true;
+    }
+    previousMessageRenderGeometrySignatures = current;
+    if (changed) publishMeasurementVersion();
+  });
 
   const presentationMessages = createMemo(() => {
     const turn = trailingAssistantTurn();

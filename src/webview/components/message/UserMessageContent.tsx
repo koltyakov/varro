@@ -610,6 +610,14 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
         index = extensionBlock.end;
         continue;
       }
+      // V2 previously joined the prompt and generated skill requests into one text part.
+      const skill = parseSkillAttachment(`${line}\n${lines[index + 1] ?? ''}`);
+      if (skill) {
+        flushTextBuffer();
+        attachments.push({ type: 'skill', name: skill });
+        index += 1;
+        continue;
+      }
       // Some backends join prompt and context parts into one text part.
       if (parseIssueAttachment(`${line}\n`)) {
         let end = index + 1;
@@ -617,6 +625,7 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
           const candidate = lines[end]!.trim();
           if (
             parseIssueAttachment(`${candidate}\n`) ||
+            parseSkillAttachment(`${lines[end]}\n${lines[end + 1] ?? ''}`) ||
             parseUserMessageAttachmentLine(candidate, false) ||
             /^\[(?:Working directory:|Database context\]|Extension context\]|Selection from terminal |Unsaved (?:selection|buffer) from |Problem [\w-]+\])/.test(
               candidate
@@ -923,9 +932,26 @@ export function hasUserMessageEditableContent(parts: Part[]): boolean {
   );
 }
 
+function getDisplayMessageTexts(parsed: ParsedUserMessageContent): string[] {
+  // Presentation only: keep leading skill markers in the canonical prompt for editing and resends.
+  const skillMarkers = new Set(
+    parsed.attachments.flatMap((attachment) =>
+      attachment.type === 'skill' ? [formatSkillReference(attachment.name)] : []
+    )
+  );
+  let firstText = parsed.messageTexts[0] ?? '';
+  let prefix = /^\s*(\$\[[^\]\s]+\])(?:\s+|$)/.exec(firstText);
+  while (prefix && skillMarkers.has(prefix[1]!)) {
+    firstText = firstText.slice(prefix[0].length);
+    prefix = /^\s*(\$\[[^\]\s]+\])(?:\s+|$)/.exec(firstText);
+  }
+  if (firstText === parsed.messageTexts[0]) return parsed.messageTexts;
+  return [...(firstText ? [firstText] : []), ...parsed.messageTexts.slice(1)];
+}
+
 export function getUserMessagePreviewText(parts: Part[]): string {
   const parsed = parseUserMessageContent(parts);
-  const firstText = parsed.messageTexts
+  const firstText = getDisplayMessageTexts(parsed)
     .map((text) =>
       parsed.attachments.reduce(
         (value, attachment) =>
@@ -947,6 +973,8 @@ export function getUserMessagePreviewText(parts: Part[]): string {
     switch (firstAttachment.type) {
       case 'extension-context':
         return firstAttachment.context.label;
+      case 'skill':
+        return firstAttachment.name;
       case 'problem-reference':
         return `${problemReferenceLabel(firstAttachment.reference)} ${problemReferenceLocation(firstAttachment.reference)}`;
       case 'issues':
@@ -986,6 +1014,7 @@ export function UserMessageContent(props: {
   onMessageHoverChange?: (hovering: boolean) => void;
 }) {
   const parsed = createMemo(() => parseUserMessageContent(props.parts));
+  const messageTexts = createMemo(() => getDisplayMessageTexts(parsed()));
   const agentParts = createMemo(() => getDisplayAgentParts(parsed()));
   const leadingAgentPart = createMemo<AgentPart | null>(() => {
     if (!props.leadingAgent) return null;
@@ -1005,11 +1034,11 @@ export function UserMessageContent(props: {
     }))
   );
   const inlineAttachmentIds = createMemo(() =>
-    getInlineAttachmentIds(parsed().messageTexts, indexedAttachments())
+    getInlineAttachmentIds(messageTexts(), indexedAttachments())
   );
   const expandedTerminalAttachment = createMemo(() => {
     if (
-      parsed().messageTexts.length !== 0 ||
+      messageTexts().length !== 0 ||
       parsed().fileParts.some((part) => part.mime.startsWith('image/'))
     ) {
       return null;
@@ -1024,8 +1053,7 @@ export function UserMessageContent(props: {
   const visibleAttachments = createMemo(() =>
     indexedAttachments().filter(
       ({ id, attachment }) =>
-        (attachment.type === 'skill' || !inlineAttachmentIds().has(id)) &&
-        attachment !== expandedTerminalAttachment()
+        !inlineAttachmentIds().has(id) && attachment !== expandedTerminalAttachment()
     )
   );
   const visibleAgentParts = createMemo(() => {
@@ -1065,7 +1093,7 @@ export function UserMessageContent(props: {
     ...otherFileParts().map((part) => ({ type: 'file-part' as const, part })),
   ]);
   const attachmentCount = createMemo(() => displayAttachments().length);
-  const hasMessageText = createMemo(() => parsed().messageTexts.length > 0);
+  const hasMessageText = createMemo(() => messageTexts().length > 0);
   const hasImageTiles = createMemo(() => hasMessageText() && imageParts().length > 0);
   const [activeImageIndex, setActiveImageIndex] = createSignal(0);
   const [previewIndex, setPreviewIndex] = createSignal<number | null>(null);
@@ -1136,7 +1164,7 @@ export function UserMessageContent(props: {
     parsed().attachments.length > 0 ||
     parsed().agentParts.length > 0;
   const hasTrailingAttachmentContent = () =>
-    parsed().messageTexts.length > 0 ||
+    messageTexts().length > 0 ||
     imageParts().length > 0 ||
     visibleAgentParts().length > 0 ||
     !!expandedTerminalAttachment();
@@ -1204,12 +1232,12 @@ export function UserMessageContent(props: {
       <Show when={expandedTerminalAttachment()}>
         {(attachment) => <TerminalMessageCodeBlock attachment={attachment()} />}
       </Show>
-      <Show when={parsed().messageTexts.length > 0}>
+      <Show when={hasMessageText()}>
         <Show
           when={hasImageTiles()}
           fallback={
             <UserMessageTextList
-              messageTexts={parsed().messageTexts}
+              messageTexts={messageTexts()}
               attachments={indexedAttachments()}
               imageParts={imageParts()}
               fileParts={parsed().fileParts}
@@ -1230,7 +1258,7 @@ export function UserMessageContent(props: {
               )}
             </Show>
             <UserMessageTextList
-              messageTexts={parsed().messageTexts}
+              messageTexts={messageTexts()}
               attachments={indexedAttachments()}
               imageParts={imageParts()}
               fileParts={parsed().fileParts}
@@ -1306,7 +1334,9 @@ export function UserMessagePreviewContent(props: {
   onOpenImagePreview?: (index: number) => void;
 }) {
   const parsed = createMemo(() => parseUserMessageContent(props.parts));
-  const text = createMemo(() => parsed().messageTexts.find((value) => value.trim().length > 0));
+  const text = createMemo(() =>
+    getDisplayMessageTexts(parsed()).find((value) => value.trim().length > 0)
+  );
   const attachments = createMemo<IndexedMessageAttachment[]>(() =>
     parsed().attachments.map((attachment, index) => ({
       id: `attachment-${index}`,

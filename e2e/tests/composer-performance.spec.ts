@@ -79,14 +79,19 @@ for (const count of [20, 10_000]) {
           page.evaluate(async () => {
             const path = '/src/webview/lib/state.ts';
             // SAFETY: This read-only import is served by the isolated Vite E2E harness.
-            const { state } = (await import(path)) as {
+            const { connectionInitialized, state } = (await import(path)) as {
+              connectionInitialized: () => boolean;
               state: { messages: unknown[]; messagesLoading: boolean };
             };
-            return { count: state.messages.length, loading: state.messagesLoading };
+            return {
+              count: state.messages.length,
+              loading: state.messagesLoading,
+              initialized: connectionInitialized(),
+            };
           }),
         { timeout: 60_000, message: `Load all ${count} messages before measuring typing latency` }
       )
-      .toEqual({ count, loading: false });
+      .toEqual({ count, loading: false, initialized: true });
     const editor = page.locator('[role="textbox"][aria-multiline="true"]').first();
     await expect(editor).toBeVisible();
     await page.waitForTimeout(500);

@@ -12,7 +12,7 @@ import {
 import { resolveTaskSessionId } from '../../lib/task-session';
 import type { TaskSessionInfo, TaskSessionLookup } from '../../lib/task-session';
 import type { AssistantMessage, MessageEntry } from '../../types';
-import { pauseCompletedAt } from '../../../shared/session-pauses';
+import { isSessionResumeMessage, pauseCompletedAt } from '../../../shared/session-pauses';
 import type { SessionPauseBoundary } from '../../../shared/session-pauses';
 import { hasUserMessageContent, parseUserMessageContent } from '../message/UserMessageContent';
 
@@ -53,7 +53,9 @@ export function flushesAssistantDialog(entry: MessageEntry, primarySessionId?: s
   if (primarySessionId && entry.info.sessionID !== primarySessionId) return false;
   if (entry.info.role !== 'user') return true;
   const parsed = parseUserMessageContent(entry.parts);
-  return !(parsed.automaticActions.length > 0 && !hasUserMessageContent(parsed));
+  // Metadata-only arrivals are provisional, not a new prompt. Background notices receive
+  // their synthetic text later and must not briefly finish the preceding dialog.
+  return isSessionResumeMessage(entry.parts) || hasUserMessageContent(parsed);
 }
 
 export function getAssistantDialogSummaryMap(
@@ -229,7 +231,7 @@ export function getAssistantDialogSummaryMap(
       if (entry.info.role === 'user') {
         const parsed = parseUserMessageContent(entry.parts);
         // Recovery and background-work notices continue the existing request.
-        if (parsed.automaticActions.length > 0 && !hasUserMessageContent(parsed)) continue;
+        if (!isSessionResumeMessage(entry.parts) && !hasUserMessageContent(parsed)) continue;
       }
       flush({
         nextUserRequestCreated: entry.info.role === 'user' ? entry.info.time.created : undefined,

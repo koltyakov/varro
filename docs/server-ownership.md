@@ -18,6 +18,22 @@ server marker, and a short-lived `.claim` coordination file. The lease records
 the actual listening port, including fallback ports. These files do not depend
 on a workspace, VS Code profile, or extension ID.
 
+A private `.credentials` companion records connection credentials separately from
+process ownership. It contains the actual port, username, password, launch token,
+and creation time, but no PID or executable identity. Confirmed launches retain
+this companion as a recovery source when a lease is missing. If a healthy launch
+cannot be confirmed through OS inspection, enforced credentials can instead
+establish attach-only connection and persist this record without inventing process
+ownership. Both health-poll and early-launch-exit recovery use this connection
+confirmation, rather than requiring lifecycle ownership before attachment.
+
+For older installations with a surviving private marker but no credential-bearing
+lease, startup can copy the matching owner-token-bound SecretStorage payload into
+the companion under the original claim path. It rechecks the record's owner and
+port before copying and still verifies enforced authentication before attachment.
+A vault payload for another launch is rejected. A private lease or companion
+already carrying credentials skips this vault lookup entirely.
+
 The parent directory is Varro's shared state root. Session annotations use its
 `opencode-v2/` subdirectory and provider quota coordination uses
 `provider-quota-v2/`. See [local state files](usage.md#local-state-files) for native
@@ -43,7 +59,9 @@ An OpenCode v2 CLI upgrade can replace a Varro-launched shared service and retai
 its password while changing the PID and random port. Automatic discovery recovers
 this replacement without adoption consent only when a private Varro lease carries
 the exact discovered credentials, its original process is conclusively retired,
-and the replacement is a same-user listener with the same executable identity.
+and the replacement has the same executable identity. Account inspection must not
+identify another OS user. Unavailable account evidence does not erase the proven
+Varro provenance or trigger connection consent; it is not recorded as same-user.
 An anonymous `/api/info` request must be rejected and a request using the Varro
 lease credentials must return the verified listening PID. Account and process
 identity are checked again before publication under the original claim path.
@@ -215,15 +233,53 @@ Missing secret storage is not permission to retry without authentication.
 Before ordinary REST requests, event subscriptions, cleanup, or incompatible-server
 remediation, attachment checks the listener's OS account in the workspace
 extension host. Verified same-user attachment is quiet. Different-user and unknown
-ownership use distinct native modal warnings. Dismissal leaves the server untouched.
+ownership use distinct native modal warnings for unregistered servers. A Varro-started
+server reconnects quietly when fresh verification of its private lease identifies
+the exact sole listener, executable, and process birth identity, even if account
+inspection is unavailable. This does not invent same-user evidence or grant new
+lifecycle rights. Positive different-user evidence still requires consent. Dismissal
+leaves the server untouched.
+Admission rechecks discovery registration before consent when no lease was loaded,
+including records published during editor handoff or stored under another port key.
+A surviving private Varro marker with the same complete listener identity also
+admits quietly before background ownership preparation recreates its missing lease.
+Each strict admission and reconnect revalidates that marker and the sole listener;
+this attachment check does not write records or claim lifecycle ownership.
+Recreating a missing lease preserves discovered credentials only for that verified
+endpoint. Background editor ownership handoff does not invalidate attachment when
+the launch token, listener PID, executable, and birth identity remain unchanged.
 A migrated automatic-mode user can instead choose to start their own server on
 another port, but cannot abandon a registered live process through this action.
+
+After a reboot or process replacement, the saved PID or birth identity can differ.
+Varro reconnects quietly on the exact saved port when the private lease credentials
+still work and the server rejects both anonymous requests and an incorrect password.
+The authenticated response must identify a supported OpenCode API family, and the
+lease's port and credentials must remain unchanged through verification. These
+read-only probes have a three-second total deadline and honor startup cancellation.
+Unavailable process inspection can use the same fallback. Positive different-user
+account evidence still requires consent.
+
+Credential-only reconnection is attach-only. It never updates the old lease or
+marker, claims the replacement process, repairs runtime configuration, or grants
+stop, restart, upgrade, or cleanup rights. Ordinary requests retain strict bounded
+verification rather than reusing PID-based connection confirmation; SSE reconnects
+recheck enforced credentials. Endpoint or saved-credential changes revoke attachment.
+
+Automatic discovery can also recover a changed service port when its exact
+username and password match a private Varro lease or credential companion. The
+discovered endpoint must be loopback and must enforce those credentials. Failed
+Windows process inspection, changed process ancestry, or a still-live old listener
+does not block this read-only fallback. It grants no authority over either process
+and leaves the old lease and marker unchanged. An explicitly configured integer
+port never follows a different service port. A valid old registration must not
+replace the endpoint already selected by discovery.
 
 Consent binds to the observed PID, birth identity, account, and endpoint. Initial
 attachment and stream reconnect inspect fresh evidence. Foreign, unknown, and
 incomplete identities retain the strict one-second request-admission cache.
-Unknown-owner consent covers only the current connection and requires a new decision
-on reconnect. Concurrent callers share the decision; disposal invalidates late
+For unregistered servers, unknown-owner consent covers only the current connection
+and requires a new decision on reconnect. Concurrent callers share the decision; disposal invalidates late
 answers. Refusal blocks subsequent requests rather than starting retry prompts.
 
 Once the running connection has a complete same-user PID/birth/account identity,
@@ -267,6 +323,9 @@ relaunched implicitly; a closed external endpoint reports a connection error.
 Before requesting new uncertainty consent, admission retries one fresh account
 inspection. Strict request rechecks inspect at least every second, but persistent
 uncertainty does not repeat an already approved warning within that connection.
+Registered unknown-account connections instead revalidate their private Varro lease
+and complete listener identity on every strict admission and reconnect. They never
+transfer that provenance into uncertainty consent if the registration disappears.
 Newly identified foreign listeners still require consent. If inspection recovers
 to verified same-user evidence after the dialog, admission uses that fresh evidence
 instead of treating recovered visibility as listener replacement. A changed known
@@ -339,6 +398,43 @@ disconnect/recovery, transferred process references, per-platform identities,
 Linux PID reuse across boots, inspection failure, and concurrent writes. These
 tests use isolated filesystem fixtures and mocked OS commands. Native Windows
 and Linux execution remains a separate verification step.
+
+Native Linux reconnect coverage also runs `opencode-startup.integration.test.ts`
+against released OpenCode 2.0.24 in an isolated Linux ARM64 container. The editor-
+reload and missing-lease marker-recovery cases each reconnect three times, both
+with normal inspection tools and with only procfs available. They check zero
+consent prompts, unchanged listener PID and credentials, retained session catalog,
+and a healthy event stream. Evidence is retained under
+`artifacts/ai-test-data/linux-reconnect-native/fixed/`. This verifies host startup
+and transport behavior, not the native VS Code UI or native Windows execution.
+
+The same Linux fixture also exercises `reboot-reconnect`: it stops only its isolated
+server, retains the prior lease, and starts a new process with the same port,
+credentials, and database. Three reconnects verify the changed PID, retained session
+catalog, healthy SSE, zero prompts, and attach-only lifecycle behavior. OpenCode
+2.0.24 passes both procfs-only and normal-tool runs; evidence is under
+`artifacts/ai-test-data/linux-reconnect-native/same-port-v2-probes/`, including
+redacted HTTP probe observations. The fixture disconnects its old editor, disables
+that editor's exit-cleanup callback to model host loss, and kills only its verified
+isolated launch and listener. This simulates the persisted process replacement,
+not an actual machine reboot.
+
+OpenCode 1.18.34 also passes editor reload and same-port process replacement with
+both procfs-only and normal-tool inspection, for twelve reconnects without prompts.
+Evidence is under `artifacts/ai-test-data/linux-reconnect-native/same-port-v1-verified/`.
+V1 uses its original coordination path because it has no v2 shared-service discovery.
+Graceful V1 disposal encountered a separate listener-inspection failure in earlier
+runs; the abrupt-loss fixture does not establish a graceful-shutdown fix. See the
+run ledger at `artifacts/ai-test-data/linux-reconnect-native/same-port-verification.md`.
+
+Additional real-server checks inject failed lifecycle ownership confirmation during
+fresh startup, then reload three times using the independent credential companion.
+V2 also replaces that unowned fixture on another port and reattaches twice without
+consent or restart rights. These scenarios pass with procfs-only and normal Linux
+tools for OpenCode 2.0.24; V1 startup/reload cases pass on 1.18.34. The OS-inspection
+failure is injected, so this is not native PowerShell or Windows UI verification.
+Evidence and the reported Windows failure analysis are in
+`artifacts/ai-test-data/linux-reconnect-native/windows-attachment-verification.md`.
 
 Connection-admission tests cover concurrent consent, dismissal, listener replacement,
 uncertain ownership, reconnect, and cancellation during ordinary requests. Follow

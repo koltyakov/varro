@@ -14,6 +14,7 @@ import {
   hasUserMessageEditableContent,
   getUserMessageEditText,
   getUserMessageEditContext,
+  parseUserMessageContent,
 } from './UserMessageContent';
 import { fixture } from '../../test-fixtures';
 import type { UnknownRecord } from '../../../shared/type-utils';
@@ -462,24 +463,133 @@ describe('UserMessageContent', () => {
     expect(getUserMessageEditContext(parts).files).toEqual([]);
   });
 
-  it('renders skill chips inline and above the message alongside file attachments', () => {
+  it.each(['separate', 'joined', 'joined-crlf'])(
+    'renders %s skill chips inline without duplicating them alongside file attachments',
+    (layout) => {
+      const parts = [
+        textPart('prompt', 'Use $[browser-bridge] and $[unslop].'),
+        textPart('skill-1', formatSkillAttachment('browser-bridge')),
+        textPart('skill-2', formatSkillAttachment('unslop')),
+        textPart('file', '[Attached file: README.md]'),
+      ];
+      const persistedParts =
+        layout === 'separate'
+          ? parts
+          : [
+              textPart(
+                'joined',
+                parts
+                  .map((part) => part.text)
+                  .join('\n')
+                  .replaceAll('\n', layout === 'joined-crlf' ? '\r\n' : '\n')
+              ),
+            ];
+      renderUserContent(persistedParts);
+      const attachments = container?.querySelector('.message-attachments-leading');
+      const text = container?.querySelector('.user-message-text');
+      expect(attachments?.textContent).not.toContain('browser-bridge');
+      expect(attachments?.textContent).not.toContain('unslop');
+      expect(attachments?.textContent).toContain('README.md');
+      expect(attachments?.querySelectorAll('.message-attachment-chip')).toHaveLength(1);
+      expect(
+        Array.from(text?.querySelectorAll('.inline-chip') ?? []).map((chip) => chip.textContent)
+      ).toEqual(['browser-bridge', 'unslop']);
+      expect(text?.textContent).toBe('Use browser-bridge and unslop.');
+      expect(container?.textContent).not.toContain('Use the skill tool');
+      expect(getUserMessageEditText(persistedParts)).toBe('Use $[browser-bridge] and $[unslop].');
+      expect(getUserMessagePreviewText(persistedParts)).not.toContain('Use the skill tool');
+      expect(getUserMessageEditContext(persistedParts).files).toHaveLength(1);
+      expect(attachments?.compareDocumentPosition(text!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    }
+  );
+
+  it('shows an inline skill without an attachment row', () => {
     renderUserContent([
-      textPart('prompt', 'Use $[browser-bridge] and $[unslop].'),
-      textPart('skill-1', formatSkillAttachment('browser-bridge')),
-      textPart('skill-2', formatSkillAttachment('unslop')),
-      textPart('file', '[Attached file: README.md]'),
+      textPart('prompt', 'What machines can you see using $[control]'),
+      textPart('skill', formatSkillAttachment('control')),
+    ]);
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+    expect(container?.querySelectorAll('.inline-chip')).toHaveLength(1);
+    expect(container?.querySelector('.inline-chip')?.textContent).toBe('control');
+  });
+
+  it('keeps skills without inline references in the attachment row', () => {
+    renderUserContent([
+      textPart('prompt', 'What machines can you see using $[control]'),
+      textPart('inline-skill', formatSkillAttachment('control')),
+      textPart('attached-skill', formatSkillAttachment('unslop')),
     ]);
     const attachments = container?.querySelector('.message-attachments-leading');
-    const text = container?.querySelector('.user-message-text');
-    expect(attachments?.textContent).toContain('browser-bridge');
-    expect(attachments?.textContent).toContain('unslop');
-    expect(attachments?.textContent).toContain('README.md');
-    expect(
-      Array.from(text?.querySelectorAll('.inline-chip') ?? []).map((chip) => chip.textContent)
-    ).toEqual(['browser-bridge', 'unslop']);
-    expect(text?.textContent).toBe('Use browser-bridge and unslop.');
-    expect(container?.textContent).not.toContain('Use the skill tool');
-    expect(attachments?.compareDocumentPosition(text!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(attachments?.querySelectorAll('.message-attachment-chip')).toHaveLength(1);
+    expect(attachments?.querySelector('.message-attachment-chip .chip-label')?.textContent).toBe(
+      'unslop'
+    );
+    expect(attachments?.textContent).not.toContain('control');
+    expect(container?.querySelectorAll('.inline-chip')).toHaveLength(1);
+    expect(container?.querySelector('.inline-chip')?.textContent).toBe('control');
+  });
+
+  it.each(['separate', 'joined'])(
+    'moves %s leading skills into attachments without changing the edit draft',
+    (layout) => {
+      const prompt = '$[control] $[unslop]\nWhat machines can you see';
+      const parts = [
+        textPart('prompt', prompt),
+        textPart('skill-1', formatSkillAttachment('control')),
+        textPart('skill-2', formatSkillAttachment('unslop')),
+      ];
+      const persistedParts =
+        layout === 'separate'
+          ? parts
+          : [textPart('joined', parts.map((part) => part.text).join('\n'))];
+      renderUserContent(persistedParts);
+      expect(container?.querySelector('.user-message-text-scroll')?.textContent).toBe(
+        'What machines can you see'
+      );
+      expect(container?.querySelectorAll('.inline-chip')).toHaveLength(0);
+      expect(
+        Array.from(
+          container?.querySelectorAll(
+            '.message-attachments-leading .message-attachment-chip .chip-label'
+          ) ?? []
+        ).map((label) => label.textContent)
+      ).toEqual(['control', 'unslop']);
+      expect(getUserMessageEditText(persistedParts)).toBe(prompt);
+      expect(getUserMessagePreviewText(persistedParts)).toBe('What machines can you see');
+    }
+  );
+
+  it('shows a skill-only prefix as an attachment without an empty prompt bubble', () => {
+    const parts = [
+      textPart('prompt', '$[control] '),
+      textPart('skill', formatSkillAttachment('control')),
+    ];
+    renderUserContent(parts);
+    expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
+    expect(container?.querySelector('.message-attachment-chip .chip-label')?.textContent).toBe(
+      'control'
+    );
+    expect(container?.querySelector('.user-message-empty')).toBeNull();
+    expect(getUserMessageEditText(parts)).toBe('$[control] ');
+    expect(getUserMessagePreviewText(parts)).toBe('control');
+  });
+
+  it.each([
+    '$[control] What machines can you see',
+    '```text\n$[control] What machines can you see\n```',
+  ])('preserves unbacked and fenced skill prefixes: %s', (prompt) => {
+    renderUserContent([textPart('prompt', prompt)]);
+    expect(container?.querySelector('.user-message-text-scroll')?.textContent).toContain(
+      '$[control]'
+    );
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+  });
+
+  it('keeps fenced and incomplete skill attachment examples as prompt text', () => {
+    const prompt = `Example:\n\`\`\`text\n${formatSkillAttachment('control')}\n\`\`\`\n[Attached skill: $[unslop]]\nNot a generated skill request.`;
+    const parts = [textPart('prompt', prompt)];
+    expect(parseUserMessageContent(parts).attachments).toEqual([]);
+    expect(getUserMessageEditText(parts)).toBe(prompt);
   });
 
   it('renders each text part as its own paragraph in the scroll container', () => {

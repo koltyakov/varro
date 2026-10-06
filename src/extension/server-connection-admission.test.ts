@@ -7,11 +7,13 @@ function setup(account: LocalServerAccount = { kind: 'same-user', identity: 'fir
   let url = 'http://127.0.0.1:4096';
   const inspect = vi.fn(async (): Promise<LocalServerAccount> => account);
   const confirm = vi.fn(async () => true);
-  const admission = new ServerConnectionAdmission(() => url, inspect, confirm);
+  const verifyManaged = vi.fn(async () => false);
+  const admission = new ServerConnectionAdmission(() => url, inspect, confirm, verifyManaged);
   return {
     admission,
     inspect,
     confirm,
+    verifyManaged,
     setUrl: (value: string) => {
       url = value;
     },
@@ -34,6 +36,73 @@ describe('server connection admission', () => {
     expect(confirm).not.toHaveBeenCalled();
     expect(admission.isExternal).toBe(false);
   });
+
+  it('quietly admits a verified Varro process without inventing same-user evidence', async () => {
+    const { admission, inspect, confirm, verifyManaged } = setup({ kind: 'unknown' });
+    verifyManaged.mockResolvedValue(true);
+    await admission.admit();
+    await admission.verify(true);
+    expect(inspect).toHaveBeenCalledTimes(2);
+    expect(verifyManaged).toHaveBeenCalledOnce();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(admission.confirmedAccount).toEqual({ kind: 'unknown' });
+    expect(admission.isExternal).toBe(false);
+    await admission.verify(true);
+    expect(verifyManaged).toHaveBeenCalledTimes(2);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('revalidates managed provenance on expired requests and never treats it as consent', async () => {
+    vi.useFakeTimers();
+    const { admission, confirm, verifyManaged } = setup({ kind: 'unknown' });
+    verifyManaged.mockResolvedValue(true);
+    await admission.admit();
+    vi.advanceTimersByTime(1001);
+    await admission.verify();
+    expect(verifyManaged).toHaveBeenCalledTimes(2);
+    expect(confirm).not.toHaveBeenCalled();
+    verifyManaged.mockResolvedValue(false);
+    confirm.mockResolvedValue(false);
+    vi.advanceTimersByTime(1001);
+    await expect(admission.verify()).rejects.toThrow('left untouched');
+    expect(confirm).toHaveBeenCalledOnce();
+    await expect(admission.verify()).rejects.toThrow('not been approved');
+  });
+
+  it('blocks changed managed identities without asking to connect anyway', async () => {
+    const { admission, confirm, verifyManaged } = setup({ kind: 'unknown' });
+    verifyManaged.mockRejectedValue(new Error('managed listener changed'));
+    await expect(admission.admit()).rejects.toThrow('managed listener changed');
+    await expect(admission.verify()).rejects.toThrow('not been approved');
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('does not suppress a positively identified foreign-account warning for a managed record', async () => {
+    const { admission, confirm, verifyManaged } = setup({
+      kind: 'different-user',
+      identity: 'foreign-process',
+    });
+    verifyManaged.mockResolvedValue(true);
+    await admission.admit();
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(verifyManaged).not.toHaveBeenCalled();
+    expect(admission.isExternal).toBe(true);
+  });
+
+  it.each(['reset', 'endpoint'] as const)(
+    'discards managed verification after %s changes',
+    async (change) => {
+      const { admission, confirm, verifyManaged, setUrl } = setup({ kind: 'unknown' });
+      verifyManaged.mockImplementation(async () => {
+        if (change === 'reset') admission.reset();
+        else setUrl('http://127.0.0.1:50000');
+        return true;
+      });
+      await expect(admission.admit()).rejects.toThrow('connection changed');
+      expect(admission.confirmedAccount).toBeUndefined();
+      expect(confirm).not.toHaveBeenCalled();
+    }
+  );
 
   it('forces fresh evidence after an observed process change even inside the cache window', async () => {
     const { admission, inspect } = setup();

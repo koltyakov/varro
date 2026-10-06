@@ -122,11 +122,11 @@ test('shows no-provider setup actions and triggers provider setup commands', asy
 test('recovers when the webview reloads while startup is still in progress', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=dispose-during-start');
 
-  await expect(page.getByText('Starting OpenCode...', { exact: true })).toBeVisible();
+  await expect(page.getByText('Connecting to OpenCode...', { exact: true })).toBeVisible();
 
   await page.reload();
 
-  await expect(page.getByText('Starting OpenCode...', { exact: true })).toBeVisible();
+  await expect(page.getByText('Connecting to OpenCode...', { exact: true })).toBeVisible();
   await expect(
     page.getByLabel('Back to sessions').locator('..').getByText('Startup handoff')
   ).toBeVisible();

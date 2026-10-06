@@ -4,7 +4,7 @@ import { ProcessInspectionTimeoutError } from './process-inspection-error';
 /** Coordinates consent; process management remains governed by the ownership lease. */
 export class ServerConnectionAdmission {
   private generation = 0;
-  private admitted: { url: string; account: LocalServerAccount } | null = null;
+  private admitted: { url: string; account: LocalServerAccount; managed: boolean } | null = null;
   private operation: Promise<void> | null = null;
   private checkedAt = 0;
   private external = false;
@@ -14,7 +14,8 @@ export class ServerConnectionAdmission {
   constructor(
     private readonly getUrl: () => string,
     private readonly inspect: () => Promise<LocalServerAccount>,
-    private readonly confirm: (account: LocalServerAccount, url: string) => Promise<boolean>
+    private readonly confirm: (account: LocalServerAccount, url: string) => Promise<boolean>,
+    private readonly verifyManagedConnection: () => Promise<boolean> = async () => false
   ) {}
 
   get isExternal(): boolean {
@@ -51,7 +52,10 @@ export class ServerConnectionAdmission {
       // A supplied Authorization header does not prove the server enforces it.
       let account = await this.inspect();
       assertCurrent();
-      const previousAccount = this.admitted?.url === url ? this.admitted.account : undefined;
+      const previous = this.admitted?.url === url ? this.admitted : undefined;
+      // Managed provenance is not uncertainty consent. Revalidate it on every
+      // strict admission instead of transferring approval to an unregistered listener.
+      const previousAccount = previous?.managed ? undefined : previous?.account;
       const approvedAccount =
         this.requiresUncertaintyConsent && previousAccount?.kind === 'unknown'
           ? undefined
@@ -65,13 +69,15 @@ export class ServerConnectionAdmission {
         account = await this.inspect();
         assertCurrent();
       }
+      const managed = account.kind === 'unknown' && (await this.verifyManagedConnection());
+      assertCurrent();
       const consentApplies =
         account.kind === approvedAccount?.kind &&
         (account.identity !== undefined || account.kind === 'unknown') &&
         account.identity === approvedAccount.identity;
       // Explicit uncertainty consent covers this connection only. verify(true)
       // requires a new decision on reconnect; fresh observations detect known changes.
-      if (account.kind !== 'same-user' && !consentApplies) {
+      if (account.kind !== 'same-user' && !managed && !consentApplies) {
         const confirmed = await this.confirm(account, url);
         assertCurrent();
         if (!confirmed)
@@ -93,8 +99,10 @@ export class ServerConnectionAdmission {
         account = verified;
       }
       assertCurrent();
-      this.admitted = { url, account };
-      this.external = account.kind !== 'same-user';
+      this.admitted = { url, account, managed };
+      // Missing SID evidence remains unknown. A verified Varro registration
+      // admits its own process without downgrading it to an external server.
+      this.external = account.kind !== 'same-user' && !managed;
       this.checkedAt = Date.now();
       this.requiresUncertaintyConsent = false;
     })();

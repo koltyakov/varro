@@ -1,5 +1,6 @@
 import type { Message, MessageEntry, Part } from '../../types';
 import type { QueuedAttachmentSnapshot } from './session-send';
+import type { SessionWorkspaceTarget } from '../../../shared/protocol';
 
 type PlanImplementationSendOptions = {
   queuedAttachments: QueuedAttachmentSnapshot;
@@ -9,6 +10,12 @@ type PlanImplementationSendOptions = {
 type InitSendOptions = { targetSessionId: string };
 type CommandRouting = { agent?: string; model?: string };
 type SessionCommandInput = CommandRouting & { command: string; arguments: string };
+
+export type SessionCommandOptions = {
+  targetSessionId?: string | null;
+  newSessionWorkspace?: SessionWorkspaceTarget;
+  onAccepted?: () => void;
+};
 
 export const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file containing:
 1. Build, lint, and test commands - especially the command to run a single test.
@@ -107,9 +114,9 @@ export async function initSessionWithDependencies(
 export async function runSlashCommandWithDependencies(
   deps: {
     hasCommand(name: string): boolean;
-    getCommandRouting(): CommandRouting;
+    getCommandRouting(sessionId?: string | null): CommandRouting;
     getActiveSessionId(): string | null;
-    createSession(): Promise<string | null>;
+    createSession(workspaceTarget?: SessionWorkspaceTarget): Promise<string | null>;
     startLoading(): void;
     runSessionCommand(sessionId: string, input: SessionCommandInput): Promise<MessageEntry | void>;
     shouldApplyToActiveSession(sessionId: string): boolean;
@@ -123,17 +130,21 @@ export async function runSlashCommandWithDependencies(
     setError(message: string): void;
   },
   name: string,
-  args: string
+  args: string,
+  options?: SessionCommandOptions
 ) {
   if (!deps.hasCommand(name)) {
     deps.setError(`Unknown command: /${name}`);
     return false;
   }
 
-  const routing = { ...deps.getCommandRouting() };
-  let sessionId = deps.getActiveSessionId();
+  let sessionId =
+    options?.targetSessionId !== undefined ? options.targetSessionId : deps.getActiveSessionId();
+  const routing = { ...deps.getCommandRouting(sessionId) };
   if (!sessionId) {
-    const createdId = await deps.createSession();
+    const createdId = options?.newSessionWorkspace
+      ? await deps.createSession(options.newSessionWorkspace)
+      : await deps.createSession();
     if (!createdId) return false;
     sessionId = createdId;
   }
@@ -146,6 +157,7 @@ export async function runSlashCommandWithDependencies(
       ...routing,
     });
     if (deps.shouldApplyToActiveSession(sessionId)) {
+      options?.onAccepted?.();
       if (result) {
         deps.upsertMessageInfo(result.info);
         for (const part of result.parts) {
@@ -180,10 +192,10 @@ type SessionActionDependencies = {
     options?: PlanImplementationSendOptions | InitSendOptions
   ): Promise<void | boolean | object>;
   openPlan(markdown: string): Promise<void | boolean | object>;
-  createSession(): Promise<string | null>;
+  createSession(workspaceTarget?: SessionWorkspaceTarget): Promise<string | null>;
   getMessageCount(): number;
   hasCommand(name: string): boolean;
-  getCommandRouting(): CommandRouting;
+  getCommandRouting(sessionId?: string | null): CommandRouting;
   startLoading(): void;
   runSessionCommand(sessionId: string, input: SessionCommandInput): Promise<MessageEntry | void>;
   shouldApplyToActiveSession(sessionId: string): boolean;
@@ -236,7 +248,11 @@ export class SessionActionOperations {
     });
   };
 
-  readonly runSlashCommandByName = async (name: string, args: string) => {
+  readonly runSlashCommandByName = async (
+    name: string,
+    args: string,
+    options?: SessionCommandOptions
+  ) => {
     return runSlashCommandWithDependencies(
       {
         hasCommand: this.deps.hasCommand,
@@ -256,7 +272,8 @@ export class SessionActionOperations {
         setError: this.deps.setError,
       },
       name,
-      args
+      args,
+      options
     );
   };
 }

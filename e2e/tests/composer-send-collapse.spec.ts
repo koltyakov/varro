@@ -12,6 +12,21 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
       await page.clock.install({ time: new Date('2030-01-01T00:00:00Z') });
       await page.emulateMedia({ reducedMotion: reducedMotion ? 'reduce' : 'no-preference' });
       await page.goto(`/e2e/harness/index.html?scenario=${scenario}`);
+      // Startup restores the session and its draft after the editor first appears.
+      // Finish that ownership handoff before attaching files or typing the test draft.
+      await expect
+        .poll(() =>
+          page.evaluate(async () => {
+            const path = '/src/webview/lib/state.ts';
+            // SAFETY: This read-only import is served by the isolated Vite E2E harness.
+            const { connectionInitialized, state } = (await import(path)) as {
+              connectionInitialized: () => boolean;
+              state: { messagesLoading: boolean };
+            };
+            return { initialized: connectionInitialized(), loading: state.messagesLoading };
+          })
+        )
+        .toEqual({ initialized: true, loading: false });
       const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
       const frame = page.locator('.chat-input-container').first();
       await expect(composer).toBeVisible();

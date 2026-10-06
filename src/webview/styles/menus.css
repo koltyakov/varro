@@ -1,4 +1,9 @@
 /* Unified dropdown menus */
+
+/* Keep fallback geometry out of the first painted frame while measuring the menu. */
+[data-popup-position-pending] {
+  visibility: hidden;
+}
 .themed-tooltip {
   position: fixed;
   z-index: var(--z-topmost);

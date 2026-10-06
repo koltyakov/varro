@@ -6,6 +6,7 @@ import type {
 } from '../../../shared/protocol';
 import type { SelectedModel, SessionSelectionOptions } from '../../lib/app-state-types';
 import type { QueuedAttachmentSnapshot } from '../session/session-send';
+import type { SessionCommandOptions } from '../session/session-actions';
 
 let currentOpenCodeRuntime = createOpenCodeRuntime();
 
@@ -176,8 +177,12 @@ export async function initSession() {
   await getCurrentOpenCodeRuntime().initSession();
 }
 
-export async function runSlashCommandByName(name: string, args: string) {
-  return getCurrentOpenCodeRuntime().runSlashCommandByName(name, args);
+export async function runSlashCommandByName(
+  name: string,
+  args: string,
+  options?: SessionCommandOptions
+) {
+  return getCurrentOpenCodeRuntime().runSlashCommandByName(name, args, options);
 }
 
 export async function reviewSession() {

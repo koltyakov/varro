@@ -342,16 +342,16 @@ describe('V2 generated transcript records', () => {
       {
         ...base,
         type: 'user',
-        text: 'Review this',
+        text: 'Review this with $[review]',
         agents: [{ name: 'build' }],
         skills: [{ id: 'review', name: 'Code review', text: 'Internal skill instructions' }],
       },
       'ses_one'
     );
     expect(projected.info.role).toBe('user');
-    expect(projected.parts[0]).toMatchObject({ type: 'text', text: 'Review this' });
+    expect(projected.parts[0]).toMatchObject({ type: 'text', text: 'Review this with $[review]' });
     expect(projected.parts[1]).toMatchObject({ type: 'agent', name: 'build' });
-    expect(parseSkillAttachment(String(projected.parts[2]?.text))).toBe('Code review');
+    expect(parseSkillAttachment(String(projected.parts[2]?.text))).toBe('review');
     expect(JSON.stringify(projected.parts)).not.toContain('Internal skill instructions');
     expect(new Set(projected.parts.map((part) => part.id)).size).toBe(3);
   });

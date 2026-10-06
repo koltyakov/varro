@@ -380,6 +380,26 @@ describe('popup-position', () => {
     }
   });
 
+  it('keeps a popup hidden until its initial positioning callback completes', async () => {
+    const el = document.createElement('div');
+    el.setAttribute('data-popup-position-pending', 'true');
+    const reposition = vi.fn(() => {
+      expect(el.hasAttribute('data-popup-position-pending')).toBe(true);
+      el.style.left = '24px';
+    });
+
+    const cleanup = observePopupViewport(el, reposition);
+    try {
+      expect(el.hasAttribute('data-popup-position-pending')).toBe(true);
+      await Promise.resolve();
+      expect(reposition).toHaveBeenCalledOnce();
+      expect(el.style.left).toBe('24px');
+      expect(el.hasAttribute('data-popup-position-pending')).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
   it('cancels a queued reposition during cleanup', async () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     Object.defineProperty(globalThis, 'ResizeObserver', {
@@ -387,13 +407,16 @@ describe('popup-position', () => {
       writable: true,
       value: undefined,
     });
+    const el = document.createElement('div');
+    el.setAttribute('data-popup-position-pending', 'true');
     const reposition = vi.fn();
 
     try {
-      const cleanup = observePopupViewport(document.createElement('div'), reposition);
+      const cleanup = observePopupViewport(el, reposition);
       cleanup();
       await Promise.resolve();
       expect(reposition).not.toHaveBeenCalled();
+      expect(el.hasAttribute('data-popup-position-pending')).toBe(true);
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;
     }

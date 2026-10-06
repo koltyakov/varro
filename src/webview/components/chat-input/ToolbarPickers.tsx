@@ -260,6 +260,7 @@ export function WorkspacePicker(props: {
         <div
           ref={setPopoverRef}
           class="toolbar-popover workspace-popover"
+          data-popup-position-pending
           style={selectedIconStyle}
           onClick={(e) => e.stopPropagation()}
         >
@@ -501,6 +502,7 @@ export function PermissionModePicker(props: {
         <div
           ref={setPopoverRef}
           class="toolbar-popover permission-mode-popover"
+          data-popup-position-pending
           style={selectedIconStyle}
           onClick={(e) => e.stopPropagation()}
         >
@@ -707,6 +709,7 @@ export function AgentPicker(props: {
         <div
           ref={setPopoverRef}
           class="toolbar-popover agent-popover"
+          data-popup-position-pending
           style={selectedIconStyle}
           onClick={(e) => e.stopPropagation()}
         >
@@ -877,6 +880,7 @@ export function VariantPicker(props: {
         <div
           ref={setPopoverRef}
           class="toolbar-popover variant-popover"
+          data-popup-position-pending
           onClick={(e) => e.stopPropagation()}
           style={{ ...popoverStyle(), ...selectedIconStyle }}
         >

@@ -28,6 +28,7 @@ import type * as ServerUtils from './server-utils';
 import { Service } from '@opencode/client/service';
 import * as processInspection from './process-inspection';
 import { getVarroStateDirectory } from './varro-state-paths';
+import { ServerConnectionAdmission } from './server-connection-admission';
 
 const { loggerMock, spawnMock, vscodeMock, waitForProcessExitMock } = vi.hoisted(() => ({
   loggerMock: {
@@ -1181,6 +1182,848 @@ describe('OpenCodeProcess startup termination', () => {
 });
 
 describe('OpenCodeProcess server ownership leases', () => {
+  describe('same-port credential reconnection', () => {
+    async function fixture(platform: 'linux' | 'win32' = 'linux', port = 51197, pid = 42425) {
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      vi.stubEnv('OPENCODE_SERVER_PASSWORD', undefined);
+      vi.stubEnv('OPENCODE_SERVER_USERNAME', undefined);
+      const root = await mkdtemp(join(tmpdir(), 'varro-credential-reconnection-'));
+      vi.stubEnv('VARRO_TEST_STATE_ROOT', root);
+      const directory = join(root, 'servers');
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      const path = join(directory, 'varro-opencode-server-4096.json');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid,
+        port,
+        executable: platform === 'win32' ? 'C:\\opencode.exe' : '/usr/bin/opencode',
+        birthIdentity:
+          platform === 'win32'
+            ? 'win32:639268000000000000'
+            : 'linux:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:12345',
+        owner: 'previous-launch',
+        host: 'previous-editor',
+        state: 'active',
+        createdAt: Date.now(),
+        password: 'private-reboot-password',
+        username: 'fixture-user',
+      };
+      const raw = JSON.stringify(lease);
+      await writeFile(path, raw, { mode: 0o600 });
+      await writeFile(`${path}.managed`, raw, { mode: 0o600 });
+      const listeners = vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue([42424]);
+      vi.spyOn(processInspection, 'readProcessBirthIdentity').mockResolvedValue(
+        lease.birthIdentity
+      );
+      vi.spyOn(process, 'kill').mockReturnValue(true);
+      const authorization = `Basic ${Buffer.from(`fixture-user:${lease.password}`).toString('base64')}`;
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async (_url, options) =>
+          new Headers(options?.headers).get('Authorization') === authorization
+            ? new Response(JSON.stringify({ version: '2.0.24', pid: 42424 }))
+            : new Response(null, { status: 401 })
+        );
+      return {
+        root,
+        path,
+        lease,
+        raw,
+        listeners,
+        authorization,
+        fetchMock,
+        manager: new OpenCodeProcess('auto', true),
+      };
+    }
+
+    it.each(
+      (['linux', 'win32'] as const).flatMap((platform) =>
+        (['changed-pid', 'reused-pid', 'inspection-unavailable'] as const).map((change) => ({
+          platform,
+          change,
+        }))
+      )
+    )(
+      'reconnects quietly on $platform after $change without stop authority',
+      async ({ platform, change }) => {
+        const { root, path, lease, raw, listeners, authorization, fetchMock, manager } =
+          await fixture(platform);
+        try {
+          if (change === 'reused-pid') {
+            listeners.mockResolvedValue([lease.pid]);
+            vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue(
+              lease.executable
+            );
+            vi.spyOn(processInspection, 'readProcessBirthIdentity').mockResolvedValue(
+              `${lease.birthIdentity}-new-boot`
+            );
+            vi.spyOn(processInspection, 'readWindowsProcessIdentity').mockResolvedValue({
+              executable: lease.executable,
+              birthIdentity: `${lease.birthIdentity}-new-boot`,
+            });
+          }
+          if (change === 'inspection-unavailable')
+            listeners.mockRejectedValue(new Error('Process inspection unavailable'));
+          await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
+          expect(manager.hasCredentialVerifiedConnection).toBe(true);
+          expect(manager.serverAuthorization).toBe(authorization);
+          const confirm = vi.fn(async () => true);
+          const admission = new ServerConnectionAdmission(
+            () => manager.url,
+            async () => ({ kind: 'unknown' }),
+            confirm,
+            () => manager.verifyManagedServerAdmission()
+          );
+          await admission.admit();
+          await admission.verify(true);
+          await admission.verify(true);
+          expect(confirm).not.toHaveBeenCalled();
+          expect(admission.isExternal).toBe(false);
+          expect(manager.connectionIdentity).toBeUndefined();
+          expect(manager.managedProcess).toBe(false);
+          await manager.prepareForHealthyExistingServer();
+          await expect(manager.takeOwnershipOfExistingServer()).resolves.toBe(false);
+          await expect(manager.recoverManagedServerOwnership()).resolves.toBe(false);
+          await expect(manager.refreshManagedServerOwnership()).resolves.toBe(false);
+          expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith(manager.url))).toBe(
+            true
+          );
+          await manager.disposeProcess({ stopProcess: true });
+          expect(await readFile(path, 'utf8')).toBe(raw);
+          expect(await readFile(`${path}.managed`, 'utf8')).toBe(raw);
+          expect(vi.mocked(process.kill).mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    );
+
+    it.each([
+      'anonymous-access',
+      'arbitrary-password',
+      'rejected-password',
+      'unsupported-version',
+      'changed-record',
+      'public-record',
+    ] as const)('does not grant credential reconnection with %s', async (failure) => {
+      const { root, path, lease, raw, authorization, fetchMock, manager } = await fixture();
+      try {
+        if (failure === 'anonymous-access') fetchMock.mockResolvedValue(new Response('{}'));
+        if (failure === 'arbitrary-password')
+          fetchMock.mockImplementation(async (_url, options) =>
+            options?.headers ? new Response('{}') : new Response(null, { status: 401 })
+          );
+        if (failure === 'rejected-password')
+          fetchMock.mockImplementation(async () => new Response(null, { status: 401 }));
+        if (failure === 'unsupported-version' || failure === 'changed-record')
+          fetchMock.mockImplementation(async (_url, options) => {
+            if (new Headers(options?.headers).get('Authorization') !== authorization)
+              return new Response(null, { status: 401 });
+            if (failure === 'changed-record')
+              await writeFile(path, JSON.stringify({ ...lease, password: 'changed-password' }), {
+                mode: 0o600,
+              });
+            return new Response(
+              JSON.stringify({
+                version: failure === 'unsupported-version' ? '9.0.0' : '2.0.24',
+                pid: 42424,
+              })
+            );
+          });
+        if (failure === 'public-record') await chmod(path, 0o644);
+        await expect(manager.refreshStartupRegistration()).rejects.toThrow();
+        expect(manager.hasCredentialVerifiedConnection).toBe(false);
+        expect(manager.serverAuthorization).toBeUndefined();
+        if (failure !== 'changed-record') expect(await readFile(path, 'utf8')).toBe(raw);
+        if (failure === 'public-record') expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('invalidates same-port credentials on endpoint or saved-password changes', async () => {
+      const { root, path, lease, manager } = await fixture();
+      try {
+        await manager.refreshStartupRegistration();
+        manager.port += 1;
+        await expect(manager.verifyManagedServerConnection()).rejects.toThrow('endpoint changed');
+        manager.port = lease.port;
+        await writeFile(path, JSON.stringify({ ...lease, password: 'changed-password' }), {
+          mode: 0o600,
+        });
+        await expect(manager.verifyManagedServerConnection(true)).rejects.toThrow(
+          'credentials changed'
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it.each(['missing', 'html', 'public-html'] as const)(
+      'verifies V1 credentials with %s obsolete health routes',
+      async (route) => {
+        const { root, manager, fetchMock, authorization } = await fixture();
+        fetchMock.mockImplementation(async (url, options) => {
+          if (route === 'public-html' && !String(url).endsWith('/global/health'))
+            return new Response('<html>OpenCode frontend</html>', {
+              headers: { 'content-type': 'text/html' },
+            });
+          if (new Headers(options?.headers).get('Authorization') !== authorization)
+            return new Response(null, { status: 401 });
+          return String(url).endsWith('/global/health')
+            ? new Response(JSON.stringify({ healthy: true, version: '1.18.34' }))
+            : route === 'html'
+              ? new Response('<html>OpenCode frontend</html>', {
+                  headers: { 'content-type': 'text/html' },
+                })
+              : new Response(null, { status: 404 });
+        });
+        try {
+          await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
+          expect(manager.hasCredentialVerifiedConnection).toBe(true);
+          expect(manager.managedProcess).toBe(false);
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    );
+
+    it('cancels credential recovery without publishing a connection', async () => {
+      const { root, manager, fetchMock } = await fixture();
+      const controller = new AbortController();
+      fetchMock.mockImplementation(async () => {
+        controller.abort(new Error('cancelled credential recovery'));
+        throw controller.signal.reason;
+      });
+      try {
+        await expect(manager.refreshStartupRegistration(controller.signal)).rejects.toThrow(
+          'cancelled credential recovery'
+        );
+        expect(manager.hasCredentialVerifiedConnection).toBe(false);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it.each(
+      (['linux', 'win32'] as const).flatMap((platform) =>
+        (['false', 'throws'] as const).map((inspection) => ({ platform, inspection }))
+      )
+    )(
+      'attaches a fresh $platform launch when ownership inspection $inspection and recovers without a lease',
+      async ({ platform, inspection }) => {
+        const { root, path, lease, authorization, listeners } = await fixture(platform);
+        try {
+          await rm(path);
+          await rm(`${path}.managed`);
+          vi.stubEnv('OPENCODE_SERVER_PASSWORD', lease.password);
+          vi.stubEnv('OPENCODE_SERVER_USERNAME', lease.username);
+          const manager = new OpenCodeProcess('auto', true, 'fixture-opencode');
+          manager.port = lease.port;
+          const child = Object.assign(new EventEmitter(), {
+            pid: 42424,
+            stdout: new EventEmitter(),
+            stderr: new EventEmitter(),
+            exitCode: null,
+            signalCode: null,
+            kill: vi.fn(),
+          });
+          spawnMock.mockReturnValue(child);
+          const proc = manager.launchServer({
+            getWorkspaceCwd: () => undefined,
+            onStdout: vi.fn(),
+            onStderr: vi.fn(),
+            onExit: vi.fn(),
+            onError: vi.fn(),
+          });
+          const confirm = vi.spyOn(manager, 'confirmManagedServerOwnership');
+          if (inspection === 'throws')
+            confirm.mockRejectedValue(
+              new Error(
+                "The shell cannot be started. The type initializer for 'System.Net.ServicePointManager' threw an exception."
+              )
+            );
+          else confirm.mockResolvedValue(false);
+          await expect(manager.confirmManagedServerConnection(proc)).resolves.toBe(true);
+          expect(manager.managedProcess).toBe(false);
+          expect(manager.hasCredentialVerifiedConnection).toBe(true);
+          expect(manager.process).toBeNull();
+          expect(manager.serverAuthorization).toBe(authorization);
+          const connection = asRecord(JSON.parse(await readFile(`${path}.credentials`, 'utf8')));
+          expect(connection?.port).toBe(lease.port);
+          expect(connection?.password === lease.password).toBe(true);
+          expect(connection?.pid).toBeUndefined();
+          await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+          await manager.terminateLaunchAttempt(proc);
+          await manager.disposeProcess({ stopProcess: true });
+          expect(child.kill).not.toHaveBeenCalled();
+          // A stale marker must not resurrect the same blocking error on the next reload.
+          await writeFile(`${path}.managed`, JSON.stringify(lease), { mode: 0o600 });
+          listeners.mockRejectedValue(new Error('Windows process inspection unavailable'));
+          vi.stubEnv('OPENCODE_SERVER_PASSWORD', undefined);
+          vi.stubEnv('OPENCODE_SERVER_USERNAME', undefined);
+          const reloaded = new OpenCodeProcess('auto', true);
+          await expect(reloaded.refreshStartupRegistration()).resolves.toBe(true);
+          await expect(reloaded.verifyManagedServerAdmission()).resolves.toBe(true);
+          expect(reloaded.serverAuthorization).toBe(authorization);
+          expect(reloaded.managedProcess).toBe(false);
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    );
+
+    it.each(['lease', 'connection-only', 'legacy-vault', 'different-key'] as const)(
+      'recovers a changed Windows service port through %s without PowerShell or lifecycle authority',
+      async (source) => {
+        const { root, path, lease, raw, authorization, listeners, fetchMock } = await fixture(
+          'win32',
+          64344,
+          7016
+        );
+        try {
+          const discoveredUrl = 'http://127.0.0.1:63516';
+          if (source === 'connection-only' || source === 'legacy-vault') {
+            await rm(path);
+            if (source === 'connection-only')
+              await writeFile(
+                `${path}.credentials`,
+                JSON.stringify({
+                  version: 1,
+                  owner: lease.owner,
+                  createdAt: lease.createdAt,
+                  port: lease.port,
+                  password: lease.password,
+                  username: lease.username,
+                }),
+                { mode: 0o600 }
+              );
+          }
+          listeners.mockRejectedValue(new Error('PowerShell initialization failed'));
+          vi.mocked(Service.discover).mockResolvedValue({
+            url: discoveredUrl,
+            auth: {
+              type: 'basic',
+              username: lease.username!,
+              password: lease.password!,
+            },
+          });
+          fetchMock.mockImplementation(async (url, options) => {
+            if (!String(url).startsWith(discoveredUrl)) throw new Error('Old listener is gone');
+            return new Headers(options?.headers).get('Authorization') === authorization
+              ? new Response(JSON.stringify({ version: '2.0.24', pid: 16616 }))
+              : new Response(null, { status: 401 });
+          });
+          const manager = new OpenCodeProcess(
+            'auto',
+            true,
+            '',
+            false,
+            undefined,
+            source === 'different-key'
+              ? join(root, 'servers/varro-opencode-server-4196.json')
+              : undefined
+          );
+          if (source === 'legacy-vault')
+            await manager.recoverLegacyConnectionCredentials({
+              get: vi.fn(async () =>
+                JSON.stringify({
+                  owner: lease.owner,
+                  password: lease.password,
+                  username: lease.username,
+                })
+              ),
+            });
+          if (source === 'different-key') {
+            manager.rememberInstalledCliVersion('2.0.24');
+            await expect(manager.discoverSharedServer()).resolves.toBe(true);
+            await expect(manager.refreshDiscoveredServerRegistration()).resolves.toBe(true);
+          } else await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
+          expect(manager.url).toBe(discoveredUrl);
+          expect(manager.serverAuthorization).toBe(authorization);
+          expect(manager.managedProcess).toBe(false);
+          expect(manager.connectionIdentity).toBeUndefined();
+          await expect(manager.verifyManagedServerAdmission()).resolves.toBe(true);
+          await expect(manager.verifyManagedServerConnection(true)).resolves.toBeUndefined();
+          await manager.disposeProcess({ stopProcess: true });
+          if (source !== 'connection-only' && source !== 'legacy-vault')
+            expect(await readFile(path, 'utf8')).toBe(raw);
+          expect(await readFile(`${path}.managed`, 'utf8')).toBe(raw);
+          expect(vi.mocked(process.kill).mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    );
+
+    it('keeps the discovered endpoint when an older registered listener is still alive', async () => {
+      const { root, path, lease, raw, listeners, manager } = await fixture('linux');
+      try {
+        const url = 'http://127.0.0.1:63516';
+        listeners.mockImplementation(async (port) => [port === lease.port ? lease.pid : 16616]);
+        vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue(lease.executable);
+        vi.spyOn(processInspection, 'inspectLocalServerAccount').mockResolvedValue({
+          kind: 'unknown',
+        });
+        vi.mocked(Service.discover).mockResolvedValue({
+          url,
+          auth: {
+            type: 'basic',
+            username: lease.username!,
+            password: lease.password!,
+          },
+        });
+        manager.rememberInstalledCliVersion('2.0.24');
+        await manager.discoverSharedServer();
+        await expect(manager.refreshDiscoveredServerRegistration()).resolves.toBe(true);
+        expect(manager.url).toBe(url);
+        expect(manager.hasCredentialVerifiedConnection).toBe(true);
+        expect(manager.managedProcess).toBe(false);
+        expect(await readFile(path, 'utf8')).toBe(raw);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('does not transfer a saved password to a differently authenticated discovered service', async () => {
+      const { root, manager, listeners, fetchMock } = await fixture('win32');
+      try {
+        listeners.mockRejectedValue(new Error('Windows process inspection unavailable'));
+        fetchMock.mockImplementation(async () => {
+          throw new Error('Old port is closed');
+        });
+        vi.mocked(Service.discover).mockResolvedValue({
+          url: 'http://127.0.0.1:63516',
+          auth: {
+            type: 'basic',
+            username: 'fixture-user',
+            password: 'unrelated-service-password',
+          },
+        });
+        await expect(manager.refreshStartupRegistration()).rejects.toThrow(
+          'Windows process inspection unavailable'
+        );
+        expect(manager.hasCredentialVerifiedConnection).toBe(false);
+        expect(manager.port).toBe(51197);
+        expect(fetchMock.mock.calls.every(([url]) => !String(url).includes(':63516'))).toBe(true);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('does not use a surviving marker to recover credentials belonging to another launch', async () => {
+      const { root, path, manager, lease, fetchMock } = await fixture('win32');
+      try {
+        await rm(path);
+        const get = vi.fn(async () =>
+          JSON.stringify({
+            owner: 'unrelated-launch',
+            password: lease.password,
+            username: lease.username,
+          })
+        );
+        await manager.recoverLegacyConnectionCredentials({ get });
+        expect(get).toHaveBeenCalledOnce();
+        await expect(stat(`${path}.credentials`)).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('does not query the credential vault when a private lease already carries a password', async () => {
+      const { root, manager } = await fixture('win32');
+      try {
+        const get = vi.fn(async (): Promise<never> => new Promise<never>(() => {}));
+        await manager.recoverLegacyConnectionCredentials({ get });
+        expect(get).not.toHaveBeenCalled();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it.each(
+    (['win32', 'linux'] as const).flatMap((platform) =>
+      (['lease', 'marker-only', 'discovered-marker', 'late-lease'] as const).map((record) => ({
+        platform,
+        record,
+      }))
+    )
+  )(
+    'reconnects quietly on $platform using real $record ownership records',
+    async ({ platform, record }) => {
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      const root = await mkdtemp(join(tmpdir(), `varro-${platform}-reconnect-`));
+      vi.stubEnv('VARRO_TEST_STATE_ROOT', root);
+      const directory = join(root, 'servers');
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      const automaticPath = join(directory, 'varro-opencode-server-4096.json');
+      const path =
+        record === 'discovered-marker'
+          ? join(directory, 'varro-opencode-server-4196.json')
+          : automaticPath;
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: 42424,
+        port: 51197,
+        executable: platform === 'win32' ? 'C:\\Users\\fixture\\opencode.exe' : '/usr/bin/opencode',
+        birthIdentity:
+          platform === 'win32'
+            ? 'win32:639268000000000000'
+            : 'linux:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:12345',
+        owner: 'varro-launch',
+        host: 'previous-vscode',
+        state: 'relinquished',
+        createdAt: Date.now(),
+        password: 'private-fixture-password',
+      };
+      const marker = {
+        pid: lease.pid,
+        port: lease.port,
+        executable: lease.executable,
+        birthIdentity: lease.birthIdentity,
+        owner: lease.owner,
+        createdAt: lease.createdAt,
+      };
+      vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue([lease.pid]);
+      vi.spyOn(processInspection, 'readWindowsProcessIdentity').mockResolvedValue({
+        executable: lease.executable,
+        birthIdentity: lease.birthIdentity,
+      });
+      vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue(lease.executable);
+      vi.spyOn(processInspection, 'readProcessBirthIdentity').mockResolvedValue(
+        lease.birthIdentity
+      );
+      vi.spyOn(process, 'kill').mockReturnValue(true);
+      const inspect = vi.fn(async (): Promise<processInspection.LocalServerAccount> => ({
+        kind: 'unknown',
+      }));
+      const confirm = vi.fn(async () => true);
+      try {
+        if (record !== 'late-lease') {
+          await writeFile(`${path}.managed`, JSON.stringify(marker), { mode: 0o600 });
+          if (record === 'lease') await writeFile(path, JSON.stringify(lease), { mode: 0o600 });
+        }
+        for (let editor = 0; editor < 2; editor += 1) {
+          const manager = new OpenCodeProcess('auto', true);
+          manager.port = lease.port;
+          if (record === 'discovered-marker') await manager.refreshDiscoveredServerRegistration();
+          else await manager.refreshStartupRegistration();
+          if (record === 'late-lease')
+            await writeFile(path, JSON.stringify(lease), { mode: 0o600 });
+          const admission = new ServerConnectionAdmission(
+            () => manager.url,
+            inspect,
+            confirm,
+            () => manager.verifyManagedServerAdmission()
+          );
+          await admission.admit();
+          await admission.verify(true);
+          await admission.verify(true);
+          await admission.verify(false, true);
+          expect(confirm).not.toHaveBeenCalled();
+          expect(admission.isExternal).toBe(false);
+          expect(admission.confirmedAccount).toEqual({ kind: 'unknown' });
+          // Quiet attachment alone must not claim lifecycle ownership or create a lease.
+          expect(manager.managedProcess).toBe(false);
+          if (record === 'marker-only' || record === 'discovered-marker')
+            await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+          else expect(manager.serverAuthorization).toBeDefined();
+          await manager.disposeProcess({ stopProcess: false });
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(
+    (['linux', 'win32'] as const).flatMap((platform) =>
+      (['lease', 'marker'] as const).flatMap((record) =>
+        (['same-launch', 'new-launch-token'] as const).map((change) => ({
+          platform,
+          record,
+          change,
+        }))
+      )
+    )
+  )(
+    'checks $platform $record ownership handoff during admission with $change',
+    async ({ platform, record, change }) => {
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      const root = await mkdtemp(join(tmpdir(), `varro-${platform}-admission-handoff-`));
+      vi.stubEnv('VARRO_TEST_STATE_ROOT', root);
+      const directory = join(root, 'servers');
+      const path = join(directory, 'varro-opencode-server-4096.json');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: 42424,
+        port: 51197,
+        executable: platform === 'win32' ? 'C:\\Users\\fixture\\opencode.exe' : '/usr/bin/opencode',
+        birthIdentity:
+          platform === 'win32'
+            ? 'win32:639268000000000000'
+            : 'linux:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:12345',
+        owner: 'original-varro-launch',
+        host: 'previous-editor',
+        state: 'relinquished',
+        createdAt: Date.now(),
+      };
+      vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue([lease.pid]);
+      vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue(lease.executable);
+      const readBirth = vi
+        .spyOn(processInspection, 'readProcessBirthIdentity')
+        .mockResolvedValue(lease.birthIdentity);
+      const readWindowsIdentity = vi
+        .spyOn(processInspection, 'readWindowsProcessIdentity')
+        .mockResolvedValue({
+          executable: lease.executable,
+          birthIdentity: lease.birthIdentity,
+        });
+      if (platform === 'win32') {
+        spawnMock.mockImplementation((command: string) => {
+          const child = Object.assign(new EventEmitter(), {
+            stdout: new EventEmitter(),
+            stderr: new EventEmitter(),
+            kill: vi.fn(),
+          });
+          queueMicrotask(() => {
+            if (command === 'netstat.exe') {
+              child.stdout.emit(
+                'data',
+                Buffer.from(`TCP 127.0.0.1:${lease.port} 0.0.0.0:0 LISTENING ${lease.pid}\n`)
+              );
+              child.emit('close', 0);
+            } else {
+              child.stderr.emit(
+                'data',
+                Buffer.from(
+                  "The shell cannot be started. The type initializer for 'System.Net.ServicePointManager' threw an exception."
+                )
+              );
+              child.emit('close', 1);
+            }
+          });
+          return child;
+        });
+      }
+      vi.spyOn(process, 'kill').mockReturnValue(true);
+      const confirm = vi.fn(async () => true);
+      try {
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        await writeFile(`${path}.managed`, JSON.stringify(lease), { mode: 0o600 });
+        if (record === 'lease') await writeFile(path, JSON.stringify(lease), { mode: 0o600 });
+        const manager = new OpenCodeProcess('auto', true);
+        await manager.refreshStartupRegistration();
+        let inspections = 0;
+        let claimed = false;
+        const inspectDuringHandoff = async () => {
+          inspections += 1;
+          if (!claimed && inspections === (record === 'marker' ? 2 : 1)) {
+            claimed = true;
+            if (record === 'lease')
+              await expect(manager.recoverManagedServerOwnership()).resolves.toBe(true);
+            else await expect(manager.takeOwnershipOfExistingServer()).resolves.toBe(true);
+            if (change === 'new-launch-token') {
+              const current = JSON.parse(
+                await readFile(path, 'utf8')
+              ) as ManagedServerOwnershipLease;
+              await writeFile(path, JSON.stringify({ ...current, owner: 'replacement-launch' }), {
+                mode: 0o600,
+              });
+              await manager.refreshStartupRegistration();
+            }
+          }
+          return lease.birthIdentity;
+        };
+        if (platform === 'win32')
+          readWindowsIdentity.mockImplementation(async () => ({
+            executable: lease.executable,
+            birthIdentity: await inspectDuringHandoff(),
+          }));
+        else readBirth.mockImplementation(inspectDuringHandoff);
+        const admission = new ServerConnectionAdmission(
+          () => manager.url,
+          async () =>
+            platform === 'win32'
+              ? processInspection.inspectLocalServerAccount(manager.port)
+              : { kind: 'unknown' },
+          confirm,
+          () => manager.verifyManagedServerAdmission()
+        );
+        if (change === 'new-launch-token') {
+          await expect(admission.admit()).rejects.toThrow('changed');
+          await expect(admission.verify()).rejects.toThrow('not been approved');
+        } else {
+          await admission.admit();
+          await admission.verify(true);
+          await admission.verify(true);
+          expect(admission.isExternal).toBe(false);
+        }
+        expect(claimed).toBe(true);
+        expect(confirm).not.toHaveBeenCalled();
+        expect(manager.managedProcess).toBe(true);
+        if (platform === 'win32')
+          expect(loggerMock.warn.mock.calls.flat().join('\n')).toContain(
+            'System.Net.ServicePointManager'
+          );
+        await manager.disposeProcess({ stopProcess: false });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['matching-endpoint', 'different-endpoint'] as const)(
+    'recreates a Linux marker lease with credentials confined to the %s',
+    async (endpoint) => {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-linux-marker-credentials-'));
+      vi.stubEnv('VARRO_TEST_STATE_ROOT', root);
+      const directory = join(root, 'servers');
+      const path = join(directory, 'varro-opencode-server-4096.json');
+      const marker = {
+        pid: 42424,
+        port: 51197,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'linux:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:12345',
+        owner: 'original-varro-launch',
+        createdAt: Date.now(),
+      };
+      const password = 'fixture-discovered-password';
+      vi.mocked(Service.discover).mockResolvedValue({
+        url: `http://127.0.0.1:${endpoint === 'matching-endpoint' ? marker.port : marker.port + 1}`,
+        auth: { type: 'basic', username: 'fixture-user', password },
+      });
+      vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue([marker.pid]);
+      vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue(marker.executable);
+      vi.spyOn(processInspection, 'readProcessBirthIdentity').mockResolvedValue(
+        marker.birthIdentity
+      );
+      vi.spyOn(process, 'kill').mockReturnValue(true);
+      try {
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        await writeFile(`${path}.managed`, JSON.stringify(marker), { mode: 0o600 });
+        const manager = new OpenCodeProcess('auto', true);
+        manager.rememberInstalledCliVersion('2.0.24');
+        await expect(manager.discoverSharedServer()).resolves.toBe(true);
+        await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
+        await expect(manager.verifyManagedServerAdmission()).resolves.toBe(true);
+        await manager.prepareForHealthyExistingServer();
+        expect(manager.managedProcess).toBe(true);
+        const recovered = JSON.parse(await readFile(path, 'utf8')) as ManagedServerOwnershipLease;
+        if (endpoint === 'matching-endpoint') {
+          expect(recovered.password).toBe(password);
+          expect(recovered.username).toBe('fixture-user');
+          await manager.disposeProcess({ stopProcess: false });
+          const reconnected = new OpenCodeProcess('auto', true);
+          await expect(reconnected.refreshStartupRegistration()).resolves.toBe(true);
+          expect(reconnected.serverAuthorization).toBe(
+            `Basic ${Buffer.from(`fixture-user:${password}`).toString('base64')}`
+          );
+        } else {
+          expect(recovered.password).toBeUndefined();
+          expect(recovered.username).toBeUndefined();
+          await manager.disposeProcess({ stopProcess: false });
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    'missing-identity',
+    'wrong-port',
+    'ambiguous-listener',
+    'reused-pid',
+    'wrong-executable',
+  ] as const)('does not quietly admit a Windows ownership marker with %s', async (failure) => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const root = await mkdtemp(join(tmpdir(), 'varro-windows-marker-rejection-'));
+    const path = join(root, 'varro-opencode-server-4096.json');
+    const marker = {
+      pid: 42424,
+      port: failure === 'wrong-port' ? 51198 : 51197,
+      executable: 'C:\\Users\\fixture\\opencode.exe',
+      birthIdentity: 'win32:639268000000000000',
+      owner: 'varro-launch',
+      createdAt: Date.now(),
+    };
+    vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue(
+      failure === 'ambiguous-listener' ? [marker.pid, marker.pid + 1] : [marker.pid]
+    );
+    vi.spyOn(processInspection, 'readWindowsProcessIdentity').mockResolvedValue({
+      executable: failure === 'wrong-executable' ? 'C:\\other.exe' : marker.executable,
+      birthIdentity: failure === 'reused-pid' ? 'win32:639268000000000001' : marker.birthIdentity,
+    });
+    vi.spyOn(processInspection, 'readProcessBirthIdentity').mockResolvedValue(marker.birthIdentity);
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    try {
+      await writeFile(
+        `${path}.managed`,
+        JSON.stringify(
+          failure === 'missing-identity'
+            ? { pid: marker.pid, owner: marker.owner, createdAt: marker.createdAt }
+            : marker
+        )
+      );
+      const manager = new OpenCodeProcess('auto', true, '', false, undefined, path);
+      manager.port = 51197;
+      await expect(manager.verifyManagedServerAdmission()).rejects.toThrow();
+      expect(manager.managedProcess).toBe(false);
+      await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['removed', 'replaced'] as const)(
+    'blocks quiet Windows admission when the marker is %s during inspection',
+    async (change) => {
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'varro-windows-marker-change-'));
+      const path = join(root, 'varro-opencode-server-4096.json');
+      const marker = {
+        pid: 42424,
+        port: 51197,
+        executable: 'C:\\Users\\fixture\\opencode.exe',
+        birthIdentity: 'win32:639268000000000000',
+        owner: 'varro-launch',
+        createdAt: Date.now(),
+      };
+      vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue([marker.pid]);
+      let inspections = 0;
+      vi.spyOn(processInspection, 'readWindowsProcessIdentity').mockImplementation(async () => {
+        inspections += 1;
+        if (inspections === 2) {
+          if (change === 'removed') await rm(`${path}.managed`);
+          else
+            await writeFile(`${path}.managed`, JSON.stringify({ ...marker, owner: 'replacement' }));
+        }
+        return { executable: marker.executable, birthIdentity: marker.birthIdentity };
+      });
+      const confirm = vi.fn(async () => true);
+      try {
+        await writeFile(`${path}.managed`, JSON.stringify(marker));
+        const manager = new OpenCodeProcess('auto', true, '', false, undefined, path);
+        manager.port = marker.port;
+        const admission = new ServerConnectionAdmission(
+          () => manager.url,
+          async () => ({ kind: 'unknown' }),
+          confirm,
+          () => manager.verifyManagedServerAdmission()
+        );
+        await expect(admission.admit()).rejects.toThrow('marker changed');
+        expect(confirm).not.toHaveBeenCalled();
+        await expect(admission.verify()).rejects.toThrow('not been approved');
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   describe('credential-backed shared-service replacement', () => {
     async function fixture(automaticKey = false) {
       Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
@@ -1230,13 +2073,20 @@ describe('OpenCodeProcess server ownership leases', () => {
       return { root, directory, path, lease, manager, kill, account, fetchMock };
     }
 
-    it.each(['different-key', 'automatic-key', 'reused-pid', 'multiple-retired-records'])(
+    it.each([
+      'different-key',
+      'automatic-key',
+      'reused-pid',
+      'multiple-retired-records',
+      'unknown-account',
+    ])(
       'recovers a replacement through %s without restarting or carrying obsolete config',
       async (mode) => {
         const state = await fixture(mode === 'automatic-key');
         const { root, path, lease, manager, kill, fetchMock } = state;
         let selectedPath = path;
         try {
+          if (mode === 'unknown-account') state.account.mockResolvedValue({ kind: 'unknown' });
           if (mode === 'reused-pid') {
             kill.mockImplementation(() => true);
             vi.spyOn(processInspection, 'readProcessBirthIdentity').mockImplementation(
@@ -1273,6 +2123,7 @@ describe('OpenCodeProcess server ownership leases', () => {
           expect(manager.serverOwnership).toBe('current-host');
           expect(manager.managedProcessId).toBe(MOCK_LINUX_PID);
           await expect(manager.verifyManagedServerConnection(true)).resolves.toBeUndefined();
+          await expect(manager.verifyManagedServerAdmission()).resolves.toBe(true);
           expect(fetchMock).toHaveBeenCalledWith(
             'http://127.0.0.1:49374/api/info',
             expect.objectContaining({
@@ -1311,7 +2162,6 @@ describe('OpenCodeProcess server ownership leases', () => {
       'rejected-password',
       'wrong-http-pid',
       'foreign-user',
-      'unknown-user',
       'live-original',
       'unknown-original',
       'wrong-executable',
@@ -1320,9 +2170,22 @@ describe('OpenCodeProcess server ownership leases', () => {
       'busy-claim',
       'changed-listener',
       'changed-record',
-    ])('does not recover a replacement with %s evidence', async (mode) => {
+      'unknown-account-wrong-password',
+      'unknown-account-anonymous-access',
+      'unknown-account-wrong-http-pid',
+      'unknown-account-live-original',
+      'unknown-account-wrong-executable',
+      'unknown-account-changed-record',
+      'unknown-to-foreign',
+    ])('does not recover a replacement with %s evidence', async (scenario) => {
       const { root, path, lease, manager, kill, account, fetchMock } = await fixture();
+      const mode = scenario.replace('unknown-account-', '');
       try {
+        if (scenario.startsWith('unknown-account-')) account.mockResolvedValue({ kind: 'unknown' });
+        if (mode === 'unknown-to-foreign')
+          account
+            .mockResolvedValueOnce({ kind: 'unknown' })
+            .mockResolvedValue({ kind: 'different-user', identity: 'foreign' });
         if (mode === 'wrong-password' || mode === 'wrong-username' || mode === 'wrong-executable') {
           const altered = { ...lease };
           if (mode === 'wrong-password') altered.password = 'unrelated-password';
@@ -1341,7 +2204,6 @@ describe('OpenCodeProcess server ownership leases', () => {
           );
         if (mode === 'foreign-user')
           account.mockResolvedValue({ kind: 'different-user', identity: 'foreign' });
-        if (mode === 'unknown-user') account.mockResolvedValue({ kind: 'unknown' });
         if (mode === 'live-original' || mode === 'unknown-original')
           kill.mockImplementation(() => true);
         if (mode === 'unknown-original')
@@ -1376,7 +2238,15 @@ describe('OpenCodeProcess server ownership leases', () => {
           });
         const before = await readFile(path, 'utf8').catch(() => null);
         const marker = await readFile(`${path}.managed`, 'utf8');
-        if (['public-record', 'busy-claim', 'changed-listener', 'changed-record'].includes(mode))
+        if (
+          [
+            'public-record',
+            'busy-claim',
+            'changed-listener',
+            'changed-record',
+            'unknown-to-foreign',
+          ].includes(mode)
+        )
           await expect(manager.refreshDiscoveredServerRegistration()).rejects.toThrow();
         else await expect(manager.refreshDiscoveredServerRegistration()).resolves.toBe(false);
         expect(manager.serverOwnership).toBe('unmanaged');
@@ -1384,6 +2254,76 @@ describe('OpenCodeProcess server ownership leases', () => {
           expect(await readFile(path, 'utf8').catch(() => null)).toBe(before);
         expect(await readFile(`${path}.managed`, 'utf8')).toBe(marker);
         expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it.each([
+      'missing-record',
+      'public-record',
+      'changed-owner',
+      'changed-pid',
+      'changed-port',
+      'changed-birth',
+      'changed-executable',
+      'ambiguous-listener',
+      'replaced-listener',
+      'reused-pid',
+      'endpoint-change',
+    ])('blocks quiet managed admission with %s', async (mode) => {
+      const { root, path, manager } = await fixture();
+      try {
+        await expect(manager.refreshDiscoveredServerRegistration()).resolves.toBe(true);
+        const recorded = JSON.parse(await readFile(path, 'utf8')) as ManagedServerOwnershipLease;
+        if (mode === 'missing-record') await rm(path);
+        if (mode === 'public-record') await chmod(path, 0o644);
+        if (mode.startsWith('changed-')) {
+          const changed = { ...recorded };
+          if (mode === 'changed-owner') changed.owner = 'unrelated-owner';
+          if (mode === 'changed-pid') changed.pid += 1;
+          if (mode === 'changed-port') changed.port += 1;
+          if (mode === 'changed-birth') changed.birthIdentity = 'linux:replacement-birth';
+          if (mode === 'changed-executable') changed.executable = '/unrelated/executable';
+          await writeFile(path, JSON.stringify(changed));
+        }
+        if (mode === 'ambiguous-listener' || mode === 'replaced-listener')
+          vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue(
+            mode === 'ambiguous-listener' ? [recorded.pid, recorded.pid + 1] : [recorded.pid + 1]
+          );
+        if (mode === 'reused-pid')
+          vi.spyOn(processInspection, 'readProcessBirthIdentity').mockResolvedValue('linux:reused');
+        if (mode === 'endpoint-change') {
+          const find = processInspection.findListeningPids;
+          vi.spyOn(processInspection, 'findListeningPids').mockImplementation(async (...args) => {
+            const listeners = await find(...args);
+            manager.port += 1;
+            return listeners;
+          });
+        }
+        await expect(manager.verifyManagedServerAdmission()).rejects.toThrow();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('does not grant managed admission from discovered credentials without a Varro lease', async () => {
+      const { root, directory, path, manager } = await fixture();
+      try {
+        await rm(path);
+        await rm(`${path}.managed`);
+        const unregistered = new OpenCodeProcess(
+          'auto',
+          true,
+          '',
+          false,
+          undefined,
+          join(directory, 'absent.json')
+        );
+        unregistered.rememberInstalledCliVersion('2.0.21');
+        await expect(unregistered.discoverSharedServer()).resolves.toBe(true);
+        expect(unregistered.serverAuthorization).toBe(manager.serverAuthorization);
+        await expect(unregistered.verifyManagedServerAdmission()).resolves.toBe(false);
       } finally {
         await rm(root, { recursive: true, force: true });
       }

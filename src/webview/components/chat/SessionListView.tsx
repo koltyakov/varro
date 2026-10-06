@@ -1065,11 +1065,6 @@ export function SessionListView(props: {
     document.addEventListener('visibilitychange', update);
     onCleanup(() => document.removeEventListener('visibilitychange', update));
   });
-  const activeNow = useSecondClock(
-    () =>
-      visible() &&
-      visibleSessions().some((session) => sessionIndicators().runningIds.has(session.id))
-  );
   const ageNow = useMinuteClock(visible);
 
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
@@ -1460,6 +1455,11 @@ export function SessionListView(props: {
     if (shouldShowSearch() && trimmedSearchQuery()) return searchResultSessions();
     return baseVisibleSessions();
   });
+  const activeNow = useSecondClock(
+    () =>
+      visible() &&
+      visibleSessions().some((session) => sessionIndicators().runningIds.has(session.id))
+  );
 
   const startPinnedSessionDrag = (event: DragEvent, sessionId: string) => {
     if (!event.dataTransfer) return;

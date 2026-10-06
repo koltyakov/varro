@@ -357,10 +357,12 @@ export function ModelPicker(props: {
     };
     repositionPopup = reposition;
 
-    searchInputRef?.focus();
-
     if (!menuRef) return;
     const stopObservingViewport = observePopupViewport(menuRef, reposition);
+    // Focus only after placement and reveal, without scrolling the initial anchor into view.
+    queueMicrotask(() => {
+      if (searchInputRef?.isConnected) searchInputRef.focus({ preventScroll: true });
+    });
     const listObserver =
       globalThis.ResizeObserver === undefined
         ? null
@@ -418,6 +420,7 @@ export function ModelPicker(props: {
           props.popoverRef?.(el);
         }}
         class="dropdown-menu model-picker-menu w-full"
+        data-popup-position-pending
         tabIndex={-1}
         onKeyDown={handleKeyDown}
         onClick={(e) => e.stopPropagation()}

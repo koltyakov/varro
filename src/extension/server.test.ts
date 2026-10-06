@@ -891,6 +891,119 @@ afterEach(async () => {
 });
 
 describe('automatic-port migration and admission', () => {
+  it('reuses a registered Varro server quietly when Windows account inspection is unavailable', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer('auto', true);
+    const { api, children } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.24' });
+    vi.mocked(inspectLocalServerAccount).mockResolvedValue({ kind: 'unknown' });
+    const verify = vi.spyOn(processManager, 'verifyManagedServerAdmission').mockResolvedValue(true);
+    const prepare = vi
+      .spyOn(processManager, 'prepareForHealthyExistingServer')
+      .mockResolvedValue(undefined);
+    await expect(server.start()).resolves.toBe(server.url);
+    await flushMicrotasks();
+    expect(verify).toHaveBeenCalledOnce();
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(server.isAttachOnly).toBe(false);
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(children).toHaveLength(0);
+    expect(server.status.state).toBe('running');
+    await server.disconnect();
+  });
+
+  it('quietly admits a newly confirmed Varro launch with unavailable account evidence', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer('auto', true);
+    const state = server as unknown as {
+      processManager: OpenCodeProcess;
+      admitManagedServer(): Promise<void>;
+      registeredEndpoint: boolean;
+    };
+    vi.mocked(inspectLocalServerAccount).mockResolvedValue({ kind: 'unknown' });
+    vi.spyOn(state.processManager, 'verifyManagedServerAdmission').mockResolvedValue(true);
+    await state.admitManagedServer();
+    expect(state.registeredEndpoint).toBe(true);
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(server.isAttachOnly).toBe(false);
+    await server.disconnect();
+  });
+
+  it('keeps credential-only reconnection quiet but attach-only, without background ownership repair', async () => {
+    const server = new OpenCodeServer('auto', true);
+    const { api, children } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.24' });
+    vi.mocked(inspectLocalServerAccount).mockResolvedValue({ kind: 'unknown' });
+    vi.spyOn(processManager, 'hasCredentialVerifiedConnection', 'get').mockReturnValue(true);
+    vi.spyOn(processManager, 'verifyManagedServerAdmission').mockResolvedValue(true);
+    const prepare = vi.spyOn(processManager, 'prepareForHealthyExistingServer');
+    await expect(server.start()).resolves.toBe(server.url);
+    await flushMicrotasks();
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(server.isAttachOnly).toBe(true);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(children).toHaveLength(0);
+    await expect(server.restart()).rejects.toThrow('attach-only');
+    await server.disconnect();
+  });
+
+  it('keeps a late recovered registration managed after shared-service admission', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer('auto', true);
+    const { api, children } = configureManagedStartup(server);
+    const state = server as unknown as {
+      processManager: OpenCodeProcess;
+      registeredEndpoint: boolean;
+      externalEndpoint: boolean;
+    };
+    vi.spyOn(state.processManager, 'discoverSharedServer').mockReturnValue(Promise.resolve(true));
+    vi.spyOn(state.processManager, 'refreshDiscoveredServerRegistration').mockResolvedValue(false);
+    vi.spyOn(state.processManager, 'verifyManagedServerAdmission').mockResolvedValue(true);
+    vi.spyOn(state.processManager, 'prepareForHealthyExistingServer').mockResolvedValue(undefined);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.24' });
+    vi.mocked(inspectLocalServerAccount).mockResolvedValue({ kind: 'unknown' });
+    await expect(server.start()).resolves.toBe(server.url);
+    await flushMicrotasks();
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(state.registeredEndpoint).toBe(true);
+    expect(state.externalEndpoint).toBe(false);
+    expect(server.isAttachOnly).toBe(false);
+    expect(children).toHaveLength(0);
+    await server.disconnect();
+  });
+
+  it('blocks HTTP and SSE until quiet managed verification succeeds', async () => {
+    const server = new OpenCodeServer('auto', true);
+    const { api } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.24' });
+    vi.mocked(inspectLocalServerAccount).mockResolvedValue({ kind: 'unknown' });
+    const pending = deferred<boolean>();
+    const verify = vi
+      .spyOn(processManager, 'verifyManagedServerAdmission')
+      .mockReturnValue(pending.promise);
+    const start = expect(server.start()).rejects.toThrow('registration changed');
+    await flushMicrotasks();
+    expect(verify).toHaveBeenCalledOnce();
+    const request = expect(server.request('GET', '/config')).rejects.toThrow(
+      'registration changed'
+    );
+    await flushMicrotasks();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(api.startEventStream).not.toHaveBeenCalled();
+    pending.reject(new ManagedServerConnectionChangedError('registration changed'));
+    await Promise.all([start, request]);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(api.startEventStream).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    await server.disconnect();
+  });
+
   it('runs ownership and account checks together but sends no HTTP until both succeed', async () => {
     const server = new OpenCodeServer(4096, false);
     const api = server as unknown as {
@@ -4956,6 +5069,37 @@ describe('OpenCodeServer managed process lifecycle', () => {
     );
     expect(children[0]!.kill).toHaveBeenCalledWith('SIGTERM');
     expect(processManager.process).toBeNull();
+  });
+
+  it('does not gate healthy launch attachment on lifecycle ownership confirmation', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { api, children } = configureManagedStartup(server, false);
+    api.readHealthInfo = vi
+      .fn()
+      .mockResolvedValueOnce({ healthy: false })
+      .mockResolvedValue({ healthy: true, version: MINIMUM_SUPPORTED_OPENCODE_VERSION });
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    const ownership = vi
+      .spyOn(processManager, 'confirmManagedServerOwnership')
+      .mockResolvedValue(false);
+    const connection = vi
+      .spyOn(processManager, 'confirmManagedServerConnection')
+      .mockResolvedValue(true);
+    vi.spyOn(processManager, 'hasCredentialVerifiedConnection', 'get').mockReturnValue(true);
+    vi.spyOn(processManager, 'verifyManagedServerAdmission').mockResolvedValue(true);
+    vi.mocked(inspectLocalServerAccount).mockResolvedValue({ kind: 'unknown' });
+    const started = server.start();
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(started).resolves.toBe(server.url);
+    expect(connection).toHaveBeenCalledOnce();
+    expect(ownership).not.toHaveBeenCalled();
+    expect(server.status.state).toBe('running');
+    expect(server.isAttachOnly).toBe(true);
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    await expect(server.restart()).rejects.toThrow('attach-only');
+    await server.disconnect();
+    expect(children[0]!.kill).not.toHaveBeenCalled();
   });
 
   it('cleans a tracked child from a failed startup before launching a retry', async () => {

@@ -121,6 +121,18 @@ export function getActiveCompletion(text: string, cursor: number) {
       end: cursor,
     };
   }
+  const inlineSkillsMatch = prefix.match(/(?:^|\s)(\/skills(?:[ \t]+([^\s]*))?)$/i);
+  if (inlineSkillsMatch) {
+    const start = cursor - inlineSkillsMatch[1]!.length;
+    if (text.slice(0, start).trim()) {
+      return {
+        type: 'skill' as const,
+        query: inlineSkillsMatch[2] ?? '',
+        start,
+        end: cursor,
+      };
+    }
+  }
   const tokenStart = Math.max(prefix.lastIndexOf(' '), prefix.lastIndexOf('\n')) + 1;
   const token = prefix.slice(tokenStart);
   if (token.startsWith('$')) {
@@ -176,6 +188,12 @@ export function applySlashCompletion(
   completion: { query: string; start: number; end: number },
   value: string
 ) {
+  if (value === `/${SKILLS_COMMAND_NAME} ` && text.slice(0, completion.start).trim()) {
+    return {
+      value: `${text.slice(0, completion.start)}$${text.slice(completion.end)}`,
+      cursor: completion.start + 1,
+    };
+  }
   if (value === `/${SKILLS_COMMAND_NAME} ` || value === `/${PROBLEMS_COMMAND_NAME} `) {
     const suffix = text.slice(completion.end).replace(/^[ \t]+/, '');
     const nextValue = `${text.slice(0, completion.start)}${value}${suffix}`;

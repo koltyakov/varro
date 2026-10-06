@@ -106,6 +106,7 @@ import {
   getUsageLimitNoticeContext as getUsageLimitNoticeContextForState,
 } from '../routing-state';
 import { SessionActionOperations } from '../session/session-actions';
+import type { SessionCommandOptions } from '../session/session-actions';
 import { SessionApprovalOperations } from '../session/session-approvals';
 import { SessionControlOperations } from '../session/session-controls';
 import {
@@ -209,7 +210,11 @@ export interface OpenCodeRuntime {
   undoSession(): Promise<void>;
   redoSession(): Promise<void>;
   initSession(): Promise<void>;
-  runSlashCommandByName(name: string, args: string): Promise<boolean>;
+  runSlashCommandByName(
+    name: string,
+    args: string,
+    options?: SessionCommandOptions
+  ): Promise<boolean>;
   reviewSession(): Promise<void>;
   compactSession(): Promise<void>;
   respondPermission(
@@ -2715,14 +2720,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     },
     sendMessage,
     openPlan: (content) => client.varro.openPlan(content),
-    createSession: () =>
-      createSession(undefined, permissionsStore.getPermissionModeForSession(null)),
+    createSession: (workspaceTarget) =>
+      createSession(undefined, permissionsStore.getPermissionModeForSession(null), workspaceTarget),
     getMessageCount: () => appStore.state.messages.length,
     hasCommand: routingStore.hasCommand,
-    getCommandRouting: () => {
+    getCommandRouting: (sessionId = appStore.state.activeSessionId) => {
       const model =
-        routingStore.getSelectedModelForSession(appStore.state.activeSessionId) ??
-        appStore.state.selectedModel;
+        routingStore.getSelectedModelForSession(sessionId) ?? appStore.state.selectedModel;
       return {
         agent: appStore.state.selectedAgent ?? undefined,
         model: model ? `${model.providerID}/${model.modelID}` : undefined,
@@ -3222,8 +3226,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await sessionActionOperations.initSession();
   }
 
-  async function runSlashCommandByName(name: string, args: string) {
-    return sessionActionOperations.runSlashCommandByName(name, args);
+  async function runSlashCommandByName(
+    name: string,
+    args: string,
+    options?: SessionCommandOptions
+  ) {
+    return sessionActionOperations.runSlashCommandByName(name, args, options);
   }
 
   async function reviewSession() {

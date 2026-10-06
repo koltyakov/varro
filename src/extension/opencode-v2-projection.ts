@@ -439,7 +439,7 @@ export function projectV2Message(
         ),
         ...(message.skills ?? []).map((skill, index) =>
           part((message.files?.length ?? 0) + (message.agents?.length ?? 0) + index + 1, 'text', {
-            text: formatSkillAttachment(skill.name),
+            text: formatSkillAttachment(skill.id),
             synthetic: true,
           })
         ),

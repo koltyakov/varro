@@ -91,7 +91,29 @@ The local-database session-summary optimization did not fix that readiness barri
    This wait shares the startup health deadline and must discard cancelled or
    replaced-launch results. It does not retry explicit health authentication rejection.
 4. Admit the listener/account before requests or SSE. Ownership and account checks
-   may run concurrently, but **both must succeed before any protected HTTP traffic**.
+   may run concurrently, but **both must settle successfully before any protected HTTP traffic**.
+    If account inspection remains unknown, a fresh private Varro lease or surviving
+    private Varro marker and exact sole
+    listener/executable/birth verification admit that registered process quietly.
+    Recheck discovered registration before consent when no lease was loaded, so
+    editor handoff and marker-only recovery do not reach the external-server warning.
+   The account stays unknown, strict rechecks remain mandatory, and lifecycle rights
+    still require their independent ownership checks. Unregistered unknown listeners
+    and positively identified different-user listeners retain consent.
+    If the PID or birth identity changed, the exact saved port and private lease
+    credentials can instead establish read-only, attach-only admission. Verify that
+    anonymous and wrong-password probes are rejected before accepting authenticated
+    OpenCode health, then recheck the saved port and credentials. These probes share
+    a three-second deadline and startup cancellation. Do not rewrite the old records
+    or transfer stop/restart/maintenance authority through this fallback.
+    Fresh launch health polling and early-exit recovery must also admit an
+    authenticated launch when ancestry inspection cannot confirm lifecycle ownership.
+    Retain credentials in a private `.credentials` companion without PID identity,
+    detach the unowned process handle, and disable stop/restart/maintenance operations.
+    Automatic service discovery may follow a changed port only when its exact
+    credentials match a private Varro record and authentication is enforced. Never
+    substitute an older registered endpoint for the discovered endpoint or grant
+    lifecycle rights from this attachment proof.
     Preserve fresh reconnect checks, in-flight deduplication, and one-second strict
     admission/ticket limits. Running same-user connection reuse requires complete
     PID/birth/account evidence and independent background monitoring, not PID-only trust.

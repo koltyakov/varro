@@ -5499,6 +5499,9 @@ async function handleApiRequest(
       !startupOptions.has('startupCatalogRecovered')
     )
       throw new Error('Command catalog unavailable');
+    if (new URLSearchParams(window.location.search).get('skillCommand') === '1') {
+      return [{ name: 'control', template: 'Check machines', source: 'skill' }];
+    }
     return [];
   }
 
@@ -5645,6 +5648,30 @@ async function handleApiRequest(
     state.messagesBySessionId[session.id] = [];
     state.sessionStatuses[session.id] = { type: 'idle' };
     return session;
+  }
+
+  const skillCommandMatch = path.match(/^\/session\/([^/]+)\/command$/);
+  if (
+    skillCommandMatch &&
+    method === 'POST' &&
+    new URLSearchParams(window.location.search).get('skillCommand') === '1'
+  ) {
+    if (new URLSearchParams(window.location.search).get('skillCommandFailure') === '1') {
+      throw new Error('Skill command rejected');
+    }
+    const sessionId = decodeURIComponent(skillCommandMatch[1]!);
+    const payload = asRecord(body);
+    const message = makeUserMessage(
+      sessionId,
+      `command-user-${state.nextSequence}`,
+      [`/${String(payload.command)} ${String(payload.arguments)}`],
+      nextTimestamp(state)
+    );
+    state.messagesBySessionId[sessionId] = [
+      ...(state.messagesBySessionId[sessionId] ?? []),
+      message,
+    ];
+    return message;
   }
 
   const activationMatch = path.match(/^\/varro\/session\/([^/]+)\/activate$/);

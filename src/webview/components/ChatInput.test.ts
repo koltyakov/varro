@@ -3805,6 +3805,155 @@ describe('ChatInput', () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
+  it.each(['/docs test', '/docs', '  /DOCS test'])(
+    'renders the leading skill command %s as a chip without changing its send path',
+    async (draft) => {
+      setState('commands', [
+        {
+          name: 'docs',
+          description: 'Write a document',
+          template: 'Write a document',
+          source: 'skill',
+        },
+      ]);
+      setInputText(draft);
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      const chip = editor?.querySelector<HTMLElement>('[data-chip-type="mention-skill"]');
+      expect(chip?.textContent).toBe('docs');
+      expect(chip?.dataset.chipMarker).toBe(draft.trimStart().split(/\s/, 1)[0]);
+      expect(inputText()).toBe(draft);
+      if (draft.includes('test')) expect(editor?.textContent).toContain('test');
+      const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
+      if (!sendButton) throw new Error('Expected send button');
+      sendButton.click();
+      await flushAsyncWork();
+      expect(runSlashCommandByNameMock).toHaveBeenCalledWith(
+        'docs',
+        draft.includes('test') ? 'test' : ''
+      );
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['Enter', 'button'])(
+    'starts a new session for a skill command from the sessions list with %s',
+    async (sendMethod) => {
+      setState('activeSessionId', 'existing-session');
+      setState('commands', [{ name: 'control', template: 'Check machines', source: 'skill' }]);
+      setInputText('/control check machines');
+      const onBeforeSend = vi.fn();
+      cleanup = render(() => ChatInput({ newSession: true, onBeforeSend }), container!);
+      expect(container?.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
+        'control'
+      );
+
+      if (sendMethod === 'Enter') {
+        container
+          ?.querySelector('.rich-composer')
+          ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      } else {
+        container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.click();
+      }
+      await flushAsyncWork();
+
+      expect(runSlashCommandByNameMock).toHaveBeenCalledWith('control', 'check machines', {
+        targetSessionId: null,
+        newSessionWorkspace: { scope: 'folder', directory: null },
+        onAccepted: onBeforeSend,
+      });
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(inputText()).toBe('');
+    }
+  );
+
+  it.each([false, true])(
+    'restores a failed sessions-list skill command without sending it as a prompt (throws: %s)',
+    async (throws) => {
+      setState('activeSessionId', 'existing-session');
+      setState('commands', [{ name: 'control', template: 'Check machines', source: 'skill' }]);
+      setInputText('/control check machines');
+      if (throws) runSlashCommandByNameMock.mockRejectedValueOnce(new Error('Command failed'));
+      else runSlashCommandByNameMock.mockResolvedValueOnce(false);
+      const onBeforeSend = vi.fn();
+      cleanup = render(() => ChatInput({ newSession: true, onBeforeSend }), container!);
+      container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.click();
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('/control check machines');
+      expect(container?.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
+        'control'
+      );
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(onBeforeSend).not.toHaveBeenCalled();
+    }
+  );
+
+  it('preserves a newer draft when a sessions-list skill command fails', async () => {
+    setState('commands', [{ name: 'control', template: 'Check machines', source: 'skill' }]);
+    setInputText('/control check machines');
+    let resolveCommand: ((sent: boolean) => void) | undefined;
+    runSlashCommandByNameMock.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveCommand = resolve;
+        })
+    );
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+    container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.click();
+    await flushAsyncWork();
+    setInputText('New draft');
+    resolveCommand?.(false);
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('New draft');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['Please use /docs test', 'skill'],
+    ['/docs-other test', 'skill'],
+    ['/docs test', 'command'],
+  ] as const)(
+    'keeps non-leading, partial, and ordinary slash commands as text: %s %s',
+    (draft, source) => {
+      setState('commands', [
+        { name: 'docs', description: 'Write a document', template: 'Write a document', source },
+      ]);
+      setInputText(draft);
+      cleanup = render(() => ChatInput(), container!);
+      expect(container?.querySelector('[data-chip-type="mention-skill"]')).toBeNull();
+      expect(inputText()).toBe(draft);
+    }
+  );
+
+  it('renders a skill selected from the leading skills picker as a chip', async () => {
+    setState('commands', [
+      {
+        name: 'docs',
+        description: 'Write a document',
+        template: 'Write a document',
+        source: 'skill',
+      },
+    ]);
+    setInputText('/skills do');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, '/skills do'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'o', bubbles: true }));
+    await flushAsyncWork();
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+    expect(inputText()).toBe('/docs');
+    expect(editor.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe('docs');
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
   it('removes the mixed-view prefix from an existing skill row when jumping to skills', async () => {
     setState('commands', [
       {
@@ -4014,7 +4163,55 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.composer-completion-menu')).toBeNull();
   });
 
-  it('selects and runs a skill from the middle of a prompt', async () => {
+  it.each(['Enter', 'Tab', 'click'])(
+    'opens Skills inline as a dollar picker with %s and inserts a chip',
+    async (selection) => {
+      setState('commands', [
+        {
+          name: 'browser-bridge',
+          description: 'Control a browser',
+          template: 'Control a browser',
+          source: 'skill',
+        },
+      ]);
+      const draft = 'Please use /ski for this';
+      setInputText(draft);
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+      editor.focus();
+      setCollapsedSelection(editor.firstChild, 'Please use /ski'.length);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'i', bubbles: true }));
+      await flushAsyncWork();
+      const skillsRow = Array.from(
+        container?.querySelectorAll<HTMLButtonElement>('.completion-slash') ?? []
+      ).find((row) => row.querySelector('.composer-completion-title')?.textContent === '/skills');
+      if (!skillsRow) throw new Error('Expected Skills lookup option');
+      if (selection === 'click') skillsRow.click();
+      else
+        editor.dispatchEvent(
+          new KeyboardEvent('keydown', { key: selection, bubbles: true, cancelable: true })
+        );
+      await flushAsyncWork();
+      expect(inputText()).toBe('Please use $ for this');
+      expect(container?.querySelector('.composer-completion-header')?.textContent).toBe('Skills');
+      expect(container?.querySelector('.composer-completion-title')?.textContent).toBe(
+        'browser-bridge'
+      );
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+      await flushAsyncWork();
+      expect(inputText()).toBe('Please use $[browser-bridge] for this');
+      expect(editor.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
+        'browser-bridge'
+      );
+    }
+  );
+
+  it('selects an inline /skills alias as a dollar skill and sends it with the prompt', async () => {
     setState('commands', [
       {
         name: 'browser-bridge',
@@ -4044,7 +4241,10 @@ describe('ChatInput', () => {
     );
     await flushAsyncWork();
 
-    expect(inputText()).toBe('/browser-bridge Please use for this');
+    expect(inputText()).toBe('Please use $[browser-bridge] for this');
+    expect(editor.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
+      'browser-bridge'
+    );
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
 
     editor.dispatchEvent(
@@ -4052,8 +4252,8 @@ describe('ChatInput', () => {
     );
     await flushAsyncWork();
 
-    expect(runSlashCommandByNameMock).toHaveBeenCalledWith('browser-bridge', 'Please use for this');
-    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    expect(sendMessageMock.mock.calls[0]?.[0]).toBe('Please use $[browser-bridge] for this');
     expect(inputText()).toBe('');
   });
 

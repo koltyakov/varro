@@ -98,7 +98,7 @@ test('startup shows the animated logo, loading, and restored content in order', 
     await expect(page.locator('.varro-startup-dots')).toHaveCount(0);
     releaseScript?.();
 
-    const loading = page.getByText('Starting OpenCode...', { exact: true });
+    const loading = page.getByText('Connecting to OpenCode...', { exact: true });
     await expect(loading).toBeVisible();
     await expect(page.locator('.server-status-detecting-logo')).toHaveCount(0);
     await expect(page.locator('.chat-empty-state')).toHaveCount(0);

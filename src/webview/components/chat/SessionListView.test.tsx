@@ -249,6 +249,17 @@ describe('SessionListSectionHeader icons', () => {
 });
 
 describe('SessionListView keyboard recovery', () => {
+  it.each(['idle', 'busy'] as const)('mounts a visible %s session with its clocks', (type) => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    setSessions([session('visible-session', Date.now())]);
+    setState('sessionStatus', { 'visible-session': { type } });
+    cleanup = render(() => <SessionListView />, container);
+
+    expect(container.querySelector('.session-item')?.textContent).toContain('visible-session');
+    expect(setIntervalSpy.mock.calls.some(([, delay]) => delay === 1_000)).toBe(type === 'busy');
+  });
+
   it.each([false, true])('handles Escape with no sessions, embedded=%s', (embedded) => {
     setSessions([]);
     setShowSessionPicker(true);

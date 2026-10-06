@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, isString, type UnknownRecord } from '../shared/type-utils';
 import { withStartupDeadline } from '../shared/startup';
+import { parseSkillAttachment } from '../shared/skill-reference';
 import type {
   ProviderAuthMethod,
   ProviderAuthPromptCondition,
@@ -836,15 +837,24 @@ export class OpenCodeV2Adapter {
           const parts = Array.isArray(input.parts)
             ? input.parts.map(asRecord).filter((part) => part !== null)
             : [];
-          const text = parts
+          const textParts = parts
             .filter((part) => part.type === 'text')
-            .map((part) => part.text ?? '')
+            .map((part) => part.text ?? '');
+          const attachedSkillIds = [
+            ...new Set(
+              textParts
+                .map((value) => (isString(value) ? parseSkillAttachment(value) : null))
+                .filter(isString)
+            ),
+          ];
+          const text = textParts
+            .filter((value) => !isString(value) || !parseSkillAttachment(value))
             .join('\n');
           if (action === 'message' && (input.system || input.format)) {
             const format = asRecord(input.format);
             const prompt = [
               input.system,
-              text,
+              textParts.join('\n'),
               format?.type === 'json_schema'
                 ? `Return only JSON matching this schema:\n${JSON.stringify(format.schema)}`
                 : '',
@@ -881,6 +891,7 @@ export class OpenCodeV2Adapter {
             agents: parts
               .filter((part) => part.type === 'agent')
               .map((part) => ({ name: part.name })),
+            skills: attachedSkillIds.length ? attachedSkillIds.map((id) => ({ id })) : undefined,
             // Keep the prompt with pending context, including Plan mode's synthetic reminder.
             // Queuing by default lets the reminder run as a separate provider turn.
             delivery: input.delivery === 'queue' ? 'queue' : 'steer',
@@ -896,15 +907,10 @@ export class OpenCodeV2Adapter {
               const skills = await data<SkillInfo[]>('GET', query('/api/skill', true));
               const skill = skills.find((entry) => entry.id === input.command);
               if (skill) {
-                await raw(
-                  'POST',
-                  `/api/experimental/session/${encodeURIComponent(sessionID)}/skill`,
-                  {
-                    id: skill.id,
-                    resume: payload.text ? false : !input.noReply,
-                  }
-                );
-                if (payload.text) await raw('POST', `${endpoint}/prompt`, payload);
+                await raw('POST', `${endpoint}/prompt`, {
+                  ...payload,
+                  skills: [...new Set([skill.id, ...attachedSkillIds])].map((id) => ({ id })),
+                });
                 return;
               }
             }

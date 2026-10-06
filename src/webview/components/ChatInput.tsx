@@ -315,6 +315,7 @@ import {
 } from './chat-input/completion';
 import { forkActiveSession, getSlashCommands } from './chat-input/slash-commands';
 import { formatSkillReference, getSkillReferences } from '../lib/skill-reference';
+import type { SessionCommandOptions } from '../hooks/session/session-actions';
 import {
   collectDroppedPaths,
   parseDroppedText,
@@ -1651,6 +1652,23 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         title: `Skill: ${name}`,
         icon: 'skill',
         textMarker: formatSkillReference(name),
+      });
+    }
+    const leadingCommand = getLeadingSlashCommand(text);
+    const leadingSkill = leadingCommand
+      ? state.commands.find(
+          (command) =>
+            command.source === 'skill' && command.name.toLowerCase() === leadingCommand.name
+        )
+      : undefined;
+    if (leadingSkill) {
+      chips.push({
+        id: `skill-command:${leadingSkill.name}`,
+        type: 'mention-skill',
+        label: leadingSkill.name,
+        title: `Skill: ${leadingSkill.name}`,
+        icon: 'skill',
+        textMarker: text.trimStart().split(/\s/, 1)[0]!,
       });
     }
 
@@ -3048,9 +3066,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
   }
 
-  async function runSlashCommand(raw: string) {
+  async function runSlashCommand(raw: string, options?: SessionCommandOptions) {
     const parsed = getLeadingSlashCommand(raw);
     if (!parsed) return false;
+    const commandSessionId = composerSessionId();
 
     const { name, args } = parsed;
     if (isPauseSlashCommand(raw)) {
@@ -3102,20 +3121,45 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         : null;
     const skillCommand =
       builtInCommand === null && !fallbackCommand
-        ? state.commands.find((command) => command.source === 'skill' && command.name === name)
+        ? state.commands.find(
+            (command) => command.source === 'skill' && command.name.toLowerCase() === name
+          )
         : undefined;
     if (builtInCommand === null && !fallbackCommand && !skillCommand) return false;
     setHistoryIndex(null);
     setHistoryDraft('');
     invalidatePendingPdfAttachments();
     setInputText('');
+    const clearedInputVersion = inputTextMutationVersion();
     resetPastedImageIndex();
     setCompletionIndex(0);
     if (builtInCommand) {
       await builtInCommand;
       return true;
     }
-    if (skillCommand) return runSlashCommandByName(skillCommand.name, args);
+    if (skillCommand) {
+      setWorkspaceSendPending(true);
+      let sent = false;
+      try {
+        sent = options
+          ? await runSlashCommandByName(skillCommand.name, args, options)
+          : await runSlashCommandByName(skillCommand.name, args);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (
+          !sent &&
+          composerSessionId() === commandSessionId &&
+          inputTextMutationVersion() === clearedInputVersion &&
+          inputText() === ''
+        ) {
+          setInputText(raw);
+        }
+        setWorkspaceSendPending(false);
+      }
+      // A failed recognized command must not fall through to a normal prompt send.
+      return true;
+    }
     if (!fallbackCommand) return false;
     await fallbackCommand.action(args);
     return true;
@@ -3335,7 +3379,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
 
     if (!shouldQueue && !hasQueuedAttachments) {
-      const ranSlashCommand = await runSlashCommand(text);
+      const ranSlashCommand = await runSlashCommand(
+        text,
+        props.newSession
+          ? {
+              targetSessionId: sendSessionId,
+              newSessionWorkspace,
+              onAccepted: props.onBeforeSend,
+            }
+          : undefined
+      );
       if (ranSlashCommand) {
         if (queuedEdit) removeQueuedMessage(queuedEdit.id);
         setQueuedMessageEdit(null);

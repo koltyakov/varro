@@ -247,7 +247,9 @@ export function observePopupViewport(el: HTMLElement, reposition: () => void): (
     scheduled = true;
     queueMicrotask(() => {
       scheduled = false;
-      if (!disposed) reposition();
+      if (disposed) return;
+      reposition();
+      el.removeAttribute('data-popup-position-pending');
     });
   };
 

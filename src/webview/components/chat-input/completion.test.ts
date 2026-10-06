@@ -245,6 +245,21 @@ describe('shouldRequestMentionFileSearch', () => {
 });
 
 describe('getActiveCompletion', () => {
+  it.each([
+    ['Use /skills', ''],
+    ['Use /skills ', ''],
+    ['Use /skills browser', 'browser'],
+    ['Use /SKILLS\tweb', 'web'],
+    ['Use\n/skills web', 'web'],
+  ])('treats inline skills lookup %s as a dollar skill picker', (text, query) => {
+    expect(getActiveCompletion(text, text.length)).toEqual({
+      type: 'skill',
+      query,
+      start: text.toLowerCase().indexOf('/skills'),
+      end: text.length,
+    });
+  });
+
   it('detects dollar skills only at token boundaries', () => {
     expect(getActiveCompletion('$', 1)).toEqual({ type: 'skill', query: '', start: 0, end: 1 });
     expect(getActiveCompletion('use $browser', 12)).toEqual({
@@ -320,25 +335,32 @@ describe('getActiveCompletion', () => {
 });
 
 describe('applySlashCompletion', () => {
-  it('opens the skills selector without replacing surrounding prompt text', () => {
+  it('opens the inline skills selector with a dollar without replacing surrounding prompt text', () => {
     expect(
       applySlashCompletion('Use /sk for this', { query: 'sk', start: 4, end: 7 }, '/skills ')
     ).toEqual({
-      value: 'Use /skills for this',
-      cursor: 12,
+      value: 'Use $ for this',
+      cursor: 5,
     });
   });
 
-  it('moves a selected inline skill to the command position', () => {
+  it('opens the inline skills selector at the end with a bare dollar', () => {
+    expect(applySlashCompletion('Use /sk', { query: 'sk', start: 4, end: 7 }, '/skills ')).toEqual({
+      value: 'Use $',
+      cursor: 5,
+    });
+  });
+
+  it('keeps leading skills lookup as a slash selector', () => {
     expect(
       applySlashCompletion(
-        'Please use /skills browser for this',
-        { query: 'skills browser', start: 11, end: 26 },
+        '/skills browser for this',
+        { query: 'skills browser', start: 0, end: 15 },
         '/browser-bridge'
       )
     ).toEqual({
-      value: '/browser-bridge Please use for this',
-      cursor: 35,
+      value: '/browser-bridge for this',
+      cursor: 24,
     });
   });
 });

@@ -21,6 +21,7 @@ import type { MessageEntry } from '../webview/types';
 import { logger } from './logger';
 import { readLocalSessionSummary } from './local-session-summary';
 import { sessionSummary } from './session-summary';
+import { formatSkillAttachment, parseSkillAttachment } from '../shared/skill-reference';
 
 const exportEditor = vi.hoisted(() => ({
   openTextDocument: vi.fn(async (options: { content: string; language: string }) => options),
@@ -1004,6 +1005,47 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     }
   }, 45000);
 
+  it('attaches a selected skill to a v2 prompt without exposing generated instructions', async () => {
+    if (transport.version !== 2) return;
+    const session = asRecord(
+      await transport.request('POST', '/session', { title: 'Selected skill fixture' })
+    );
+    const id = String(session?.id);
+    const text = 'Use $[fixture-skill] for this reply.';
+    const before = providerPrompts.length;
+    try {
+      await transport.request('POST', `/session/${id}/message`, {
+        parts: [
+          { type: 'text', text },
+          { type: 'text', text: formatSkillAttachment('fixture-skill') },
+        ],
+        agent: 'build',
+        model: { providerID: 'fixture', modelID: 'fixture' },
+      });
+      const messages = (await transport.request('GET', `/session/${id}/message`)) as Array<{
+        info: UnknownRecord;
+        parts: UnknownRecord[];
+      }>;
+      const user = messages.find((message) => message.info.role === 'user');
+      expect(user?.parts[0]?.text).toBe(text);
+      expect(user?.parts.slice(1).map((part) => parseSkillAttachment(String(part.text)))).toEqual([
+        'fixture-skill',
+      ]);
+      const userPrompts = providerPrompts
+        .slice(before)
+        .flat()
+        .map(asRecord)
+        .filter((message) => message?.role === 'user');
+      expect(JSON.stringify(userPrompts)).toContain(
+        'Reply with the fixture response. Do not call tools.'
+      );
+      expect(JSON.stringify(userPrompts)).not.toContain('[Attached skill:');
+      expect(JSON.stringify(userPrompts)).not.toContain('Use the skill tool');
+    } finally {
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 45000);
+
   it('lists and runs a skill slash command with arguments', async () => {
     await vi.waitFor(
       async () =>
@@ -1032,10 +1074,26 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
         async () => {
           const status = asRecord(await transport.request('GET', '/session/status'))?.[id];
           expect(status === undefined || asRecord(status)?.type === 'idle').toBe(true);
-          expect(
-            JSON.stringify(await transport.request('GET', `/session/${id}/message`))
-          ).toContain('Adapter stream verified.');
+          const messages = (await transport.request('GET', `/session/${id}/message`)) as Array<{
+            info: UnknownRecord;
+            parts: UnknownRecord[];
+          }>;
+          expect(JSON.stringify(messages)).toContain('Adapter stream verified.');
           expect(JSON.stringify(providerPrompts.slice(before))).toContain('SKILL_ARGUMENT_FIXTURE');
+          if (transport.version === 2) {
+            const user = messages.find((message) => message.info.role === 'user');
+            expect(user?.parts[0]?.text).toBe('SKILL_ARGUMENT_FIXTURE');
+            expect(
+              user?.parts.slice(1).map((part) => parseSkillAttachment(String(part.text)))
+            ).toEqual(['fixture-skill']);
+            expect(messages.filter((message) => message.info.role === 'assistant')).toHaveLength(1);
+            expect(
+              messages.flatMap((message) => message.parts).some((part) => part.tool === 'skill')
+            ).toBe(false);
+            expect(JSON.stringify(providerPrompts.slice(before))).toContain(
+              'Reply with the fixture response. Do not call tools.'
+            );
+          }
         },
         { timeout: 30000 }
       );

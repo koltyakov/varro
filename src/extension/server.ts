@@ -331,6 +331,19 @@ export class OpenCodeServer extends EventEmitter {
         if (answer === 'Start my server on another port')
           throw new SeparateAutomaticServerRequested();
         return answer === 'Connect anyway';
+      },
+      async () => {
+        const url = this.url;
+        const generation = this.disposeGeneration;
+        const managed = await this.processManager.verifyManagedServerAdmission();
+        if (
+          managed &&
+          this.url === url &&
+          this.disposeGeneration === generation &&
+          !this.isDisposing
+        )
+          this.registeredEndpoint = true;
+        return managed;
       }
     );
     this.connectionMonitor = new ServerConnectionMonitor({
@@ -346,7 +359,12 @@ export class OpenCodeServer extends EventEmitter {
       authorizeConnection: async (reconnect) => {
         const url = this.url;
         const generation = this.disposeGeneration;
-        if (!reconnect && this._status.state === 'running' && this.connectionMonitor.canReuse()) {
+        if (
+          !reconnect &&
+          this._status.state === 'running' &&
+          !this.processManager.hasCredentialVerifiedConnection &&
+          this.connectionMonitor.canReuse()
+        ) {
           // A short adapter ticket, not another OS inspection. The confirmed
           // connection remains monitored independently of request frequency.
           return { expiresAt: Date.now() + 1000 };
@@ -764,8 +782,19 @@ export class OpenCodeServer extends EventEmitter {
           await this.processManager.stopServerForRestart();
           this.throwIfStartCancelled(disposeGeneration, signal);
         }
+        if (this.secrets) {
+          try {
+            await this.processManager.recoverLegacyConnectionCredentials(this.secrets, signal);
+          } catch (error) {
+            signal?.throwIfAborted();
+            logger.warn(
+              `Could not recover legacy OpenCode connection credentials: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        }
+        this.throwIfStartCancelled(disposeGeneration, signal);
         let registered = await this.measureStartup('registration', () =>
-          this.processManager.refreshStartupRegistration()
+          this.processManager.refreshStartupRegistration(signal)
         );
         this.registeredEndpoint = registered;
         if (registered) await this.restoreRegistrationCredentials(signal);
@@ -787,7 +816,7 @@ export class OpenCodeServer extends EventEmitter {
           // A previous editor can publish its lease after our first read. Recover
           // verified credentials and classification before asking for a password.
           registered = await this.measureStartup('registration', () =>
-            this.processManager.refreshStartupRegistration()
+            this.processManager.refreshStartupRegistration(signal)
           );
           this.registeredEndpoint = registered;
           this.throwIfStartCancelled(disposeGeneration, signal);
@@ -834,7 +863,7 @@ export class OpenCodeServer extends EventEmitter {
         if (health.healthy && (await this.admitExistingEndpoint())) {
           this.throwIfStartCancelled(disposeGeneration, signal);
           this.preserveExistingProcess = true;
-          this.externalEndpoint = !registered;
+          this.externalEndpoint = !this.registeredEndpoint;
           if (isSupportedOpenCodeVersion(health.version)) {
             logger.info(`Found existing OpenCode server at ${this.url}`);
             const restored = await this.restoreManagedRuntimeConfigAtStartup(
@@ -904,7 +933,7 @@ export class OpenCodeServer extends EventEmitter {
     );
     try {
       // Another window may have published a server while this window waited.
-      const registered = await this.processManager.refreshStartupRegistration();
+      const registered = await this.processManager.refreshStartupRegistration(signal);
       this.registeredEndpoint = registered;
       if (registered) await this.restoreRegistrationCredentials(signal);
       this.throwIfStartCancelled(disposeGeneration, signal);
@@ -951,7 +980,7 @@ export class OpenCodeServer extends EventEmitter {
         await this.admission.admit();
         this.throwIfStartCancelled(disposeGeneration, signal);
         this.preserveExistingProcess = true;
-        this.externalEndpoint = !managedRegistration;
+        this.externalEndpoint = !this.registeredEndpoint;
         await release();
         const restored = await this.restoreManagedRuntimeConfigAtStartup(disposeGeneration, signal);
         if (restored) return restored;
@@ -1386,7 +1415,7 @@ export class OpenCodeServer extends EventEmitter {
           try {
             ownershipConfirmed = await awaitBoundary(
               attemptProcess
-                ? this.processManager.confirmManagedServerOwnership(attemptProcess)
+                ? this.processManager.confirmManagedServerConnection(attemptProcess, signal)
                 : Promise.resolve(false)
             );
           } catch (err) {
@@ -1606,7 +1635,7 @@ export class OpenCodeServer extends EventEmitter {
           awaitBoundary(
             this.measureStartup('ownership', () =>
               attemptProcess
-                ? this.processManager.confirmManagedServerOwnership(attemptProcess)
+                ? this.processManager.confirmManagedServerConnection(attemptProcess, signal)
                 : Promise.resolve(false)
             )
           )
@@ -1676,7 +1705,7 @@ export class OpenCodeServer extends EventEmitter {
       probeSignal
     ) => this.readHealthInfo(probeSignal),
     confirmOwnership: () => Promise<boolean> = () =>
-      this.processManager.confirmManagedServerOwnership(),
+      this.processManager.confirmManagedServerConnection(undefined, signal),
     deadline = performance.now() + STARTUP_HEALTH_TIMEOUT_MS
   ) {
     if (
@@ -1986,6 +2015,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async admitManagedServer(signal?: AbortSignal) {
+    this.registeredEndpoint = true;
     await this.measureStartup('admission', () => this.admission.admit());
     signal?.throwIfAborted();
     if (this.secrets) {
@@ -2929,6 +2959,7 @@ export class OpenCodeServer extends EventEmitter {
   get isAttachOnly(): boolean {
     return (
       this.externalEndpoint ||
+      this.processManager.hasCredentialVerifiedConnection ||
       this.admission.isExternal ||
       (!this.processManager.isAutoStartEnabled && !this.managedProcess)
     );

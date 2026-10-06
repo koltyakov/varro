@@ -13,7 +13,7 @@ function userMessage(id: string, sessionID: string, created: number): MessageEnt
       agent: 'build',
       model: { providerID: 'openai', modelID: 'gpt-5' },
     },
-    parts: [],
+    parts: [{ id: `${id}-text`, sessionID, messageID: id, type: 'text', text: 'Run the checks.' }],
   };
 }
 
@@ -352,6 +352,47 @@ describe('getAssistantDialogSummaryMap', () => {
       }
     }
   );
+
+  it('does not finish a dialog when a background notice arrives before its text', () => {
+    const prompt = userMessage('prompt', 'session-parent', 1_000);
+    const answer = assistantMessage('answer', 'session-parent', prompt.info.id, 2_000, 3_000);
+    const notice = userMessage('notice', 'session-parent', 4_000);
+    notice.parts = [];
+    const options = { primarySessionId: 'session-parent', suppressTrailingSummary: true };
+    const messages = [prompt, answer, notice];
+    expect(flushesAssistantDialog(notice, 'session-parent')).toBe(false);
+    expect([...getAssistantDialogSummaryMap(messages, undefined, options)]).toEqual([]);
+    notice.parts = [
+      {
+        id: 'notice-text',
+        sessionID: 'session-parent',
+        messageID: notice.info.id,
+        type: 'text',
+        synthetic: true,
+        text: '<shell id="checks" state="completed" command="npm test">\nDone\n</shell>',
+      },
+    ];
+    expect(flushesAssistantDialog(notice, 'session-parent')).toBe(false);
+    expect([...getAssistantDialogSummaryMap(messages, undefined, options)]).toEqual([]);
+    const resumed = assistantMessage('resumed', 'session-parent', prompt.info.id, 5_000, 6_000);
+    expect([...getAssistantDialogSummaryMap([...messages, resumed])]).toEqual([
+      ['resumed', expect.objectContaining({ promptMessageId: prompt.info.id, durationMs: 5_000 })],
+    ]);
+    notice.parts = [
+      {
+        id: 'notice-text',
+        sessionID: 'session-parent',
+        messageID: notice.info.id,
+        type: 'text',
+        text: 'Run the next check.',
+      },
+    ];
+    // A real prompt establishes a boundary only when its content has arrived.
+    expect(flushesAssistantDialog(notice, 'session-parent')).toBe(true);
+    expect([...getAssistantDialogSummaryMap(messages, undefined, options).keys()]).toEqual([
+      'answer',
+    ]);
+  });
 
   it('still ends a turn when a real prompt includes automatic context', () => {
     const followup = userMessage('followup', 'session-parent', 4_000);

@@ -95,6 +95,20 @@ afterEach(() => {
 });
 
 describe('ModelPicker', () => {
+  it('focuses search after positioning without scrolling the initial anchor into view', async () => {
+    const focus = vi.spyOn(HTMLInputElement.prototype, 'focus');
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    const menu = container!.querySelector<HTMLElement>('.model-picker-menu')!;
+
+    expect(menu.hasAttribute('data-popup-position-pending')).toBe(true);
+    expect(focus).not.toHaveBeenCalled();
+    await flushMicrotasks();
+
+    expect(menu.hasAttribute('data-popup-position-pending')).toBe(false);
+    expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+    expect(document.activeElement).toBe(container!.querySelector('.dropdown-search-input'));
+  });
+
   it('clears the model highlight when the pointer leaves and restores keyboard navigation', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {

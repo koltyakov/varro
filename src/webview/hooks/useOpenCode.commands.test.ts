@@ -14,6 +14,60 @@ const sessionSendAsync = vi.fn<SessionSendAsync>();
 Object.assign(clientMocks, { sessionSendAsync });
 
 describe('command helpers', () => {
+  it('creates a sessions-list skill command in its captured workspace and opens it after acceptance', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setSessions([session('existing-session')]);
+    stateModule.setState('activeSessionId', 'existing-session');
+    stateModule.setState('commands', [
+      { name: 'control', template: 'Check machines', source: 'skill' },
+    ]);
+    clientMocks.sessionCreate.mockResolvedValue(session('created'));
+    clientMocks.sessionGet.mockResolvedValue(session('created'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    let accept!: () => void;
+    clientMocks.sessionCommand.mockReturnValue(
+      new Promise<void>((resolve) => {
+        accept = resolve;
+      })
+    );
+    const onAccepted = vi.fn();
+
+    const operation = hookModule.runSlashCommandByName('control', 'check machines', {
+      targetSessionId: null,
+      newSessionWorkspace: { scope: 'folder', directory: '/repo-b' },
+      onAccepted,
+    });
+    await vi.waitFor(() => expect(clientMocks.sessionCommand).toHaveBeenCalled());
+    expect(clientMocks.sessionCreate.mock.calls[0]?.[1]).toEqual({ directory: '/repo-b' });
+    expect(clientMocks.sessionCommand.mock.calls[0]?.[0]).toBe('created');
+    expect(stateModule.state.activeSessionId).toBe('created');
+    expect(onAccepted).not.toHaveBeenCalled();
+    accept();
+
+    expect(await operation).toBe(true);
+    expect(onAccepted).toHaveBeenCalledTimes(1);
+    expect(stateModule.state.activeSessionId).toBe('created');
+  });
+
+  it('does not open the sessions-list command when the backend rejects it', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('commands', [
+      { name: 'control', template: 'Check machines', source: 'skill' },
+    ]);
+    clientMocks.sessionCreate.mockResolvedValue(session('created'));
+    clientMocks.sessionCommand.mockRejectedValue(new Error('Command failed'));
+    const onAccepted = vi.fn();
+
+    expect(
+      await hookModule.runSlashCommandByName('control', 'check machines', {
+        targetSessionId: null,
+        onAccepted,
+      })
+    ).toBe(false);
+    expect(onAccepted).not.toHaveBeenCalled();
+    expect(stateModule.error()).toBe('Command failed');
+  });
+
   it('accepts an asynchronous V2 command and reconciles its session without a response message', async () => {
     const { stateModule, hookModule } = await loadModules();
     stateModule.setState('activeSessionId', 'session-1');

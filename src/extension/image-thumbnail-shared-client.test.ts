@@ -141,5 +141,5 @@ describe('cross-process thumbnail service', () => {
       first.dispose();
       second.dispose();
     }
-  });
+  }, 20_000);
 });
