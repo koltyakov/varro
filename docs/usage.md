@@ -64,7 +64,7 @@ For WSL, open the project in a VS Code WSL window, then install and authenticate
 | Version | Minimum supported | Tested with this release | npm package |
 | --- | --- | --- | --- |
 | v2, recommended | 2.0.5 | 2.0.24 | `@opencode/cli` |
-| v1, still supported | 1.16.0 | 1.18.34 | `opencode-ai` |
+| v1, still supported | 1.16.0 | 1.18.35 | `opencode-ai` |
 
 To keep using v1, retain your installation or run `npm install -g opencode-ai`. Set `varro.server.command` to its executable path. Setting it to `opencode` selects v1 only if that command resolves to a v1 installation. Varro detects the API automatically.
 
@@ -680,6 +680,8 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - A jump-to-latest button when you scroll away from the bottom of the chat; clicking it returns to the newest message and re-enables auto-follow
 - Completed turn summaries expose `Copy final response` and `Fork chat from here` actions. Copying uses the final assistant text from that turn.
 
+OpenCode controls automatic compaction through its own configuration and defaults. Varro does not override it. Use the compact action or `/compact` to request compaction on demand.
+
 Hold `Option`/`Alt` to show turn numbers and message timestamps. While the chat has focus on Windows, bare `Alt` does not activate the native menu bar.
 
 Hold `Alt` or `Option` while viewing a sufficiently long final answer to reveal its read-mode action. Read mode opens the rendered answer in a focused dialog; close it with `Escape`, the close button, or a click outside the content.
@@ -731,8 +733,6 @@ Chat view:
 - `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`; defaults to `right`
 - Use the scope picker inside the session search field to choose which OpenCode sessions appear. **Folder** shows exact working-directory matches, **Nested** includes folders beneath it in the same OpenCode project, and **Project** shows the entire containing Git project. Varro remembers the choice for each project; non-Git folders offer Folder and Nested independently.
 - `varro.chat.autoRenameUntitledSessions` - generate a fallback title when OpenCode leaves a session untitled; defaults to `false`
-- `varro.chat.autoCompact` - enable automatic OpenCode session compaction when context is full unless project `opencode.json` overrides it; defaults to `true`
-- `varro.chat.autoCompactionReservedTokens` - reserved token headroom before automatic compaction triggers; defaults to `4096`, or set it to `null` to use OpenCode defaults
 
 Commit messages:
 
@@ -747,7 +747,7 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install v2 with `npm install -g @opencode/cli` on macOS, Linux, or WSL, or download the native Windows CLI from the [v2 install page](https://opencode.ai/v2/docs/). V1 remains available with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.34` and v2 `2.0.24`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
+- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.35` and v2 `2.0.24`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
 - OpenCode v2 authentication: Varro captures managed-server credentials automatically and redacts them from output. Existing local services use their registered credentials. An externally managed server can also use `OPENCODE_SERVER_PASSWORD` and `OPENCODE_SERVER_USERNAME` from the extension host's environment.
 - OpenCode v2 session settings: Varro stores mutable session annotations locally because the released v2 API cannot update session metadata. Session sharing is unavailable through this API, so its menu action is disabled. Existing v1-format configuration remains supported.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.

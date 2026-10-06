@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import { batch } from 'solid-js';
 import { reconcile } from 'solid-js/store';
 import {
   replaceMessages,
@@ -341,6 +342,112 @@ describe('MessageList auto-scroll', () => {
       expect(list.scrollTop).toBeLessThan(height - 400);
       settleBottomFollow(animationFrames, list);
       expect(list.scrollTop).toBe(height - 400);
+      animationFrames.restore();
+    }
+  );
+
+  it.each([2, 60])(
+    'jumps before a batched send and eases only the new card with %i existing rows',
+    async (messageCount) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      const rowHeight = messageCount === 2 ? 600 : 120;
+      const initialHeight = messageCount * rowHeight;
+      let height = initialHeight;
+      let userRowsStartTop = initialHeight;
+      let list: HTMLDivElement | null = null;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        if (this.classList.contains('interactive-list-track'))
+          return new DOMRect(0, 0, 500, height);
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
+        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+        const rowTop = messageId?.startsWith('assistant-')
+          ? Number(messageId.slice('assistant-'.length)) * rowHeight
+          : userRowsStartTop + (messageId === 'user-next' ? 200 : 0);
+        return new DOMRect(
+          0,
+          rowTop - (list?.scrollTop ?? 0),
+          500,
+          messageId?.startsWith('user-') ? 200 : rowHeight
+        );
+      });
+      setState('activeSessionId', 'session-1');
+      replaceMessages(
+        Array.from({ length: messageCount }, (_, index) => ({
+          info: assistantMessage(`assistant-${index}`),
+          parts: [textPart(`text-${index}`, `Response ${index}`)],
+        }))
+      );
+      cleanup = render(() => MessageList(), container!);
+      list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      for (let frame = 0; frame < 20; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+      const previousBottom = initialHeight - 400;
+      expect(list.scrollTop).toBe(previousBottom);
+
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      list.scrollTop = 200;
+      list.dispatchEvent(new Event('scroll'));
+      // Use the current bottom, including output received while the reader was detached.
+      height += rowHeight;
+      userRowsStartTop = height;
+      setMessagesIncremental([
+        ...state.messages,
+        {
+          info: assistantMessage(`assistant-${messageCount}`),
+          parts: [textPart('background-text', 'Output received while reading history')],
+        },
+      ]);
+      await Promise.resolve();
+      await Promise.resolve();
+      animationFrames.flush();
+      expect(list.scrollTop).toBe(200);
+      const existingBottom = height - 400;
+      batch(() => {
+        startLoading();
+        requestMessageListScrollToBottom('user-new');
+        expect(list.scrollTop).toBe(existingBottom);
+        height += 200;
+        setMessagesIncremental([
+          ...state.messages,
+          { info: userMessage('user-new'), parts: [textPart('new-text', 'Follow-up')] },
+        ]);
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      animationFrames.flush();
+      expect(list.scrollTop).toBeGreaterThanOrEqual(existingBottom);
+      expect(list.scrollTop).toBeLessThan(height - 400);
+      settleBottomFollow(animationFrames, list);
+      expect(list.scrollTop).toBe(height - 400);
+
+      // The same reveal still yields to a new gesture after the immediate jump.
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      list.scrollTop = 200;
+      list.dispatchEvent(new Event('scroll'));
+      batch(() => {
+        requestMessageListScrollToBottom('user-next');
+        expect(list.scrollTop).toBe(height - 400);
+        height += 200;
+        setMessagesIncremental([
+          ...state.messages,
+          { info: userMessage('user-next'), parts: [textPart('next-text', 'Another follow-up')] },
+        ]);
+      });
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: -96, bubbles: true }));
+      const destination = list.scrollTop - 96;
+      list.scrollTop = destination;
+      list.dispatchEvent(new Event('scroll'));
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+        expect(list.scrollTop).toBe(destination);
+      }
       animationFrames.restore();
     }
   );

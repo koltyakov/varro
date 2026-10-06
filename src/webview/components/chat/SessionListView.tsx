@@ -55,6 +55,7 @@ import type { SelectedModel } from '../../lib/app-state-types';
 import type { Session } from '../../types';
 import { client, type SessionListPage } from '../../lib/client';
 import { useMinuteClock, useSecondClock } from '../../lib/clock';
+import { createPendingBackgroundSessionIds } from '../../lib/background-session-status';
 import { postMessage } from '../../lib/bridge';
 import { setManualWorkspaceSelection } from '../../lib/app-state';
 import { requestWorkspaceSelection } from '../../lib/workspace-selection';
@@ -73,6 +74,7 @@ import {
   folderPlusIcon,
   folderSettingsIcon,
   gitIcon,
+  hourglassIcon,
   navArrowDownIcon,
   pinIcon,
   trashIcon,
@@ -285,6 +287,7 @@ export type SessionIndicatorSets = {
   permissionIds: Set<string>;
   questionIds: Set<string>;
   runningIds: Set<string>;
+  pendingIds: Set<string>;
   failedIds: Set<string>;
   attentionIds: Set<string>;
   planReadyIds: Set<string>;
@@ -416,6 +419,7 @@ export type SessionStatusIndicatorKind =
   | 'failed'
   | 'attention'
   | 'running'
+  | 'pending'
   | 'plan-ready'
   | 'completed';
 
@@ -463,7 +467,13 @@ export function isSessionFailureUnread(sessionId: string): boolean {
   );
 }
 
-export type SessionListFilter = 'running' | 'attention' | 'failed' | 'plan-ready' | 'completed';
+export type SessionListFilter =
+  | 'running'
+  | 'pending'
+  | 'attention'
+  | 'failed'
+  | 'plan-ready'
+  | 'completed';
 
 type SessionListGroupedSection = 'recent' | 'archive' | 'recycle-bin';
 
@@ -471,6 +481,8 @@ export function getSessionListFilterLabel(filter: SessionListFilter | null) {
   switch (filter) {
     case 'running':
       return 'Running';
+    case 'pending':
+      return 'Pending';
     case 'attention':
       return 'Needs attention';
     case 'failed':
@@ -491,14 +503,17 @@ export function getPrimarySessionsForFilter(
   isNeedingAttention: (sessionId: string) => boolean,
   isFailed: (sessionId: string) => boolean,
   isPlanReady: (session: (typeof state.sessions)[number]) => boolean,
-  isCompleted: (session: (typeof state.sessions)[number]) => boolean
+  isCompleted: (session: (typeof state.sessions)[number]) => boolean,
+  isPending: (sessionId: string) => boolean = () => false
 ) {
   return sessions.filter((session) => {
     if (!isPrimarySession(session)) return false;
 
     switch (filter) {
       case 'running':
-        return isRunning(session.id) || isNeedingAttention(session.id);
+        return !isPending(session.id) && (isRunning(session.id) || isNeedingAttention(session.id));
+      case 'pending':
+        return isPending(session.id);
       case 'attention':
         return isNeedingAttention(session.id);
       case 'failed':
@@ -532,11 +547,13 @@ export function getSessionStatusIndicatorKind(input: {
   isFailed: boolean;
   hasPendingInput: boolean;
   isRunning: boolean;
+  isPending?: boolean;
   isPlanReady: boolean;
   isCompleted: boolean;
 }): SessionStatusIndicatorKind | null {
   if (input.isFailed) return 'failed';
   if (input.hasPendingInput) return 'attention';
+  if (input.isPending) return 'pending';
   if (input.isRunning) return 'running';
   if (input.isPlanReady) return 'plan-ready';
   if (input.isCompleted) return 'completed';
@@ -551,6 +568,8 @@ export function getSessionStatusIndicatorClass(kind: SessionStatusIndicatorKind)
       return 'is-attention';
     case 'running':
       return 'is-running';
+    case 'pending':
+      return 'is-pending';
     case 'plan-ready':
       return 'is-plan-completed';
     case 'completed':
@@ -569,6 +588,8 @@ export function getSessionStatusIndicatorTitle(
       return 'Attention needed';
     case 'running':
       return options?.retrying ? 'Retrying' : 'Running';
+    case 'pending':
+      return 'Pending background task';
     case 'plan-ready':
       return 'Plan ready';
     case 'completed':
@@ -1250,8 +1271,12 @@ export function SessionListView(props: {
     searchAbortController?.abort();
   });
 
+  const pendingBackgroundIds = createPendingBackgroundSessionIds(() =>
+    props.rawSessionIndicators ? {} : state.sessionStatus
+  );
   const rawSessionIndicators = createMemo(
-    () => props.rawSessionIndicators ?? deriveSessionIndicators(state.sessions)
+    () =>
+      props.rawSessionIndicators ?? deriveSessionIndicators(state.sessions, pendingBackgroundIds())
   );
   const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
   const queuedMessageCounts = createMemo(() => {
@@ -1348,7 +1373,8 @@ export function SessionListView(props: {
           (sessionId) => sessionIndicators().attentionIds.has(sessionId),
           (sessionId) => sessionIndicators().failedIds.has(sessionId),
           (session) => sessionIndicators().planReadyIds.has(session.id),
-          (session) => sessionIndicators().newlyCompletedIds.has(session.id)
+          (session) => sessionIndicators().newlyCompletedIds.has(session.id),
+          (sessionId) => sessionIndicators().pendingIds.has(sessionId)
         )
       : []
   );
@@ -1686,6 +1712,7 @@ export function SessionListView(props: {
               hasPermissionRequest={sessionIndicators().permissionIds.has(sessionId)}
               hasQuestionRequest={sessionIndicators().questionIds.has(sessionId)}
               isRunning={sessionIndicators().runningIds.has(sessionId)}
+              isPending={sessionIndicators().pendingIds.has(sessionId)}
               isFailed={sessionIndicators().failedIds.has(sessionId)}
               needsAttention={sessionIndicators().attentionIds.has(sessionId)}
               isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(sessionId)}
@@ -2171,6 +2198,7 @@ function SessionListItem(props: {
   hasPermissionRequest: boolean;
   hasQuestionRequest: boolean;
   isRunning: boolean;
+  isPending: boolean;
   isFailed: boolean;
   needsAttention: boolean;
   isNewlyCompleted: boolean;
@@ -2275,6 +2303,7 @@ function SessionListItem(props: {
       isFailed: hasUnreadFailure(),
       hasPendingInput: hasPendingInput(),
       isRunning: props.isRunning,
+      isPending: props.isPending,
       isPlanReady: props.isCompletedPlanSession && hasUnreadCompletion(),
       isCompleted: hasUnreadCompletion(),
     });
@@ -2462,7 +2491,11 @@ function SessionListItem(props: {
               class={`session-item-indicator session-status-indicator ${getSessionStatusIndicatorClass(kind())}`}
               title={indicatorTitle(kind())}
               aria-label={indicatorTitle(kind())}
-            />
+            >
+              <Show when={kind() === 'pending'}>
+                <UiIcon source={hourglassIcon} width={12} height={12} />
+              </Show>
+            </span>
           )}
         </Show>
         <Show when={props.canReorderPinned}>
@@ -2729,7 +2762,10 @@ function rootSessionId(sessionId: string) {
   return getSessionTreeRootId(sessionId) || sessionId;
 }
 
-export function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndicatorSets {
+export function deriveSessionIndicators(
+  sessions: typeof state.sessions,
+  pendingBackgroundIds: ReadonlySet<string> = new Set()
+): SessionIndicatorSets {
   const subagentCounts = new Map<string, number>();
   const failedSessionIds = new Set(state.failedSessionIds);
   const editorSessionIds = new Set(state.editorSessionIds);
@@ -2752,6 +2788,8 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     questionResponsePendingIds.add(rootSessionId(sessionId));
   }
   const runningIds = new Set<string>();
+  const pendingIds = new Set<string>();
+  const activelyRunningIds = new Set<string>();
   const failedIds = new Set<string>();
   const attentionIds = new Set<string>();
   const planReadyIds = new Set<string>();
@@ -2823,8 +2861,14 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     if (running) {
       runningIds.add(displaySessionId);
       runningIds.add(sessionId);
+      const targetIds = pendingBackgroundIds.has(sessionId) ? pendingIds : activelyRunningIds;
+      targetIds.add(displaySessionId);
+      targetIds.add(sessionId);
       const managerSessionId = ralphChildToManager.get(sessionId);
-      if (managerSessionId && !failedIds.has(managerSessionId)) runningIds.add(managerSessionId);
+      if (managerSessionId && !failedIds.has(managerSessionId)) {
+        runningIds.add(managerSessionId);
+        targetIds.add(managerSessionId);
+      }
       continue;
     }
     if (editorSessionIds.has(displaySessionId)) continue;
@@ -2847,6 +2891,10 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
   }
 
   for (const failedId of failedIds) planReadyIds.delete(failedId);
+  for (const id of pendingIds) {
+    if (activelyRunningIds.has(id) || failedIds.has(id) || attentionIds.has(id))
+      pendingIds.delete(id);
+  }
 
   const countDescendants = (sessionId: string): number => {
     const cachedCount = descendantSubagentCountBySession.get(sessionId);
@@ -2900,6 +2948,7 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     permissionIds,
     questionIds,
     runningIds,
+    pendingIds,
     failedIds,
     attentionIds,
     planReadyIds,

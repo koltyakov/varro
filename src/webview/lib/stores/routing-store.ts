@@ -1,5 +1,6 @@
 import type { Agent, Command, Provider } from '../../types';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
+import { postMessage } from '../bridge';
 import { getSupersededModelIds } from '../model-ordering';
 import { STORAGE_KEYS, writeStored } from '../state-storage';
 import {
@@ -8,6 +9,7 @@ import {
   clearSelectedModelForSession,
   getAvailableMcpNames,
   getListedProviderModels,
+  getModelPreferencesSnapshot,
   getPersistedSelectedAgent,
   getPersistedSelectedModel,
   getProviderLimit,
@@ -129,9 +131,14 @@ export const routingStore = {
     }
 
     if (hiddenModelsChanged) {
+      const base = getModelPreferencesSnapshot();
       const hiddenModels = [...nextHiddenModels];
       setState('hiddenModels', hiddenModels);
       writeStored(STORAGE_KEYS.hiddenModels, hiddenModels);
+      postMessage({
+        type: 'model-preferences/update',
+        payload: { base, preferences: getModelPreferencesSnapshot() },
+      });
     }
     setState('providers', providers);
   },

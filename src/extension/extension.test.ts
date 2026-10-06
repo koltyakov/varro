@@ -47,10 +47,6 @@ const {
         return false;
       case 'debug.simulateNoProviders':
         return false;
-      case 'chat.autoCompact':
-        return false;
-      case 'chat.autoCompactionReservedTokens':
-        return 7777;
       default:
         return fallback;
     }
@@ -90,7 +86,6 @@ const {
     current: null as null | {
       disconnect: ReturnType<typeof vi.fn>;
       rescopeEventStream: ReturnType<typeof vi.fn>;
-      updateCompactionSettings: ReturnType<typeof vi.fn>;
       updateLaunchSettings: ReturnType<typeof vi.fn>;
     },
   },
@@ -135,14 +130,12 @@ vi.mock('vscode', () => ({
 
 vi.mock('./server', () => ({
   OpenCodeServer: class {
-    updateCompactionSettings = vi.fn(() => Promise.resolve());
     updateLaunchSettings = vi.fn();
     disconnect = vi.fn(() => Promise.resolve());
     rescopeEventStream = vi.fn(() => Promise.resolve({ state: 'inactive', directory: undefined }));
 
     constructor(...args: unknown[]) {
       latestServerInstance.current = {
-        updateCompactionSettings: this.updateCompactionSettings,
         updateLaunchSettings: this.updateLaunchSettings,
         disconnect: this.disconnect,
         rescopeEventStream: this.rescopeEventStream,
@@ -200,10 +193,6 @@ function readDefaultConfig(key: string, fallback?: unknown) {
     case 'debug.simulateMissingCli':
     case 'debug.simulateNoProviders':
       return false;
-    case 'chat.autoCompact':
-      return false;
-    case 'chat.autoCompactionReservedTokens':
-      return 7777;
     default:
       return fallback;
   }
@@ -230,7 +219,7 @@ describe('extension activation', () => {
     vi.useRealTimers();
   });
 
-  it('passes compaction settings and secret storage into OpenCodeServer', async () => {
+  it('passes secret storage into OpenCodeServer without reading compaction settings', async () => {
     const { activate } = await import('./extension');
     const secrets = { get: vi.fn(), store: vi.fn(), delete: vi.fn() };
 
@@ -247,15 +236,16 @@ describe('extension activation', () => {
       true,
       '',
       false,
-      {
-        auto: false,
-        reserved: 7777,
-      },
       undefined,
       secrets,
       false
     );
     expect(scratchMock.prepare).toHaveBeenCalledOnce();
+    expect(getMock).not.toHaveBeenCalledWith('chat.autoCompact', expect.anything());
+    expect(getMock).not.toHaveBeenCalledWith(
+      'chat.autoCompactionReservedTokens',
+      expect.anything()
+    );
     expect(scratchMock.prepare.mock.invocationCallOrder[0]).toBeLessThan(
       openCodeServerMock.mock.invocationCallOrder[0]!
     );
@@ -368,7 +358,7 @@ describe('extension activation', () => {
         subscriptions: [],
       } as never);
       expect(openCodeServerMock.mock.calls.at(-1)?.[0]).toBe('auto');
-      expect(openCodeServerMock.mock.calls.at(-1)?.[7]).toBe(existing);
+      expect(openCodeServerMock.mock.calls.at(-1)?.[6]).toBe(existing);
       expect(globalState.update).toHaveBeenCalledWith(
         'varro.server.legacyDefaultEndpoint',
         existing
@@ -401,7 +391,7 @@ describe('extension activation', () => {
     expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:showFileDiffs', false);
   });
 
-  it('reapplies compaction settings when configuration changes', async () => {
+  it('does not expose Varro compaction settings or react to legacy setting changes', async () => {
     const { activate } = await import('./extension');
 
     await activate({
@@ -413,16 +403,16 @@ describe('extension activation', () => {
 
     const listener = onDidChangeConfigurationMock.mock.lastCall?.[0];
     expect(listener).toBeTypeOf('function');
+    getMock.mockClear();
 
-    listener?.({
-      affectsConfiguration: (key: string) => key === 'varro.chat.autoCompactionReservedTokens',
-    });
+    for (const setting of ['varro.chat.autoCompact', 'varro.chat.autoCompactionReservedTokens']) {
+      expect(Object.keys(packageJson.contributes.configuration.properties)).not.toContain(setting);
+      listener?.({ affectsConfiguration: (key: string) => key === setting });
+    }
 
-    expect(latestServerInstance.current).toBeTruthy();
-    expect(latestServerInstance.current?.updateCompactionSettings).toHaveBeenCalledWith({
-      auto: false,
-      reserved: 7777,
-    });
+    expect(getMock).not.toHaveBeenCalled();
+    expect(latestServerInstance.current?.updateLaunchSettings).not.toHaveBeenCalled();
+    expect(showInformationMessageMock).not.toHaveBeenCalled();
   });
 
   it('reapplies launch settings when configuration changes', async () => {
@@ -467,52 +457,6 @@ describe('extension activation', () => {
       'Reload Window'
     );
     expect(executeCommandMock).toHaveBeenCalledWith('workbench.action.reloadWindow');
-  });
-
-  it('uses a less aggressive reserved token default', async () => {
-    getMock.mockImplementation((key: string, fallback?: unknown) => {
-      switch (key) {
-        case 'server.port':
-          return 4096;
-        case 'server.autoStart':
-          return true;
-        case 'server.command':
-          return '';
-        case 'debug.simulateMissingCli':
-          return false;
-        case 'debug.simulateNoProviders':
-          return false;
-        case 'chat.autoCompact':
-          return true;
-        case 'chat.autoCompactionReservedTokens':
-          return fallback;
-        default:
-          return fallback;
-      }
-    });
-
-    const { activate } = await import('./extension');
-
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
-
-    expect(openCodeServerMock).toHaveBeenCalledWith(
-      4096,
-      true,
-      '',
-      false,
-      {
-        auto: true,
-        reserved: 4096,
-      },
-      undefined,
-      undefined,
-      false
-    );
   });
 
   it('registers the sidebar view provider, commands, and activation context', async () => {

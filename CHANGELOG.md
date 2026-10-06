@@ -4,6 +4,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.32.x - October 2026
 
+- Removed Varro's automatic compaction settings and overrides. OpenCode controls automatic compaction; on-demand compaction remains available.
 - Reworked chat performance across typing, streaming, and navigation in long conversations and large session lists. Reduced repeated Markdown processing and history indexing so incoming messages do less work on existing content.
 - Reduced memory use and initial rendering work by loading full tool and reasoning details on demand, reducing memory retained by cached history, and avoiding unused diff and diagram allocations.
 - Moved code and diff syntax highlighting to a background worker, keeping the chat responsive and content readable while highlighting loads.

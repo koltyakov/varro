@@ -33,7 +33,6 @@ import {
 import type { StartupPhase } from '../shared/startup';
 import {
   OpenCodeProcess,
-  type OpenCodeCompactionSettings,
   type OpenCodePortSetting,
   type OpenCodeServerOwnership,
   type UpgradeFailureReport,
@@ -64,8 +63,6 @@ import { readLocalServerConnectionInfo } from './server-connection-info';
 import type { ServerConnectionInfo } from './server-connection-info';
 import { ServerConnectionAdmission } from './server-connection-admission';
 import { ServerConnectionMonitor } from './server-connection-monitor';
-
-export type { OpenCodeCompactionSettings };
 
 export interface OpenCodeServerInfo {
   status: ServerStatus;
@@ -297,7 +294,6 @@ export class OpenCodeServer extends EventEmitter {
     autoStart: boolean,
     command?: string,
     simulateMissingCli = false,
-    compactionSettings?: Partial<OpenCodeCompactionSettings>,
     ownershipLeasePath?: string,
     private readonly secrets?: vscode.SecretStorage,
     private readonly legacyDefaultEndpoint = false
@@ -308,7 +304,6 @@ export class OpenCodeServer extends EventEmitter {
       autoStart,
       command,
       simulateMissingCli,
-      compactionSettings,
       ownershipLeasePath
     );
     this.admission = new ServerConnectionAdmission(
@@ -627,11 +622,6 @@ export class OpenCodeServer extends EventEmitter {
         if (signal.aborted || disposeGeneration !== this.disposeGeneration) return;
         await this.processManager.prepareForHealthyExistingServer();
         if (signal.aborted || disposeGeneration !== this.disposeGeneration) return;
-        if (this.hasInjectedCompactionOverride() && !this.managedProcess) {
-          logger.warn(
-            'Varro chat auto-compaction settings require a Varro-managed OpenCode server; project opencode.json still overrides when present'
-          );
-        }
         this.requestMaintenanceCheck();
       } catch (err) {
         logger.warn(
@@ -2941,16 +2931,6 @@ export class OpenCodeServer extends EventEmitter {
     await this.disposeResources({ stopProcess: false });
   }
 
-  async updateCompactionSettings(value?: Partial<OpenCodeCompactionSettings>) {
-    await this.processManager.updateCompactionSettings(value, {
-      status: this._status,
-      request: (method, path, body) =>
-        body === undefined ? this.request(method, path) : this.request(method, path, body),
-      restartManagedServerForCompactionSettings: () =>
-        this.restartManagedServerForCompactionSettings(),
-    });
-  }
-
   updateLaunchSettings(options: { autoStart: boolean; command: string }) {
     this.processManager.updateLaunchSettings(options);
   }
@@ -3106,17 +3086,6 @@ export class OpenCodeServer extends EventEmitter {
 
   private async syncInjectedConfigFile() {
     await this.processManager.syncInjectedConfigFile();
-  }
-
-  private async restartManagedServerForCompactionSettings() {
-    await this.runRestart(async () => {
-      logger.info('Restarting managed OpenCode server to apply updated Varro compaction settings');
-      await this.stopManagedProcessForRestart(true);
-    });
-  }
-
-  private hasInjectedCompactionOverride() {
-    return this.processManager.hasInjectedCompactionOverride();
   }
 
   private throwIfStartCancelled(disposeGeneration: number, signal: AbortSignal) {

@@ -1,8 +1,16 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import type { ProviderLimitStatus } from '../../../shared/protocol';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ProviderLimitStatus, WebviewMessage } from '../../../shared/protocol';
+import { ModelPreferencesStore } from '../../../extension/model-preferences-store';
 import type { Agent, Command, Provider } from '../../types';
+import { registerHostExtension } from '../../host/extensions';
 import { routingStore } from './routing-store';
-import { resetDefaultAppState, setState, state } from '../state';
+import {
+  applyModelPreferencesSnapshot,
+  getModelPreferencesSnapshot,
+  resetDefaultAppState,
+  setState,
+  state,
+} from '../state';
 
 function createAgent(name: string): Agent {
   return {
@@ -214,6 +222,61 @@ describe('routingStore', () => {
       state.hiddenModels
     );
   });
+
+  it.each([false, true])(
+    'keeps automatically hidden models unchecked after another model changes, synced before toggle=%s',
+    async (syncBeforeToggle) => {
+      const host = new ModelPreferencesStore({ get: vi.fn(), set: vi.fn(), remove: vi.fn() });
+      await host.migrateLegacy(getModelPreferencesSnapshot());
+      const sent: WebviewMessage[] = [];
+      const disposeHost = registerHostExtension({
+        apiVersion: 1,
+        id: 'test.model-preferences',
+        services: { send: (message) => sent.push(message) },
+      });
+      const syncPreferences = async () => {
+        for (const message of sent.splice(0)) {
+          if (message.type !== 'model-preferences/update') continue;
+          applyModelPreferencesSnapshot(
+            await host.update(message.payload.base, message.payload.preferences)
+          );
+        }
+      };
+
+      try {
+        const connected = createProvider('provider-1');
+        connected.models['model-1'] = {
+          ...connected.models['model-1']!,
+          family: 'model',
+          release_date: '2025-01-01',
+        };
+        connected.models['model-2'] = {
+          ...connected.models['model-2']!,
+          family: 'model',
+          release_date: '2026-01-01',
+        };
+        routingStore.setProviders([connected], {}, ['provider-1']);
+        expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(false);
+        if (syncBeforeToggle) await syncPreferences();
+
+        routingStore.setModelVisible('provider-1', 'model-2', false);
+        await syncPreferences();
+
+        expect(state.hiddenModels).toEqual(['provider-1:model-1', 'provider-1:model-2']);
+        expect(host.get().hiddenModels).toEqual(state.hiddenModels);
+        expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(false);
+
+        routingStore.setModelVisible('provider-1', 'model-1', true);
+        await syncPreferences();
+        routingStore.setProviders([connected]);
+        expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(true);
+        expect(routingStore.isModelVisible('provider-1', 'model-2')).toBe(false);
+        expect(sent).toEqual([]);
+      } finally {
+        disposeHost();
+      }
+    }
+  );
 
   it('keeps the provider default enabled on first connection', () => {
     const connected = createProvider('provider-1');

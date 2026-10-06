@@ -57,6 +57,7 @@ import {
   providerConnectionRequest,
 } from '../lib/provider-connection-state';
 import { client } from '../lib/client';
+import { createPendingBackgroundSessionIds } from '../lib/background-session-status';
 import type { Provider } from '../types';
 import {
   clearDirectSessionReturn,
@@ -149,7 +150,10 @@ export function Chat() {
   const [showReconnectBanner, setShowReconnectBanner] = createSignal(false);
   const [slowApiRequests, setSlowApiRequests] = createSignal<readonly SlowApiRequest[]>([]);
   const [sessionListNow, setSessionListNow] = createSignal(Date.now());
-  const rawSessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
+  const pendingBackgroundIds = createPendingBackgroundSessionIds(() => state.sessionStatus);
+  const rawSessionIndicators = createMemo(() =>
+    deriveSessionIndicators(state.sessions, pendingBackgroundIds())
+  );
   const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
   // Keep direct activity visible through the same settle window as completion,
   // without counting parents whose only activity comes from their subagents.
@@ -486,7 +490,8 @@ export function Chat() {
       recentSessions(),
       state.activeSessionId,
       isEditorSurface ? false : showSessionPicker(),
-      isStablyDirectlyRunningSession,
+      (sessionId) =>
+        isStablyDirectlyRunningSession(sessionId) && !indicators.pendingIds.has(sessionId),
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId) && isSessionFailureUnread(sessionId),
       (session) =>
@@ -496,6 +501,19 @@ export function Chat() {
     );
   });
   const runningSessionsCount = () => headerSessionCounts().running;
+  const pendingSessionCounts = createMemo(() => {
+    const indicators = sessionIndicators();
+    return getHeaderSessionCounts(
+      recentSessions(),
+      state.activeSessionId,
+      isEditorSurface ? false : showSessionPicker(),
+      (sessionId) => indicators.pendingIds.has(sessionId),
+      () => false,
+      () => false,
+      () => false,
+      () => false
+    );
+  });
   const attentionSessionsCount = () => headerSessionCounts().attention;
   const failedSessionsCount = () => headerSessionCounts().failed;
   const planReadySessionsCount = () => headerSessionCounts().planReady;
@@ -525,7 +543,8 @@ export function Chat() {
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId),
       (session) => indicators.planReadyIds.has(session.id),
-      (session) => indicators.newlyCompletedIds.has(session.id)
+      (session) => indicators.newlyCompletedIds.has(session.id),
+      (sessionId) => indicators.pendingIds.has(sessionId)
     );
     if (matchingSessions.length === 0) return;
 
@@ -540,7 +559,8 @@ export function Chat() {
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId),
       (session) => indicators.planReadyIds.has(session.id),
-      (session) => indicators.newlyCompletedIds.has(session.id)
+      (session) => indicators.newlyCompletedIds.has(session.id),
+      (sessionId) => indicators.pendingIds.has(sessionId)
     );
 
     if (autoOpenSessionId) {
@@ -697,6 +717,10 @@ export function Chat() {
 
   const openRunningSessions = () => {
     void openSessionFilter('running');
+  };
+
+  const openPendingSessions = () => {
+    void openSessionFilter('pending');
   };
 
   const openAttentionSessions = () => {
@@ -878,16 +902,20 @@ export function Chat() {
         shouldShowPlanReadyBadge={shouldShowHeaderBadge('plan-ready')}
         shouldShowCompletedBadge={shouldShowHeaderBadge('completed')}
         shouldShowRunningBadge={shouldShowHeaderBadge('running')}
+        shouldShowPendingBadge={shouldShowHeaderBadge('pending')}
         failedSessionsCount={failedSessionsCount()}
         attentionSessionsCount={attentionSessionsCount()}
         planReadySessionsCount={planReadySessionsCount()}
         completedSessionsCount={completedSessionsCount()}
         runningSessionsCount={runningSessionsCount()}
+        pendingSessionsCount={pendingSessionCounts().running}
+        activePending={sessionIndicators().pendingIds.has(state.activeSessionId ?? '')}
         sessionSidebarFailedCount={sessionSidebarFailedCount()}
         sessionSidebarAttentionCount={sessionSidebarAttentionCount()}
         sessionSidebarPlanReadyCount={sessionSidebarPlanReadyCount()}
         sessionSidebarCompletedCount={sessionSidebarCompletedCount()}
         sessionSidebarRunningCount={sessionSidebarRunningCount()}
+        sessionSidebarPendingCount={pendingSessionCounts().sidebarRunning}
         activeTitle={activeTitle()}
         activeBackTitle={activeBackTitle()}
         showDesktopBackButton={
@@ -913,6 +941,7 @@ export function Chat() {
         onOpenPlanReadySessions={openPlanReadySessions}
         onOpenCompletedSessions={openCompletedSessions}
         onOpenRunningSessions={openRunningSessions}
+        onOpenPendingSessions={openPendingSessions}
         onSendFromPicker={() => setShowSessionPicker(false)}
         onCreateSession={startNewChatDraft}
       />
@@ -971,7 +1000,8 @@ export function getAutoOpenSessionIdForFilter(
   isNeedingAttention: (sessionId: string) => boolean,
   isFailed: (sessionId: string) => boolean,
   isPlanReady: (session: (typeof state.sessions)[number]) => boolean,
-  isCompleted: (session: (typeof state.sessions)[number]) => boolean
+  isCompleted: (session: (typeof state.sessions)[number]) => boolean,
+  isPending: (sessionId: string) => boolean = () => false
 ) {
   if (isSessionPickerOpen) return null;
 
@@ -982,7 +1012,8 @@ export function getAutoOpenSessionIdForFilter(
     isNeedingAttention,
     isFailed,
     isPlanReady,
-    isCompleted
+    isCompleted,
+    isPending
   ).filter((session) => session.id !== activeSessionId);
 
   return matchingSessions.length === 1 ? matchingSessions[0]?.id || null : null;

@@ -19,6 +19,12 @@ import { STORAGE_KEYS, writeStored } from './state-storage';
 let loadingGeneration = 0;
 
 const beforeShowThinkingPreferenceChangeListeners = new Set<() => void>();
+const beforeMessageListScrollToBottomListeners = new Set<(targetMessageId?: string) => void>();
+
+export function onBeforeMessageListScrollToBottom(listener: (targetMessageId?: string) => void) {
+  beforeMessageListScrollToBottomListeners.add(listener);
+  return () => beforeMessageListScrollToBottomListeners.delete(listener);
+}
 
 export function onBeforeShowThinkingPreferenceChange(listener: () => void) {
   beforeShowThinkingPreferenceChangeListeners.add(listener);
@@ -84,6 +90,7 @@ export function requestSessionSearchFocus() {
 
 export function requestMessageListScrollToBottom(targetMessageId?: string) {
   batch(() => {
+    for (const listener of beforeMessageListScrollToBottomListeners) listener(targetMessageId);
     setMessageListScrollTargetMessageId(targetMessageId ?? null);
     setMessageListScrollRequestKey((value) => value + 1);
   });

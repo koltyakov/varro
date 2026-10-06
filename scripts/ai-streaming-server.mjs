@@ -21,6 +21,9 @@ const EVENT_TYPES = new Set([
   ...V2_REPLAY_EVENTS,
 ]);
 const MAX_SUBSCRIBER_BUFFER_BYTES = 8 * 1024 * 1024;
+// The extension reconnects an event stream after 45 s without bytes. Live OpenCode sends
+// heartbeats; without them an armed or paused replay loses its subscriber mid-reconnect.
+const HEARTBEAT_MS = 15_000;
 
 /**
  * await createStreamingServer({ capture, timeline, directory }) binds 127.0.0.1:0.
@@ -38,6 +41,7 @@ const MAX_SUBSCRIBER_BUFFER_BYTES = 8 * 1024 * 1024;
  * close(): Promise<void>, idempotent, cancels waits, resolves an active start()
  * with state 'cancelled', and destroys ALL sockets, including SSE/idle sockets.
  * Optional checkpoints: increasing applied-event counts; delivery pauses at each.
+ * Subscribers receive an SSE comment every heartbeatMs (default 15 s) so idle hosts stay connected.
  * pause()/resume() control delivery only. Paused time shifts the monotonic epoch,
  * preserving the remaining gap without a catch-up burst. close() releases pauses.
  * getResult(): detached snapshot with state ready/running/paused/completed/cancelled/
@@ -68,7 +72,13 @@ const MAX_SUBSCRIBER_BUFFER_BYTES = 8 * 1024 * 1024;
  * All non-GET requests return 405, including config/dispose/prompt/abort/auth.
  * There are NO bootstrap mutation exceptions, model calls, tools, or FS access.
  */
-export async function createStreamingServer({ capture, timeline, directory, checkpoints = [] }) {
+export async function createStreamingServer({
+  capture,
+  timeline,
+  directory,
+  checkpoints = [],
+  heartbeatMs = HEARTBEAT_MS,
+}) {
   if (!isAbsolute(directory ?? '')) throw new Error('directory must be an absolute path');
   const sourceID = capture?.session?.id;
   if (typeof sourceID !== 'string' || !sourceID) throw new Error('capture.session.id is required');
@@ -432,6 +442,10 @@ export async function createStreamingServer({ capture, timeline, directory, chec
       resolve();
     });
   });
+  const heartbeat = setInterval(() => {
+    for (const subscriber of subscribers) subscriber.write(': heartbeat\n\n');
+  }, heartbeatMs);
+  heartbeat.unref();
 
   function start() {
     if (closed || phase !== 'ready') throw new Error('Replay is closed or already started');
@@ -493,6 +507,7 @@ export async function createStreamingServer({ capture, timeline, directory, chec
   function close() {
     if (closePromise) return closePromise;
     closed = true;
+    clearInterval(heartbeat);
     if (['running', 'paused'].includes(phase)) elapsedMs = activeElapsed();
     if (pausedAt !== undefined) {
       const duration = performance.now() - pausedAt;

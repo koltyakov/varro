@@ -1,4 +1,4 @@
-/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- Process, filesystem, and JSON boundaries are validated before ownership data is used. */
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Process, filesystem, and JSON boundaries are validated before ownership data is used. */
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Ownership assertions follow complete PID, port, executable, and birth-identity checks. */
 import type { ChildProcess, SpawnOptions } from 'child_process';
 import { randomBytes, randomInt } from 'crypto';
@@ -120,11 +120,6 @@ export function getOpenCodeConfigPaths(
   );
 }
 
-export interface OpenCodeCompactionSettings {
-  auto: boolean | null;
-  reserved: number | null;
-}
-
 const ASK_AGENT = {
   description: 'Answers questions and investigates the codebase without modifying anything',
   mode: 'primary',
@@ -209,25 +204,6 @@ function containsOpenAIStreamTimeout(raw: string): boolean {
   });
 }
 
-export function normalizeCompactionSettings(
-  value?: Partial<OpenCodeCompactionSettings>
-): OpenCodeCompactionSettings {
-  return {
-    auto: typeof value?.auto === 'boolean' ? value.auto : null,
-    reserved:
-      typeof value?.reserved === 'number' && Number.isInteger(value.reserved) && value.reserved >= 0
-        ? value.reserved
-        : null,
-  };
-}
-
-export function areCompactionSettingsEqual(
-  left: OpenCodeCompactionSettings,
-  right: OpenCodeCompactionSettings
-): boolean {
-  return left.auto === right.auto && left.reserved === right.reserved;
-}
-
 interface MaintenanceCallbacks {
   /** Reuse permits only verified ownership and an already-installed same-family CLI. */
   reusedServer?: boolean;
@@ -259,12 +235,6 @@ export interface UpgradeFailureReport {
   guidance: string;
   /** Command that repairs this install, or null when none is safe to suggest. */
   suggestedCommand: string | null;
-}
-
-interface UpdateCompactionSettingsCallbacks {
-  status: ServerStatus;
-  request: (method: string, path: string, body?: unknown) => Promise<unknown>;
-  restartManagedServerForCompactionSettings: () => Promise<void>;
 }
 
 interface LaunchCallbacks {
@@ -652,7 +622,6 @@ export class OpenCodeProcess {
   private readonly processLaunches = new WeakMap<ChildProcess, ProcessLaunch>();
   private readonly processCleanupOperations = new WeakMap<ChildProcess, Promise<void>>();
   private readonly processResourceCleanupOperations = new WeakMap<ChildProcess, Promise<void>>();
-  private compactionSettings: OpenCodeCompactionSettings;
   private injectedConfigPath: string | null = null;
   private injectedConfigServerVersion: string | null = null;
   private injectedConfigOwnerPid: number | null = null;
@@ -810,7 +779,6 @@ export class OpenCodeProcess {
     autoStart: boolean,
     command?: string,
     simulateMissingCli = false,
-    compactionSettings?: Partial<OpenCodeCompactionSettings>,
     ownershipLeasePath?: string,
     private readonly linuxProcRoot = '/proc'
   ) {
@@ -821,7 +789,6 @@ export class OpenCodeProcess {
     this.autoStart = autoStart;
     this.command = command?.trim() || '';
     this.simulateMissingCli = simulateMissingCli;
-    this.compactionSettings = normalizeCompactionSettings(compactionSettings);
     this.checkOwnershipFiles = ownershipLeasePath === undefined;
     this.ownershipLeasePath =
       ownershipLeasePath ?? getManagedServerOwnershipLeasePath(port === 'auto' ? 4096 : port);
@@ -2573,15 +2540,9 @@ export class OpenCodeProcess {
   }
 
   async serializeInjectedConfig() {
-    const compaction: Partial<OpenCodeCompactionSettings> = {};
-    if (this.compactionSettings.auto !== null) compaction.auto = this.compactionSettings.auto;
-    if (this.compactionSettings.reserved !== null) {
-      compaction.reserved = this.compactionSettings.reserved;
-    }
     const config: Record<string, unknown> = {
       experimental: { continue_loop_on_deny: true },
     };
-    if (Object.keys(compaction).length > 0) config.compaction = compaction;
     if (!(await this.hasConfiguredValue(containsAskAgent, 'an existing Ask agent'))) {
       config.agent = { ask: ASK_AGENT };
     }
@@ -2737,62 +2698,6 @@ export class OpenCodeProcess {
     const result = this.injectedConfigOperation.then(operation, operation);
     this.injectedConfigOperation = result.catch(() => {});
     return result;
-  }
-
-  private async rewriteInjectedConfigFile() {
-    const configPath = this.injectedConfigPath;
-    if (!configPath) return;
-    await this.runInjectedConfigOperation(async () => {
-      if (this.injectedConfigPath !== configPath) return;
-      if (!(await isSafeInjectedConfigPath(configPath))) {
-        logger.warn(`Refusing to write untrusted temporary OpenCode config path: ${configPath}`);
-        return;
-      }
-      await writeFile(configPath, await this.serializeInjectedConfig(), 'utf-8');
-    });
-  }
-
-  hasInjectedCompactionOverride() {
-    return this.compactionSettings.auto !== null || this.compactionSettings.reserved !== null;
-  }
-
-  async updateCompactionSettings(
-    value: Partial<OpenCodeCompactionSettings> | undefined,
-    callbacks: UpdateCompactionSettingsCallbacks
-  ) {
-    const next = normalizeCompactionSettings(value);
-    const changed = !areCompactionSettingsEqual(this.compactionSettings, next);
-    this.compactionSettings = next;
-    if (callbacks.status.state === 'running' && this.foreignActiveOwnership) {
-      await this.refreshManagedServerOwnership();
-    }
-    await this.rewriteInjectedConfigFile();
-    if (!changed || callbacks.status.state !== 'running') return;
-    await this.reapplyCompactionSettings(callbacks);
-  }
-
-  async reapplyCompactionSettings(callbacks: UpdateCompactionSettingsCallbacks) {
-    if (this.foreignActiveOwnership) await this.refreshManagedServerOwnership();
-    if (!this._managedProcess) {
-      logger.warn(
-        'Varro chat auto-compaction settings can only be reapplied automatically for a Varro-managed OpenCode server'
-      );
-      if (!this.autoStart) {
-        await vscode.window.showInformationMessage(
-          'Varro auto-compaction settings cannot be applied in attach-only mode. Configure compaction on the OpenCode server host or inside the container.'
-        );
-      }
-      return;
-    }
-    try {
-      await callbacks.request('POST', '/global/dispose');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.warn(
-        `Failed to dispose OpenCode instances after compaction setting change: ${message}`
-      );
-      await callbacks.restartManagedServerForCompactionSettings();
-    }
   }
 
   launchServer(callbacks: LaunchCallbacks): ChildProcess {

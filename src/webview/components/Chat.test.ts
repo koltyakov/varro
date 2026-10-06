@@ -676,6 +676,7 @@ describe('getAttentionSessions', () => {
 describe('getSessionListFilterLabel', () => {
   it('returns the active label when the session list is filtered', () => {
     expect(getSessionListFilterLabel('running')).toBe('Running');
+    expect(getSessionListFilterLabel('pending')).toBe('Pending');
     expect(getSessionListFilterLabel('attention')).toBe('Needs attention');
     expect(getSessionListFilterLabel('failed')).toBe('Failed');
     expect(getSessionListFilterLabel('plan-ready')).toBe('Plan ready');
@@ -685,6 +686,38 @@ describe('getSessionListFilterLabel', () => {
 });
 
 describe('getPrimarySessionsForFilter', () => {
+  it('separates pending background waits from running sessions and excludes subagents', () => {
+    const sessions = [
+      session('working', 3),
+      session('waiting', 2),
+      session('waiting-child', 1, { parentID: 'waiting' }),
+    ];
+    const isPending = (id: string) => id.startsWith('waiting');
+    expect(
+      getPrimarySessionsForFilter(
+        sessions,
+        'pending',
+        () => true,
+        () => false,
+        () => false,
+        () => false,
+        () => false,
+        isPending
+      ).map((item) => item.id)
+    ).toEqual(['waiting']);
+    expect(
+      getPrimarySessionsForFilter(
+        sessions,
+        'running',
+        () => true,
+        () => false,
+        () => false,
+        () => false,
+        () => false,
+        isPending
+      ).map((item) => item.id)
+    ).toEqual(['working']);
+  });
   const sessions = [
     session('running-primary', 600),
     session('attention-primary', 500),
@@ -1038,6 +1071,76 @@ describe('SessionListSectionHeader', () => {
 });
 
 describe('header status badges', () => {
+  it('opens a Pending filter from the hourglass and keeps it separate from Running', () => {
+    const now = Date.now();
+    setState('sessions', [session('waiting', now), session('working', now)]);
+    setState('activeSessionId', null);
+    setState('sessionStatus', {
+      waiting: { type: 'busy', background: true, backgroundStartedAt: now - 60_000 },
+      working: { type: 'busy' },
+    });
+    setShowSessionPicker(true);
+    cleanup = render(() => Chat(), container!);
+
+    container?.querySelector<HTMLButtonElement>('.chat-header-pending-badge')?.click();
+    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe('Pending');
+    expect(container?.querySelector('[data-session-id="waiting"]')).not.toBeNull();
+    expect(container?.querySelector('[data-session-id="working"]')).toBeNull();
+    expect(container?.querySelector('.chat-header-pending-badge')).toBeNull();
+
+    container?.querySelector<HTMLButtonElement>('.chat-header-running-badge')?.click();
+    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe('Running');
+    expect(container?.querySelector('[data-session-id="waiting"]')).toBeNull();
+    expect(container?.querySelector('[data-session-id="working"]')).not.toBeNull();
+    expect(container?.querySelector('.chat-header-pending-badge')).not.toBeNull();
+
+    container?.querySelector<HTMLButtonElement>('.chat-header-pending-badge')?.click();
+    setState('sessionStatus', 'waiting', { type: 'busy', background: false });
+    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe('Pending');
+    expect(container?.querySelector('[data-session-id="waiting"]')).toBeNull();
+  });
+  it('removes long background waits from the running count and shows a counter-free pending badge', () => {
+    const now = Date.now();
+    setState('sessions', [session('waiting', now), session('working', now)]);
+    setState('activeSessionId', null);
+    setState('sessionStatus', {
+      waiting: { type: 'busy', background: true, backgroundStartedAt: now },
+      working: { type: 'busy' },
+    });
+    setShowSessionPicker(true);
+    cleanup = render(() => Chat(), container!);
+    expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('2');
+    expect(container?.querySelector('.chat-header-pending-badge')).toBeNull();
+
+    vi.advanceTimersByTime(60_000);
+    expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
+    const pending = container?.querySelector('.chat-header-pending-badge');
+    expect(pending).toBeInstanceOf(HTMLButtonElement);
+    expect(pending?.textContent).toBe('');
+    expect(container?.querySelector('[data-session-id="waiting"] .is-pending')).not.toBeNull();
+
+    setState('sessionStatus', 'waiting', { type: 'busy', background: false });
+    expect(container?.querySelector('.chat-header-pending-badge')).toBeNull();
+    expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('2');
+  });
+
+  it('shows an hourglass beside the active title even when desktop header actions are hidden', () => {
+    const now = Date.now();
+    desktopMediaQueryMatches = true;
+    setState('sessions', [session('waiting', now)]);
+    setState('activeSessionId', 'waiting');
+    setState('sessionStatus', {
+      waiting: { type: 'busy', background: true, backgroundStartedAt: now - 60_000 },
+    });
+    setShowSessionPicker(false);
+    cleanup = render(() => Chat(), container!);
+    const marker = container?.querySelector(
+      '.chat-header-chat-desktop .chat-header-pending-marker'
+    );
+    expect(marker?.getAttribute('aria-label')).toBe('Pending background task');
+    expect(marker?.textContent).toBe('');
+    expect(marker?.querySelector('.ui-icon')).not.toBeNull();
+  });
   it('derives quick statuses from Recent sessions and excludes recycled sessions', () => {
     const now = Date.now();
     const oldUpdatedAt = now - 3 * 24 * 60 * 60 * 1_000;

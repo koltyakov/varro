@@ -108,7 +108,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         command = '';
       }
       const leasePath = join(root, `varro-opencode-server-${address.port}.json`);
-      let server = new OpenCodeServer(address.port, true, command, false, undefined, leasePath);
+      let server = new OpenCodeServer(address.port, true, command, false, leasePath);
       let attached: OpenCodeServer | undefined;
       let replacement: ChildProcess | undefined;
       let unownedLaunch: ChildProcess | undefined;
@@ -232,7 +232,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
           ]);
           expect(output).not.toContain(String(lease?.password));
         }
-        attached = new OpenCodeServer(address.port, false, binary, false, undefined, leasePath);
+        attached = new OpenCodeServer(address.port, false, binary, false, leasePath);
         phase = 'second-window attachment';
         expect(await attached.start()).toBe(url);
         const attachedInfo = await attached.readServerInfo();
@@ -336,7 +336,6 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
               true,
               binary,
               false,
-              undefined,
               info.health.version?.startsWith('2.')
                 ? join(root, 'varro-opencode-server-4096.json')
                 : leasePath
@@ -465,7 +464,6 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             true,
             binary,
             false,
-            undefined,
             join(root, 'varro-opencode-server-4096.json')
           );
           phase = 'replacement recovery';
@@ -482,7 +480,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
           else expect(recovered?.owner).not.toBe(lease?.owner);
           expect(recovered?.configPath).toBeUndefined();
           await attached.disconnect();
-          attached = new OpenCodeServer('auto', true, binary, false, undefined, leasePath);
+          attached = new OpenCodeServer('auto', true, binary, false, leasePath);
           phase = 'recovered replacement reuse';
           expect(await attached.start()).toBe(replacementUrl);
           expect((await attached.readServerInfo()).ownership).toBe(
@@ -505,7 +503,6 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             true,
             binary,
             false,
-            undefined,
             join(root, 'varro-opencode-server-4096.json')
           );
           expect(await attached.start()).toBe(url);
@@ -520,13 +517,13 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         await server.disconnect();
         phase = 'inherited attachment';
         const inheritedLease = await readFile(leasePath, 'utf8');
-        attached = new OpenCodeServer('auto', false, binary, false, undefined, leasePath);
+        attached = new OpenCodeServer('auto', false, binary, false, leasePath);
         expect(await attached.start()).toBe(url);
         expect(await readFile(leasePath, 'utf8')).toBe(inheritedLease);
         expect((await attached.readServerInfo()).health.healthy).toBe(true);
         await attached.disconnect();
         attached = undefined;
-        server = new OpenCodeServer(address.port, true, binary, false, undefined, leasePath);
+        server = new OpenCodeServer(address.port, true, binary, false, leasePath);
         phase = 'managed restart';
         expect(await server.start()).toBe(url);
         expect(await server.restart()).toBe(url);
@@ -621,8 +618,8 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released multi-window 
           throw new Error('Invalid fixture lease');
         return { pid: lease.pid, host: lease.host };
       };
-      const owner = new OpenCodeServer(address.port, true, binary, false, undefined, leasePath);
-      const follower = new OpenCodeServer(address.port, true, binary, false, undefined, leasePath);
+      const owner = new OpenCodeServer(address.port, true, binary, false, leasePath);
+      const follower = new OpenCodeServer(address.port, true, binary, false, leasePath);
       let phase = 'initial attachment';
       const timeline: Array<{ phase: string; window: string; state: string; at: number }> = [];
       const started = performance.now();

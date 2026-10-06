@@ -42,6 +42,7 @@ export function performScrollToBottom(args: {
   programmaticScrollWindowMs: number;
   elapsedMs?: number;
   motion?: BottomFollowMotion;
+  maxLagPx?: number;
 }) {
   const { container } = args;
   if (!container) return null;
@@ -50,7 +51,7 @@ export function performScrollToBottom(args: {
   if (args.elapsedMs === undefined) args.motion?.reset();
   const nextScrollTop =
     args.motion && args.elapsedMs !== undefined
-      ? args.motion.next(container.scrollTop, target, args.elapsedMs)
+      ? args.motion.next(container.scrollTop, target, args.elapsedMs, args.maxLagPx)
       : target;
   if (Math.abs(container.scrollTop - nextScrollTop) >= 1) {
     container.scrollTop = nextScrollTop;
@@ -70,7 +71,11 @@ export class BottomFollowMotion {
     this.velocity = 0;
   }
 
-  next(top: number, target: number, elapsedMs: number): number {
+  /**
+   * `maxLagPx` bounds how far paced text may trail below the viewport. Beyond it the
+   * follower catches up continuously at a bounded speed instead of snapping.
+   */
+  next(top: number, target: number, elapsedMs: number, maxLagPx?: number): number {
     // Keep fractional progress when Chromium rounds scrollTop, but discard momentum
     // when another scroll owner moves the viewport.
     if (this.position === null || Math.abs(top - this.position) > 1.5) {
@@ -87,14 +92,24 @@ export class BottomFollowMotion {
     // Limit the spring's distance so a tall new block cannot cause a high-speed surge.
     const smoothTimeMs = 220;
     const maxSpeedPxPerMs = 1.1;
+    const maxCatchupSpeedPxPerMs = 2.2;
     const elapsed = Math.min(32, Math.max(1, elapsedMs));
     const omega = 2 / smoothTimeMs;
     const offset = -Math.min(distance, maxSpeedPxPerMs * smoothTimeMs);
     const destination = this.position - offset;
     const decay = Math.exp(-omega * elapsed);
     const change = (this.velocity + omega * offset) * elapsed;
+    const start = this.position;
     this.velocity = (this.velocity - omega * change) * decay;
     this.position = Math.max(top, Math.min(target, destination + (offset + change) * decay));
+    if (maxLagPx !== undefined && target - this.position > maxLagPx) {
+      const caughtUp = Math.min(target - maxLagPx, start + maxCatchupSpeedPxPerMs * elapsed);
+      if (caughtUp > this.position) {
+        // Carry the catch-up speed into the spring so leaving the bound does not stall.
+        this.velocity = (caughtUp - start) / elapsed;
+        this.position = caughtUp;
+      }
+    }
     if (target - this.position <= 1) {
       this.reset();
       return target;

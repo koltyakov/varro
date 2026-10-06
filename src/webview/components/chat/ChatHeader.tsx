@@ -11,7 +11,7 @@ import { client } from '../../lib/client';
 import { useSecondClock } from '../../lib/clock';
 import { formatDuration } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
-import { cableTagIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
+import { cableTagIcon, hourglassIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
 import { NavArrowLeftControlIcon } from '../ControlIcons';
 import {
   setError,
@@ -26,6 +26,7 @@ import {
   FailedSessionsBadge,
   PlanReadyBadge,
   RunningSessionsBadge,
+  PendingSessionsBadge,
 } from './HeaderBadges';
 import type { SessionListFilter } from './SessionListView';
 import { SessionActionsMenu, createSessionActionsState } from './SessionActionsMenu';
@@ -387,11 +388,13 @@ export function SessionPickerHeader(props: {
   showPlanReadyBadge: boolean;
   showCompletedBadge: boolean;
   showRunningBadge: boolean;
+  showPendingBadge?: boolean;
   failedCount: number;
   attentionCount: number;
   planReadyCount: number;
   completedCount: number;
   runningCount: number;
+  pendingCount?: number;
   showNewChatButton?: boolean;
   onBack?: () => void;
   onClearFilter: () => void;
@@ -401,6 +404,7 @@ export function SessionPickerHeader(props: {
   onOpenPlanReadySessions: () => void;
   onOpenCompletedSessions: () => void;
   onOpenRunningSessions: () => void;
+  onOpenPendingSessions: () => void;
   onCreateSession: () => void;
 }) {
   return (
@@ -482,6 +486,12 @@ export function SessionPickerHeader(props: {
             onClick={props.onOpenCompletedSessions}
           />
         </Show>
+        <Show when={props.showPendingBadge !== false}>
+          <PendingSessionsBadge
+            count={props.pendingCount ?? 0}
+            onClick={props.onOpenPendingSessions}
+          />
+        </Show>
         <Show when={props.showRunningBadge}>
           <RunningSessionsBadge count={props.runningCount} onClick={props.onOpenRunningSessions} />
         </Show>
@@ -506,6 +516,8 @@ export function ActiveChatHeader(props: {
   planReadyCount: number;
   completedCount: number;
   runningCount: number;
+  pendingCount?: number;
+  activePending?: boolean;
   onBack: () => void;
   onOpenSubagents: (rootSessionId: string) => void;
   onOpenFailedSessions: () => void;
@@ -513,6 +525,7 @@ export function ActiveChatHeader(props: {
   onOpenPlanReadySessions: () => void;
   onOpenCompletedSessions: () => void;
   onOpenRunningSessions: () => void;
+  onOpenPendingSessions: () => void;
   onCreateSession: () => void;
 }) {
   const [workSummary, setWorkSummary] = createSignal<Pick<
@@ -625,6 +638,13 @@ export function ActiveChatHeader(props: {
             onContextMenu={openActions}
           >
             <span class="chat-header-title-text">{props.title}</span>
+            <Show when={props.activePending}>
+              <Tooltip content="Pending background task">
+                <span class="chat-header-pending-marker" aria-label="Pending background task">
+                  <UiIcon source={hourglassIcon} width={14} height={14} />
+                </span>
+              </Tooltip>
+            </Show>
             <Show when={isActiveSessionPinned()}>
               <Tooltip content="Pinned session">
                 <span class="session-item-pinned-marker" aria-label="Pinned session">
@@ -686,6 +706,10 @@ export function ActiveChatHeader(props: {
             onClick={props.onOpenCompletedSessions}
           />
           <RunningSessionsBadge count={props.runningCount} onClick={props.onOpenRunningSessions} />
+          <PendingSessionsBadge
+            count={props.pendingCount ?? 0}
+            onClick={props.onOpenPendingSessions}
+          />
           <NewChatButton onCreateSession={props.onCreateSession} />
         </div>
       </Show>

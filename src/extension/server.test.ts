@@ -130,7 +130,6 @@ class OpenCodeServer extends RealOpenCodeServer {
     autoStart: boolean,
     command?: string,
     simulateMissingCli = false,
-    compactionSettings?: ConstructorParameters<typeof RealOpenCodeServer>[4],
     secrets?: vscode.SecretStorage,
     legacyDefaultEndpoint = false
   ) {
@@ -139,7 +138,6 @@ class OpenCodeServer extends RealOpenCodeServer {
       autoStart,
       command,
       simulateMissingCli,
-      compactionSettings,
       join('/tmp', `varro-server-test-${process.pid}-${++serverOwnershipPathSequence}.json`),
       secrets,
       legacyDefaultEndpoint
@@ -182,7 +180,7 @@ describe('startup wait bounds', () => {
       keys: vi.fn(async () => []),
       onDidChange: vi.fn(() => ({ dispose() {} })),
     };
-    const server = new OpenCodeServer(4096, true, '', false, undefined, secrets);
+    const server = new OpenCodeServer(4096, true, '', false, secrets);
     const state = server as unknown as {
       admission: { admit(): Promise<void> };
       processManager: OpenCodeProcess;
@@ -1420,7 +1418,7 @@ describe('automatic-port migration and admission', () => {
   });
 
   it('allows a migrated default-port user to choose a separate automatic server', async () => {
-    const server = new OpenCodeServer('auto', true, '', false, undefined, undefined, true);
+    const server = new OpenCodeServer('auto', true, '', false, undefined, true);
     const { api, children } = configureManagedStartup(server);
     vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '1.18.33' });
     vi.mocked(inspectLocalServerAccount).mockResolvedValue({
@@ -1594,7 +1592,7 @@ describe('OpenCodeServer credential prompts', () => {
       keys: vi.fn(async () => []),
       onDidChange: vi.fn(() => ({ dispose() {} })),
     };
-    const server = new OpenCodeServer(4097, autoStart, '', false, undefined, secrets);
+    const server = new OpenCodeServer(4097, autoStart, '', false, secrets);
     const api = server as unknown as {
       beginRunningEventStream: () => void;
       startExistingServerPreparation: () => void;
@@ -2026,15 +2024,12 @@ describe('OpenCodeServer event stream', () => {
   });
 });
 
-describe('OpenCodeServer compaction config injection', () => {
-  it('injects a temporary OPENCODE_CONFIG layer for managed server startup', async () => {
+describe('OpenCodeServer runtime config injection', () => {
+  it('injects runtime defaults without overriding caller compaction configuration', async () => {
     const inheritedContent =
-      '{\n  // inherited content\n  "provider": { "example": { "name": "Example" } },\n}\n';
+      '{\n  // inherited content\n  "provider": { "example": { "name": "Example" } },\n  "compaction": { "auto": false, "buffer": 16000 },\n}\n';
     process.env.OPENCODE_CONFIG_CONTENT = inheritedContent;
-    const server = new OpenCodeServer(4096, true, 'opencode', false, {
-      auto: false,
-      reserved: 1234,
-    });
+    const server = new OpenCodeServer(4096, true, 'opencode');
     const stdoutOn = vi.fn();
     const stderrOn = vi.fn();
     const processOn = vi.fn();
@@ -2080,8 +2075,12 @@ describe('OpenCodeServer compaction config injection', () => {
         processManager: { serializeInjectedConfig: () => Promise<string> };
       }
     ).processManager.serializeInjectedConfig();
-    expect(String(configText)).toContain('"auto": false');
-    expect(String(configText)).toContain('"reserved": 1234');
+    const config = JSON.parse(configText);
+    expect(config).not.toHaveProperty('compaction');
+    expect(config).toMatchObject({
+      experimental: { continue_loop_on_deny: true },
+      agent: { ask: { mode: 'primary' } },
+    });
     expect(String(configText)).not.toContain('"example"');
 
     const spawnCall = spawnMock.mock.calls.find((call) =>
@@ -2102,10 +2101,7 @@ describe('OpenCodeServer compaction config injection', () => {
     const previous = process.env.OPENCODE_CONFIG;
     process.env.OPENCODE_CONFIG = '/caller/opencode.jsonc';
     try {
-      const server = new OpenCodeServer(4096, true, 'opencode', false, {
-        auto: true,
-        reserved: 2345,
-      });
+      const server = new OpenCodeServer(4096, true, 'opencode');
       const processManager = (
         server as unknown as {
           processManager: {
@@ -2124,80 +2120,6 @@ describe('OpenCodeServer compaction config injection', () => {
       if (previous === undefined) delete process.env.OPENCODE_CONFIG;
       else process.env.OPENCODE_CONFIG = previous;
     }
-  });
-
-  it('reapplies changed settings by disposing OpenCode instances', async () => {
-    const server = new OpenCodeServer(4096, false);
-    const request = vi.fn(async () => true);
-    const api = server as unknown as {
-      _status: ServerStatus;
-      process: Record<string, unknown> | null;
-      managedProcess: boolean;
-      request: typeof request;
-    };
-
-    api._status = { state: 'running', url: server.url };
-    api.process = {};
-    api.managedProcess = true;
-    api.request = request;
-
-    await server.updateCompactionSettings({ auto: false, reserved: 4321 });
-
-    expect(request).toHaveBeenCalledWith('POST', '/global/dispose');
-    const configText = await (
-      server as unknown as {
-        processManager: { serializeInjectedConfig: () => Promise<string> };
-      }
-    ).processManager.serializeInjectedConfig();
-    expect(String(configText)).toContain('"auto": false');
-    expect(String(configText)).toContain('"reserved": 4321');
-  });
-
-  it('restarts the managed server when dispose fails during reapply', async () => {
-    const server = new OpenCodeServer(4096, false);
-    const restart = vi.fn(async () => undefined);
-    const api = server as unknown as {
-      _status: ServerStatus;
-      process: Record<string, unknown> | null;
-      managedProcess: boolean;
-      request: (method: string, path: string, body?: unknown) => Promise<unknown>;
-      restartManagedServerForCompactionSettings: () => Promise<void>;
-    };
-
-    api._status = { state: 'running', url: server.url };
-    api.process = {};
-    api.managedProcess = true;
-    api.request = vi.fn(async () => {
-      throw new Error('dispose failed');
-    });
-    api.restartManagedServerForCompactionSettings = restart;
-
-    await server.updateCompactionSettings({ auto: false });
-
-    expect(restart).toHaveBeenCalledTimes(1);
-  });
-
-  it('warns instead of reapplying when the running server is unmanaged', async () => {
-    const server = new OpenCodeServer(4096, false);
-    const request = vi.fn(async () => true);
-    const api = server as unknown as {
-      _status: ServerStatus;
-      process: Record<string, unknown> | null;
-      managedProcess: boolean;
-      request: typeof request;
-    };
-
-    api._status = { state: 'running', url: server.url };
-    api.process = null;
-    api.managedProcess = false;
-    api.request = request;
-
-    await server.updateCompactionSettings({ auto: false });
-
-    expect(request).not.toHaveBeenCalled();
-    expect(loggerMock.warn).toHaveBeenCalledWith(
-      'Varro chat auto-compaction settings can only be reapplied automatically for a Varro-managed OpenCode server'
-    );
   });
 });
 

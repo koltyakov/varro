@@ -11,6 +11,108 @@ import { appendDeltaToLastLargeAssistant, appendDeltaToRapidStreaming } from './
 
 test.describe('auto-scroll', () => {
   for (const scenario of ['mixed-small-transcript', 'large-transcript']) {
+    test(`jumps past history before smoothly revealing a sent card in ${scenario}`, async ({
+      page,
+    }) => {
+      await page.goto(`/e2e/harness/index.html?scenario=${scenario}`);
+      const list = page.locator('.interactive-list');
+      const composer = page.getByRole('textbox', { name: 'Message composer' });
+      await expect(composer).toBeVisible();
+      await composer.fill(
+        Array.from({ length: 8 }, (_, index) => `Detached send follow-up line ${index + 1}.`).join(
+          '\n'
+        )
+      );
+      await expect
+        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .toBeLessThan(1);
+      await waitForAnimationFrames(page, 20);
+      const before = await list.evaluate((element) => {
+        const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].findLast(
+          (candidate) => candidate.getBoundingClientRect().height > 0
+        )!;
+        return {
+          id: row.dataset.msgId!,
+          top: row.getBoundingClientRect().top - element.getBoundingClientRect().top,
+        };
+      });
+      await list.hover();
+      await page.mouse.wheel(0, -900);
+      await expect
+        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .toBeGreaterThan(200);
+      await waitForAnimationFrames(page, 10);
+      await page.evaluate((previousId) => {
+        const harness = window as Window & {
+          __sendToExtension?: (message: unknown) => void | Promise<void>;
+          detachedSendSamples?: Array<{ previousTop: number | null; cardTop: number }>;
+        };
+        const originalSend = harness.__sendToExtension;
+        harness.__sendToExtension = (message) => {
+          const request = message as { type?: string; payload?: { path?: string } };
+          // Hold the isolated send so acknowledgement/assistant growth cannot mask its entrance.
+          if (
+            request.type === 'api/request' &&
+            /\/prompt_async(?:\?|$)/.test(request.payload?.path ?? '')
+          ) {
+            return;
+          }
+          return originalSend?.(message);
+        };
+        const container = document.querySelector<HTMLElement>('.interactive-list')!;
+        const samples: Array<{ previousTop: number | null; cardTop: number }> = [];
+        const observer = new MutationObserver(() => {
+          const card = [...container.querySelectorAll<HTMLElement>('.user-message-card')].find(
+            (candidate) => candidate.textContent?.includes('Detached send follow-up line 1.')
+          );
+          if (!card) return;
+          observer.disconnect();
+          const sample = () => {
+            const previous = container.querySelector<HTMLElement>(`[data-msg-id="${previousId}"]`);
+            const top = container.getBoundingClientRect().top;
+            samples.push({
+              previousTop: previous ? previous.getBoundingClientRect().top - top : null,
+              cardTop: card.getBoundingClientRect().top - top,
+            });
+            if (samples.length < 30) requestAnimationFrame(sample);
+            else harness.detachedSendSamples = samples;
+          };
+          sample();
+        });
+        observer.observe(container, { childList: true, subtree: true });
+      }, before.id);
+      await page.getByLabel('Send (Enter)').click();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => (window as Window & { detachedSendSamples?: unknown }).detachedSendSamples
+          )
+        )
+        .not.toBeUndefined();
+      const samples = await page.evaluate(
+        () =>
+          (
+            window as Window & {
+              detachedSendSamples?: Array<{ previousTop: number | null; cardTop: number }>;
+            }
+          ).detachedSendSamples!
+      );
+      // The old bottom is already in view when the optimistic card mounts.
+      expect(samples[0]!.previousTop).not.toBeNull();
+      expect(Math.abs(samples[0]!.previousTop! - before.top), JSON.stringify(samples)).toBeLessThan(
+        4
+      );
+      expect(samples[0]!.cardTop - samples.at(-1)!.cardTop).toBeGreaterThan(10);
+      expect(new Set(samples.map((sample) => Math.round(sample.cardTop))).size).toBeGreaterThan(2);
+      for (let index = 1; index < samples.length; index += 1) {
+        const movement = samples[index - 1]!.cardTop - samples[index]!.cardTop;
+        expect(movement, JSON.stringify(samples)).toBeGreaterThanOrEqual(-1);
+        expect(movement, JSON.stringify(samples)).toBeLessThan(45);
+      }
+    });
+  }
+
+  for (const scenario of ['mixed-small-transcript', 'large-transcript']) {
     for (const resize of ['host', 'container']) {
       test(`keeps the bottom aligned without easing on ${resize} narrowing in ${scenario}`, async ({
         page,

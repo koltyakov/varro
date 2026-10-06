@@ -83,16 +83,20 @@ export function ChatWorkspace(props: {
   shouldShowPlanReadyBadge: boolean;
   shouldShowCompletedBadge: boolean;
   shouldShowRunningBadge: boolean;
+  shouldShowPendingBadge: boolean;
   failedSessionsCount: number;
   attentionSessionsCount: number;
   planReadySessionsCount: number;
   completedSessionsCount: number;
   runningSessionsCount: number;
+  pendingSessionsCount: number;
+  activePending: boolean;
   sessionSidebarFailedCount: number;
   sessionSidebarAttentionCount: number;
   sessionSidebarPlanReadyCount: number;
   sessionSidebarCompletedCount: number;
   sessionSidebarRunningCount: number;
+  sessionSidebarPendingCount: number;
   activeTitle: string;
   activeBackTitle: string;
   showDesktopBackButton: boolean;
@@ -113,6 +117,7 @@ export function ChatWorkspace(props: {
   onOpenPlanReadySessions: () => void;
   onOpenCompletedSessions: () => void;
   onOpenRunningSessions: () => void;
+  onOpenPendingSessions: () => void;
   onSendFromPicker: () => void;
   onCreateSession: () => void;
 }) {
@@ -160,6 +165,7 @@ export function ChatWorkspace(props: {
       showPlanReadyBadge={props.shouldShowPlanReadyBadge}
       showCompletedBadge={props.shouldShowCompletedBadge}
       showRunningBadge={props.shouldShowRunningBadge}
+      showPendingBadge={props.shouldShowPendingBadge}
       failedCount={useSidebarCounts ? props.sessionSidebarFailedCount : props.failedSessionsCount}
       attentionCount={
         useSidebarCounts ? props.sessionSidebarAttentionCount : props.attentionSessionsCount
@@ -173,6 +179,9 @@ export function ChatWorkspace(props: {
       runningCount={
         useSidebarCounts ? props.sessionSidebarRunningCount : props.runningSessionsCount
       }
+      pendingCount={
+        useSidebarCounts ? props.sessionSidebarPendingCount : props.pendingSessionsCount
+      }
       showNewChatButton
       onMarkAllRead={markAllReadAction()}
       onBack={useSidebarCounts ? props.onOpenTopLevelSidebarSessions : props.onOpenParentSession}
@@ -184,6 +193,7 @@ export function ChatWorkspace(props: {
       onOpenPlanReadySessions={props.onOpenPlanReadySessions}
       onOpenCompletedSessions={props.onOpenCompletedSessions}
       onOpenRunningSessions={props.onOpenRunningSessions}
+      onOpenPendingSessions={props.onOpenPendingSessions}
       onCreateSession={props.onCreateSession}
     />
   );
@@ -202,6 +212,8 @@ export function ChatWorkspace(props: {
       planReadyCount={props.planReadySessionsCount}
       completedCount={props.completedSessionsCount}
       runningCount={props.runningSessionsCount}
+      pendingCount={props.pendingSessionsCount}
+      activePending={props.activePending}
       onBack={props.onOpenAllSessions}
       onOpenSubagents={props.onOpenSubagentSessions}
       onOpenFailedSessions={props.onOpenFailedSessions}
@@ -209,6 +221,7 @@ export function ChatWorkspace(props: {
       onOpenPlanReadySessions={props.onOpenPlanReadySessions}
       onOpenCompletedSessions={props.onOpenCompletedSessions}
       onOpenRunningSessions={props.onOpenRunningSessions}
+      onOpenPendingSessions={props.onOpenPendingSessions}
       onCreateSession={props.onCreateSession}
     />
   );

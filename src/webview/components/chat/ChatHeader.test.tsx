@@ -65,6 +65,7 @@ function renderHeader(
           onOpenPlanReadySessions={vi.fn()}
           onOpenCompletedSessions={vi.fn()}
           onOpenRunningSessions={vi.fn()}
+          onOpenPendingSessions={vi.fn()}
           onCreateSession={options.onCreateSession ?? vi.fn()}
         />
         <SessionActionFeedback />
@@ -424,6 +425,7 @@ describe('ActiveChatHeader', () => {
           onOpenPlanReadySessions={vi.fn()}
           onOpenCompletedSessions={vi.fn()}
           onOpenRunningSessions={vi.fn()}
+          onOpenPendingSessions={vi.fn()}
           onCreateSession={createPickerSession}
         />
       ),

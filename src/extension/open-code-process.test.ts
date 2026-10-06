@@ -136,10 +136,8 @@ vi.mock('./server-utils', async () => {
 });
 
 import {
-  areCompactionSettingsEqual,
   appendBoundedCliOutput,
   getOpenCodeConfigPaths,
-  normalizeCompactionSettings,
   OpenCodeProcess,
   sweepStaleInjectedConfigDirectories,
   type UpgradeFailureReport,
@@ -193,7 +191,6 @@ describe('v2 shared service routing', () => {
       false,
       '',
       false,
-      undefined,
       join(tmpdir(), `varro-credential-diagnostic-${process.pid}.json`)
     );
     vi.stubEnv('OPENCODE_SERVER_PASSWORD', '');
@@ -229,7 +226,6 @@ describe('v2 shared service routing', () => {
       true,
       '',
       false,
-      undefined,
       join(tmpdir(), `varro-credential-test-${process.pid}.json`)
     );
     vi.mocked(Service.discover).mockResolvedValue({
@@ -248,7 +244,7 @@ describe('v2 shared service routing', () => {
 
   it('does not use discovered credentials for a different endpoint', async () => {
     const root = await mkdtemp(join(tmpdir(), 'varro-credential-discovery-'));
-    const manager = new OpenCodeProcess(4096, true, '', false, undefined, join(root, 'lease.json'));
+    const manager = new OpenCodeProcess(4096, true, '', false, join(root, 'lease.json'));
     const originalAuthorization = manager.serverAuthorization;
     vi.mocked(Service.discover).mockResolvedValue({
       url: 'http://127.0.0.1:43123',
@@ -306,8 +302,7 @@ describe('v2 shared service routing', () => {
       });
       try {
         const managers = ['varro', 'openjet'].map(
-          (name) =>
-            new OpenCodeProcess(4096, true, '', false, undefined, join(root, `${name}.json`))
+          (name) => new OpenCodeProcess(4096, true, '', false, join(root, `${name}.json`))
         );
         await Promise.all(managers.map((manager) => manager.discoverServerCredentials()));
         expect(managers.map((manager) => manager.serverAuthorization)).toEqual([
@@ -319,14 +314,7 @@ describe('v2 shared service routing', () => {
         expect(spawnMock).not.toHaveBeenCalled();
 
         fetchMock.mockResolvedValue(Response.json({ version, pid: process.pid + 1 }));
-        const stale = new OpenCodeProcess(
-          4096,
-          true,
-          '',
-          false,
-          undefined,
-          join(root, 'stale.json')
-        );
+        const stale = new OpenCodeProcess(4096, true, '', false, join(root, 'stale.json'));
         const previousAuthorization = stale.serverAuthorization;
         await stale.discoverServerCredentials();
         expect(stale.serverAuthorization).toBe(previousAuthorization);
@@ -409,7 +397,6 @@ describe('v2 shared service routing', () => {
           true,
           'opencode2',
           false,
-          undefined,
           join(root, 'lease.json')
         );
         manager.rememberInstalledCliVersion('2.0.6');
@@ -628,103 +615,6 @@ async function setAdoptedOwnership(
   manager.managedProcess = true;
   return lease;
 }
-
-describe('normalizeCompactionSettings', () => {
-  it('returns defaults for undefined input', () => {
-    expect(normalizeCompactionSettings(undefined)).toEqual({ auto: null, reserved: null });
-  });
-
-  it('returns defaults for empty object', () => {
-    expect(normalizeCompactionSettings({})).toEqual({ auto: null, reserved: null });
-  });
-
-  it('preserves boolean auto', () => {
-    expect(normalizeCompactionSettings({ auto: true })).toEqual({ auto: true, reserved: null });
-    expect(normalizeCompactionSettings({ auto: false })).toEqual({ auto: false, reserved: null });
-  });
-
-  it('treats truthy/falsy non-boolean auto as null', () => {
-    expect(normalizeCompactionSettings({ auto: 1 as unknown as boolean })).toEqual({
-      auto: null,
-      reserved: null,
-    });
-    expect(normalizeCompactionSettings({ auto: 'yes' as unknown as boolean })).toEqual({
-      auto: null,
-      reserved: null,
-    });
-  });
-
-  it('preserves valid non-negative integer reserved', () => {
-    expect(normalizeCompactionSettings({ reserved: 0 })).toEqual({ auto: null, reserved: 0 });
-    expect(normalizeCompactionSettings({ reserved: 5000 })).toEqual({
-      auto: null,
-      reserved: 5000,
-    });
-  });
-
-  it('rejects negative reserved', () => {
-    expect(normalizeCompactionSettings({ reserved: -1 })).toEqual({ auto: null, reserved: null });
-  });
-
-  it('rejects non-integer reserved', () => {
-    expect(normalizeCompactionSettings({ reserved: 1.5 })).toEqual({ auto: null, reserved: null });
-  });
-
-  it('rejects NaN reserved', () => {
-    expect(normalizeCompactionSettings({ reserved: NaN })).toEqual({ auto: null, reserved: null });
-  });
-
-  it('rejects non-number reserved', () => {
-    expect(normalizeCompactionSettings({ reserved: '100' as unknown as number })).toEqual({
-      auto: null,
-      reserved: null,
-    });
-  });
-
-  it('preserves both fields together', () => {
-    expect(normalizeCompactionSettings({ auto: true, reserved: 1024 })).toEqual({
-      auto: true,
-      reserved: 1024,
-    });
-  });
-});
-
-describe('areCompactionSettingsEqual', () => {
-  it('returns true for identical object reference', () => {
-    const a = { auto: true, reserved: 100 };
-    expect(areCompactionSettingsEqual(a, a)).toBe(true);
-  });
-
-  it('returns true for equal settings', () => {
-    expect(
-      areCompactionSettingsEqual({ auto: false, reserved: 0 }, { auto: false, reserved: 0 })
-    ).toBe(true);
-  });
-
-  it('returns false when auto differs', () => {
-    expect(
-      areCompactionSettingsEqual({ auto: true, reserved: null }, { auto: false, reserved: null })
-    ).toBe(false);
-  });
-
-  it('returns false when reserved differs', () => {
-    expect(
-      areCompactionSettingsEqual({ auto: null, reserved: 10 }, { auto: null, reserved: 20 })
-    ).toBe(false);
-  });
-
-  it('returns false when auto is null vs boolean', () => {
-    expect(
-      areCompactionSettingsEqual({ auto: null, reserved: null }, { auto: true, reserved: null })
-    ).toBe(false);
-  });
-
-  it('returns true when both are fully null', () => {
-    expect(
-      areCompactionSettingsEqual({ auto: null, reserved: null }, { auto: null, reserved: null })
-    ).toBe(true);
-  });
-});
 
 describe('OpenCodeProcess port validation', () => {
   it.each([0, -1, 1.5, 65_536, Number.NaN, Number.POSITIVE_INFINITY])(
@@ -1519,7 +1409,6 @@ describe('OpenCodeProcess server ownership leases', () => {
             true,
             '',
             false,
-            undefined,
             source === 'different-key'
               ? join(root, 'servers/varro-opencode-server-4196.json')
               : undefined
@@ -1969,7 +1858,7 @@ describe('OpenCodeProcess server ownership leases', () => {
             : marker
         )
       );
-      const manager = new OpenCodeProcess('auto', true, '', false, undefined, path);
+      const manager = new OpenCodeProcess('auto', true, '', false, path);
       manager.port = 51197;
       await expect(manager.verifyManagedServerAdmission()).rejects.toThrow();
       expect(manager.managedProcess).toBe(false);
@@ -2007,7 +1896,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       const confirm = vi.fn(async () => true);
       try {
         await writeFile(`${path}.managed`, JSON.stringify(marker));
-        const manager = new OpenCodeProcess('auto', true, '', false, undefined, path);
+        const manager = new OpenCodeProcess('auto', true, '', false, path);
         manager.port = marker.port;
         const admission = new ServerConnectionAdmission(
           () => manager.url,
@@ -2317,7 +2206,6 @@ describe('OpenCodeProcess server ownership leases', () => {
           true,
           '',
           false,
-          undefined,
           join(directory, 'absent.json')
         );
         unregistered.rememberInstalledCliVersion('2.0.21');
@@ -2494,7 +2382,6 @@ describe('OpenCodeProcess server ownership leases', () => {
         true,
         '',
         false,
-        undefined,
         automaticPath,
         join(root, 'proc')
       );
@@ -2654,15 +2541,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     };
     await writeFile(path, JSON.stringify(lease));
     mockLinuxLeaseProcess({ port: lease.port });
-    const manager = new OpenCodeProcess(
-      'auto',
-      true,
-      '',
-      false,
-      undefined,
-      path,
-      join(root, 'proc')
-    );
+    const manager = new OpenCodeProcess('auto', true, '', false, path, join(root, 'proc'));
     const secrets = { get: vi.fn(), store: vi.fn().mockResolvedValue(undefined) };
     try {
       await manager.refreshStartupRegistration();
@@ -2704,15 +2583,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     try {
       await writeFile(path, JSON.stringify(lease));
       mockLinuxLeaseProcess({ port: lease.port });
-      const manager = new OpenCodeProcess(
-        'auto',
-        true,
-        '',
-        false,
-        undefined,
-        path,
-        join(root, 'proc')
-      );
+      const manager = new OpenCodeProcess('auto', true, '', false, path, join(root, 'proc'));
       await manager.refreshStartupRegistration();
       const authorization = manager.serverAuthorization;
       const secrets = { get: vi.fn<() => Promise<string | undefined>>() };
@@ -2779,15 +2650,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       await writeFile(path, raw);
       mockLinuxLeaseProcess({ port: lease.port });
       try {
-        const manager = new OpenCodeProcess(
-          port,
-          true,
-          '',
-          false,
-          undefined,
-          path,
-          join(root, 'proc')
-        );
+        const manager = new OpenCodeProcess(port, true, '', false, path, join(root, 'proc'));
         await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
         expect(manager.port).toBe(50001);
         expect(manager.serverAuthorization).toBe(
@@ -2827,15 +2690,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       };
       await writeFile(path, JSON.stringify(lease));
       mockLinuxLeaseProcess({ port: lease.port });
-      const manager = new OpenCodeProcess(
-        'auto',
-        true,
-        '',
-        false,
-        undefined,
-        path,
-        join(root, 'proc')
-      );
+      const manager = new OpenCodeProcess('auto', true, '', false, path, join(root, 'proc'));
       const kill = vi.spyOn(process, 'kill');
       try {
         await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
@@ -2893,15 +2748,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       };
       await writeFile(path, JSON.stringify(lease));
       mockLinuxLeaseProcess({ port: lease.port });
-      const manager = new OpenCodeProcess(
-        'auto',
-        true,
-        '',
-        false,
-        undefined,
-        path,
-        join(root, 'proc')
-      );
+      const manager = new OpenCodeProcess('auto', true, '', false, path, join(root, 'proc'));
       try {
         await manager.refreshStartupRegistration();
         await manager.recoverManagedServerOwnership();
@@ -2946,7 +2793,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       };
       const raw = JSON.stringify(lease);
       await writeFile(path, raw);
-      const manager = new OpenCodeProcess(port, true, '', false, undefined, path);
+      const manager = new OpenCodeProcess(port, true, '', false, path);
       try {
         await expect(manager.refreshStartupRegistration()).resolves.toBe(false);
         manager.selectAutomaticPort();
@@ -2982,15 +2829,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     await writeFile(`${path}.managed`, JSON.stringify(marker));
     mockLinuxLeaseProcess();
     try {
-      const manager = new OpenCodeProcess(
-        'auto',
-        true,
-        '',
-        false,
-        undefined,
-        path,
-        join(root, 'proc')
-      );
+      const manager = new OpenCodeProcess('auto', true, '', false, path, join(root, 'proc'));
       await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
       expect(manager.port).toBe(50001);
       expect(JSON.parse(await readFile(`${path}.managed`, 'utf8'))).toEqual(marker);
@@ -3038,15 +2877,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue(listeners);
       const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
       try {
-        const manager = new OpenCodeProcess(
-          'auto',
-          true,
-          '',
-          false,
-          undefined,
-          path,
-          join(root, 'proc')
-        );
+        const manager = new OpenCodeProcess('auto', true, '', false, path, join(root, 'proc'));
         let failure: unknown;
         try {
           await manager.refreshStartupRegistration();
@@ -3093,15 +2924,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     await writeFile(path, JSON.stringify(lease));
     mockLinuxLeaseProcess();
     try {
-      const manager = new OpenCodeProcess(
-        4096,
-        true,
-        '',
-        false,
-        undefined,
-        path,
-        join(root, 'proc')
-      );
+      const manager = new OpenCodeProcess(4096, true, '', false, path, join(root, 'proc'));
       expect(manager.port).toBe(4096);
       await expect(manager.refreshStartupRegistration()).rejects.toThrow('Select auto');
       expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(lease);
@@ -3124,7 +2947,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       const root = await mkdtemp(join(tmpdir(), 'varro-live-lease-retention-'));
       const path = join(root, 'lease.json');
       const procRoot = join(root, 'proc');
-      const manager = new OpenCodeProcess('auto', true, '', false, undefined, path, procRoot);
+      const manager = new OpenCodeProcess('auto', true, '', false, path, procRoot);
       const lease = {
         ...(await setAdoptedOwnership(manager, path, 'linux:Fri Jul 10 12:00:00 2026')),
         password: 'retained-private-password',
@@ -3154,7 +2977,7 @@ describe('OpenCodeProcess server ownership leases', () => {
         // without stopping it or recovering a credentialless marker.
         listeners.mockResolvedValue([lease.pid]);
         mockLinuxLeaseProcess();
-        const reloaded = new OpenCodeProcess('auto', true, '', false, undefined, path, procRoot);
+        const reloaded = new OpenCodeProcess('auto', true, '', false, path, procRoot);
         await expect(reloaded.refreshStartupRegistration()).resolves.toBe(true);
         expect(reloaded.serverAuthorization).toBe(
           `Basic ${Buffer.from(`opencode:${lease.password}`).toString('base64')}`
@@ -3173,15 +2996,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const path = join(root, 'lease.json');
     await writeFile(path, '{broken');
     try {
-      const manager = new OpenCodeProcess(
-        'auto',
-        true,
-        '',
-        false,
-        undefined,
-        path,
-        join(root, 'proc')
-      );
+      const manager = new OpenCodeProcess('auto', true, '', false, path, join(root, 'proc'));
       await expect(manager.refreshStartupRegistration()).rejects.toThrow('left untouched');
       expect(await readFile(path, 'utf8')).toBe('{broken');
       const lease = {
@@ -3216,15 +3031,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       const root = await mkdtemp(join(tmpdir(), 'varro-retired-lease-cleanup-'));
       const path = join(root, 'lease.json');
-      const manager = new OpenCodeProcess(
-        'auto',
-        true,
-        '',
-        false,
-        undefined,
-        path,
-        join(root, 'proc')
-      );
+      const manager = new OpenCodeProcess('auto', true, '', false, path, join(root, 'proc'));
       await setAdoptedOwnership(manager, path, 'linux:original-process');
       mockLinuxLeaseProcess({ birthIdentity: () => 'replacement-process' });
       vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue([]);
@@ -3250,8 +3057,8 @@ describe('OpenCodeProcess server ownership leases', () => {
   it('serializes competing initial launches and releases the claim idempotently', async () => {
     const root = await mkdtemp(join(tmpdir(), 'varro-launch-claim-'));
     const path = join(root, 'lease.json');
-    const first = new OpenCodeProcess('auto', true, '', false, undefined, path);
-    const second = new OpenCodeProcess('auto', true, '', false, undefined, path);
+    const first = new OpenCodeProcess('auto', true, '', false, path);
+    const second = new OpenCodeProcess('auto', true, '', false, path);
     // Birth inspection may be unavailable; the real current host PID still protects its claim.
     mockLinuxLeaseProcess();
     try {
@@ -3284,7 +3091,6 @@ describe('OpenCodeProcess server ownership leases', () => {
       true,
       '',
       false,
-      undefined,
       join(tmpdir(), 'unused-auto.json')
     );
     manager.selectAutomaticPort();
@@ -3478,7 +3284,7 @@ describe('OpenCodeProcess server ownership leases', () => {
         return result;
       });
       const createManager = () =>
-        new OpenCodeProcess(4096, true, '', false, undefined, path, join(root, 'proc'));
+        new OpenCodeProcess(4096, true, '', false, path, join(root, 'proc'));
       try {
         const first = createManager();
         const second = createManager();
@@ -3528,7 +3334,6 @@ describe('OpenCodeProcess server ownership leases', () => {
       true,
       '/usr/bin/opencode',
       false,
-      undefined,
       path,
       join(root, 'proc')
     );
@@ -3550,15 +3355,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       } finally {
         await releaseStartup();
       }
-      const second = new OpenCodeProcess(
-        4096,
-        true,
-        '',
-        false,
-        undefined,
-        path,
-        join(root, 'proc')
-      );
+      const second = new OpenCodeProcess(4096, true, '', false, path, join(root, 'proc'));
       await expect(second.recoverManagedServerOwnership()).resolves.toBe(false);
       const release = await second.acquireManagedServerRestartOwnership();
       try {
@@ -3614,7 +3411,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     );
     mockLinuxLeaseProcess({ executable: '/usr/bin/opencode (deleted)' });
     try {
-      const manager = new OpenCodeProcess(4096, true, '', false, undefined, path, procRoot);
+      const manager = new OpenCodeProcess(4096, true, '', false, path, procRoot);
       await expect(manager.recoverManagedServerOwnership()).resolves.toBe(expected);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -3635,8 +3432,8 @@ describe('OpenCodeProcess server ownership leases', () => {
       state: 'active',
       createdAt: Date.now(),
     };
-    const first = new OpenCodeProcess(4096, true, '', false, undefined, path);
-    const second = new OpenCodeProcess(4096, true, '', false, undefined, path);
+    const first = new OpenCodeProcess(4096, true, '', false, path);
+    const second = new OpenCodeProcess(4096, true, '', false, path);
     const write = (manager: OpenCodeProcess, host: string) =>
       (
         manager as unknown as {
@@ -3648,7 +3445,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(
         expect.objectContaining({ owner: 'same-server', birthIdentity: 'linux:123' })
       );
-      const reader = new OpenCodeProcess(4096, true, '', false, undefined, path);
+      const reader = new OpenCodeProcess(4096, true, '', false, path);
       expect(reader.hasOwnershipLeaseCandidate).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -3673,15 +3470,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     await writeFile(path, JSON.stringify(lease));
     mockLinuxLeaseProcess({ birthIdentity: () => '' });
     try {
-      const manager = new OpenCodeProcess(
-        4096,
-        true,
-        '',
-        false,
-        undefined,
-        path,
-        join(root, 'proc')
-      );
+      const manager = new OpenCodeProcess(4096, true, '', false, path, join(root, 'proc'));
       await expect(manager.recoverManagedServerOwnership()).rejects.toThrow(
         'Cannot verify process start identity'
       );
@@ -3712,7 +3501,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     };
     await writeFile(path, JSON.stringify(lease));
     mockLinuxLeaseProcess({ port: lease.port });
-    const manager = new OpenCodeProcess(4097, true, '', false, undefined, path, join(root, 'proc'));
+    const manager = new OpenCodeProcess(4097, true, '', false, path, join(root, 'proc'));
     try {
       await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
       const authorization = manager.serverAuthorization;
@@ -3787,7 +3576,7 @@ describe('OpenCodeProcess server ownership leases', () => {
         return child;
       });
       try {
-        const manager = new OpenCodeProcess(4096, true, '', false, undefined, path);
+        const manager = new OpenCodeProcess(4096, true, '', false, path);
         const verification = manager.verifyManagedServerConnection(true);
         if (failure) await expect(verification).rejects.toThrow(failure);
         else await expect(verification).resolves.toBeUndefined();
@@ -3809,7 +3598,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
     await setAdoptedOwnership(manager, leasePath);
     mockLinuxLeaseProcess();
     const kill = vi.spyOn(process, 'kill');
@@ -3829,7 +3618,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
     await setAdoptedOwnership(manager, leasePath);
     spawnMock.mockImplementation(() => {
       const result = Object.assign(new EventEmitter(), {
@@ -3856,7 +3645,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
     await setAdoptedOwnership(manager, leasePath, 'linux:old-process');
     mockLinuxLeaseProcess({ birthIdentity: () => 'replacement-process' });
     const kill = vi.spyOn(process, 'kill');
@@ -3933,7 +3722,6 @@ describe('OpenCodeProcess server ownership leases', () => {
       false,
       '/usr/bin/opencode',
       false,
-      undefined,
       leasePath,
       procRoot
     );
@@ -4015,15 +3803,7 @@ describe('OpenCodeProcess server ownership leases', () => {
         return result;
       }
     );
-    const first = new OpenCodeProcess(
-      4096,
-      true,
-      'opencode',
-      false,
-      undefined,
-      leasePath,
-      procRoot
-    );
+    const first = new OpenCodeProcess(4096, true, 'opencode', false, leasePath, procRoot);
     first.launchServer({
       getWorkspaceCwd: () => '/repo',
       onStdout: vi.fn(),
@@ -4059,15 +3839,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     });
     expect(serverEnv?.VARRO_SERVER_OWNER).toBe(lease.owner);
 
-    const second = new OpenCodeProcess(
-      4096,
-      true,
-      'opencode',
-      false,
-      undefined,
-      leasePath,
-      procRoot
-    );
+    const second = new OpenCodeProcess(4096, true, 'opencode', false, leasePath, procRoot);
     await expect(second.recoverManagedServerOwnership()).resolves.toBe(false);
     expect(second.managedProcess).toBe(false);
     expect(second.hasForeignActiveOwnership).toBe(true);
@@ -4134,7 +3906,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       return result;
     });
     const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
 
     await expect(manager.recoverManagedServerOwnership()).resolves.toBe(false);
     await expect(manager.stopServerForRestart()).rejects.toThrow(
@@ -4194,14 +3966,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       });
       return result;
     });
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'C:\\OpenCode\\opencode.exe',
-      false,
-      undefined,
-      leasePath
-    );
+    const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.exe', false, leasePath);
     manager.launchServer({
       getWorkspaceCwd: () => undefined,
       onStdout: vi.fn(),
@@ -4270,14 +4035,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       });
       return result;
     });
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'C:\\OpenCode\\opencode.exe',
-      false,
-      undefined,
-      leasePath
-    );
+    const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.exe', false, leasePath);
     manager.launchServer({
       getWorkspaceCwd: () => undefined,
       onStdout: vi.fn(),
@@ -4334,14 +4092,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       });
       return result;
     });
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'C:\\OpenCode\\opencode.exe',
-      false,
-      undefined,
-      leasePath
-    );
+    const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.exe', false, leasePath);
     manager.launchServer({
       getWorkspaceCwd: () => undefined,
       onStdout: vi.fn(),
@@ -4408,14 +4159,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       }
       return result;
     });
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'C:\\OpenCode\\opencode.exe',
-      false,
-      undefined,
-      leasePath
-    );
+    const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.exe', false, leasePath);
     manager.launchServer({
       getWorkspaceCwd: () => undefined,
       onStdout: vi.fn(),
@@ -4480,7 +4224,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       });
       return result;
     });
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
 
     await expect(manager.recoverManagedServerOwnership()).resolves.toBe(true);
     await manager.stopServerForRestart();
@@ -4522,10 +4266,10 @@ describe('OpenCodeProcess server ownership leases', () => {
       queueMicrotask(() => result.emit('close', 0));
       return result;
     });
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
     expect(manager.port).toBe(4100);
 
-    const attached = new OpenCodeProcess(4096, false, 'opencode', false, undefined, leasePath);
+    const attached = new OpenCodeProcess(4096, false, 'opencode', false, leasePath);
     expect(attached.url).toBe('http://127.0.0.1:4096');
     expect(attached.managedProcess).toBe(false);
 
@@ -4553,7 +4297,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       'utf-8'
     );
 
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
 
     expect(manager.port).toBe(4096);
     await expect(manager.recoverManagedServerOwnership()).resolves.toBe(false);
@@ -4583,7 +4327,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     );
     mockLinuxLeaseProcess({ birthIdentity: () => 'new-process' });
     const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
 
     await expect(manager.recoverManagedServerOwnership()).resolves.toBe(false);
 
@@ -4619,7 +4363,7 @@ describe('OpenCodeProcess server ownership leases', () => {
         pid !== MOCK_LINUX_PID || ++birthQueries <= 2 ? 'original-process' : 'replacement-process',
     });
     const kill = vi.spyOn(process, 'kill');
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
     await expect(manager.recoverManagedServerOwnership()).resolves.toBe(true);
 
     await expect(manager.stopServerForRestart()).rejects.toThrow(
@@ -4652,15 +4396,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     await writeFile(leasePath, JSON.stringify(activeLease), 'utf-8');
     mockLinuxLeaseProcess();
     const kill = vi.spyOn(process, 'kill');
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'opencode',
-      false,
-      undefined,
-      leasePath,
-      procRoot
-    );
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath, procRoot);
 
     await expect(manager.recoverManagedServerOwnership()).resolves.toBe(false);
     expect(manager.managedProcess).toBe(false);
@@ -4722,15 +4458,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       }
       return true;
     });
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'opencode',
-      false,
-      undefined,
-      leasePath,
-      procRoot
-    );
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath, procRoot);
 
     await expect(manager.recoverManagedServerOwnership()).resolves.toBe(true);
 
@@ -5010,14 +4738,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const staleClaimTime = new Date(Date.now() - 60_000);
     await utimes(`${leasePath}.claim`, staleClaimTime, staleClaimTime);
     mockLinuxLeaseProcess();
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      '/usr/bin/opencode',
-      false,
-      undefined,
-      leasePath
-    );
+    const manager = new OpenCodeProcess(4096, true, '/usr/bin/opencode', false, leasePath);
 
     const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
     await manager.runMaintenanceTick({
@@ -5063,14 +4784,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       'utf-8'
     );
     mockLinuxLeaseProcess();
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      '/usr/bin/opencode',
-      false,
-      undefined,
-      leasePath
-    );
+    const manager = new OpenCodeProcess(4096, true, '/usr/bin/opencode', false, leasePath);
 
     await expect(manager.takeOwnershipOfExistingServer()).resolves.toBe(true);
     const ownership = manager.acquireManagedServerRestartOwnership();
@@ -5112,14 +4826,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
     mockLinuxLeaseProcess();
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      '/usr/bin/opencode',
-      false,
-      undefined,
-      leasePath
-    );
+    const manager = new OpenCodeProcess(4096, true, '/usr/bin/opencode', false, leasePath);
 
     await expect(manager.takeOwnershipOfExistingServer()).resolves.toBe(false);
 
@@ -5170,14 +4877,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       });
       return result;
     });
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      '/usr/bin/opencode',
-      false,
-      undefined,
-      leasePath
-    );
+    const manager = new OpenCodeProcess(4096, true, '/usr/bin/opencode', false, leasePath);
 
     await expect(manager.takeOwnershipOfExistingServer()).resolves.toBe(true);
 
@@ -5242,14 +4942,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       });
       return result;
     });
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'C:\\OpenCode\\opencode.exe',
-      false,
-      undefined,
-      leasePath
-    );
+    const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.exe', false, leasePath);
 
     await expect(manager.takeOwnershipOfExistingServer()).resolves.toBe(true);
 
@@ -5270,14 +4963,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
     mockLinuxLeaseProcess({ parentPid: 42 });
-    const manager = new OpenCodeProcess(
-      4096,
-      false,
-      '/usr/bin/opencode',
-      false,
-      undefined,
-      leasePath
-    );
+    const manager = new OpenCodeProcess(4096, false, '/usr/bin/opencode', false, leasePath);
 
     await expect(manager.takeOwnershipOfExistingServer()).resolves.toBe(false);
     expect(manager.managedProcess).toBe(false);
@@ -5306,7 +4992,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       'utf-8'
     );
     mockLinuxLeaseProcess({ lsofMissing: true });
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
 
     await expect(manager.recoverManagedServerOwnership()).resolves.toBe(true);
     expect(spawnMock).toHaveBeenCalledWith('ss', ['-ltnp'], expect.anything());
@@ -5343,7 +5029,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       'utf-8'
     );
     mockLinuxLeaseProcess();
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
 
     await expect(manager.recoverManagedServerOwnership()).rejects.toThrow(
       'ownership evidence were retained'
@@ -5443,14 +5129,7 @@ describe('OpenCodeProcess config ownership', () => {
   ])('reconciles an owned reused timeout policy safely: %s', async (scenario) => {
     const root = await mkdtemp(join(tmpdir(), 'varro-stream-reused-'));
     process.env.XDG_CONFIG_HOME = root;
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'opencode',
-      false,
-      undefined,
-      join(root, 'lease.json')
-    );
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, join(root, 'lease.json'));
     await manager.syncInjectedConfigFile();
     const state = manager as unknown as {
       injectedConfigPath: string;
@@ -5725,14 +5404,16 @@ describe('OpenCodeProcess config ownership', () => {
     ]);
   });
 
-  it('injects continuation defaults and Ask with no compaction override', async () => {
+  it('injects continuation defaults and Ask without overriding compaction', async () => {
     const manager = new OpenCodeProcess(4096, true, 'opencode');
 
     await manager.syncInjectedConfigFile();
     try {
       const env = (manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }).buildServerEnv();
       expect(env.OPENCODE_CONFIG).toBeTruthy();
-      expect(JSON.parse(await readFile(env.OPENCODE_CONFIG!, 'utf-8'))).toMatchObject({
+      const config = JSON.parse(await readFile(env.OPENCODE_CONFIG!, 'utf-8'));
+      expect(config).not.toHaveProperty('compaction');
+      expect(config).toMatchObject({
         experimental: { continue_loop_on_deny: true },
         agent: { ask: { mode: 'primary' } },
       });
@@ -5798,10 +5479,7 @@ describe('OpenCodeProcess config ownership', () => {
       signalCode: null,
     });
     spawnMock.mockReturnValueOnce(first).mockReturnValueOnce(second);
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, {
-      auto: true,
-      reserved: 4096,
-    });
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false);
     const callbacks = {
       getWorkspaceCwd: () => '/repo',
       onStdout: vi.fn(),
@@ -5833,7 +5511,6 @@ describe('OpenCodeProcess config ownership', () => {
     expect(firstPath).not.toBe(secondPath);
     expect(JSON.parse(await readFile(secondPath, 'utf-8'))).toMatchObject({
       experimental: { continue_loop_on_deny: true },
-      compaction: { auto: true, reserved: 4096 },
     });
     await manager.cleanupPreparedInjectedConfigFile();
   });
@@ -6023,7 +5700,7 @@ describe('OpenCodeProcess config ownership', () => {
       signalCode: null,
     });
     spawnMock.mockReturnValueOnce(child);
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, { auto: true });
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false);
     await manager.syncInjectedConfigFile();
     manager.launchServer({
       getWorkspaceCwd: () => '/repo',
@@ -6056,7 +5733,7 @@ describe('OpenCodeProcess config ownership', () => {
       signalCode: null,
     });
     spawnMock.mockReturnValueOnce(child);
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, { auto: true });
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false);
     await manager.syncInjectedConfigFile();
     manager.launchServer({
       getWorkspaceCwd: () => '/repo',
@@ -6082,16 +5759,7 @@ describe('OpenCodeProcess config ownership', () => {
   });
 
   it('does not create a temporary config until managed spawn preparation', async () => {
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, { auto: true });
-
-    await manager.updateCompactionSettings(
-      { auto: false, reserved: 2048 },
-      {
-        status: { state: 'stopped' },
-        request: vi.fn(),
-        restartManagedServerForCompactionSettings: vi.fn(),
-      }
-    );
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
 
     expect(
       (manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }).buildServerEnv()
@@ -6106,7 +5774,6 @@ describe('OpenCodeProcess config ownership', () => {
       false,
       'opencode',
       false,
-      { auto: true },
       join(directory, 'lease.json')
     );
     await manager.syncInjectedConfigFile();
@@ -6143,14 +5810,7 @@ describe('OpenCodeProcess config ownership', () => {
       ),
     ]);
     mockLinuxLeaseProcess({ parentPid: 42 });
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      '/usr/bin/opencode',
-      false,
-      undefined,
-      leasePath
-    );
+    const manager = new OpenCodeProcess(4096, true, '/usr/bin/opencode', false, leasePath);
 
     await manager.prepareForHealthyExistingServer();
 
@@ -6176,7 +5836,7 @@ describe('OpenCodeProcess config ownership', () => {
     spawnMock.mockImplementationOnce(() => {
       throw new Error('spawn failed');
     });
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, { auto: true });
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false);
     await manager.syncInjectedConfigFile();
     const configPath = (
       manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }

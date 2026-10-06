@@ -447,6 +447,9 @@ Direct input acquires ownership only when it can affect the transcript:
   bottom while the preceding response remains visible. It must never align the new card to the
   transcript top. This established behavior applies to typed prompts, generated actions such as
   "Implement plan", and queued follow-ups, and must not change at the virtualization threshold.
+  If the reader is detached, the send request positions at the existing bottom synchronously before
+  publishing the optimistic card. Only the appended content uses the normal smooth reveal, not the
+  trip through older history. The request hook runs inside the send batch before row reconciliation.
 - Only the first turn in an empty chat may align its user card to the message-jump inset and create
   enough trailing reserve to make that destination reachable. Assistant growth consumes that reserve
   while direct transcript input cancels destination settling. Measured appends retain their
@@ -747,7 +750,10 @@ Direct input acquires ownership only when it can affect the transcript:
   preceding content upward. Initial positioning, browser clamp corrections, and reduced motion remain
   immediate. The final easing step reaches the destination before the one-pixel settle threshold.
   The viewport follower uses critically damped motion with a 220 ms smoothing time and a
-  1,100 px/s speed limit. Preserve velocity across incoming blocks, retain fractional progress between
+  1,100 px/s speed limit. While paced text is releasing, newly revealed lines may trail the viewport by
+  at most 64 px: beyond that the follower catches up continuously at up to 2,200 px/s, never by a jump,
+  so a large first chunk does not sit below the composer for a third of a second. A tick that lands
+  mid catch-up may exceed the bound for one frame. Preserve velocity across incoming blocks, retain fractional progress between
   painted frames, and reset momentum after interruption. Use animation-frame timestamps so rendering
   work does not turn a late callback into a sudden speed change. Do not replay an ease-out curve at
   full initial speed for each arrival.
@@ -755,8 +761,8 @@ Direct input acquires ownership only when it can affect the transcript:
   editing, disclosure ownership, and activity exit still take precedence. Content arriving after
   canonical completion must release the old activity-summary anchor just like a live delta.
 - An explicit return to latest positions immediately at any distance rather than scrolling through
-  intermediate rows. Sends and subsequent growth retain normal easing. A newer direct gesture still
-  cancels the queued return.
+  intermediate rows. A detached send first jumps to the existing bottom; its new card and subsequent
+  growth retain normal easing. A newer direct gesture still cancels the queued return or reveal.
 - `MessageList.presentation.test.ts` and `streaming-presentation.test.ts` cover canonical/display
   separation, grouped fast previews, completion, interruption, hydration, and cancellation.
   `e2e/tests/scroll-streaming-presentation.spec.ts` records every-frame preview, text, anchor, and scroll

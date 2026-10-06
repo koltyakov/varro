@@ -1,4 +1,3 @@
-/* oxlint-disable anti-slop/no-runtime-typeof -- VS Code configuration values require runtime validation at activation. */
 import * as vscode from 'vscode';
 import { OpenCodeServer } from './server';
 import { SidebarProvider } from './sidebar-provider';
@@ -11,7 +10,6 @@ import { diagnosticTimeline } from './diagnostics';
 import { measureStartupPhase } from '../shared/startup';
 import { prepareVarroScratchDirectory } from './varro-state-paths';
 
-const DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS = 4096;
 const CONTEXT_RESCOPE_RETRY_MS = 50;
 const CONTEXT_RESTART_GRACE_MS = 3000;
 const INITIAL_SIDEBAR_REVEAL_KEY = 'layout.initialSidebarReveal.v1';
@@ -27,20 +25,6 @@ function syncShowFileDiffsContext(config: vscode.WorkspaceConfiguration): void {
     SHOW_FILE_DIFFS_CONTEXT,
     config.get<boolean>('chat.showFileDiffs', false)
   );
-}
-
-function readCompactionSettings(config: vscode.WorkspaceConfiguration) {
-  const rawReserved = config.get<number | null>(
-    'chat.autoCompactionReservedTokens',
-    DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS
-  );
-  return {
-    auto: config.get<boolean>('chat.autoCompact', true),
-    reserved:
-      typeof rawReserved === 'number' && Number.isInteger(rawReserved) && rawReserved >= 0
-        ? rawReserved
-        : null,
-  };
 }
 
 let server: OpenCodeServer | null = null;
@@ -189,7 +173,6 @@ async function activateExtension(context: vscode.ExtensionContext) {
       );
     }
   }
-  const compactionSettings = readCompactionSettings(config);
   syncShowFileDiffsContext(config);
 
   server = new OpenCodeServer(
@@ -197,7 +180,6 @@ async function activateExtension(context: vscode.ExtensionContext) {
     autoStart,
     command,
     simulateMissingCli,
-    compactionSettings,
     undefined,
     context.secrets,
     legacyDefaultEndpoint
@@ -278,14 +260,11 @@ async function activateExtension(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       const portChanged = event.affectsConfiguration('varro.server.port');
-      const compactionChanged =
-        event.affectsConfiguration('varro.chat.autoCompact') ||
-        event.affectsConfiguration('varro.chat.autoCompactionReservedTokens');
       const launchSettingsChanged =
         event.affectsConfiguration('varro.server.autoStart') ||
         event.affectsConfiguration('varro.server.command');
       const fileDiffsChanged = event.affectsConfiguration('varro.chat.showFileDiffs');
-      if (!portChanged && !compactionChanged && !launchSettingsChanged && !fileDiffsChanged) return;
+      if (!portChanged && !launchSettingsChanged && !fileDiffsChanged) return;
 
       if (portChanged) {
         void vscode.window
@@ -303,9 +282,6 @@ async function activateExtension(context: vscode.ExtensionContext) {
       const nextConfig = vscode.workspace.getConfiguration('varro');
       if (fileDiffsChanged) {
         syncShowFileDiffsContext(nextConfig);
-      }
-      if (compactionChanged) {
-        void server?.updateCompactionSettings(readCompactionSettings(nextConfig));
       }
       if (launchSettingsChanged) {
         server?.updateLaunchSettings({

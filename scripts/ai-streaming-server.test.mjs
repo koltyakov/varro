@@ -99,6 +99,19 @@ async function waitFor(predicate) {
   }
 }
 
+test('armed replay keeps idle subscribers alive with heartbeats and stops them on close', async (t) => {
+  const server = await createStreamingServer({ ...fixture(), heartbeatMs: 10 });
+  t.after(() => server.close());
+  const { response } = await connect(server, t);
+  let heartbeats = 0;
+  response.on('data', (chunk) => (heartbeats += chunk.split(': heartbeat\n\n').length - 1));
+  await waitFor(() => heartbeats >= 2);
+  await server.close();
+  const afterClose = heartbeats;
+  await sleep(40);
+  assert.equal(heartbeats, afterClose);
+});
+
 test('native v2 capture detaches fork metadata and exposes only delivered parallel tool state', async (t) => {
   const sessionID = 'native';
   const user = { info: { id: 'u', sessionID, role: 'user', time: { created: 1 } }, parts: [] };

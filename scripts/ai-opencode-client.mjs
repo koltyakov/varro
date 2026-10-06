@@ -98,7 +98,13 @@ export class AiOpenCodeClient {
       });
       if (response.status === 404 || response.headers.get('content-type')?.includes('text/html'))
         continue;
-      if (!response.ok) throw new Error(`OpenCode detection ${route}: HTTP ${response.status}`);
+      if (!response.ok) {
+        const hint =
+          [401, 403].includes(response.status) && !process.env.OPENCODE_SERVER_PASSWORD
+            ? '; the server requires authentication, set OPENCODE_SERVER_PASSWORD (and OPENCODE_SERVER_USERNAME if not "opencode")'
+            : '';
+        throw new Error(`OpenCode detection ${route}: HTTP ${response.status}${hint}`);
+      }
       const info = await response.json();
       const healthy =
         route === '/global/health'

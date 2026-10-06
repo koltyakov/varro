@@ -101,7 +101,10 @@ canonical database path, and association method. These checks do not read databa
 If discovery is unavailable or ambiguous, supply `--server-url http://127.0.0.1:<port>` or
 `--server-url 'http://[::1]:<port>'`. Explicit URLs require a numeric loopback address and exactly one
 listener owner, discovered by port and address; that PID must also hold the source database open.
-There is no operator-assertion bypass. Missing `lsof`, inaccessible process metadata, an unheld
+An authenticated source server returns HTTP 401 until `OPENCODE_SERVER_PASSWORD` (and
+`OPENCODE_SERVER_USERNAME` when it is not `opencode`) is exported for `prepare`. A Varro-managed server
+keeps these in its private `.credentials` companion ([server ownership](server-ownership.md)); ask the
+user before reading it, and otherwise use retained captures. There is no operator-assertion bypass. Missing `lsof`, inaccessible process metadata, an unheld
 database, or ambiguous ownership blocks preparation before SQLite opens. Status failures also block preparation;
 no fallback treats completed stored history as proof of inactivity. Busy and retry sessions are
 excluded automatically, including a controller whose latest persisted response is already complete.

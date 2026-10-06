@@ -1,7 +1,27 @@
 import { Show } from 'solid-js';
 import { Tooltip } from '../Tooltip';
+import { UiIcon } from '../UiIcon';
+import { hourglassIcon } from '../../lib/ui-icons';
 
 const HEADER_BADGE_TOOLTIP_DELAY_MS = 1000;
+
+export function PendingSessionsBadge(props: { count: number; onClick: () => void }) {
+  const label = 'Sessions pending background tasks';
+  return (
+    <Show when={props.count > 0}>
+      <Tooltip content={label} delay={HEADER_BADGE_TOOLTIP_DELAY_MS}>
+        <button
+          type="button"
+          class="chat-header-pending-badge"
+          aria-label={label}
+          onClick={props.onClick}
+        >
+          <UiIcon source={hourglassIcon} width={14} height={14} />
+        </button>
+      </Tooltip>
+    </Show>
+  );
+}
 
 export function RunningSessionsBadge(props: { count: number; onClick: () => void }) {
   const label = () => `${props.count} running session${props.count === 1 ? '' : 's'}`;

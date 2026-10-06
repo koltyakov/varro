@@ -37,6 +37,7 @@ import {
   getPermissionGroupMembers,
   messageStructureVersion,
   messageInfoVersion,
+  onBeforeMessageListScrollToBottom,
   onBeforeShowThinkingPreferenceChange,
   expandThinking,
   showModelPicker,
@@ -247,6 +248,8 @@ const STRUCTURAL_ANCHOR_SETTLE_FRAME_LIMIT = 24;
 const NEW_TURN_ALIGNMENT_FRAME_LIMIT = 64;
 const NEW_TURN_ALIGNMENT_MAX_STEP_PX = 24;
 const BOTTOM_FOLLOW_SETTLE_FRAME_COUNT = 2;
+// Paced text may trail the viewport by at most this much before the follower catches up.
+const STREAMING_FOLLOW_MAX_LAG_PX = 64;
 const WIDTH_RESIZE_SETTLE_MS = 100;
 const WIDTH_RESIZE_ANCHOR_INSET_PX = 20;
 const INITIAL_HISTORY_HYDRATION_BATCH_SIZE = 16;
@@ -5389,6 +5392,7 @@ export function MessageList() {
       programmaticScrollWindowMs: PROGRAMMATIC_SCROLL_WINDOW_MS,
       elapsedMs: smooth ? options?.elapsedMs : undefined,
       motion: bottomFollowMotion,
+      maxLagPx: presentation.canSmoothFollow() ? STREAMING_FOLLOW_MAX_LAG_PX : undefined,
     });
     suppressSyncScrollTop = false;
     if (!result) return;
@@ -7076,6 +7080,35 @@ export function MessageList() {
 
   onMount(() => {
     if (!containerRef) return;
+    onCleanup(
+      onBeforeMessageListScrollToBottom((targetMessageId) =>
+        untrack(() => {
+          const sessionId = state.activeSessionId;
+          if (
+            !targetMessageId ||
+            !sessionId ||
+            !containerRef?.isConnected ||
+            state.messagesLoading ||
+            messages().length === 0 ||
+            autoScroll() ||
+            editingMessage() ||
+            diffFocusPauseActive ||
+            stickyNavigationOwnsScroll() ||
+            pointerScrollOwnershipActive
+          ) {
+            return;
+          }
+          // Send requests precede the optimistic append, even inside a Solid batch.
+          // Skip the old history immediately; only the incoming card should ease into view.
+          invalidatePendingHistoryRestoration(sessionId);
+          setChangedLayoutAnchor(null);
+          clearPendingStructuralScrollAnchor();
+          cancelAppendScrollTransition();
+          performScroll({ force: true, immediate: true });
+          setAutoScroll(true);
+        })
+      )
+    );
     const stopCapturingFontChange = onBeforeChatFontConfigChange(() => {
       if (!containerRef) return;
       beginWidthResize({
@@ -7828,7 +7861,8 @@ export function MessageList() {
       }
       if (shouldAlignNewTurn && startNewTurnAlignment(sessionId, targetMessageId)) return;
       if (startPendingAppendScrollTransition(sessionId)) return;
-      // Explicit returns jump immediately; sends and subsequent growth keep normal easing.
+      // Detached sends already jumped before the append. Ease only their new content;
+      // explicit returns still jump to the full current bottom.
       performScroll({
         force: true,
         immediate: !targetMessageId,

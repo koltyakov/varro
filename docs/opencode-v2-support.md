@@ -84,6 +84,49 @@ The released-server adapter tests cover exact workspace resolution for Japanese 
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
 
+### 1.18.35 compatibility review
+
+Reviewed v1.18.34 to v1.18.35, `82ea3a3a63` through `63be8f95d8`.
+The complete release diff leaves public HTTP routes, SSE names and payloads,
+generated SDK declarations, configuration, permissions, questions, session/message
+records, and managed startup contracts consumed by Varro unchanged. No adapter
+changes are required.
+
+Runtime changes update xAI to support images in tool results and omit image formats
+that xAI rejects, while retaining PNG, JPEG, and WebP. The GitLab provider is updated
+to 6.19.0. Console, stats, marketing, and CI changes do not require Varro adaptations.
+
+The tested v1 SDK is `1.18.35`; the v2 client remains at the latest published
+`2.0.24`. Support floors remain v1 `1.16.0` and v2 `2.0.5`.
+
+The Docker support-range run passed required checks on all 14 releases, including
+38/38 on 1.18.35 and 37/37 on the 1.16.0 floor. The floor and the below-floor
+1.15.13 probe each failed the advisory MCP pagination check. The run regenerated
+`scripts/opencode-compatibility/verified.json`; all five shared compatibility
+tests passed afterward.
+
+The adapter matrix passed 27 checks on each v1 release, 31 on v2.0.5, and 35 on
+v2.0.24, but did not pass overall:
+
+- V1.16.0 and v1.18.35 each failed multi-window recovery after the owned server
+  was killed. The follower reported an authentication failure. Inspect follower
+  credential refresh during owner replacement. Evidence is in
+  `artifacts/ai-test-data/multi-window-hTeu9Q/` and
+  `artifacts/ai-test-data/multi-window-xddJOr/`.
+- V2.0.5 failed replacement ownership, simulated reboot recovery, multi-window
+  ownership, and stalled-turn steering. Inspect lease identity and startup recovery
+  using `artifacts/ai-test-data/startup-Us9AGF/`,
+  `artifacts/ai-test-data/startup-zy3zNm/`, and
+  `artifacts/ai-test-data/multi-window-Tpq1Ph/`. Trace inbox admission for the
+  steering failure, which admitted three user messages instead of two.
+- V2.0.24 failed multi-window ownership after the owned server was killed,
+  reporting `unmanaged` instead of `other-host`. Inspect replacement registration
+  and lease identity using `artifacts/ai-test-data/multi-window-dMovpF/`.
+
+These results do not establish whether the failures are regressions from the
+v1 SDK bump. Later recovery phases were not reached after the early failures.
+Complete logs are under `artifacts/opencode-adapters/run-F6e4nj/`.
+
 ### 2.0.24 compatibility review
 
 Reviewed v2.0.23 to v2.0.24, `9e96aacd64` through `bd55d4895f`.

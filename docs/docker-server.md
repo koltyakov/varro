@@ -34,7 +34,7 @@ The following functionality is unsupported or limited in this mode:
 | Provider quota checks | Unavailable because Varro cannot read server-side provider credentials. Session token and cost information reported by OpenCode remains available. |
 | Usage report | Uses the server API instead of a local database. Reports support up to 250 sessions; larger reports show an explanatory error. |
 | Global configuration and credential-file watching | Local changes are not watched or applied to the external server. Refresh providers after server-side changes and restart the server externally when needed. |
-| Varro auto-compaction and injected Ask agent settings | Varro cannot inject startup configuration into an external process. Configure these settings on the OpenCode server. |
+| Injected Ask agent | Varro cannot inject startup configuration into an external process. Configure the agent on the OpenCode server. |
 | Custom server hostname, URL, or HTTPS endpoint | No direct setting is available. Forward the server to `http://127.0.0.1:<port>` as seen by the VS Code extension host. |
 | Workspace path translation and file synchronization | Unsupported. Both environments need the same files at identical absolute paths. A port forward does not synchronize files, and native Windows paths do not map to Linux container paths. |
 | Provider authentication that needs a server-side browser callback | May require additional forwarding or login inside the container. Host provider credentials are not automatically shared. |
@@ -63,7 +63,7 @@ Choose one API family. Complete samples are included in the repository:
 
 | Family | Package and example version | Dockerfile | Compose sample | Health endpoint |
 | --- | --- | --- | --- | --- |
-| v1 | `opencode-ai@1.18.34` | [Dockerfile.v1](../examples/docker/Dockerfile.v1) | [compose.v1.yaml](../examples/docker/compose.v1.yaml) | `/global/health` |
+| v1 | `opencode-ai@1.18.35` | [Dockerfile.v1](../examples/docker/Dockerfile.v1) | [compose.v1.yaml](../examples/docker/compose.v1.yaml) | `/global/health` |
 | v2 | `@opencode/cli@2.0.24` | [Dockerfile.v2](../examples/docker/Dockerfile.v2) | [compose.v2.yaml](../examples/docker/compose.v2.yaml) | `/api/info` |
 
 From the Varro repository root, build the selected image:
@@ -97,7 +97,7 @@ CMD ["opencode", "serve", "--hostname", "0.0.0.0", "--port", "4096"]
 The v1 sample replaces the package installation with:
 
 ```dockerfile
-ARG OPENCODE_VERSION=1.18.34
+ARG OPENCODE_VERSION=1.18.35
 RUN npm install --global "opencode-ai@${OPENCODE_VERSION}"
 ```
 
@@ -249,4 +249,4 @@ If the connection still fails, include your Varro and OpenCode versions, Docker 
 
 Docker owns this server's lifecycle. Use `docker stop varro-opencode`, `docker start varro-opencode`, or `docker restart varro-opencode` to manage it. Varro's restart command only restarts a server it manages.
 
-To update OpenCode, rebuild the image with a supported version and recreate the container with the same mounts and credentials. Varro does not update the OpenCode installation inside this container. Varro settings that require injecting configuration into a managed server, such as its auto-compaction settings, must instead be configured in OpenCode for this setup.
+To update OpenCode, rebuild the image with a supported version and recreate the container with the same mounts and credentials. Varro does not update the OpenCode installation inside this container. Configure automatic compaction in OpenCode; Varro's on-demand compaction action remains available.

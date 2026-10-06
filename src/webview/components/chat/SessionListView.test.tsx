@@ -27,7 +27,7 @@ import {
   resetSessionShareOverridesForTests,
 } from '../../lib/session-share-overrides';
 import { fixture } from '../../test-fixtures';
-import { flashSolidIcon, forwardMessageIcon } from '../../lib/ui-icons';
+import { flashSolidIcon, forwardMessageIcon, hourglassIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 
 type TestRuntimeValue =
@@ -128,6 +128,22 @@ function dispatchDragEvent(target: Element, type: string, dataTransfer: DataTran
 }
 
 describe('deriveSessionIndicators', () => {
+  it('keeps pending waits unfinished and prefers active work in the same tree', () => {
+    const sessions = [session('root', 1), session('child', 2, { parentID: 'root' })];
+    setSessions(sessions);
+    setState('sessionStatus', {
+      root: { type: 'idle' },
+      child: { type: 'busy', background: true, backgroundStartedAt: 1 },
+    });
+    const waiting = deriveSessionIndicators(sessions, new Set(['child']));
+    expect([...waiting.pendingIds].toSorted()).toEqual(['child', 'root']);
+    expect(waiting.runningIds.has('root')).toBe(true);
+    expect(waiting.newlyCompletedIds.has('root')).toBe(false);
+
+    setState('sessionStatus', 'root', { type: 'busy' });
+    const active = deriveSessionIndicators(sessions, new Set(['child']));
+    expect([...active.pendingIds]).toEqual(['child']);
+  });
   it('handles cyclic and deeply nested session parent data without recursive overflow', () => {
     const cyclic = [
       session('cycle-a', 1, { parentID: 'cycle-b' }),
@@ -249,6 +265,35 @@ describe('SessionListSectionHeader icons', () => {
 });
 
 describe('SessionListView keyboard recovery', () => {
+  it('replaces the spinner with a counter-free hourglass after one minute of background waiting', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    setSessions([session('waiting', Date.now())]);
+    setState('sessionStatus', {
+      waiting: { type: 'busy', background: true, backgroundStartedAt: Date.now() },
+    });
+    try {
+      cleanup = render(() => <SessionListView />, container);
+      vi.advanceTimersByTime(59_999);
+      expect(container.querySelector('.session-status-indicator.is-running')).not.toBeNull();
+      vi.advanceTimersByTime(1);
+      const pending = container.querySelector<HTMLElement>('.session-status-indicator.is-pending');
+      expect(pending?.getAttribute('aria-label')).toBe('Pending background task');
+      expect(pending?.textContent).toBe('');
+      expect(
+        pending?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(hourglassIcon));
+      expect(container.querySelector('.session-status-indicator.is-running')).toBeNull();
+      setState('sessionStatus', 'waiting', { type: 'busy', background: false });
+      expect(container.querySelector('.session-status-indicator.is-pending')).toBeNull();
+      expect(container.querySelector('.session-status-indicator.is-running')).not.toBeNull();
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+      vi.useRealTimers();
+    }
+  });
   it.each(['idle', 'busy'] as const)('mounts a visible %s session with its clocks', (type) => {
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');

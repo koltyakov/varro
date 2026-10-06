@@ -73,6 +73,41 @@ describe('bottom follow motion', () => {
     expect(motion.next(userTop, userTop - 10, 16)).toBe(userTop - 10);
   });
 
+  it('keeps paced text within the lag bound without snapping', () => {
+    const motion = new BottomFollowMotion();
+    let top = 0;
+    let target = 0;
+    // A 240 px chunk revealed over 256 ms in 32 ms text ticks at 120 Hz. The unbounded
+    // follower trails by about 168 px here.
+    for (let frame = 0; frame < 60; frame += 1) {
+      const tick = frame % 4 === 0 && target < 240;
+      if (tick) target += 30;
+      const next = motion.next(top, target, 8, 64);
+      expect(next - top).toBeGreaterThanOrEqual(0);
+      expect(next - top).toBeLessThanOrEqual(2.2 * 8 + 1e-9);
+      // A tick may land mid catch-up; the following frame is back within the bound.
+      expect(target - next).toBeLessThanOrEqual(tick ? 64 + 30 - 2.2 * 8 : 64);
+      top = next;
+    }
+    expect(top).toBe(240);
+  });
+
+  it('catches up a tall block continuously instead of jumping to the lag bound', () => {
+    const motion = new BottomFollowMotion();
+    const first = motion.next(0, 400, 16, 64);
+    expect(first).toBeLessThanOrEqual(2.2 * 16);
+    let top = first;
+    let previousStep = first;
+    for (let frame = 0; frame < 20; frame += 1) {
+      const next = motion.next(top, 400, 16, 64);
+      expect(next - top).toBeLessThanOrEqual(2.2 * 16 + 1e-9);
+      expect(Math.abs(next - top - previousStep)).toBeLessThan(2.2 * 16);
+      previousStep = next - top;
+      top = next;
+    }
+    expect(400 - top).toBeLessThanOrEqual(64);
+  });
+
   it('limits movement after a suspended frame', () => {
     const motion = new BottomFollowMotion();
     expect(motion.next(0, 1_000, 10_000)).toBeLessThan(12);
