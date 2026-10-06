@@ -66,8 +66,10 @@ export function modelDisplayName(value) {
 }
 
 export function validateLiveModel(value) {
-  if (!['openai/gpt-6-luna-fast', 'openai/gpt-6-sol'].includes(value)) {
-    throw new Error('--model must be openai/gpt-6-luna-fast or openai/gpt-6-sol');
+  if (!['openai/gpt-6-luna-fast', 'openai/gpt-6-sol', 'openai/gpt-6.1-sol'].includes(value)) {
+    throw new Error(
+      '--model must be openai/gpt-6-luna-fast, openai/gpt-6-sol, or openai/gpt-6.1-sol'
+    );
   }
   return value;
 }
@@ -1684,6 +1686,14 @@ export async function restoreSidebarSessionFromPicker(cdp, sessionId, title) {
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 250));
     if (sessionSnapshotMatches(await cdp.snapshot(), sessionId, title)) return true;
+  }
+  // Escape restores the previous sidebar route, which may be another session.
+  await cdp.click('[aria-label="Back to sessions"]');
+  if (!(await cdp.clickSession(sessionId))) return false;
+  const explicitDeadline = Date.now() + 5_000;
+  while (Date.now() < explicitDeadline) {
+    if (sessionSnapshotMatches(await cdp.snapshot(), sessionId, title)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
 }
@@ -3714,8 +3724,10 @@ export async function executeActivityScenario({
   timeoutMs,
   pollIntervalMs = 50,
   runActions = executeActionPlan,
+  now = Date.now,
+  wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = now() + timeoutMs;
   const evidence = {
     executed: false,
     actions: [],
@@ -3750,7 +3762,7 @@ export async function executeActivityScenario({
     // visibility threshold, so it can disappear while the viewport stays detached.
     const detached =
       !!transcript && transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop > 2;
-    const sample = { at: Date.now(), busy, detached, tools, snapshot };
+    const sample = { at: now(), busy, detached, tools, snapshot };
     evidence.observations.push(sample);
     return sample;
   };
@@ -3808,7 +3820,7 @@ export async function executeActivityScenario({
         .map((tool) => tool.id)
     );
     let sample = baseline;
-    while (Date.now() < deadline) {
+    while (now() < deadline) {
       sample = await read();
       if (!sample.detached) throw new Error('Transcript reattached before two tool completions');
       for (const tool of sample.tools) {
@@ -3823,7 +3835,7 @@ export async function executeActivityScenario({
       }
       if (evidence.completedWhileDetached.length >= 2) break;
       if (!sample.busy) throw new Error('Stream settled before two detached tool completions');
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      await wait(pollIntervalMs);
     }
     if (evidence.completedWhileDetached.length < 2)
       throw new Error('Timed out waiting for two detached tool completions');
@@ -3831,9 +3843,9 @@ export async function executeActivityScenario({
     while (
       sample.busy &&
       !sample.tools.some((tool) => tool.status === 'running') &&
-      Date.now() < deadline
+      now() < deadline
     ) {
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      await wait(pollIntervalMs);
       sample = await read();
       if (!sample.detached) throw new Error('Transcript reattached before the return action');
     }
@@ -3878,9 +3890,9 @@ export async function executeActivityScenario({
         after.snapshot.transcript.clientHeight -
         after.snapshot.transcript.scrollTop >
         2 &&
-      Date.now() < deadline
+      now() < deadline
     ) {
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      await wait(pollIntervalMs);
       after = await read();
       recordActiveWindow();
     }

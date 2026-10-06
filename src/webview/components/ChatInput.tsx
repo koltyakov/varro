@@ -3168,15 +3168,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   function captureQueuedModelSnapshot(sessionId: string) {
     const persistedSelection = getSelectedModelForSession(sessionId);
     const current = currentModel();
+    // Queue the model shown by this composer, not an older session snapshot.
     const selection =
-      persistedSelection ??
-      (current.providerID && current.modelID
+      current.providerID && current.modelID
         ? {
             providerID: current.providerID,
             modelID: current.modelID,
             variant: effectiveVariant() || undefined,
           }
-        : null);
+        : persistedSelection;
     if (!selection) return {};
     return {
       queuedModel: {

@@ -54,7 +54,8 @@ For an unqualified **Run AI tests** or **Run fuzzy tests** request:
 2. Run the automated preflight and the standard real-editor scenarios `AI-01` through `AI-08`.
 3. Use the OpenAI subscription for all AI test model calls. Use GPT-6 Luna Fast
    (`openai/gpt-6-luna-fast`) for repeatable synthetic height streams and GPT-6 Luna Fast or GPT-6 Sol
-   for realistic reasoning, tool, and edit workflows. Sol (`openai/gpt-6-sol`) is explicitly allowed and preferred when
+   for realistic reasoning, tool, and edit workflows. Current Sol (`openai/gpt-6.1-sol`) and legacy Sol
+   (`openai/gpt-6-sol`) are explicitly allowed. Prefer current Sol when
    it produces more representative multi-step repository work. Record the exact provider/model for
    every scenario and do not silently change models during a reproduction because output length,
    reasoning cadence, tool concurrency, and timing are test inputs.

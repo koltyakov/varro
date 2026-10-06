@@ -8263,6 +8263,39 @@ describe('ChatInput', () => {
     expect(container?.querySelector('[aria-label="Add to queue (Enter)"]')).not.toBeNull();
   });
 
+  it('captures the displayed queued model when a session snapshot still names the previous model', async () => {
+    setupMatchingActiveTurn();
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    setSelectedModel(
+      { providerID: 'openai', modelID: 'gpt-4o' },
+      { sessionId: 'session-1', persistGlobal: false }
+    );
+    setState('providers', 0, 'models', 'other', {
+      id: 'other',
+      name: 'Other model',
+      capabilities: { toolcall: true },
+      cost: { input: 0, output: 0 },
+    });
+    const displayedModel = { providerID: 'openai', modelID: 'other' };
+    setState('selectedModel', displayedModel);
+    setInputText('Keep the displayed model');
+    cleanup = render(() => ChatInput(), container!);
+    expect(container?.querySelector('.model-picker-btn')?.textContent).toContain('Other model');
+
+    container
+      ?.querySelector('.rich-composer')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(state.queuedMessages).toHaveLength(1);
+    expect(state.queuedMessages[0]?.queuedContext?.editorContext.queuedModel?.selection).toEqual(
+      displayedModel
+    );
+  });
+
   it.each(['agent', 'model', 'reasoning'])(
     'queues instead of steering after changing %s during a turn',
     async (changed) => {

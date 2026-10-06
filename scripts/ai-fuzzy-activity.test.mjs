@@ -7,6 +7,7 @@ const tool = (id, status) => ({ id, type: 'tool', state: { status } });
 
 function harness({ stale = false, settledEarly = false, attached = false } = {}) {
   let reads = 0;
+  let time = 0;
   const calls = [];
   const client = {
     isBusy: async () => !settledEarly,
@@ -56,6 +57,10 @@ function harness({ stale = false, settledEarly = false, attached = false } = {})
       scope: { messageIds: ['assistant'] },
       timeoutMs: 30,
       pollIntervalMs: 0,
+      now: () => time,
+      wait: async (ms) => {
+        time += Math.max(1, ms);
+      },
       runActions: async (_cdp, plan) => {
         calls.push(...plan.map((item) => item.action));
         return plan.map((item) => ({ ...item, executed: true }));

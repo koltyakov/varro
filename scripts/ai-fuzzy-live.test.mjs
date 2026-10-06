@@ -88,6 +88,13 @@ function transcriptStateAt(scrollTop) {
   };
 }
 
+test('accepts the current Sol model without substituting a different model', () => {
+  assert.equal(validateLiveModel('openai/gpt-6.1-sol'), 'openai/gpt-6.1-sol');
+  assert.equal(modelDisplayName('openai/gpt-6.1-sol'), 'GPT-6.1 Sol');
+  assert.throws(() => validateLiveModel('other/gpt-6.1-sol'), /--model/);
+  assert.throws(() => validateLiveModel('openai/gpt-6.1-sol-fast'), /--model/);
+});
+
 test('keeps live-only gates explicit for AI-07 and AI-08', () => {
   assert.deepEqual(missingLiveGates(ready, 'AI-07'), []);
   assert.deepEqual(missingLiveGates(ready, 'AI-08'), []);
@@ -1237,6 +1244,34 @@ test('returns the sidebar from a managed child before using the session picker f
 
   assert.equal(restored, true);
   assert.equal(escaped, false);
+});
+
+test('restores the exact sidebar session when Escape returns to an unrelated route', async () => {
+  const root = { routeSessionId: 'root', title: 'Root' };
+  let active = { routeSessionId: 'unrelated', title: 'Unrelated' };
+  const actions = [];
+  const restored = await restoreSidebarSessionFromPicker(
+    {
+      snapshot: async () => active,
+      clickText: async () => false,
+      click: async (selector) => {
+        actions.push(selector);
+        return selector === '[aria-label="Back to sessions"]';
+      },
+      key: async () => true,
+      clickSession: async (sessionId) => {
+        actions.push(sessionId);
+        assert.equal(sessionId, 'root');
+        active = root;
+        return true;
+      },
+    },
+    'root',
+    'Root'
+  );
+
+  assert.equal(restored, true);
+  assert.deepEqual(actions.slice(-2), ['[aria-label="Back to sessions"]', 'root']);
 });
 
 test('retains a failed live run when recording its replay', () => {
