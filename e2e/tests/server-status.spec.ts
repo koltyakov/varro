@@ -72,6 +72,21 @@ test('keeps failed essential catalogs gated and retries without restarting the s
     .toBe(2);
 });
 
+test('finishes startup when catalog events supersede the first routing loads', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank&startupCatalogEvents');
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
+  await expect(page.getByText(/Failed to load OpenCode startup data/)).toHaveCount(0);
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const state = (window as Window & { __varroE2E?: { requests: Array<{ path: string }> } })
+          .__varroE2E;
+        return state?.requests.filter((request) => request.path === '/agent').length ?? 0;
+      })
+    )
+    .toBeGreaterThanOrEqual(2);
+});
+
 test('shows no-provider setup actions and triggers provider setup commands', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=no-providers');
 

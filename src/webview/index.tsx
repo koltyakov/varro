@@ -7,6 +7,7 @@ import './index.css';
 import { applyChatFontConfig } from './lib/chat-font-config';
 import { isFunction } from './lib/runtime-values';
 import { readInitialWebviewState } from './lib/state-stored-values';
+import { startSteppedAnimationClock } from './lib/stepped-animation-clock';
 
 const STARTUP_HANDLERS_KEY = '__clearVarroBootstrapFailureHandlers';
 const APP_CLEANUP_KEY = '__cleanupVarroApp';
@@ -206,6 +207,7 @@ export function bootstrap(root: HTMLElement) {
   document.documentElement.classList.toggle(EDITOR_SURFACE_CLASS, isEditorSurface);
   const stopTrackingEditorLayout = isEditorSurface ? trackEditorLayoutSettling() : undefined;
   const stopTrackingWidth = trackWebviewWidth(root);
+  const stopSteppedAnimationClock = startSteppedAnimationClock();
   let dispose: (() => void) | undefined;
   let failed = false;
   const disposeWebview = () => {
@@ -247,6 +249,7 @@ export function bootstrap(root: HTMLElement) {
     disposeWebview();
     stopTrackingEditorLayout?.();
     stopTrackingWidth();
+    stopSteppedAnimationClock();
     document.documentElement.classList.remove(EDITOR_SURFACE_CLASS);
   };
 }

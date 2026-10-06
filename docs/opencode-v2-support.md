@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 100 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.34`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.22`, with 21 platform- or family-specific skips and three failures described in the 2.0.22 review below. Both v1 releases passed every applicable check; neither v2 release has a full compatibility pass in this run. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 101 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.34`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.23`, with 21 platform- or family-specific skips and two failures described in the 2.0.23 review below. Both v1 releases passed every applicable check; neither v2 release has a full compatibility pass in this run. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,44 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.23 compatibility review
+
+Reviewed v2.0.22 to v2.0.23, `d259ae7163` through `9e96aacd64`.
+The API adds optional persistent-terminal capabilities to server info, a VCS
+initialization route, and structured `LocationNotFoundError` 404 responses for
+missing workspace directories. Existing successful HTTP responses, consumed
+SSE payloads, session/message records, permissions, and forms remain compatible.
+Removed legacy question declarations and the session-event attachment re-export
+are not consumed by Varro. No adapter changes are required.
+
+Runtime changes improve shared-service startup/replacement and terminal handoff,
+Homebrew update selection, Windows installer shell selection, formatter config
+merging, skill invocation controls, and transient MCP connection/catalog retries.
+Summary compaction now honors its configured agent model. Native Cohere, Venice,
+and Google Interactions providers and refreshed model metadata need no Varro
+adaptation. ACP and GUI extension changes are optional parity work.
+
+The tested v2 client is `2.0.23`; v1 remains at `1.18.34`.
+Support floors remain v2 `2.0.5` and v1 `1.16.0`.
+The unchanged v1 SDK does not require a new Docker support-range run.
+
+The adapter matrix passed 23 checks on each v1 release, 27 on v2.0.5, and
+28 on v2.0.23. V2.0.5 retains the replacement-server ownership failure,
+reporting `unmanaged` instead of `current-host`. V2.0.23 passes all three
+managed startup scenarios, including replacement recovery, but retains the
+stalled-turn steering failure: three user messages enter the transcript instead
+of two, admitting a queued prompt that should remain parked. These failure
+signatures were already observed in the previous release review. Capture
+credential restoration and registration-selection diagnostics for the floor
+ownership issue; trace native inbox admission and resume ordering for steering.
+The complete matrix logs are under `artifacts/opencode-adapters/run-tQO2du/`.
+Focused steering reruns reproduced the same failure on both v2.0.22 and
+v2.0.23. Their logs are `artifacts/opencode-2.0.22-steering.log` and
+`artifacts/opencode-2.0.23-steering.log`; the bump introduces no new failure
+signature in this check.
+All 126 focused adapter unit tests and five shared compatibility tests passed.
+Lint, formatting, both TypeScript checks, and the build passed.
 
 ### 2.0.22 compatibility review
 

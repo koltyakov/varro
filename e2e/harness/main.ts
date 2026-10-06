@@ -5379,6 +5379,8 @@ function resolveMessageCursor(state: ScenarioState, sessionId: string, token: st
   return target.end;
 }
 
+let startupCatalogBurstAt: number | null = null;
+
 async function handleApiRequest(
   state: ScenarioState,
   method: string,
@@ -5465,6 +5467,26 @@ async function handleApiRequest(
 
   if (method === 'GET' && path === '/session/status') {
     return state.sessionStatuses;
+  }
+
+  if (
+    startupOptions.has('startupCatalogEvents') &&
+    method === 'GET' &&
+    (path === '/agent' || path === '/config/providers')
+  ) {
+    // A freshly launched server emits catalog events in waves while its first
+    // workspace requests run; each event starts a newer routing load mid-flight.
+    if (startupCatalogBurstAt === null) {
+      startupCatalogBurstAt = Date.now();
+      setTimeout(() => {
+        dispatchToWebview({ type: 'server/event', payload: { type: 'integration.updated' } });
+      }, 20);
+      setTimeout(() => {
+        dispatchToWebview({ type: 'server/event', payload: { type: 'models-dev.refreshed' } });
+      }, 200);
+    }
+    if (Date.now() - startupCatalogBurstAt < 400)
+      await new Promise<void>((resolve) => setTimeout(resolve, 150));
   }
 
   if (method === 'GET' && path === '/agent') {

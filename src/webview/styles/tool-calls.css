@@ -400,6 +400,67 @@
   animation: chat-thinking-shimmer 2s steps(12) infinite;
 }
 
+/* While stepped-animation-clock.ts publishes the step, show the matching chat-thinking-shimmer
+   frame without a running animation, which Chromium would otherwise service every frame. Other
+   shimmer animations keep their own timing, and their running or paused values take precedence
+   over the static positions below. */
+:root[data-shimmer-step]
+  .shimmer-progress:not(
+    .chat-tool-invocation-part *,
+    .manage-models-attention *,
+    .interactive-item-off-core *
+  ) {
+  animation: none;
+}
+
+:root[data-shimmer-step='0'] .shimmer-progress {
+  background-position: 120% 0;
+}
+
+:root[data-shimmer-step='1'] .shimmer-progress {
+  background-position: 100% 0;
+}
+
+:root[data-shimmer-step='2'] .shimmer-progress {
+  background-position: 80% 0;
+}
+
+:root[data-shimmer-step='3'] .shimmer-progress {
+  background-position: 60% 0;
+}
+
+:root[data-shimmer-step='4'] .shimmer-progress {
+  background-position: 40% 0;
+}
+
+:root[data-shimmer-step='5'] .shimmer-progress {
+  background-position: 20% 0;
+}
+
+:root[data-shimmer-step='6'] .shimmer-progress {
+  background-position: 0% 0;
+}
+
+:root[data-shimmer-step='7'] .shimmer-progress {
+  background-position: -20% 0;
+}
+
+:root[data-shimmer-step='8'] .shimmer-progress {
+  background-position: -40% 0;
+}
+
+:root[data-shimmer-step='9'] .shimmer-progress {
+  background-position: -60% 0;
+}
+
+:root[data-shimmer-step='10'] .shimmer-progress {
+  background-position: -80% 0;
+}
+
+:root[data-shimmer-step='11'] .shimmer-progress {
+  background-position: -100% 0;
+}
+
 .model-change-indicator {
   display: flex;
   align-items: center;

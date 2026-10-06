@@ -230,6 +230,52 @@ test('pastes an image, sends it as a file part, and clears the chip', async ({ p
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'Image' })).toHaveCount(0);
 });
 
+test('shows the duplicate-image warning directly above the input', async ({ page }) => {
+  await page.setViewportSize({ width: 520, height: 1040 });
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  const composer = page.locator('.rich-composer').first();
+  await composer.click();
+  const pasteImage = () =>
+    composer.evaluate((node) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      const bytes = Uint8Array.from(atob(canvas.toDataURL('image/png').split(',')[1]!), (char) =>
+        char.charCodeAt(0)
+      );
+      const clipboard = new DataTransfer();
+      clipboard.items.add(new File([bytes], 'clipboard.png', { type: 'image/png' }));
+      node.dispatchEvent(
+        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: clipboard })
+      );
+    });
+
+  await pasteImage();
+  const images = page.locator('.chat-attachment-chip').filter({ hasText: 'Image' });
+  await expect(images).toHaveCount(1);
+  const shell = page.locator('.chat-input-shell').first();
+  const initialBounds = await shell.boundingBox();
+  if (!initialBounds) throw new Error('Expected input bounds');
+
+  await pasteImage();
+  const warning = shell.locator('.session-action-feedback');
+  await expect(warning).toContainText('This image is already attached');
+  await expect(images).toHaveCount(1);
+  await expect
+    .poll(async () => {
+      const inputBounds = await shell.boundingBox();
+      const warningBounds = await warning.boundingBox();
+      if (!inputBounds || !warningBounds) throw new Error('Expected input and warning bounds');
+      return {
+        gap: Math.round(inputBounds.y - warningBounds.y - warningBounds.height),
+        centerOffset: Math.round(
+          warningBounds.x + warningBounds.width / 2 - inputBounds.x - inputBounds.width / 2
+        ),
+        inputShift: Math.round(inputBounds.y - initialBounds.y),
+      };
+    })
+    .toEqual({ gap: 8, centerOffset: 0, inputShift: 0 });
+});
+
 test('keeps a line-start pasted image from creating a trailing line', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 

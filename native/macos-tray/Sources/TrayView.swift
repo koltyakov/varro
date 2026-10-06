@@ -108,6 +108,7 @@ struct TrayView: View {
                     .lineLimit(1).truncationMode(.middle).layoutPriority(1)
                   Spacer(minLength: 8)
                   Text(row.session.status.label).font(.caption).foregroundStyle(.secondary)
+                    .offset(y: -3)
                 }
                 Text(row.session.title).font(.callout).lineLimit(2).multilineTextAlignment(.leading)
                 if !row.connected {
@@ -119,7 +120,7 @@ struct TrayView: View {
               .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
               .contentShape(Rectangle())
           }.buttonStyle(.plain)
-            .help("Open \(row.session.project) in VS Code")
+            .focusable(false)
         }
       }
     }

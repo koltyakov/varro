@@ -559,10 +559,14 @@ describe('About command', () => {
         content: expect.stringContaining('  - **Binary:** `/home/me/.bun/bin/opencode`'),
       })
     );
+    const updateInstruction =
+      process.platform === 'win32'
+        ? 'Run this command to install the update:'
+        : 'Varro installs it automatically and restarts the server when no sessions are active. To update now, run:';
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining(
-          `**OpenCode ${MAXIMUM_TESTED_OPENCODE_VERSION} is available.**\n\nRun this command to install the update:\n\n\`\`\`${process.platform === 'win32' ? 'powershell' : 'sh'}\nbun add -g opencode-ai@latest\n\`\`\``
+          `**OpenCode ${MAXIMUM_TESTED_OPENCODE_VERSION} is available.**\n\n${updateInstruction}\n\n\`\`\`${process.platform === 'win32' ? 'powershell' : 'sh'}\nbun add -g opencode-ai@latest\n\`\`\``
         ),
       })
     );
@@ -572,6 +576,72 @@ describe('About command', () => {
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.not.stringContaining('Searched PATH entries') })
     );
+  });
+
+  it('shows the manual update command for a server Varro does not manage', async () => {
+    const { sidebar } = register('/repo', {
+      readServerInfo: vi.fn().mockResolvedValue({
+        status: { state: 'running', url: 'http://127.0.0.1:4096' },
+        url: 'http://127.0.0.1:4096',
+        port: 4096,
+        command: 'opencode',
+        managedProcess: false,
+        ownership: 'unmanaged',
+        cliVersion: '1.18.4',
+        cliVersionError: null,
+        installMethod: 'bun',
+        resolvedCommand: '/home/me/.bun/bin/opencode',
+        searchedPaths: [],
+        activeAgentCount: 0,
+        activeAgentError: null,
+        health: { healthy: true, version: '1.18.4' },
+        workspaceCwd: '/repo',
+      }),
+    });
+
+    await runCommand('varro.about');
+
+    const aboutMarkdown = sidebar.openMarkdownDocument.mock.calls[0]?.[0] ?? '';
+    expect(aboutMarkdown).toContain(
+      `**OpenCode ${MAXIMUM_TESTED_OPENCODE_VERSION} is available.**\n\nRun this command to install the update:`
+    );
+    expect(aboutMarkdown).not.toContain('Varro installs it automatically');
+    const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)?.value;
+    expect(panel?.webview.html).toContain(
+      `OpenCode ${MAXIMUM_TESTED_OPENCODE_VERSION} is available. Install it with: bun add -g opencode-ai@latest`
+    );
+  });
+
+  it('reports a managed restart pending after a newer CLI is installed', async () => {
+    const { sidebar } = register('/repo', {
+      readServerInfo: vi.fn().mockResolvedValue({
+        status: { state: 'running', url: 'http://127.0.0.1:4096' },
+        url: 'http://127.0.0.1:4096',
+        port: 4096,
+        command: 'opencode2',
+        managedProcess: false,
+        ownership: 'other-host',
+        cliVersion: '2.0.99',
+        cliVersionError: null,
+        installMethod: 'bun',
+        resolvedCommand: '/home/me/.bun/bin/opencode2',
+        searchedPaths: [],
+        activeAgentCount: 1,
+        activeAgentError: null,
+        health: { healthy: true, version: '2.0.22' },
+        workspaceCwd: '/repo',
+      }),
+    });
+
+    await runCommand('varro.about');
+
+    const aboutMarkdown = sidebar.openMarkdownDocument.mock.calls[0]?.[0] ?? '';
+    expect(aboutMarkdown).toContain(
+      '**OpenCode 2.0.99 is installed.**\n\nVarro restarts the server on it when no sessions are active.'
+    );
+    const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)?.value;
+    expect(panel?.webview.html).toContain('OpenCode update installed');
+    expect(panel?.webview.html).not.toContain('Install it with');
   });
 
   it('does not distinguish which Varro window manages the server', async () => {

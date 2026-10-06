@@ -131,6 +131,14 @@ the original process is still alive or its retirement is uncertain. A failed
 inspection is not proof of retirement. Cleanup requires process exit or a changed
 birth identity; subsequent attachment still needs fresh complete verification.
 
+Reload recovery also retains its in-memory lease candidate until ownership is
+recovered or another live editor's ownership is verified. An inconclusive read
+does not delete the lease or prevent a subsequent fresh recovery attempt. Before
+showing an authentication prompt, startup rechecks registration once so a lease
+published during editor handoff can supply verified credentials and prevent an
+incorrect external-server classification. Restart waits for pending ownership
+preparation before rejecting an attach-only connection.
+
 ## Automatic ports and upgrade compatibility
 
 `varro.server.port` defaults to `"auto"`. New managed launches choose a random
@@ -177,14 +185,22 @@ later candidates when an earlier `opencode2` command actually runs v1. A connect
 server's version is not evidence of the installed executable's version and does
 not select launch flags.
 
-Reused servers do not run background CLI installation or implicit server-family
-migration. Maintenance can restart a reused Varro-owned server when the installed
-CLI is newer within the same API family, after fresh lease/process verification and
-the existing global active-session and pending-attention preflight. Unmanaged servers,
-another live host's ownership, unknown versions, and failed safety reads leave the
-server running. Explicit restart retains its existing safety checks. Reload disconnects
-rather than stopping the process. A surviving registered server is recoverable, not a
-stale process to kill based on age.
+Reused servers never run implicit server-family migration. Only the window holding
+verified ownership of a reused server runs the same-family background CLI update, so
+windows sharing one server do not race installers and a reload does not disable
+automatic updates. Maintenance can then restart a reused Varro-owned server when the
+installed CLI is newer within the same API family, after fresh lease/process
+verification and the existing global active-session and pending-attention preflight.
+Unmanaged servers, another live host's ownership, unknown or cross-family versions,
+and failed safety reads skip installation and leave the server running. Explicit
+restart retains its existing safety checks. Reload disconnects rather than stopping
+the process. A surviving registered server is recoverable, not a stale process to
+kill based on age.
+
+The About view mirrors this: a managed server with automatic updates enabled reports
+that Varro installs the update itself, with the manual command as an optional
+shortcut. A newer installed CLI on a managed server is reported as a pending idle
+restart. Unmanaged servers and disabled automatic updates show the manual command.
 
 New launches use an existing nonempty environment password or generate a
 cryptographically random password before spawning. Credentials never enter the
@@ -227,6 +243,26 @@ Adapter tickets remain endpoint-bound and expire after at most one second. This 
 connection-lifetime attachment monitoring, not a permanent PID-only ownership cache.
 It does not grant adoption, restart, upgrade, or cleanup authority; those operations
 still verify the current private registration and process identity independently.
+
+A port with no visible listener whose loopback connection is refused has no account
+to consent to. Account inspection reports it as not listening instead of unknown, so
+a stopped or restarting server never produces the unknown-owner warning. A port that
+accepts connections while process inspection shows no listener, such as another
+user's process hidden from `lsof`, remains unknown and keeps the consent rules below.
+
+Every window attached to a Varro-registered server follows that registration across
+restarts. When the registered listener closes or is replaced, or the event stream
+degrades after the registered PID exits (a signal-0 probe, no OS inspection command),
+a non-owning window uses the same bounded restart path as the owner. It resets
+admission, which also cancels any consent prompt an in-flight check could reach,
+reports `stopped`, and reruns startup. Startup rereads the registration and waits on
+the launch claim, so the window reattaches to the owner's replacement under the same
+quiet same-user admission. Non-owning windows wait one extra second before their
+first attempt so the owning window normally relaunches. If no live owner relaunches,
+one contender launches under the claim and the rest reuse its registration. A
+reattached connection restores its crash-retry budget after the usual stability
+window. External endpoints and consented foreign or unknown connections are never
+relaunched implicitly; a closed external endpoint reports a connection error.
 
 Before requesting new uncertainty consent, admission retries one fresh account
 inspection. Strict request rechecks inspect at least every second, but persistent
@@ -305,7 +341,10 @@ tests use isolated filesystem fixtures and mocked OS commands. Native Windows
 and Linux execution remains a separate verification step.
 
 Connection-admission tests cover concurrent consent, dismissal, listener replacement,
-uncertain ownership, reconnect, and cancellation during ordinary requests. The
+uncertain ownership, reconnect, and cancellation during ordinary requests. Follow
+recovery tests cover a refused port, a replaced registered listener, an exited
+registered PID on stream degradation, a live PID, and a closed external endpoint,
+each without a consent prompt. The
 startup integration test checks authentication enforcement, second-window attachment,
 disconnect/automatic-mode rediscovery, and explicit restart using isolated databases.
 Its latest macOS run passes against released OpenCode 1.16.0 and 1.18.34.

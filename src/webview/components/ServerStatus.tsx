@@ -215,8 +215,7 @@ export function ServerStatus() {
           />
         </div>
         <div>
-          <p class="text-[13px] font-medium text-vscode-fg">Starting OpenCode...</p>
-          <p class="mt-1.5 text-[12px] text-vscode-muted">Spawning the local server</p>
+          <p class="text-[13px] font-medium text-vscode-fg">Connecting to OpenCode...</p>
         </div>
       </Show>
 

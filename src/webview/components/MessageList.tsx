@@ -9267,7 +9267,7 @@ export function MessageList() {
     trackLayoutVersion();
     return distanceFromBottom() > JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX;
   });
-  const activeTurnState = createMemo(() => {
+  const readActiveTurnState = () => {
     scrollTop();
     stickyPreviewGeometryVersion();
     viewportHeight();
@@ -9323,6 +9323,12 @@ export function MessageList() {
         : null
     );
     return { primary, visibleIds };
+  };
+  // Streaming publishes scroll and measurement changes several times per delta. Rail markers
+  // rerun only when the primary turn or the set of highlighted turns actually changes.
+  const activeTurnState = createMemo(readActiveTurnState, undefined, {
+    equals: (previous, next) =>
+      previous.primary === next.primary && sameKeys(previous.visibleIds, next.visibleIds),
   });
 
   async function waitForMessageRow(

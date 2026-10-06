@@ -25,10 +25,34 @@ import type {
   WebviewInstanceContext,
 } from '../shared/protocol';
 import type { ExtensionConfigState } from '../shared/provider-limit-config';
+import { isObject } from '../shared/type-utils';
 import { isSameWorkspacePath } from '../shared/workspace-path';
 
 export type WebviewHost = vscode.WebviewView | vscode.WebviewPanel;
 const RELIABLE_DELIVERY_TIMEOUT_MS = 5_000;
+const ENCODED_API_RESPONSE_MIN_LENGTH = 64 * 1024;
+
+type ApiResponsePayload = Extract<ExtensionMessage, { type: 'api/response' }>['payload'];
+
+/**
+ * VS Code serializes object messages with a per-value replacer, then parses them again on the
+ * workbench thread before cloning them into the webview. Large responses go as JSON bytes, which
+ * VS Code transfers as a buffer. Responses are JSON data, so the encoding preserves their values.
+ */
+function encodeLargeApiResponse(payload: ApiResponsePayload): ApiResponsePayload {
+  if (!isObject(payload.data)) return payload;
+  let json: string;
+  try {
+    json = JSON.stringify(payload.data);
+  } catch {
+    return payload;
+  }
+  if (json.length < ENCODED_API_RESPONSE_MIN_LENGTH) return payload;
+  // A plain Uint8Array: VS Code serializes Node Buffers as JSON objects instead.
+  const encoded: ApiResponsePayload = { ...payload, encodedData: new TextEncoder().encode(json) };
+  delete encoded.data;
+  return encoded;
+}
 
 export class WebviewSession {
   public interruptedSessionsForWebview: InterruptedSessionSnapshot[] = [];
@@ -179,7 +203,7 @@ export class WebviewSession {
   ) {
     if (!this.bridge.getView() || requestGeneration !== this.webviewLoadGeneration) return;
     this.deps.flushPendingServerEvents();
-    this.bridge.post({ type: 'api/response', payload });
+    this.bridge.post({ type: 'api/response', payload: encodeLargeApiResponse(payload) });
   }
 
   requestInputFocus() {

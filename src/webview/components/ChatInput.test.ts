@@ -6171,6 +6171,8 @@ describe('ChatInput', () => {
       'button[title^="Resume the existing"]'
     );
     expect(resume).toBeTruthy();
+    expect(resume?.classList.contains('chat-queue-control')).toBe(true);
+    expect(resume?.classList.contains('chat-steer-resume')).toBe(true);
     resume?.click();
     await flushAsyncWork();
     expect(client.session.resumeSteering).toHaveBeenCalledWith('session-1', {
@@ -10505,7 +10507,8 @@ describe('ChatInput', () => {
       expect(state.clipboardImages.map((image) => image.id)).toEqual(['existing-image']);
       expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
         'This image is already attached',
-        'warning'
+        'warning',
+        container?.querySelector('.chat-input-shell')
       );
     } finally {
       fileReader.restore();
@@ -12246,6 +12249,26 @@ function historyEntry(id: string, text: string) {
 }
 
 describe('ChatInput composer history hotkeys', () => {
+  it.each(['loaded history', 'live messages'])('recalls only prompt text from %s', (source) => {
+    setState('activeSessionId', 'session-1');
+    const entry = historyEntry(
+      'user-1',
+      'Sync with latest Varro\n\n[Active file: src/main/resources/META-INF/plugin.xml]'
+    );
+    if (source === 'loaded history') setSessionHistoryPrompts('session-1', [entry]);
+    else setState('messages', [entry]);
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    pressKey(editor, { key: 'ArrowUp' });
+    expect(inputText()).toBe('Sync with latest Varro');
+    expect(editor?.textContent).not.toContain('[Active file:');
+    expect(entry.parts[0]?.text).toContain('[Active file:');
+
+    pressKey(editor, { key: 'ArrowDown' });
+    expect(inputText()).toBe('');
+  });
+
   it('paginates through sent prompts with Up and returns with Down', async () => {
     setState('activeSessionId', 'session-1');
     setSessionHistoryPrompts('session-1', [

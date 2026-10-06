@@ -362,6 +362,29 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ type: 'api/response', payload: { id: 'x' } })).toBeNull();
   });
 
+  it('restores encoded api/response data and rejects undecodable bytes', () => {
+    const data = [{ info: { id: 'message-1' }, parts: [{ type: 'text', text: 'é ✓' }] }];
+    const bytes = new TextEncoder().encode(JSON.stringify(data));
+    const view = new Uint8Array(bytes.length + 4);
+    view.set(bytes, 2);
+
+    expect(
+      parseExtensionMessage({
+        type: 'api/response',
+        payload: { id: 1, encodedData: view.subarray(2, 2 + bytes.length) },
+      })
+    ).toEqual({ type: 'api/response', payload: { id: 1, data } });
+    expect(
+      parseExtensionMessage({
+        type: 'api/response',
+        payload: { id: 2, encodedData: new TextEncoder().encode('{"truncated":') },
+      })
+    ).toEqual({ type: 'api/response', payload: { id: 2, error: 'Invalid encoded API response' } });
+    expect(
+      parseExtensionMessage({ type: 'api/response', payload: { id: 3, encodedData: '[]' } })
+    ).toEqual({ type: 'api/response', payload: { id: 3, error: 'Invalid encoded API response' } });
+  });
+
   it('parses host clipboard image snapshots without decoding their data URLs', () => {
     const message = {
       type: 'composer/images-sync',

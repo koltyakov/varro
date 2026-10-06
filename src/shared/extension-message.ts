@@ -391,7 +391,17 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         id: payload.id,
       };
       if (payload.error !== undefined) response.error = String(payload.error);
-      if (payload.data !== undefined) response.data = payload.data;
+      if (payload.encodedData !== undefined) {
+        try {
+          if (!(payload.encodedData instanceof Uint8Array)) throw new Error('not bytes');
+          response.data = JSON.parse(new TextDecoder().decode(payload.encodedData));
+        } catch {
+          // Settle the request now instead of letting it wait for its timeout.
+          response.error ??= 'Invalid encoded API response';
+        }
+      } else if (payload.data !== undefined) {
+        response.data = payload.data;
+      }
       return { type, payload: response };
     }
 

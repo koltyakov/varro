@@ -2746,8 +2746,49 @@ describe('OpenCodeProcess server ownership leases', () => {
         'Cannot verify process start identity'
       );
       expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(lease);
+      expect(manager.hasOwnershipLeaseCandidate).toBe(true);
       mockLinuxLeaseProcess();
-      await expect(manager.refreshManagedServerOwnership()).resolves.toBe(true);
+      await expect(manager.recoverManagedServerOwnership()).resolves.toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('retains a live lease and credentials after a missed listener observation during reload', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const root = await mkdtemp(join(tmpdir(), 'ownership-reload-inspection-'));
+    const path = join(root, 'lease.json');
+    const lease: ManagedServerOwnershipLease = {
+      version: 1,
+      pid: MOCK_LINUX_PID,
+      port: 4097,
+      executable: '/usr/bin/opencode',
+      birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      owner: 'same-server',
+      host: 'old-host',
+      state: 'relinquished',
+      createdAt: Date.now(),
+      password: 'reload-password',
+    };
+    await writeFile(path, JSON.stringify(lease));
+    mockLinuxLeaseProcess({ port: lease.port });
+    const manager = new OpenCodeProcess(4097, true, '', false, undefined, path, join(root, 'proc'));
+    try {
+      await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
+      const authorization = manager.serverAuthorization;
+      const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      vi.spyOn(processInspection, 'findListeningPids').mockResolvedValueOnce([]);
+      await expect(manager.recoverManagedServerOwnership()).resolves.toBe(false);
+      expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(lease);
+      expect(manager.hasOwnershipLeaseCandidate).toBe(true);
+      expect(manager.managedProcess).toBe(false);
+      expect(manager.serverAuthorization).toBe(authorization);
+      expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+
+      await manager.prepareForHealthyExistingServer();
+      expect(manager.serverOwnership).toBe('current-host');
+      expect(manager.serverAuthorization).toBe(authorization);
+      expect(manager.hasOwnershipLeaseCandidate).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -3152,7 +3193,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       });
       return result;
     });
-    const kill = vi.spyOn(process, 'kill');
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
     const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
 
     await expect(manager.recoverManagedServerOwnership()).resolves.toBe(false);
@@ -3160,8 +3201,9 @@ describe('OpenCodeProcess server ownership leases', () => {
       'Port 4096 is occupied by a process Varro does not own'
     );
 
-    expect(kill).not.toHaveBeenCalled();
-    await expect(stat(leasePath)).rejects.toThrow();
+    expect(kill).toHaveBeenCalledWith(777, 0);
+    expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+    await expect(stat(leasePath)).resolves.toBeDefined();
     kill.mockRestore();
     await rm(directory, { recursive: true, force: true });
   });
@@ -3600,12 +3642,13 @@ describe('OpenCodeProcess server ownership leases', () => {
       'utf-8'
     );
     mockLinuxLeaseProcess({ birthIdentity: () => 'new-process' });
-    const kill = vi.spyOn(process, 'kill');
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
     const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
 
     await expect(manager.recoverManagedServerOwnership()).resolves.toBe(false);
 
-    expect(kill).not.toHaveBeenCalled();
+    expect(kill).toHaveBeenCalledWith(MOCK_LINUX_PID, 0);
+    expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
     await expect(stat(leasePath)).rejects.toThrow();
     kill.mockRestore();
     await rm(directory, { recursive: true, force: true });
@@ -3805,6 +3848,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       owned: true,
       active: false,
       restart: true,
+      checksUpdate: true,
     },
     {
       name: 'v2 upgrade',
@@ -3813,6 +3857,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       owned: true,
       active: false,
       restart: true,
+      checksUpdate: true,
     },
     {
       name: 'same version',
@@ -3821,6 +3866,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       owned: true,
       active: false,
       restart: false,
+      checksUpdate: true,
     },
     {
       name: 'older CLI',
@@ -3829,6 +3875,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       owned: true,
       active: false,
       restart: false,
+      checksUpdate: true,
     },
     {
       name: 'family migration',
@@ -3837,6 +3884,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       owned: true,
       active: false,
       restart: false,
+      checksUpdate: false,
     },
     {
       name: 'unknown server',
@@ -3845,6 +3893,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       owned: true,
       active: false,
       restart: false,
+      checksUpdate: false,
     },
     {
       name: 'unknown CLI',
@@ -3853,6 +3902,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       owned: true,
       active: false,
       restart: false,
+      checksUpdate: false,
     },
     {
       name: 'busy server',
@@ -3861,6 +3911,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       owned: true,
       active: true,
       restart: false,
+      checksUpdate: true,
     },
     {
       name: 'unverified owner',
@@ -3869,10 +3920,11 @@ describe('OpenCodeProcess server ownership leases', () => {
       owned: false,
       active: false,
       restart: false,
+      checksUpdate: false,
     },
   ])(
     'reconciles a reused server safely: $name',
-    async ({ serverVersion, cliVersion, owned, active, restart }) => {
+    async ({ serverVersion, cliVersion, owned, active, restart, checksUpdate }) => {
       const manager = new OpenCodeProcess(4096, true);
       const ownership = vi
         .spyOn(manager, 'refreshManagedServerOwnership')
@@ -3885,7 +3937,7 @@ describe('OpenCodeProcess server ownership leases', () => {
         isDisposing: () => false,
         getStatus: () => ({ state: 'running' as const, url: manager.url }),
         readInstalledCliVersion: vi.fn().mockResolvedValue(cliVersion),
-        maybeSuggestCliUpdate: vi.fn().mockResolvedValue('2.0.22'),
+        maybeSuggestCliUpdate: vi.fn().mockResolvedValue(null),
         readHealthInfo: vi.fn().mockResolvedValue({ healthy: true, version: serverVersion }),
         hasActiveSessions: vi.fn().mockResolvedValue(active),
         takeOwnershipOfExistingServer: vi.fn().mockResolvedValue(false),
@@ -3893,7 +3945,10 @@ describe('OpenCodeProcess server ownership leases', () => {
       };
       await manager.runMaintenanceTick(callbacks);
       expect(ownership).toHaveBeenCalledOnce();
-      expect(callbacks.maybeSuggestCliUpdate).not.toHaveBeenCalled();
+      // Only the verified owner checks for same-family installs; it never migrates families.
+      if (checksUpdate)
+        expect(callbacks.maybeSuggestCliUpdate).toHaveBeenCalledExactlyOnceWith(cliVersion);
+      else expect(callbacks.maybeSuggestCliUpdate).not.toHaveBeenCalled();
       expect(callbacks.takeOwnershipOfExistingServer).not.toHaveBeenCalled();
       if (restart) {
         expect(callbacks.restartServerForCliUpdate).toHaveBeenCalledExactlyOnceWith(
@@ -3914,6 +3969,30 @@ describe('OpenCodeProcess server ownership leases', () => {
       }
     }
   );
+
+  it('lets the verified owner of a reused server install and restart on a same-family update', async () => {
+    const manager = new OpenCodeProcess(4096, true);
+    vi.spyOn(manager, 'refreshManagedServerOwnership').mockImplementation(async () => {
+      manager.managedProcess = true;
+      return true;
+    });
+    const callbacks = {
+      reusedServer: true,
+      isDisposing: () => false,
+      getStatus: () => ({ state: 'running' as const, url: manager.url }),
+      readInstalledCliVersion: vi.fn().mockResolvedValue('2.0.22'),
+      maybeSuggestCliUpdate: vi.fn().mockResolvedValue('2.0.23'),
+      readHealthInfo: vi.fn().mockResolvedValue({ healthy: true, version: '2.0.22' }),
+      hasActiveSessions: vi.fn().mockResolvedValue(false),
+      takeOwnershipOfExistingServer: vi.fn().mockResolvedValue(false),
+      restartServerForCliUpdate: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await manager.runMaintenanceTick(callbacks);
+
+    expect(callbacks.maybeSuggestCliUpdate).toHaveBeenCalledExactlyOnceWith('2.0.22');
+    expect(callbacks.restartServerForCliUpdate).toHaveBeenCalledExactlyOnceWith('2.0.22', '2.0.23');
+  });
 
   it.each(['ownership', 'health', 'activity'] as const)(
     'leaves a reused server running after a failed %s check',
@@ -3940,7 +4019,8 @@ describe('OpenCodeProcess server ownership leases', () => {
         restartServerForCliUpdate: restart,
       });
       expect(restart).not.toHaveBeenCalled();
-      expect(update).not.toHaveBeenCalled();
+      // The owner may check for an update before the activity read fails.
+      expect(update).toHaveBeenCalledTimes(failedCheck === 'activity' ? 1 : 0);
     }
   );
 

@@ -1828,6 +1828,25 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   animation: ellipsis steps(4, end) 1s infinite;
 }
 
+/* stepped-animation-clock.ts publishes the ellipsis step; see the matching shimmer rules. */
+:root[data-ellipsis-step]
+  .interactive-item-container
+  .chat-animated-ellipsis:not(.interactive-item-off-core *)::after {
+  animation: none;
+}
+
+:root[data-ellipsis-step='1'] .interactive-item-container .chat-animated-ellipsis::after {
+  content: '.';
+}
+
+:root[data-ellipsis-step='2'] .interactive-item-container .chat-animated-ellipsis::after {
+  content: '..';
+}
+
+:root[data-ellipsis-step='3'] .interactive-item-container .chat-animated-ellipsis::after {
+  content: '...';
+}
+
 .interactive-session
   .interactive-item-container.interactive-request
   .chat-turn-card

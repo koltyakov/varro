@@ -108,7 +108,7 @@ export function QueuedMessages(props: {
           <Show when={props.canResumeSteering}>
             <button
               type="button"
-              class="chat-queue-action"
+              class="chat-queue-control chat-steer-resume"
               title="Resume the existing steering prompt without sending another message"
               onClick={() => props.onResumeSteering?.()}
             >

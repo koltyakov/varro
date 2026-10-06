@@ -1,5 +1,6 @@
 import { readExtensionContextBlock } from '../../shared/extension-context';
 import { isDatabaseContext } from '../../shared/database-context';
+import { parseSelectionReference } from '../../shared/context-files';
 import { readLegacyExtensionContext } from '../host/extensions';
 
 /** Hide generated context in composer history, preserving fenced examples and malformed blocks. */
@@ -15,6 +16,13 @@ export function stripContextForHistory(text: string): string {
       let end = (
         readExtensionContextBlock(lines, index) ?? readLegacyExtensionContext(lines, index)
       )?.end;
+      if (
+        end === undefined &&
+        (/^\[(?:Active file|Attached file|Working directory): .+\]$/.test(trimmed) ||
+          parseSelectionReference(trimmed))
+      ) {
+        end = index;
+      }
       if (end === undefined && trimmed === '[Database context]') {
         const opening = lines[index + 1]?.trim().match(/^(`{3,})json$/);
         if (opening) {

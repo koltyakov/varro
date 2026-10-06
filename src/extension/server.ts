@@ -55,7 +55,11 @@ import {
 import { FULL_SESSION_LIST_LIMIT } from './util/session-list';
 import { basicAuthorization, openCodeApiVersion } from './opencode-connection';
 import { inspectLocalServerAccount, isProcessAlive } from './process-inspection';
-import { ProcessInspectionTimeoutError } from './process-inspection-error';
+import {
+  ManagedServerConnectionChangedError,
+  ProcessInspectionTimeoutError,
+  ServerNotListeningError,
+} from './process-inspection-error';
 import { readLocalServerConnectionInfo } from './server-connection-info';
 import type { ServerConnectionInfo } from './server-connection-info';
 import { ServerConnectionAdmission } from './server-connection-admission';
@@ -236,6 +240,8 @@ export class OpenCodeServer extends EventEmitter {
   private static readonly MAX_RETRIES = 3;
   private static readonly MAX_RESTART_DELAY_MS = 30_000;
   private static readonly CRASH_STABILITY_WINDOW_MS = 30_000;
+  /** Lets the owning window relaunch first; followers then reuse its new registration. */
+  private static readonly FOLLOWER_RECOVERY_DELAY_MS = 1000;
   private static readonly OWNERSHIP_CONFIRMATION_FAILED_MESSAGE =
     'Could not confirm ownership of the OpenCode server started by Varro';
 
@@ -375,11 +381,19 @@ export class OpenCodeServer extends EventEmitter {
             !this.isDisposing &&
             !(error instanceof ProcessInspectionTimeoutError)
           ) {
-            this.stopEventStream();
-            this.setStatus({
-              state: 'error',
-              message: error instanceof Error ? error.message : String(error),
-            });
+            if (
+              (error instanceof ServerNotListeningError ||
+                error instanceof ManagedServerConnectionChangedError) &&
+              this.followsManagedRegistration
+            ) {
+              this.recoverLostRegisteredServer(error.message);
+            } else {
+              this.stopEventStream();
+              this.setStatus({
+                state: 'error',
+                message: error instanceof Error ? error.message : String(error),
+              });
+            }
           }
           throw error;
         }
@@ -490,9 +504,52 @@ export class OpenCodeServer extends EventEmitter {
 
   private updateEventStreamState(eventStream: 'healthy' | 'degraded') {
     if (this._status.state !== 'running') return;
-    if (eventStream === 'degraded') this.requestAdoptedServerRecovery();
-    if (this._status.eventStream === eventStream) return;
+    if (eventStream === 'degraded') {
+      this.requestAdoptedServerRecovery();
+      this.recoverExitedRegisteredServer();
+    }
+    if (this._status.state !== 'running' || this._status.eventStream === eventStream) return;
     this.setRunningStatus(this._status.url, eventStream);
+  }
+
+  /** Varro registrations are followed across restarts; external endpoints are never relaunched implicitly. */
+  private get followsManagedRegistration(): boolean {
+    return (
+      !this.externalEndpoint &&
+      !this.admission.isExternal &&
+      this.processManager.connectionIdentity !== undefined
+    );
+  }
+
+  /**
+   * Windows that do not own the server get no exit event. An exited registered
+   * PID is checked with one signal-0 probe, without OS inspection commands.
+   */
+  private recoverExitedRegisteredServer() {
+    if (this.process || this.managedProcess || !this.followsManagedRegistration) return;
+    const pid = this.processManager.connectionIdentity?.pid;
+    if (!pid || isProcessAlive(pid)) return;
+    this.recoverLostRegisteredServer(`Registered OpenCode server PID ${pid} exited`);
+  }
+
+  /**
+   * A closed or replaced registered listener is a restart, not a new server
+   * that needs consent. Startup rereads the registration under the launch claim,
+   * so followers reattach to the owner's replacement instead of prompting.
+   */
+  private recoverLostRegisteredServer(reason: string) {
+    logger.warn(`${reason}; reconnecting through the Varro server registration`);
+    // Cancels any consent prompt an in-flight admission could still reach.
+    this.admission.reset();
+    this.stopEventStream();
+    this.handleRuntimeProcessExit(
+      null,
+      null,
+      this.startAttemptId,
+      this.disposeGeneration,
+      Promise.resolve(),
+      this.managedProcess ? 0 : OpenCodeServer.FOLLOWER_RECOVERY_DELAY_MS
+    );
   }
 
   private requestAdoptedServerRecovery() {
@@ -539,8 +596,17 @@ export class OpenCodeServer extends EventEmitter {
     const operation = (async () => {
       try {
         if (this.processManager.hasOwnershipLeaseCandidate) {
-          await this.processManager.recoverManagedServerOwnership();
+          try {
+            await this.processManager.recoverManagedServerOwnership();
+          } catch (err) {
+            // Preparation below rereads and verifies the retained registration
+            // once. A transient inspection failure must not require an editor reload.
+            logger.warn(
+              `Existing OpenCode ownership recovery failed; retrying with fresh registration: ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
         }
+        if (signal.aborted || disposeGeneration !== this.disposeGeneration) return;
         await this.processManager.prepareForHealthyExistingServer();
         if (signal.aborted || disposeGeneration !== this.disposeGeneration) return;
         if (this.hasInjectedCompactionOverride() && !this.managedProcess) {
@@ -698,7 +764,7 @@ export class OpenCodeServer extends EventEmitter {
           await this.processManager.stopServerForRestart();
           this.throwIfStartCancelled(disposeGeneration, signal);
         }
-        const registered = await this.measureStartup('registration', () =>
+        let registered = await this.measureStartup('registration', () =>
           this.processManager.refreshStartupRegistration()
         );
         this.registeredEndpoint = registered;
@@ -713,6 +779,26 @@ export class OpenCodeServer extends EventEmitter {
           ? await this.measureStartup('health', () => this.readHealthInfo(signal))
           : { healthy: false };
         this.throwIfStartCancelled(disposeGeneration, signal);
+        if (
+          !health.healthy &&
+          probeExistingEndpoint &&
+          this.transport.healthError?.includes('authentication')
+        ) {
+          // A previous editor can publish its lease after our first read. Recover
+          // verified credentials and classification before asking for a password.
+          registered = await this.measureStartup('registration', () =>
+            this.processManager.refreshStartupRegistration()
+          );
+          this.registeredEndpoint = registered;
+          this.throwIfStartCancelled(disposeGeneration, signal);
+          if (registered) {
+            this.savedServerAuthorization = undefined;
+            await this.restoreRegistrationCredentials(signal);
+            this.throwIfStartCancelled(disposeGeneration, signal);
+            health = await this.measureStartup('health', () => this.readHealthInfo(signal));
+            this.throwIfStartCancelled(disposeGeneration, signal);
+          }
+        }
         if (
           !health.healthy &&
           probeExistingEndpoint &&
@@ -1540,7 +1626,8 @@ export class OpenCodeServer extends EventEmitter {
     signal: NodeJS.Signals | null,
     startAttemptId: number,
     disposeGeneration: number,
-    processCleanup: Promise<void>
+    processCleanup: Promise<void>,
+    delayOffsetMs = 0
   ) {
     this.transport.clearPendingAttentionRequests();
     this.transport.abortRequests();
@@ -1553,7 +1640,7 @@ export class OpenCodeServer extends EventEmitter {
     }
 
     const retryAttempt = ++this.retryCount;
-    const delay = this.getRestartDelay(retryAttempt);
+    const delay = this.getRestartDelay(retryAttempt) + delayOffsetMs;
     logger.info(`Restarting server in ${delay}ms (attempt ${retryAttempt})`);
     void Promise.all([processCleanup, this.transport.waitForRequestsToSettle()]).then(
       () => {
@@ -1561,9 +1648,14 @@ export class OpenCodeServer extends EventEmitter {
         this.restartTimer = setTimeout(() => {
           this.restartTimer = null;
           if (!this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)) return;
-          void this.startOperation(true).catch(() => {
-            // Startup reports its own error status; this catch only owns the background promise.
-          });
+          void this.startOperation(true).then(
+            // Reattaching to a registered replacement does not pass through a
+            // launch, so restore the crash budget once the connection is stable.
+            () => this.scheduleRetryBudgetReset(this.startAttemptId, this.disposeGeneration),
+            () => {
+              // Startup reports its own error status; this catch only owns the background promise.
+            }
+          );
         }, delay);
       },
       (err: unknown) => {
@@ -1937,7 +2029,8 @@ export class OpenCodeServer extends EventEmitter {
     const stream = this.startEventStream();
     this.setRunningStatus(this.url, 'degraded');
     void stream.catch((error: unknown) => {
-      if (this.isDisposing) return;
+      // Admission failure already published its outcome, including follow recovery.
+      if (this.isDisposing || this._status.state !== 'running') return;
       this.setStatus({
         state: 'error',
         message: error instanceof Error ? error.message : String(error),
@@ -2842,11 +2935,14 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   restart(options: { force?: boolean } = {}): Promise<string> {
+    if (this.isAttachOnly && this.existingServerPreparationOperation) {
+      return this.existingServerPreparationOperation.then(() => this.restart(options));
+    }
     if (this.isAttachOnly) {
       if (this._status.state !== 'running') return this.start();
       return Promise.reject(
         new Error(
-          'Restart is not supported in attach-only mode. Restart OpenCode on its server host or with Docker, then reconnect Varro.'
+          'Restart is not supported in attach-only mode because Varro has not established ownership of this server. Restart it using the terminal or service that launched it, then reconnect Varro.'
         )
       );
     }

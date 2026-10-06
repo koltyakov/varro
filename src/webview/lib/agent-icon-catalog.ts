@@ -1,11 +1,13 @@
 import { createSignal } from 'solid-js';
 
-// Vite groups these lazy imports into small alphabetic bundles for VSIX packaging.
+// Vite groups these lazy imports into small alphabetic bundles for VSIX packaging. The
+// catalog query keeps statically imported `?raw` icons out of those bundles, which would
+// otherwise load a whole bundle at startup for one status icon.
 const icons = new Map(
   Object.entries(
     import.meta.glob<string>('/node_modules/iconoir/icons/{regular,solid}/*.svg', {
       exhaustive: true,
-      query: '?raw',
+      query: '?raw&agent-icon',
       import: 'default',
     })
   ).map(([path, svg]) => {

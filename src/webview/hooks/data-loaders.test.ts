@@ -780,6 +780,74 @@ describe('data loaders', () => {
     expect(finishWorkspaceCatalogReload).not.toHaveBeenCalled();
   });
 
+  it('inherits a newer routing load when catalog events supersede startup catalogs', async () => {
+    const startupAgents = deferred<Agent[]>();
+    const eventAgents = deferred<Agent[]>();
+    const startupProviders =
+      deferred<Awaited<ReturnType<DataLoaderDependencies['listProviders']>>>();
+    const eventProviders = deferred<Awaited<ReturnType<DataLoaderDependencies['listProviders']>>>();
+    const listAgents = vi
+      .fn<DataLoaderDependencies['listAgents']>()
+      .mockReturnValueOnce(startupAgents.promise)
+      .mockReturnValueOnce(eventAgents.promise);
+    const listProviders = vi
+      .fn<DataLoaderDependencies['listProviders']>()
+      .mockReturnValueOnce(startupProviders.promise)
+      .mockReturnValueOnce(eventProviders.promise);
+    const setAllAgents = vi.fn();
+    const finishWorkspaceCatalogReload = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listAgents,
+        listCommands: vi.fn<DataLoaderDependencies['listCommands']>().mockResolvedValue([]),
+        listProviders,
+        setAllAgents,
+        finishWorkspaceCatalogReload,
+      })
+    );
+
+    const startup = operations.reloadWorkspaceCatalogs();
+    // A fresh server emits catalog events while its first workspace requests run.
+    const eventRefresh = operations.refreshRoutingState();
+    eventAgents.resolve([buildAgent('latest')]);
+    eventProviders.resolve({ providers: [provider('latest', {})], default: {} });
+    await eventRefresh;
+    startupAgents.resolve([buildAgent('stale')]);
+    startupProviders.resolve({ providers: [provider('stale', {})], default: {} });
+
+    await expect(startup).resolves.toBe(true);
+    expect(listAgents).toHaveBeenCalledTimes(2);
+    expect(listProviders).toHaveBeenCalledTimes(2);
+    expect(setAllAgents).toHaveBeenCalledExactlyOnceWith([buildAgent('latest')]);
+    expect(finishWorkspaceCatalogReload).toHaveBeenCalledOnce();
+  });
+
+  it('reports a superseded startup catalog as failed when the newer load fails', async () => {
+    const startupAgents = deferred<Agent[]>();
+    const listAgents = vi
+      .fn<DataLoaderDependencies['listAgents']>()
+      .mockReturnValueOnce(startupAgents.promise)
+      .mockRejectedValue(new Error('agents unavailable'));
+    const finishWorkspaceCatalogReload = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listAgents,
+        listCommands: vi.fn<DataLoaderDependencies['listCommands']>().mockResolvedValue([]),
+        listProviders: vi
+          .fn<DataLoaderDependencies['listProviders']>()
+          .mockResolvedValue({ providers: [], default: {} }),
+        finishWorkspaceCatalogReload,
+      })
+    );
+
+    const startup = operations.reloadWorkspaceCatalogs();
+    await operations.loadAgents();
+    startupAgents.resolve([buildAgent('stale')]);
+
+    await expect(startup).resolves.toBe(false);
+    expect(finishWorkspaceCatalogReload).not.toHaveBeenCalled();
+  });
+
   it('bounds workspace catalog reloads that do not settle', async () => {
     vi.useFakeTimers();
     const never = new Promise<never>(() => {});

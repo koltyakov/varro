@@ -35,9 +35,18 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
           (_, index) => `Review the attached files, line ${index + 1}.`
         ).join('\n')
       );
+      const sendButton = frame.getByRole('button', {
+        name: scenario === 'busy-stop-send' ? 'Add to queue (Enter)' : 'Send (Enter)',
+        exact: true,
+      });
+      // A visible editor can still be waiting for connection or history readiness.
+      // Let setup finish while timers run before Enter takes its non-retrying send path.
+      await expect(sendButton).toBeEnabled();
 
       // Assert easing at a fixed frame cadence rather than the CI runner's available CPU time.
-      await page.clock.pauseAt(new Date('2030-01-01T00:01:00Z'));
+      // Jump only to the next frame window, not across pending API/startup deadlines.
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+      await expect(sendButton).toBeEnabled();
       await frame.evaluate((element) => {
         // CSS animation time runs independently of Playwright's paused JS clock.
         // Capture the exit at insertion so a slow assertion cannot miss its 140ms lifetime.
@@ -92,8 +101,7 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
           capture: true,
         });
       });
-      if (scenario === 'blank')
-        await frame.getByRole('button', { name: 'Send (Enter)', exact: true }).click();
+      if (scenario === 'blank') await sendButton.click();
       else await composer.press('Enter');
       await expect(composer).toHaveText('');
       await expect(frame.locator(':scope > .chat-attachments-container')).toHaveCount(0);

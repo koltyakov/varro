@@ -8,7 +8,7 @@ SWIFTC := xcrun swiftc
 FLAGS := -swift-version 5 -warnings-as-errors -target $(ARCH)-apple-macosx13.0 -module-cache-path build/module-cache
 SOURCES := $(wildcard Sources/*.swift)
 
-.PHONY: build install run clean uninstall test test-layout
+.PHONY: build install run clean uninstall test test-layout test-indicator
 
 build: build/.built
 
@@ -36,7 +36,7 @@ install: build
 run: build
 	open "$(APP)"
 
-test: test-layout
+test: test-layout test-indicator
 	mkdir -p build
 	$(SWIFTC) $(FLAGS) -framework Foundation -framework Combine Sources/TrayModel.swift Sources/TrayServer.swift Tests/main.swift -o build/tray-tests
 	build/tray-tests
@@ -45,6 +45,11 @@ test-layout:
 	mkdir -p build
 	$(SWIFTC) $(FLAGS) -framework Cocoa -framework SwiftUI -framework ServiceManagement Sources/TrayModel.swift Sources/TrayView.swift Tests/Layout/main.swift -o build/tray-layout-tests
 	build/tray-layout-tests
+
+test-indicator:
+	mkdir -p build
+	$(SWIFTC) $(FLAGS) -framework Cocoa -framework Combine Sources/TrayModel.swift Sources/TrayStatusIndicator.swift Tests/Indicator/main.swift -o build/tray-indicator-tests
+	build/tray-indicator-tests
 
 clean:
 	rm -rf build

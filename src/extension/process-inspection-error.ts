@@ -7,3 +7,8 @@ export class ProcessInspectionTimeoutError extends Error {
 export class ManagedServerConnectionChangedError extends Error {
   override readonly name = 'ManagedServerConnectionChangedError';
 }
+
+/** The loopback port refused connections: there is no listener whose account needs consent. */
+export class ServerNotListeningError extends Error {
+  override readonly name = 'ServerNotListeningError';
+}

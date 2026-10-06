@@ -3,10 +3,11 @@ import { spawn } from 'child_process';
 import type { Dirent } from 'fs';
 import { existsSync } from 'fs';
 import { readFile, readdir, readlink, realpath } from 'fs/promises';
+import { connect } from 'net';
 import { uptime } from 'os';
 import { join } from 'path';
 import { logger } from './logger';
-import { ProcessInspectionTimeoutError } from './process-inspection-error';
+import { ProcessInspectionTimeoutError, ServerNotListeningError } from './process-inspection-error';
 import { WindowsProcessInspector } from './windows-process-inspector';
 
 type CommandResult = {
@@ -27,6 +28,7 @@ const LISTENER_INSPECTION_RETRY_TIMEOUT_MS = 5000;
 const PROCESS_COMMAND_KILL_GRACE_MS = 1000;
 const WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS = 10_000;
 const WINDOWS_PROCESS_INSPECTION_ATTEMPTS = 2;
+const LOOPBACK_PROBE_TIMEOUT_MS = 500;
 export const PROCESS_STOP_TIMEOUT_MS = 5000;
 const PROCESS_COMMAND_MAX_OUTPUT_CHARS = 1_000_000;
 const windowsInspector = new WindowsProcessInspector();
@@ -47,6 +49,11 @@ export type LocalServerAccount = {
 export async function inspectLocalServerAccount(port: number): Promise<LocalServerAccount> {
   try {
     const pids = await findListeningPids(port);
+    // A stopped or restarting server leaves nothing to consent to. Process
+    // inspection can also hide another user's listener, so only a refused
+    // loopback connection proves the port is closed.
+    if (pids.length === 0 && (await isLoopbackPortRefusing(port)))
+      throw new ServerNotListeningError(`No OpenCode server is listening on port ${port}`);
     // Port-only discovery can include unrelated IPv4/IPv6 binds. Do not guess.
     if (pids.length !== 1) {
       logger.warn(`Cannot verify the account on port ${port}: found ${pids.length} listeners`);
@@ -88,13 +95,28 @@ export async function inspectLocalServerAccount(port: number): Promise<LocalServ
   } catch (error) {
     // A timeout blocks traffic, but must not turn a quiet existing connection
     // into an unknown-account consent prompt. A later request inspects afresh.
-    if (error instanceof ProcessInspectionTimeoutError) throw error;
+    if (error instanceof ProcessInspectionTimeoutError || error instanceof ServerNotListeningError)
+      throw error;
     // Restricted process visibility must never be interpreted as same-user.
     logger.warn(
       `Cannot verify the account on port ${port}: ${error instanceof Error ? error.message : String(error)}`
     );
     return { kind: 'unknown' };
   }
+}
+
+function isLoopbackPortRefusing(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ host: '127.0.0.1', port });
+    const finish = (refused: boolean) => {
+      socket.destroy();
+      resolve(refused);
+    };
+    // An accepted, slow, or otherwise failed probe keeps the listener's account unknown.
+    socket.setTimeout(LOOPBACK_PROBE_TIMEOUT_MS, () => finish(false));
+    socket.once('connect', () => finish(false));
+    socket.once('error', (error: NodeJS.ErrnoException) => finish(error.code === 'ECONNREFUSED'));
+  });
 }
 
 function parsePids(text: string) {

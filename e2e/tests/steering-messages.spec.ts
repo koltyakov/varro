@@ -3,6 +3,75 @@ import type { AssistantMessage, MessageEntry, UserMessage } from '../../src/webv
 import { waitForAnimationFrames } from './helpers';
 
 for (const theme of ['dark', 'light']) {
+  test(`resume steering uses a compact themed control (${theme})`, async ({ page }) => {
+    const sessionID = 'pending-steering';
+    const message: MessageEntry<UserMessage> = {
+      info: {
+        id: 'pending-steer',
+        sessionID,
+        role: 'user',
+        pendingDelivery: 'steer',
+        time: { created: 1 },
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'gpt-5' },
+      },
+      parts: [
+        {
+          id: 'pending-steer-text',
+          messageID: 'pending-steer',
+          sessionID,
+          type: 'text',
+          text: 'Change direction',
+        },
+      ],
+    };
+    await page.addInitScript(
+      (fixture) => {
+        // SAFETY: The isolated E2E harness consumes this fixture before mounting.
+        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
+          fixture;
+      },
+      {
+        session: {
+          id: sessionID,
+          projectID: 'test',
+          directory: '/workspace',
+          title: 'Pending steering',
+          version: '1',
+          time: { created: 1, updated: 1 },
+        },
+        initialMessages: [message],
+      }
+    );
+    await page.goto(`/e2e/harness/index.html?scenario=session-playback&theme=${theme}`);
+    const resume = page.getByRole('button', { name: 'Resume steering', exact: true });
+    await expect(resume).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Steered messages' })).toHaveText(
+      'Change direction'
+    );
+    for (const width of [1100, 360]) {
+      await page.setViewportSize({ width, height: 800 });
+      await waitForAnimationFrames(page, 8);
+      await expect(resume).toHaveCSS('display', 'inline-flex');
+      await expect(resume).toHaveCSS('height', '24px');
+      await expect(resume).toHaveCSS('border-top-width', '0px');
+      await expect(resume).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      const geometry = await resume.evaluate((element) => {
+        const button = element.getBoundingClientRect();
+        const container = element.parentElement!.getBoundingClientRect();
+        return {
+          fits: button.left >= container.left && button.right <= container.right,
+          labelFits: element.scrollWidth <= element.clientWidth,
+        };
+      });
+      expect(geometry).toEqual({ fits: true, labelFits: true });
+    }
+    await page.keyboard.press('Tab');
+    await resume.focus();
+    await expect(resume).toBeFocused();
+    expect(await resume.evaluate((element) => element.matches(':focus-visible'))).toBe(true);
+  });
+
   for (const withImage of [false, true]) {
     test(`steering is gray and read-only, queued follow-ups stay editable (${theme}, image=${withImage})`, async ({
       page,

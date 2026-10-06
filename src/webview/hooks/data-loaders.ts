@@ -206,6 +206,8 @@ export function createDataLoaderOperations(deps: {
   let inFlightSessionLoad: Promise<boolean | undefined> | null = null;
   let inFlightQuestionLoad: Promise<boolean> | null = null;
   let inFlightCatalogReload: Promise<boolean> | null = null;
+  let latestAgentLoad: Promise<boolean> | null = null;
+  let latestProviderLoad: Promise<boolean> | null = null;
   let knownProviderIDs: Set<string> | null = null;
   const questionSnapshots = createMutationAwareSnapshotReconciler(deps.getQuestions);
   const sessionSnapshots = createMutationAwareSnapshotReconciler(deps.getSessions);
@@ -275,23 +277,45 @@ export function createDataLoaderOperations(deps: {
     return request;
   };
 
-  const loadAgents = async () => {
+  // A fresh server emits catalog events while its first workspace requests run,
+  // and each event starts a newer routing load. A superseded load applies
+  // nothing, so its waiters (startup readiness) inherit the newer load's outcome
+  // instead of reporting a failure. Only a workspace change ends that chain.
+  const inheritSupersededLoad = (
+    request: Promise<boolean>,
+    workspace: number,
+    isLatest: () => boolean,
+    latest: () => Promise<boolean> | null
+  ) =>
+    request.then((loaded) =>
+      loaded || isLatest() || workspace !== workspaceGeneration ? loaded : (latest() ?? false)
+    );
+
+  const loadAgents = (): Promise<boolean> => {
     const workspace = workspaceGeneration;
     const generation = ++agentLoadGeneration;
-    return await loadAgentsWithDependencies(
-      {
-        listAgents: deps.listAgents,
-        getActiveSessionId: deps.getActiveSessionId,
-        getSelectedAgent: deps.getSelectedAgent,
-        getSelectedAgentForSession: deps.getSelectedAgentForSession,
-        getPersistedSelectedAgent: deps.getPersistedSelectedAgent,
-        setAllAgents: deps.setAllAgents,
-        setPrimaryAgents: deps.setPrimaryAgents,
-        setSelectedAgent: deps.setSelectedAgent,
-      },
-      deps.logError,
-      () => workspace === workspaceGeneration && generation === agentLoadGeneration
+    const isLatest = () => workspace === workspaceGeneration && generation === agentLoadGeneration;
+    const request = inheritSupersededLoad(
+      loadAgentsWithDependencies(
+        {
+          listAgents: deps.listAgents,
+          getActiveSessionId: deps.getActiveSessionId,
+          getSelectedAgent: deps.getSelectedAgent,
+          getSelectedAgentForSession: deps.getSelectedAgentForSession,
+          getPersistedSelectedAgent: deps.getPersistedSelectedAgent,
+          setAllAgents: deps.setAllAgents,
+          setPrimaryAgents: deps.setPrimaryAgents,
+          setSelectedAgent: deps.setSelectedAgent,
+        },
+        deps.logError,
+        isLatest
+      ),
+      workspace,
+      isLatest,
+      () => latestAgentLoad
     );
+    latestAgentLoad = request;
+    return request;
   };
 
   const loadCommands = async () => {
@@ -307,34 +331,43 @@ export function createDataLoaderOperations(deps: {
     );
   };
 
-  const loadProviders = async () => {
+  const loadProviders = (): Promise<boolean> => {
     const workspace = workspaceGeneration;
     const generation = ++providerLoadGeneration;
-    return await loadProvidersWithDependencies(
-      {
-        listProviders: deps.listProviders,
-        setProvidersLoaded: deps.setProvidersLoaded,
-        setProviders: (providers, defaults) => {
-          const knownProviders = knownProviderIDs;
-          const newlyConnectedProviderIDs = knownProviders
-            ? providers
-                .filter((provider) => !knownProviders.has(provider.id))
-                .map((provider) => provider.id)
-            : [];
-          deps.setProviders(providers, defaults, newlyConnectedProviderIDs);
-          knownProviderIDs ??= new Set();
-          for (const provider of providers) knownProviderIDs.add(provider.id);
+    const isLatest = () =>
+      workspace === workspaceGeneration && generation === providerLoadGeneration;
+    const request = inheritSupersededLoad(
+      loadProvidersWithDependencies(
+        {
+          listProviders: deps.listProviders,
+          setProvidersLoaded: deps.setProvidersLoaded,
+          setProviders: (providers, defaults) => {
+            const knownProviders = knownProviderIDs;
+            const newlyConnectedProviderIDs = knownProviders
+              ? providers
+                  .filter((provider) => !knownProviders.has(provider.id))
+                  .map((provider) => provider.id)
+              : [];
+            deps.setProviders(providers, defaults, newlyConnectedProviderIDs);
+            knownProviderIDs ??= new Set();
+            for (const provider of providers) knownProviderIDs.add(provider.id);
+          },
+          setProviderDefaults: deps.setProviderDefaults,
+          getSelectedModel: deps.getSelectedModel,
+          getLastSelectedModel: deps.getLastSelectedModel,
+          getSelectedModelForSession: deps.getSelectedModelForSession,
+          getComposerSessionId: deps.getComposerSessionId,
+          setSelectedModel: deps.setSelectedModel,
         },
-        setProviderDefaults: deps.setProviderDefaults,
-        getSelectedModel: deps.getSelectedModel,
-        getLastSelectedModel: deps.getLastSelectedModel,
-        getSelectedModelForSession: deps.getSelectedModelForSession,
-        getComposerSessionId: deps.getComposerSessionId,
-        setSelectedModel: deps.setSelectedModel,
-      },
-      deps.logError,
-      () => workspace === workspaceGeneration && generation === providerLoadGeneration
+        deps.logError,
+        isLatest
+      ),
+      workspace,
+      isLatest,
+      () => latestProviderLoad
     );
+    latestProviderLoad = request;
+    return request;
   };
 
   const refreshRoutingState = async () => {
@@ -572,6 +605,8 @@ export function createDataLoaderOperations(deps: {
     inFlightSessionLoad = null;
     inFlightQuestionLoad = null;
     inFlightCatalogReload = null;
+    latestAgentLoad = null;
+    latestProviderLoad = null;
     deps.setSessionsLoadingMore?.(false);
     deps.setSessionsPaginationError?.(null);
   };

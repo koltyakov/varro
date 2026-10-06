@@ -368,7 +368,8 @@ export function TurnNavigationRail(props: {
           onCleanup(() => {
             if (ownsHover) props.onTurnHoverChange?.(id, false);
           });
-          const label = () => {
+          // Highlight changes rerun the marker's attributes; keep the prompt scan out of that path.
+          const label = createMemo(() => {
             const preview = turn();
             if (preview.format) {
               const format = `${preview.format.kind.toUpperCase()} content`;
@@ -376,7 +377,7 @@ export function TurnNavigationRail(props: {
             }
             const text = preview.text.replaceAll(/\s+/g, ' ').trim();
             return text.length > 80 ? `${text.slice(0, 77)}...` : text;
-          };
+          });
           return (
             <Tooltip
               placement="right"

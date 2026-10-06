@@ -42,13 +42,14 @@ describe('ServerStatus', () => {
     resetDefaultAppState();
   });
 
-  it('renders the starting state copy', () => {
+  it('renders connection progress without assuming a server is being spawned', () => {
     setState('serverStatus', { state: 'starting' });
 
     renderServerStatus();
 
-    expect(container?.textContent).toContain('Starting OpenCode...');
-    expect(container?.textContent).toContain('Spawning the local server');
+    expect(container?.textContent).toContain('Connecting to OpenCode...');
+    expect(container?.textContent).not.toContain('Starting OpenCode...');
+    expect(container?.textContent).not.toContain('Spawning the local server');
   });
 
   it('shows a pulsing Varro logo while server detection is pending', () => {

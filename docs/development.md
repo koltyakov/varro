@@ -97,6 +97,9 @@ For message-list scrolling, pagination, sticky prompts, row measurement, attachm
 editing, read [Message List Virtualization](message-list-virtualization.md) before making changes.
 That guide defines the required invariants and exact-data debugging workflow for this coupled area.
 
+For performance work, read [Performance Principles](performance.md). It covers measurement, baseline
+comparisons, animation and reactivity costs, webview transport, CSS build targets, and bundle checks.
+
 Before packaging or publishing, a fuller verification sweep is:
 
 ```sh

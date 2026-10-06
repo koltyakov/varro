@@ -687,7 +687,8 @@ export class OpenCodeV2Adapter {
             message.type === 'assistant' ||
             message.type === 'skill' ||
             message.type === 'shell' ||
-            (message.type === 'idle' && message.outcome === 'failed')
+            (message.type === 'idle' &&
+              (message.outcome === 'failed' || message.outcome === 'interrupted'))
         );
         const firstUser = ordered.findIndex((message) => message.type === 'user');
         let parent =
@@ -728,7 +729,7 @@ export class OpenCodeV2Adapter {
           if (message.type === 'agent-switched') context.agent = message.agent;
           if (message.type === 'model-switched') context.model = message.model;
           if (!isV2TranscriptMessage(message)) return [];
-          if (message.type === 'idle' && assistantFailed) return [];
+          if (message.type === 'idle' && message.outcome === 'failed' && assistantFailed) return [];
           const projected = projectV2Message(
             message,
             sessionID,
@@ -814,7 +815,7 @@ export class OpenCodeV2Adapter {
               found = true;
               break;
             }
-            if (message.type !== 'idle') throw notLast;
+            if (message.type !== 'idle' || message.outcome !== 'failed') throw notLast;
             trailingFailure = true;
           }
           if (found) break;

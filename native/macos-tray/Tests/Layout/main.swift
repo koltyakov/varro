@@ -39,6 +39,8 @@ check(empty.width == 390 && empty.height > 100 && empty.height < 520, "Empty sta
 show(1)
 let single = size()
 check(single.width == 390 && single.height > 100 && single.height < 300, "One item uses a compact popover: \(single)")
+window.recalculateKeyViewLoop()
+check(controller.view.nextValidKeyView == nil, "The popover must not include automatically focusable controls")
 show(3)
 let three = size()
 check(three.height > single.height && three.height < 520, "A few items grow the popover without filling the maximum: \(three)")
@@ -54,6 +56,8 @@ check(sections.height > three.height && sections.height < 520, "Separate section
 show(30)
 let full = size()
 check(abs(full.height - 520) < 1, "Long lists stop growing at 520 points: \(full)")
+window.recalculateKeyViewLoop()
+check(controller.view.nextValidKeyView == nil, "Updated and scrollable rows must remain unfocusable")
 model.error = "Could not open this project in VS Code."
 let withError = size()
 check(abs(withError.height - 520) < 1, "Errors share the height cap with the scrollable list: \(withError)")

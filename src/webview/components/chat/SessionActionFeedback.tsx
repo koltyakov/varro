@@ -1,4 +1,4 @@
-import { Show, createSignal, onCleanup } from 'solid-js';
+import { Show, batch, createSignal, onCleanup } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { checkIcon, xmarkIcon } from '../../lib/ui-icons';
@@ -12,6 +12,7 @@ const LEAVE_MS = 160;
 
 const [message, setMessage] = createSignal<string | null>(null);
 const [kind, setKind] = createSignal<'success' | 'warning'>('success');
+const [anchor, setAnchor] = createSignal<HTMLElement | undefined>();
 const [leaving, setLeaving] = createSignal(false);
 let leaveTimeout: ReturnType<typeof setTimeout> | undefined;
 let clearTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -24,15 +25,20 @@ function reset() {
 
 export function showSessionActionFeedback(
   nextMessage: string,
-  nextKind: 'success' | 'warning' = 'success'
+  nextKind: 'success' | 'warning' = 'success',
+  nextAnchor?: HTMLElement
 ) {
   reset();
-  setKind(nextKind);
-  setMessage(nextMessage);
+  batch(() => {
+    setKind(nextKind);
+    setAnchor(nextAnchor);
+    setMessage(nextMessage);
+  });
   const visibleMs = nextKind === 'warning' ? WARNING_VISIBLE_MS : SUCCESS_VISIBLE_MS;
   leaveTimeout = setTimeout(() => setLeaving(true), visibleMs);
   clearTimeoutHandle = setTimeout(() => {
     setMessage(null);
+    setAnchor(undefined);
     setLeaving(false);
   }, visibleMs + LEAVE_MS);
 }
@@ -48,6 +54,7 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
   const currentError = () => props.error?.() ?? null;
   const currentStatus = () => props.status?.() ?? null;
   const currentMessage = () => currentError() ?? message() ?? currentStatus()?.message ?? null;
+  const currentAnchor = () => (currentError() || !message() ? undefined : anchor());
   const currentStatusIcon = () =>
     currentError() || message() ? null : (currentStatus()?.icon ?? null);
   const isWarning = () => !currentError() && message() !== null && kind() === 'warning';
@@ -57,15 +64,16 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
   onCleanup(() => {
     reset();
     setMessage(null);
+    setAnchor(undefined);
     setKind('success');
   });
 
   return (
     <Show when={currentMessage()}>
       {(visibleMessage) => (
-        <Portal>
+        <Portal mount={currentAnchor()} ref={(el) => (el.style.display = 'contents')}>
           <div
-            class={`session-action-feedback ${currentError() ? 'is-error' : hasWarningTone() ? 'is-warning' : ''} ${!currentError() && leaving() ? 'is-leaving' : ''}`.trim()}
+            class={`session-action-feedback ${currentAnchor() ? 'is-input-anchored' : ''} ${currentError() ? 'is-error' : hasWarningTone() ? 'is-warning' : ''} ${!currentError() && leaving() ? 'is-leaving' : ''}`.trim()}
             role={currentError() ? 'alert' : 'status'}
             aria-live={currentError() ? 'assertive' : 'polite'}
           >

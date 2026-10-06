@@ -959,7 +959,19 @@ export type ExtensionMessage =
       type: 'vscode/open-result';
       payload: { requestId: number; status: 'opened' | 'unavailable' };
     }
-  | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
+  | {
+      type: 'api/response';
+      payload: {
+        id: number;
+        data?: unknown;
+        /**
+         * Large `data` as UTF-8 JSON. VS Code transfers buffers without serializing them in
+         * the extension host or parsing them on the workbench thread. Parsing restores `data`.
+         */
+        encodedData?: Uint8Array;
+        error?: string;
+      };
+    }
   | {
       type: 'queued-messages/sync';
       payload: { messages: QueuedMessageSnapshot[]; mutationId?: string };

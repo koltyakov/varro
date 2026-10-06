@@ -50,11 +50,12 @@ export default defineConfig(({ mode }) => ({
               test: /node_modules[\\/](?:d3(?:-|[\\/])|mermaid[\\/]dist[\\/]chunks[\\/]mermaid\.core[\\/]chunk-)/,
               includeDependenciesRecursively: false,
             },
+            // Only the lazy agent-icon catalog query, so static status icons stay in their importer.
             ...['a-c', 'd-f', 'g-i', 'j-l', 'm-o', 'p-r', 's-u', 'v-z0-9'].map(
               (letters, index) => ({
                 name: `agent-icons-${index}`,
                 test: new RegExp(
-                  `node_modules[/\\\\]iconoir[/\\\\]icons[/\\\\](?:regular|solid)[/\\\\][${letters}][^/\\\\]*\\.svg\\?raw`
+                  `node_modules[/\\\\]iconoir[/\\\\]icons[/\\\\](?:regular|solid)[/\\\\][${letters}][^/\\\\]*\\.svg\\?raw&agent-icon$`
                 ),
               })
             ),
@@ -65,6 +66,10 @@ export default defineConfig(({ mode }) => ({
     minify: 'oxc',
     sourcemap: false,
     target: 'es2022',
+    // Webviews run in the editor's Chromium. Older default targets lack :has(), so the CSS
+    // minifier wrapped merged rules in :is(), which Chromium cannot index by class and which
+    // raised their specificity above the authored rules that development builds serve.
+    cssTarget: 'chrome120',
     chunkSizeWarningLimit: 2048,
   },
 }));

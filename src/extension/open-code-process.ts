@@ -1424,9 +1424,15 @@ export class OpenCodeProcess {
   async recoverManagedServerOwnership(): Promise<boolean> {
     if (this._process && this._managedProcess) return true;
     const lease = this.ownershipLeaseCandidate;
-    this.ownershipLeaseCandidate = null;
     if (!lease) return false;
-    if (!(await this.matchesOwnershipLease(lease))) {
+    const verification = await this.inspectOwnershipLease(lease);
+    if (!verification.matches) {
+      if (!(await this.isRegisteredProcessRetired(lease))) {
+        logger.warn(
+          `Managed OpenCode recovery could not verify the live process; its lease was retained. ${verification.reason}`
+        );
+        return false;
+      }
       await this.removeOwnershipLease(lease.owner, lease.host);
       this._port = this.originalPort;
       return false;
@@ -1673,6 +1679,7 @@ export class OpenCodeProcess {
   }
 
   private adoptManagedServerOwnership(lease: ManagedServerOwnershipLease) {
+    this.ownershipLeaseCandidate = null;
     this.ownershipLease = lease;
     this.ownershipOwner = lease.owner;
     this.foreignActiveOwnership = false;
@@ -1685,6 +1692,7 @@ export class OpenCodeProcess {
   }
 
   private observeForeignManagedServer(lease: ManagedServerOwnershipLease) {
+    this.ownershipLeaseCandidate = null;
     this.ownershipLease = lease;
     this.ownershipOwner = lease.owner;
     this._managedProcess = false;
@@ -3154,8 +3162,8 @@ export class OpenCodeProcess {
       const installedCliVersion = await callbacks.readInstalledCliVersion();
       const health =
         callbacks.getStatus().state === 'running' ? await callbacks.readHealthInfo() : null;
-      // Reusing a server permits an owned same-family restart, not an implicit
-      // migration or another CLI install. Missing version evidence leaves it running.
+      // Reusing a server permits an owned same-family update and restart, not an
+      // implicit migration. Missing version evidence leaves it running.
       if (
         callbacks.reusedServer &&
         (!health?.healthy ||
@@ -3170,8 +3178,10 @@ export class OpenCodeProcess {
         health?.healthy &&
         openCodeApiVersion(health.version ?? '') === 1 &&
         openCodeApiVersion(installedCliVersion ?? '') === 2;
+      // Only the verified owner installs CLI updates, so windows sharing a reused
+      // server do not race installers. Updates stay within the running family.
       const updatedCliVersion =
-        callbacks.reusedServer || switchingToV2
+        switchingToV2 || (callbacks.reusedServer && !this._managedProcess)
           ? null
           : await callbacks.maybeSuggestCliUpdate(installedCliVersion);
       const restartCliVersion = updatedCliVersion || installedCliVersion;

@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-module-mocking -- OS account inspection is tested without invoking real process commands. */
 import { EventEmitter } from 'events';
+import { createServer } from 'net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { spawnMock, nativeReadMock } = vi.hoisted(() => ({
@@ -13,8 +14,9 @@ vi.mock('./windows-process-inspector', () => ({
   },
 }));
 vi.mock('./logger', () => ({ logger: { warn: vi.fn() } }));
+import { isString } from '../shared/type-utils';
 import { logger } from './logger';
-import { ProcessInspectionTimeoutError } from './process-inspection-error';
+import { ProcessInspectionTimeoutError, ServerNotListeningError } from './process-inspection-error';
 import {
   findListeningPids,
   inspectLocalServerAccount,
@@ -130,6 +132,48 @@ describe('local listener account inspection', () => {
       await expect(inspectLocalServerAccount(4096)).resolves.toEqual({ kind: 'unknown' });
     }
   );
+});
+
+describe('listener inspection without visible listeners', () => {
+  function mockNoListeners() {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    spawnMock.mockImplementation(() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() => child.emit('close', 0));
+      return child;
+    });
+  }
+
+  async function listenOnLoopback() {
+    const listener = createServer();
+    await new Promise<void>((done) => listener.listen(0, '127.0.0.1', done));
+    const address = listener.address();
+    if (!address || isString(address)) throw new Error('No fixture port');
+    return { listener, port: address.port };
+  }
+
+  it('reports a refused port as not listening instead of an unknown account', async () => {
+    mockNoListeners();
+    const { listener, port } = await listenOnLoopback();
+    await new Promise<void>((done) => listener.close(() => done()));
+
+    await expect(inspectLocalServerAccount(port)).rejects.toBeInstanceOf(ServerNotListeningError);
+  });
+
+  it('keeps an accepting port with a hidden listener unknown', async () => {
+    mockNoListeners();
+    const { listener, port } = await listenOnLoopback();
+    try {
+      // Another user's listener can be invisible to process inspection.
+      await expect(inspectLocalServerAccount(port)).resolves.toEqual({ kind: 'unknown' });
+    } finally {
+      await new Promise<void>((done) => listener.close(() => done()));
+    }
+  });
 });
 
 describe('macOS listener inspection recovery', () => {

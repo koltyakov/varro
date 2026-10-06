@@ -22,6 +22,7 @@ export type AboutViewData = {
   vscodeVersion: string;
   nodeVersion: string;
   platform: string;
+  updateTitle?: string;
   updateNotice?: string;
   diagnostics?: string;
   diagnosticsWithPaths?: string;
@@ -169,7 +170,7 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
       <div class="status"><span class="status-dot"></span><span data-about-field="statusLabel">${statusLabel}</span></div>
       <div class="status-detail" data-about-field="serverStatus">${escapeHtml(data.serverStatus)}</div>
     </section>
-    <section id="update-notice" class="notice"${data.updateNotice ? '' : ' hidden'}><strong>OpenCode update available</strong><span data-about-field="updateNotice">${escapeHtml(data.updateNotice ?? '')}</span></section>
+    <section id="update-notice" class="notice"${data.updateNotice ? '' : ' hidden'}><strong data-about-field="updateTitle">${escapeHtml(data.updateTitle ?? 'OpenCode update available')}</strong><span data-about-field="updateNotice">${escapeHtml(data.updateNotice ?? '')}</span></section>
 
     <div class="cards">
       <section class="card">
@@ -236,6 +237,7 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
           ...data,
           statusLabel: data.healthy ? 'System ready' : 'Needs attention',
           autoUpdate: data.autoUpdate ? 'Enabled' : 'Disabled',
+          updateTitle: data.updateTitle ?? 'OpenCode update available',
           updateNotice: data.updateNotice ?? '',
         };
         document.querySelectorAll('[data-about-field]').forEach((element) => {

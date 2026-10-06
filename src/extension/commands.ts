@@ -13,6 +13,7 @@ import { getRelativePath } from './util/path';
 import { errorHub } from './error-hub';
 import { logger } from './logger';
 import { compareVersions, extractVersion } from './server-utils';
+import { openCodeApiVersion } from './opencode-connection';
 import { renderAboutHtml } from './about-view';
 import { diagnosticTimeline } from './diagnostics';
 import { parseExtensionMessage } from '../shared/extension-message';
@@ -546,14 +547,76 @@ function showAgentsFileError(scope: 'global' | 'project', err: unknown) {
   vscode.window.showErrorMessage(message);
 }
 
+type OpenCodeUpdateNotice = {
+  title: string;
+  headline: string;
+  /** Explains what Varro does on its own, so a manual command is not mistaken for a requirement. */
+  note?: string;
+  command?: string;
+  instruction?: string;
+};
+
+function isVarroManagedServer(serverInfo: OpenCodeServerInfo) {
+  return (
+    serverInfo.ownership === 'other-host' ||
+    serverInfo.ownership === 'current-host' ||
+    serverInfo.managedProcess
+  );
+}
+
+function describeOpenCodeUpdate(
+  serverInfo: OpenCodeServerInfo,
+  autoUpdate: boolean
+): OpenCodeUpdateNotice | null {
+  const cliVersion = serverInfo.cliVersion ? extractVersion(serverInfo.cliVersion) : null;
+  if (!cliVersion) return null;
+  const apiVersion = cliVersion.startsWith('2.') ? 2 : 1;
+  const managed = isVarroManagedServer(serverInfo);
+  const serverVersion =
+    serverInfo.health.healthy && serverInfo.health.version
+      ? extractVersion(serverInfo.health.version)
+      : null;
+  // The owning window restarts a managed server on a newer same-family CLI once idle.
+  if (
+    managed &&
+    serverVersion &&
+    openCodeApiVersion(serverVersion) === apiVersion &&
+    compareVersions(cliVersion, serverVersion) > 0
+  ) {
+    return {
+      title: 'OpenCode update installed',
+      headline: `OpenCode ${cliVersion} is installed.`,
+      note: 'Varro restarts the server on it when no sessions are active.',
+    };
+  }
+  const maximumTestedVersion = readMaximumTestedOpenCodeVersion(undefined, apiVersion);
+  if (compareVersions(cliVersion, maximumTestedVersion) >= 0) return null;
+  const command = getUpgradeCommand(
+    serverInfo.installMethod,
+    process.platform,
+    apiVersion === 2 ? '@opencode/cli' : 'opencode-ai'
+  );
+  const notice: OpenCodeUpdateNotice = {
+    title: 'OpenCode update available',
+    headline: `OpenCode ${maximumTestedVersion} is available.`,
+  };
+  // Mirrors background maintenance: only managed servers update, and Windows v1 asks first.
+  if (managed && autoUpdate && (process.platform !== 'win32' || apiVersion === 2)) {
+    notice.note =
+      'Varro installs it automatically and restarts the server when no sessions are active.';
+  }
+  if (command) notice.command = command;
+  else
+    notice.instruction = `${notice.note ? 'To update now, reinstall' : 'Reinstall'} OpenCode using ${describeInstallMethod(serverInfo.installMethod)}.`;
+  return notice;
+}
+
 function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenCodeServerInfo) {
   const pkg = readPackageJson(context);
   const name = getString(pkg.displayName) || getString(pkg.name) || 'Varro';
   const description =
     getString(pkg.description) || 'An OpenCode agent workbench built for Visual Studio Code.';
   const version = getString(pkg.version) || 'unknown';
-  const apiVersion = serverInfo.cliVersion?.startsWith('2.') ? 2 : 1;
-  const maximumTestedVersion = readMaximumTestedOpenCodeVersion(undefined, apiVersion);
   const autoUpdate = vscode.workspace
     .getConfiguration('varro')
     .get<boolean>('server.autoUpdate', true);
@@ -564,40 +627,26 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     ? `error: ${serverInfo.activeAgentError}`
     : String(serverInfo.activeAgentCount ?? 'unknown');
   const installedVersion = serverInfo.cliVersion ? extractVersion(serverInfo.cliVersion) : null;
-  const updateAvailable =
-    installedVersion !== null && compareVersions(installedVersion, maximumTestedVersion) < 0;
-  const updateCommand = updateAvailable
-    ? getUpgradeCommand(
-        serverInfo.installMethod,
-        process.platform,
-        apiVersion === 2 ? '@opencode/cli' : 'opencode-ai'
-      )
-    : null;
-  const updateNoticeLines = !updateAvailable
+  const update = describeOpenCodeUpdate(serverInfo, autoUpdate);
+  const updateNoticeLines = !update
     ? []
-    : updateCommand
-      ? [
-          '',
-          `**OpenCode ${maximumTestedVersion} is available.**`,
-          '',
-          'Run this command to install the update:',
-          '',
-          `\`\`\`${process.platform === 'win32' ? 'powershell' : 'sh'}`,
-          updateCommand,
-          '```',
-        ]
-      : [
-          '',
-          `**OpenCode ${maximumTestedVersion} is available.**`,
-          '',
-          `Reinstall OpenCode using ${describeInstallMethod(serverInfo.installMethod)}.`,
-        ];
-  const ownership =
-    serverInfo.ownership === 'other-host' ||
-    serverInfo.ownership === 'current-host' ||
-    serverInfo.managedProcess
-      ? 'managed by Varro'
-      : 'unmanaged';
+    : [
+        '',
+        `**${update.headline}**`,
+        ...(update.command
+          ? [
+              '',
+              update.note
+                ? `${update.note} To update now, run:`
+                : 'Run this command to install the update:',
+              '',
+              `\`\`\`${process.platform === 'win32' ? 'powershell' : 'sh'}`,
+              update.command,
+              '```',
+            ]
+          : ['', [update.note, update.instruction].filter(Boolean).join(' ')]),
+      ];
+  const ownership = isVarroManagedServer(serverInfo) ? 'managed by Varro' : 'unmanaged';
   const serverStatus =
     serverInfo.status.state === 'running'
       ? `running, event stream ${serverInfo.status.eventStream || 'unknown'}`
@@ -649,12 +698,7 @@ function createAboutViewData(
   serverInfo: OpenCodeServerInfo,
   logoUri: string
 ) {
-  const ownership =
-    serverInfo.ownership === 'other-host' ||
-    serverInfo.ownership === 'current-host' ||
-    serverInfo.managedProcess
-      ? 'Managed by Varro'
-      : 'Unmanaged';
+  const ownership = isVarroManagedServer(serverInfo) ? 'Managed by Varro' : 'Unmanaged';
   const serverStatus =
     serverInfo.status.state === 'running'
       ? `Running, event stream ${serverInfo.status.eventStream || 'unknown'}`
@@ -662,17 +706,10 @@ function createAboutViewData(
         ? `Error: ${serverInfo.status.message}`
         : serverInfo.status.state;
   const cliVersion = serverInfo.cliVersion ? extractVersion(serverInfo.cliVersion) : null;
-  const apiVersion = cliVersion?.startsWith('2.') ? 2 : 1;
-  const maximumTestedVersion = readMaximumTestedOpenCodeVersion(undefined, apiVersion);
-  const updateAvailable =
-    cliVersion !== null && compareVersions(cliVersion, maximumTestedVersion) < 0;
-  const updateCommand = updateAvailable
-    ? getUpgradeCommand(
-        serverInfo.installMethod,
-        process.platform,
-        apiVersion === 2 ? '@opencode/cli' : 'opencode-ai'
-      )
-    : null;
+  const autoUpdate = vscode.workspace
+    .getConfiguration('varro')
+    .get<boolean>('server.autoUpdate', true);
+  const update = describeOpenCodeUpdate(serverInfo, autoUpdate);
 
   return {
     name: getString(pkg.displayName) || getString(pkg.name) || 'Varro',
@@ -695,14 +732,21 @@ function createAboutViewData(
     serverStartedOn: formatAboutDateTime(serverInfo.connections?.startedAt),
     vscodeClients: String(serverInfo.connections?.vscodeClients ?? 'Unknown'),
     otherClients: String(serverInfo.connections?.otherClients ?? 'Unknown'),
-    autoUpdate: vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', true),
+    autoUpdate,
     vscodeVersion: vscode.version,
     nodeVersion: process.version,
     platform: `${process.platform} ${process.arch}`,
-    updateNotice: updateAvailable
-      ? updateCommand
-        ? `Install ${maximumTestedVersion} with: ${updateCommand}`
-        : `Reinstall OpenCode using ${describeInstallMethod(serverInfo.installMethod)}.`
+    updateTitle: update?.title,
+    updateNotice: update
+      ? [
+          update.headline,
+          update.note,
+          update.command
+            ? `${update.note ? 'To update now, run' : 'Install it with'}: ${update.command}`
+            : update.instruction,
+        ]
+          .filter(Boolean)
+          .join(' ')
       : undefined,
   };
 }

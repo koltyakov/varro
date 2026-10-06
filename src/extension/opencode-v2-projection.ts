@@ -246,7 +246,7 @@ export function isV2TranscriptMessage(message: SessionMessageInfo): boolean {
     message.type === 'compaction' ||
     message.type === 'skill' ||
     message.type === 'shell' ||
-    (message.type === 'idle' && message.outcome === 'failed')
+    (message.type === 'idle' && (message.outcome === 'failed' || message.outcome === 'interrupted'))
   );
 }
 
@@ -319,7 +319,11 @@ export function projectV2Message(
       options
     );
   }
-  if (message.type === 'idle' && message.outcome === 'failed') {
+  if (
+    message.type === 'idle' &&
+    (message.outcome === 'failed' || message.outcome === 'interrupted')
+  ) {
+    const interrupted = message.outcome === 'interrupted';
     const error = normalizeV2Error(context.error);
     return {
       info: {
@@ -330,21 +334,26 @@ export function projectV2Message(
         mode: context.agent ?? '',
         modelID: context.model?.id ?? '',
         providerID: context.model?.providerID ?? '',
+        variant: context.model?.variant,
         path: { cwd: directory, root: directory },
         time: { created: message.time.created, completed: message.time.created },
         cost: 0,
         tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        error: {
-          name:
-            error?.status === 401 || error?.status === 403 ? 'ProviderAuthError' : 'UnknownError',
-          data: {
-            providerID: context.model?.providerID,
-            statusCode: error?.status,
-            message:
-              error?.message ??
-              'OpenCode failed before a response was recorded. Check the provider connection and the OpenCode server log.',
-          },
-        },
+        error: interrupted
+          ? { name: 'MessageAbortedError', data: {} }
+          : {
+              name:
+                error?.status === 401 || error?.status === 403
+                  ? 'ProviderAuthError'
+                  : 'UnknownError',
+              data: {
+                providerID: context.model?.providerID,
+                statusCode: error?.status,
+                message:
+                  error?.message ??
+                  'OpenCode failed before a response was recorded. Check the provider connection and the OpenCode server log.',
+              },
+            },
       },
       parts: [],
     };

@@ -1242,6 +1242,30 @@ describe('WebviewSession', () => {
     expect(bridge.post).not.toHaveBeenCalled();
   });
 
+  it('posts large API response data as JSON bytes and keeps small data as objects', async () => {
+    const { session, bridge } = createSession();
+    await session.resolve(createWebviewView(true) as never);
+    const generation = session.getRequestGeneration();
+    bridge.post.mockClear();
+    const messages = Array.from({ length: 400 }, (_, index) => ({
+      info: { id: `message-${index}`, role: 'assistant' },
+      parts: [{ id: `part-${index}`, type: 'text', text: `é ${'x'.repeat(200)}` }],
+    }));
+
+    session.postApiResponse({ id: 1, data: messages }, generation);
+    session.postApiResponse({ id: 2, data: { ok: true } }, generation);
+    session.postApiResponse({ id: 3, error: '404 Not found' }, generation);
+
+    const [large, small, failed] = bridge.post.mock.calls.map(([message]) => message);
+    expect(large.payload).not.toHaveProperty('data');
+    expect(large.payload.id).toBe(1);
+    expect(large.payload.encodedData).toBeInstanceOf(Uint8Array);
+    expect(Buffer.isBuffer(large.payload.encodedData)).toBe(false);
+    expect(JSON.parse(new TextDecoder().decode(large.payload.encodedData))).toEqual(messages);
+    expect(small).toEqual({ type: 'api/response', payload: { id: 2, data: { ok: true } } });
+    expect(failed).toEqual({ type: 'api/response', payload: { id: 3, error: '404 Not found' } });
+  });
+
   it('flushes pending server events before posting an API response', async () => {
     const { session, bridge, deps } = createSession();
     const view = createWebviewView(true);

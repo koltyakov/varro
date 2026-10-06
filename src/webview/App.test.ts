@@ -200,7 +200,7 @@ describe('AppRoot', () => {
 
     setState('serverStatus', { state: 'starting' });
     expect(container?.querySelector('.server-status-detecting-logo')).toBeNull();
-    expect(container?.textContent).toContain('Starting OpenCode...');
+    expect(container?.textContent).toContain('Connecting to OpenCode...');
     expect(appMocks.chatMountCount).toBe(0);
 
     setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
@@ -256,7 +256,7 @@ describe('AppRoot', () => {
     });
     setState('serverStatus', { state: 'starting' });
     mountAppRoot();
-    expect(container?.textContent).toContain('Starting OpenCode...');
+    expect(container?.textContent).toContain('Connecting to OpenCode...');
     setState('serverStatus', { state: 'error', message: 'Failed to bind local server port' });
     expect(container?.textContent).toContain('Failed to bind local server port');
     setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
@@ -413,6 +413,38 @@ describe('AppRoot', () => {
 
     vi.advanceTimersByTime(160);
     expect(document.body.querySelector('.session-action-feedback')).toBeNull();
+  });
+
+  it('anchors image feedback above the input without moving other feedback', () => {
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setConnectionInitialized(true);
+    mountAppRoot();
+    const inputShell = document.createElement('div');
+    container?.appendChild(inputShell);
+
+    showSessionActionFeedback('This image is already attached', 'warning', inputShell);
+
+    const warningToast = inputShell.querySelector<HTMLElement>('.session-action-feedback');
+    expect(warningToast?.textContent).toContain('This image is already attached');
+    expect(warningToast?.classList.contains('is-input-anchored')).toBe(true);
+    expect(warningToast?.getAttribute('role')).toBe('status');
+    expect(warningToast?.parentElement?.style.display).toBe('contents');
+    expect(document.body.querySelectorAll('.session-action-feedback')).toHaveLength(1);
+
+    setError('Failed to send message');
+    expect(inputShell.querySelector('.session-action-feedback')).toBeNull();
+    const errorToast = document.body.querySelector<HTMLElement>('.session-action-feedback');
+    expect(errorToast?.textContent).toContain('Failed to send message');
+    expect(errorToast?.classList.contains('is-input-anchored')).toBe(false);
+
+    setError(null);
+    expect(inputShell.querySelector('.session-action-feedback')).not.toBeNull();
+
+    showSessionActionFeedback('Session renamed');
+    expect(inputShell.querySelector('.session-action-feedback')).toBeNull();
+    const successToast = document.body.querySelector<HTMLElement>('.session-action-feedback');
+    expect(successToast?.textContent).toContain('Session renamed');
+    expect(successToast?.classList.contains('is-input-anchored')).toBe(false);
   });
 
   it('clears the retry action whenever the error changes', () => {

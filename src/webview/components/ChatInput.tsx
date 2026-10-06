@@ -611,7 +611,10 @@ type PasteTransaction = {
   mentions: Awaited<ReturnType<typeof resolvePastedMentionContextFiles>> | undefined;
 };
 
-function notifyPastedImageRejections(rejections: Set<PastedImageRejection>) {
+function notifyPastedImageRejections(
+  rejections: Set<PastedImageRejection>,
+  anchor: HTMLElement | undefined
+) {
   if (rejections.size === 0) return;
 
   let message: string;
@@ -634,7 +637,8 @@ function notifyPastedImageRejections(rejections: Set<PastedImageRejection>) {
     message = 'Could not read the pasted image';
   }
 
-  showSessionActionFeedback(message, 'warning');
+  if (rejections.has('duplicate')) showSessionActionFeedback(message, 'warning', anchor);
+  else showSessionActionFeedback(message, 'warning');
 }
 
 function mergeTransactionFiles(files: DroppedFile[], committedFiles: DroppedFile[]) {
@@ -4318,7 +4322,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     } finally {
       applyingComposerHistory = false;
     }
-    notifyPastedImageRejections(transaction.imageRejections);
+    notifyPastedImageRejections(transaction.imageRejections, containerRef);
 
     const textDelta = inputText().length - previousValue.length;
     if (textDelta !== 0) {

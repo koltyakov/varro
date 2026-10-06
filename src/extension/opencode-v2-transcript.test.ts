@@ -111,6 +111,11 @@ describe('V2 transcript deletion', () => {
     { name: 'newer assistant', records: [assistant, user], target: user.id },
     { name: 'standalone failure', records: [failed, user], target: user.id },
     {
+      name: 'interruption after an assistant',
+      records: [{ ...failed, outcome: 'interrupted' }, assistant],
+      target: assistant.id,
+    },
+    {
       name: 'failure after a successful assistant',
       records: [failed, { ...assistant, error: undefined, finish: 'stop' }],
       target: assistant.id,
@@ -137,6 +142,93 @@ describe('V2 transcript deletion', () => {
 
 describe('V2 generated transcript records', () => {
   const base = { id: 'msg_generated', time: { created: 10 } };
+
+  it('preserves the durable interruption after a completed response and background notice', async () => {
+    const records: SessionMessageInfo[] = [
+      { id: 'msg_user', type: 'user', text: 'Run tests', time: { created: 1 } },
+      {
+        id: 'msg_answer',
+        type: 'assistant',
+        agent: 'build',
+        model: { providerID: 'openai', id: 'model', variant: 'high' },
+        content: [{ type: 'text', text: 'Tests are running in the background.' }],
+        finish: 'stop',
+        time: { created: 2, completed: 3 },
+      },
+      { id: 'msg_succeeded', type: 'idle', outcome: 'succeeded', time: { created: 4 } },
+      {
+        id: 'msg_background',
+        type: 'synthetic',
+        text: '<shell id="sh_test" state="error" command="npm test">\nShell.NotFoundError\n</shell>',
+        time: { created: 9 },
+      },
+      { ...base, type: 'idle', outcome: 'interrupted' },
+    ];
+    const wire = vi.fn(async (_method: string, path: string) => ({
+      data: path.endsWith('/inbox')
+        ? []
+        : path.includes('/message/')
+          ? records.at(-1)
+          : records.toReversed(),
+      cursor: {},
+    }));
+    const expected = {
+      info: {
+        id: base.id,
+        role: 'assistant',
+        parentID: 'msg_user',
+        variant: 'high',
+        time: { created: 10, completed: 10 },
+        error: { name: 'MessageAbortedError' },
+      },
+      parts: [],
+    };
+    for (let reload = 0; reload < 2; reload++) {
+      const adapter = new OpenCodeV2Adapter(wire);
+      adapter.observe('session.model.selected', {
+        sessionID: 'ses_one',
+        model: { providerID: 'openai', id: 'model', variant: 'high' },
+      });
+      const history = await adapter.request('GET', '/session/ses_one/message', undefined);
+      expect(history).toMatchObject([
+        { info: { id: 'msg_user' } },
+        { info: { id: 'msg_answer', error: undefined } },
+        { info: { id: 'msg_background' } },
+        expected,
+      ]);
+      expect(history).toHaveLength(4);
+      expect(
+        await adapter.request('GET', '/session/ses_one/message/msg_generated', undefined)
+      ).toMatchObject(expected);
+    }
+  });
+
+  it('does not hide a later interruption behind an earlier assistant failure', async () => {
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => ({
+      data: path.endsWith('/inbox')
+        ? []
+        : [
+            { ...base, type: 'idle', outcome: 'interrupted' },
+            {
+              id: 'msg_attempt',
+              type: 'assistant',
+              agent: 'build',
+              model: { providerID: 'openai', id: 'model' },
+              content: [],
+              finish: 'error',
+              error: { type: 'provider.transport', message: 'Connection lost' },
+              time: { created: 2, completed: 3 },
+            },
+            { id: 'msg_user', type: 'user', text: 'Run tests', time: { created: 1 } },
+          ],
+      cursor: {},
+    }));
+    expect(await adapter.request('GET', '/session/ses_one/message', undefined)).toMatchObject([
+      { info: { id: 'msg_user' } },
+      { info: { id: 'msg_attempt' } },
+      { info: { id: base.id, error: { name: 'MessageAbortedError' } } },
+    ]);
+  });
 
   it('preserves automatic retry metadata on history and direct message reads', async () => {
     const record: SessionMessageInfo = {
@@ -352,13 +444,15 @@ describe('V2 generated transcript records', () => {
     ).toMatchObject(expected);
   });
 
-  it.each(['skill', 'shell'] as const)(
+  it.each(['skill', 'shell', 'idle'] as const)(
     'keeps a paginated %s activity attached to the original prompt',
     async (type) => {
       const record: SessionMessageInfo =
         type === 'skill'
           ? { ...base, type, skill: 'review', name: 'Review', text: 'Instructions' }
-          : { ...base, type, shellID: 'shell_one', command: 'pwd', status: 'exited' };
+          : type === 'shell'
+            ? { ...base, type, shellID: 'shell_one', command: 'pwd', status: 'exited' }
+            : { ...base, type, outcome: 'interrupted' };
       const wire = vi.fn(async (_method: string, path: string) => {
         if (path.endsWith('/inbox')) return { data: [] };
         if (path.endsWith('/msg_generated')) return { data: record };

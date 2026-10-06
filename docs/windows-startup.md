@@ -117,7 +117,13 @@ recovery even when their prompt is hidden. Snapshot mutation guards and reply
 acknowledgement still decide when a request is resolved.
 
 Session, routing, and question loads share applicable in-flight reads. Required-load
-failure does not mean readiness and does not release the routing send gate. Initial
+failure does not mean readiness and does not release the routing send gate.
+A freshly launched server emits catalog events such as `integration.updated` and
+`models-dev.refreshed` while its first workspace requests run, and each event starts
+a newer agent/provider load. A superseded load still applies nothing, but its waiters
+inherit the newest load's outcome. Event bursts therefore cannot fail startup in the
+window that warmed up the server. A real error from the newest load still fails, and
+only a workspace change ends the chain. This adds no requests. Initial
 SSE reconciliation waits for active bootstrap rather than superseding its snapshots.
 Status fetching overlaps essential snapshots, and its generation-bound result is
 reused for hydration/restoration with the original event-versus-snapshot timestamp.
