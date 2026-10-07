@@ -2,6 +2,36 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
+for (const width of [800, 486, 280]) {
+  test(`rename popup has roomy controls and fits a ${width}px sidebar`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto('/e2e/harness/index.html?scenario=session-search');
+    await page.locator('.session-item').first().click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Rename', exact: true }).click();
+
+    const form = page.locator('.session-item-rename-form');
+    const input = page.getByLabel('Session name', { exact: true });
+    const save = form.getByRole('button', { name: 'Save', exact: true });
+    await expect(input).toBeFocused();
+    await expect(form).toHaveCSS('width', `${Math.min(480, width - 26)}px`);
+    await expect(input).toHaveCSS('min-height', '36px');
+    await expect(save).toHaveCSS('min-height', '32px');
+    await expect
+      .poll(async () => {
+        const box = await page.locator('.session-item-actions-menu').boundingBox();
+        return box !== null && box.x >= 8 && box.x + box.width <= width - 8;
+      })
+      .toBe(true);
+
+    await input.fill('');
+    await expect(save).toBeDisabled();
+    await input.fill('A longer session name with space to edit');
+    await expect(save).toBeEnabled();
+    await form.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(form).toHaveCount(0);
+  });
+}
+
 test('host new-session command opens a draft chat and creates the session on first send', async ({
   page,
 }) => {
