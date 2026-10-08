@@ -3903,7 +3903,7 @@ describe('header status badges', () => {
     ).toBe('New Chat');
   });
 
-  it('renders Models on desktop while the session picker state is active', async () => {
+  it('shows loading dots before rendering Models on desktop from the session picker', async () => {
     setState('sessions', [session('session-1', 500), session('session-2', 400)]);
     setState('activeSessionId', 'session-1');
     setShowSessionPicker(true);
@@ -3911,10 +3911,24 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    const loading = container?.querySelector('[role="status"][aria-label="Loading models"]');
+    expect(loading?.parentElement?.classList.contains('models-panel')).toBe(true);
+    expect(loading?.querySelectorAll('.chat-messages-loading-dot')).toHaveLength(3);
+    expect(container?.querySelector('.models-header')).toBeNull();
+
     dispatchDesktopMediaQueryChange(true);
     await vi.waitFor(() =>
-      expect(container?.querySelector('.models-panel')).toBeInstanceOf(HTMLDivElement)
+      expect(container?.querySelector('.models-header')).toBeInstanceOf(HTMLDivElement)
     );
+    expect(container?.querySelector('[aria-label="Loading models"]')).toBeNull();
+
+    setShowModels(false);
+    expect(container?.querySelector('.models-panel')).toBeNull();
+    setShowModels(true);
+    await vi.waitFor(() =>
+      expect(container?.querySelector('.models-header')).toBeInstanceOf(HTMLDivElement)
+    );
+    expect(container?.querySelector('[aria-label="Loading models"]')).toBeNull();
   });
 
   it('opens locked provider re-authentication over chat without showing Models', async () => {
@@ -3993,7 +4007,7 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-workspace')).toBeNull();
     expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
     await vi.waitFor(() =>
-      expect(container?.querySelector('.models-panel')).toBeInstanceOf(HTMLDivElement)
+      expect(container?.querySelector('.models-header')).toBeInstanceOf(HTMLDivElement)
     );
   });
 

@@ -351,7 +351,17 @@ export function ChatWorkspace(props: {
       </Show>
 
       <Show when={props.showModels}>
-        <Suspense>
+        <Suspense
+          fallback={
+            <div class="models-panel">
+              <div class="chat-messages-loading" role="status" aria-label="Loading models">
+                <span class="chat-messages-loading-dot" />
+                <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
+                <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.6s' }} />
+              </div>
+            </div>
+          }
+        >
           <LazyModelsPanel />
         </Suspense>
       </Show>
