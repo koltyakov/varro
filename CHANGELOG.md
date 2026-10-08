@@ -4,15 +4,15 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.32.x - October 2026
 
-- Removed Varro's automatic compaction settings and overrides. OpenCode controls automatic compaction; on-demand compaction remains available.
-- Reworked chat performance across typing, streaming, and navigation in long conversations and large session lists. Reduced repeated Markdown processing and history indexing so incoming messages do less work on existing content.
-- Reduced memory use and initial rendering work by loading full tool and reasoning details on demand, reducing memory retained by cached history, and avoiding unused diff and diagram allocations.
-- Moved code and diff syntax highlighting to a background worker, keeping the chat responsive and content readable while highlighting loads.
-- Added bounded image thumbnails and shared thumbnail conversion across extension hosts, reducing image processing and large attachment payloads in conversation views.
-- Improved scrolling and layout stability during streaming, table rendering, diff expansion, and resizing. Preserved measured row heights while deferred diffs reload and reduced layout work when hiding diffs.
-- Added opt-in desktop notifications and per-event sounds for permission requests, questions, completed replies, and plans ready for review. Grouped notification bursts and suppressed alerts already handled automatically.
-- Remembered the last selected model and reasoning variant across projects while preserving each session's choices.
-- Fixed scroll jumps, diff toggling and resizing, repeated tool-preview animations, unread plan indicators.
+- Left automatic compaction to OpenCode; kept on-demand compaction.
+- Sped up typing, streaming, and session navigation. Reduced memory use with on-demand tool and reasoning details and shared image thumbnails.
+- Moved code and diff syntax highlighting to a background worker.
+- Stabilized scrolling, tables, diffs, and resizing. Fixed repeated tool-preview animations and unread plan indicators.
+- Added opt-in desktop notifications, event sounds, and an experimental macOS menu-bar session companion.
+- Remembered model and reasoning choices across projects and preserved the displayed model when queueing messages.
+- Fixed skill delivery, server recovery, background-wait status, and model preference synchronization.
+- Improved session renaming in narrow sidebars and kept focus after commit-message generation.
+- Fixed HTTP and HTTPS links opening once in the system browser. Added context-menu actions to copy URLs and file paths.
 
 ## 0.31.x - October 2026
 

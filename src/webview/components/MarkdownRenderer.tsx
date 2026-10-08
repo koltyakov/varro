@@ -25,7 +25,8 @@ import { rememberDirectSessionReturn } from '../lib/session-navigation';
 import { selectSession } from '../hooks/useOpenCode';
 import { trapModalFocus } from '../lib/modal-focus';
 import { mixRgb, parseThemeColor } from '../lib/theme';
-import { isSafeExternalHref } from '../lib/external-link';
+import { getExternalLinkContext, isSafeExternalHref } from '../lib/external-link';
+import { asRecord, getString } from '../lib/runtime-values';
 import { checkIcon, copyIcon, expandIcon, xmarkIcon } from '../lib/ui-icons';
 import { createExternalLinkIconElement } from './ExternalLinkIcon';
 import { createFileTypeIconElement, hasRecognizedFileType } from './FileTypeIcon';
@@ -621,23 +622,43 @@ function isLikelyFilePathReference(raw: string, requireCanonicalSpecialName = fa
 }
 
 function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
+  anchor.removeAttribute('data-vscode-context');
   anchor.classList.remove('external-link');
   for (const icon of Array.from(anchor.querySelectorAll('.external-link-icon, .file-path-icon'))) {
     icon.remove();
   }
 
   const href = anchor.getAttribute('href')?.trim() || '';
+  let filePath = isLocalFileHref(href) ? splitPathReference(href)?.path : undefined;
+  if (!filePath && anchor.dataset.file) {
+    // DOMPurify strips Windows drive-letter hrefs; the trusted renderer payload retains the path.
+    try {
+      filePath = getString(asRecord(JSON.parse(anchor.dataset.file))?.path);
+    } catch {
+      // A malformed optional file payload must not supply native menu context.
+    }
+  }
+  if (filePath && isLocalFileHref(filePath)) {
+    anchor.setAttribute(
+      'data-vscode-context',
+      JSON.stringify({
+        webviewSection: 'varroFileLink',
+        varroFilePath: toAbsolutePath(filePath),
+      })
+    );
+  }
   if (isLocalFileHref(href)) {
     anchor.setAttribute('href', href);
     anchor.removeAttribute('data-external');
     if (anchor.classList.contains('file-path-link')) {
-      prependLinkIcon(anchor, createFileTypeIconElement(splitPathReference(href)?.path), true);
+      prependLinkIcon(anchor, createFileTypeIconElement(filePath), true);
     }
     return;
   }
 
   if (isSafeExternalHref(href)) {
     anchor.setAttribute('href', href);
+    anchor.setAttribute('data-vscode-context', getExternalLinkContext(href));
     anchor.setAttribute('data-external', 'true');
     anchor.classList.add('external-link');
     const image = anchor.querySelector('img');
@@ -2377,6 +2398,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
       const href = anchor.getAttribute('href');
       if (isSafeExternalHref(href)) {
         e.preventDefault();
+        // VS Code's webview host forwards bubbled link clicks even when default is prevented.
+        e.stopPropagation();
         postMessage({ type: 'vscode/open-external', payload: { url: href! } });
       }
       return;

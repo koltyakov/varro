@@ -3,6 +3,7 @@ import { installHighlightWorker } from '../../lib/highlight-worker.test-support'
 import { render } from 'solid-js/web';
 import { navArrowLeftIcon, navArrowRightIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
+import { StickyUserMessagePreviewCard } from '../message-list/MessageListChrome';
 import type { AgentPart, FilePart, Part, TextPart } from '../../types';
 import { resetDefaultAppState, setState as setAppState, state } from '../../lib/state';
 import {
@@ -31,6 +32,7 @@ const retryMessageMock = vi.hoisted(() => vi.fn());
 vi.mock('../../hooks/useOpenCode', () => ({
   retryMessage: retryMessageMock,
   selectSession: selectSessionMock,
+  recheckSessionStatus: vi.fn(),
 }));
 
 let container: HTMLDivElement | null = null;
@@ -1208,7 +1210,12 @@ describe('UserMessageContent', () => {
     expect(caption?.textContent).toContain('1 / 2');
   });
 
-  it('links known session references and selects the session on click', () => {
+  it.each([
+    'a.session-reference-link',
+    '.session-reference-link .link-leading-label',
+    '.session-reference-link .session-reference-icon',
+  ])('selects a known session when clicking %s in a normal user message', (target) => {
+    const send = installSendToExtension();
     setAppState('activeSessionId', 'ses_origin123');
     setAppState('sessions', [
       {
@@ -1232,10 +1239,68 @@ describe('UserMessageContent', () => {
     expect(link?.querySelector('.session-reference-icon')).not.toBeNull();
     expect(container?.textContent).toContain('session:ses_missing456');
 
-    link?.click();
-    expect(selectSessionMock).toHaveBeenCalledWith('ses_found123', { directory: '/repo' });
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    const element = container!.querySelector(target);
+    expect(element).not.toBeNull();
+    element!.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(selectSessionMock).toHaveBeenCalledExactlyOnceWith('ses_found123', {
+      directory: '/repo',
+    });
     expect(getDirectSessionReturnId('ses_found123')).toBe('ses_origin123');
+    expect(send).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    'keeps sticky session-link clicks owned by message navigation with loading=%s',
+    (loading) => {
+      const send = installSendToExtension();
+      const onClick = vi.fn();
+      setAppState('activeSessionId', 'ses_origin123');
+      setAppState('sessions', [
+        {
+          id: 'ses_found123',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Permission request states',
+          version: '1',
+          time: { created: 0, updated: 0 },
+        },
+      ]);
+      const preview = {
+        id: 'msg-1',
+        index: 3,
+        text: 'Review session:ses_found123',
+        attachmentCount: 0,
+        imageCount: 0,
+      };
+      cleanup = render(
+        () => (
+          <StickyUserMessagePreviewCard
+            preview={preview}
+            parts={[textPart('text-1', preview.text)]}
+            loading={loading}
+            onClick={onClick}
+          />
+        ),
+        container!
+      );
+
+      for (const selector of ['.link-leading-label', '.session-reference-icon']) {
+        onClick.mockClear();
+        const target = container!.querySelector(`.session-reference-link ${selector}`);
+        expect(target).not.toBeNull();
+        const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+        target!.dispatchEvent(click);
+        expect(click.defaultPrevented).toBe(true);
+        if (loading) expect(onClick).not.toHaveBeenCalled();
+        else expect(onClick).toHaveBeenCalledExactlyOnceWith(preview);
+        expect(selectSessionMock).not.toHaveBeenCalled();
+        expect(getDirectSessionReturnId('ses_found123')).toBeNull();
+        expect(send).not.toHaveBeenCalled();
+      }
+    }
+  );
 
   it.each(['https://example.test/docs', 'http://localhost:3000', 'http://app.above-all.test/x'])(
     'renders %s as an external link and opens it through the bridge',
@@ -1247,6 +1312,10 @@ describe('UserMessageContent', () => {
       expect(links).toHaveLength(1);
       const link = links?.[0];
       expect(link?.getAttribute('href')).toBe(url);
+      expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+        webviewSection: 'varroExternalLink',
+        varroLinkUrl: url,
+      });
       expect(link?.getAttribute('data-external')).toBe('true');
       expect(link?.firstElementChild?.classList).toContain('link-leading-content');
       expect(container?.querySelector('.user-message-text')?.textContent).toContain(`See ${url}.`);
@@ -1270,6 +1339,31 @@ describe('UserMessageContent', () => {
       container?.querySelector<HTMLAnchorElement>('a.external-link')?.getAttribute('href')
     ).toBe('https://iconoir.com');
   });
+
+  it.each(['http://ingest.above-all.test/', 'https://example.test/docs'])(
+    'does not forward handled user-message link clicks on %s to the VS Code webview host',
+    (url) => {
+      const send = installSendToExtension();
+      renderUserContent([textPart('text-1', `See ${url}.`)]);
+      const hostLinkHandler = vi.fn();
+      window.addEventListener('click', hostLinkHandler);
+      try {
+        const linkLabel = container!.querySelector('.external-link .link-leading-label');
+        expect(linkLabel).not.toBeNull();
+        const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+        linkLabel!.dispatchEvent(event);
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(send).toHaveBeenCalledExactlyOnceWith({
+          type: 'vscode/open-external',
+          payload: { url },
+        });
+        expect(hostLinkHandler).not.toHaveBeenCalled();
+      } finally {
+        window.removeEventListener('click', hostLinkHandler);
+      }
+    }
+  );
 
   it('keeps prose ending in a Git remote as linked message text', () => {
     const send = installSendToExtension();

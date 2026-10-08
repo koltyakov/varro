@@ -20,6 +20,10 @@ export function isSafeExternalHref(href: string | null): boolean {
   }
 }
 
+export function getExternalLinkContext(href: string): string {
+  return JSON.stringify({ webviewSection: 'varroExternalLink', varroLinkUrl: href });
+}
+
 export function getGitRemoteHttpsUrl(remote: string): string | null {
   const match = remote.match(/^git@([a-z0-9.-]+):([^\s]+)\.git$/i);
   if (!match?.[1] || !match[2] || !match[2].includes('/')) return null;

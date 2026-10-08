@@ -347,7 +347,13 @@ export function createSidebarProviderActions(
       if (!isAllowedExternalUrl(url)) {
         throw new Error('Unsupported external URL');
       }
-      await vscode.env.openExternal(vscode.Uri.parse(url));
+      // VS Code supports this option at runtime, but its stable typings omit it.
+      // The default opener bypasses integrated browsers and contributed URI openers.
+      const openExternal: (
+        target: vscode.Uri,
+        options: { allowContributedOpeners: 'default' }
+      ) => Thenable<boolean> = vscode.env.openExternal;
+      await openExternal(vscode.Uri.parse(url), { allowContributedOpeners: 'default' });
     },
     updateConfig: async (payload: ConfigPayload) => {
       await vscode.workspace

@@ -1507,7 +1507,13 @@ describe('MarkdownRenderer', () => {
     });
   });
 
-  it('links workspace session IDs using their session titles', () => {
+  it.each([
+    'a.session-reference-link',
+    '.session-reference-link .link-leading-label',
+    '.session-reference-link .session-reference-icon',
+  ])('selects a workspace session when clicking %s in Markdown', (target) => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
     setState('activeSessionId', 'ses_origin123');
     setState('sessions', [
       {
@@ -1540,9 +1546,16 @@ describe('MarkdownRenderer', () => {
     expect(container?.textContent).toContain('session:ses_missing456');
     expect(container?.querySelector('code a')).toBeNull();
 
-    dispatchAnchorClick(link);
-    expect(selectSessionMock).toHaveBeenCalledWith('ses_found123', { directory: '/repo' });
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    const element = container!.querySelector(target);
+    expect(element).not.toBeNull();
+    element!.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(selectSessionMock).toHaveBeenCalledExactlyOnceWith('ses_found123', {
+      directory: '/repo',
+    });
     expect(getDirectSessionReturnId('ses_found123')).toBe('ses_origin123');
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('updates session references when a matching workspace session is discovered', async () => {
@@ -1636,6 +1649,10 @@ describe('MarkdownRenderer', () => {
       for (const link of links) {
         expect(link.getAttribute('data-external')).toBe('true');
         expect(link.getAttribute('href')).toBe(url);
+        expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+          webviewSection: 'varroExternalLink',
+          varroLinkUrl: url,
+        });
         expect(link.querySelector('.external-link-icon')).toBeInstanceOf(HTMLImageElement);
         dispatchAnchorClick(link);
         expect(send).toHaveBeenLastCalledWith({
@@ -1644,6 +1661,41 @@ describe('MarkdownRenderer', () => {
         });
       }
       expect(send).toHaveBeenCalledTimes(3);
+    }
+  );
+
+  it.each(['http://ingest.above-all.test/', 'https://example.test/docs'])(
+    'does not forward handled clicks on %s to the VS Code webview host',
+    (url) => {
+      const send = vi.fn();
+      window.__sendToExtension = send;
+      cleanup = render(
+        () =>
+          MarkdownRenderer({
+            content: `[Docs](${url}) ${url}\n\n| URL |\n| --- |\n| ${url} |`,
+            cacheByContent: true,
+          }),
+        container!
+      );
+
+      // VS Code's window listener forwards anchor clicks even when defaultPrevented is true.
+      const hostLinkHandler = vi.fn();
+      window.addEventListener('click', hostLinkHandler);
+      try {
+        const links = container!.querySelectorAll<HTMLAnchorElement>('a.external-link');
+        expect(links).toHaveLength(3);
+        for (const link of links) {
+          const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+          link.querySelector('.link-leading-label')!.dispatchEvent(event);
+          expect(event.defaultPrevented).toBe(true);
+        }
+        expect(send.mock.calls).toEqual(
+          Array.from({ length: 3 }, () => [{ type: 'vscode/open-external', payload: { url } }])
+        );
+        expect(hostLinkHandler).not.toHaveBeenCalled();
+      } finally {
+        window.removeEventListener('click', hostLinkHandler);
+      }
     }
   );
 
@@ -1668,6 +1720,10 @@ describe('MarkdownRenderer', () => {
     const link = container?.querySelector('a.file-path-link');
     expect(link?.getAttribute('href')).toBe('/repo/src/webview/App.tsx');
     expect(link?.getAttribute('data-file')).toContain('/repo/src/webview/App.tsx');
+    expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+      webviewSection: 'varroFileLink',
+      varroFilePath: '/repo/src/webview/App.tsx',
+    });
   });
 
   it('links file-only inline code but not ordinary inline or fenced code', async () => {
@@ -1746,6 +1802,49 @@ describe('MarkdownRenderer', () => {
     expect(container?.querySelector('code')?.textContent).toBe('workspace.fs');
   });
 
+  it.each([
+    {
+      content: '`src/shared/protocol.ts`',
+      label: 'protocol.ts',
+      path: '/repo/src/shared/protocol.ts',
+    },
+    {
+      content: 'Review src/shared/protocol.ts.',
+      label: 'protocol.ts',
+      path: '/repo/src/shared/protocol.ts',
+    },
+    {
+      content: '`src/shared/protocol.ts:12-15`',
+      label: 'protocol.ts (line 12-15)',
+      path: '/repo/src/shared/protocol.ts',
+    },
+    {
+      content: '[src/shared/protocol.ts](./src/shared/protocol.ts:12)',
+      label: 'protocol.ts (line 12)',
+      path: '/repo/src/shared/protocol.ts',
+    },
+    {
+      content: '`C:\\repo\\src\\App.tsx:12`',
+      label: 'App.tsx (line 12)',
+      path: 'C:/repo/src/App.tsx',
+    },
+  ])('provides a native copy-path target for $content', ({ content, label, path }) => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+
+    const link = container!.querySelector('a.file-path-link');
+    expect(link?.textContent).toBe(label);
+    expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+      webviewSection: 'varroFileLink',
+      varroFilePath: path,
+    });
+  });
+
   it('linkifies only text nodes and leaves path-looking attributes unchanged', () => {
     setState('editorContext', {
       workspacePath: '/repo',
@@ -1767,6 +1866,24 @@ describe('MarkdownRenderer', () => {
     expect(links).toHaveLength(1);
     expect(links[0]?.textContent).toBe('protocol.ts');
     expect(links[0]?.title).toBe('/repo/src/shared/protocol.ts');
+  });
+
+  it('derives native copy-path context from the target instead of untrusted HTML attributes', () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content:
+            '<a href="/repo/src/safe.ts" data-vscode-context=\'{"webviewSection":"varroFileLink","varroFilePath":"/other/file.ts"}\'>Safe</a>',
+          cacheByContent: true,
+        }),
+      container!
+    );
+
+    const link = container!.querySelector('a');
+    expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+      webviewSection: 'varroFileLink',
+      varroFilePath: '/repo/src/safe.ts',
+    });
   });
 
   it('sanitizes copied code payloads before writing to the clipboard', async () => {

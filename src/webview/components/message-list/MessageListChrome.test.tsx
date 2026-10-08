@@ -810,43 +810,69 @@ describe('MessageListChrome', () => {
     expect(onClick).toHaveBeenCalledWith(preview);
   });
 
-  it('routes clicks on inner interactive content through the sticky card', () => {
-    const onClick = vi.fn();
-    const preview = {
-      id: 'msg-rich',
-      index: 3,
-      text: 'Review https://example.com',
-      attachmentCount: 0,
-      imageCount: 0,
-    };
-    cleanup = render(
-      () => (
-        <StickyUserMessagePreviewCard
-          preview={preview}
-          parts={[
-            {
-              id: 'part-rich',
-              sessionID: 'session-1',
-              messageID: 'msg-rich',
-              type: 'text',
-              text: preview.text,
-            },
-          ]}
-          onClick={onClick}
-        />
-      ),
-      container!
-    );
+  it.each([
+    { linkText: 'http://example.com', loading: false },
+    { linkText: 'https://example.com', loading: false },
+    { linkText: 'git@github.com:owner/repo.git', loading: false },
+    { linkText: 'http://example.com', loading: true },
+    { linkText: 'https://example.com', loading: true },
+    { linkText: 'git@github.com:owner/repo.git', loading: true },
+  ])(
+    'routes inner $linkText clicks through the sticky card with loading=$loading',
+    ({ linkText, loading }) => {
+      const onClick = vi.fn();
+      const send = vi.fn();
+      vi.stubGlobal('__sendToExtension', send);
+      const hostClick = vi.fn();
+      const hostContextMenu = vi.fn();
+      const preview = {
+        id: 'msg-rich',
+        index: 3,
+        text: `Review ${linkText}`,
+        attachmentCount: 0,
+        imageCount: 0,
+      };
+      cleanup = render(
+        () => (
+          <div on:click={hostClick} on:contextmenu={hostContextMenu}>
+            <StickyUserMessagePreviewCard
+              preview={preview}
+              loading={loading}
+              parts={[
+                {
+                  id: 'part-rich',
+                  sessionID: 'session-1',
+                  messageID: 'msg-rich',
+                  type: 'text',
+                  text: preview.text,
+                },
+              ]}
+              onClick={onClick}
+            />
+          </div>
+        ),
+        container!
+      );
 
-    const link = container?.querySelector<HTMLAnchorElement>(
-      '.latest-user-message-sticky a.external-link'
-    );
-    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
-    link?.dispatchEvent(click);
+      const link = container?.querySelector<HTMLAnchorElement>(
+        '.latest-user-message-sticky a.external-link'
+      );
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      expect(link).not.toBeNull();
+      link!.querySelector('.link-leading-label')!.dispatchEvent(click);
 
-    expect(click.defaultPrevented).toBe(true);
-    expect(onClick).toHaveBeenCalledWith(preview);
-  });
+      expect(click.defaultPrevented).toBe(true);
+      if (loading) expect(onClick).not.toHaveBeenCalled();
+      else expect(onClick).toHaveBeenCalledExactlyOnceWith(preview);
+      expect(send).not.toHaveBeenCalled();
+      expect(hostClick).not.toHaveBeenCalled();
+
+      const contextMenu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      link!.dispatchEvent(contextMenu);
+      expect(contextMenu.defaultPrevented).toBe(false);
+      expect(hostContextMenu).toHaveBeenCalledOnce();
+    }
+  );
 
   it('is not clickable without an onClick handler', () => {
     cleanup = render(

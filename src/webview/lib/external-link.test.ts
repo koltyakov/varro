@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { isSafeExternalHref, splitExternalLinkText } from './external-link';
+import { getExternalLinkContext, isSafeExternalHref, splitExternalLinkText } from './external-link';
+
+describe('getExternalLinkContext', () => {
+  it('preserves the exact link URL in the native context menu', () => {
+    const href = 'http://example.com/docs?q="quoted"&next=one';
+    expect(JSON.parse(getExternalLinkContext(href))).toEqual({
+      webviewSection: 'varroExternalLink',
+      varroLinkUrl: href,
+    });
+  });
+});
 
 describe('isSafeExternalHref', () => {
   it.each(['https://example.com', 'http://localhost:3000', 'http://app.above-all.test'])(

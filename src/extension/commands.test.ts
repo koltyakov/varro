@@ -1169,6 +1169,33 @@ describe('sidebar navigation commands', () => {
     });
   });
 
+  it.each(['http://localhost:3000', 'http://example.com/docs?q=one&two=2', 'https://example.com'])(
+    'copies the context-menu link %s without opening it',
+    async (url) => {
+      register();
+
+      await runCommand('varro.chat.copyLink', {
+        webviewSection: 'varroExternalLink',
+        varroLinkUrl: url,
+      });
+
+      expect(vscodeMock.env.clipboard.writeText).toHaveBeenCalledWith(url);
+      expect(vscodeMock.env.openExternal).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([undefined, null, {}, { varroLinkUrl: 42 }, { varroLinkUrl: 'javascript:alert(1)' }])(
+    'rejects malformed copy-link context %j',
+    async (context) => {
+      register();
+
+      await expect(runCommand('varro.chat.copyLink', context)).rejects.toThrow(
+        'No valid external link was provided'
+      );
+      expect(vscodeMock.env.clipboard.writeText).not.toHaveBeenCalled();
+    }
+  );
+
   it('does not open session search when the view cannot be revealed', async () => {
     const { sidebar } = register();
     vscodeMock.commands.executeCommand.mockRejectedValueOnce(new Error('no such view'));
@@ -1176,6 +1203,39 @@ describe('sidebar navigation commands', () => {
     await runCommand('varro.chat.searchSessions');
 
     expect(sidebar.searchSessions).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '/repo/src/shared/protocol.ts',
+    '/repo/folder with spaces/file.ts',
+    'C:/repo/src/App.tsx',
+  ])('copies the full context-menu file path %s without opening it', async (path) => {
+    register();
+
+    await runCommand('varro.chat.copyPath', {
+      webviewSection: 'varroFileLink',
+      varroFilePath: path,
+    });
+
+    expect(vscodeMock.env.clipboard.writeText).toHaveBeenCalledExactlyOnceWith(path);
+    expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
+    expect(vscodeMock.env.openExternal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    undefined,
+    null,
+    {},
+    { varroFilePath: 42 },
+    { varroFilePath: '' },
+    { varroFilePath: ' ' },
+  ])('rejects malformed copy-path context %j', async (fileContext) => {
+    register();
+
+    await expect(runCommand('varro.chat.copyPath', fileContext)).rejects.toThrow(
+      'No valid file path was provided'
+    );
+    expect(vscodeMock.env.clipboard.writeText).not.toHaveBeenCalled();
   });
 
   it('forwards new-session and abort to the webview as commands', async () => {

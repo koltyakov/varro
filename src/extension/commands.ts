@@ -18,6 +18,7 @@ import { renderAboutHtml } from './about-view';
 import { diagnosticTimeline } from './diagnostics';
 import { parseExtensionMessage } from '../shared/extension-message';
 import { toEditorDiagnostic } from './workspace-problems';
+import { isAllowedExternalUrl } from './util/webview-message';
 
 type ExtensionPackageJson = {
   name?: unknown;
@@ -316,6 +317,32 @@ export function registerCommands(
 
     vscode.commands.registerCommand('varro.openGitHub', async () => {
       await vscode.env.openExternal(vscode.Uri.parse('https://github.com/koltyakov/varro'));
+    }),
+
+    vscode.commands.registerCommand('varro.chat.copyLink', async (linkContext: unknown) => {
+      if (
+        !linkContext ||
+        typeof linkContext !== 'object' ||
+        !('varroLinkUrl' in linkContext) ||
+        typeof linkContext.varroLinkUrl !== 'string' ||
+        !isAllowedExternalUrl(linkContext.varroLinkUrl)
+      ) {
+        throw new Error('No valid external link was provided');
+      }
+      await vscode.env.clipboard.writeText(linkContext.varroLinkUrl);
+    }),
+
+    vscode.commands.registerCommand('varro.chat.copyPath', async (fileContext: unknown) => {
+      if (
+        !fileContext ||
+        typeof fileContext !== 'object' ||
+        !('varroFilePath' in fileContext) ||
+        typeof fileContext.varroFilePath !== 'string' ||
+        !fileContext.varroFilePath.trim()
+      ) {
+        throw new Error('No valid file path was provided');
+      }
+      await vscode.env.clipboard.writeText(fileContext.varroFilePath);
     }),
 
     vscode.commands.registerCommand('varro.showOutput', () => {

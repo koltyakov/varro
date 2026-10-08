@@ -154,9 +154,14 @@ export function StickyUserMessagePreviewCard(props: {
             title={props.loading ? 'Loading message' : undefined}
             onMouseEnter={() => notifyUserMessageHoverChange(true)}
             onMouseLeave={() => notifyUserMessageHoverChange(false)}
-            onClick={(event) => {
-              event.preventDefault();
-              if (!props.loading) props.onClick?.(props.preview);
+            on:click={{
+              capture: true,
+              handleEvent: (event) => {
+                // The preview owns navigation, including clicks on nested links and attachments.
+                event.preventDefault();
+                event.stopPropagation();
+                if (!props.loading) props.onClick?.(props.preview);
+              },
             }}
           >
             <div class="latest-user-message-sticky-text-clip">

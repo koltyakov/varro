@@ -707,15 +707,17 @@ describe('createSidebarProviderActions', () => {
     'http://example.com/docs',
     'http://localhost:3000',
     'http://app.above-all.test/documentation',
-  ])('opens the external URL %s', async (url) => {
+  ])('opens %s in the system browser without using integrated openers', async (url) => {
     const { actions } = createActionFixture();
 
     await actions.openExternal(url);
 
     expect(mocks.vscode.Uri.parse).toHaveBeenCalledWith(url);
-    expect(mocks.vscode.env.openExternal).toHaveBeenCalledWith({
-      value: url,
-    });
+    expect(mocks.vscode.env.openExternal).toHaveBeenCalledWith(
+      { value: url },
+      { allowContributedOpeners: 'default' }
+    );
+    expect(mocks.vscode.commands.executeCommand).not.toHaveBeenCalled();
   });
 
   it.each(['javascript:alert(1)', 'file:///etc/passwd', 'command:test', 'http://', 'https://'])(

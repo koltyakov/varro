@@ -269,6 +269,14 @@
       {
         "command": "varro.chat.addTerminalSelectionToContext",
         "title": "Varro: Add to Context"
+      },
+      {
+        "command": "varro.chat.copyLink",
+        "title": "Copy link"
+      },
+      {
+        "command": "varro.chat.copyPath",
+        "title": "Copy path"
       }
     ],
     "submenus": [
@@ -279,6 +287,18 @@
       }
     ],
     "menus": {
+      "webview/context": [
+        {
+          "command": "varro.chat.copyLink",
+          "when": "(webviewId == varro.chat || webviewId == varro.editor) && webviewSection == varroExternalLink",
+          "group": "navigation@1"
+        },
+        {
+          "command": "varro.chat.copyPath",
+          "when": "(webviewId == varro.chat || webviewId == varro.editor) && webviewSection == varroFileLink",
+          "group": "navigation@1"
+        }
+      ],
       "editor/title": [
         {
           "command": "varro.chat.newEditor",
@@ -355,6 +375,14 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "varro.chat.copyLink",
+          "when": "false"
+        },
+        {
+          "command": "varro.chat.copyPath",
+          "when": "false"
+        },
         {
           "command": "varro.chat.addProblemsToContext",
           "when": "false"

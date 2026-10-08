@@ -74,6 +74,7 @@ import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
 import { ExternalLinkIcon } from '../ExternalLinkIcon';
 import {
+  getExternalLinkContext,
   isSafeExternalHref,
   splitExternalLinkText,
   type ExternalLinkTextSegment,
@@ -1894,6 +1895,8 @@ function buildInlineTextSegments(
 function ExternalLink(props: { link: Extract<InlineTextSegment, { type: 'external-link' }> }) {
   const openExternal = (event: MouseEvent) => {
     event.preventDefault();
+    // Keep VS Code's webview host from opening the same link a second time.
+    event.stopPropagation();
     if (!isSafeExternalHref(props.link.target)) return;
     postMessage({ type: 'vscode/open-external', payload: { url: props.link.target } });
   };
@@ -1903,6 +1906,7 @@ function ExternalLink(props: { link: Extract<InlineTextSegment, { type: 'externa
       class="external-link"
       href={props.link.target}
       data-external="true"
+      data-vscode-context={getExternalLinkContext(props.link.target)}
       title={`Open ${props.link.href}`}
       onClick={openExternal}
     >
