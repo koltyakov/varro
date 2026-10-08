@@ -89,7 +89,9 @@ describe('development compatibility', () => {
     expect(job).toContain('shard: [1, 2, 3, 4]');
     expect(job).toContain('fail-fast: false');
     expect(job).toContain('timeout-minutes: 20');
-    expect(job).toContain('image: mcr.microsoft.com/playwright:v1.63.0-noble');
+    expect(job).toContain(
+      `image: mcr.microsoft.com/playwright:v${packageJson.devDependencies['@playwright/test']}-noble`
+    );
     expect(job).toContain(
       'run: node scripts/run-e2e.mjs --shard=${{ matrix.shard }}/${{ strategy.job-total }}'
     );
