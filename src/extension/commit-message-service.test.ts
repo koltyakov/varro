@@ -347,6 +347,7 @@ describe('CommitMessageService', () => {
     );
     await service.generate();
     expect(repository.inputBox.value).toBe('fix: validate order totals');
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
     expect(hidden.registerPendingTitle).not.toHaveBeenCalled();
     expect(mocks.window.showErrorMessage).not.toHaveBeenCalled();
   });
@@ -465,7 +466,7 @@ describe('CommitMessageService', () => {
     expect(hiddenSessions.hide).toHaveBeenCalledWith('helper-1');
     expect(hiddenSessions.forgetPendingTitle).toHaveBeenCalledOnce();
     expect(hiddenSessions.retainUntilDeleted).toHaveBeenCalledWith('helper-1');
-    expect(mocks.executeCommand).toHaveBeenCalledWith('workbench.view.scm');
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
     expect(mocks.logger.error).not.toHaveBeenCalled();
   });
 
@@ -1102,7 +1103,26 @@ describe('CommitMessageService', () => {
     expect(mocks.clipboardWriteText).toHaveBeenCalledWith(
       'feat: generated message\n\nExplain the generated change.'
     );
-    expect(mocks.executeCommand).toHaveBeenCalledWith('workbench.view.scm');
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('replaces changed input without focusing Source Control', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    mocks.window.showWarningMessage.mockResolvedValueOnce('Replace Anyway');
+    const request = createRequest({
+      onMessage: () => {
+        repository.inputBox.value = 'New user draft';
+      },
+    });
+    const { service } = createService(request);
+
+    await service.generate();
+
+    expect(repository.inputBox.value).toBe(
+      'feat: generated message\n\nExplain the generated change.'
+    );
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
   });
 
   it('does not write or copy when the changed-input prompt is dismissed', async () => {
@@ -1119,6 +1139,7 @@ describe('CommitMessageService', () => {
 
     expect(repository.inputBox.value).toBe('User edit');
     expect(mocks.clipboardWriteText).not.toHaveBeenCalled();
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
   });
 
   it('does not apply output when the authoritative staged diff changes', async () => {
@@ -1304,7 +1325,7 @@ describe('CommitMessageService', () => {
       'feat: generated message\n\nExplain the generated change.'
     );
     expect(request).toHaveBeenCalledWith('DELETE', '/session/helper-1?directory=%2Frepo');
-    expect(mocks.executeCommand).toHaveBeenCalledWith('workbench.view.scm');
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
 
     deletion.resolve(true);
     await flush();

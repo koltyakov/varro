@@ -327,8 +327,6 @@ export class CommitMessageService {
     } else {
       repository.inputBox.value = generatedMessage;
     }
-
-    await vscode.commands.executeCommand('workbench.view.scm');
   }
 
   private async generateWithHelper(
