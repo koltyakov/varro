@@ -581,6 +581,29 @@ describe('ModelPicker', () => {
     ).toEqual(['OpenAI', 'Google', 'Alpha', 'Beta', 'Zulu']);
   });
 
+  it('only renders a checkmark for the selected model and updates it with the selection', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        alpha: createModel('alpha', 'Alpha'),
+        beta: createModel('beta', 'Beta'),
+      }),
+    ]);
+    setState('pinnedModels', ['openai:alpha']);
+    setState('selectedModel', { providerID: 'openai', modelID: 'alpha' });
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    const alpha = container!.querySelector('[data-model-id="alpha"]')!;
+    const beta = container!.querySelector('[data-model-id="beta"]')!;
+    expect(alpha.querySelector('.dropdown-check .ui-icon')).not.toBeNull();
+    expect(beta.querySelector('.dropdown-check')).toBeNull();
+
+    setState('selectedModel', { providerID: 'openai', modelID: 'beta' });
+    await flushMicrotasks();
+    expect(alpha.querySelector('.dropdown-check')).toBeNull();
+    expect(beta.querySelector('.dropdown-check .ui-icon')).not.toBeNull();
+  });
+
   it('pins models in a top group without selecting or closing the picker', async () => {
     const onSelect = vi.fn();
     const onClose = vi.fn();

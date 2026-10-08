@@ -560,25 +560,30 @@
   padding-right: 32px;
 }
 
+.model-picker-item .dropdown-name {
+  flex: 1 1 auto;
+}
+
 .model-picker-row:hover,
 .model-picker-row:focus-within {
   background: color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
 }
 
 .model-picker-provider-name {
+  display: none;
+  max-width: 40%;
+  flex: 0 0 auto;
   overflow: hidden;
   color: color-mix(in srgb, var(--color-vscode-muted) 72%, transparent);
   font-size: 10px;
   font-weight: 400;
-  opacity: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: opacity 0.08s ease;
 }
 
 .model-picker-row:hover .model-picker-provider-name,
 .model-picker-row:focus-within .model-picker-provider-name {
-  opacity: 1;
+  display: block;
 }
 
 .model-picker-pin {
@@ -673,15 +678,6 @@ body.vscode-high-contrast-light .model-picker-item.selected {
 }
 
 .model-picker-item .dropdown-check {
-  position: absolute;
-  top: 7px;
-  right: 11px;
-}
-
-.model-picker-row:hover .dropdown-check,
-.model-picker-row:focus-within .dropdown-check,
-.model-picker-row.pinned .dropdown-check {
-  position: static;
   margin-left: auto;
 }
 

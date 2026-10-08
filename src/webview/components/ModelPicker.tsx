@@ -594,16 +594,16 @@ export function ModelPicker(props: {
                                   <Show when={pinned()}>
                                     <span class="model-picker-provider-name">{provider.name}</span>
                                   </Show>
-                                  <span class="dropdown-check">
-                                    <Show when={isSelected(provider.id, model.id)}>
+                                  <Show when={isSelected(provider.id, model.id)}>
+                                    <span class="dropdown-check">
                                       <UiIcon
                                         source={checkIcon}
                                         class="h-3 w-3 text-vscode-accent"
                                         width={12}
                                         height={12}
                                       />
-                                    </Show>
-                                  </span>
+                                    </span>
+                                  </Show>
                                 </span>
                               </button>
                               <Tooltip content={`${pinned() ? 'Unpin' : 'Pin'} model`}>
