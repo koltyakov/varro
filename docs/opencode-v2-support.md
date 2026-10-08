@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.18.35` and v2 `2.0.25`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.18.35` and v2 `2.0.26`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,80 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.26 compatibility review
+
+Reviewed v2.0.25 to v2.0.26, `62e087ff7b` through `8059cdcbdf`.
+Public HTTP routes, generated client/protocol/schema declarations, consumed SSE payloads,
+session/message records, permissions/forms, and managed `serve` output remain compatible.
+No adapter changes are required.
+
+Vertex adds a Google Cloud Application Default Credentials connection method with editable
+project and location fields. Varro's existing external-auth flow already supports its typed
+form and server-acknowledged completion. Explicit project/location settings now take precedence
+over an ambient Vertex API key. Live Google Cloud sign-in is not verified by this bump.
+
+Runtime changes overlap snapshot capture with provider requests while preserving step-start
+ordering, recover corrupt indexes, isolate concurrent captures, pack snapshot objects without
+pruning them, and batch large restores and untracked-file diffs. These retain the consumed
+snapshot and diff contracts. Model catalog updates need no local adaptation. Shared-service
+remote access now persists a random subdomain; Varro does not manage that setting. TUI links,
+activity disclosure, release tooling, and Console documentation are optional parity work.
+
+The tested v2 client is `2.0.26`; v1 remains current at `1.18.35`.
+Support floors remain v2 `2.0.5` and v1 `1.16.0`. The unchanged v1 SDK does not require a new
+Docker support-range run. The sandbox reads its expected v2 version from the selected binary.
+
+All 925 focused adapter, inbox, transcript, provider-dialog, startup/server, state, and transport
+unit tests passed, followed by all five shared compatibility tests after the matrix finished.
+`npm run lint`, `npm run fmt`, `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` passed. The isolated VS Code
+`v2-first-run` scenario passed against the published 2.0.26 CLI.
+
+`npm run test:compatibility:adapters` passed 120 checks, failed seven, and skipped 25
+platform- or family-specific checks. This is not an overall compatibility pass.
+
+| Scope | Tested behavior | Issues found | All cases complete |
+| --- | --- | --- | --- |
+| v2.0.26 | 34 passed, 2 failed, 2 skipped | Multi-window ownership and stalled-turn steering | No, later recovery phases were not reached |
+| v1.16.0 and v1.18.35 | 27 passed, 1 failed, 10 skipped each | Follower authentication after owner replacement | No, later recovery phases were not reached |
+| v2.0.5 | 32 passed, 3 failed, 3 skipped | Replacement ownership, reboot recovery, multi-window ownership | No, later recovery phases were not reached |
+| VS Code v2.0.26 startup | Activation, managed ownership, health, event-stream connection passed | None found | Yes, the startup scenario |
+
+Focused comparisons against the previous 2.0.25 CLI reproduced both current-release failure
+signatures. Logs are `artifacts/opencode-2.0.25-recovery-steering.log` and
+`artifacts/opencode-2.0.26-recovery-steering.log`. The latter also exposed an overly narrow
+abort-history assertion: cancelling before step creation can yield the already-supported
+`MessageAbortedError` interrupted-idle projection instead of a native assistant's `aborted`
+error. The assertion now accepts those two valid forms. The complete 2.0.26 adapter-contract
+rerun then passed 26 checks, failed the unchanged queued-prompt assertion, and skipped two;
+see `artifacts/opencode-2.0.26-contract-rerun.log`.
+
+Recommended follow-up diagnostics for the evidenced issues:
+
+- High priority: both v1 releases restart the owner but leave the follower in an authentication
+  error instead of reattaching. Inspect follower credential refresh and lease-generation ordering,
+  then rerun killed-server and owner-restart recovery. Evidence is in
+  `artifacts/ai-test-data/multi-window-3oAei3/failure.json` and
+  `artifacts/ai-test-data/multi-window-h7arGK/failure.json`.
+- Medium priority: v2.0.26 and v2.0.5 reconnect with healthy event streams, but the follower reports
+  `unmanaged` instead of `other-host`. V2.0.5 replacement recovery also reports `unmanaged` instead
+  of `current-host`. Managed lifecycle identity is lost despite successful HTTP reconnection.
+  Inspect authenticated endpoint fallback and credential-backed registration identity checks;
+  verify owner/follower identity through replacement and restart. Evidence is in
+  `artifacts/ai-test-data/multi-window-3YYYaT/failure.json`,
+  `artifacts/ai-test-data/multi-window-ypLMqV/failure.json`, and
+  `artifacts/ai-test-data/startup-pJpFON/failure.json`.
+- High priority: v2.0.5 simulated reboot recovery fails its healthy-start assertion. Capture startup
+  probes, lease identity, and credential restoration before changing recovery logic, then rerun
+  the reboot scenario. Evidence is `artifacts/ai-test-data/startup-qrWfNR/failure.json`.
+- High priority: v2.0.26 steering resume admits three user messages instead of two, consuming the
+  prompt expected to remain queued. The previous 2.0.25 CLI reproduces this too. Trace native
+  inbox admission and resume ordering, then verify the queued prompt remains pending after the
+  steering reply. Evidence is in the comparison and contract-rerun logs above.
+
+Complete matrix logs are under `artifacts/opencode-adapters/run-3LLgcz/`.
+Live Google Cloud sign-in and full visual streaming performance remain unverified by this bump.
 
 ### 2.0.25 compatibility review
 

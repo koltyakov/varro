@@ -191,7 +191,7 @@ export function AttachmentStrip(props: {
               <AttachmentChip
                 label={item.value.filename}
                 path={item.value.filename}
-                disabled={!!props.imageError?.(item.value.id) || props.clipboardImagesNeedVision}
+                disabled={props.clipboardImagesNeedVision}
                 icon="image"
                 title={
                   props.imageError?.(item.value.id) ??

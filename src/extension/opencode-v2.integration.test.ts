@@ -1180,7 +1180,11 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
               expect.objectContaining({
                 info: expect.objectContaining({
                   role: 'assistant',
-                  error: expect.objectContaining({ name: 'aborted' }),
+                  // Snapshot capture overlaps the provider request from v2.0.26, so
+                  // cancellation can project an interrupted idle record before a step starts.
+                  error: expect.objectContaining({
+                    name: expect.stringMatching(/^(aborted|MessageAbortedError)$/),
+                  }),
                 }),
               }),
               expect.objectContaining({

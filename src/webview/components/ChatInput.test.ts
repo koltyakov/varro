@@ -730,7 +730,7 @@ function availableProviderLimit(
 }
 
 describe('ChatInput', () => {
-  describe('broken image attachments', () => {
+  describe('image preview fallback', () => {
     const broken = {
       id: 'broken-image',
       filename: 'Image 1',
@@ -746,24 +746,26 @@ describe('ChatInput', () => {
       vi.mocked(imageLoading.loadImage).mockRejectedValue(new Error('Could not decode the image'));
     });
 
-    it('strikes through the attachment chip, exposes the decode reason, and prevents previews', async () => {
+    it('keeps the original attachment enabled, exposes the decode reason, and prevents previews', async () => {
       cleanup = render(() => ChatInput(), container!);
       await flushAsyncWork();
       const chip = container!.querySelector<HTMLElement>('.chat-attachment-chip')!;
-      expect(chip.classList.contains('disabled')).toBe(true);
-      expect(chip.title).toBe('Could not decode the image');
+      expect(chip.classList.contains('disabled')).toBe(false);
+      expect(chip.title).toBe(
+        'Preview unavailable: Could not decode the image. The original image is attached.'
+      );
       expect(chip.getAttribute('role')).toBeNull();
       chip.dispatchEvent(new MouseEvent('mouseenter'));
       chip.click();
       expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
       expect(document.querySelector('.chat-image-preview-overlay')).toBeNull();
-      expect(container!.querySelector('.chat-send-button')?.classList).toContain('disabled');
+      expect(container!.querySelector('.chat-send-button')?.classList).toContain('enabled');
       chip.querySelector<HTMLButtonElement>('.chip-remove')!.click();
       expect(state.clipboardImages).toEqual([]);
     });
 
     it.each([false, true])(
-      'disables inline broken chips and sends without the image or its placeholder (steering: %s)',
+      'sends the original image and placeholder without enabling its preview (steering: %s)',
       async (steering) => {
         if (steering) setupMatchingActiveTurn();
         setIsLoading(steering);
@@ -771,8 +773,10 @@ describe('ChatInput', () => {
         cleanup = render(() => ChatInput(), container!);
         await flushAsyncWork();
         const chip = container!.querySelector<HTMLElement>('.inline-chip')!;
-        expect(chip.classList.contains('disabled')).toBe(true);
-        expect(chip.title).toBe('Could not decode the image');
+        expect(chip.classList.contains('disabled')).toBe(false);
+        expect(chip.title).toBe(
+          'Preview unavailable: Could not decode the image. The original image is attached.'
+        );
         expect(chip.hasAttribute('data-preview-image')).toBe(false);
         chip.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
         chip.click();
@@ -785,15 +789,17 @@ describe('ChatInput', () => {
           );
         await flushAsyncWork();
         expect(sendMessageMock).toHaveBeenCalledWith(
-          'Describe ',
+          'Describe [Image 1]',
           expect.objectContaining({
-            queuedAttachments: expect.objectContaining({ clipboardImages: [] }),
+            queuedAttachments: expect.objectContaining({
+              clipboardImages: [expect.objectContaining({ id: broken.id, url: broken.url })],
+            }),
           })
         );
       }
     );
 
-    it('excludes broken images and placeholders from inline edits', async () => {
+    it('retains original images and placeholders in inline edits after preview failure', async () => {
       setState('messages', [
         {
           info: {
@@ -820,9 +826,11 @@ describe('ChatInput', () => {
       await flushAsyncWork();
       expect(editMessageMock).toHaveBeenCalledWith(
         'message-1',
-        'Describe ',
+        'Describe [Image 1]',
         expect.objectContaining({
-          queuedAttachments: expect.objectContaining({ clipboardImages: [] }),
+          queuedAttachments: expect.objectContaining({
+            clipboardImages: [expect.objectContaining({ id: broken.id, url: broken.url })],
+          }),
         })
       );
     });
@@ -850,7 +858,7 @@ describe('ChatInput', () => {
       expect(container!.querySelector('.inline-chip[data-preview-image]')).not.toBeNull();
     });
 
-    it('does not send an image-only broken draft', async () => {
+    it('sends the original image-only draft after preview failure', async () => {
       setInputText('[Image 1]');
       cleanup = render(() => ChatInput(), container!);
       await flushAsyncWork();
@@ -858,11 +866,17 @@ describe('ChatInput', () => {
         .querySelector('.rich-composer')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       await flushAsyncWork();
-      expect(sendMessageMock).not.toHaveBeenCalled();
-      expect(inputText()).toBe('[Image 1]');
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        '[Image 1]',
+        expect.objectContaining({
+          queuedAttachments: expect.objectContaining({
+            clipboardImages: [expect.objectContaining({ id: broken.id, url: broken.url })],
+          }),
+        })
+      );
     });
 
-    it('omits broken images from queued messages while retaining valid images', async () => {
+    it('retains original images in queued messages even when one preview fails', async () => {
       const valid = {
         ...broken,
         id: 'valid-image',
@@ -882,13 +896,15 @@ describe('ChatInput', () => {
         .querySelector('.rich-composer')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       await flushAsyncWork();
-      expect(state.queuedMessages[0]?.text).toBe('Describe [Image 2]');
+      expect(state.queuedMessages[0]?.text).toBe('Describe [Image 1] [Image 2]');
       expect(state.queuedMessages[0]?.clipboardImages).toEqual([
+        expect.objectContaining({ id: broken.id, url: broken.url }),
         expect.objectContaining({ id: valid.id }),
       ]);
     });
 
-    it('checks images before sending and clears the failure when their content changes', async () => {
+    it('allows original image sends while decoding is pending or timed out and recovers previews on replacement', async () => {
+      sendMessageMock.mockResolvedValue(false);
       let rejectLoad: ((error: Error) => void) | undefined;
       vi.mocked(imageLoading.loadImage).mockImplementationOnce(
         () =>
@@ -897,15 +913,33 @@ describe('ChatInput', () => {
           })
       );
       setInputText('Describe [Image 1]');
-      cleanup = render(() => ChatInput(), container!);
+      cleanup = render(() => ChatInput({ newSession: true }), container!);
+      expect(
+        container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.disabled
+      ).toBe(false);
       container!
         .querySelector('.rich-composer')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      expect(sendMessageMock).not.toHaveBeenCalled();
+      await flushAsyncWork();
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        'Describe [Image 1]',
+        expect.objectContaining({
+          queuedAttachments: expect.objectContaining({
+            clipboardImages: [expect.objectContaining({ id: broken.id, url: broken.url })],
+          }),
+        })
+      );
+      expect(showSessionActionFeedbackMock).not.toHaveBeenCalled();
       rejectLoad?.(new Error('Timed out decoding the image'));
       await flushAsyncWork();
       expect(container!.querySelector<HTMLElement>('.inline-chip')!.title).toBe(
-        'Timed out decoding the image'
+        'Preview unavailable: Timed out decoding the image. The original image is attached.'
+      );
+      container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
+      await flushAsyncWork();
+      expect(sendMessageMock).toHaveBeenCalledTimes(2);
+      expect(sendMessageMock.mock.calls[1]?.[1]?.queuedAttachments?.clipboardImages?.[0]?.url).toBe(
+        broken.url
       );
       vi.mocked(imageLoading.loadImage).mockResolvedValue(document.createElement('img'));
       setState('clipboardImages', 0, 'url', 'data:image/gif;base64,repaired');
@@ -914,7 +948,7 @@ describe('ChatInput', () => {
       expect(container!.querySelector('.inline-chip[data-preview-image]')).not.toBeNull();
     });
 
-    it('does not store a broken image for vision delegation', async () => {
+    it('stores and delegates the original image even when its preview fails', async () => {
       setupVisionDelegationModelState();
       setInputText('@vision Describe [Image 1]');
       const posted = vi.fn();
@@ -922,12 +956,42 @@ describe('ChatInput', () => {
         posted;
       cleanup = render(() => ChatInput(), container!);
       await flushAsyncWork();
-      expect(posted.mock.calls.some(([message]) => message.type === 'images/store')).toBe(false);
+      expect(posted).toHaveBeenCalledWith({
+        type: 'images/store',
+        payload: {
+          id: broken.id,
+          name: broken.filename,
+          content: broken.url.slice(broken.url.indexOf(',') + 1),
+          size: broken.size,
+        },
+      });
+      expect(
+        container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.disabled
+      ).toBe(true);
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'images/stored',
+            payload: {
+              id: broken.id,
+              contextFile: {
+                path: '/repo/original.gif',
+                relativePath: 'original.gif',
+                type: 'file',
+              },
+            },
+          },
+        })
+      );
+      await flushAsyncWork();
       container!
         .querySelector('.rich-composer')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       await flushAsyncWork();
       expect(sendMessageMock).toHaveBeenCalled();
+      expect(sendMessageMock.mock.calls[0]?.[1]?.queuedAttachments?.clipboardImages?.[0]?.url).toBe(
+        broken.url
+      );
     });
   });
 
@@ -6636,7 +6700,7 @@ describe('ChatInput', () => {
     expect(container?.querySelector('[aria-label="Retry send as Steer"]')).not.toBeNull();
   });
 
-  it('waits for restored inline-edit images to decode before accepting Enter', async () => {
+  it('accepts restored inline-edit images before their preview finishes decoding', async () => {
     setupModelState();
     setState('providers', 0, 'models', 'gpt-4o', 'capabilities', 'vision', true);
     setState('activeSessionId', 'session-1');
@@ -6675,14 +6739,6 @@ describe('ChatInput', () => {
     const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
     const send = container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!;
     expect(container!.querySelector('.chat-attachment-chip')).not.toBeNull();
-    expect(send.disabled).toBe(true);
-    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(editMessageMock).not.toHaveBeenCalled();
-    expect(inputText()).toBe('edited prompt');
-
-    expect(finishDecode).toBeDefined();
-    finishDecode?.(document.createElement('img'));
-    await flushAsyncWork();
     expect(send.disabled).toBe(false);
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await flushAsyncWork();
@@ -6695,6 +6751,10 @@ describe('ChatInput', () => {
         }),
       })
     );
+    expect(finishDecode).toBeDefined();
+    finishDecode?.(document.createElement('img'));
+    await flushAsyncWork();
+    expect(editMessageMock).toHaveBeenCalledTimes(1);
   });
 
   it('restores edited message context and restores draft context on cancel', async () => {
@@ -10426,6 +10486,12 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeNull();
     const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     expect(sendButton?.disabled).toBe(true);
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+    expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+      'Preparing attachments: storing images for vision delegation',
+      'warning'
+    );
 
     window.dispatchEvent(
       new MessageEvent('message', {
@@ -10567,6 +10633,10 @@ describe('ChatInput', () => {
         startNewChatDraft();
         if (!switchBeforeNewChat) setSelectedModel(visionModel);
         await flushAsyncWork();
+        expect(container?.querySelector('.chat-attachment-chip.clickable')).toBeNull();
+        expect(
+          container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
+        ).toBe(false);
         decodes[0]!();
         await flushAsyncWork();
 

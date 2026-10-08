@@ -53,7 +53,9 @@ for (const switchBeforeNewChat of [false, true]) {
       await page.getByRole('button', { name: 'New chat', exact: true }).first().click();
       if (!switchBeforeNewChat) await selectVision();
       await expect(page.locator('.chat-header-title-text').first()).toHaveText('New Chat');
-      await expect(page.getByLabel('Send (Enter)', { exact: true })).toBeDisabled();
+      // Preview decoding must not block sending the original attachment.
+      await expect(page.getByLabel('Send (Enter)', { exact: true })).toBeEnabled();
+      await expect(imageChip).not.toHaveClass(/clickable/);
       releaseImage?.();
 
       await expect(imageChip).toHaveClass(/clickable/);

@@ -1710,7 +1710,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           label: image.filename,
           path: image.filename,
           icon: 'image',
-          disabled: !!imageError(image.id),
           title: imageError(image.id),
           previewImage: canPreviewImage(image.id)
             ? { url: image.url, alt: image.filename }
@@ -1892,7 +1891,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   function imageError(id: string): string | undefined {
     const image = composerClipboardImages().find((item) => item.id === id);
     const result = imageLoadResults().get(id);
-    return image && result?.url === image.url ? (result.error ?? undefined) : undefined;
+    return image && result?.url === image.url && result.error
+      ? `Preview unavailable: ${result.error}. The original image is attached.`
+      : undefined;
   }
 
   function canPreviewImage(id: string): boolean {
@@ -1900,9 +1901,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const result = imageLoadResults().get(id);
     return !!image && result?.url === image.url && result.error === null;
   }
-
-  const hasPendingImageLoads = () =>
-    composerClipboardImages().some((image) => imageLoadResults().get(image.id)?.url !== image.url);
 
   createEffect(() => {
     // Decode readiness belongs to image content, not the chat or compression owner.
@@ -3212,10 +3210,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       requestAbortSession();
       return;
     }
-    if (hasPendingImageLoads()) {
-      showSessionActionFeedback('Checking image attachments', 'warning');
-      return;
-    }
     if (pendingProblems() || problemsPickerScope()) return;
     if (/^\/(?:problems|promlems)(?:\s|$)/i.test(text.trim()) && state.enableProblemsContext) {
       await runSlashCommand(text);
@@ -3245,7 +3239,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
     const shouldQueue = mode === 'queue' || pendingApproval;
     const sendableText = getSendableInputText(text);
-    const hasBrokenImages = state.clipboardImages.some((image) => imageError(image.id));
+    const hasImagePreviewErrors = state.clipboardImages.some((image) => imageError(image.id));
     const hasSendableImages = hasSendableClipboardImages();
     if (
       !sendableText.trim() &&
@@ -3261,7 +3255,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     const queuedAttachments = getQueuedAttachmentSnapshot({
       droppedFiles: state.droppedFiles,
-      clipboardImages: state.clipboardImages.filter((image) => !imageError(image.id)),
+      clipboardImages: state.clipboardImages,
       nativePdfs: state.nativePdfs,
       terminalSelection: state.terminalSelection,
       attachedDiagnostics: state.attachedDiagnostics,
@@ -3545,7 +3539,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               onOptimisticPublish: props.newSession ? props.onBeforeSend : undefined,
             };
       if (capturedTarget !== undefined) sendOptions.targetSessionId = capturedTarget;
-      if (hasBrokenImages) sendOptions.queuedAttachments = queuedAttachments;
+      if (hasImagePreviewErrors) sendOptions.queuedAttachments = queuedAttachments;
       if (queuedEdit)
         sendOptions.queuedAttachments = {
           ...queuedAttachments,
@@ -5188,9 +5182,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     !currentModelSupportsPdf() && state.nativePdfs.some((pdf) => !pdf.contextFile);
 
   function hasSendableClipboardImages() {
-    return (
-      state.clipboardImages.some((image) => !imageError(image.id)) && currentPromptCanHandleImages()
-    );
+    return state.clipboardImages.length > 0 && currentPromptCanHandleImages();
   }
 
   function hasSendableComposerContent() {
@@ -5206,16 +5198,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   function getSendableInputText(text = inputText()) {
     if (state.clipboardImages.length === 0) return text;
-    const brokenImages = state.clipboardImages.filter((image) => imageError(image.id));
     return getPromptTextForClipboardImages(
-      brokenImages.length ? getPromptTextForClipboardImages(text, brokenImages, false) : text,
+      text,
       state.clipboardImages,
       currentPromptCanHandleImages()
     );
   }
 
   const hasPendingDelegatedImages = () =>
-    state.clipboardImages.some((image) => !imageError(image.id) && !image.contextFile) &&
+    state.clipboardImages.some((image) => !image.contextFile) &&
     !currentModelSupportsVision() &&
     currentModelSupportsTools() &&
     canDelegateCurrentImages();
@@ -5227,13 +5218,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (currentModelSupportsVision() || !currentModelSupportsTools()) return;
     if (!canDelegateCurrentImages()) return;
     for (const image of images) {
-      if (
-        imageError(image.id) ||
-        hasPendingImageLoads() ||
-        image.contextFile ||
-        pendingImageStores.has(image.id)
-      )
-        continue;
+      if (image.contextFile || pendingImageStores.has(image.id)) continue;
       pendingImageStores.set(image.id, image.url);
       postMessage({
         type: 'images/store',
@@ -5256,7 +5241,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       (!state.workspaceCatalogReloadPending &&
         !pendingWorkspacePath() &&
         !hasPendingPdfFallback() &&
-        !hasPendingImageLoads() &&
         pendingTableCount() === 0 &&
         !pendingProblems() &&
         !hasPendingDelegatedImages() &&
@@ -5285,14 +5269,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
     const pendingWorkspace = pendingWorkspacePath();
     if (pendingWorkspace) return `Waiting for the workspace to switch to ${pendingWorkspace}`;
-    if (
-      hasPendingPdfFallback() ||
-      hasPendingImageLoads() ||
-      hasPendingDelegatedImages() ||
-      pendingTableCount() > 0 ||
-      pendingProblems()
-    )
-      return 'Preparing attachments';
+    if (hasPendingPdfFallback()) return 'Preparing attachments: storing PDFs';
+    if (hasPendingDelegatedImages()) {
+      return 'Preparing attachments: storing images for vision delegation';
+    }
+    if (pendingTableCount() > 0) return 'Preparing attachments: loading database tables';
+    if (pendingProblems()) return 'Preparing attachments: loading problems';
     return null;
   };
   const reportBlockedSend = () => {
@@ -5311,6 +5293,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           providerRefreshPending: state.providerRefreshPending,
           workspaceCatalogReloadPending: state.workspaceCatalogReloadPending,
           pendingWorkspaceSelectionPath: state.pendingWorkspaceSelectionPath,
+          model: currentModel(),
+          pendingImageDecodeIds: composerClipboardImages()
+            .filter((image) => imageLoadResults().get(image.id)?.url !== image.url)
+            .map((image) => image.id),
+          pendingImageStoreIds: [...pendingImageStores.keys()],
+          pendingPdfFallback: hasPendingPdfFallback(),
+          pendingDelegatedImages: hasPendingDelegatedImages(),
+          pendingTableCount: pendingTableCount(),
+          pendingProblems: pendingProblems(),
         }),
       },
     });

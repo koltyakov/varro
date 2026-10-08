@@ -1739,7 +1739,7 @@
   width: 28px;
   height: 28px;
   border-radius: var(--radius-control);
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
   transition:
     background-color 0.15s,
@@ -1749,24 +1749,27 @@
   -webkit-user-select: none;
 }
 
-.chat-send-button.enabled:active {
+.chat-send-button.enabled:active:not(:disabled) {
   transform: scale(0.92);
 }
 
-.chat-send-button.enabled {
-  background: var(--color-vscode-accent);
+.chat-send-button.enabled:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-vscode-button-fg) 16%, transparent);
+  background: var(--color-vscode-button-bg);
   color: var(--color-vscode-button-fg);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-button-fg) 16%, transparent);
 }
 
-.chat-send-button.enabled:hover {
+.chat-send-button.enabled:hover:not(:disabled) {
   background: var(--color-vscode-button-hover);
 }
 
-.chat-send-button.disabled {
-  background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
-  color: var(--color-vscode-muted);
-  opacity: 0.5;
+.chat-send-button.disabled,
+.chat-send-button:disabled {
+  border-color: var(--color-vscode-border);
+  background: transparent;
+  color: var(--vscode-disabledForeground, var(--color-vscode-muted));
+  box-shadow: none;
+  opacity: 1;
   cursor: default;
 }
 
@@ -1777,6 +1780,7 @@
 }
 
 .send-button-group .send-main {
+  border-right-width: 0;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
   width: 26px;
@@ -1788,9 +1792,9 @@
   justify-content: center;
   width: 18px;
   height: 28px;
-  border: none;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-button-fg) 16%, transparent);
   cursor: pointer;
-  background: var(--color-vscode-accent);
+  background: var(--color-vscode-button-bg);
   color: var(--color-vscode-button-fg);
   border-radius: 0 var(--radius-control) var(--radius-control) 0;
   border-left: 1px solid color-mix(in srgb, var(--color-vscode-button-separator) 100%, transparent);
