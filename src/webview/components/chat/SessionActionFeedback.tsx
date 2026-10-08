@@ -10,6 +10,35 @@ const WARNING_VISIBLE_MS = 5_000;
    finishes fading before it leaves the DOM. */
 const LEAVE_MS = 160;
 
+// Keep toast copy short without changing errors used by recovery logic or losing
+// the original detail in the tooltip and accessible label.
+const COMPACT_MESSAGES = new Map<string, string>([
+  ['Permission automation ownership changed', 'Approval handler moved'],
+  ['Failed to respond to permission', 'Permission reply failed'],
+  ['Failed to update permissions', 'Permission update failed'],
+  ['Wait for the permission mode update to finish before forking', 'Wait for mode update'],
+  ['Select a model before compacting the session', 'Select model to compact'],
+  [
+    'This conversation is unavailable on the connected OpenCode server.',
+    'Conversation unavailable',
+  ],
+  ['Init is only available for blank sessions', 'Init needs a blank chat'],
+  ['Problems context is disabled in settings', 'Problems context disabled'],
+  ['Problems already added to context', 'Problems already added'],
+  ['PDFs must be valid and total 20 MiB or less', 'Valid PDFs, max 20 MiB'],
+  ['PDFs must total 20 MiB or less', 'PDF limit is 20 MiB'],
+  ['Table attachment timed out. Try selecting it again.', 'Table timed out. Reselect'],
+  ['Wait for pending image pastes to finish', 'Wait for image pastes'],
+  [
+    'Image attached; use a vision-capable model or vision subagent to send it',
+    'Use a vision model',
+  ],
+  [
+    'This paste remains inline. Text attachments support 64 KB per paste and 256 KB per draft.',
+    'Large paste kept inline',
+  ],
+]);
+
 const [message, setMessage] = createSignal<string | null>(null);
 const [kind, setKind] = createSignal<'success' | 'warning'>('success');
 const [anchor, setAnchor] = createSignal<HTMLElement | undefined>();
@@ -92,8 +121,12 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
                 <span class="session-action-feedback-attention-glyph">!</span>
               </Show>
             </span>
-            <span class="session-action-feedback-message" title={visibleMessage()}>
-              {visibleMessage()}
+            <span
+              class="session-action-feedback-message"
+              title={visibleMessage()}
+              aria-label={visibleMessage()}
+            >
+              {COMPACT_MESSAGES.get(visibleMessage()) ?? visibleMessage()}
             </span>
             <Show when={currentError()}>
               <span class="session-action-feedback-actions">
