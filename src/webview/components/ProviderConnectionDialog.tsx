@@ -215,6 +215,10 @@ export function ProviderConnectionDialog(props: {
         { signal: controller.signal }
       );
       if (controller.signal.aborted) return;
+      if (nextAuthorization.method === 'complete') {
+        finish();
+        return;
+      }
       setAuthorization(nextAuthorization);
       if (nextAuthorization.url) {
         postMessage({ type: 'vscode/open-external', payload: { url: nextAuthorization.url } });
@@ -403,7 +407,11 @@ export function ProviderConnectionDialog(props: {
                           >
                             <span>{method.label}</span>
                             <span class="provider-connect-method-type">
-                              {method.type === 'api' ? 'API key' : 'OAuth'}
+                              {method.type === 'api'
+                                ? 'API key'
+                                : method.type === 'external'
+                                  ? 'External credentials'
+                                  : 'OAuth'}
                             </span>
                           </button>
                         )}

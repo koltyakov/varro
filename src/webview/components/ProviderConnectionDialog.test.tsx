@@ -158,6 +158,31 @@ async function startApiFlow() {
   return keyInput;
 }
 
+it('finishes an external credential connection without a key, browser handoff, or OAuth callback', async () => {
+  setState('providerAuthMethods', 'openai', [{ type: 'external', label: 'CLI credentials' }]);
+  clientMocks.authorizeProvider.mockResolvedValue({
+    url: '',
+    method: 'complete',
+    instructions: '',
+  });
+  const onClose = renderDialog();
+  chooseProvider('OpenAI');
+  chooseMethod('CLI credentials');
+  expect(dialog()!.querySelector('input[type="password"]')).toBeNull();
+  primaryButton().click();
+  await flush();
+  expect(clientMocks.authorizeProvider).toHaveBeenCalledWith(
+    { providerID: 'openai', method: 0, inputs: {} },
+    { signal: expect.any(AbortSignal) }
+  );
+  expect(clientMocks.completeProviderAuth).not.toHaveBeenCalled();
+  expect(postMessageMock).toHaveBeenCalledWith({ type: 'providers/auth-changed' });
+  expect(
+    postMessageMock.mock.calls.some(([message]) => message.type === 'vscode/open-external')
+  ).toBe(false);
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);

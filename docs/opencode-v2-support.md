@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 103 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.34`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.24`, with 21 platform- or family-specific skips and four failures described in the 2.0.24 review below. None of these releases has a full compatibility pass in this run. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.18.35` and v2 `2.0.25`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,70 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.25 compatibility review
+
+Reviewed v2.0.24 to v2.0.25, `bd55d4895f` through `62e087ff7b`.
+The release adds external credential references and a `/api/integration/:integrationID/connect/external`
+route. Azure CLI authentication moves from OAuth to this method; AWS named profiles use it too.
+Varro now exposes external methods, submits their typed form answers, and finishes only after
+the server acknowledges the connection. It does not open a browser or request an OAuth callback.
+Custom string fields remain editable even when the server supplies suggested values, so newly
+created AWS profiles and Azure resources can be entered.
+
+Consumed SSE envelopes, session/message records, permission/form reply routes, and managed
+`serve` output remain compatible. Experimental policy actions replace `permission` with
+`tool.use` and add `integration.use`; Varro's provider-disable rules still use the unchanged
+`provider.use` action. Server-native agent defaults no longer ask about external directories.
+Varro continues to project the server's rules without overriding them.
+
+Runtime fixes reject incomplete tool arguments without executing repaired input, preserve
+interrupted reasoning safely on follow-up turns, update session timestamps at step boundaries,
+refresh AWS SSO credentials, retain remote configuration during refresh failures, and improve
+ChatGPT cache-affinity headers. File reads gain streaming and range support, and PTY connections
+validate origin and location before upgrading. Client service-ensure decisions are refactored;
+Varro only uses service discovery and retains its own managed startup. Remote pairing, plugin
+runtime packaging, Office previews, desktop, TUI, and GUI changes need no Varro adaptation.
+
+The tested v2 client is `2.0.25`; v1 remains current at `1.18.35`.
+Support floors remain v2 `2.0.5` and v1 `1.16.0`. The unchanged v1 SDK does not require a new
+Docker support-range run. External credential coverage uses deterministic adapter and dialog
+fixtures; live Azure/AWS accounts were not used.
+
+All 851 focused adapter, provider-dialog, credential-store, startup/server, state, and transport
+unit tests passed. Lint, lint check, formatting, both TypeScript checks, and the build passed.
+The isolated VS Code `v2-first-run` scenario passed against the published 2.0.25 CLI, including
+activation, managed ownership, health, and event-stream connection.
+
+The released-server matrix passed 122 checks, failed five, and skipped 25 platform- or
+family-specific checks. All 36 applicable checks passed on v2.0.25, with two skips.
+The five shared compatibility unit tests passed after the matrix finished.
+
+| Scope | Tested behavior | Issues found | All cases complete |
+| --- | --- | --- | --- |
+| v2.0.25 | 36 passed, 2 skipped | None found | Yes, all applicable automated checks |
+| v1.16.0 and v1.18.35 | 27 passed, 1 failed, 10 skipped each | Follower authentication after owner replacement | No, later recovery phases were not reached |
+| v2.0.5 | 32 passed, 3 failed, 3 skipped | Replacement ownership, reboot recovery, multi-window ownership | No, later recovery phases were not reached |
+
+These are previously documented recovery failure signatures, not new HTTP-contract changes:
+
+- Both v1 releases restart the owner successfully but leave the follower in an authentication
+  error instead of quietly reattaching. This blocks that window's conversation access.
+  Inspect follower credential refresh and lease-generation ordering, then rerun killed-server
+  and owner-restart recovery. Evidence is in `artifacts/ai-test-data/multi-window-AwRdmo/failure.json`
+  and `artifacts/ai-test-data/multi-window-qkwy07/failure.json`.
+- V2.0.5 replacement recovery reports `unmanaged` instead of `current-host`; multi-window
+  recovery reports `unmanaged` instead of `other-host`. Healthy event streams reconnect, but
+  managed lifecycle operations lose their ownership identity. Inspect authenticated floor-endpoint
+  fallback and credential-backed registration identity checks. Evidence is in
+  `artifacts/ai-test-data/startup-uIMYF0/failure.json` and
+  `artifacts/ai-test-data/multi-window-RNd6kM/failure.json`.
+- V2.0.5 simulated reboot recovery fails its healthy-start assertion. Capture the startup
+  probe, lease identity, and credential-restoration phases before changing recovery logic.
+  Evidence is in `artifacts/ai-test-data/startup-wuXBnK/failure.json`.
+
+Complete matrix logs are under `artifacts/opencode-adapters/run-ZrPK6E/`.
+Live Azure/AWS sign-in and full visual streaming performance remain unverified by this bump.
 
 ### 1.18.35 compatibility review
 

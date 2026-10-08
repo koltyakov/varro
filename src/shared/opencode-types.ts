@@ -825,7 +825,7 @@ export type ProviderAuthPromptSelect = {
 };
 
 export type ProviderAuthMethod = {
-  type: 'oauth' | 'api';
+  type: 'oauth' | 'api' | 'external';
   label: string;
   prompts?: Array<ProviderAuthPromptText | ProviderAuthPromptSelect>;
 };
@@ -834,7 +834,7 @@ export type ProviderAuthMethodsByProvider = Record<string, ProviderAuthMethod[]>
 
 export type ProviderAuthAuthorization = {
   url: string;
-  method: 'auto' | 'code';
+  method: 'auto' | 'code' | 'complete';
   instructions: string;
   attemptID?: string;
 };

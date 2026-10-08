@@ -89,7 +89,7 @@
   "dependencies": {
     "@imagemagick/magick-wasm": "0.0.44",
     "@opencode-ai/sdk": "^1.18.35",
-    "@opencode/client": "^2.0.24",
+    "@opencode/client": "^2.0.25",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.16",
     "highlight.js": "11.12.0",
@@ -117,7 +117,7 @@
     "oxlint-tsgolint": "7.0.2003",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.3.3",
+    "vite": "8.3.4",
     "vite-plugin-solid": "2.11.14",
     "vitest": "5.0.3",
     "ws": "8.22.0"

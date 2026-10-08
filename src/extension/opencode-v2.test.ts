@@ -403,37 +403,117 @@ describe('v2 authentication fields', () => {
     );
   });
 
-  it.each(['oauth', 'key'])('preserves scalar defaults and typed %s answers', async (type) => {
+  it.each(['oauth', 'key', 'external'])(
+    'preserves scalar defaults and typed %s answers',
+    async (type) => {
+      const integration = {
+        id: 'fixture',
+        methods: [
+          {
+            id: 'login',
+            type,
+            label: 'Sign in',
+            form: [
+              { key: 'enabled', type: 'boolean', default: false, required: true },
+              { key: 'count', type: 'integer', default: 0 },
+              { key: 'ratio', type: 'number' },
+              {
+                key: 'server',
+                type: 'string',
+                default: 'https://example.test',
+                placeholder: 'Server URL',
+              },
+              {
+                key: 'internal',
+                type: 'string',
+                hidden: true,
+                default: 'internal-default',
+                when: [{ key: 'enabled', op: 'eq', value: false }],
+              },
+              {
+                key: 'inactive',
+                type: 'string',
+                hidden: true,
+                default: 'omit',
+                when: [{ key: 'enabled', op: 'eq', value: true }],
+              },
+            ],
+          },
+        ],
+      };
+      const wire = vi.fn(async (_method: string, path: string) => {
+        if (path === '/api/provider') return { data: [] };
+        if (path === '/api/provider/fixture') return { data: {} };
+        if (path === '/api/integration') return { data: [integration] };
+        if (path === '/api/integration/fixture') return { data: integration };
+        if (path.endsWith('/connect/oauth')) return { data: { attemptID: 'attempt' } };
+        if (path.endsWith('/connect/key')) return null;
+        if (path.endsWith('/connect/external')) return null;
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const adapter = new OpenCodeV2Adapter(wire);
+      expect(await adapter.request('GET', '/provider/auth', undefined)).toMatchObject({
+        fixture: [
+          {
+            prompts: [
+              {
+                key: 'enabled',
+                type: 'select',
+                default: 'false',
+                options: [
+                  { value: 'true', label: 'Yes' },
+                  { value: 'false', label: 'No' },
+                ],
+              },
+              { key: 'count', default: '0' },
+              { key: 'ratio', type: 'text' },
+              { key: 'server', default: 'https://example.test', placeholder: 'Server URL' },
+              { key: 'internal', hidden: true, default: 'internal-default' },
+              { key: 'inactive', hidden: true, default: 'omit' },
+            ],
+          },
+        ],
+      });
+      const inputs = { enabled: 'false', count: '0', ratio: '1.25', server: 'https://custom.test' };
+      await adapter.request(
+        type === 'key' ? 'PUT' : 'POST',
+        type === 'key' ? '/auth/fixture' : '/provider/fixture/oauth/authorize',
+        type === 'key' ? { type: 'api', key: 'token', metadata: inputs } : { method: 0, inputs }
+      );
+      expect(wire).toHaveBeenLastCalledWith(
+        'POST',
+        `/api/integration/fixture/connect/${type}`,
+        expect.objectContaining({
+          answer: {
+            enabled: false,
+            count: 0,
+            ratio: 1.25,
+            server: 'https://custom.test',
+            internal: 'internal-default',
+          },
+        }),
+        expect.anything()
+      );
+    }
+  );
+
+  it('connects external credentials with custom profile names without an OAuth attempt', async () => {
     const integration = {
-      id: 'fixture',
+      id: 'amazon-bedrock',
       methods: [
+        { type: 'env', names: ['AWS_BEARER_TOKEN_BEDROCK'] },
+        { type: 'key', label: 'API key' },
         {
-          id: 'login',
-          type,
-          label: 'Sign in',
+          type: 'external',
+          id: 'aws-profile',
+          label: 'AWS profile',
           form: [
-            { key: 'enabled', type: 'boolean', default: false, required: true },
-            { key: 'count', type: 'integer', default: 0 },
-            { key: 'ratio', type: 'number' },
             {
-              key: 'server',
+              key: 'profile',
               type: 'string',
-              default: 'https://example.test',
-              placeholder: 'Server URL',
-            },
-            {
-              key: 'internal',
-              type: 'string',
-              hidden: true,
-              default: 'internal-default',
-              when: [{ key: 'enabled', op: 'eq', value: false }],
-            },
-            {
-              key: 'inactive',
-              type: 'string',
-              hidden: true,
-              default: 'omit',
-              when: [{ key: 'enabled', op: 'eq', value: true }],
+              custom: true,
+              options: [{ value: 'default', label: 'Default' }],
+              placeholder: 'Profile name',
             },
           ],
         },
@@ -441,56 +521,51 @@ describe('v2 authentication fields', () => {
     };
     const wire = vi.fn(async (_method: string, path: string) => {
       if (path === '/api/provider') return { data: [] };
-      if (path === '/api/provider/fixture') return { data: {} };
       if (path === '/api/integration') return { data: [integration] };
-      if (path === '/api/integration/fixture') return { data: integration };
-      if (path.endsWith('/connect/oauth')) return { data: { attemptID: 'attempt' } };
-      if (path.endsWith('/connect/key')) return null;
+      if (path === '/api/provider/amazon-bedrock') return { data: {} };
+      if (path === '/api/integration/amazon-bedrock') return { data: integration };
+      if (path.endsWith('/connect/external')) return null;
       throw new Error(`Unexpected request: ${path}`);
     });
     const adapter = new OpenCodeV2Adapter(wire);
     expect(await adapter.request('GET', '/provider/auth', undefined)).toMatchObject({
-      fixture: [
+      'amazon-bedrock': [
+        { type: 'api' },
         {
-          prompts: [
-            {
-              key: 'enabled',
-              type: 'select',
-              default: 'false',
-              options: [
-                { value: 'true', label: 'Yes' },
-                { value: 'false', label: 'No' },
-              ],
-            },
-            { key: 'count', default: '0' },
-            { key: 'ratio', type: 'text' },
-            { key: 'server', default: 'https://example.test', placeholder: 'Server URL' },
-            { key: 'internal', hidden: true, default: 'internal-default' },
-            { key: 'inactive', hidden: true, default: 'omit' },
-          ],
+          type: 'external',
+          prompts: [{ type: 'text', key: 'profile', placeholder: 'Profile name' }],
         },
       ],
     });
-    const inputs = { enabled: 'false', count: '0', ratio: '1.25', server: 'https://custom.test' };
-    await adapter.request(
-      type === 'key' ? 'PUT' : 'POST',
-      type === 'key' ? '/auth/fixture' : '/provider/fixture/oauth/authorize',
-      type === 'key' ? { type: 'api', key: 'token', metadata: inputs } : { method: 0, inputs }
-    );
+    await expect(
+      adapter.request('POST', '/provider/amazon-bedrock/oauth/authorize', {
+        method: 1,
+        inputs: { profile: 'new-profile' },
+      })
+    ).resolves.toEqual({ url: '', method: 'complete', instructions: '' });
     expect(wire).toHaveBeenLastCalledWith(
       'POST',
-      `/api/integration/fixture/connect/${type}`,
-      expect.objectContaining({
-        answer: {
-          enabled: false,
-          count: 0,
-          ratio: 1.25,
-          server: 'https://custom.test',
-          internal: 'internal-default',
-        },
-      }),
+      '/api/integration/amazon-bedrock/connect/external',
+      {
+        methodID: 'aws-profile',
+        answer: { profile: 'new-profile' },
+      },
       expect.anything()
     );
+  });
+
+  it('does not report an external connection as complete when the server rejects it', async () => {
+    const wire = vi.fn(async (method: string, path: string) => {
+      if (path === '/api/provider/azure') return { data: {} };
+      if (path === '/api/integration/azure')
+        return { data: { methods: [{ id: 'azure-cli', type: 'external', label: 'Azure CLI' }] } };
+      if (method === 'POST' && path === '/api/integration/azure/connect/external')
+        throw new Error('400 Azure resource name is required');
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    await expect(
+      new OpenCodeV2Adapter(wire).request('POST', '/provider/azure/oauth/authorize', { method: 0 })
+    ).rejects.toThrow('400 Azure resource name is required');
   });
 
   it.each([undefined, { server: 'https://custom.example' }])(

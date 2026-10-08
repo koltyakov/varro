@@ -116,9 +116,9 @@ function connectionInfo(integration: IntegrationInfo | undefined) {
 function v1AuthMethods(integration: IntegrationInfo | undefined): ProviderAuthMethod[] {
   return (
     integration?.methods
-      .filter((item) => item.type === 'oauth' || item.type === 'key')
+      .filter((item) => item.type === 'oauth' || item.type === 'key' || item.type === 'external')
       .map((item) => ({
-        type: item.type === 'key' ? 'api' : 'oauth',
+        type: item.type === 'key' ? 'api' : item.type,
         label: item.label ?? 'API key',
         prompts: item.form?.flatMap<NonNullable<ProviderAuthMethod['prompts']>[number]>((field) => {
           if (field.type === 'external') return [];
@@ -147,7 +147,7 @@ function v1AuthMethods(integration: IntegrationInfo | undefined): ProviderAuthMe
                 ],
               },
             ];
-          if (field.type === 'string' && field.options)
+          if (field.type === 'string' && field.options && !field.custom)
             return [
               {
                 ...base,
@@ -1333,9 +1333,16 @@ export class OpenCodeV2Adapter {
     if (action === 'authorize') {
       const integration = asRecord(await raw('GET', base))?.data as IntegrationInfo;
       const methods = integration.methods.filter(
-        (item) => item.type === 'key' || item.type === 'oauth'
+        (item) => item.type === 'key' || item.type === 'oauth' || item.type === 'external'
       );
       const selected = methods[Number(input.method ?? 0)];
+      if (selected?.type === 'external') {
+        await raw('POST', `${base}/connect/external`, {
+          methodID: selected.id,
+          answer: v2AuthAnswers(selected.form, input.inputs),
+        });
+        return { url: '', method: 'complete', instructions: '' };
+      }
       if (selected?.type !== 'oauth') throw new Error('Unsupported OpenCode authentication method');
       const result = asRecord(
         asRecord(
