@@ -26,6 +26,7 @@ import { selectSession } from '../hooks/useOpenCode';
 import { trapModalFocus } from '../lib/modal-focus';
 import { mixRgb, parseThemeColor } from '../lib/theme';
 import { getExternalLinkContext, isSafeExternalHref } from '../lib/external-link';
+import { getLinkContext } from '../lib/link-context';
 import { asRecord, getString } from '../lib/runtime-values';
 import { checkIcon, copyIcon, expandIcon, xmarkIcon } from '../lib/ui-icons';
 import { createExternalLinkIconElement } from './ExternalLinkIcon';
@@ -359,11 +360,12 @@ function toAbsolutePath(path: string) {
   if (!workspacePath) return normalizePath(path);
 
   const relativePath = normalizePath(path).replace(/^\.\//, '');
+  if (relativePath === '.') return normalizePath(workspacePath);
   return `${trimTrailingSlashes(normalizePath(workspacePath))}/${relativePath}`;
 }
 
 function buildFileLink(raw: string, label?: string) {
-  const parsed = splitPathReference(raw);
+  const parsed = splitPathReference(getLocalFilePath(raw) ?? raw);
   if (!parsed) return null;
 
   const absolutePath = toAbsolutePath(parsed.path);
@@ -593,17 +595,28 @@ const CANONICAL_SPECIAL_FILE_NAMES = new Set([
 const MARKDOWN_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 
 function isLocalFileHref(href: string | null): boolean {
-  if (!href) return false;
-  if (href.startsWith('#')) return false;
-  if (/^[A-Za-z]:[/\\]/.test(href)) return true;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return false;
-  if (href.startsWith('//')) return false;
-  return (
-    href.startsWith('/') ||
-    href.startsWith('./') ||
-    href.startsWith('../') ||
-    FILE_PATH_REFERENCE_RE.test(href)
-  );
+  return getLocalFilePath(href) !== null;
+}
+
+function getLocalFilePath(href: string | null): string | null {
+  if (!href || href.startsWith('#') || href.startsWith('//')) return null;
+  if (/^file:\/\//i.test(href)) {
+    try {
+      const url = new URL(href);
+      const path = decodeURIComponent(url.pathname);
+      if (url.hostname && url.hostname !== 'localhost') return `//${url.hostname}${path}`;
+      return path.replace(/^\/([A-Za-z]:\/)/, '$1');
+    } catch {
+      // Malformed file URIs must not become actionable paths.
+      return null;
+    }
+  }
+  if (/^[A-Za-z]:[/\\]/.test(href)) return href;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return null;
+  // oxlint-disable-next-line no-control-regex -- Reject control characters rather than treating them as paths.
+  if (/[\u0000-\u001f?#]/.test(href)) return null;
+  // Explicit Markdown targets may name folders without an extension or a ./ prefix.
+  return href;
 }
 
 function isLikelyFilePathReference(raw: string, requireCanonicalSpecialName = false): boolean {
@@ -629,7 +642,8 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
   }
 
   const href = anchor.getAttribute('href')?.trim() || '';
-  let filePath = isLocalFileHref(href) ? splitPathReference(href)?.path : undefined;
+  const localPath = getLocalFilePath(href);
+  let filePath = localPath ? splitPathReference(localPath)?.path : undefined;
   if (!filePath && anchor.dataset.file) {
     // DOMPurify strips Windows drive-letter hrefs; the trusted renderer payload retains the path.
     try {
@@ -638,17 +652,16 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
       // A malformed optional file payload must not supply native menu context.
     }
   }
-  if (filePath && isLocalFileHref(filePath)) {
+  const text = anchor.textContent || anchor.querySelector('img')?.getAttribute('alt') || '';
+  anchor.setAttribute('data-vscode-context', getLinkContext(text));
+  if (filePath) {
     anchor.setAttribute(
       'data-vscode-context',
-      JSON.stringify({
-        webviewSection: 'varroFileLink',
-        varroFilePath: toAbsolutePath(filePath),
-      })
+      getLinkContext(text, { path: toAbsolutePath(filePath) })
     );
   }
   if (isLocalFileHref(href)) {
-    anchor.setAttribute('href', href);
+    anchor.setAttribute('href', localPath!);
     anchor.removeAttribute('data-external');
     if (anchor.classList.contains('file-path-link')) {
       prependLinkIcon(anchor, createFileTypeIconElement(filePath), true);
@@ -658,7 +671,7 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
 
   if (isSafeExternalHref(href)) {
     anchor.setAttribute('href', href);
-    anchor.setAttribute('data-vscode-context', getExternalLinkContext(href));
+    anchor.setAttribute('data-vscode-context', getExternalLinkContext(href, text));
     anchor.setAttribute('data-external', 'true');
     anchor.classList.add('external-link');
     const image = anchor.querySelector('img');
@@ -750,6 +763,7 @@ function linkifySessionReferences(fragment: DocumentFragment) {
         folderLabel.textContent = ` · ${segment.reference.folderLabel}`;
         anchor.append(folderLabel);
       }
+      anchor.setAttribute('data-vscode-context', getLinkContext(anchor.textContent ?? ''));
       replacement.append(anchor);
     }
     node.replaceWith(replacement);

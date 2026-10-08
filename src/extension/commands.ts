@@ -319,6 +319,19 @@ export function registerCommands(
       await vscode.env.openExternal(vscode.Uri.parse('https://github.com/koltyakov/varro'));
     }),
 
+    vscode.commands.registerCommand('varro.chat.copyLinkText', async (linkContext: unknown) => {
+      if (
+        !linkContext ||
+        typeof linkContext !== 'object' ||
+        !('varroLinkText' in linkContext) ||
+        typeof linkContext.varroLinkText !== 'string' ||
+        !linkContext.varroLinkText
+      ) {
+        throw new Error('No valid link text was provided');
+      }
+      await vscode.env.clipboard.writeText(linkContext.varroLinkText);
+    }),
+
     vscode.commands.registerCommand('varro.chat.copyLink', async (linkContext: unknown) => {
       if (
         !linkContext ||

@@ -36,7 +36,7 @@ for (const url of ['http://ingest.above-all.test/', 'https://example.test/docs']
           type: 'text',
           text:
             entry.info.role === 'assistant'
-              ? `[Docs](${href}) ${href}\n\n| Component | URL |\n| --- | --- |\n| Ingestion | ${href} |\n\nFile: \`src/shared/protocol.ts:12-15\``
+              ? `[Docs](${href}) ${href}\n\n| Component | URL |\n| --- | --- |\n| Ingestion | ${href} |\n\nFile: \`src/shared/protocol.ts:12-15\`\n\n[Project folder](src/) [Local folder](file:///workspace/varro/src/)`
               : `See ${href}.`,
         };
         harness.updateMessagePart(part);
@@ -101,19 +101,35 @@ for (const url of ['http://ingest.above-all.test/', 'https://example.test/docs']
 
     const link = user.locator('a.external-link');
     expect(JSON.parse((await link.getAttribute('data-vscode-context')) ?? '{}')).toEqual({
+      preventDefaultContextMenuItems: true,
+      varroLinkText: url,
       webviewSection: 'varroExternalLink',
       varroLinkUrl: url,
     });
     await link.click({ button: 'right' });
     expect(await host.evaluate((observations) => observations.contextMenus)).toBe(1);
-    const fileLink = assistant.locator('a.file-path-link');
+    const fileLink = assistant.locator('a.file-path-link').nth(0);
     await expect(fileLink).toHaveText('protocol.ts (line 12-15)');
     expect(JSON.parse((await fileLink.getAttribute('data-vscode-context')) ?? '{}')).toEqual({
+      preventDefaultContextMenuItems: true,
+      varroLinkText: 'protocol.ts (line 12-15)',
       webviewSection: 'varroFileLink',
       varroFilePath: '/workspace/varro/src/shared/protocol.ts',
     });
     await fileLink.locator('.link-leading-label').click({ button: 'right' });
     expect(await host.evaluate((observations) => observations.contextMenus)).toBe(2);
+    for (const [index, text] of ['Project folder', 'Local folder'].entries()) {
+      const folderLink = assistant.locator('a.file-path-link').nth(index + 1);
+      await expect(folderLink).toHaveText(text);
+      expect(JSON.parse((await folderLink.getAttribute('data-vscode-context')) ?? '{}')).toEqual({
+        preventDefaultContextMenuItems: true,
+        varroLinkText: text,
+        webviewSection: 'varroFileLink',
+        varroFilePath: '/workspace/varro/src',
+      });
+      await folderLink.locator('.link-leading-label').click({ button: 'right' });
+      expect(await host.evaluate((observations) => observations.contextMenus)).toBe(index + 3);
+    }
     await host.dispose();
   });
 }

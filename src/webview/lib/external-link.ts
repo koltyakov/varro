@@ -1,3 +1,5 @@
+import { getLinkContext } from './link-context';
+
 export type ExternalLinkTextSegment =
   | { type: 'text'; content: string }
   | { type: 'external-link'; href: string; target: string; kind: 'web' | 'git' };
@@ -20,8 +22,8 @@ export function isSafeExternalHref(href: string | null): boolean {
   }
 }
 
-export function getExternalLinkContext(href: string): string {
-  return JSON.stringify({ webviewSection: 'varroExternalLink', varroLinkUrl: href });
+export function getExternalLinkContext(href: string, text = href): string {
+  return getLinkContext(text, { url: href });
 }
 
 export function getGitRemoteHttpsUrl(remote: string): string | null {

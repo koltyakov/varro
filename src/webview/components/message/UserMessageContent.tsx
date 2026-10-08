@@ -79,6 +79,7 @@ import {
   splitExternalLinkText,
   type ExternalLinkTextSegment,
 } from '../../lib/external-link';
+import { getLinkContext } from '../../lib/link-context';
 import { formatAgentLabel } from '../../lib/format';
 import { AgentChip } from './AgentChip';
 import { InlineMessageImage } from '../InlineMessageImage';
@@ -1906,7 +1907,7 @@ function ExternalLink(props: { link: Extract<InlineTextSegment, { type: 'externa
       class="external-link"
       href={props.link.target}
       data-external="true"
-      data-vscode-context={getExternalLinkContext(props.link.target)}
+      data-vscode-context={getExternalLinkContext(props.link.target, props.link.href)}
       title={`Open ${props.link.href}`}
       onClick={openExternal}
     >
@@ -1935,6 +1936,9 @@ function SessionReferenceLink(props: { reference: SessionReference }) {
     <a
       class="session-reference-link"
       href={props.reference.href}
+      data-vscode-context={getLinkContext(
+        `${props.reference.title}${props.reference.folderLabel ? ` · ${props.reference.folderLabel}` : ''}`
+      )}
       data-copy-marker={props.reference.marker}
       data-session-id={props.reference.id}
       data-session-directory={props.reference.directory}

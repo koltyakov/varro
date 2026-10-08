@@ -10,6 +10,71 @@ import {
 import { appendDeltaToLastLargeAssistant, appendDeltaToRapidStreaming } from './scroll-helpers';
 
 test.describe('auto-scroll', () => {
+  for (const scenario of ['mixed-small-transcript', 'large-transcript', 'rapid-streaming-jitter']) {
+    for (const detached of [false, true]) {
+      test(`restores hidden bottom-follow instantly in ${scenario}, detached=${detached}`, async ({
+        page,
+      }) => {
+        await page.goto(`/e2e/harness/index.html?scenario=${scenario}`);
+        const list = page.locator('.interactive-list');
+        await expect(list).toBeVisible();
+        await expect
+          .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+          .toBeLessThan(1);
+        await waitForAnimationFrames(page, 20);
+        if (detached) {
+          await list.hover();
+          await page.mouse.wheel(0, -500);
+          await expect
+            .poll(() =>
+              getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom)
+            )
+            .toBeGreaterThan(100);
+          await waitForAnimationFrames(page, 20);
+        }
+
+        const result = await list.evaluate(async (element) => {
+          const beforeTop = element.scrollTop;
+          Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+          document.dispatchEvent(new Event('visibilitychange'));
+          // Add settled layout while frames are unavailable, then restore in the same task.
+          const growth = document.createElement('div');
+          growth.style.height = '2400px';
+          element.querySelector('.interactive-list-track')!.appendChild(growth);
+          const beforeRestoreDistance =
+            element.scrollHeight - element.clientHeight - element.scrollTop;
+          Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+          document.dispatchEvent(new Event('visibilitychange'));
+          const restoredTop = element.scrollTop;
+          const distances = [element.scrollHeight - element.clientHeight - element.scrollTop];
+          const tops = [restoredTop];
+          for (let frame = 0; frame < 8; frame += 1) {
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => setTimeout(resolve, 0))
+            );
+            distances.push(element.scrollHeight - element.clientHeight - element.scrollTop);
+            tops.push(element.scrollTop);
+          }
+          Reflect.deleteProperty(document, 'hidden');
+          growth.remove();
+          return { beforeTop, beforeRestoreDistance, distances, tops };
+        });
+        expect(result.beforeRestoreDistance).toBeGreaterThan(2000);
+        if (detached) {
+          expect(
+            result.tops.every((top) => Math.abs(top - result.beforeTop) <= 1),
+            JSON.stringify(result)
+          ).toBe(true);
+        } else {
+          expect(
+            result.distances.every((distance) => Math.abs(distance) <= 1),
+            JSON.stringify(result)
+          ).toBe(true);
+        }
+      });
+    }
+  }
+
   for (const scenario of ['mixed-small-transcript', 'large-transcript']) {
     test(`jumps past history before smoothly revealing a sent card in ${scenario}`, async ({
       page,

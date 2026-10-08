@@ -5,6 +5,8 @@ describe('getExternalLinkContext', () => {
   it('preserves the exact link URL in the native context menu', () => {
     const href = 'http://example.com/docs?q="quoted"&next=one';
     expect(JSON.parse(getExternalLinkContext(href))).toEqual({
+      preventDefaultContextMenuItems: true,
+      varroLinkText: href,
       webviewSection: 'varroExternalLink',
       varroLinkUrl: href,
     });

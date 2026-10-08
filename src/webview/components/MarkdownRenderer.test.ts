@@ -1541,6 +1541,11 @@ describe('MarkdownRenderer', () => {
     expect(link?.getAttribute('href')).toBe('#session/ses_found123');
     expect(link?.dataset.sessionId).toBe('ses_found123');
     expect(link?.querySelector('.session-reference-icon')).not.toBeNull();
+    expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+      preventDefaultContextMenuItems: true,
+      varroLinkText: 'Permission request states',
+      webviewSection: 'varroLink',
+    });
     expect(link?.querySelector('.link-leading-content')?.textContent).toBe('Permission');
     expect(link?.querySelector('.link-leading-label')?.textContent).toBe('Permission');
     expect(container?.textContent).toContain('session:ses_missing456');
@@ -1650,6 +1655,8 @@ describe('MarkdownRenderer', () => {
         expect(link.getAttribute('data-external')).toBe('true');
         expect(link.getAttribute('href')).toBe(url);
         expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+          preventDefaultContextMenuItems: true,
+          varroLinkText: link.textContent,
           webviewSection: 'varroExternalLink',
           varroLinkUrl: url,
         });
@@ -1721,6 +1728,8 @@ describe('MarkdownRenderer', () => {
     expect(link?.getAttribute('href')).toBe('/repo/src/webview/App.tsx');
     expect(link?.getAttribute('data-file')).toContain('/repo/src/webview/App.tsx');
     expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+      preventDefaultContextMenuItems: true,
+      varroLinkText: 'Open file',
       webviewSection: 'varroFileLink',
       varroFilePath: '/repo/src/webview/App.tsx',
     });
@@ -1828,6 +1837,27 @@ describe('MarkdownRenderer', () => {
       label: 'App.tsx (line 12)',
       path: 'C:/repo/src/App.tsx',
     },
+    { content: '[Project folder](src)', label: 'Project folder', path: '/repo/src' },
+    { content: '[Project folder](src/)', label: 'Project folder', path: '/repo/src' },
+    { content: '[Project folder](./src)', label: 'Project folder', path: '/repo/src' },
+    { content: '[Project folder](.)', label: 'Project folder', path: '/repo' },
+    { content: '[Project folder](/repo/src/)', label: 'Project folder', path: '/repo/src' },
+    { content: '[Project folder](file:///repo/src/)', label: 'Project folder', path: '/repo/src' },
+    {
+      content: '[Project folder](file:///repo/folder%20with%20spaces/)',
+      label: 'Project folder',
+      path: '/repo/folder with spaces',
+    },
+    {
+      content: '[Project folder](file:///C:/repo/src/)',
+      label: 'Project folder',
+      path: 'C:/repo/src',
+    },
+    {
+      content: '[Local file](file:///repo/README.md)',
+      label: 'Local file',
+      path: '/repo/README.md',
+    },
   ])('provides a native copy-path target for $content', ({ content, label, path }) => {
     setState('editorContext', {
       workspacePath: '/repo',
@@ -1840,6 +1870,8 @@ describe('MarkdownRenderer', () => {
     const link = container!.querySelector('a.file-path-link');
     expect(link?.textContent).toBe(label);
     expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+      preventDefaultContextMenuItems: true,
+      varroLinkText: label,
       webviewSection: 'varroFileLink',
       varroFilePath: path,
     });
@@ -1881,6 +1913,8 @@ describe('MarkdownRenderer', () => {
 
     const link = container!.querySelector('a');
     expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+      preventDefaultContextMenuItems: true,
+      varroLinkText: 'Safe',
       webviewSection: 'varroFileLink',
       varroFilePath: '/repo/src/safe.ts',
     });

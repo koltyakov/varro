@@ -429,6 +429,11 @@ Direct input acquires ownership only when it can affect the transcript:
   after the follow loop is cancelled. Idle and detached reading use passive wheel delivery.
 - Initial positioning also requires consecutive stable frames. Keep initial measurement corrections
   immediate until then, so row sizing delivered after the first frame does not start animated follow.
+- Returning from a hidden editor catches bottom-follow up before paint, without easing through output
+  accumulated while hidden. Keep late restoration measurements immediate until consecutive stable
+  frames agree, then restore normal easing. A follow-frame gap of at least 1,000 ms also catches up
+  immediately because host occlusion can suspend frames without a visibility event. This must not
+  reattach detached readers or override editing, navigation, diff, or pointer ownership.
 - Keep the transcript hidden behind its loading indicator through initial positioning and any initial
   viewport-filling history fetch. Reaching the end of the first page is not a ready-to-paint state when
   compact tool rows leave that page shorter than the viewport. Reveal only after the final bottom

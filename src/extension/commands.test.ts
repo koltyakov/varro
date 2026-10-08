@@ -1184,6 +1184,30 @@ describe('sidebar navigation commands', () => {
     }
   );
 
+  it.each([
+    'Project folder',
+    'Permission request states',
+    'protocol.ts (line 12-15)',
+    'https://example.com/docs?q=one&next=two#section',
+  ])('copies the whole link text %s independently of the selected word', async (text) => {
+    register();
+    await runCommand('varro.chat.copyLinkText', { varroLinkText: text });
+    expect(vscodeMock.env.clipboard.writeText).toHaveBeenCalledExactlyOnceWith(text);
+    expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
+    expect(vscodeMock.env.openExternal).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, {}, { varroLinkText: 42 }, { varroLinkText: '' }])(
+    'rejects malformed copy-text context %j',
+    async (context) => {
+      register();
+      await expect(runCommand('varro.chat.copyLinkText', context)).rejects.toThrow(
+        'No valid link text was provided'
+      );
+      expect(vscodeMock.env.clipboard.writeText).not.toHaveBeenCalled();
+    }
+  );
+
   it.each([undefined, null, {}, { varroLinkUrl: 42 }, { varroLinkUrl: 'javascript:alert(1)' }])(
     'rejects malformed copy-link context %j',
     async (context) => {
@@ -1207,6 +1231,7 @@ describe('sidebar navigation commands', () => {
 
   it.each([
     '/repo/src/shared/protocol.ts',
+    '/repo/src',
     '/repo/folder with spaces/file.ts',
     'C:/repo/src/App.tsx',
   ])('copies the full context-menu file path %s without opening it', async (path) => {

@@ -1237,6 +1237,11 @@ describe('UserMessageContent', () => {
     expect(link?.getAttribute('data-copy-marker')).toBe('session:ses_found123');
     expect(link?.getAttribute('data-session-id')).toBe('ses_found123');
     expect(link?.querySelector('.session-reference-icon')).not.toBeNull();
+    expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+      preventDefaultContextMenuItems: true,
+      varroLinkText: 'Permission request states',
+      webviewSection: 'varroLink',
+    });
     expect(container?.textContent).toContain('session:ses_missing456');
 
     const click = new MouseEvent('click', { bubbles: true, cancelable: true });
@@ -1313,6 +1318,8 @@ describe('UserMessageContent', () => {
       const link = links?.[0];
       expect(link?.getAttribute('href')).toBe(url);
       expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+        preventDefaultContextMenuItems: true,
+        varroLinkText: url,
         webviewSection: 'varroExternalLink',
         varroLinkUrl: url,
       });
@@ -1324,6 +1331,27 @@ describe('UserMessageContent', () => {
       expect(send).toHaveBeenCalledWith({
         type: 'vscode/open-external',
         payload: { url },
+      });
+    }
+  );
+
+  it.each(['src/', 'file:///repo/src/'])(
+    'offers complete label Copy and Copy path for a user-message folder link to %s',
+    (href) => {
+      setAppState('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      });
+      renderUserContent([textPart('text-1', `[Project folder](${href})`)]);
+      const link = container!.querySelector('a.file-path-link');
+      expect(link?.textContent).toBe('Project folder');
+      expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
+        preventDefaultContextMenuItems: true,
+        varroLinkText: 'Project folder',
+        webviewSection: 'varroFileLink',
+        varroFilePath: '/repo/src',
       });
     }
   );

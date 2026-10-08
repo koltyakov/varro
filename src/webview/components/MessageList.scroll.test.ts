@@ -52,6 +52,129 @@ installMessageListTestEnvironment({
 
 describe('MessageList auto-scroll', () => {
   it.each([
+    { working: true, detached: false },
+    { working: false, detached: false },
+    { working: true, detached: true },
+    { working: false, detached: true },
+  ])(
+    'catches up instantly after visibility restoration with working=$working, detached=$detached',
+    async ({ working, detached }) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      let hidden = false;
+      vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
+      let height = 1200;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          this.classList.contains('interactive-list-track') ? height : 400
+        );
+      });
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+      expect(list.scrollTop).toBe(800);
+      if (detached) {
+        list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        list.scrollTop = 200;
+        list.dispatchEvent(new Event('scroll'));
+      }
+
+      hidden = true;
+      document.dispatchEvent(new Event('visibilitychange'));
+      startLoading();
+      await Promise.resolve();
+      height += 2400;
+      if (!working) stopLoading();
+      await Promise.resolve();
+      hidden = false;
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(list.scrollTop).toBe(detached ? 200 : height - 400);
+      // Late row measurement on restoration must also settle before paint.
+      height += 300;
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+        expect(list.scrollTop).toBe(detached ? 200 : height - 400);
+      }
+
+      if (!detached) {
+        stopLoading();
+        await Promise.resolve();
+        for (let frame = 0; frame < 4; frame += 1) animationFrames.flush();
+        const previousTop = list.scrollTop;
+        height += 200;
+        startLoading();
+        await Promise.resolve();
+        animationFrames.flush();
+        expect(list.scrollTop).toBeGreaterThanOrEqual(previousTop);
+        expect(list.scrollTop).toBeLessThan(height - 400);
+        settleBottomFollow(animationFrames, list);
+        expect(list.scrollTop).toBe(height - 400);
+      }
+      animationFrames.restore();
+    }
+  );
+
+  it.each([true, false])(
+    'catches up instantly after suspended frames without a visibility event with working=%s',
+    async (working) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      let height = 1200;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          this.classList.contains('interactive-list-track') ? height : 400
+        );
+      });
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+      expect(list.scrollTop).toBe(800);
+      startLoading();
+      await Promise.resolve();
+      height += 2400;
+      if (!working) stopLoading();
+      await Promise.resolve();
+
+      const restoredAt = performance.now() + 2000;
+      animationFrames.flush(restoredAt);
+      expect(list.scrollTop).toBe(height - 400);
+      height += 300;
+      animationFrames.flush(restoredAt + 16);
+      expect(list.scrollTop).toBe(height - 400);
+      animationFrames.restore();
+    }
+  );
+
+  it.each([
     { growth: 24, detached: false, trackChanged: false },
     { growth: 120, detached: false, trackChanged: true },
     { growth: 120, detached: true, trackChanged: false },

@@ -248,6 +248,7 @@ const STRUCTURAL_ANCHOR_SETTLE_FRAME_LIMIT = 24;
 const NEW_TURN_ALIGNMENT_FRAME_LIMIT = 64;
 const NEW_TURN_ALIGNMENT_MAX_STEP_PX = 24;
 const BOTTOM_FOLLOW_SETTLE_FRAME_COUNT = 2;
+const BOTTOM_FOLLOW_RESUME_GAP_MS = 1000;
 // Paced text may trail the viewport by at most this much before the follower catches up.
 const STREAMING_FOLLOW_MAX_LAG_PX = 64;
 const WIDTH_RESIZE_SETTLE_MS = 100;
@@ -779,6 +780,7 @@ export function MessageList() {
   let bottomFollowSettleFrames = 0;
   let bottomFollowObservedStreaming = false;
   let bottomFollowPreservesNearBottomOffset = false;
+  let bottomFollowResumePending = false;
   const activeOlderHistoryLoads = new Map<
     string,
     { generation: number; windowVersion: number; promise: Promise<void> }
@@ -5362,6 +5364,8 @@ export function MessageList() {
     // position restoration, and browser clamp corrections synchronize immediately.
     const smooth =
       !options?.immediate &&
+      !document.hidden &&
+      !bottomFollowResumePending &&
       !widthResizeActive &&
       !(
         inlinePreviewBottomFollow?.sessionId === state.activeSessionId &&
@@ -5556,8 +5560,10 @@ export function MessageList() {
     pendingMeasuredAppendAnchor = null;
     restoreVisibleScrollAnchor(appendAnchor, { useMessageOffsetFallback: true });
     if (
-      isFunction(window.matchMedia) &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      document.hidden ||
+      bottomFollowResumePending ||
+      (isFunction(window.matchMedia) &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches)
     ) {
       performScroll({ force: true });
       startFollowLoop(sessionId);
@@ -5777,6 +5783,7 @@ export function MessageList() {
   }
 
   function disengageBottomFollow() {
+    bottomFollowResumePending = false;
     setInitialPositioningSessionId(null);
     pendingInitialScrollSessionId = null;
     pendingScrollToBottomRequest = false;
@@ -5845,6 +5852,13 @@ export function MessageList() {
         return;
       }
 
+      // An occluded editor can suspend frames without changing document visibility.
+      // Catch up before its first paint instead of replaying the accumulated growth.
+      if (elapsedMs >= BOTTOM_FOLLOW_RESUME_GAP_MS) {
+        bottomFollowResumePending = true;
+        bottomFollowMotion.reset();
+      }
+
       ignoreScrollUntil = Math.max(
         ignoreScrollUntil,
         performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS
@@ -5888,11 +5902,13 @@ export function MessageList() {
       // corrections immediate until consecutive frames agree on the hydrated layout.
       const settleFrameCount =
         pendingInitialHistoryFillSessionId === sessionId ||
+        bottomFollowResumePending ||
         bottomFollowObservedStreaming ||
         isWorking
           ? BOTTOM_FOLLOW_SETTLE_FRAME_COUNT
           : 1;
       if (bottomFollowSettleFrames >= settleFrameCount) {
+        bottomFollowResumePending = false;
         const shouldFillInitialViewport =
           pendingInitialHistoryFillSessionId === sessionId &&
           isSessionHistoryTruncated(sessionId) &&
@@ -7717,6 +7733,7 @@ export function MessageList() {
     );
     cancelPendingScroll();
     pendingScrollToBottomRequest = false;
+    bottomFollowResumePending = false;
     deferredScrollToBottomRequestKey = null;
     expectedScrollTop = -1;
     ignoreScrollUntil = 0;
@@ -8640,7 +8657,28 @@ export function MessageList() {
   const [presentationHidden, setPresentationHidden] = createSignal(document.hidden);
   const motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const [reducedMotion, setReducedMotion] = createSignal(motionQuery?.matches ?? false);
-  const onVisibilityChange = () => setPresentationHidden(document.hidden);
+  const onVisibilityChange = () => {
+    const wasHidden = presentationHidden();
+    const hidden = document.hidden;
+    const canResumeFollow =
+      autoScroll() &&
+      !editingMessage() &&
+      !diffFocusPauseActive &&
+      !pointerScrollOwnershipActive &&
+      !stickyNavigationOwnsScroll();
+    if (canResumeFollow && (hidden || wasHidden)) {
+      // Set this before flushing presentation so its layout corrections cannot ease.
+      bottomFollowResumePending = true;
+      bottomFollowMotion.reset();
+      cancelAppendScrollTransition();
+    }
+    setPresentationHidden(hidden);
+    const sessionId = state.activeSessionId;
+    if (!hidden && wasHidden && canResumeFollow && sessionId) {
+      performScroll({ immediate: true });
+      startFollowLoop(sessionId);
+    }
+  };
   const onMotionChange = () => setReducedMotion(motionQuery?.matches ?? false);
   document.addEventListener('visibilitychange', onVisibilityChange);
   motionQuery?.addEventListener?.('change', onMotionChange);
