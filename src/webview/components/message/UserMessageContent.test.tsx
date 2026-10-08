@@ -1412,7 +1412,10 @@ describe('UserMessageContent', () => {
     });
   });
 
-  it('hides delegated vision routing context while keeping inline image and agent chips', () => {
+  it.each([
+    'When calling the vision subagent, include',
+    'Call the vision subagent to inspect this image before responding. Include',
+  ])('hides delegated vision routing context while keeping chips: %s', (instruction) => {
     const image = imageFilePart('image-1', '1786723794731-image-1');
     image.source = {
       text: {
@@ -1430,7 +1433,7 @@ describe('UserMessageContent', () => {
       textPart(
         'text-2',
         '[Image for @vision: /tmp/varro-drops/drop-1/1786723794731-image-1]\n' +
-          'When calling the vision subagent, include {file:/tmp/varro-drops/drop-1/1786723794731-image-1} in its task prompt.'
+          `${instruction} {file:/tmp/varro-drops/drop-1/1786723794731-image-1} in its task prompt.`
       ),
       image,
     ]);
@@ -1442,7 +1445,7 @@ describe('UserMessageContent', () => {
     expect(container?.querySelector('.user-message-text .material-chip-icon')).toBeInstanceOf(
       HTMLImageElement
     );
-    expect(container?.textContent).not.toContain('When calling the vision subagent');
+    expect(container?.textContent).not.toContain(instruction);
     expect(container?.querySelector('.user-message-image-tile img')).toBeInstanceOf(
       HTMLImageElement
     );
@@ -1463,6 +1466,68 @@ describe('UserMessageContent', () => {
       'Run the review'
     );
   });
+
+  it.each(['\n', '\n\n', ' '])(
+    'hides vision routing joined to the original prompt with %j',
+    (separator) => {
+      const prompt = "What's on the image?";
+      const imagePath = '/var/folders/90/varro-drops/drop-1/Image_1';
+      const context = `[Image for @vision: ${imagePath}]\nCall the vision subagent to inspect this image before responding. Include {file:${imagePath}} in its task prompt.`;
+      const image = imageFilePart('image-1', 'Image 1');
+      const parts = [textPart('joined', `${prompt}${separator}${context}`), image];
+      renderUserContent(parts);
+
+      expect(container?.querySelector('.user-message-text')?.textContent?.trim()).toBe(prompt);
+      expect(getUserMessageEditText(parts)).toBe(prompt);
+      expect(getUserMessagePreviewText(parts)).toBe(prompt);
+      expect(container?.textContent).not.toContain(imagePath);
+      expect(container?.textContent).not.toContain('Call the vision subagent');
+      expect(container?.querySelector('.user-message-image-tile img')).toBeInstanceOf(
+        HTMLImageElement
+      );
+      expect(getUserMessageEditContext(parts).images).toHaveLength(1);
+    }
+  );
+
+  it('hides multiple joined legacy and current vision blocks without dropping surrounding prose', () => {
+    const firstPath = 'C:/Temp/varro-drops/Image 1.png';
+    const secondPath = '/var/folders/90/varro-drops/Image 2.png';
+    const text = [
+      'Compare the images.',
+      `[Image for @vision: ${firstPath}]`,
+      `When calling the vision subagent, include {file:${firstPath}} in its task prompt.`,
+      'Also read their text.',
+      `[Image for @vision: ${secondPath}]`,
+      `Call the vision subagent to inspect this image before responding. Include {file:${secondPath}} in its task prompt.`,
+      'Explain the difference.',
+    ].join('\r\n');
+    const parts = [
+      textPart('joined', text),
+      imageFilePart('first', 'Image 1'),
+      imageFilePart('second', 'Image 2'),
+    ];
+    expect(getUserMessageEditText(parts)).toBe(
+      'Compare the images.\nAlso read their text.\nExplain the difference.'
+    );
+    expect(parseUserMessageContent(parts).fileParts).toHaveLength(2);
+    expect(getUserMessageEditContext(parts).images).toHaveLength(2);
+  });
+
+  it.each(['fenced', 'incomplete', 'different instruction'] as const)(
+    'preserves user-authored vision-routing examples: %s',
+    (example) => {
+      const header = '[Image for @vision: /tmp/image.png]';
+      const instruction =
+        'Call the vision subagent to inspect this image before responding. Include {file:/tmp/image.png} in its task prompt.';
+      const prompt =
+        example === 'fenced'
+          ? `Example:\n\`\`\`text\n${header}\n${instruction}\n\`\`\``
+          : example === 'incomplete'
+            ? `Example:\n${header}`
+            : `Example:\n${header}\nDo not use this as generated context.`;
+      expect(getUserMessageEditText([textPart('example', prompt)])).toBe(prompt);
+    }
+  );
 
   it('renders textual agent mentions from known agents as inline chips', () => {
     setAppState('allAgents', [

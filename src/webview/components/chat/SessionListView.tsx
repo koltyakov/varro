@@ -8,6 +8,7 @@ import {
   hasActiveUsageLimit,
   isLoading,
   isSessionAwaitingInput,
+  isSessionCompacting,
   isSessionCompletedResponseUnread,
   isSessionUnread,
   getSessionPlanUpdatedAt,
@@ -70,6 +71,7 @@ import {
   forwardMessageIcon,
   navArrowRightIcon,
   cableTagIcon,
+  compressLinesIcon,
   folderIcon,
   folderPlusIcon,
   folderSettingsIcon,
@@ -287,6 +289,7 @@ export type SessionIndicatorSets = {
   permissionIds: Set<string>;
   questionIds: Set<string>;
   runningIds: Set<string>;
+  compactingIds: Set<string>;
   pendingIds: Set<string>;
   failedIds: Set<string>;
   attentionIds: Set<string>;
@@ -419,6 +422,7 @@ export type SessionStatusIndicatorKind =
   | 'failed'
   | 'attention'
   | 'running'
+  | 'compacting'
   | 'pending'
   | 'plan-ready'
   | 'completed';
@@ -548,11 +552,13 @@ export function getSessionStatusIndicatorKind(input: {
   hasPendingInput: boolean;
   isRunning: boolean;
   isPending?: boolean;
+  isCompacting?: boolean;
   isPlanReady: boolean;
   isCompleted: boolean;
 }): SessionStatusIndicatorKind | null {
   if (input.isFailed) return 'failed';
   if (input.hasPendingInput) return 'attention';
+  if (input.isCompacting) return 'compacting';
   if (input.isPending) return 'pending';
   if (input.isRunning) return 'running';
   if (input.isPlanReady) return 'plan-ready';
@@ -568,6 +574,8 @@ export function getSessionStatusIndicatorClass(kind: SessionStatusIndicatorKind)
       return 'is-attention';
     case 'running':
       return 'is-running';
+    case 'compacting':
+      return 'is-compacting';
     case 'pending':
       return 'is-pending';
     case 'plan-ready':
@@ -588,6 +596,8 @@ export function getSessionStatusIndicatorTitle(
       return 'Attention needed';
     case 'running':
       return options?.retrying ? 'Retrying' : 'Running';
+    case 'compacting':
+      return 'Compacting';
     case 'pending':
       return 'Pending background task';
     case 'plan-ready':
@@ -1712,6 +1722,7 @@ export function SessionListView(props: {
               hasPermissionRequest={sessionIndicators().permissionIds.has(sessionId)}
               hasQuestionRequest={sessionIndicators().questionIds.has(sessionId)}
               isRunning={sessionIndicators().runningIds.has(sessionId)}
+              isCompacting={sessionIndicators().compactingIds.has(sessionId)}
               isPending={sessionIndicators().pendingIds.has(sessionId)}
               isFailed={sessionIndicators().failedIds.has(sessionId)}
               needsAttention={sessionIndicators().attentionIds.has(sessionId)}
@@ -2198,6 +2209,7 @@ function SessionListItem(props: {
   hasPermissionRequest: boolean;
   hasQuestionRequest: boolean;
   isRunning: boolean;
+  isCompacting: boolean;
   isPending: boolean;
   isFailed: boolean;
   needsAttention: boolean;
@@ -2303,6 +2315,7 @@ function SessionListItem(props: {
       isFailed: hasUnreadFailure(),
       hasPendingInput: hasPendingInput(),
       isRunning: props.isRunning,
+      isCompacting: props.isCompacting,
       isPending: props.isPending,
       isPlanReady: props.isCompletedPlanSession && hasUnreadCompletion(),
       isCompleted: hasUnreadCompletion(),
@@ -2494,6 +2507,9 @@ function SessionListItem(props: {
             >
               <Show when={kind() === 'pending'}>
                 <UiIcon source={hourglassIcon} width={12} height={12} />
+              </Show>
+              <Show when={kind() === 'compacting'}>
+                <UiIcon source={compressLinesIcon} width={12} height={12} />
               </Show>
             </span>
           )}
@@ -2768,6 +2784,10 @@ export function deriveSessionIndicators(
 ): SessionIndicatorSets {
   const subagentCounts = new Map<string, number>();
   const failedSessionIds = new Set(state.failedSessionIds);
+  const compactingSessionIds = new Set(state.compactingSessionIds);
+  for (const session of sessions) {
+    if (session.time.compacting) compactingSessionIds.add(session.id);
+  }
   const editorSessionIds = new Set(state.editorSessionIds);
   const ralphChildToManager = new Map<string, string>();
   const ralphManagerManualStopIds = new Set<string>();
@@ -2788,6 +2808,7 @@ export function deriveSessionIndicators(
     questionResponsePendingIds.add(rootSessionId(sessionId));
   }
   const runningIds = new Set<string>();
+  const compactingIds = new Set<string>();
   const pendingIds = new Set<string>();
   const activelyRunningIds = new Set<string>();
   const failedIds = new Set<string>();
@@ -2800,7 +2821,11 @@ export function deriveSessionIndicators(
   const isFailed = (sessionId: string) => {
     if (isManuallyStoppedRalphManager(sessionId)) return false;
     if (hasActiveUsageLimit(sessionId)) return true;
-    return state.sessionStatus[sessionId]?.type !== 'busy' && failedSessionIds.has(sessionId);
+    return (
+      state.sessionStatus[sessionId]?.type !== 'busy' &&
+      !compactingSessionIds.has(sessionId) &&
+      failedSessionIds.has(sessionId)
+    );
   };
   const isRunning = (sessionId: string, rootId: string) => {
     if (hasActiveUsageLimit(sessionId)) return false;
@@ -2810,7 +2835,10 @@ export function deriveSessionIndicators(
     if (ralphRun && ralphRun.status !== 'running') return false;
     const type = state.sessionStatus[sessionId]?.type;
     return (
-      type === 'busy' || type === 'retry' || (sessionId === state.activeSessionId && isLoading())
+      type === 'busy' ||
+      type === 'retry' ||
+      compactingSessionIds.has(sessionId) ||
+      (sessionId === state.activeSessionId && isLoading())
     );
   };
 
@@ -2861,12 +2889,19 @@ export function deriveSessionIndicators(
     if (running) {
       runningIds.add(displaySessionId);
       runningIds.add(sessionId);
-      const targetIds = pendingBackgroundIds.has(sessionId) ? pendingIds : activelyRunningIds;
+      const compacting = compactingSessionIds.has(sessionId);
+      if (compacting) {
+        compactingIds.add(displaySessionId);
+        compactingIds.add(sessionId);
+      }
+      const targetIds =
+        !compacting && pendingBackgroundIds.has(sessionId) ? pendingIds : activelyRunningIds;
       targetIds.add(displaySessionId);
       targetIds.add(sessionId);
       const managerSessionId = ralphChildToManager.get(sessionId);
       if (managerSessionId && !failedIds.has(managerSessionId)) {
         runningIds.add(managerSessionId);
+        if (compacting) compactingIds.add(managerSessionId);
         targetIds.add(managerSessionId);
       }
       continue;
@@ -2891,6 +2926,10 @@ export function deriveSessionIndicators(
   }
 
   for (const failedId of failedIds) planReadyIds.delete(failedId);
+  for (const id of compactingIds) {
+    planReadyIds.delete(id);
+    newlyCompletedIds.delete(id);
+  }
   for (const id of pendingIds) {
     if (activelyRunningIds.has(id) || failedIds.has(id) || attentionIds.has(id))
       pendingIds.delete(id);
@@ -2948,6 +2987,7 @@ export function deriveSessionIndicators(
     permissionIds,
     questionIds,
     runningIds,
+    compactingIds,
     pendingIds,
     failedIds,
     attentionIds,
@@ -2961,17 +3001,19 @@ export function isFailedSession(sessionId: string) {
   if (ralphRun?.stopReason === 'manual_stop') return false;
   if (hasActiveUsageLimit(sessionId)) return true;
   return (
-    state.sessionStatus[sessionId]?.type !== 'busy' && state.failedSessionIds.includes(sessionId)
+    state.sessionStatus[sessionId]?.type !== 'busy' &&
+    !isSessionCompacting(sessionId) &&
+    state.failedSessionIds.includes(sessionId)
   );
 }
 
-export function isRunningSession(sessionId: string) {
+export function isRunningSession(sessionId: string, compacting = isSessionCompacting(sessionId)) {
   if (hasActiveUsageLimit(sessionId)) return false;
   if (isSessionAwaitingInput(sessionId)) return false;
   const ralphRun = ralphStore.getRun(getSessionTreeRootId(sessionId) || sessionId);
   if (ralphRun && ralphRun.status !== 'running') return false;
   const type = state.sessionStatus[sessionId]?.type;
-  return type === 'busy' || type === 'retry';
+  return type === 'busy' || type === 'retry' || compacting;
 }
 
 export function isPrimarySession(session: (typeof state.sessions)[number]) {

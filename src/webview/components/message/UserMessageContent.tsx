@@ -176,7 +176,7 @@ type InlineTextSegment =
   | Extract<ExternalLinkTextSegment, { type: 'external-link' }>;
 
 const VISION_DELEGATION_CONTEXT_RE =
-  /^\[Image for @[^:\]\n]+: [^\]\n]+\]\nWhen calling the [^\n]+ subagent, include \{file:[^}\n]+\} in its task prompt\.$/;
+  /^\[Image for @[^:\]\n]+: [^\]\n]+\]\n(?:When calling the [^\n]+ subagent, include|Call the [^\n]+ subagent to inspect this image before responding\. Include) \{file:[^}\n]+\} in its task prompt\.$/;
 const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
 function bindUserMessageOverflowFade(element: HTMLElement, trackText: () => string[]) {
   const update = () => {
@@ -604,6 +604,19 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
     const trimmedLine = line.trim();
 
     if (!inCodeFence) {
+      // V2 can join generated routing context to the user's prompt in one text part.
+      const visionContextStart = line.lastIndexOf('[Image for @');
+      if (
+        visionContextStart !== -1 &&
+        isVisionDelegationContextText(
+          `${line.slice(visionContextStart)}\n${lines[index + 1] ?? ''}`
+        )
+      ) {
+        const prefix = line.slice(0, visionContextStart).trimEnd();
+        if (prefix) textBuffer.push(prefix);
+        index += 1;
+        continue;
+      }
       const extensionBlock =
         readExtensionContextBlock(lines, index) ?? readLegacyExtensionContext(lines, index);
       if (extensionBlock) {
@@ -628,6 +641,7 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
           if (
             parseIssueAttachment(`${candidate}\n`) ||
             parseSkillAttachment(`${lines[end]}\n${lines[end + 1] ?? ''}`) ||
+            isVisionDelegationContextText(`${lines[end]}\n${lines[end + 1] ?? ''}`) ||
             parseUserMessageAttachmentLine(candidate, false) ||
             /^\[(?:Working directory:|Database context\]|Extension context\]|Selection from terminal |Unsaved (?:selection|buffer) from |Problem [\w-]+\])/.test(
               candidate

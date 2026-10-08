@@ -18,6 +18,7 @@ import checkSquareIcon from 'iconoir/icons/check-square.svg';
 import clockIcon from 'iconoir/icons/clock.svg';
 import codeBracketsSquareIcon from 'iconoir/icons/code-brackets-square.svg';
 import coinsIcon from 'iconoir/icons/coins.svg';
+import compressLinesIcon from 'iconoir/icons/compress-lines.svg';
 import copyIcon from 'iconoir/icons/copy.svg';
 import dashboardDotsIcon from 'iconoir/icons/dashboard-dots.svg';
 import databaseBackupIcon from 'iconoir/icons/database-backup.svg';
@@ -109,6 +110,7 @@ export {
   clockIcon,
   codeBracketsSquareIcon,
   coinsIcon,
+  compressLinesIcon,
   copyIcon,
   dashboardDotsIcon,
   databaseBackupIcon,

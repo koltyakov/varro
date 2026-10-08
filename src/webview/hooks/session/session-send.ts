@@ -103,7 +103,6 @@ type ComposerState = {
   extensionContexts?: ExtensionContext[];
   inlineProblems?: InlineProblemAttachment[];
   allAgents?: Agent[];
-  visionDelegationTexts?: string[];
   visionDelegationAvailable?: boolean;
 };
 
@@ -298,11 +297,7 @@ export function buildSessionSendBody(
       composerState.providers
     ) &&
     (composerState.visionDelegationAvailable ??
-      canDelegateVision(
-        [text, ...(composerState.visionDelegationTexts ?? [])],
-        composerState.allAgents ?? [],
-        composerState.providers
-      )) &&
+      canDelegateVision(composerState.allAgents ?? [], composerState.providers)) &&
     composerState.clipboardImages.every((image) => image.contextFile);
   const includeClipboardImages = includeNativeClipboardImages || delegateClipboardImages;
   const hasProblemReference = text.includes(PROBLEMS_REFERENCE);
@@ -541,7 +536,7 @@ export function buildSessionSendBody(
     const imagePath = attachment.image.contextFile.path.replace(/\\/g, '/');
     parts.push({
       type: 'text',
-      text: `[Image for @vision: ${imagePath}]\nWhen calling the vision subagent, include {file:${imagePath}} in its task prompt.`,
+      text: `[Image for @vision: ${imagePath}]\nCall the vision subagent to inspect this image before responding. Include {file:${imagePath}} in its task prompt.`,
     });
   }
 
@@ -1059,13 +1054,6 @@ export class SessionSendOperations {
         ...agent,
         model: agent.model ? { ...agent.model } : undefined,
       })),
-      visionDelegationTexts: targetSessionId
-        ? appStore.state.messages.flatMap((entry) =>
-            entry.info.sessionID === targetSessionId && entry.info.role === 'user'
-              ? entry.parts.flatMap((part) => (part.type === 'text' ? [part.text] : []))
-              : []
-          )
-        : [],
       visionDelegationAvailable: options?.queuedContext?.visionDelegationAvailable,
     };
     const currentDocumentEnabled =

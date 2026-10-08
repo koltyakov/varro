@@ -64,4 +64,27 @@ describe('SessionActionFeedback compact copy', () => {
       'Wait for image pastes'
     );
   });
+
+  it('shows the vision warning anchored to the composer with the full detail preserved', () => {
+    cleanup = render(
+      () => (
+        <>
+          <div class="chat-input-container" />
+          <SessionActionFeedback />
+        </>
+      ),
+      document.body
+    );
+    const composer = document.body.querySelector<HTMLDivElement>('.chat-input-container')!;
+    const detail = 'Image attached; use a vision-capable model or vision subagent to send it';
+    showSessionActionFeedback(detail, 'warning', composer);
+
+    const feedback = composer.querySelector('.session-action-feedback');
+    expect(feedback?.classList).toContain('is-input-anchored');
+    expect(feedback?.classList).toContain('is-warning');
+    const text = feedback?.querySelector('.session-action-feedback-message');
+    expect(text?.textContent).toBe('Use vision model');
+    expect(text?.getAttribute('title')).toBe(detail);
+    expect(text?.getAttribute('aria-label')).toBe(detail);
+  });
 });

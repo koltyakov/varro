@@ -1100,7 +1100,7 @@ describe('SessionSendOperations', () => {
             type: 'text',
             text:
               '[Image for @vision: /tmp/varro-drops/repo-a/Image 1.png]\n' +
-              'When calling the vision subagent, include {file:/tmp/varro-drops/repo-a/Image 1.png} in its task prompt.',
+              'Call the vision subagent to inspect this image before responding. Include {file:/tmp/varro-drops/repo-a/Image 1.png} in its task prompt.',
           },
         ]),
       }),

@@ -1079,6 +1079,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [imageLoadResults, setImageLoadResults] = createSignal(
     new Map<string, { url: string; error: string | null }>()
   );
+  const pendingImageLoads = new Map<string, { url: string }>();
   const [imageAnalyses, setImageAnalyses] = createSignal(
     new Map<string, { url: string; analysis: ImageCompressionAnalysis | null }>()
   );
@@ -1160,6 +1161,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     pendingPasteTransactions.length = 0;
     pasteTransactionsByEvent.clear();
     pendingImageStores.clear();
+    pendingImageLoads.clear();
     clearPendingTableAttachments();
     pendingPasteImageBytes = 0;
   });
@@ -1881,7 +1883,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     void compressionOwner();
     compressionEpoch += 1;
     cancelImageAnalyses();
-    setImageLoadResults(new Map());
     setOriginalImages(new Map());
     setImageAnalyses(new Map());
     setCompressionMenu(null);
@@ -1904,14 +1905,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     composerClipboardImages().some((image) => imageLoadResults().get(image.id)?.url !== image.url);
 
   createEffect(() => {
-    void compressionOwner();
-    const images = composerClipboardImages().map((image) => ({ ...image }));
-    const epoch = compressionEpoch;
+    // Decode readiness belongs to image content, not the chat or compression owner.
+    const images = composerClipboardImages().map((image) => ({ id: image.id, url: image.url }));
     const current = untrack(imageLoadResults);
-    let cancelled = false;
-    onCleanup(() => {
-      cancelled = true;
-    });
     setImageLoadResults(
       new Map(
         [...current].filter(([id, result]) =>
@@ -1919,10 +1915,22 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         )
       )
     );
+    for (const [id, pending] of pendingImageLoads) {
+      if (!images.some((image) => image.id === id && image.url === pending.url)) {
+        pendingImageLoads.delete(id);
+      }
+    }
     for (const image of images) {
-      if (current.get(image.id)?.url === image.url) continue;
+      if (
+        current.get(image.id)?.url === image.url ||
+        pendingImageLoads.get(image.id)?.url === image.url
+      )
+        continue;
+      const pending = { url: image.url };
+      pendingImageLoads.set(image.id, pending);
       const complete = (error: string | null) => {
-        if (cancelled || composerDisposed || compressionEpoch !== epoch) return;
+        if (composerDisposed || pendingImageLoads.get(image.id) !== pending) return;
+        pendingImageLoads.delete(image.id);
         setImageLoadResults((results) => new Map(results).set(image.id, { url: image.url, error }));
       };
       void (async () => {
@@ -3482,7 +3490,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           currentDocumentEnabled: activeContextEnabled(sessionId),
           autoAttachedFilePath,
           issuesEnabled: state.issuesEnabled,
-          visionDelegationAvailable: canDelegateCurrentImages(text),
+          visionDelegationAvailable: canDelegateCurrentImages(),
         },
       };
       const replaced =
@@ -4500,10 +4508,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     }
 
-    if (!currentModelSupportsVision()) {
+    if (!currentPromptCanHandleImages()) {
       showSessionActionFeedback(
         'Image attached; use a vision-capable model or vision subagent to send it',
-        'warning'
+        'warning',
+        inputFrameRef
       );
     }
 
@@ -5165,32 +5174,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return modelSupportsTools(current.providerID, current.modelID, state.providers);
   }
 
-  const historicalPromptCanDelegateImages = createMemo(() => {
-    if (composerClipboardImages().length === 0) return false;
-    if (currentModelSupportsVision() || !currentModelSupportsTools()) return false;
-    const sessionId = composerSessionId();
-    if (!sessionId) return false;
-    const sessionPromptTexts: string[] = [];
-    for (const entry of state.messages) {
-      if (entry.info.sessionID !== sessionId || entry.info.role !== 'user') continue;
-      for (const part of entry.parts) {
-        if (part.type === 'text') sessionPromptTexts.push(part.text);
-      }
-    }
-    return canDelegateVision(sessionPromptTexts, state.allAgents, state.providers);
-  });
+  const canDelegateCurrentImages = createMemo(() =>
+    canDelegateVision(state.allAgents, state.providers)
+  );
 
-  function canDelegateCurrentImages(text = inputText()) {
+  function currentPromptCanHandleImages() {
     return (
-      canDelegateVision(text, state.allAgents, state.providers) ||
-      historicalPromptCanDelegateImages()
-    );
-  }
-
-  function currentPromptCanHandleImages(text = inputText()) {
-    return (
-      currentModelSupportsVision() ||
-      (currentModelSupportsTools() && canDelegateCurrentImages(text))
+      currentModelSupportsVision() || (currentModelSupportsTools() && canDelegateCurrentImages())
     );
   }
 
@@ -5220,7 +5210,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return getPromptTextForClipboardImages(
       brokenImages.length ? getPromptTextForClipboardImages(text, brokenImages, false) : text,
       state.clipboardImages,
-      currentPromptCanHandleImages(text)
+      currentPromptCanHandleImages()
     );
   }
 

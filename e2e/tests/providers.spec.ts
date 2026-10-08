@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: This E2E callback invokes the provider hook installed by the controlled harness fixture. */
 import { expect, test } from '@playwright/test';
+import type { WebviewMessage } from '../../src/shared/protocol';
 
 import { appendDeltaToRapidStreaming } from './scroll-helpers';
 
@@ -84,6 +85,79 @@ test('opens manage models from the picker and filters the model catalog', async 
   await expect(page.getByText('OpenAI', { exact: true })).toBeVisible();
   await expect(page.getByText('GPT-4.1', { exact: true })).toBeVisible();
   await expect(page.getByText('GitHub Copilot', { exact: true })).toHaveCount(0);
+});
+
+test('refreshes global vision tags and offers the same vision menu without a project agent', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  await expect(page.getByLabel('GitHub Copilot / GPT-5 mini')).toBeVisible();
+  await page.evaluate(() => {
+    // SAFETY: This isolated harness exposes the typed bridge hook and the test-owned refresh hook.
+    const target = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+      setGlobalVisionForTest?: () => void;
+    };
+    const previous = target.__sendToExtension;
+    let visionAssigned = false;
+    target.__sendToExtension = (message) => {
+      if (
+        message.type === 'api/request' &&
+        message.payload.method === 'GET' &&
+        message.payload.path === '/varro/opencode-config'
+      ) {
+        queueMicrotask(() =>
+          window.postMessage(
+            {
+              type: 'api/response',
+              payload: {
+                id: message.payload.id,
+                data: {
+                  smallModel: { providerID: 'copilot', modelID: 'gpt-5-mini' },
+                  agentModels: visionAssigned
+                    ? { vision: { providerID: 'openai', modelID: 'gpt-4.1' } }
+                    : {},
+                  commitMessageModel: null,
+                  autoApproveModel: null,
+                },
+              },
+            },
+            '*'
+          )
+        );
+        return;
+      }
+      previous?.(message);
+    };
+    target.setGlobalVisionForTest = () => {
+      visionAssigned = true;
+      window.postMessage({ type: 'providers/refresh' }, '*');
+    };
+  });
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
+  await page.getByRole('button', { name: 'Manage models', exact: true }).click();
+  await expect(page.getByLabel('Small model', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Agent model: vision', { exact: true })).toHaveCount(0);
+  await page.evaluate(() => {
+    // SAFETY: The test installed this hook before opening Models.
+    const target = window as { setGlobalVisionForTest?: () => void };
+    target.setGlobalVisionForTest?.();
+  });
+  await expect(page.getByLabel('Agent model: vision', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Small model', { exact: true })).toBeVisible();
+  const visionRow = page
+    .locator('.models-model-row')
+    .filter({ has: page.getByText('GPT-4.1', { exact: true }) });
+  await visionRow.click({ button: 'right' });
+  const assigned = page.getByRole('button', { name: "Don't use for vision agent", exact: true });
+  await expect(assigned).toBeEnabled();
+  await expect(assigned).toHaveAttribute('title', 'Global vision agent model');
+  await page.getByLabel('Filter providers or models').click();
+  const textRow = page.locator('.models-model-row').filter({ hasText: 'GPT-5 mini' });
+  await textRow.click({ button: 'right' });
+  await expect(
+    page.getByRole('button', { name: 'Use for vision agent', exact: true })
+  ).toBeDisabled();
 });
 
 test('keeps a running chat out of the model dialog backdrop', async ({ page }) => {

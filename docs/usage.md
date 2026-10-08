@@ -199,30 +199,34 @@ Use any of these flows to add more context.
 
 Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. Native PDFs can be picked, dropped, or pasted and are limited to 20 MiB in total. When the selected model does not advertise PDF input support, a picked or dropped PDF with an available file path is sent as a file reference instead of native PDF data. A pasted PDF without an available path remains visible but is not sent. In environments where other dropped items do not expose local paths, content-only drops are limited to 20 files, 10 MiB per file, and 50 MiB in total.
 
-### Add Vision To A Text-Only Model
+### Add vision to a text-only model
 
-Varro can delegate pasted images from a tool-capable text-only model, such as GLM, to an OpenCode subagent named `vision`. Add the agent to `opencode.json` and replace the example model with a model available from one of your configured providers. This example uses supported v1-format configuration so it works with both v1 and v2:
+Varro can delegate pasted images from a tool-capable text-only model, such as GLM, to an OpenCode subagent named `vision`. In Models, right-click an image-capable model and choose `Use for vision agent` to configure it globally for every workspace.
+
+Existing project definitions remain overrides. Remove or move a project-local vision definition if you want that project to use the shared global assignment.
+
+You can also add the following V2 agent to `~/.config/opencode/opencode.json`. Replace the example model with an image-capable model available from one of your configured providers:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "agent": {
+  "agents": {
     "vision": {
       "description": "Inspects images for text-only parent agents",
       "mode": "subagent",
-      "model": "openai/gpt-5.6-luna",
-      "prompt": "Analyze every supplied image carefully. Return a concise textual description, including visible text, UI state, diagrams, errors, and details relevant to the parent agent's request.",
-      "permission": {
-        "read": "allow",
-        "edit": "deny",
-        "bash": "deny"
-      }
+      "model": "openai/gpt-6-luna",
+      "system": "Analyze every supplied image carefully. Return a concise textual description, including visible text, UI state, diagrams, errors, and details relevant to the parent agent's request.",
+      "permissions": [
+        { "action": "read", "resource": "*", "effect": "allow" },
+        { "action": "edit", "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "*", "effect": "deny" }
+      ]
     }
   }
 }
 ```
 
-The `vision` agent must have an explicit model that OpenCode reports as supporting image input. If the saved agent does not appear, follow the server restart guidance under [Models, Agents, Reasoning, And MCPs](#models-agents-reasoning-and-mcps). With a non-vision parent model, pasted images retain the normal disabled appearance and are not sent unless the prompt contains an exact `@vision` mention. Once `@vision` is present, Varro materializes the images as private temporary files and instructs OpenCode to include those files in the vision subagent task. The parent model must support tool calls and be allowed to invoke the `vision` subagent.
+The `vision` agent must be visible, have subagent or all mode, and have an explicit model that OpenCode reports as supporting image input. If the saved agent does not appear, follow the server restart guidance under [Models, Agents, Reasoning, And MCPs](#models-agents-reasoning-and-mcps). With a tool-capable non-vision parent model, pasted images are enabled automatically when this agent is configured. No `@vision` mention is required. Varro materializes the images as private temporary files and instructs the parent model to call the vision subagent with those files before responding. The parent model must be allowed to invoke the `vision` subagent. Vision-capable parent models receive images directly instead.
 
 ## Composer Behavior
 
@@ -340,7 +344,7 @@ External edits to project-level OpenCode configuration may not be detected. If a
 - Open the model picker footer to hide or show providers and individual models.
 - Pin frequently used models to a dedicated group in the picker, or assign a local display name from the Models view. These preferences do not change the OpenCode provider/model ID.
 - Use the add and disconnect actions in the Models view to connect or disconnect provider credentials. Option/Alt-click either action to use OpenCode's terminal manager instead.
-- In the Models view, right-click a model to assign it to project `small_model`, an available sub-agent, commit-message generation, or the auto-approve judge. Project and agent assignments update the project OpenCode configuration after checking for unsaved or concurrent changes. Commit-message and auto-approve assignments update their VS Code user settings instead.
+- In the Models view, right-click a model to assign it to project `small_model`, an available sub-agent, commit-message generation, or the auto-approve judge. Small-model and ordinary agent assignments update the project OpenCode configuration after checking for unsaved or concurrent changes. The vision-agent assignment writes to global OpenCode configuration and is available across workspaces; its menu entry is available even before the agent is configured. Only image-capable models can be assigned to vision. Commit-message and auto-approve assignments update their VS Code user settings instead. Model tags include inherited global assignments, with project overrides taking precedence. Open Models views refresh their tags when shared configuration changes.
 
 The Models view also shows whether a model exposes tools, variants, vision support, and a known context-window size. A lightning marker identifies GPT model names containing `Fast`; its tooltip notes that fast models can be more expensive.
 

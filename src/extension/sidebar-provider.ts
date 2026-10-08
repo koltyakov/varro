@@ -847,6 +847,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         generatedDependencyTreeGuard.confirmPromptAdmission(workspacePath),
       refreshOpenCodeConfig: (previousRouting, currentRouting, workspacePath) =>
         this.refreshOpenCodeWorkspaceState(previousRouting, currentRouting, workspacePath),
+      refreshOpenCodeGlobalConfig: () => this.providerFileRefresh.refreshState(),
       cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
       removeSessionImages: (sessionIds) =>
         this.droppedFilesService.removeSessionOwnedFiles(sessionIds),

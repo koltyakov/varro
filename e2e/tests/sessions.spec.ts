@@ -1,6 +1,79 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 
+for (const source of ['metadata', 'events'] as const) {
+  test(`shows idle session compaction as running with a static compress-lines icon via ${source}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 650, height: 900 });
+    await page.goto('/e2e/harness/index.html?scenario=status-filters');
+    const row = page
+      .locator('.session-item:visible')
+      .filter({ hasText: 'Plan awaiting implementation' });
+    await expect(row.locator('.is-plan-completed')).toBeVisible();
+
+    const replayCompaction = async (compacting: boolean) => {
+      const event: ServerEvent =
+        source === 'metadata'
+          ? {
+              type: 'session.updated',
+              properties: {
+                info: {
+                  id: 'session-plan-filter',
+                  projectID: 'project-varro',
+                  directory: '/workspace/varro',
+                  title: 'Plan awaiting implementation',
+                  version: '1',
+                  time: {
+                    created: Date.now() - 30_000,
+                    updated: Date.now(),
+                    compacting: compacting ? Date.now() : undefined,
+                  },
+                },
+              },
+            }
+          : {
+              type: compacting
+                ? 'session.next.compaction.started'
+                : 'session.next.compaction.ended',
+              properties: { sessionID: 'session-plan-filter' },
+            };
+      await page.evaluate((nextEvent) => {
+        // SAFETY: The isolated session-list fixture installs this event transport.
+        const harness = (
+          window as typeof window & {
+            __varroE2E: { replayServerEvent: (event: ServerEvent) => void };
+          }
+        ).__varroE2E;
+        harness.replayServerEvent(nextEvent);
+        if (nextEvent.type === 'session.next.compaction.ended') {
+          harness.replayServerEvent({
+            type: 'session.status',
+            properties: { sessionID: 'session-plan-filter', status: { type: 'idle' } },
+          });
+        }
+      }, event);
+    };
+
+    await replayCompaction(true);
+    const indicator = row.locator('.session-status-indicator.is-compacting');
+    await expect(indicator).toBeVisible();
+    await expect(indicator).toHaveAttribute('aria-label', 'Compacting');
+    await expect(indicator).toHaveCSS('animation-name', 'none');
+    await expect(indicator).toHaveCSS('width', '12px');
+    await expect(indicator.locator('.ui-icon')).not.toHaveCSS('mask-image', 'none');
+    await expect(row.locator('.is-plan-completed')).toHaveCount(0);
+    await page.getByRole('button', { name: '2 running sessions' }).click();
+    await expect(row).toBeVisible();
+
+    await replayCompaction(false);
+    await expect(indicator).toHaveCount(0);
+    await expect(row).toHaveCount(0);
+    await page.getByRole('button', { name: 'Clear Running filter' }).click();
+    await expect(row.locator('.is-plan-completed')).toBeVisible();
+  });
+}
+
 test('shows an unseen plan in the narrow header after switching to another chat', async ({
   page,
 }) => {

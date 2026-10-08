@@ -48,6 +48,7 @@ export type OpenCodeModelRoute = {
 export type OpenCodeModelRouting = {
   smallModel: OpenCodeModelRoute | null;
   agentModels: Record<string, OpenCodeModelRoute>;
+  globalVisionModel?: OpenCodeModelRoute | null;
   commitMessageModel: OpenCodeModelRoute | null;
   autoApproveModel: OpenCodeModelRoute | null;
   providerConfigPaths?: Record<string, string[]>;

@@ -1794,6 +1794,106 @@ describe('ModelsPanel', () => {
     expect(refreshRoutingStateMock).toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    'offers a global vision assignment before the agent exists (image support: %s)',
+    async (supportsVision) => {
+      setState('allAgents', []);
+      setState('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', supportsVision);
+      cleanup = render(() => ModelsPanel(), container!);
+      await Promise.resolve();
+      const row = Array.from(
+        container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
+      ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
+      row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      const button = findButton(document, 'Use for vision agent');
+      expect(button).not.toBeNull();
+      expect(button?.title).toBe('Global vision agent model');
+      expect(button?.disabled).toBe(!supportsVision);
+      button?.click();
+      await Promise.resolve();
+      if (supportsVision)
+        expect(clientMocks.saveModelRouting).toHaveBeenCalledWith({
+          target: 'agent',
+          agentName: 'vision',
+          providerID: 'openai',
+          modelID: 'gpt-5-mini',
+          unset: undefined,
+        });
+      else expect(clientMocks.saveModelRouting).not.toHaveBeenCalled();
+    }
+  );
+
+  it('refreshes inherited model tags after another window changes global configuration', async () => {
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+    expect(container?.querySelector('[aria-label="Agent model: vision"]')).toBeNull();
+    clientMocks.openCodeConfig.mockResolvedValue({
+      smallModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+      agentModels: { vision: { providerID: 'openai', modelID: 'gpt-5' } },
+      commitMessageModel: null,
+      autoApproveModel: null,
+    });
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'providers/refresh' } }));
+    await Promise.resolve();
+    expect(container?.querySelector('[aria-label="Agent model: vision"]')).not.toBeNull();
+    expect(container?.querySelector('[aria-label="Small model"]')).not.toBeNull();
+    expect(clientMocks.openCodeConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers a global assignment even when the project already assigns that vision model', async () => {
+    setState('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', true);
+    clientMocks.openCodeConfig.mockResolvedValue({
+      smallModel: null,
+      agentModels: { vision: { providerID: 'openai', modelID: 'gpt-5-mini' } },
+      globalVisionModel: null,
+      commitMessageModel: null,
+      autoApproveModel: null,
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+    const row = Array.from(
+      container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
+    ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
+    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const button = findButton(document, 'Use for vision agent');
+    expect(button).not.toBeNull();
+    button?.click();
+    await Promise.resolve();
+    expect(clientMocks.saveModelRouting).toHaveBeenCalledWith({
+      target: 'agent',
+      agentName: 'vision',
+      providerID: 'openai',
+      modelID: 'gpt-5-mini',
+      unset: undefined,
+    });
+  });
+
+  it('does not overwrite refreshed tags with an older routing response', async () => {
+    const oldRouting = {
+      smallModel: null,
+      agentModels: {},
+      commitMessageModel: null,
+      autoApproveModel: null,
+    };
+    let finishOldRead!: (value: typeof oldRouting) => void;
+    clientMocks.openCodeConfig.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOldRead = resolve;
+        })
+    );
+    cleanup = render(() => ModelsPanel(), container!);
+    clientMocks.openCodeConfig.mockResolvedValue({
+      ...oldRouting,
+      agentModels: { vision: { providerID: 'openai', modelID: 'gpt-5' } },
+    });
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'providers/refresh' } }));
+    await Promise.resolve();
+    finishOldRead(oldRouting);
+    await Promise.resolve();
+    expect(container?.querySelector('[aria-label="Agent model: vision"]')).not.toBeNull();
+  });
+
   it.each([
     ['small_model', 'Use as small model', false, undefined],
     ['small_model', "Don't use as small model", true, undefined],

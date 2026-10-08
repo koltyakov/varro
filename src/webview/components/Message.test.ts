@@ -1004,7 +1004,10 @@ describe('Message user prompt rendering', () => {
     );
   });
 
-  it('renders delegated vision files and agents as chips without exposing routing context', () => {
+  it.each([
+    'When calling the vision subagent, include',
+    'Call the vision subagent to inspect this image before responding. Include',
+  ])('renders delegated vision chips without exposing routing context: %s', (instruction) => {
     const image = imageFilePart('image-1', '1786723794731-image-1');
     image.source = {
       text: {
@@ -1033,7 +1036,7 @@ describe('Message user prompt rendering', () => {
             textPart(
               'text-2',
               '[Image for @vision: /tmp/varro-drops/drop-1/1786723794731-image-1]\n' +
-                'When calling the vision subagent, include {file:/tmp/varro-drops/drop-1/1786723794731-image-1} in its task prompt.'
+                `${instruction} {file:/tmp/varro-drops/drop-1/1786723794731-image-1} in its task prompt.`
             ),
             image,
           ],
@@ -1045,7 +1048,7 @@ describe('Message user prompt rendering', () => {
       "What's on this image? Image 1 Vision"
     );
     expect(container?.querySelectorAll('.user-message-text .inline-chip')).toHaveLength(2);
-    expect(container?.textContent).not.toContain('When calling the vision subagent');
+    expect(container?.textContent).not.toContain(instruction);
     expect(container?.querySelector('.user-message-image-tile img')).toBeInstanceOf(
       HTMLImageElement
     );

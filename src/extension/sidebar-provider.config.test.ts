@@ -12,6 +12,343 @@ import { getOpenCodeConfigPaths } from './open-code-process';
 const vscodeMock = getVscodeMock();
 
 describe('SidebarProvider local config routing', () => {
+  it('creates a global vision agent when no OpenCode configuration exists', async () => {
+    const globalPath = getOpenCodeConfigPaths()[1]!;
+    vscodeMock.workspace.fs.readFile.mockRejectedValue({ code: 'FileNotFound' });
+    vscodeMock.workspace.fs.stat.mockRejectedValue({ code: 'FileNotFound' });
+    const { provider } = await createSidebarProviderInstance({
+      server: createServer({ apiVersion: 2 }),
+    });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 955,
+        method: 'POST',
+        path: '/varro/opencode-config/model-routing',
+        body: { target: 'agent', agentName: 'vision', providerID: 'openai', modelID: 'viewer' },
+      },
+    });
+    const [uri, bytes] = vscodeMock.workspace.fs.writeFile.mock.lastCall as unknown as [
+      { fsPath: string },
+      Uint8Array,
+    ];
+    expect(uri.fsPath).toBe(globalPath);
+    expect(vscodeMock.workspace.fs.createDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({ fsPath: globalPath.slice(0, globalPath.lastIndexOf('/')) })
+    );
+    expect(JSON.parse(new TextDecoder().decode(bytes))).toMatchObject({
+      $schema: 'https://opencode.ai/config.json',
+      agents: {
+        vision: {
+          mode: 'subagent',
+          model: 'openai/viewer',
+          permissions: [
+            { action: 'read', resource: '*', effect: 'allow' },
+            { action: 'edit', resource: '*', effect: 'deny' },
+            { action: 'shell', resource: '*', effect: 'deny' },
+          ],
+        },
+      },
+    });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 955,
+        data: expect.objectContaining({
+          globalVisionModel: { providerID: 'openai', modelID: 'viewer' },
+        }),
+      },
+    });
+  });
+
+  it('preserves inherited custom vision settings and an explicit project override during a global assignment', async () => {
+    const globalPath = getOpenCodeConfigPaths()[1]!;
+    const targetPath = getOpenCodeConfigPaths()[2]!;
+    const global = {
+      agent: {
+        vision: {
+          description: 'Custom image reviewer',
+          mode: 'all',
+          prompt: 'Custom instructions',
+          permission: { read: 'ask', edit: 'deny', bash: 'deny' },
+          model: 'openai/old-viewer',
+        },
+      },
+    };
+    const project = {
+      agent: { vision: { model: 'openai/project-viewer' } },
+      small_model: 'openai/small',
+    };
+    const files = new Map([
+      [globalPath, JSON.stringify(global)],
+      [targetPath, JSON.stringify({ theme: 'system' })],
+      ['/repo/opencode.json', JSON.stringify(project)],
+    ]);
+    vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+      const raw = files.get(uri.fsPath);
+      if (raw === undefined) throw { code: 'FileNotFound' };
+      return new TextEncoder().encode(raw);
+    });
+    const { provider } = await createSidebarProviderInstance({
+      server: createServer({ apiVersion: 2 }),
+    });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 956,
+        method: 'POST',
+        path: '/varro/opencode-config/model-routing',
+        body: { target: 'agent', agentName: 'vision', providerID: 'openai', modelID: 'new-viewer' },
+      },
+    });
+    const [uri, bytes] = vscodeMock.workspace.fs.writeFile.mock.lastCall as unknown as [
+      { fsPath: string },
+      Uint8Array,
+    ];
+    expect(uri.fsPath).toBe(targetPath);
+    expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      theme: 'system',
+      agents: { vision: { model: 'openai/new-viewer' } },
+    });
+    expect(vscodeMock.workspace.fs.writeFile).toHaveBeenCalledTimes(1);
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 956,
+        data: expect.objectContaining({
+          smallModel: { providerID: 'openai', modelID: 'small' },
+          agentModels: { vision: { providerID: 'openai', modelID: 'project-viewer' } },
+          globalVisionModel: { providerID: 'openai', modelID: 'new-viewer' },
+        }),
+      },
+    });
+  });
+
+  it.each([1, 2] as const)(
+    'includes inherited global model tags on v%s while preserving project overrides',
+    async (apiVersion) => {
+      const globalPath = getOpenCodeConfigPaths()[1]!;
+      const files = new Map([
+        [
+          globalPath,
+          JSON.stringify({
+            small_model: 'openai/global-small',
+            agents: {
+              general: { model: 'openai/global-general' },
+              vision: { mode: 'subagent', model: 'openai/global-vision' },
+            },
+          }),
+        ],
+        [
+          '/repo/opencode.json',
+          JSON.stringify({
+            small_model: 'openai/project-small',
+            agent: { general: { model: 'openai/project-general' } },
+          }),
+        ],
+      ]);
+      vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+        const raw = files.get(uri.fsPath);
+        if (raw === undefined) throw { code: 'FileNotFound' };
+        return new TextEncoder().encode(raw);
+      });
+      const { provider } = await createSidebarProviderInstance({
+        server: createServer({ apiVersion }),
+      });
+      const { posted } = attachTestView(provider);
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: { id: 950, method: 'GET', path: '/varro/opencode-config' },
+      });
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: {
+          id: 950,
+          data: expect.objectContaining({
+            smallModel: { providerID: 'openai', modelID: 'project-small' },
+            agentModels: {
+              general: { providerID: 'openai', modelID: 'project-general' },
+              vision: { providerID: 'openai', modelID: 'global-vision' },
+            },
+          }),
+        },
+      });
+    }
+  );
+
+  it.each([1, 2] as const)(
+    'saves vision globally on v%s and makes it visible to a sibling workspace',
+    async (apiVersion) => {
+      const globalPath = getOpenCodeConfigPaths()[1]!;
+      const files = new Map([
+        [globalPath, '// Keep global settings\n' + JSON.stringify({ model: 'openai/default' })],
+        ['/repo/opencode.json', JSON.stringify({ small_model: 'openai/project-small' })],
+      ]);
+      vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+        const raw = files.get(uri.fsPath);
+        if (raw === undefined) throw { code: 'FileNotFound' };
+        return new TextEncoder().encode(raw);
+      });
+      vscodeMock.workspace.fs.writeFile.mockImplementation(async (...args: unknown[]) => {
+        const [uri, bytes] = args as [{ fsPath: string }, Uint8Array];
+        files.set(uri.fsPath, new TextDecoder().decode(bytes));
+      });
+      const server = createServer({
+        apiVersion,
+        request: vi.fn(async (_method: string, path: string) =>
+          path === '/session/status' ? {} : []
+        ),
+      });
+      const { provider } = await createSidebarProviderInstance({ server });
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 951,
+          method: 'POST',
+          path: '/varro/opencode-config/model-routing',
+          body: { target: 'agent', agentName: 'vision', providerID: 'openai', modelID: 'viewer' },
+        },
+      });
+      expect(vscodeMock.workspace.fs.writeFile).toHaveBeenCalledTimes(1);
+      const writeArgs = vscodeMock.workspace.fs.writeFile.mock.calls[0] as unknown[] | undefined;
+      expect(writeArgs?.[0]).toEqual(expect.objectContaining({ fsPath: globalPath }));
+      expect(files.get(globalPath)).toContain('// Keep global settings');
+      expect(files.get(globalPath)).toContain('"mode": "subagent"');
+      expect(files.get(globalPath)).toContain(apiVersion === 2 ? '"system"' : '"prompt"');
+      expect(files.get('/repo/opencode.json')).toBe(
+        JSON.stringify({ small_model: 'openai/project-small' })
+      );
+      expect(server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+
+      const { provider: sibling } = await createSidebarProviderInstance({
+        contextProvider: {
+          context: {
+            workspacePath: '/sibling',
+            activeFile: null,
+            selection: null,
+            diagnostics: [],
+          },
+          getOpenWorkspaceRoot: vi.fn(() => '/sibling'),
+          readFile: vi.fn(),
+          terminalSelection: null,
+          clearTerminalSelection: vi.fn(),
+          openPath: vi.fn(),
+          selectWorkspace: vi.fn(async () => {}),
+        },
+        server: createServer({ apiVersion }),
+      });
+      const { posted } = attachTestView(sibling);
+      await sibling.handleMessage({
+        type: 'api/request',
+        payload: { id: 952, method: 'GET', path: '/varro/opencode-config' },
+      });
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: {
+          id: 952,
+          data: expect.objectContaining({
+            smallModel: null,
+            agentModels: { vision: { providerID: 'openai', modelID: 'viewer' } },
+          }),
+        },
+      });
+    }
+  );
+
+  it('unsets only the global vision model and preserves the agent and project configuration', async () => {
+    const globalPath = getOpenCodeConfigPaths()[2]!;
+    const original = {
+      agents: {
+        vision: { mode: 'subagent', system: 'Custom instructions', model: 'openai/viewer' },
+      },
+    };
+    vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath === globalPath) return new TextEncoder().encode(JSON.stringify(original));
+      if (uri.fsPath === '/repo/opencode.json')
+        return new TextEncoder().encode(JSON.stringify({ small_model: 'openai/small' }));
+      throw { code: 'FileNotFound' };
+    });
+    const { provider } = await createSidebarProviderInstance({
+      server: createServer({ apiVersion: 2 }),
+    });
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 953,
+        method: 'POST',
+        path: '/varro/opencode-config/model-routing',
+        body: {
+          target: 'agent',
+          agentName: 'vision',
+          providerID: 'openai',
+          modelID: 'viewer',
+          unset: true,
+        },
+      },
+    });
+    const [uri, bytes] = vscodeMock.workspace.fs.writeFile.mock.lastCall as unknown as [
+      { fsPath: string },
+      Uint8Array,
+    ];
+    expect(uri.fsPath).toBe(globalPath);
+    expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({
+      agents: { vision: { mode: 'subagent', system: 'Custom instructions' } },
+    });
+  });
+
+  it.each(['dirty', 'concurrent'] as const)(
+    'rejects a global vision update when the config is %s',
+    async (conflict) => {
+      const globalPath = getOpenCodeConfigPaths()[1]!;
+      vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+        if (uri.fsPath === globalPath) return new TextEncoder().encode('{}');
+        throw { code: 'FileNotFound' };
+      });
+      if (conflict === 'dirty')
+        vscodeMock.workspace.textDocuments = [
+          { isDirty: true, uri: { fsPath: globalPath, toString: () => globalPath } },
+        ];
+      else {
+        vscodeMock.workspace.fs.stat.mockResolvedValueOnce({
+          mtime: 1,
+          size: 2,
+          type: 0,
+          ctime: 0,
+        });
+        vscodeMock.workspace.fs.stat.mockResolvedValueOnce({
+          mtime: 2,
+          size: 2,
+          type: 0,
+          ctime: 0,
+        });
+      }
+      const { provider } = await createSidebarProviderInstance();
+      const { posted } = attachTestView(provider);
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 954,
+          method: 'POST',
+          path: '/varro/opencode-config/model-routing',
+          body: { target: 'agent', agentName: 'vision', providerID: 'openai', modelID: 'viewer' },
+        },
+      });
+      expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: {
+          id: 954,
+          error: expect.stringContaining(
+            conflict === 'dirty' ? 'has unsaved changes' : 'changed while updating'
+          ),
+        },
+      });
+    }
+  );
+
   it.each([1, 2] as const)(
     'reads v%s attach-only model routing from the server',
     async (apiVersion) => {

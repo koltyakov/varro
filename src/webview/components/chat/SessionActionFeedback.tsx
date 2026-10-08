@@ -29,10 +29,7 @@ const COMPACT_MESSAGES = new Map<string, string>([
   ['PDFs must total 20 MiB or less', 'PDF limit is 20 MiB'],
   ['Table attachment timed out. Try selecting it again.', 'Table timed out. Reselect'],
   ['Wait for pending image pastes to finish', 'Wait for image pastes'],
-  [
-    'Image attached; use a vision-capable model or vision subagent to send it',
-    'Use a vision model',
-  ],
+  ['Image attached; use a vision-capable model or vision subagent to send it', 'Use vision model'],
   [
     'This paste remains inline. Text attachments support 64 KB per paste and 256 KB per draft.',
     'Large paste kept inline',

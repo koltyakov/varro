@@ -39,7 +39,8 @@ import {
   requestProviderConnection,
 } from '../lib/provider-connection-state';
 import { client } from '../lib/client';
-import { postMessage } from '../lib/bridge';
+import { onMessage, postMessage } from '../lib/bridge';
+import { VISION_AGENT_NAME } from '../lib/vision-delegation';
 import { refreshRoutingState } from '../hooks/useOpenCode';
 import type { OpenCodeModelRouting, Provider } from '../types';
 import { FormattedModelName } from './chat-input/ToolbarPickers';
@@ -91,8 +92,12 @@ const MODEL_CATALOG_RESULT_LIMIT = 50;
 const PROVIDER_DRAG_TYPE = 'application/x-varro-provider';
 const MODEL_DRAG_TYPE = 'application/x-varro-model';
 
-function routableAgents() {
-  return state.allAgents.filter((agent) => agent.mode === 'subagent');
+function routableAgentNames() {
+  const names = state.allAgents
+    .filter((agent) => !agent.hidden && (agent.mode === 'subagent' || agent.mode === 'all'))
+    .map((agent) => agent.name);
+  if (!names.includes(VISION_AGENT_NAME)) names.push(VISION_AGENT_NAME);
+  return names;
 }
 
 function shouldSortProviderLast(provider: ModelProvider, models: readonly ProviderModel[]) {
@@ -126,6 +131,12 @@ export function ModelsPanel() {
   onMount(() => {
     void refreshRoutingState();
     void loadJevStatus();
+    onCleanup(
+      onMessage((message) => {
+        if (message.type === 'providers/refresh' || message.type === 'config/update')
+          void loadRouting();
+      })
+    );
   });
 
   const [query, setQuery] = createSignal('');
@@ -277,11 +288,14 @@ export function ModelsPanel() {
     bodyRef.parentElement?.style.setProperty('--models-scrollbar-inset', `${scrollbarInset}px`);
   }
 
+  let routingRequestId = 0;
   async function loadRouting() {
+    const requestId = ++routingRequestId;
     try {
-      setRouting(normalizeModelRouting(await client.varro.openCodeConfig()));
+      const next = normalizeModelRouting(await client.varro.openCodeConfig());
+      if (requestId === routingRequestId) setRouting(next);
     } catch {
-      setRouting(createEmptyRouting());
+      if (requestId === routingRequestId) setRouting(createEmptyRouting());
     }
   }
 
@@ -298,6 +312,7 @@ export function ModelsPanel() {
     setIsSaving(true);
     try {
       const nextRouting = normalizeModelRouting(await client.varro.saveModelRouting(body));
+      routingRequestId += 1;
       setRouting(nextRouting);
       if (updatesOpenCodeConfig && !state.providerRefreshPending) setPreviousRouting(null);
       await refreshRoutingState();
@@ -915,19 +930,35 @@ export function ModelsPanel() {
                   : 'Use for '}
                 <strong>auto-approve</strong>
               </button>
-              <For each={routableAgents()}>
-                {(agent) => {
+              <For each={routableAgentNames()}>
+                {(agentName) => {
                   const isAssigned = () =>
-                    isModelRoute(routing().agentModels[agent.name], menu.providerID, menu.modelID);
+                    isModelRoute(
+                      agentName === VISION_AGENT_NAME && routing().globalVisionModel !== undefined
+                        ? routing().globalVisionModel
+                        : routing().agentModels[agentName],
+                      menu.providerID,
+                      menu.modelID
+                    );
                   return (
                     <button
                       type="button"
                       class="models-context-menu-item"
-                      disabled={isSaving()}
+                      disabled={
+                        isSaving() ||
+                        (agentName === VISION_AGENT_NAME &&
+                          !isAssigned() &&
+                          !modelSupportsVision(menu.providerID, menu.modelID, state.providers))
+                      }
+                      title={
+                        agentName === VISION_AGENT_NAME
+                          ? 'Global vision agent model'
+                          : 'Project agent model'
+                      }
                       onClick={() =>
                         void saveRouting({
                           target: 'agent',
-                          agentName: agent.name,
+                          agentName,
                           providerID: menu.providerID,
                           modelID: menu.modelID,
                           unset: isAssigned() ? true : undefined,
@@ -935,7 +966,7 @@ export function ModelsPanel() {
                       }
                     >
                       {isAssigned() ? "Don't use for " : 'Use for '}
-                      <strong>{agent.name}</strong> agent
+                      <strong>{agentName}</strong> agent
                     </button>
                   );
                 }}
@@ -1997,6 +2028,9 @@ function normalizeModelRouting<T>(value: T): OpenCodeModelRouting {
     commitMessageModel,
     autoApproveModel,
   };
+  if (record.globalVisionModel !== undefined) {
+    normalized.globalVisionModel = parseModelRoute(record.globalVisionModel);
+  }
   if (Object.keys(providerConfigPaths).length > 0)
     normalized.providerConfigPaths = providerConfigPaths;
   return normalized;

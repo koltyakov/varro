@@ -359,6 +359,7 @@ export interface RestProxyCallbacks {
     currentRouting: OpenCodeModelRouting | undefined,
     workspacePath: string
   ): Promise<void>;
+  refreshOpenCodeGlobalConfig?(): Promise<void>;
   cleanupExpiredRecycleBin(): Promise<void>;
   removeSessionImages(sessionIds: Iterable<string>): Promise<void>;
   rememberServerMemoryPermissions(rules: readonly OpenCodeServerMemoryPermission[]): void;

@@ -1,6 +1,41 @@
 import { expect, test } from '@playwright/test';
 
 for (const width of [280, 320]) {
+  test(`vision warning stays above the composer at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/e2e/harness/index.html?scenario=blank');
+    const composer = page.locator('.chat-input-container');
+    await expect(composer).toBeVisible();
+    await page.evaluate(async () => {
+      const path = '/src/webview/components/chat/SessionActionFeedback.tsx';
+      // SAFETY: Vite serves this feedback module from the isolated E2E harness.
+      const { showSessionActionFeedback } = (await import(path)) as {
+        showSessionActionFeedback(message: string, kind: 'warning', anchor: HTMLElement): void;
+      };
+      const anchor = document.querySelector<HTMLElement>('.chat-input-container');
+      if (!anchor) throw new Error('Expected composer frame');
+      showSessionActionFeedback(
+        'Image attached; use a vision-capable model or vision subagent to send it',
+        'warning',
+        anchor
+      );
+    });
+
+    const feedback = composer.locator('.session-action-feedback.is-input-anchored');
+    await expect(feedback).toBeVisible();
+    await expect(feedback.locator('.session-action-feedback-message')).toHaveText(
+      'Use vision model'
+    );
+    await expect(feedback).toHaveCSS('position', 'absolute');
+    const feedbackBox = await feedback.boundingBox();
+    const composerBox = await composer.boundingBox();
+    expect(feedbackBox).not.toBeNull();
+    expect(composerBox).not.toBeNull();
+    expect(feedbackBox!.y + feedbackBox!.height).toBeLessThanOrEqual(composerBox!.y);
+    expect(feedbackBox!.x).toBeGreaterThanOrEqual(0);
+    expect(feedbackBox!.x + feedbackBox!.width).toBeLessThanOrEqual(width);
+  });
+
   for (const retry of [false, true]) {
     test(`compact toast copy fits at ${width}px with retry=${retry}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });

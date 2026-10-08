@@ -66,7 +66,7 @@ export class OpenCodeConfigService {
     return getOpenCodePathApi(workspacePath).resolve(workspacePath);
   }
 
-  private async readOpenCodeConfigObject(): Promise<OpenCodeConfigSnapshot> {
+  private async readOpenCodeConfigObject(includeGlobal = false): Promise<OpenCodeConfigSnapshot> {
     if (this.callbacks.server.isAttachOnly) {
       throw new Error(
         'File-based OpenCode configuration is not supported in attach-only mode. Edit model, provider, and project permission settings on the server host or inside the container. Session permissions remain available through the API.'
@@ -75,11 +75,14 @@ export class OpenCodeConfigService {
     const workspacePath = this.getOpenCodeWorkspacePath();
     const files: OpenCodeConfigFile[] = [];
     const pathApi = getOpenCodePathApi(workspacePath);
-    const candidates = resolveOpenCodeProjectConfigPaths(
+    const projectCandidates = resolveOpenCodeProjectConfigPaths(
       workspacePath,
       (path) => (pathApi.basename(path) === '.git' ? existsSync(path) : true),
       this.callbacks.server.apiVersion
     );
+    const candidates = includeGlobal
+      ? [...new Set([...getOpenCodeConfigPaths(), ...projectCandidates])]
+      : projectCandidates;
     for (const path of candidates) {
       const uri = vscode.Uri.file(path);
       try {
@@ -125,7 +128,7 @@ export class OpenCodeConfigService {
       asRecord(asRecord(config.agents)?.title)?.model ?? config.small_model
     );
     const agentModels: Record<string, { providerID: string; modelID: string }> = {};
-    const agents = { ...asRecord(config.agent), ...asRecord(config.agents) };
+    const agents = mergeOpenCodeConfig(asRecord(config.agent) ?? {}, asRecord(config.agents) ?? {});
 
     for (const [name, value] of Object.entries(agents)) {
       const agentConfig = asRecord(value);
@@ -150,11 +153,32 @@ export class OpenCodeConfigService {
       if (!config) throw new Error('OpenCode returned an invalid server configuration');
       return this.normalizeOpenCodeModelRouting(config);
     }
-    const { config, files } = await this.readOpenCodeConfigObject();
-    const routing = this.normalizeOpenCodeModelRouting(config);
+    const { files } = await this.readOpenCodeConfigObject(true);
+    const routing = this.normalizeOpenCodeModelRoutingFiles(files);
     const providerConfigPaths = await this.readOpenCodeProviderConfigPaths(files);
     if (Object.keys(providerConfigPaths).length > 0)
       routing.providerConfigPaths = providerConfigPaths;
+    return routing;
+  }
+
+  private normalizeOpenCodeModelRoutingFiles(files: OpenCodeConfigFile[]): OpenCodeModelRouting {
+    const routing = this.normalizeOpenCodeModelRouting({});
+    const globalPaths = getOpenCodeConfigPaths();
+    let globalVisionModel: OpenCodeModelRouting['globalVisionModel'] = null;
+    for (const { path, config } of files) {
+      const next = this.normalizeOpenCodeModelRouting(config);
+      if (
+        config.small_model !== undefined ||
+        asRecord(asRecord(config.agents)?.title)?.model !== undefined
+      ) {
+        routing.smallModel = next.smallModel;
+      }
+      Object.assign(routing.agentModels, next.agentModels);
+      if (globalPaths.includes(path) && next.agentModels.vision) {
+        globalVisionModel = next.agentModels.vision;
+      }
+    }
+    if (routing.agentModels.vision) routing.globalVisionModel = globalVisionModel;
     return routing;
   }
 
@@ -267,18 +291,18 @@ export class OpenCodeConfigService {
     if (request.target !== 'small_model' && request.target !== 'agent') {
       throw new Error('Unsupported OpenCode model routing target');
     }
-    let snapshot = await this.readOpenCodeConfigObject();
+    let snapshot = await this.readOpenCodeConfigObject(true);
     while (true) {
       const candidate = this.selectOpenCodeModelRoutingTarget(request, snapshot);
-      if (!candidate) return this.normalizeOpenCodeModelRouting(snapshot.config);
+      if (!candidate) return this.normalizeOpenCodeModelRoutingFiles(snapshot.files);
       const lockPath = getCanonicalOpenCodeConfigPath(candidate.path);
       const result = await withOpenCodeConfigUpdateLock(lockPath, async () => {
-        const currentSnapshot = await this.readOpenCodeConfigObject();
+        const currentSnapshot = await this.readOpenCodeConfigObject(true);
         const target = this.selectOpenCodeModelRoutingTarget(request, currentSnapshot);
         if (!target) {
           return {
             kind: 'complete' as const,
-            routing: this.normalizeOpenCodeModelRouting(currentSnapshot.config),
+            routing: this.normalizeOpenCodeModelRoutingFiles(currentSnapshot.files),
           };
         }
         if (getCanonicalOpenCodeConfigPath(target.path) !== lockPath) {
@@ -286,6 +310,10 @@ export class OpenCodeConfigService {
         }
 
         const { workspacePath, files, config } = currentSnapshot;
+        const globalVision = request.target === 'agent' && request.agentName === 'vision';
+        const targetLabel = globalVision
+          ? `Global ${target.path}`
+          : `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'}`;
         const { uri } = target;
         const dirtyDocument = vscode.workspace.textDocuments.find(
           (document) =>
@@ -295,7 +323,7 @@ export class OpenCodeConfigService {
         );
         if (dirtyDocument) {
           throw new Error(
-            `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} has unsaved changes; save or revert the document before updating model routing`
+            `${targetLabel} has unsaved changes; save or revert the document before updating model routing`
           );
         }
         const initialStat = await this.readConfigStat(uri);
@@ -316,8 +344,12 @@ export class OpenCodeConfigService {
         const agentKey = (
           request.unset
             ? parseModelRoute(nativeAgent?.model) !== null
-            : target.config.agents !== undefined ||
-              (target.config.agent === undefined && config.agents !== undefined)
+            : globalVision
+              ? nativeAgent !== undefined ||
+                (asRecord(asRecord(target.config.agent)?.vision) === undefined &&
+                  this.callbacks.server.apiVersion === 2)
+              : target.config.agents !== undefined ||
+                (target.config.agent === undefined && config.agents !== undefined)
         )
           ? 'agents'
           : 'agent';
@@ -332,6 +364,44 @@ export class OpenCodeConfigService {
           const agentName = nativeTitle ? 'title' : request.agentName;
           if (!agentName) {
             throw new Error('Agent name is required');
+          }
+          if (globalVision && !request.unset) {
+            let existing: Record<string, unknown> = {};
+            const globalPaths = getOpenCodeConfigPaths();
+            for (const file of files) {
+              if (!globalPaths.includes(file.path)) continue;
+              existing = mergeOpenCodeConfig(
+                existing,
+                mergeOpenCodeConfig(
+                  asRecord(asRecord(file.config.agent)?.vision) ?? {},
+                  asRecord(asRecord(file.config.agents)?.vision) ?? {}
+                )
+              );
+            }
+            const defaults = {
+              description: 'Inspects images for text-only parent agents',
+              mode: 'subagent',
+              [agentKey === 'agents' ? 'system' : 'prompt']:
+                "Analyze every supplied image carefully. Return a concise textual description, including visible text, UI state, diagrams, errors, and details relevant to the parent agent's request. Do not modify files or run shell commands.",
+              [agentKey === 'agents' ? 'permissions' : 'permission']:
+                agentKey === 'agents'
+                  ? [
+                      { action: 'read', resource: '*', effect: 'allow' },
+                      { action: 'edit', resource: '*', effect: 'deny' },
+                      { action: 'shell', resource: '*', effect: 'deny' },
+                    ]
+                  : { read: 'allow', edit: 'deny', bash: 'deny' },
+            };
+            for (const [key, value] of Object.entries(defaults)) {
+              const hasExisting =
+                key === 'system' || key === 'prompt'
+                  ? existing.system !== undefined || existing.prompt !== undefined
+                  : key === 'permissions' || key === 'permission'
+                    ? existing.permissions !== undefined || existing.permission !== undefined
+                    : existing[key] !== undefined;
+              if (!hasExisting)
+                nextRaw = applyJsoncChange(nextRaw, [agentKey, agentName, key], value);
+            }
           }
           nextRaw = applyJsoncChange(
             nextRaw,
@@ -356,30 +426,29 @@ export class OpenCodeConfigService {
         const encoded = new TextEncoder().encode(nextRaw.endsWith('\n') ? nextRaw : `${nextRaw}\n`);
         const latestStat = await this.readConfigStat(uri);
         if (!this.areConfigStatsEqual(initialStat, latestStat)) {
-          throw new Error(
-            `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} changed while updating model routing; please retry`
-          );
+          throw new Error(`${targetLabel} changed while updating model routing; please retry`);
         }
-        const previousRouting = this.normalizeOpenCodeModelRouting(config);
+        const previousRouting = this.normalizeOpenCodeModelRoutingFiles(files);
         if (!initialStat)
           await vscode.workspace.fs.createDirectory(
             vscode.Uri.file(getOpenCodePathApi(target.path).dirname(target.path))
           );
         await vscode.workspace.fs.writeFile(uri, encoded);
-        let effectiveConfig = files.reduce<Record<string, unknown>>(
-          (merged, file) =>
-            mergeOpenCodeConfig(merged, file.path === target.path ? nextTargetConfig : file.config),
-          {}
+        const updatedFiles = files.map((file) =>
+          file.path === target.path ? { ...file, config: nextTargetConfig } : file
         );
         if (!files.some((file) => file.path === target.path)) {
-          effectiveConfig = mergeOpenCodeConfig(effectiveConfig, nextTargetConfig);
+          if (globalVision) updatedFiles.unshift({ ...target, config: nextTargetConfig });
+          else updatedFiles.push({ ...target, config: nextTargetConfig });
         }
-        const currentRouting = this.normalizeOpenCodeModelRouting(effectiveConfig);
-        await this.callbacks.refreshOpenCodeConfig?.(
-          previousRouting,
-          currentRouting,
-          workspacePath
-        );
+        const currentRouting = this.normalizeOpenCodeModelRoutingFiles(updatedFiles);
+        if (globalVision) await this.callbacks.refreshOpenCodeGlobalConfig?.();
+        else
+          await this.callbacks.refreshOpenCodeConfig?.(
+            previousRouting,
+            currentRouting,
+            workspacePath
+          );
         return { kind: 'complete' as const, routing: currentRouting };
       });
       if (result.kind === 'complete') return result.routing;
@@ -860,9 +929,21 @@ export class OpenCodeConfigService {
     request: Extract<OpenCodeConfigRequest, { kind: 'update' }>,
     snapshot: OpenCodeConfigSnapshot
   ): OpenCodeConfigFile | null {
+    const globalPaths = getOpenCodeConfigPaths();
+    const globalVision = request.target === 'agent' && request.agentName === 'vision';
+    const candidates = snapshot.files.filter(
+      (file) => globalPaths.includes(file.path) === globalVision
+    );
+    if (globalVision && !request.unset) {
+      const path = globalPaths.find(
+        (candidate) => getOpenCodePathApi(candidate).basename(candidate) === 'opencode.json'
+      );
+      if (!path) throw new Error('Could not resolve global OpenCode config');
+      return candidates.at(-1) ?? { path, uri: vscode.Uri.file(path), raw: '{}\n', config: {} };
+    }
     if (!request.unset) return snapshot.target;
     return (
-      snapshot.files.toReversed().find((file) => {
+      candidates.toReversed().find((file) => {
         const route =
           request.target === 'small_model'
             ? parseModelRoute(

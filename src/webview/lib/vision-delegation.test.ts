@@ -29,26 +29,38 @@ function visionAgent(overrides: Partial<Agent> = {}): Agent {
 }
 
 describe('canDelegateVision', () => {
-  it('accepts an exact mention of a configured vision subagent', () => {
-    expect(
-      canDelegateVision('Please ask @vision, then summarize.', [visionAgent()], providers)
-    ).toBe(true);
+  it('automatically enables a configured vision subagent', () => {
+    expect(canDelegateVision([visionAgent()], providers)).toBe(true);
   });
 
-  it('accepts an exact mention from earlier session text', () => {
-    expect(
-      canDelegateVision(
-        ['Inspect this image', 'Earlier I asked @vision for help'],
-        [visionAgent()],
-        providers
-      )
-    ).toBe(true);
+  it('accepts an agent with all mode', () => {
+    expect(canDelegateVision([visionAgent({ mode: 'all' })], providers)).toBe(true);
   });
 
-  it('rejects partial mentions and agents without an explicit vision model', () => {
-    expect(canDelegateVision('Ask @visionary', [visionAgent()], providers)).toBe(false);
-    expect(canDelegateVision('Ask @vision', [visionAgent({ model: undefined })], providers)).toBe(
-      false
-    );
+  it.each<Partial<Agent>>([
+    { name: 'visionary' },
+    { model: undefined },
+    { hidden: true },
+    { mode: 'primary' },
+    { model: { providerID: 'missing', modelID: 'gpt-4.1-mini' } },
+    { model: { providerID: 'openai', modelID: 'missing' } },
+  ])('rejects an unavailable vision subagent: %j', (overrides) => {
+    expect(canDelegateVision([visionAgent(overrides)], providers)).toBe(false);
+  });
+
+  it('rejects missing agents and a model without image input', () => {
+    expect(canDelegateVision([], providers)).toBe(false);
+    const textProviders = providers.map((provider) => ({
+      ...provider,
+      models: {
+        'gpt-4.1-mini': {
+          id: 'gpt-4.1-mini',
+          name: 'GPT-4.1 mini',
+          cost: { input: 0, output: 0 },
+          capabilities: { vision: false, toolcall: true },
+        },
+      },
+    }));
+    expect(canDelegateVision([visionAgent()], textProviders)).toBe(false);
   });
 });

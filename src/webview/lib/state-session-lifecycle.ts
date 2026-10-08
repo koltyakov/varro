@@ -220,11 +220,10 @@ export function setSessionCompacting(sessionId: string, compacting: boolean) {
   );
 }
 
-export function isSessionCompacting() {
-  const sid = state.activeSessionId;
-  if (!sid) return false;
-  if (state.compactingSessionIds.includes(sid)) return true;
-  return !!state.sessions.find((session) => session.id === sid)?.time.compacting;
+export function isSessionCompacting(sessionId: string | null = state.activeSessionId) {
+  if (!sessionId) return false;
+  if (state.compactingSessionIds.includes(sessionId)) return true;
+  return !!state.sessions.find((session) => session.id === sessionId)?.time.compacting;
 }
 
 export function isSessionStatusWorking(status: SessionStatus | null | undefined) {

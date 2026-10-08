@@ -96,7 +96,7 @@ function createState(overrides?: {
     inline?: boolean;
   } | null;
   allAgents?: Agent[];
-  visionDelegationTexts?: string[];
+  visionDelegationAvailable?: boolean;
 }) {
   return {
     selectedAgent: 'build',
@@ -1057,7 +1057,7 @@ describe('session-send helpers', () => {
         type: 'text',
         text:
           '[Image for @vision: /tmp/varro-drops/drop-1/Image 1.png]\n' +
-          'When calling the vision subagent, include {file:/tmp/varro-drops/drop-1/Image 1.png} in its task prompt.',
+          'Call the vision subagent to inspect this image before responding. Include {file:/tmp/varro-drops/drop-1/Image 1.png} in its task prompt.',
       },
     ]);
     expect(result?.optimisticImages).toEqual([
@@ -1069,65 +1069,94 @@ describe('session-send helpers', () => {
     ]);
   });
 
-  it('delegates an image when vision was referenced earlier in the session', () => {
-    const result = buildSessionSendBody(
-      createState({
-        selectedModel: { providerID: 'zai', modelID: 'glm-4.7' },
-        providers: [
-          provider('zai', {
-            'glm-4.7': {
-              id: 'glm-4.7',
-              name: 'GLM 4.7',
-              capabilities: { toolcall: true, vision: false },
-              cost: { input: 0, output: 0 },
+  it.each([
+    { name: 'automatic delegation', vision: false, tools: true, stored: true, queued: undefined },
+    { name: 'native vision', vision: true, tools: true, stored: true, queued: undefined },
+    { name: 'parent without tools', vision: false, tools: false, stored: true, queued: undefined },
+    { name: 'image not yet stored', vision: false, tools: true, stored: false, queued: undefined },
+    { name: 'queued delegation disabled', vision: false, tools: true, stored: true, queued: false },
+  ])(
+    'routes images without a vision mention or history: $name',
+    ({ vision, tools, stored, queued }) => {
+      const result = buildSessionSendBody(
+        createState({
+          selectedModel: { providerID: 'zai', modelID: 'glm-4.7' },
+          providers: [
+            provider('zai', {
+              'glm-4.7': {
+                id: 'glm-4.7',
+                name: 'GLM 4.7',
+                capabilities: { toolcall: tools, vision },
+                cost: { input: 0, output: 0 },
+              },
+            }),
+            provider('openai', {
+              viewer: {
+                id: 'viewer',
+                name: 'Viewer',
+                capabilities: { toolcall: true, vision: true },
+                cost: { input: 0, output: 0 },
+              },
+            }),
+          ],
+          providerDefaults: { zai: 'glm-4.7', openai: 'viewer' },
+          visionDelegationAvailable: queued,
+          allAgents: [
+            {
+              name: 'vision',
+              mode: 'subagent',
+              permission: [],
+              model: { providerID: 'openai', modelID: 'viewer' },
             },
-          }),
-          provider('openai', {
-            viewer: {
-              id: 'viewer',
-              name: 'Viewer',
-              capabilities: { toolcall: true, vision: true },
-              cost: { input: 0, output: 0 },
+          ],
+          clipboardImages: [
+            {
+              id: 'img-1',
+              url: 'data:image/png;base64,aW1hZ2U=',
+              mime: 'image/png',
+              filename: 'Image 1',
+              size: 5,
+              contextFile: stored
+                ? {
+                    path: '/tmp/varro-drops/drop-1/Image 1.png',
+                    relativePath: 'Image 1.png',
+                    type: 'file',
+                  }
+                : undefined,
             },
-          }),
-        ],
-        providerDefaults: { zai: 'glm-4.7', openai: 'viewer' },
-        allAgents: [
+          ],
+        }),
+        'session-1',
+        'Inspect [Image 1]',
+        () => false
+      );
+
+      if (vision) {
+        expect(result?.body.parts).toEqual([
+          { type: 'text', text: 'Inspect [Image 1]' },
           {
-            name: 'vision',
-            mode: 'subagent',
-            permission: [],
-            model: { providerID: 'openai', modelID: 'viewer' },
-          },
-        ],
-        visionDelegationTexts: ['Earlier request for @vision'],
-        clipboardImages: [
-          {
-            id: 'img-1',
-            url: 'data:image/png;base64,aW1hZ2U=',
+            type: 'file',
             mime: 'image/png',
             filename: 'Image 1',
-            size: 5,
-            contextFile: {
-              path: '/tmp/varro-drops/drop-1/Image 1.png',
-              relativePath: 'Image 1.png',
-              type: 'file',
-            },
+            url: 'data:image/png;base64,aW1hZ2U=',
           },
-        ],
-      }),
-      'session-1',
-      'Inspect [Image 1]',
-      () => false
-    );
-
-    expect(result?.body.parts).toContainEqual({
-      type: 'text',
-      text:
-        '[Image for @vision: /tmp/varro-drops/drop-1/Image 1.png]\n' +
-        'When calling the vision subagent, include {file:/tmp/varro-drops/drop-1/Image 1.png} in its task prompt.',
-    });
-  });
+        ]);
+      } else if (tools && stored && queued !== false) {
+        expect(result?.body.parts).toEqual([
+          { type: 'text', text: 'Inspect [Image 1]' },
+          {
+            type: 'text',
+            text:
+              '[Image for @vision: /tmp/varro-drops/drop-1/Image 1.png]\n' +
+              'Call the vision subagent to inspect this image before responding. Include {file:/tmp/varro-drops/drop-1/Image 1.png} in its task prompt.',
+          },
+        ]);
+      } else {
+        expect(result?.body.parts).toEqual([{ type: 'text', text: 'Inspect ' }]);
+        expect(result?.optimisticImages).toBeUndefined();
+      }
+    }
+  );
 
   it.each([
     { selectedVariant: undefined, rememberedVariant: 'high', expectedVariant: 'high' },

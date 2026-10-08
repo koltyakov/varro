@@ -10062,7 +10062,8 @@ describe('ChatInput', () => {
 
       expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
         'Image attached; use a vision-capable model or vision subagent to send it',
-        'warning'
+        'warning',
+        container?.querySelector('.chat-input-container')
       );
 
       fileReader.resolve('unsupported.png');
@@ -10187,7 +10188,7 @@ describe('ChatInput', () => {
     expect(partsReadCount).toBe(readsAfterMount);
   });
 
-  it('reuses historical vision delegation while the current draft changes', async () => {
+  it('keeps automatic vision delegation enabled while the draft changes without rereading history', async () => {
     setupVisionDelegationModelState();
     setState('activeSessionId', 'session-1');
     let partsReadCount = 0;
@@ -10210,14 +10211,14 @@ describe('ChatInput', () => {
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     const imageChip = container?.querySelector<HTMLElement>('.chat-attachment-chip');
     if (!editor || !imageChip) throw new Error('Expected composer editor and image chip');
-    expect(imageChip.classList).toContain('disabled');
+    expect(imageChip.classList).not.toContain('disabled');
     const readsAfterMount = partsReadCount;
 
     enterComposerText(editor, 'Inspect this image');
     await flushAsyncWork();
     expect(partsReadCount).toBe(readsAfterMount);
     expect(container?.querySelector('.chat-attachment-chip')).toBe(imageChip);
-    expect(imageChip.classList).toContain('disabled');
+    expect(imageChip.classList).not.toContain('disabled');
 
     enterComposerText(editor, '@vision inspect this image');
     await flushAsyncWork();
@@ -10229,7 +10230,7 @@ describe('ChatInput', () => {
     await flushAsyncWork();
     expect(partsReadCount).toBe(readsAfterMount);
     expect(container?.querySelector('.chat-attachment-chip')).toBe(imageChip);
-    expect(imageChip.classList).toContain('disabled');
+    expect(imageChip.classList).not.toContain('disabled');
   });
 
   it.each([false, true])(
@@ -10348,9 +10349,12 @@ describe('ChatInput', () => {
     }
   });
 
-  it('enables a non-vision image chip after an exact @vision mention', async () => {
+  it('automatically enables and stores a non-vision image without a vision mention', async () => {
     const fileReader = installControllableFileReader();
     setupVisionDelegationModelState();
+    const posted = vi.fn();
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+      posted;
     cleanup = render(() => ChatInput(), container!);
     await flushAsyncWork();
 
@@ -10362,39 +10366,43 @@ describe('ChatInput', () => {
 
     const stagedImageChip = container?.querySelector('.chat-attachment-chip');
     expect(stagedImageChip).toBeInstanceOf(HTMLElement);
-    expect(stagedImageChip?.classList).toContain('disabled');
+    expect(stagedImageChip?.classList).not.toContain('disabled');
+    expect(posted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'images/store',
+        payload: expect.objectContaining({ name: 'Image 1' }),
+      })
+    );
+    expect(showSessionActionFeedbackMock).not.toHaveBeenCalledWith(
+      'Image attached; use a vision-capable model or vision subagent to send it',
+      'warning',
+      expect.anything()
+    );
 
-    setInputText('@vision inspect [Image 1]');
-    await flushAsyncWork();
-
-    expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeNull();
-
-    setState('activeSessionId', 'session-1');
-    setState('messages', [
-      {
-        info: {
-          id: 'user-1',
-          sessionID: 'session-1',
-          role: 'user',
-          time: { created: 1 },
-          agent: 'build',
-          model: { providerID: 'zai', modelID: 'glm-4.7' },
-        },
-        parts: [
-          {
-            id: 'text-1',
-            sessionID: 'session-1',
-            messageID: 'user-1',
-            type: 'text',
-            text: '@vision inspect the previous image',
-          },
-        ],
-      },
-    ]);
     setInputText('Inspect [Image 1]');
     await flushAsyncWork();
 
     expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeNull();
+    const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
+    expect(sendButton?.disabled).toBe(true);
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'images/stored',
+          payload: {
+            id: state.clipboardImages[0]!.id,
+            contextFile: { path: '/repo/Image 1.png', relativePath: 'Image 1.png', type: 'file' },
+          },
+        },
+      })
+    );
+    await flushAsyncWork();
+
+    expect(sendButton?.disabled).toBe(false);
+    sendButton?.click();
+    await flushAsyncWork();
+    expect(sendMessageMock).toHaveBeenCalledWith('Inspect [Image 1]', expect.anything());
     fileReader.restore();
   });
 
@@ -10441,6 +10449,153 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-send-button')?.classList).toContain('enabled');
     expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeNull();
   });
+
+  it.each([false, true])(
+    'keeps prepared images previewable and sendable after New Chat (switch to vision first: %s)',
+    async (switchBeforeNewChat) => {
+      setupVisionDelegationModelState();
+      setState('activeSessionId', 'session-1');
+      setState('messages', [historyEntry('existing-user', 'An existing conversation')]);
+      setState('clipboardImages', [
+        {
+          id: 'carried-image',
+          url: 'data:image/png;base64,aW1hZ2U=',
+          mime: 'image/png',
+          filename: 'Image 1',
+          size: 5,
+          contextFile: { path: '/repo/Image 1.png', relativePath: 'Image 1.png', type: 'file' },
+        },
+      ]);
+      setInputText('Describe these images');
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      expect(container?.querySelector('.chat-attachment-chip.clickable')).not.toBeNull();
+      expect(
+        container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
+      ).toBe(false);
+
+      const visionModel = { providerID: 'vision-provider', modelID: 'viewer' };
+      if (switchBeforeNewChat) setSelectedModel(visionModel);
+      startNewChatDraft();
+      if (!switchBeforeNewChat) setSelectedModel(visionModel);
+      await flushAsyncWork();
+
+      expect(state.activeSessionId).toBeNull();
+      expect(state.clipboardImages).toHaveLength(1);
+      const imageChip = container?.querySelector<HTMLElement>('.chat-attachment-chip');
+      expect(imageChip?.classList).toContain('clickable');
+      imageChip?.click();
+      await flushAsyncWork();
+      expect(document.querySelector('.chat-image-preview-overlay')).not.toBeNull();
+      expect(
+        container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
+      ).toBe(false);
+    }
+  );
+
+  it.each([false, true])(
+    'keeps an in-flight image decode through New Chat (switch to vision first: %s)',
+    async (switchBeforeNewChat) => {
+      const analysis = vi
+        .spyOn(imageCompression, 'analyzeImageCompression')
+        .mockResolvedValue(null);
+      const decodes: Array<() => void> = [];
+      vi.mocked(imageLoading.loadImage).mockImplementation(
+        () => new Promise((resolve) => decodes.push(() => resolve(document.createElement('img'))))
+      );
+      try {
+        setupVisionDelegationModelState();
+        setState('activeSessionId', 'session-1');
+        setState('messages', [historyEntry('existing-user', 'An existing conversation')]);
+        setState('clipboardImages', [
+          {
+            id: 'pending-carried-image',
+            url: 'data:image/png;base64,aW1hZ2U=',
+            mime: 'image/png',
+            filename: 'Image 1',
+            size: 5,
+          },
+        ]);
+        setInputText('Describe these images');
+        cleanup = render(() => ChatInput(), container!);
+        await flushAsyncWork();
+        expect(decodes).toHaveLength(1);
+
+        const visionModel = { providerID: 'vision-provider', modelID: 'viewer' };
+        if (switchBeforeNewChat) setSelectedModel(visionModel);
+        startNewChatDraft();
+        if (!switchBeforeNewChat) setSelectedModel(visionModel);
+        await flushAsyncWork();
+        decodes[0]!();
+        await flushAsyncWork();
+
+        expect(container?.querySelector('.chat-attachment-chip.clickable')).not.toBeNull();
+        expect(
+          container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
+        ).toBe(false);
+        expect(decodes).toHaveLength(1);
+      } finally {
+        analysis.mockRestore();
+      }
+    }
+  );
+
+  it.each(['remove', 'store'] as const)(
+    'does not restart another image decode when a prepared image changes: %s',
+    async (change) => {
+      const analysis = vi
+        .spyOn(imageCompression, 'analyzeImageCompression')
+        .mockResolvedValue(null);
+      let finishDecode: (() => void) | undefined;
+      let pendingDecodeCount = 0;
+      vi.mocked(imageLoading.loadImage).mockImplementation((url) => {
+        if (url.endsWith('ready')) return Promise.resolve(document.createElement('img'));
+        pendingDecodeCount += 1;
+        return new Promise((resolve) => {
+          finishDecode = () => resolve(document.createElement('img'));
+        });
+      });
+      try {
+        setupModelState();
+        setState(
+          'clipboardImages',
+          ['ready', 'pending'].map((name, index) => ({
+            id: name,
+            url: `data:image/png;base64,${name}`,
+            mime: 'image/png',
+            filename: `Image ${index + 1}`,
+            size: 5,
+          }))
+        );
+        setInputText('Describe the images');
+        cleanup = render(() => ChatInput(), container!);
+        await flushAsyncWork();
+        const originalDecode = finishDecode;
+        if (change === 'remove') {
+          setState('clipboardImages', (images) => images.filter((image) => image.id !== 'ready'));
+        } else {
+          setState('clipboardImages', 0, 'contextFile', {
+            path: '/repo/ready.png',
+            relativePath: 'ready.png',
+            type: 'file',
+          });
+        }
+        await flushAsyncWork();
+        originalDecode?.();
+        await flushAsyncWork();
+
+        expect(pendingDecodeCount).toBe(1);
+        expect(container?.querySelectorAll('.chat-attachment-chip.clickable')).toHaveLength(
+          change === 'remove' ? 1 : 2
+        );
+        expect(
+          container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
+        ).toBe(false);
+      } finally {
+        analysis.mockRestore();
+      }
+    }
+  );
 
   it.each(['image first', 'mention first'])(
     'retains an image and mention-only file attachment when %s completes',

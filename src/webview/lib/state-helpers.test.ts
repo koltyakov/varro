@@ -629,9 +629,12 @@ describe('state helpers', () => {
 
     stateModule.setSessionCompacting('session-4', true);
     expect(stateModule.state.compactingSessionIds).toEqual(['session-4']);
+    expect(stateModule.isSessionCompacting('session-4')).toBe(true);
+    expect(stateModule.isSessionCompacting()).toBe(false);
 
     stateModule.setSessionCompacting('session-4', false);
     expect(stateModule.state.compactingSessionIds).toEqual([]);
+    expect(stateModule.isSessionCompacting('session-4')).toBe(false);
   });
 
   it('persists skipped plan sessions by session update time', async () => {

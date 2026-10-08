@@ -58,7 +58,7 @@ import {
 } from '../lib/provider-connection-state';
 import { client } from '../lib/client';
 import { createPendingBackgroundSessionIds } from '../lib/background-session-status';
-import type { Provider } from '../types';
+import type { Provider, Session } from '../types';
 import {
   clearDirectSessionReturn,
   clearDirectSessionReturnUnless,
@@ -97,8 +97,14 @@ function isDesktopSessionPaneRight() {
   return desktopSessionPaneSide() === 'right';
 }
 
-function isDirectlyRunningSession(sessionId: string) {
-  return isRunningSession(sessionId) || (sessionId === state.activeSessionId && isLoading());
+function isDirectlyRunningSession(session: Session, compactingSessionIds: ReadonlySet<string>) {
+  return (
+    isRunningSession(
+      session.id,
+      compactingSessionIds.has(session.id) || !!session.time.compacting
+    ) ||
+    (session.id === state.activeSessionId && isLoading())
+  );
 }
 
 export function Chat() {
@@ -157,14 +163,17 @@ export function Chat() {
   const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
   // Keep direct activity visible through the same settle window as completion,
   // without counting parents whose only activity comes from their subagents.
-  const directSessionIndicators = createStableSessionIndicators(() => ({
-    ...rawSessionIndicators(),
-    runningIds: new Set(
-      state.sessions
-        .filter((session) => isDirectlyRunningSession(session.id))
-        .map((session) => session.id)
-    ),
-  }));
+  const directSessionIndicators = createStableSessionIndicators(() => {
+    const compactingSessionIds = new Set(state.compactingSessionIds);
+    return {
+      ...rawSessionIndicators(),
+      runningIds: new Set(
+        state.sessions
+          .filter((session) => isDirectlyRunningSession(session, compactingSessionIds))
+          .map((session) => session.id)
+      ),
+    };
+  });
   const isStablyDirectlyRunningSession = (sessionId: string) =>
     directSessionIndicators().runningIds.has(sessionId);
   let publishedUnreadWorkspace: string | null = null;

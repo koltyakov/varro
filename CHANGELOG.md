@@ -4,15 +4,16 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.32.x - October 2026
 
-- Left automatic compaction to OpenCode; kept on-demand compaction.
-- Sped up typing, streaming, and session navigation. Reduced memory use with on-demand tool and reasoning details and shared image thumbnails.
-- Moved code and diff syntax highlighting to a background worker.
-- Stabilized scrolling, tables, diffs, and resizing. Fixed repeated tool-preview animations and unread plan indicators.
+- Left automatic compaction to OpenCode; kept manual compaction and added session indicators.
+- Improved typing, streaming, navigation, and memory use. Moved syntax highlighting to a background worker.
+- Stabilized scrolling, tables, diffs, and resizing. Fixed bottom-follow recovery, repeated animations, and unread plan indicators.
 - Added opt-in desktop notifications, event sounds, and an experimental macOS menu-bar session companion.
-- Remembered model and reasoning choices across projects and preserved the displayed model when queueing messages.
-- Fixed skill delivery, server recovery, background-wait status, and model preference synchronization.
-- Improved session renaming in narrow sidebars and kept focus after commit-message generation.
-- Fixed HTTP and HTTPS links opening once in the system browser. Added context-menu actions to copy URLs and file paths.
+- Remembered model and reasoning choices across projects and queues; showed inherited global assignments in Models.
+- Added global vision-agent setup and automatic image delegation without `@vision`. Fixed image preparation and hid routing instructions from prompts and edits.
+- Added OpenCode 2.0.25 external provider credentials. Fixed skill delivery, server recovery, background-wait status, and preference synchronization.
+- Preserved permission prompts during view handoffs and suppressed ownership-conflict errors from automatic replies.
+- Improved narrow-view controls and Models loading feedback; kept focus after commit-message generation.
+- Fixed external links opening twice. Added copying of complete link labels, URLs, and file paths.
 
 ## 0.31.x - October 2026
 

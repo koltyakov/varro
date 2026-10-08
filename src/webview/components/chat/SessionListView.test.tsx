@@ -18,6 +18,8 @@ import {
   getSessionDiffSummaryStateForTests,
   resetSessionDiffSummaryStateForTests,
   deriveSessionIndicators,
+  getSessionStatusIndicatorKind,
+  isRunningSession,
   SessionListSectionHeader,
   SessionListView,
 } from './SessionListView';
@@ -27,7 +29,12 @@ import {
   resetSessionShareOverridesForTests,
 } from '../../lib/session-share-overrides';
 import { fixture } from '../../test-fixtures';
-import { flashSolidIcon, forwardMessageIcon, hourglassIcon } from '../../lib/ui-icons';
+import {
+  compressLinesIcon,
+  flashSolidIcon,
+  forwardMessageIcon,
+  hourglassIcon,
+} from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 
 type TestRuntimeValue =
@@ -128,6 +135,49 @@ function dispatchDragEvent(target: Element, type: string, dataTransfer: DataTran
 }
 
 describe('deriveSessionIndicators', () => {
+  it.each(['local', 'metadata'] as const)(
+    'counts %s child compaction as active work on both child and parent',
+    (source) => {
+      const sessions = [
+        session('root', 1),
+        session('child', 2, {
+          parentID: 'root',
+          time: { created: 1, updated: 2, compacting: source === 'metadata' ? 3 : undefined },
+        }),
+      ];
+      setSessions(sessions);
+      if (source === 'local') setState('compactingSessionIds', ['child']);
+      setState('sessionStatus', {
+        root: { type: 'idle' },
+        child: { type: 'idle' },
+      });
+      setState('completedSessionResponses', { root: 10, child: 10 });
+      setState('lastSeenSessions', { root: 0, child: 0 });
+
+      const indicators = deriveSessionIndicators(sessions, new Set(['child']));
+      expect([...indicators.runningIds].toSorted()).toEqual(['child', 'root']);
+      expect([...indicators.compactingIds].toSorted()).toEqual(['child', 'root']);
+      expect(indicators.pendingIds.size).toBe(0);
+      expect(indicators.newlyCompletedIds.size).toBe(0);
+      expect(isRunningSession('child')).toBe(true);
+    }
+  );
+
+  it('keeps failures and attention ahead of the compacting indicator', () => {
+    const input = {
+      isFailed: false,
+      hasPendingInput: false,
+      isRunning: true,
+      isPending: true,
+      isCompacting: true,
+      isPlanReady: true,
+      isCompleted: true,
+    };
+    expect(getSessionStatusIndicatorKind(input)).toBe('compacting');
+    expect(getSessionStatusIndicatorKind({ ...input, hasPendingInput: true })).toBe('attention');
+    expect(getSessionStatusIndicatorKind({ ...input, isFailed: true })).toBe('failed');
+  });
+
   it('keeps pending waits unfinished and prefers active work in the same tree', () => {
     const sessions = [session('root', 1), session('child', 2, { parentID: 'root' })];
     setSessions(sessions);
@@ -178,6 +228,7 @@ beforeEach(() => {
   setState('editorSessionIds', []);
   setState('openEditorSessionIds', []);
   setState('sessionStatus', {});
+  setState('compactingSessionIds', []);
   setState('queuedMessages', []);
   setState('editorContext', {
     workspacePath: null,
@@ -213,6 +264,7 @@ afterEach(() => {
   setState('sessionSelectedModels', reconcile({}));
   setState('pinnedSessionIds', []);
   setState('sessionStatus', {});
+  setState('compactingSessionIds', []);
   setState('queuedMessages', []);
   setState('completedSessionResponses', reconcile({}));
   setState('sessionsLoadError', null);
@@ -265,6 +317,50 @@ describe('SessionListSectionHeader icons', () => {
 });
 
 describe('SessionListView keyboard recovery', () => {
+  it.each(['local', 'metadata'] as const)(
+    'shows the compress-lines icon in the running filter during %s compaction',
+    (source) => {
+      vi.useFakeTimers();
+      setSessions([session('compacting', 10), session('idle', 9)]);
+      setState('sessionStatus', { compacting: { type: 'idle' }, idle: { type: 'idle' } });
+      try {
+        cleanup = render(() => <SessionListView sessionFilter="running" />, container);
+        expect(container.querySelector('.session-item')).toBeNull();
+
+        if (source === 'local') setState('compactingSessionIds', ['compacting']);
+        else setState('sessions', 0, 'time', 'compacting', 11);
+
+        expect(container.querySelectorAll('.session-item')).toHaveLength(1);
+        const indicator = container.querySelector<HTMLElement>(
+          '.session-status-indicator.is-compacting'
+        );
+        expect(indicator?.getAttribute('title')).toBe('Compacting');
+        expect(indicator?.getAttribute('aria-label')).toBe('Compacting');
+        expect(
+          indicator
+            ?.querySelector<HTMLElement>('.ui-icon')
+            ?.style.getPropertyValue('--ui-icon-mask')
+        ).toBe(toCssUrl(compressLinesIcon));
+        expect(container.querySelector('.session-status-indicator.is-running')).toBeNull();
+
+        setState('sessionStatus', 'compacting', { type: 'busy' });
+        expect(container.querySelector('.session-status-indicator.is-compacting')).not.toBeNull();
+        if (source === 'local') setState('compactingSessionIds', []);
+        else setState('sessions', 0, 'time', 'compacting', undefined);
+        expect(container.querySelector('.session-status-indicator.is-compacting')).toBeNull();
+        expect(container.querySelector('.session-status-indicator.is-running')).not.toBeNull();
+
+        setState('sessionStatus', 'compacting', { type: 'idle' });
+        vi.advanceTimersByTime(1200);
+        expect(container.querySelector('.session-item')).toBeNull();
+      } finally {
+        cleanup?.();
+        cleanup = undefined;
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it('replaces the spinner with a counter-free hourglass after one minute of background waiting', () => {
     vi.useFakeTimers();
     vi.setSystemTime(100_000);
