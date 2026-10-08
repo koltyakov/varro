@@ -13,6 +13,7 @@ import type { ToolOutputDocumentProvider } from './tool-output-document-provider
 import type { OpenCodeServer } from './server';
 import { assertSessionInCurrentWorkspace } from './session-workspace';
 import type { UsageReportService } from './usage-report-service';
+import { isAllowedExternalUrl } from './util/webview-message';
 import type {
   ChatModelSelection,
   ExtensionMessage,
@@ -343,7 +344,7 @@ export function createSidebarProviderActions(
       }
     },
     openExternal: async (url) => {
-      if (!url.startsWith('https://')) {
+      if (!isAllowedExternalUrl(url)) {
         throw new Error('Unsupported external URL');
       }
       await vscode.env.openExternal(vscode.Uri.parse(url));

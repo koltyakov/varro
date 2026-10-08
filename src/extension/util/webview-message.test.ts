@@ -410,7 +410,7 @@ describe('webview message validation', () => {
     expect(
       parseWebviewMessage({
         type: 'vscode/open-external',
-        payload: { url: 'http://example.com' },
+        payload: { url: 'javascript:alert(1)' },
       })
     ).toBeNull();
 
@@ -472,9 +472,33 @@ describe('webview message validation', () => {
     }
   });
 
-  it('allows only https external URLs', () => {
-    expect(isAllowedExternalUrl('https://example.com')).toBe(true);
-    expect(isAllowedExternalUrl('http://example.com')).toBe(false);
+  it.each([
+    'https://example.com',
+    'http://example.com',
+    'http://localhost:3000',
+    'http://app.above-all.test/documentation',
+    'http://127.0.0.1:8000',
+    'http://[::1]:8001',
+  ])('allows the external URL %s', (url) => {
+    expect(isAllowedExternalUrl(url)).toBe(true);
+    expect(parseWebviewMessage({ type: 'vscode/open-external', payload: { url } })).toEqual({
+      type: 'vscode/open-external',
+      payload: { url },
+    });
+  });
+
+  it.each([
+    'javascript:alert(1)',
+    'data:text/html,test',
+    'file:///etc/passwd',
+    'command:workbench.action.openSettings',
+    'ftp://example.com',
+    '//example.com',
+    'http://',
+    'not a URL',
+  ])('rejects the external URL %s', (url) => {
+    expect(isAllowedExternalUrl(url)).toBe(false);
+    expect(parseWebviewMessage({ type: 'vscode/open-external', payload: { url } })).toBeNull();
   });
 
   it('accepts tool text destined for an editor tab, including empty output', () => {

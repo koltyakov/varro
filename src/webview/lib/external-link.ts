@@ -2,7 +2,7 @@ export type ExternalLinkTextSegment =
   | { type: 'text'; content: string }
   | { type: 'external-link'; href: string; target: string; kind: 'web' | 'git' };
 
-const EXTERNAL_LINK_RE = /https:\/\/[^\s<>"']+|git@[a-z0-9.-]+:[^\s<>"']+/gi;
+const EXTERNAL_LINK_RE = /https?:\/\/[^\s<>"']+|git@[a-z0-9.-]+:[^\s<>"']+/gi;
 const TRAILING_URL_PUNCTUATION_RE = /[.,!?;:]$/;
 const CLOSING_DELIMITERS = {
   ')': '(',
@@ -14,7 +14,7 @@ export function isSafeExternalHref(href: string | null): boolean {
   if (!href) return false;
   try {
     const parsed = new URL(href);
-    return parsed.protocol === 'https:';
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
   } catch {
     return false;
   }

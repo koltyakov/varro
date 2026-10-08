@@ -1044,7 +1044,7 @@ describe('MarkdownRenderer', () => {
         MarkdownRenderer({
           content:
             'https://example.test/docs [https://example.test/docs](https://example.test/docs) ' +
-            '[Unsafe](javascript:alert) [Insecure](http://example.test/docs)',
+            '[Unsafe](javascript:alert) [http://example.test/docs](http://example.test/docs)',
           cacheByContent: true,
         }),
       container!
@@ -1616,36 +1616,36 @@ describe('MarkdownRenderer', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('makes only HTTPS external links actionable', () => {
-    const send = vi.fn();
-    window.__sendToExtension = send;
+  it.each(['https://example.test/docs', 'http://localhost:3000', 'http://app.above-all.test/docs'])(
+    'makes the external link %s actionable',
+    (url) => {
+      const send = vi.fn();
+      window.__sendToExtension = send;
 
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content: '[Secure](https://example.test/docs) [Insecure](http://example.test/docs)',
-        }),
-      container!
-    );
+      cleanup = render(
+        () =>
+          MarkdownRenderer({
+            content: `[Docs](${url}) ${url}\n\n| Component | URL |\n| --- | --- |\n| App | ${url} |`,
+            cacheByContent: true,
+          }),
+        container!
+      );
 
-    const links = Array.from(container?.querySelectorAll<HTMLAnchorElement>('a') ?? []);
-    const secure = links.find((link) => link.textContent === 'Secure');
-    const insecure = links.find((link) => link.textContent === 'Insecure');
-    expect(secure?.getAttribute('data-external')).toBe('true');
-    expect(secure?.getAttribute('href')).toBe('https://example.test/docs');
-    expect(secure?.querySelector('.external-link-icon')).toBeInstanceOf(HTMLImageElement);
-    expect(insecure?.hasAttribute('data-external')).toBe(false);
-    expect(insecure?.hasAttribute('href')).toBe(false);
-    expect(insecure?.querySelector('.external-link-icon')).toBeNull();
-
-    dispatchAnchorClick(insecure);
-    expect(send).not.toHaveBeenCalled();
-    dispatchAnchorClick(secure);
-    expect(send).toHaveBeenCalledWith({
-      type: 'vscode/open-external',
-      payload: { url: 'https://example.test/docs' },
-    });
-  });
+      const links = Array.from(container?.querySelectorAll<HTMLAnchorElement>('a') ?? []);
+      expect(links).toHaveLength(3);
+      for (const link of links) {
+        expect(link.getAttribute('data-external')).toBe('true');
+        expect(link.getAttribute('href')).toBe(url);
+        expect(link.querySelector('.external-link-icon')).toBeInstanceOf(HTMLImageElement);
+        dispatchAnchorClick(link);
+        expect(send).toHaveBeenLastCalledWith({
+          type: 'vscode/open-external',
+          payload: { url },
+        });
+      }
+      expect(send).toHaveBeenCalledTimes(3);
+    }
+  );
 
   it('re-renders workspace-relative links when the workspace changes', async () => {
     cleanup = render(

@@ -702,21 +702,31 @@ describe('createSidebarProviderActions', () => {
     );
   });
 
-  it('opens https links externally and rejects unsupported urls', async () => {
+  it.each([
+    'https://example.com/docs',
+    'http://example.com/docs',
+    'http://localhost:3000',
+    'http://app.above-all.test/documentation',
+  ])('opens the external URL %s', async (url) => {
     const { actions } = createActionFixture();
 
-    await actions.openExternal('https://example.com/docs');
+    await actions.openExternal(url);
 
-    expect(mocks.vscode.Uri.parse).toHaveBeenCalledWith('https://example.com/docs');
+    expect(mocks.vscode.Uri.parse).toHaveBeenCalledWith(url);
     expect(mocks.vscode.env.openExternal).toHaveBeenCalledWith({
-      value: 'https://example.com/docs',
+      value: url,
     });
-
-    await expect(actions.openExternal('http://example.com/docs')).rejects.toThrow(
-      'Unsupported external URL'
-    );
-    expect(mocks.vscode.env.openExternal).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['javascript:alert(1)', 'file:///etc/passwd', 'command:test', 'http://', 'https://'])(
+    'rejects the external URL %s',
+    async (url) => {
+      const { actions } = createActionFixture();
+
+      await expect(actions.openExternal(url)).rejects.toThrow('Unsupported external URL');
+      expect(mocks.vscode.env.openExternal).not.toHaveBeenCalled();
+    }
+  );
 
   it('persists supported config values and posts the refreshed state', async () => {
     const { actions, deps } = createActionFixture();

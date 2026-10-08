@@ -1237,28 +1237,27 @@ describe('UserMessageContent', () => {
     expect(getDirectSessionReturnId('ses_found123')).toBe('ses_origin123');
   });
 
-  it('renders HTTPS URLs as external links and opens them through the bridge', () => {
-    const send = installSendToExtension();
-    renderUserContent([
-      textPart('text-1', 'See https://example.test/docs but not http://insecure.test/x.'),
-    ]);
+  it.each(['https://example.test/docs', 'http://localhost:3000', 'http://app.above-all.test/x'])(
+    'renders %s as an external link and opens it through the bridge',
+    (url) => {
+      const send = installSendToExtension();
+      renderUserContent([textPart('text-1', `See ${url}.`)]);
 
-    const links = container?.querySelectorAll<HTMLAnchorElement>('a.external-link');
-    expect(links).toHaveLength(1);
-    const link = links?.[0];
-    expect(link?.getAttribute('href')).toBe('https://example.test/docs');
-    expect(link?.getAttribute('data-external')).toBe('true');
-    expect(link?.firstElementChild?.classList).toContain('link-leading-content');
-    expect(container?.querySelector('.user-message-text')?.textContent).toContain(
-      'See https://example.test/docs but not http://insecure.test/x.'
-    );
+      const links = container?.querySelectorAll<HTMLAnchorElement>('a.external-link');
+      expect(links).toHaveLength(1);
+      const link = links?.[0];
+      expect(link?.getAttribute('href')).toBe(url);
+      expect(link?.getAttribute('data-external')).toBe('true');
+      expect(link?.firstElementChild?.classList).toContain('link-leading-content');
+      expect(container?.querySelector('.user-message-text')?.textContent).toContain(`See ${url}.`);
 
-    link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    expect(send).toHaveBeenCalledWith({
-      type: 'vscode/open-external',
-      payload: { url: 'https://example.test/docs' },
-    });
-  });
+      link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      expect(send).toHaveBeenCalledWith({
+        type: 'vscode/open-external',
+        payload: { url },
+      });
+    }
+  );
 
   it('keeps one-line prose ending in a URL as message text', () => {
     renderUserContent([textPart('text-1', 'Test message https://iconoir.com')]);

@@ -1667,7 +1667,7 @@ function getBase64DecodedSize(value: string): number | null {
 export function isAllowedExternalUrl(value: string) {
   try {
     const url = new URL(value);
-    return url.protocol === 'https:';
+    return url.protocol === 'http:' || url.protocol === 'https:';
   } catch {
     return false;
   }

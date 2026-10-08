@@ -898,7 +898,7 @@ describe('Message user prompt rendering', () => {
     expect(selectSessionMock).toHaveBeenCalledWith('ses_found123', { directory: '/repo' });
   });
 
-  it('renders HTTPS URLs as icon-prefixed external links in user messages', () => {
+  it('renders HTTP and HTTPS URLs as icon-prefixed external links in user messages', () => {
     const send = vi.fn();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     fixture<UnknownRecord>(window).__sendToExtension = send;
@@ -907,10 +907,7 @@ describe('Message user prompt rendering', () => {
         Message({
           info: userMessage('message-external-link'),
           parts: [
-            textPart(
-              'text-1',
-              'See https://example.test/docs?q=(one), but not http://example.test/insecure.'
-            ),
+            textPart('text-1', 'See https://example.test/docs?q=(one), and http://localhost:3000.'),
           ],
         }),
       container!
@@ -922,15 +919,22 @@ describe('Message user prompt rendering', () => {
     expect(link?.firstElementChild?.classList).toContain('link-leading-content');
     expect(link?.firstElementChild?.firstElementChild?.classList).toContain('external-link-icon');
     expect(link?.querySelector('.external-link-icon')).toBeInstanceOf(HTMLImageElement);
-    expect(container?.querySelectorAll('a.external-link')).toHaveLength(1);
+    expect(container?.querySelectorAll('a.external-link')).toHaveLength(2);
     expect(container?.querySelector('.user-message-text')?.textContent).toContain(
-      '(one), but not http://example.test/insecure.'
+      '(one), and http://localhost:3000.'
     );
 
     link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-external',
       payload: { url: 'https://example.test/docs?q=(one)' },
+    });
+    const httpLink = container?.querySelector<HTMLAnchorElement>('a[href="http://localhost:3000"]');
+    expect(httpLink?.querySelector('.external-link-icon')).toBeInstanceOf(HTMLImageElement);
+    httpLink?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(send).toHaveBeenLastCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: 'http://localhost:3000' },
     });
   });
 
