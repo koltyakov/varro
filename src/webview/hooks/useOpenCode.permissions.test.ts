@@ -220,6 +220,120 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
+  it.each([
+    ['default', 'todowrite'],
+    ['default', 'question'],
+    ['auto', 'todowrite'],
+    ['auto', 'question'],
+    ['full', 'todowrite'],
+    ['full', 'question'],
+  ] as const)('leaves %s-mode %s permissions to the automation owner', async (mode, type) => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    // SAFETY: The fixture provides the initial ownership state read by the runtime.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      permissionAutomation: { owner: false, lease: 1 },
+    };
+    clientMocks.sessionRespondPermission.mockRejectedValue(
+      new Error('Permission automation ownership changed')
+    );
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', mode);
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: { ...permissionListItem('perm-direct-unowned'), permission: type },
+      });
+
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-direct-unowned', type }),
+        ])
+      );
+      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+      expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
+      expect(stateModule.error()).toBeNull();
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-direct-unowned' },
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it.each(['bash', 'todowrite', 'question'])(
+    'recovers a full-access %s reply rejected during an ownership handoff without a popup',
+    async (type) => {
+      let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+      bridgeOnMessage.mockImplementation((handler) => {
+        bridgeHandler = handler;
+        return () => {
+          bridgeHandler = undefined;
+        };
+      });
+      const serverEventHandlers = captureServerEventHandlers();
+      configureReconciliationMocks();
+      const pending = { ...permissionListItem('perm-handoff'), permission: type };
+      const response = deferred<void>();
+      clientMocks.sessionRespondPermission.mockReturnValueOnce(response.promise);
+      clientMocks.permissionList.mockResolvedValue([pending]);
+
+      const { stateModule, hookModule } = await loadModules();
+      stateModule.setPermissionModeForSession('session-1', 'full');
+      const dispose = createRoot((cleanup) => {
+        hookModule.useOpenCode();
+        return cleanup;
+      });
+
+      try {
+        serverEventHandlers.get('permission.asked')?.({ properties: pending });
+        await vi.waitFor(() => expect(clientMocks.sessionRespondPermission).toHaveBeenCalledOnce());
+        if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+        bridgeHandler({
+          type: 'permission-automation/update',
+          payload: { owner: false, lease: 2 },
+        });
+        response.reject(new Error('Permission automation ownership changed'));
+
+        await vi.waitFor(() =>
+          expect(stateModule.state.permissions).toEqual([
+            expect.objectContaining({ id: 'perm-handoff' }),
+          ])
+        );
+        expect(stateModule.error()).toBeNull();
+        expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+          type: 'permission/reveal',
+          payload: { permissionId: 'perm-handoff' },
+        });
+
+        clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+        bridgeHandler({
+          type: 'permission-automation/update',
+          payload: { owner: true, lease: 3 },
+        });
+        await vi.waitFor(() =>
+          expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(2)
+        );
+        expect(clientMocks.sessionRespondPermission).toHaveBeenLastCalledWith(
+          'session-1',
+          'perm-handoff',
+          'once',
+          { permissionAutomationLease: 3 }
+        );
+        await vi.waitFor(() => expect(stateModule.state.permissions).toEqual([]));
+        expect(stateModule.error()).toBeNull();
+      } finally {
+        dispose();
+      }
+    }
+  );
+
   it('reconciles visible prompts once when a non-owner acquires automation', async () => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
     bridgeOnMessage.mockImplementation((handler) => {

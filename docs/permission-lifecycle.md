@@ -135,9 +135,13 @@ and publishes owner flags with a shared generation lease. A ready sidebar is pre
 workspace; otherwise, the current ready owner or the next ready editor owns automation there.
 
 - Only the elected owner for a workspace may run the model judge, answer full-mode requests, or
-  automatically process that workspace's pending-permission snapshot.
+  automatically process that workspace's pending-permission snapshot. This also applies to direct
+  `todowrite` and `question` replies in every mode.
 - Automatic judge and reply API requests carry the lease they started under. The host rejects a
   request when that endpoint no longer owns the matching lease.
+- A rejected automatic reply lease is an ownership handoff, not a chat-wide error. Keep the request
+  pending and preserve fallback handling so the current owner can reconcile and answer it. Other
+  reply failures still surface errors.
 - Manual permission replies do not use the automation lease.
 - A non-owner keeps the request visible and posts `permission/reveal`. The host makes attention
   actionable and notifies the current owner so it can reconcile the pending snapshot.

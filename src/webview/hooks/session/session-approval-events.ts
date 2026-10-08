@@ -7,6 +7,7 @@ import { isSharedDirectPermission } from '../../../shared/permission-rules';
 import type { UnknownRecord } from '../../../shared/type-utils';
 
 type ApprovalEventDependencies = {
+  isPermissionAutomationOwner?(): boolean;
   shouldAutoApprovePermissions(sessionId: string): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
   isPermissionSessionKnown?(sessionId: string): boolean;
@@ -36,7 +37,7 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
   let disposed = false;
 
   function handleKnownPermission(permission: Permission) {
-    if (permission.recoveredIncomplete) {
+    if (permission.recoveredIncomplete || deps.isPermissionAutomationOwner?.() === false) {
       permissionsStore.addPermission(permission);
       deps.permissionVisible?.(permission.id);
       return;

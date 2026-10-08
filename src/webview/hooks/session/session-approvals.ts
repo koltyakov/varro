@@ -69,7 +69,15 @@ export async function respondPermissionWithDependencies(
     );
     deps.removePermission(permissionId, { removeGroup: response !== 'once' });
   } catch (err) {
-    deps.setError(err instanceof Error ? err.message : 'Failed to respond to permission');
+    // A rejected automation lease leaves recovery to the current owner. Keep the
+    // request pending and rethrow for fallback handling without a chat-wide popup.
+    const ownershipChanged =
+      options?.automatic &&
+      err instanceof Error &&
+      err.message === 'Permission automation ownership changed';
+    if (!ownershipChanged) {
+      deps.setError(err instanceof Error ? err.message : 'Failed to respond to permission');
+    }
     if (options?.rethrow) {
       throw err;
     }

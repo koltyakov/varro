@@ -153,6 +153,37 @@ describe('session-approvals helpers', () => {
     expect(setError).toHaveBeenCalledWith('Failed to respond to permission');
   });
 
+  it.each([
+    [true, 'Permission automation ownership changed', false],
+    [false, 'Permission automation ownership changed', true],
+    [true, 'Permission backend unavailable', true],
+  ] as const)(
+    'handles automatic=%s response error %s with popup=%s',
+    async (automatic, message, showError) => {
+      const error = new Error(message);
+      const removePermission = vi.fn();
+      const setError = vi.fn();
+
+      await expect(
+        respondPermissionWithDependencies(
+          {
+            respondPermission: vi.fn().mockRejectedValue(error),
+            removePermission,
+            setError,
+          },
+          'session-1',
+          'perm-1',
+          'once',
+          { automatic, rethrow: true }
+        )
+      ).rejects.toBe(error);
+
+      expect(removePermission).not.toHaveBeenCalled();
+      if (showError) expect(setError).toHaveBeenCalledWith(message);
+      else expect(setError).not.toHaveBeenCalled();
+    }
+  );
+
   it('clears a permission that was already resolved remotely', async () => {
     const removePermission = vi.fn();
     const setError = vi.fn();
