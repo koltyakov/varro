@@ -40,7 +40,7 @@ import {
 } from '../lib/provider-connection-state';
 import { client } from '../lib/client';
 import { onMessage, postMessage } from '../lib/bridge';
-import { VISION_AGENT_NAME } from '../lib/vision-delegation';
+import { canDelegateVision, VISION_AGENT_NAME } from '../lib/vision-delegation';
 import { refreshRoutingState } from '../hooks/useOpenCode';
 import type { OpenCodeModelRouting, Provider } from '../types';
 import { FormattedModelName } from './chat-input/ToolbarPickers';
@@ -263,6 +263,9 @@ export function ModelsPanel() {
       .filter(({ provider, models }) => !shouldSortProviderLast(provider, models))
       .map(({ provider }) => provider.id)
   );
+  const visionDelegationAvailable = createMemo(() =>
+    canDelegateVision(state.allAgents, state.providers)
+  );
   const maxCapabilityCount = createMemo(() =>
     Math.max(
       0,
@@ -272,7 +275,9 @@ export function ModelsPanel() {
             [
               modelSupportsTools(provider.id, model.id, state.providers),
               modelSupportsVariants(provider.id, model.id, state.providers),
-              modelSupportsVision(provider.id, model.id, state.providers),
+              modelSupportsVision(provider.id, model.id, state.providers) ||
+                (visionDelegationAvailable() &&
+                  modelSupportsTools(provider.id, model.id, state.providers)),
               modelSupportsPdf(provider.id, model.id, state.providers),
               modelSupportsAudio(provider.id, model.id, state.providers),
               modelSupportsVideo(provider.id, model.id, state.providers),
@@ -777,6 +782,7 @@ export function ModelsPanel() {
                       provider={entry().provider}
                       models={entry().models}
                       maxCapabilityCount={maxCapabilityCount()}
+                      visionDelegationAvailable={visionDelegationAvailable()}
                       reconnectRequired={providerRequiresReconnection(providerID)}
                       forceExpanded={normalizedQuery().length > 0}
                       routing={routing()}
@@ -1367,6 +1373,7 @@ function ProviderSection(props: {
   provider: ModelProvider;
   models: ProviderModel[];
   maxCapabilityCount: number;
+  visionDelegationAvailable: boolean;
   reconnectRequired: boolean;
   forceExpanded: boolean;
   routing: OpenCodeModelRouting;
@@ -1593,6 +1600,8 @@ function ProviderSection(props: {
                   modelSupportsVariants(props.provider.id, model.id, state.providers);
                 const supportsVision = () =>
                   modelSupportsVision(props.provider.id, model.id, state.providers);
+                const usesVisionProxy = () =>
+                  !supportsVision() && supportsTools() && props.visionDelegationAvailable;
                 const supportsPdf = () =>
                   modelSupportsPdf(props.provider.id, model.id, state.providers);
                 const supportsAudio = () =>
@@ -1749,8 +1758,12 @@ function ProviderSection(props: {
                             label="Variants / reasoning"
                           />
                         </Show>
-                        <Show when={supportsVision()}>
-                          <ModelCapabilityBadge capability="vision" label="Vision" />
+                        <Show when={supportsVision() || usesVisionProxy()}>
+                          <ModelCapabilityBadge
+                            capability="vision"
+                            label="Vision"
+                            viaProxy={usesVisionProxy()}
+                          />
                         </Show>
                         <Show when={supportsPdf()}>
                           <ModelCapabilityBadge capability="pdf" label="PDF" />
@@ -1781,16 +1794,26 @@ function ProviderSection(props: {
 
 type ModelCapability = 'tools' | 'variants' | 'vision' | 'pdf' | 'audio' | 'video';
 
-function ModelCapabilityBadge(props: { capability: ModelCapability; label: string }) {
+function ModelCapabilityBadge(props: {
+  capability: ModelCapability;
+  label: string;
+  viaProxy?: boolean;
+}) {
+  const description = () => (props.viaProxy ? 'Vision (via proxy model)' : props.label);
   return (
-    <Tooltip content={props.label}>
+    <Tooltip content={description()}>
       <span
-        class={`model-capability-tag model-capability-tag-${props.capability}`}
-        aria-label={props.label}
+        class={`model-capability-tag model-capability-tag-${props.capability}${props.viaProxy ? ' model-capability-tag-vision-proxy' : ''}`}
+        aria-label={description()}
       >
         <span class="models-capability-icon" aria-hidden="true">
           <CapabilityIcon capability={props.capability} />
         </span>
+        <Show when={props.viaProxy}>
+          <span class="models-capability-proxy-marker" aria-hidden="true">
+            *
+          </span>
+        </Show>
         <span class="models-capability-label">
           {props.capability === 'variants' ? 'Variants' : props.label}
         </span>

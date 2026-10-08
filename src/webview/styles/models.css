@@ -1389,6 +1389,21 @@
   --models-route-color: var(--vscode-charts-purple, #b180d7);
 }
 
+.model-capability-tag-vision-proxy {
+  position: relative;
+  color: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 52%, var(--color-vscode-fg));
+}
+
+.models-capability-proxy-marker {
+  position: absolute;
+  top: -1px;
+  right: -2px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 9px;
+  pointer-events: none;
+}
+
 .models-route-tag-small {
   --models-route-color: var(--vscode-charts-blue, #75beff);
 }

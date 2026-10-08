@@ -12,6 +12,7 @@ import { getWorkspaceFolderLabel } from '../../../shared/workspace-folders';
 import { formatSkillReference } from '../../lib/skill-reference';
 import { getWorkspaceRelativePath } from '../../lib/path-display';
 import { problemIdentity, uniqueProblems } from '../../lib/editor-problems';
+import { isVarroVisionAgent } from '../../../shared/vision-agent';
 
 export const SKILLS_COMMAND_NAME = 'skills';
 export const PROBLEMS_COMMAND_NAME = 'problems';
@@ -390,22 +391,24 @@ export function createMentionCompletionSource({
   const exactAgentNames = new Set<string>();
   const exactFilePaths = new Set<string>();
 
-  const agentEntries = agents.map((agent) => {
-    const normalizedName = agent.name.toLowerCase();
-    exactAgentNames.add(normalizedName);
+  const agentEntries = agents
+    .filter((agent) => !isVarroVisionAgent(agent))
+    .map((agent) => {
+      const normalizedName = agent.name.toLowerCase();
+      exactAgentNames.add(normalizedName);
 
-    return {
-      item: {
-        key: `agent:${agent.name}`,
-        type: 'agent',
-        label: agent.name,
-        detail: agent.description || getAgentBadgeLine(agent),
-        value: `@${agent.name} `,
-      },
-      normalizedName,
-      normalizedDescription: agent.description?.toLowerCase() || '',
-    } satisfies MentionAgentEntry;
-  });
+      return {
+        item: {
+          key: `agent:${agent.name}`,
+          type: 'agent',
+          label: agent.name,
+          detail: agent.description || getAgentBadgeLine(agent),
+          value: `@${agent.name} `,
+        },
+        normalizedName,
+        normalizedDescription: agent.description?.toLowerCase() || '',
+      } satisfies MentionAgentEntry;
+    });
 
   const fileEntries = files.map((file) => {
     const normalizedPath = normalizeMentionPath(file.relativePath);

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
-import type { Provider, Session } from '../types';
+import type { Agent, Provider, Session } from '../types';
 import {
   markProviderAuthFailure,
   resetProviderConnectionState,
@@ -10,6 +10,7 @@ import { setState, state } from '../lib/state';
 import { STORAGE_KEYS } from '../lib/state-storage';
 import { fixture } from '../test-fixtures';
 import { ModelsPanel } from './ModelsPanel';
+import { DEFAULT_TOOLTIP_DELAY } from './Tooltip';
 
 type TestRuntimeValue =
   | string
@@ -1697,6 +1698,106 @@ describe('ModelsPanel', () => {
     expect(miniRow?.querySelector('.model-capability-tag-pdf')).toBeNull();
     expect(miniRow?.querySelector('.model-capability-tag-audio')).toBeNull();
     expect(miniRow?.querySelector('.model-capability-tag-video')).toBeNull();
+  });
+
+  it('shows proxy vision with a separate tooltip and keeps native vision unchanged', async () => {
+    setState('providers', 0, 'models', 'gpt-5', 'capabilities', 'vision', true);
+    setState('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', false);
+    setState('providers', 0, 'models', 'gpt-5-mini', 'variants', { high: {} });
+    setState('allAgents', [
+      {
+        name: 'vision',
+        mode: 'subagent',
+        permission: [],
+        model: { providerID: 'openai', modelID: 'gpt-5' },
+      },
+    ]);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const rows = Array.from(container?.querySelectorAll('.models-model-row') ?? []);
+    const nativeRow = rows.find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5'
+    );
+    const proxyRow = rows.find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini'
+    );
+    const nativeBadge = nativeRow?.querySelector('.model-capability-tag-vision');
+    const proxyBadge = proxyRow?.querySelector('.model-capability-tag-vision');
+    expect(nativeBadge?.getAttribute('aria-label')).toBe('Vision');
+    expect(nativeBadge?.classList.contains('model-capability-tag-vision-proxy')).toBe(false);
+    expect(nativeBadge?.querySelector('.models-capability-proxy-marker')).toBeNull();
+    expect(proxyBadge?.getAttribute('aria-label')).toBe('Vision (via proxy model)');
+    expect(proxyBadge?.classList.contains('model-capability-tag-vision-proxy')).toBe(true);
+    expect(proxyBadge?.querySelector('.models-capability-label')?.textContent).toBe('Vision');
+    const marker = proxyBadge?.querySelector('.models-capability-proxy-marker');
+    expect(marker?.textContent?.trim()).toBe('*');
+    expect(marker?.getAttribute('aria-hidden')).toBe('true');
+    expect(proxyRow?.querySelectorAll('.model-capability-tag-vision')).toHaveLength(1);
+    expect(
+      container
+        ?.querySelector<HTMLElement>('.models-model-list')
+        ?.style.getPropertyValue('--models-capability-count')
+    ).toBe('3');
+
+    vi.useFakeTimers();
+    proxyBadge?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'Vision (via proxy model)'
+    );
+    proxyBadge?.dispatchEvent(new MouseEvent('mouseleave'));
+    vi.useRealTimers();
+
+    setState('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', true);
+    expect(proxyRow?.querySelector('.models-capability-proxy-marker')).toBeNull();
+    expect(
+      proxyRow?.querySelector('.model-capability-tag-vision')?.getAttribute('aria-label')
+    ).toBe('Vision');
+    setState('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', false);
+    expect(proxyRow?.querySelector('.models-capability-proxy-marker')?.textContent?.trim()).toBe(
+      '*'
+    );
+
+    setState('allAgents', []);
+    expect(proxyRow?.querySelector('.model-capability-tag-vision')).toBeNull();
+    expect(
+      nativeRow?.querySelector('.model-capability-tag-vision')?.getAttribute('aria-label')
+    ).toBe('Vision');
+    expect(
+      container
+        ?.querySelector<HTMLElement>('.models-model-list')
+        ?.style.getPropertyValue('--models-capability-count')
+    ).toBe('2');
+  });
+
+  it.each<Partial<Agent>>([
+    {},
+    { hidden: true },
+    { mode: 'primary' },
+    { model: undefined },
+    { model: { providerID: 'openai', modelID: 'gpt-5-mini' } },
+    { model: { providerID: 'missing', modelID: 'missing' } },
+  ])('shows proxy vision only for an available vision helper: %j', async (overrides) => {
+    setState('providers', 0, 'models', 'gpt-5', 'capabilities', 'vision', true);
+    setState('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', false);
+    setState('allAgents', [
+      {
+        name: 'vision',
+        mode: 'all',
+        permission: [],
+        model: { providerID: 'openai', modelID: 'gpt-5' },
+        ...overrides,
+      },
+    ]);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.model-capability-tag-vision-proxy')).toHaveLength(
+      Object.keys(overrides).length === 0 ? 1 : 0
+    );
+    setState('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'toolcall', false);
+    expect(container?.querySelector('.model-capability-tag-vision-proxy')).toBeNull();
   });
 
   it('shows routing tags loaded from opencode config and agents', async () => {

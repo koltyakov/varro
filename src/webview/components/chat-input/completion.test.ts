@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Agent, Session } from '../../types';
+import {
+  VARRO_VISION_AGENT_DESCRIPTION,
+  VARRO_VISION_AGENT_PROMPT,
+} from '../../../shared/vision-agent';
 import { problemIdentity } from '../../lib/editor-problems';
 import {
   applySlashCompletion,
@@ -164,6 +168,72 @@ describe('getMentionCompletionItems', () => {
     expect(completions).toHaveLength(10);
     expect(completions[0]).toEqual(
       expect.objectContaining({ type: 'agent', label: 'helper', value: '@helper ' })
+    );
+  });
+
+  it.each(['', 'vis', 'inspect'])('hides the automatic vision helper for query %j', (rawQuery) => {
+    const mentionAgents: Agent[] = [
+      ...agents,
+      {
+        name: 'vision',
+        description: VARRO_VISION_AGENT_DESCRIPTION,
+        prompt: VARRO_VISION_AGENT_PROMPT,
+        mode: 'subagent',
+        permission: [],
+      },
+      {
+        name: 'vision-review',
+        description: 'Inspect images manually',
+        mode: 'subagent',
+        permission: [],
+      },
+    ];
+    const source = createMentionCompletionSource({ agents: mentionAgents, files: [] });
+    const completions = getMentionCompletionItems({ rawQuery, source });
+    expect(completions.some((item) => item.type === 'agent' && item.label === 'vision')).toBe(
+      false
+    );
+    expect(
+      completions.some((item) => item.type === 'agent' && item.label === 'vision-review')
+    ).toBe(true);
+    if (!rawQuery) expect(completions.some((item) => item.label === 'helper')).toBe(true);
+    expect(mentionAgents.some((agent) => agent.name === 'vision')).toBe(true);
+  });
+
+  it('keeps workspace files available when their names match the hidden vision helper', () => {
+    const completions = getMentionCompletionItems({
+      rawQuery: 'vis',
+      agents: [
+        {
+          name: 'vision',
+          description: VARRO_VISION_AGENT_DESCRIPTION,
+          prompt: VARRO_VISION_AGENT_PROMPT,
+          mode: 'subagent',
+          permission: [],
+        },
+      ],
+      files: [{ path: '/workspace/vision.ts', relativePath: 'vision.ts', type: 'file' }],
+    });
+    expect(completions.map((item) => item.label)).toEqual(['vision.ts']);
+  });
+
+  it.each<Partial<Agent>>([
+    { description: 'My custom vision agent' },
+    { prompt: 'Review images using my custom instructions' },
+    { prompt: undefined },
+    { mode: 'all' },
+  ])('keeps a custom vision agent available: %j', (overrides) => {
+    const custom: Agent = {
+      name: 'vision',
+      description: VARRO_VISION_AGENT_DESCRIPTION,
+      prompt: VARRO_VISION_AGENT_PROMPT,
+      mode: 'subagent',
+      permission: [],
+      ...overrides,
+    };
+    const completions = getMentionCompletionItems({ rawQuery: '', agents: [custom], files: [] });
+    expect(completions).toContainEqual(
+      expect.objectContaining({ type: 'agent', label: 'vision', value: '@vision ' })
     );
   });
 

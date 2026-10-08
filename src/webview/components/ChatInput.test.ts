@@ -4,6 +4,10 @@ import { reconcile } from 'solid-js/store';
 import packageJson from '../../../package.json';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import type { ProviderLimitStatus, WebviewMessage } from '../../shared/protocol';
+import {
+  VARRO_VISION_AGENT_DESCRIPTION,
+  VARRO_VISION_AGENT_PROMPT,
+} from '../../shared/vision-agent';
 import type {
   AssistantMessage,
   MessageEntry,
@@ -3401,6 +3405,43 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.todo-block:not(.changed-files-block)')).toBe(todo);
     expect(container?.querySelector('.changed-files-block')).toBe(files);
   });
+
+  it.each([false, true])(
+    'hides only Varro vision from mentions (native vision model: %s)',
+    async (nativeVision) => {
+      setupVisionDelegationModelState();
+      if (nativeVision) setSelectedModel({ providerID: 'vision-provider', modelID: 'viewer' });
+      setState('allAgents', [
+        {
+          name: 'vision',
+          description: VARRO_VISION_AGENT_DESCRIPTION,
+          prompt: VARRO_VISION_AGENT_PROMPT,
+          mode: 'subagent',
+          permission: [],
+          model: { providerID: 'vision-provider', modelID: 'viewer' },
+        },
+        { name: 'general', description: 'General tasks', mode: 'subagent', permission: [] },
+      ]);
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      editor.focus();
+      enterComposerText(editor, '@');
+      await flushAsyncWork();
+
+      const menu = container?.querySelector('.composer-completion-menu');
+      expect(menu?.textContent).toContain('general');
+      expect(menu?.textContent).not.toContain('vision');
+      expect(state.allAgents.some((agent) => agent.name === 'vision')).toBe(true);
+
+      setState('allAgents', 0, 'prompt', 'Custom instructions for my image reviewer');
+      await flushAsyncWork();
+      expect(container?.querySelector('.composer-completion-menu')?.textContent).toContain(
+        'vision'
+      );
+    }
+  );
 
   it('reissues an active file search when the workspace changes', async () => {
     const messages: WebviewMessage[] = [];

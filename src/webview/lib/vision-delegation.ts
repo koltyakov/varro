@@ -1,7 +1,8 @@
 import type { Agent, Provider } from '../types';
 import { modelSupportsVision } from './model-capabilities';
+import { VISION_AGENT_NAME } from '../../shared/vision-agent';
 
-export const VISION_AGENT_NAME = 'vision';
+export { VISION_AGENT_NAME } from '../../shared/vision-agent';
 
 export function canDelegateVision(agents: Agent[], providers: Provider[]): boolean {
   const agent = agents.find(

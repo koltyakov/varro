@@ -13,6 +13,7 @@ import type {
 } from '../shared/opencode-types';
 import { isScalarConfigPermission } from '../shared/permission-rules';
 import type { OpenCodeModelRouting } from '../shared/protocol';
+import { VARRO_VISION_AGENT_DESCRIPTION, VARRO_VISION_AGENT_PROMPT } from '../shared/vision-agent';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
 import { v1Action, v2Action } from './opencode-v2-projection';
@@ -379,10 +380,9 @@ export class OpenCodeConfigService {
               );
             }
             const defaults = {
-              description: 'Inspects images for text-only parent agents',
+              description: VARRO_VISION_AGENT_DESCRIPTION,
               mode: 'subagent',
-              [agentKey === 'agents' ? 'system' : 'prompt']:
-                "Analyze every supplied image carefully. Return a concise textual description, including visible text, UI state, diagrams, errors, and details relevant to the parent agent's request. Do not modify files or run shell commands.",
+              [agentKey === 'agents' ? 'system' : 'prompt']: VARRO_VISION_AGENT_PROMPT,
               [agentKey === 'agents' ? 'permissions' : 'permission']:
                 agentKey === 'agents'
                   ? [
