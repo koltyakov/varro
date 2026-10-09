@@ -14,6 +14,7 @@ const APP_CLEANUP_KEY = '__cleanupVarroApp';
 const EDITOR_SURFACE_CLASS = 'varro-editor-surface';
 const EDITOR_LAYOUT_PENDING_CLASS = 'varro-editor-layout-pending';
 const EDITOR_LAYOUT_SETTLE_MS = 50;
+const EDITOR_LAYOUT_MAX_WAIT_MS = 250;
 type BootstrapWindow = Window & {
   __clearVarroBootstrapFailureHandlers?: () => void;
   __cleanupVarroApp?: () => void;
@@ -46,6 +47,7 @@ function trackEditorLayoutSettling() {
   const html = document.documentElement;
   let settleTimer: number | undefined;
   let settleFrame: number | undefined;
+  let maxWaitTimer: number | undefined;
 
   const cancelSettle = () => {
     if (settleTimer !== undefined) window.clearTimeout(settleTimer);
@@ -53,22 +55,34 @@ function trackEditorLayoutSettling() {
     settleTimer = undefined;
     settleFrame = undefined;
   };
+  const cancelMaxWait = () => {
+    if (maxWaitTimer !== undefined) window.clearTimeout(maxWaitTimer);
+    maxWaitTimer = undefined;
+  };
+  const reveal = () => {
+    cancelSettle();
+    cancelMaxWait();
+    html.classList.remove(EDITOR_LAYOUT_PENDING_CLASS);
+  };
   const settle = () => {
     cancelSettle();
+    // Keep the brief host-layout hold, but never let a continuous drag extend it indefinitely.
+    if (maxWaitTimer === undefined) {
+      maxWaitTimer = window.setTimeout(reveal, EDITOR_LAYOUT_MAX_WAIT_MS);
+    }
     settleTimer = window.setTimeout(() => {
       settleTimer = undefined;
-      settleFrame = window.requestAnimationFrame(() => {
-        settleFrame = undefined;
-        html.classList.remove(EDITOR_LAYOUT_PENDING_CLASS);
-      });
+      settleFrame = window.requestAnimationFrame(reveal);
     }, EDITOR_LAYOUT_SETTLE_MS);
   };
   const handleVisibilityChange = () => {
     cancelSettle();
+    cancelMaxWait();
     html.classList.add(EDITOR_LAYOUT_PENDING_CLASS);
     if (document.visibilityState !== 'hidden') settle();
   };
   const handleResize = () => {
+    if (document.visibilityState === 'hidden') return;
     if (html.classList.contains(EDITOR_LAYOUT_PENDING_CLASS)) settle();
   };
 
@@ -78,10 +92,9 @@ function trackEditorLayoutSettling() {
   if (document.visibilityState !== 'hidden') settle();
 
   return () => {
-    cancelSettle();
+    reveal();
     document.removeEventListener('visibilitychange', handleVisibilityChange);
     window.removeEventListener('resize', handleResize);
-    html.classList.remove(EDITOR_LAYOUT_PENDING_CLASS);
   };
 }
 

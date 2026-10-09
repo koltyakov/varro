@@ -19,6 +19,13 @@ Returning to a retained sidebar or editor tab resynchronizes the cap immediately
 without a resize event. This avoids briefly squeezing the view to a stale hidden width;
 the four-frame delay still applies to ordinary visible expansion within one responsive layout.
 
+Editor startup and tab reveal have a separate 50 ms layout-settling hold that hides the root.
+Continuous resize events may restart that debounce, but must not extend root hiding beyond
+250 ms from the visible startup/reveal. Hiding cancels the deadline; returning starts a fresh
+one. Once revealed, ordinary resizing must not hide the root again. This deadline does not
+change transcript hydration, width tracking, or scroll ownership. Bootstrap unit tests cover
+continuous resizing, hidden-view cancellation, and disposal in `src/webview/index.test.tsx`.
+
 The October 4 maximize/restore reproduction exposed an interaction with viewport media queries.
 At a 486px root cap, the 1400px desktop breakpoint displayed a 420px session sidebar, leaving only
 66px for the transcript. Five native maximize/restore cycles produced 20 squeezed animation-frame

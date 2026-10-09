@@ -400,6 +400,113 @@ describe('webview bootstrap', () => {
     }
   });
 
+  it.each(['startup', 'reveal'] as const)(
+    'bounds editor layout hiding during continuous resizing on %s',
+    (phase) => {
+      vi.useFakeTimers();
+      let visibilityState: DocumentVisibilityState = 'visible';
+      let width = 486;
+      const visibilitySpy = vi
+        .spyOn(document, 'visibilityState', 'get')
+        .mockImplementation(() => visibilityState);
+      const widthSpy = vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => width);
+      bootstrapWindow.__initialWebviewState = {
+        webviewContext: { viewId: 'editor-1', surface: 'editor' },
+      };
+      const isPending = () =>
+        document.documentElement.classList.contains('varro-editor-layout-pending');
+      try {
+        cleanup = bootstrap(root);
+        if (phase === 'reveal') {
+          vi.advanceTimersByTime(100);
+          expect(isPending()).toBe(false);
+          visibilityState = 'hidden';
+          document.dispatchEvent(new Event('visibilitychange'));
+          visibilityState = 'visible';
+          document.dispatchEvent(new Event('visibilitychange'));
+        }
+        for (let step = 0; step < 12; step++) {
+          width -= 2;
+          window.dispatchEvent(new Event('resize'));
+          vi.advanceTimersByTime(20);
+          expect(isPending()).toBe(true);
+          expect(root.style.maxWidth).toBe(`${width}px`);
+        }
+        vi.advanceTimersByTime(10);
+        expect(isPending()).toBe(false);
+        // Later resize events must neither hide the editor again nor stop width tracking.
+        for (let step = 0; step < 100; step++) {
+          width -= 1;
+          window.dispatchEvent(new Event('resize'));
+          vi.advanceTimersByTime(20);
+          expect(isPending()).toBe(false);
+          expect(root.style.maxWidth).toBe(`${width}px`);
+        }
+      } finally {
+        cleanup?.();
+        cleanup = undefined;
+        visibilitySpy.mockRestore();
+        widthSpy.mockRestore();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('cancels the editor reveal deadline while hidden and starts a fresh deadline on return', () => {
+    vi.useFakeTimers();
+    let visibilityState: DocumentVisibilityState = 'visible';
+    const visibilitySpy = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockImplementation(() => visibilityState);
+    bootstrapWindow.__initialWebviewState = {
+      webviewContext: { viewId: 'editor-1', surface: 'editor' },
+    };
+    const isPending = () =>
+      document.documentElement.classList.contains('varro-editor-layout-pending');
+    try {
+      cleanup = bootstrap(root);
+      vi.advanceTimersByTime(40);
+      visibilityState = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('resize'));
+      vi.advanceTimersByTime(1000);
+      expect(isPending()).toBe(true);
+
+      visibilityState = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+      for (let step = 0; step < 12; step++) {
+        window.dispatchEvent(new Event('resize'));
+        vi.advanceTimersByTime(20);
+        expect(isPending()).toBe(true);
+      }
+      vi.advanceTimersByTime(10);
+      expect(isPending()).toBe(false);
+
+      visibilityState = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+      visibilityState = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(isPending()).toBe(true);
+      cleanup();
+      cleanup = undefined;
+      const removeSpy = vi.spyOn(document.documentElement.classList, 'remove');
+      try {
+        window.dispatchEvent(new Event('resize'));
+        document.dispatchEvent(new Event('visibilitychange'));
+        vi.advanceTimersByTime(1000);
+        expect(isPending()).toBe(false);
+        expect(removeSpy).not.toHaveBeenCalled();
+      } finally {
+        removeSpy.mockRestore();
+      }
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+      visibilitySpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('hides editor content until a revealed tab finishes resizing', async () => {
     let visibilityState: DocumentVisibilityState = 'visible';
     const visibilityStateSpy = vi
