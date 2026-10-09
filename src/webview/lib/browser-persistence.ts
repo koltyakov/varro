@@ -150,6 +150,13 @@ function shouldUseLocalStorage(key: string): boolean {
   const initialState = asRecord(window)?.__initialWebviewState;
   const webviewContext = asRecord(initialState)?.webviewContext;
   const contextRecord = asRecord(webviewContext);
+  // VS Code saves sidebar view state with the workspace, independently of the webview origin.
+  if (
+    contextRecord?.surface === 'sidebar' &&
+    (key.startsWith('varro.lastOpenedView:') || key.startsWith('varro.lastActiveSessionId:'))
+  ) {
+    return false;
+  }
   if (contextRecord?.surface && WEBVIEW_INSTANCE_KEYS.has(key)) return false;
   return !(contextRecord?.surface === 'editor' && EDITOR_INSTANCE_KEYS.has(key));
 }

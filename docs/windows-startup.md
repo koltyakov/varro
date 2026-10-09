@@ -132,6 +132,13 @@ finish before exposing restored history (`waitForMcpSync: false`). Ordinary sele
 keeps its existing wait. Send and interrupted-continue paths still reconcile MCPs
 before dispatch, so faster display must not send with stale MCP configuration.
 
+The main chat remembers its last view per normalized workspace-folder path in
+VS Code's persisted sidebar webview state. Saved session, sessions-list, and
+new-session views do not expire. Restore a session only if it still exists in the
+fresh catalog, and prefer its current directory over the saved directory. Editor
+tabs retain their private, unscoped serializer state. VS Code owns sidebar visibility
+and maximization restoration; do not toggle or reset the workbench layout at startup.
+
 Essential snapshot readiness is separate from permission automation completion.
 Known automatic requests retain their bounded owner; unknown ancestry is visible
 while classification continues. Pending automatic requests also block interrupted

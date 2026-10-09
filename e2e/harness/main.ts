@@ -11,6 +11,7 @@ import type {
 } from '../../src/shared/protocol';
 import { isPermissionMode } from '../../src/shared/protocol';
 import { getSessionPermissionRulesForMode } from '../../src/shared/permission-rules';
+import { normalizeWorkspaceIdentity } from '../../src/shared/workspace-path';
 import type {
   Agent,
   AssistantMessage,
@@ -6413,6 +6414,8 @@ function setUpHarness() {
   const harnessWindow = window as HarnessWindow;
   const previousScenarioName = window.sessionStorage.getItem('varro.e2eScenario');
   const shouldResetStorage = previousScenarioName !== scenarioName;
+  const workspaceIdentity = normalizeWorkspaceIdentity(scenarioState.workspacePath);
+  const viewStorageSuffix = workspaceIdentity ? `:${workspaceIdentity}` : '';
 
   if (shouldResetStorage) {
     window.sessionStorage.removeItem(PERSISTED_MESSAGE_STATE_KEY);
@@ -6422,7 +6425,7 @@ function setUpHarness() {
     }
     if (scenarioState.persistedActiveSessionId) {
       window.localStorage.setItem(
-        'varro.lastActiveSessionId',
+        `varro.lastActiveSessionId${viewStorageSuffix}`,
         JSON.stringify(scenarioState.persistedActiveSessionId)
       );
     }
@@ -6452,7 +6455,7 @@ function setUpHarness() {
     }
     if (scenarioState.storedState.lastOpenedView) {
       window.localStorage.setItem(
-        'varro.lastOpenedView',
+        `varro.lastOpenedView${viewStorageSuffix}`,
         JSON.stringify(scenarioState.storedState.lastOpenedView)
       );
     }

@@ -571,7 +571,7 @@ describe('connection-bootstrap helpers', () => {
     expect(setShowSessionPicker).toHaveBeenCalledWith(false);
   });
 
-  it('restores the only primary session when the last active session marker is stale', async () => {
+  it('restores the only primary session after a long absence', async () => {
     const setShowSessionPicker = vi.fn();
     const selectSession = vi.fn(async () => {});
 
@@ -870,39 +870,42 @@ describe('connection-bootstrap helpers', () => {
     expect(activeSessionId).toBe('session-2');
   });
 
-  it('opens the sessions list when that was the recent startup fallback', async () => {
-    const setShowSessionPicker = vi.fn();
-    const selectSession = vi.fn(async () => {});
+  it.each(['sessions-list', 'new-session'] as const)(
+    'restores the saved %s view after a long absence',
+    async (type) => {
+      const setShowSessionPicker = vi.fn();
+      const selectSession = vi.fn(async () => {});
 
-    await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
-        getPersistedActiveSessionId: () => null,
-        getPersistedLastOpenedView: () => ({ type: 'sessions-list', timestamp: 1_000_000 }),
-        getSessionCount: () => 2,
-        getOnlyPrimarySessionId: () => null,
-        hasSession: () => true,
-        selectSession,
-        setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
-        now: () => 1_000_000 + 1_000,
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
-    );
+      await initConnectionWithDependencies(
+        {
+          health: vi.fn(async () => HEALTHY_RESPONSE),
+          loadInitialData: vi.fn(async () => {}),
+          hydrateSessionStatuses: vi.fn(async () => {}),
+          getActiveSessionId: () => null,
+          getPersistedActiveSessionId: () => null,
+          getPersistedLastOpenedView: () => ({ type, timestamp: 1_000_000 }),
+          getSessionCount: () => 2,
+          getOnlyPrimarySessionId: () => null,
+          hasSession: () => true,
+          selectSession,
+          setShowSessionPicker,
+          recoverInterruptedSessions: vi.fn(async () => {}),
+          setInitialized: vi.fn(),
+          setError: vi.fn(),
+          now: () => 1_000_000 + 30 * 24 * 60 * 60 * 1000,
+        },
+        {
+          next: () => 1,
+          isCurrent: () => true,
+        }
+      );
 
-    expect(setShowSessionPicker).toHaveBeenCalledWith(true);
-    expect(selectSession).not.toHaveBeenCalled();
-  });
+      expect(setShowSessionPicker).toHaveBeenCalledWith(type === 'sessions-list');
+      expect(selectSession).not.toHaveBeenCalled();
+    }
+  );
 
-  it('opens the sessions list when the last active session is stale and multiple sessions exist', async () => {
+  it('restores the saved session after a long absence when child sessions exist', async () => {
     const setShowSessionPicker = vi.fn();
     const selectSession = vi.fn(async () => {});
 
@@ -926,7 +929,7 @@ describe('connection-bootstrap helpers', () => {
         recoverInterruptedSessions: vi.fn(async () => {}),
         setInitialized: vi.fn(),
         setError: vi.fn(),
-        now: () => 1_000_000 + 10 * 60 * 1000,
+        now: () => 1_000_000 + 30 * 24 * 60 * 60 * 1000,
       },
       {
         next: () => 1,
@@ -934,8 +937,8 @@ describe('connection-bootstrap helpers', () => {
       }
     );
 
-    expect(setShowSessionPicker).toHaveBeenCalledWith(true);
-    expect(selectSession).not.toHaveBeenCalled();
+    expect(setShowSessionPicker).toHaveBeenCalledWith(false);
+    expect(selectSession).toHaveBeenCalledWith('session-1');
   });
 
   it('opens the sessions list when child sessions exist alongside the only primary session', async () => {
@@ -998,7 +1001,7 @@ describe('connection-bootstrap helpers', () => {
     expect(selectSession).not.toHaveBeenCalled();
   });
 
-  it('opens the sessions list when multiple primary sessions exist and the recent session is stale', async () => {
+  it('restores the saved session after a long absence when multiple primary sessions exist', async () => {
     const setShowSessionPicker = vi.fn();
     const selectSession = vi.fn(async () => {});
 
@@ -1022,7 +1025,7 @@ describe('connection-bootstrap helpers', () => {
         recoverInterruptedSessions: vi.fn(async () => {}),
         setInitialized: vi.fn(),
         setError: vi.fn(),
-        now: () => 1_000_000 + 10 * 60 * 1000,
+        now: () => 1_000_000 + 30 * 24 * 60 * 60 * 1000,
       },
       {
         next: () => 1,
@@ -1030,8 +1033,8 @@ describe('connection-bootstrap helpers', () => {
       }
     );
 
-    expect(setShowSessionPicker).toHaveBeenCalledWith(true);
-    expect(selectSession).not.toHaveBeenCalled();
+    expect(setShowSessionPicker).toHaveBeenCalledWith(false);
+    expect(selectSession).toHaveBeenCalledWith('session-1');
   });
 
   it('does not change the current view when a session is already active', async () => {

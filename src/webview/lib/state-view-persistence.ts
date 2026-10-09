@@ -1,8 +1,16 @@
 import type { SelectedModel } from './app-state-types';
+import {
+  getRelativePathWithinWorkspace,
+  normalizeWorkspaceIdentity,
+} from '../../shared/workspace-path';
 import { setShowSessionPicker, showSessionPicker, state } from './app-state';
 import { getSelectedModelForSession, setSelectedModel } from './state-model-selection';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
-import { readStoredSelectedModelForWorkspace, readStoredString } from './state-stored-values';
+import {
+  readStoredSelectedModelForWorkspace,
+  readStoredString,
+  readWebviewInstanceContext,
+} from './state-stored-values';
 import { isNumber, isString, type UnknownRecord, isObject } from './runtime-values';
 
 export type LastOpenedView =
@@ -46,7 +54,14 @@ export function restoreSelectedModelForComposer(sessionId: string | null) {
 }
 
 export function persistActiveSessionId(id: string | null) {
-  writeStored(STORAGE_KEYS.lastActiveSessionId, id);
+  writeStored(viewStorageKey(STORAGE_KEYS.lastActiveSessionId), id);
+}
+
+function viewStorageKey(key: string): string {
+  // Editor tabs have their own route. Only the main chat follows the selected folder.
+  if (readWebviewInstanceContext()?.surface === 'editor') return key;
+  const workspaceIdentity = normalizeWorkspaceIdentity(state.editorContext.workspacePath);
+  return workspaceIdentity ? `${key}:${workspaceIdentity}` : key;
 }
 
 function normalizeLastOpenedView<T>(value: T): LastOpenedView | null {
@@ -67,11 +82,25 @@ function normalizeLastOpenedView<T>(value: T): LastOpenedView | null {
 }
 
 export function persistLastOpenedView(view: LastOpenedViewInput, now = Date.now()) {
-  writeStored(STORAGE_KEYS.lastOpenedView, { ...view, timestamp: now });
+  writeStored(viewStorageKey(STORAGE_KEYS.lastOpenedView), { ...view, timestamp: now });
 }
 
 export function getPersistedLastOpenedView(): LastOpenedView | null {
-  return normalizeLastOpenedView(readStored<unknown>(STORAGE_KEYS.lastOpenedView));
+  const key = viewStorageKey(STORAGE_KEYS.lastOpenedView);
+  const stored = readStored<unknown>(key);
+  if (stored !== null || key === STORAGE_KEYS.lastOpenedView)
+    return normalizeLastOpenedView(stored);
+
+  // Migrate the old shared route only when its directory belongs to this folder.
+  const legacy = normalizeLastOpenedView(readStored<unknown>(STORAGE_KEYS.lastOpenedView));
+  if (
+    legacy?.type !== 'session' ||
+    getRelativePathWithinWorkspace(legacy.directory, state.editorContext.workspacePath) === null
+  ) {
+    return null;
+  }
+  writeStored(key, legacy);
+  return legacy;
 }
 
 export function getPersistedSelectedModel(): SelectedModel | null {
@@ -83,5 +112,5 @@ export function getPersistedSelectedAgent(): string | null {
 }
 
 export function getPersistedActiveSessionId(): string | null {
-  return readStoredString(STORAGE_KEYS.lastActiveSessionId);
+  return readStoredString(viewStorageKey(STORAGE_KEYS.lastActiveSessionId));
 }

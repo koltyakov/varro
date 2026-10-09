@@ -12,7 +12,6 @@ type LastOpenedView =
   | { type: 'sessions-list'; timestamp: number }
   | { type: 'session'; sessionId: string; directory?: string; timestamp: number };
 
-export const STARTUP_VIEW_RESTORE_WINDOW_MS = 10 * 60 * 1000;
 const MAX_SETTLED_RECOVERY_CLAIMS = 100;
 const STARTUP_HEALTH_ATTEMPTS = 3;
 const STARTUP_HEALTH_RETRY_MS = 500;
@@ -333,11 +332,7 @@ async function restoreStartupView(
     return;
   }
 
-  if (
-    lastOpenedView?.type === 'session' &&
-    (deps.now?.() ?? Date.now()) - lastOpenedView.timestamp < STARTUP_VIEW_RESTORE_WINDOW_MS &&
-    deps.hasSession(lastOpenedView.sessionId)
-  ) {
+  if (lastOpenedView?.type === 'session' && deps.hasSession(lastOpenedView.sessionId)) {
     deps.setShowSessionPicker(false);
     const directory =
       deps.getSessionDirectory?.(lastOpenedView.sessionId) ?? lastOpenedView.directory;
@@ -349,18 +344,12 @@ async function restoreStartupView(
     return;
   }
 
-  if (
-    lastOpenedView?.type === 'sessions-list' &&
-    (deps.now?.() ?? Date.now()) - lastOpenedView.timestamp < STARTUP_VIEW_RESTORE_WINDOW_MS
-  ) {
+  if (lastOpenedView?.type === 'sessions-list') {
     deps.setShowSessionPicker(true);
     return;
   }
 
-  if (
-    lastOpenedView?.type === 'new-session' &&
-    (deps.now?.() ?? Date.now()) - lastOpenedView.timestamp < STARTUP_VIEW_RESTORE_WINDOW_MS
-  ) {
+  if (lastOpenedView?.type === 'new-session') {
     deps.setShowSessionPicker(false);
     return;
   }

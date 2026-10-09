@@ -5,6 +5,27 @@ import { getE2EState } from './helpers';
 
 const SESSION_ID = 'session-reload-persistence';
 
+test('restores the main chat in a folder after a month away', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=session-search');
+  await page.locator('.session-item').filter({ hasText: 'Beta rollout notes' }).click();
+  const title = page.getByLabel('Back to sessions').locator('..').getByText('Beta rollout notes');
+  await expect(title).toBeVisible();
+
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'varro.lastOpenedView:/workspace/varro',
+      JSON.stringify({
+        type: 'session',
+        sessionId: 'session-search-beta',
+        directory: '/workspace/varro',
+        timestamp: Date.now() - 30 * 24 * 60 * 60 * 1000,
+      })
+    );
+  });
+  await page.reload();
+  await expect(title).toBeVisible();
+});
+
 test('keeps selected model, agent, MCP, and permission mode after reload', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=reload-persistence');
 
