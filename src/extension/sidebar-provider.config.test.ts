@@ -1,4 +1,5 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests inspect controlled private configuration state on the provider fixture. */
+import { dirname } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   attachTestView,
@@ -35,7 +36,7 @@ describe('SidebarProvider local config routing', () => {
     ];
     expect(uri.fsPath).toBe(globalPath);
     expect(vscodeMock.workspace.fs.createDirectory).toHaveBeenCalledWith(
-      expect.objectContaining({ fsPath: globalPath.slice(0, globalPath.lastIndexOf('/')) })
+      expect.objectContaining({ fsPath: dirname(globalPath) })
     );
     expect(JSON.parse(new TextDecoder().decode(bytes))).toMatchObject({
       $schema: 'https://opencode.ai/config.json',
