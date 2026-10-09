@@ -13,6 +13,7 @@ import {
 } from './opencode-v2-projection';
 import { projectV2Event } from './opencode-v2-events';
 import { OpenCodeV2Adapter } from './opencode-v2-adapter';
+import { findProviderLimitAdapter } from './provider-limits';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { OpenCodeTransport } from './open-code-transport';
 import { asRecord } from '../shared/type-utils';
@@ -1064,6 +1065,108 @@ describe('v2 agent icon options', () => {
 describe('v2 configured model catalogs', () => {
   const tier = { tier: { type: 'context', size: 128_000 }, input: 4, output: 16 };
   const base = { input: 2, output: 8, cache: { read: 0.5, write: 1 } };
+
+  it('forwards the Claude CLI limits descriptors and polls its renamed provider endpoint', async () => {
+    const settings = {
+      providerLimits: {
+        schemaVersion: 1,
+        transport: 'rpc',
+        rpcID: 'varro-claude',
+        method: 'limits',
+        event: 'usage',
+      },
+      'varro-claude': {
+        providerLimits: {
+          schemaVersion: 1,
+          transport: 'http',
+          url: 'http://127.0.0.1:43127/provider-limits',
+          token: 'local-secret',
+        },
+      },
+    };
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+      if (path === '/api/provider')
+        return {
+          data: [
+            { id: 'varro-claude', name: 'Claude Code (CLI)', activation: 'enabled', settings },
+          ],
+        };
+      if (path === '/api/model' || path === '/api/integration') return { data: [] };
+      if (path === '/api/config') return [{ info: {} }];
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const catalog = asRecord(await adapter.request('GET', '/config/providers', undefined));
+    const providers = catalog?.providers;
+    if (!Array.isArray(providers)) throw new Error('Missing provider catalog');
+    const provider = asRecord(providers[0]);
+    expect(provider).toMatchObject({
+      id: 'varro-claude',
+      name: 'Claude Code (CLI)',
+      options: settings,
+    });
+    const metadata = {
+      id: 'varro-claude',
+      models: {},
+      options: asRecord(provider?.options) ?? {},
+    };
+    const limits = findProviderLimitAdapter(metadata, {});
+    if (!limits) throw new Error('Missing Claude CLI limits adapter');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          schemaVersion: 1,
+          providerLimit: {
+            providerID: 'varro-claude',
+            modelID: null,
+            source: 'provider',
+            status: 'available',
+            checkedAt: 1_000,
+            note: 'Reported by the local Claude Code executable',
+            windows: [
+              {
+                id: 'current-session',
+                label: 'Current session',
+                unit: 'unknown',
+                remaining: 85,
+                limit: 100,
+                resetAt: 2_000,
+                percent: 15,
+              },
+              {
+                id: 'current-week-all-models',
+                label: 'Current week (all models)',
+                unit: 'unknown',
+                remaining: 98,
+                limit: 100,
+                resetAt: 3_000,
+                percent: 2,
+              },
+            ],
+          },
+        })
+      )
+    );
+    await expect(
+      limits.fetch({ provider: metadata, authStore: {}, modelID: 'opus', checkedAt: 5_000 })
+    ).resolves.toMatchObject({
+      providerID: 'varro-claude',
+      modelID: 'opus',
+      status: 'available',
+      checkedAt: 1_000,
+      windows: [
+        { remaining: 85, percent: 15, resetAt: 2_000 },
+        { remaining: 98, percent: 2, resetAt: 3_000 },
+      ],
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:43127/provider-limits',
+      expect.objectContaining({
+        headers: { Accept: 'application/json', Authorization: 'Bearer local-secret' },
+        redirect: 'error',
+      })
+    );
+  });
 
   it.each([
     ['single price', base, 0.5, 1, []],

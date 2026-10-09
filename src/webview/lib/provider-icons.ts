@@ -24,6 +24,7 @@ const PROVIDER_ICON_MAP = new Map<string, string>(
     openai: openaiIcon,
     anthropic: anthropicIcon,
     'claude-code': claudeIcon,
+    'varro-claude': claudeIcon,
     openrouter: openrouterIcon,
     gemini: geminiIcon,
     google: geminiIcon,

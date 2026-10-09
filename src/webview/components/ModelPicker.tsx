@@ -152,7 +152,7 @@ export function ModelPicker(props: {
     visibleProviders().map((provider) => ({
       provider,
       searchText: `${provider.name}\n${provider.id}`.toLocaleLowerCase(),
-      models: sortProviderModels(Object.values(provider.models))
+      models: sortProviderModels(Object.values(provider.models), provider.id)
         .toSorted((a, b) => {
           const aIndex = state.modelOrder.indexOf(modelVisibilityKey(provider.id, a.id));
           const bIndex = state.modelOrder.indexOf(modelVisibilityKey(provider.id, b.id));

@@ -7,9 +7,9 @@ describe('provider limit adapters', () => {
   it('prefers the OpenCode Claude adapter for its exact provider descriptor', () => {
     const adapter = findProviderLimitAdapter(
       {
-        id: 'claude-code',
+        id: 'varro-claude',
         options: {
-          'claude-code': {
+          'varro-claude': {
             providerLimits: {
               schemaVersion: 1,
               transport: 'http',
@@ -23,7 +23,7 @@ describe('provider limit adapters', () => {
       {}
     );
 
-    expect(adapter?.id).toBe('claude-code');
+    expect(adapter?.id).toBe('varro-claude');
     expect(adapter?.capabilities).toEqual({ localIpc: true });
   });
 

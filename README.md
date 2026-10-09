@@ -149,6 +149,8 @@ Run `/stats` or `Varro: Usage Stats` for a Markdown report from retained OpenCod
 
 Varro shows quota windows, reset times, and available OpenAI/Codex or Z.ai usage-limit resets when supported provider endpoints supply them. Direct limit checks support OpenAI/Codex, GitHub Copilot, OpenRouter, xAI, Ollama Cloud, Z.ai, Kimi for Coding, and OpenCode Go. After a usage-limit error, you can stop retries or switch providers.
 
+With the `opencode-claude` plugin on OpenCode V2, Varro also reads limits for `varro-claude`, displayed as `Claude Code (CLI)`. It uses the authenticated loopback endpoint advertised in the provider settings. The plugin runs Claude Code's `/usage` command and returns account usage windows, remaining percentages, and known reset times. Varro does not read Claude credentials for this adapter. Limits are unavailable in attach-only mode, where the plugin endpoint may be on another host.
+
 ![Provider quota limits and reset windows](https://raw.githubusercontent.com/koltyakov/varro/main/assets/limits.png)
 
 ## Commit messages

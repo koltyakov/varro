@@ -7,10 +7,10 @@ const provider = createProvider('http://127.0.0.1:43127/provider-limit', 'local-
 
 function createProvider(url: string, token: string): ProviderMetadata {
   return {
-    id: 'claude-code',
+    id: 'varro-claude',
     models: {},
     options: {
-      'claude-code': {
+      'varro-claude': {
         providerLimits: {
           schemaVersion: 1,
           transport: 'http',
@@ -26,7 +26,7 @@ function availableResponse() {
   return {
     schemaVersion: 1,
     providerLimit: {
-      providerID: 'claude-code',
+      providerID: 'varro-claude',
       modelID: null,
       status: 'available',
       source: 'provider',
@@ -107,13 +107,14 @@ describe('createOpenCodeClaudeAdapter', () => {
       expect(adapter.matches(createProvider(url, 'secret'), {})).toBe(false);
     }
     expect(adapter.matches(createProvider('http://127.0.0.1/provider-limit', ''), {})).toBe(false);
-    expect(adapter.matches({ ...provider, id: 'claude-code-copy' }, {})).toBe(false);
+    expect(adapter.matches({ ...provider, id: 'varro-claude-copy' }, {})).toBe(false);
+    expect(adapter.matches({ ...provider, id: 'claude-code' }, {})).toBe(false);
     expect(
       adapter.matches(
         {
           ...provider,
           options: {
-            'claude-code': {
+            'varro-claude': {
               providerLimits: {
                 schemaVersion: 2,
                 transport: 'http',
@@ -151,7 +152,7 @@ describe('createOpenCodeClaudeAdapter', () => {
     );
     expect(status).toEqual({
       ...availableResponse().providerLimit,
-      providerID: 'claude-code',
+      providerID: 'varro-claude',
       modelID: 'claude-sonnet-5',
       checkedAt: 1_000,
     });
@@ -162,7 +163,7 @@ describe('createOpenCodeClaudeAdapter', () => {
       Response.json({
         schemaVersion: 1,
         providerLimit: {
-          providerID: 'claude-code',
+          providerID: 'varro-claude',
           modelID: null,
           status: 'unsupported',
           source: 'provider',
@@ -175,7 +176,7 @@ describe('createOpenCodeClaudeAdapter', () => {
     await expect(
       adapter.fetch({ provider, authStore: {}, modelID: 'claude-opus-5', checkedAt: 5_000 })
     ).resolves.toEqual({
-      providerID: 'claude-code',
+      providerID: 'varro-claude',
       modelID: 'claude-opus-5',
       status: 'unsupported',
       source: 'provider',
@@ -245,7 +246,7 @@ describe('createOpenCodeClaudeAdapter', () => {
     });
 
     expect(status).toEqual({
-      providerID: 'claude-code',
+      providerID: 'varro-claude',
       modelID: null,
       status: 'error',
       source: 'provider',

@@ -3,6 +3,7 @@ import type { Provider } from '../types';
 type ProviderModel = Provider['models'][string];
 
 const GPT_MODEL_TIER_ORDER = ['astra', 'sol', 'terra', 'luna'] as const;
+const CLAUDE_MODEL_TIER_ORDER = ['fable', 'opus', 'sonnet', 'haiku'] as const;
 const PROVIDER_PRIORITY = ['openai', 'anthropic', 'github-copilot', 'groq', 'google'] as const;
 
 export function compareProviders(
@@ -32,6 +33,14 @@ function gptModelTier(model: ProviderModel) {
 
   const tier = GPT_MODEL_TIER_ORDER.findIndex((name) => new RegExp(`\\b${name}\\b`).test(identity));
   return tier >= 0 ? tier : null;
+}
+
+function claudeModelTier(model: ProviderModel) {
+  const identity = `${model.id} ${model.name}`.toLowerCase();
+  const tier = CLAUDE_MODEL_TIER_ORDER.findIndex((name) =>
+    new RegExp(`\\b${name}\\b`).test(identity)
+  );
+  return tier >= 0 ? tier : CLAUDE_MODEL_TIER_ORDER.length;
 }
 
 function modelReleaseTime(model: ProviderModel) {
@@ -104,10 +113,18 @@ export function getSupersededModelIds(models: readonly ProviderModel[]) {
   return superseded;
 }
 
-export function sortProviderModels(models: readonly ProviderModel[]): ProviderModel[] {
+export function sortProviderModels(
+  models: readonly ProviderModel[],
+  providerID?: string
+): ProviderModel[] {
   return models.toSorted((a, b) => {
     const deprecatedOrder = Number(a.status === 'deprecated') - Number(b.status === 'deprecated');
     if (deprecatedOrder !== 0) return deprecatedOrder;
+
+    if (providerID === 'varro-claude') {
+      const claudeTierOrder = claudeModelTier(a) - claudeModelTier(b);
+      if (claudeTierOrder !== 0) return claudeTierOrder;
+    }
 
     const aGptTier = gptModelTier(a);
     const bGptTier = gptModelTier(b);

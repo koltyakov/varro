@@ -117,7 +117,7 @@ function compareProviderOrder(a: ModelProvider, b: ModelProvider) {
 }
 
 function getOrderedProviderModels(provider: ModelProvider) {
-  return sortProviderModels(getListedProviderModels(provider)).toSorted((a, b) => {
+  return sortProviderModels(getListedProviderModels(provider), provider.id).toSorted((a, b) => {
     const aIndex = state.modelOrder.indexOf(modelVisibilityKey(provider.id, a.id));
     const bIndex = state.modelOrder.indexOf(modelVisibilityKey(provider.id, b.id));
     if (aIndex < 0 && bIndex < 0) return 0;
@@ -1148,7 +1148,9 @@ function ModelCatalogDialog(props: { provider: ModelProvider; onClose: () => voi
   const [catalogProvider, setCatalogProvider] = createSignal<ModelProvider>(props.provider);
   const [isLoading, setIsLoading] = createSignal(true);
   const [loadError, setLoadError] = createSignal('');
-  const allModels = createMemo(() => sortProviderModels(Object.values(catalogProvider().models)));
+  const allModels = createMemo(() =>
+    sortProviderModels(Object.values(catalogProvider().models), catalogProvider().id)
+  );
   const initialModelIDs = new Set(getListedProviderModels(props.provider).map((model) => model.id));
   const [selectedModelIDs, setSelectedModelIDs] = createSignal(new Set(initialModelIDs));
   const normalizedQuery = createMemo(() => query().trim().toLocaleLowerCase());

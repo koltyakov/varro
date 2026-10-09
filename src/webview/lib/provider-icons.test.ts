@@ -39,6 +39,7 @@ describe('getProviderIcon', () => {
     ['openai', openaiIcon],
     ['anthropic', anthropicIcon],
     ['claude-code', claudeIcon],
+    ['varro-claude', claudeIcon],
     ['openrouter', openrouterIcon],
     ['gemini', geminiIcon],
     ['google', geminiIcon],

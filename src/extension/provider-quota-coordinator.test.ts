@@ -163,14 +163,14 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it.each(['openai', 'anthropic', 'claude-code'])(
+  it.each(['openai', 'anthropic', 'varro-claude'])(
     'shares %s subscription windows across models and isolates credential rotation',
     async (providerID) => {
       const provider: ProviderMetadata = {
         id: providerID,
         models: {},
         options: {
-          'claude-code': {
+          'varro-claude': {
             providerLimits: {
               schemaVersion: 1,
               transport: 'http',
@@ -250,9 +250,9 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
       expect(text).not.toContain('account-a');
       expect(text).not.toContain('127.0.0.1');
 
-      if (providerID === 'claude-code') {
+      if (providerID === 'varro-claude') {
         provider.options = {
-          'claude-code': {
+          'varro-claude': {
             providerLimits: {
               schemaVersion: 1,
               transport: 'http',
@@ -526,9 +526,9 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
     };
     const coordinator = new ProviderQuotaCoordinator(root);
     const poll = vi.fn(async () => result);
-    expect(await coordinator.get('token', null, poll, 'claude-code')).toEqual(result);
+    expect(await coordinator.get('token', null, poll, 'varro-claude')).toEqual(result);
     expect(await fs.readdir(await accountDirectory())).toEqual([]);
-    expect(await coordinator.get('token', null, poll, 'claude-code')).toEqual(result);
+    expect(await coordinator.get('token', null, poll, 'varro-claude')).toEqual(result);
     expect(poll).toHaveBeenCalledTimes(2);
   });
 

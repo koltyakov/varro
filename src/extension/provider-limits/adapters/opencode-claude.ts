@@ -14,7 +14,7 @@ import {
 } from '../adapter-utils';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 
-const PROVIDER_ID = 'claude-code';
+const PROVIDER_ID = 'varro-claude';
 const REQUEST_TIMEOUT_MS = 20_000;
 const PROVIDER_LIMIT_UNITS = new Set<string>([
   'requests',

@@ -91,6 +91,56 @@ describe('sortProviderModels', () => {
     ]);
   });
 
+  it('orders varro-claude tiers as Fable, Opus, Sonnet, then Haiku', () => {
+    const models = [
+      createModel('haiku', 'Haiku', { release_date: '2027-01-01' }),
+      createModel('sonnet', 'Sonnet', { release_date: '2026-01-01' }),
+      createModel('opus', 'Opus', { release_date: '2025-01-01' }),
+      createModel('fable', 'Fable', { release_date: '2024-01-01' }),
+    ];
+
+    expect(sortProviderModels(models, 'varro-claude').map((model) => model.id)).toEqual([
+      'fable',
+      'opus',
+      'sonnet',
+      'haiku',
+    ]);
+    expect(models.map((model) => model.id)).toEqual(['haiku', 'sonnet', 'opus', 'fable']);
+  });
+
+  it('matches Claude tiers by ID or name and retains release and deprecation ordering', () => {
+    const models = [
+      createModel('default', 'Default', { release_date: '2028-01-01' }),
+      createModel('claude-opus-4-1', 'Older model', { release_date: '2025-08-05' }),
+      createModel('latest', 'Claude OPUS 4.8', { release_date: '2026-05-28' }),
+      createModel('claude-sonnet-4-6', 'Claude Sonnet 4.6', { release_date: '2026-02-17' }),
+      createModel('claude-fable-old', 'Claude Fable', { status: 'deprecated' }),
+    ];
+
+    expect(sortProviderModels(models, 'varro-claude').map((model) => model.id)).toEqual([
+      'latest',
+      'claude-opus-4-1',
+      'claude-sonnet-4-6',
+      'default',
+      'claude-fable-old',
+    ]);
+  });
+
+  it.each([undefined, 'anthropic', 'varro-claude-copy'])(
+    'does not apply Claude tier ordering to provider %s',
+    (providerID) => {
+      const models = [
+        createModel('fable', 'Fable', { release_date: '2024-01-01' }),
+        createModel('haiku', 'Haiku', { release_date: '2027-01-01' }),
+      ];
+
+      expect(sortProviderModels(models, providerID).map((model) => model.id)).toEqual([
+        'haiku',
+        'fable',
+      ]);
+    }
+  );
+
   it('does not apply GPT tier names to other model families', () => {
     const models = [
       createModel('other-sol', 'Other Sol', { release_date: '2024-01-01' }),

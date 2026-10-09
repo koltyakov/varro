@@ -907,8 +907,8 @@ describe('session effect helpers', () => {
 
   it('retargets provider-limit polling after a model switch', async () => {
     const [selection, setSelection] = createSignal({
-      providerID: 'claude-code',
-      modelID: 'claude-sonnet-5',
+      providerID: 'varro-claude',
+      modelID: 'sonnet',
     });
     const loadProviderLimit = vi.fn(async () => null);
 
@@ -931,11 +931,11 @@ describe('session effect helpers', () => {
 
     try {
       await Promise.resolve();
-      expect(loadProviderLimit).toHaveBeenLastCalledWith('claude-code', 'claude-sonnet-5');
+      expect(loadProviderLimit).toHaveBeenLastCalledWith('varro-claude', 'sonnet');
 
-      setSelection({ providerID: 'claude-code', modelID: 'claude-opus-5' });
+      setSelection({ providerID: 'varro-claude', modelID: 'opus' });
       await Promise.resolve();
-      expect(loadProviderLimit).toHaveBeenLastCalledWith('claude-code', 'claude-opus-5');
+      expect(loadProviderLimit).toHaveBeenLastCalledWith('varro-claude', 'opus');
       expect(loadProviderLimit).toHaveBeenCalledTimes(2);
     } finally {
       dispose();
