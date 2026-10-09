@@ -203,12 +203,18 @@ export async function editMessageWithDependencies(
     deps.getSessionTreeIds
   );
   const selectedModel = options?.selectedModel ?? target.info.model;
-  const sendEditedMessage = deps.prepareEditedMessageSend
-    ? deps.prepareEditedMessageSend(text, sessionId, options?.queuedAttachments, selectedModel)
-    : (beforeOptimisticPublish?: () => void) => {
-        beforeOptimisticPublish?.();
-        return deps.sendEditedMessage(text, sessionId, options?.queuedAttachments);
-      };
+  let sendEditedMessage: (beforeOptimisticPublish?: () => void) => Promise<boolean>;
+  try {
+    sendEditedMessage = deps.prepareEditedMessageSend
+      ? deps.prepareEditedMessageSend(text, sessionId, options?.queuedAttachments, selectedModel)
+      : (beforeOptimisticPublish?: () => void) => {
+          beforeOptimisticPublish?.();
+          return deps.sendEditedMessage(text, sessionId, options?.queuedAttachments);
+        };
+  } catch (err) {
+    deps.setError(err instanceof Error ? err.message : 'Failed to prepare edited message');
+    return false;
+  }
   let historyPruned = false;
   const pruneHistory = () => {
     if (historyPruned) return;

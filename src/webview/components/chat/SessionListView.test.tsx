@@ -30,7 +30,7 @@ import {
 } from '../../lib/session-share-overrides';
 import { fixture } from '../../test-fixtures';
 import {
-  compressLinesIcon,
+  compressIcon,
   flashSolidIcon,
   forwardMessageIcon,
   hourglassIcon,
@@ -318,7 +318,7 @@ describe('SessionListSectionHeader icons', () => {
 
 describe('SessionListView keyboard recovery', () => {
   it.each(['local', 'metadata'] as const)(
-    'shows the compress-lines icon in the running filter during %s compaction',
+    'shows the compress icon in the running filter during %s compaction',
     (source) => {
       vi.useFakeTimers();
       setSessions([session('compacting', 10), session('idle', 9)]);
@@ -340,7 +340,7 @@ describe('SessionListView keyboard recovery', () => {
           indicator
             ?.querySelector<HTMLElement>('.ui-icon')
             ?.style.getPropertyValue('--ui-icon-mask')
-        ).toBe(toCssUrl(compressLinesIcon));
+        ).toBe(toCssUrl(compressIcon));
         expect(container.querySelector('.session-status-indicator.is-running')).toBeNull();
 
         setState('sessionStatus', 'compacting', { type: 'busy' });

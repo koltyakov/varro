@@ -205,9 +205,12 @@ describe('SessionSendOperations', () => {
       const beforeOptimisticPublish = vi.fn();
       const operations = createOperations(sendAsync, undefined, { createSession });
 
-      expect(await operations.prepareSendMessage('Keep this draft')(beforeOptimisticPublish)).toBe(
-        false
-      );
+      expect(() => operations.prepareSendMessage('Keep this draft')).toThrow('is unavailable');
+      expect(
+        await operations.sendMessage('Keep this draft', {
+          onOptimisticPublish: beforeOptimisticPublish,
+        })
+      ).toBe(false);
 
       expect(error()).toContain('Selected model openai/gpt-6.1-sol is unavailable');
       expect(sendAsync).not.toHaveBeenCalled();

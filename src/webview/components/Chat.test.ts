@@ -56,6 +56,7 @@ import {
 } from '../lib/state';
 import { ralphStore } from '../lib/stores/ralph-store';
 import { sessionStore } from '../lib/stores/session-store';
+import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
 import { clearDirectSessionReturn, rememberDirectSessionReturn } from '../lib/session-navigation';
 import {
   requestProviderConnection,
@@ -136,6 +137,7 @@ afterEach(() => {
   vi.useRealTimers();
   cleanup?.();
   cleanup = undefined;
+  resetMessageEditState();
   container?.remove();
   container = null;
   setState('sessions', []);
@@ -4030,6 +4032,50 @@ describe('header status badges', () => {
     expect(mainShell).toBeInstanceOf(HTMLDivElement);
     expect(workspace?.firstElementChild).toBe(mainShell);
     expect(workspace?.lastElementChild).toBe(sidebar);
+  });
+
+  it('keeps the edit composer visible when its message row disappears', async () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('activeSessionId', 'session-1');
+    setState('messages', [
+      {
+        info: {
+          id: 'user-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-4o' },
+        },
+        parts: [
+          {
+            id: 'text-1',
+            messageID: 'user-1',
+            sessionID: 'session-1',
+            type: 'text',
+            text: 'Original prompt',
+          },
+        ],
+      },
+    ]);
+    cleanup = render(() => Chat(), container!);
+    startEditingMessage('user-1', 'session-1', 'Revised prompt');
+    await Promise.resolve();
+
+    const composer = container?.querySelector('.rich-composer');
+    expect(composer).not.toBeNull();
+    expect(composer?.closest('.interactive-list')).not.toBeNull();
+    setState('messages', []);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.rich-composer')).toBe(composer);
+    expect(composer?.closest('[hidden]')).toBeNull();
+    expect(composer?.closest('.composer-bottom-slot')).not.toBeNull();
+    expect(composer?.textContent).toContain('Revised prompt');
+    const cancel = container?.querySelector<HTMLButtonElement>('[title="Cancel editing (Esc)"]');
+    expect(cancel).not.toBeNull();
+    cancel?.click();
+    expect(composer?.closest('.composer-bottom-slot')).not.toBeNull();
   });
 
   it('preserves the live chat DOM and transient state when the desktop pane changes sides', async () => {

@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
+import type { MessageEntry } from '../../src/webview/types';
 
 for (const source of ['metadata', 'events'] as const) {
-  test(`shows idle session compaction as running with a static compress-lines icon via ${source}`, async ({
+  test(`shows idle session compaction as running with a static compress icon via ${source}`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 650, height: 900 });
@@ -36,7 +37,7 @@ for (const source of ['metadata', 'events'] as const) {
               type: compacting
                 ? 'session.next.compaction.started'
                 : 'session.next.compaction.ended',
-              properties: { sessionID: 'session-plan-filter' },
+              properties: { sessionID: 'session-plan-filter', reason: 'manual' },
             };
       await page.evaluate((nextEvent) => {
         // SAFETY: The isolated session-list fixture installs this event transport.
@@ -46,12 +47,6 @@ for (const source of ['metadata', 'events'] as const) {
           }
         ).__varroE2E;
         harness.replayServerEvent(nextEvent);
-        if (nextEvent.type === 'session.next.compaction.ended') {
-          harness.replayServerEvent({
-            type: 'session.status',
-            properties: { sessionID: 'session-plan-filter', status: { type: 'idle' } },
-          });
-        }
       }, event);
     };
 
@@ -62,6 +57,14 @@ for (const source of ['metadata', 'events'] as const) {
     await expect(indicator).toHaveCSS('animation-name', 'none');
     await expect(indicator).toHaveCSS('width', '12px');
     await expect(indicator.locator('.ui-icon')).not.toHaveCSS('mask-image', 'none');
+    const centerOffset = await indicator.evaluate((element) => {
+      const indicatorBox = element.getBoundingClientRect();
+      const iconBox = element.querySelector('.ui-icon')!.getBoundingClientRect();
+      return Math.abs(
+        iconBox.top + iconBox.height / 2 - (indicatorBox.top + indicatorBox.height / 2)
+      );
+    });
+    expect(centerOffset).toBeLessThan(0.5);
     await expect(row.locator('.is-plan-completed')).toHaveCount(0);
     await page.getByRole('button', { name: '2 running sessions' }).click();
     await expect(row).toBeVisible();
@@ -73,6 +76,146 @@ for (const source of ['metadata', 'events'] as const) {
     await expect(row.locator('.is-plan-completed')).toBeVisible();
   });
 }
+
+test('clears manual compaction activity when the completed action arrives without an idle event', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=status-filters');
+  const history: MessageEntry[] = [
+    {
+      info: {
+        id: 'prompt-before-compaction',
+        sessionID: 'session-plan-filter',
+        role: 'user',
+        time: { created: Date.now() - 5_000 },
+        agent: 'plan',
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+      },
+      parts: [
+        {
+          id: 'prompt-text',
+          messageID: 'prompt-before-compaction',
+          sessionID: 'session-plan-filter',
+          type: 'text',
+          text: 'Fix the layout.',
+        },
+      ],
+    },
+    {
+      info: {
+        id: 'response-before-compaction',
+        sessionID: 'session-plan-filter',
+        role: 'assistant',
+        parentID: 'prompt-before-compaction',
+        time: { created: Date.now() - 4_000, completed: Date.now() - 1_000 },
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+        mode: 'plan',
+        agent: 'plan',
+        path: { cwd: '/workspace/varro', root: '/workspace/varro' },
+        cost: 0,
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        finish: 'stop',
+      },
+      parts: [
+        {
+          id: 'response-text',
+          messageID: 'response-before-compaction',
+          sessionID: 'session-plan-filter',
+          type: 'text',
+          text: 'Layout fixed.',
+        },
+      ],
+    },
+  ];
+  await page.evaluate((messages) => {
+    // SAFETY: The isolated fixture exposes its backend transcript for setup.
+    const harness = (
+      window as typeof window & {
+        __varroE2E: {
+          updateMessageInfo(info: MessageEntry['info']): void;
+          updateMessagePart(part: MessageEntry['parts'][number]): void;
+        };
+      }
+    ).__varroE2E;
+    for (const message of messages) {
+      harness.updateMessageInfo(message.info);
+      for (const part of message.parts) harness.updateMessagePart(part);
+    }
+  }, history);
+  const row = page
+    .locator('.session-item:visible')
+    .filter({ hasText: 'Plan awaiting implementation' });
+  await row.click();
+  await expect(page.getByText('Layout fixed.', { exact: true })).toBeVisible();
+  const compaction: MessageEntry = {
+    info: {
+      id: 'manual-compaction-message',
+      sessionID: 'session-plan-filter',
+      role: 'user',
+      time: { created: Date.now() },
+      agent: 'plan',
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+    },
+    parts: [
+      {
+        id: 'manual-compaction-part',
+        sessionID: 'session-plan-filter',
+        messageID: 'manual-compaction-message',
+        type: 'compaction',
+        auto: false,
+        status: 'running',
+      },
+    ],
+  };
+  const replayCompaction = async (completed: boolean) => {
+    await page.evaluate(
+      ({ message, completed: isComplete }) => {
+        // SAFETY: The isolated fixture installs this event and transcript transport.
+        const harness = (
+          window as typeof window & {
+            __varroE2E: {
+              replayServerEvent(event: ServerEvent, message: MessageEntry): void;
+            };
+          }
+        ).__varroE2E;
+        harness.replayServerEvent(
+          {
+            type: isComplete ? 'session.next.compaction.ended' : 'session.next.compaction.started',
+            properties: { sessionID: message.info.sessionID, reason: 'manual' },
+          },
+          message
+        );
+      },
+      { message: compaction, completed }
+    );
+  };
+  await replayCompaction(false);
+  await expect(row.locator('.is-compacting')).toBeVisible();
+  await expect(page.locator('.manual-compaction-action')).toContainText('Compacting context');
+
+  const part = compaction.parts[0];
+  if (part?.type !== 'compaction') throw new Error('Missing compaction fixture part');
+  part.status = 'completed';
+  await replayCompaction(true);
+  await expect(page.locator('.manual-compaction-action')).toContainText(
+    'Context compacted manually'
+  );
+  await expect(row.locator('.is-compacting, .is-running')).toHaveCount(0);
+  await expect(page.locator('.interactive-session .loading-indicator')).toHaveCount(0);
+  await expect(page.locator('.message-compaction-divider')).toHaveCount(0);
+  const summary = page.locator(
+    '[data-msg-id="response-before-compaction"] > .assistant-dialog-summary'
+  );
+  const action = page.locator('.manual-compaction-action');
+  await expect(summary).toBeVisible();
+  const summaryBox = await summary.boundingBox();
+  const actionBox = await action.boundingBox();
+  expect(actionBox!.y).toBeGreaterThanOrEqual(summaryBox!.y + summaryBox!.height);
+  await expect(action.locator('.ui-icon')).not.toHaveCSS('mask-image', 'none');
+  await page.screenshot({ path: testInfo.outputPath('manual-compaction-completed.png') });
+});
 
 test('shows an unseen plan in the narrow header after switching to another chat', async ({
   page,

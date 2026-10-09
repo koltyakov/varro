@@ -1007,20 +1007,13 @@ export class SessionSendOperations {
     }
     // Capture the displayed reasoning choice before session creation can turn
     // an absent variant into an explicit session default.
-    let capturedSelectedModel: SelectedModel | null;
-    try {
-      capturedSelectedModel = resolveComposerSendModel({
-        selectedModel,
-        providers: appStore.state.providers,
-        providerDefaults: appStore.state.providerDefaults,
-        modelVariantSelections,
-      });
-    } catch (error) {
-      return async () => {
-        uiStore.setError(error instanceof Error ? error.message : String(error));
-        return false;
-      };
-    }
+    // Preparation must fail before an edit deletes the original history.
+    const capturedSelectedModel = resolveComposerSendModel({
+      selectedModel,
+      providers: appStore.state.providers,
+      providerDefaults: appStore.state.providerDefaults,
+      modelVariantSelections,
+    });
     const capturedAttachments = captureComposerAttachments(options?.queuedAttachments);
     const sourceEditorContext =
       options?.queuedContext?.editorContext ?? appStore.state.editorContext;
@@ -1152,7 +1145,14 @@ export class SessionSendOperations {
   };
 
   readonly sendMessage = async (text: string, options?: SessionSendOptions) => {
-    return await this.prepareSendMessage(text, options)(options?.onOptimisticPublish);
+    let send: ReturnType<SessionSendOperations['prepareSendMessage']>;
+    try {
+      send = this.prepareSendMessage(text, options);
+    } catch (error) {
+      uiStore.setError(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+    return await send(options?.onOptimisticPublish);
   };
 
   readonly retryMessage = async (messageId: string, sessionId = appStore.state.activeSessionId) => {

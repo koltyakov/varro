@@ -9096,7 +9096,18 @@ export function MessageList() {
     const messageId = trailingSummaryMessageId();
     if (!messageId) return null;
     const summary = assistantDialogSummaryMap().get(messageId);
-    const message = messages().find((entry) => entry.info.id === messageId);
+    const visibleMessages = messages();
+    const messageIndex = visibleMessages.findIndex((entry) => entry.info.id === messageId);
+    const message = visibleMessages[messageIndex];
+    // Manual compaction is a separate action after the completed turn. Keep
+    // that turn's summary in its measured row, before the compaction action.
+    if (
+      visibleMessages
+        .slice(messageIndex + 1)
+        .some((entry) => entry.parts.some((part) => part.type === 'compaction' && !part.auto))
+    ) {
+      return null;
+    }
     if (message && summary) return { message, summary };
     return previous?.message.info.id === messageId && message
       ? { message, summary: previous.summary }

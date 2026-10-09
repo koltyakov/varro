@@ -65,6 +65,60 @@ describe('message entrance detection', () => {
   });
 });
 
+describe('manual compaction actions', () => {
+  it('keeps the completed turn summary before the manual compaction action', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1')]);
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    replaceMessages([
+      { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Fix the layout')] },
+      {
+        info: {
+          ...assistantMessage('response', {
+            parentID: 'prompt',
+            time: { created: 1, completed: 2 },
+          }),
+          finish: 'stop',
+        },
+        parts: [{ ...textPart('response-text', 'Layout fixed.'), messageID: 'response' }],
+      },
+      {
+        info: { ...userMessage('manual-compaction'), time: { created: 3 } },
+        parts: [
+          {
+            id: 'manual-compaction-part',
+            sessionID: 'session-1',
+            messageID: 'manual-compaction',
+            type: 'compaction',
+            auto: false,
+            status: 'completed',
+          },
+        ],
+      },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const summary = container?.querySelector(
+      '[data-msg-id="response"] > .assistant-dialog-summary'
+    );
+    const action = container?.querySelector(
+      '[data-msg-id="manual-compaction"] .manual-compaction-action'
+    );
+    expect(summary).not.toBeNull();
+    expect(action?.textContent).toContain('Context compacted manually');
+    expect(
+      summary!.compareDocumentPosition(action!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
+    expect(
+      container
+        ?.querySelector('[data-msg-id="manual-compaction"]')
+        ?.classList.contains('interactive-item-render-empty')
+    ).toBe(false);
+  });
+});
+
 describe('session pause dividers', () => {
   it('keeps an otherwise empty pause row measured and updates it in place on continuation', () => {
     const frames = installQueuedAnimationFrameMocks();
@@ -3533,7 +3587,7 @@ describe('MessageList session scoping', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Context compacted (manual)');
+    expect(container?.textContent).toContain('Context compacted manually');
     expect(
       container?.querySelector('.model-change-indicator:not(.assistant-dialog-summary)')
     ).toBeNull();

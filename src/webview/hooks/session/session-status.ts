@@ -397,7 +397,13 @@ export async function recheckSessionStatusWithDependencies(
       if (deps.isActiveSession(sessionId)) {
         const messages = deps.getMessages?.() ?? [];
         const currentStatus = deps.getCurrentSessionStatus?.(sessionId);
-        if (hasUnsettledLatestTurn(messages)) {
+        const latestMessage = messages.at(-1);
+        const settledCompaction =
+          !!latestMessage?.parts.length &&
+          latestMessage.parts.every(
+            (part) => part.type === 'compaction' && part.status !== 'running'
+          );
+        if (!settledCompaction && hasUnsettledLatestTurn(messages)) {
           deps.startLoading();
         } else if (
           syncedMessages &&
@@ -409,7 +415,11 @@ export async function recheckSessionStatusWithDependencies(
           deps.stopLoading();
         } else if (
           isRunningSessionStatus(currentStatus) ||
-          latestAssistantFinishedBeforeCurrentLoading(messages, deps.loadingStartedAt?.() ?? null)
+          (!settledCompaction &&
+            latestAssistantFinishedBeforeCurrentLoading(
+              messages,
+              deps.loadingStartedAt?.() ?? null
+            ))
         ) {
           deps.startLoading();
         } else {

@@ -133,6 +133,38 @@ describe('sendMessage', () => {
     );
   });
 
+  it.each([
+    { providerID: 'openai', modelID: 'unavailable' },
+    { providerID: '', modelID: '' },
+  ])('preserves edited history when its model is unavailable: %j', async (model) => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('activeSessionId', 'session-1');
+    const original = userMessage('user-1');
+    if (original.role !== 'user') throw new Error('Expected a user message');
+    original.model = model;
+    const messages = [
+      { info: original, parts: [] },
+      { info: assistantMessage('assistant-1', 'user-1'), parts: [] },
+    ];
+    stateModule.replaceMessages(messages);
+    clientMocks.sessionDeleteMessage.mockResolvedValue(undefined);
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    const onOptimisticPublish = vi.fn();
+
+    expect(await hookModule.editMessage('user-1', 'Revised prompt', { onOptimisticPublish })).toBe(
+      false
+    );
+
+    expect(stateModule.error()).toContain('is unavailable');
+    expect(clientMocks.sessionDeleteMessage).not.toHaveBeenCalled();
+    expect(clientMocks.sessionAbort).not.toHaveBeenCalled();
+    expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
+    expect(clientMocks.sessionMessages).not.toHaveBeenCalled();
+    expect(onOptimisticPublish).not.toHaveBeenCalled();
+    expect(stateModule.state.messages).toEqual(messages);
+    expect(stateModule.isLoading()).toBe(false);
+  });
+
   it('requests bottom follow when an edited replacement is published before send completes', async () => {
     const { stateModule, hookModule } = await loadModules();
     stateModule.setState('activeSessionId', 'session-1');

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
-import type { Message, SessionStatus } from '../types';
+import type { Message, MessageEntry, SessionStatus } from '../types';
 
 // SAFETY: The fixture provides the complete domain shape read by this statement.
 const { setSessionUsageLimitState, setState, startLoading, stopLoading, state } = vi.hoisted(
@@ -503,6 +503,53 @@ describe('session status helpers', () => {
     expect(startLoadingSpy).toHaveBeenCalledTimes(1);
     expect(stopLoadingSpy).not.toHaveBeenCalled();
   });
+
+  it.each(['running', 'completed', 'failed'] as const)(
+    'reconciles idle after %s manual compaction without treating it as a user prompt',
+    async (status) => {
+      const stopLoadingSpy = vi.fn();
+      const startLoadingSpy = vi.fn();
+      const messages: MessageEntry[] = [
+        { info: completedAssistantMessage(), parts: [] },
+        {
+          info: { ...userMessage(), id: 'compaction-message', time: { created: 3 } },
+          parts: [
+            {
+              id: 'compaction-part',
+              messageID: 'compaction-message',
+              sessionID: 'session-1',
+              type: 'compaction',
+              auto: false,
+              status,
+            },
+          ],
+        },
+      ];
+      await recheckSessionStatusWithDependencies(
+        {
+          isDocumentVisible: () => true,
+          loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
+          shouldIgnorePendingAbortStatus: () => false,
+          hasPendingAbort: () => false,
+          updateUsageLimitState: vi.fn(),
+          clearPendingAbort: vi.fn(),
+          stopLoading: stopLoadingSpy,
+          setSessionStatuses: vi.fn(),
+          shouldResyncSessionAfterIdle: () => true,
+          syncSession: vi.fn(async () => {}),
+          syncSessionMessages: vi.fn(async () => {}),
+          startLoading: startLoadingSpy,
+          loadingStartedAt: () => 3,
+          isActiveSession: () => true,
+          getMessages: () => messages,
+          logError: vi.fn(),
+        },
+        'session-1'
+      );
+      expect(startLoadingSpy).toHaveBeenCalledTimes(status === 'running' ? 1 : 0);
+      expect(stopLoadingSpy).toHaveBeenCalledTimes(status === 'running' ? 0 : 1);
+    }
+  );
 
   it('keeps active loading when an idle recheck only sees the previous completed reply', async () => {
     const stopLoadingSpy = vi.fn();

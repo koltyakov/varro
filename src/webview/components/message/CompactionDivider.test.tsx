@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { formatClockTime } from '../../lib/message-time';
+import { compressIcon } from '../../lib/ui-icons';
 import type { CompactionPart } from '../../types';
+import { toCssUrl } from '../UiIcon';
 import { CompactionDivider } from './CompactionDivider';
 
 let container: HTMLDivElement | null = null;
@@ -52,19 +54,39 @@ describe('CompactionDivider', () => {
     expect(container?.textContent).toContain(label);
   });
 
-  it('renders the manual compaction label by default', () => {
+  it('renders manual compaction as an icon action instead of a divider', () => {
     cleanup = render(
       () => CompactionDivider({ part: compactionPart(), timestamp: 1_000 }),
       container!
     );
 
-    expect(container?.textContent).toContain('Context compacted (manual)');
+    expect(container?.textContent).toContain('Context compacted manually');
+    const action = container?.querySelector('.manual-compaction-action');
+    expect(action?.classList.contains('user-message-card-wrapperless')).toBe(true);
     expect(
-      container
-        ?.querySelector('.message-compaction-divider')
-        ?.classList.contains('assistant-dialog-summary')
-    ).toBe(true);
-    expect(container?.querySelector('.assistant-dialog-summary-content')).not.toBeNull();
+      action?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(compressIcon));
+    expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
+    expect(container?.querySelector('.message-compaction-divider')).toBeNull();
+  });
+
+  it.each([
+    ['running', 'Compacting context'],
+    ['failed', 'Context compaction failed: Summary failed'],
+    ['completed', 'Context compacted manually'],
+  ] as const)('labels %s manual compaction accurately', (status, label) => {
+    cleanup = render(
+      () =>
+        CompactionDivider({
+          part: compactionPart({
+            status,
+            error: status === 'failed' ? 'Summary failed' : undefined,
+          }),
+          timestamp: 1_000,
+        }),
+      container!
+    );
+    expect(container?.querySelector('.manual-compaction-action')?.textContent).toContain(label);
   });
 
   it('renders the auto compaction label', () => {
@@ -102,22 +124,20 @@ describe('CompactionDivider', () => {
       container!
     );
 
-    const divider = container?.querySelector<HTMLElement>('.message-compaction-divider');
-    const time = divider?.querySelector<HTMLTimeElement>(
-      '.assistant-dialog-summary-completed-time'
-    );
+    const divider = container?.querySelector<HTMLElement>('.chat-turn-manual-compaction');
+    const time = divider?.querySelector<HTMLTimeElement>('.message-sent-time');
     expect(time?.textContent).toBe(formatClockTime(timestamp));
     expect(time?.classList.contains('is-animation-suppressed')).toBe(true);
-    expect(divider?.classList.contains('is-completion-time-visible')).toBe(false);
+    expect(time?.classList.contains('is-visible')).toBe(false);
 
     divider?.dispatchEvent(new MouseEvent('mouseenter'));
     vi.advanceTimersByTime(299);
-    expect(divider?.classList.contains('is-completion-time-visible')).toBe(false);
+    expect(time?.classList.contains('is-visible')).toBe(false);
     vi.advanceTimersByTime(1);
-    expect(divider?.classList.contains('is-completion-time-visible')).toBe(true);
+    expect(time?.classList.contains('is-visible')).toBe(true);
 
     divider?.dispatchEvent(new MouseEvent('mouseleave'));
-    expect(divider?.classList.contains('is-completion-time-visible')).toBe(false);
+    expect(time?.classList.contains('is-visible')).toBe(false);
   });
 
   it('keeps the timestamp visible when configured', () => {

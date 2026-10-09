@@ -71,7 +71,7 @@ import {
   forwardMessageIcon,
   navArrowRightIcon,
   cableTagIcon,
-  compressLinesIcon,
+  compressIcon,
   folderIcon,
   folderPlusIcon,
   folderSettingsIcon,
@@ -2509,7 +2509,7 @@ function SessionListItem(props: {
                 <UiIcon source={hourglassIcon} width={12} height={12} />
               </Show>
               <Show when={kind() === 'compacting'}>
-                <UiIcon source={compressLinesIcon} width={12} height={12} />
+                <UiIcon source={compressIcon} width={12} height={12} />
               </Show>
             </span>
           )}

@@ -2737,6 +2737,61 @@ describe('registerSessionEventHandlers', () => {
     });
   });
 
+  it.each(['active', 'background'] as const)(
+    'rechecks %s manual compaction completion without restarting progress',
+    (view) => {
+      const handlers = installHandlers();
+      const syncSession = vi.fn().mockResolvedValue(undefined);
+      const recheckSessionStatus = vi.fn().mockResolvedValue(undefined);
+      const deps = createDefaultDeps({
+        getActiveSessionId: () => (view === 'active' ? 'session-1' : 'other-session'),
+        syncSession,
+        recheckSessionStatus,
+      });
+      const cleanups = registerSessionEventHandlers(deps);
+      try {
+        startLoading.mockClear();
+        markLoadingActivity.mockClear();
+        setSessionCompactingStore.mockClear();
+        handlers.get('session.next.compaction.ended')?.({
+          properties: { sessionID: 'session-1', reason: 'manual' },
+        });
+
+        expect(setSessionCompactingStore).toHaveBeenCalledWith('session-1', false);
+        expect(deps.setSessionStatusEntry).not.toHaveBeenCalled();
+        expect(startLoading).not.toHaveBeenCalled();
+        expect(markLoadingActivity).not.toHaveBeenCalled();
+        expect(syncSession).toHaveBeenCalledWith('session-1');
+        expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
+      } finally {
+        for (const cleanup of cleanups) cleanup();
+      }
+    }
+  );
+
+  it('preserves running work when automatic compaction ends', () => {
+    const handlers = installHandlers();
+    const deps = createDefaultDeps({ getActiveSessionId: () => 'session-1' });
+    const cleanups = registerSessionEventHandlers(deps);
+    try {
+      handlers.get('session.next.compaction.started')?.({
+        properties: { sessionID: 'session-1', reason: 'auto' },
+      });
+      vi.mocked(deps.setSessionStatusEntry).mockClear();
+      stopLoading.mockClear();
+      handlers.get('session.next.compaction.ended')?.({
+        properties: { sessionID: 'session-1', reason: 'auto' },
+      });
+
+      expect(deps.getSessionStatus('session-1')).toEqual({ type: 'busy' });
+      expect(deps.setSessionStatusEntry).not.toHaveBeenCalled();
+      expect(stopLoading).not.toHaveBeenCalled();
+      expect(deps.recheckSessionStatus).toHaveBeenCalledWith('session-1');
+    } finally {
+      for (const cleanup of cleanups) cleanup();
+    }
+  });
+
   it('runs a trailing transcript sync when shell completion arrives during a sync', async () => {
     const handlers = installHandlers();
     let resolveFirstSync: (() => void) | undefined;

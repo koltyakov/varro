@@ -1682,7 +1682,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           handleSessionIdle(sessionID, deps.hasPendingAbort(sessionID));
           return;
         }
-        markSessionProgress(sessionID);
+        const compactionEnded = eventName === 'session.next.compaction.ended';
+        // Compaction completion is not new work. Manual compaction can finish
+        // without an execution-idle event; automatic compaction can continue.
+        if (!compactionEnded) markSessionProgress(sessionID);
         if (
           eventName === 'session.next.compaction.started' ||
           eventName === 'session.next.compaction.ended'
@@ -1691,6 +1694,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
             sessionID,
             eventName === 'session.next.compaction.started'
           );
+        }
+        if (compactionEnded) {
+          deps
+            .syncSession(sessionID)
+            .catch((err) => deps.logError('syncSession after compaction ended', err));
+          void deps
+            .recheckSessionStatus?.(sessionID)
+            .catch((err) => deps.logError('recheckSessionStatus after compaction ended', err));
         }
         if (
           eventName === 'session.next.shell.started' ||
@@ -1705,7 +1716,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         }
 
         if (!activeTreeEvent) return;
-        uiStore.markLoadingActivity();
+        if (!compactionEnded) uiStore.markLoadingActivity();
         const projected = PROJECTED_SESSION_EVENTS.has(eventName)
           ? handleProjectedSessionEvent(eventName, p)
           : false;

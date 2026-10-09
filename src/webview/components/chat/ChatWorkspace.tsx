@@ -37,8 +37,19 @@ function activeRalphSessionId() {
 function ComposerHost() {
   const [bottomMount, setBottomMount] = createSignal<HTMLElement | null>(null);
   const [parkingMount, setParkingMount] = createSignal<HTMLElement | null>(null);
-  const mountTarget = () =>
-    inlineEditMount() ?? (editingMessage() ? parkingMount() : bottomMount());
+  const mountTarget = () => {
+    const inlineMount = inlineEditMount();
+    if (inlineMount) return inlineMount;
+    const editing = editingMessage();
+    // Park only while an existing row is acquiring its inline slot. A failed
+    // replacement can remove that row; keep its draft and Cancel control visible.
+    const hasEditRow =
+      editing &&
+      state.messages.some(
+        (entry) => entry.info.id === editing.messageId && entry.info.sessionID === editing.sessionId
+      );
+    return hasEditRow ? parkingMount() : bottomMount();
+  };
 
   return (
     <>

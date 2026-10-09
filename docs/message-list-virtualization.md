@@ -116,8 +116,10 @@ the shared invariants below remain true.
 - Removing a semantic zero-height classification makes any cached zero provisional. Delete the stale
   measurement, dirty the prefix from that row, and force bounded hydration so newly visible content
   cannot remain trapped behind a zero-height virtual range.
-- Compaction-only user messages paint a divider and must have a measured nonzero height. Treating
-  them as empty makes virtual unmounts briefly shrink the scroll range and clamp bottom follow.
+- Compaction-only user messages paint an automatic divider or a manual action and must have a measured
+  nonzero height. Keep the preceding turn's summary before a manual compaction action, in its measured
+  message row rather than the trailing summary slot. Treating compaction rows as empty makes virtual
+  unmounts briefly shrink the scroll range and clamp bottom follow.
 - Synthetic user-role text uses expandable tool-style automatic actions, never editable user cards.
   Mixed messages keep these actions outside the real prompt. Action-only messages join adjacent
   Explored groups through a presentation-only projection preserving message and part IDs. Non-owner
