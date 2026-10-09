@@ -8484,6 +8484,86 @@ describe('ChatInput', () => {
     }
   );
 
+  it('queues and dispatches the sent model despite a delayed previous-turn model snapshot', async () => {
+    setupMatchingActiveTurn();
+    setState('activeSessionId', 'session-1');
+    setState('providers', 0, 'models', 'other', {
+      id: 'other',
+      name: 'Other model',
+      capabilities: { toolcall: true },
+      cost: { input: 0, output: 0 },
+      variants: { high: {} },
+    });
+    const previous = { providerID: 'openai', modelID: 'gpt-4o' };
+    const selected = { providerID: 'openai', modelID: 'other', variant: 'high' };
+    setSelectedModel(
+      { ...selected },
+      {
+        sessionId: 'session-1',
+        persistGlobal: false,
+        selectionId: 'idle-choice',
+      }
+    );
+    applySessionSelectedModelsSnapshot(
+      { 'session-1': { ...selected } },
+      { sessionId: 'session-1', selectionId: 'idle-choice' }
+    );
+    setIsLoading(true);
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    // SessionSendOperations protects the actual sent model at optimistic publication.
+    setSelectedModel(
+      { ...selected },
+      {
+        sessionId: 'session-1',
+        persistGlobal: false,
+        protectDuringTurn: true,
+      }
+    );
+    cleanup = render(() => ChatInput(), container!);
+    applySessionSelectedModelsSnapshot({ 'session-1': { ...previous } });
+    expect(container?.querySelector('.model-picker-btn')?.textContent).toContain('Other model');
+    setInputText('Keep the first queued model');
+    container
+      ?.querySelector('.rich-composer')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(state.queuedMessages).toHaveLength(1);
+    const queued = state.queuedMessages[0]!;
+    expect(queued.queuedContext?.editorContext.queuedModel?.selection).toEqual(selected);
+
+    // Later composer changes and persistence delivery must not change enqueue-time intent.
+    setSelectedModel(
+      { ...previous },
+      {
+        sessionId: 'session-1',
+        persistGlobal: false,
+        selectionId: 'later-choice',
+      }
+    );
+    await sendQueuedAsSteer(queued);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    setIsLoading(false);
+    for (const handler of serverEventHandlers.get('session.status') ?? []) {
+      handler({
+        type: 'session.status',
+        properties: { sessionID: 'session-1', status: { type: 'idle' } },
+      });
+    }
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    await flushAsyncWork();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      'Keep the first queued model',
+      expect.objectContaining({ selectedModel: selected, targetSessionId: 'session-1' })
+    );
+    expect(state.queuedMessages).toEqual([]);
+    applySessionSelectedModelsSnapshot(
+      { 'session-1': { ...previous } },
+      { sessionId: 'session-1', selectionId: 'later-choice' }
+    );
+  });
+
   it.each(['model', 'reasoning'])(
     'keeps a changed %s dropdown and warning through active-turn snapshots',
     async (changed) => {

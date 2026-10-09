@@ -1092,7 +1092,11 @@ export class SessionSendOperations {
           applyEffectiveModel: options?.preserveModelSelection
             ? () => {}
             : (model, sessionId) =>
-                routingStore.setSelectedModel(model, { sessionId, persistGlobal: false }),
+                routingStore.setSelectedModel(model, {
+                  sessionId,
+                  persistGlobal: false,
+                  protectDuringTurn: true,
+                }),
           resetTodoSync: this.deps.resetTodoSync,
           clearTodos: composerStore.clearTodos,
           clearSessionUsageLimit: clearSessionUsageLimitForSessionTree,

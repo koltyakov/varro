@@ -85,6 +85,7 @@ export function setSelectedModel(
     rememberLastSelected?: boolean;
     rememberVariant?: string | null;
     selectionId?: string;
+    protectDuringTurn?: boolean;
   }
 ) {
   const persistGlobal = options?.persistGlobal ?? true;
@@ -96,6 +97,11 @@ export function setSelectedModel(
     const activeTurnModel = getActiveTurnComposerModel(sessionId);
     if (options?.selectionId && model) activeTurnComposerModels.set(sessionId, { ...model });
     else if (!persistGlobal && activeTurnModel) model = { ...activeTurnModel };
+    else if (options?.protectDuringTurn && model) {
+      // An idle selection's acknowledgement can release its protection before
+      // sending starts. Keep the sent model through delayed previous-turn snapshots.
+      activeTurnComposerModels.set(sessionId, { ...model });
+    }
   } else if (!persistGlobal && !showSessionPicker() && state.activeSessionId) {
     const activeTurnModel = getActiveTurnComposerModel(state.activeSessionId);
     if (activeTurnModel) model = { ...activeTurnModel };

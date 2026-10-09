@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExtensionContext } from '../../shared/extension-context';
 import {
+  applySessionSelectedModelsSnapshot,
   error,
+  isActiveSessionWorking,
   replaceClipboardImages,
   replaceContextFiles,
   setClipboardImageContextFile,
@@ -443,6 +445,62 @@ describe('SessionSendOperations', () => {
       modelID: 'gpt-5.4',
       variant: 'high',
     });
+  });
+
+  it('keeps the sent model through delayed previous-turn snapshots before the first enqueue', async () => {
+    const sessionId = 'session-1';
+    const previous = { providerID: 'openai', modelID: 'gpt-6-luna-fast' };
+    const selected = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
+    const expected = { ...selected };
+    appStore.setState('activeSessionId', sessionId);
+    appStore.setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: Object.fromEntries(
+          [previous, selected].map(({ modelID }) => [
+            modelID,
+            {
+              id: modelID,
+              name: modelID,
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+              variants: { high: {} },
+            },
+          ])
+        ),
+      },
+    ]);
+    routingStore.setSelectedModel({ ...previous }, { sessionId, persistGlobal: false });
+    expect(isActiveSessionWorking()).toBe(false);
+    routingStore.setSelectedModel({ ...selected }, { sessionId, selectionId: 'idle-selection' });
+    applySessionSelectedModelsSnapshot(
+      { [sessionId]: { ...selected } },
+      { sessionId, selectionId: 'idle-selection' }
+    );
+    expect(isActiveSessionWorking()).toBe(false);
+    const send = deferred<void>();
+    const sendAsync = vi.fn<SendAsync>(() => send.promise);
+    const operations = createOperations(sendAsync, undefined, {
+      setSessionStatusEntry: (id, status) => appStore.setState('sessionStatus', id, status),
+    });
+    const pending = operations.sendMessage('Start the Sol turn');
+    try {
+      await vi.waitFor(() => expect(sendAsync).toHaveBeenCalledOnce());
+      expect(sendAsync.mock.calls[0]?.[1]).toMatchObject({
+        model: { providerID: expected.providerID, modelID: expected.modelID },
+        variant: 'high',
+      });
+      applySessionSelectedModelsSnapshot({ [sessionId]: { ...previous } });
+
+      // The first queued message captures the composer selection during this window.
+      expect(appStore.state.selectedModel).toEqual(expected);
+      expect(routingStore.getSelectedModelForSession(sessionId)).toEqual(expected);
+    } finally {
+      send.resolve();
+      await pending;
+    }
   });
 
   it('clears sent composer attachments while the network send is pending', async () => {

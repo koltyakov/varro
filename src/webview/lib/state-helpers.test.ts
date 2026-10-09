@@ -1574,6 +1574,59 @@ describe('state helpers', () => {
     });
   });
 
+  it('protects the sent model across routing and releases it after the turn settles', async () => {
+    const stateModule = await loadState();
+    const selected = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
+    const previous = { providerID: 'openai', modelID: 'gpt-6-luna-fast' };
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+    stateModule.setSelectedModel(
+      { ...selected },
+      {
+        sessionId: 'session-1',
+        persistGlobal: false,
+        protectDuringTurn: true,
+      }
+    );
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': { ...previous } });
+    stateModule.setSelectedModel({ ...previous }, { persistGlobal: false });
+    expect(stateModule.state.selectedModel).toEqual(selected);
+
+    stateModule.setState('activeSessionId', 'session-2');
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': { ...previous } });
+    expect(stateModule.getSelectedModelForSession('session-1')).toEqual(selected);
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessionStatus', 'session-1', { type: 'idle' });
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': { ...previous } });
+    expect(stateModule.getSelectedModelForSession('session-1')).toEqual(previous);
+    expect(stateModule.state.selectedModel).toEqual(previous);
+  });
+
+  it('does not replace a newer busy composer choice when protecting a queued send model', async () => {
+    const stateModule = await loadState();
+    const queued = { providerID: 'openai', modelID: 'gpt-6-luna-fast' };
+    const next = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+    stateModule.setSelectedModel({ ...next }, { sessionId: 'session-1', selectionId: 'next' });
+    stateModule.applySessionSelectedModelsSnapshot(
+      { 'session-1': { ...next } },
+      { sessionId: 'session-1', selectionId: 'next' }
+    );
+    stateModule.setSelectedModel(
+      { ...queued },
+      {
+        sessionId: 'session-1',
+        persistGlobal: false,
+        protectDuringTurn: true,
+      }
+    );
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': { ...queued } });
+    expect(stateModule.state.selectedModel).toEqual(next);
+    expect(stateModule.getSelectedModelForSession('session-1')).toEqual(next);
+  });
+
   it('remembers an explicit default reasoning selection', async () => {
     const stateModule = await loadState();
 
