@@ -15,6 +15,10 @@ import { useSecondClock } from '../lib/clock';
 import { trapModalFocus } from '../lib/modal-focus';
 import { xmarkIcon } from '../lib/ui-icons';
 import { UiIcon } from './UiIcon';
+import { recheckSessionStatus, sendMessage } from '../hooks/useOpenCode';
+import { captureSessionStatusSnapshotTime, sessionStore } from '../lib/stores/session-store';
+import { buildStopProcessPrompt } from '../lib/background-process-action';
+import { error as sendError, setError, state } from '../lib/state';
 
 const RETAINED_OUTPUT_CHARS = 128 * 1024;
 const POLL_INTERVAL_MS = 1_000;
@@ -24,24 +28,31 @@ type ProcessLog = { text: string; cursor: number; size: number; truncated: boole
 export function BackgroundProcessDialog(props: {
   sessionID: string;
   directory?: string;
+  processID?: string;
   onClose: () => void;
 }) {
   const [processes, setProcesses] = createSignal<BackgroundProcess[]>([]);
   const [availableIDs, setAvailableIDs] = createSignal(new Set<string>());
-  const [selectedID, setSelectedID] = createSignal<string | null>(null);
+  const [selectedID, setSelectedID] = createSignal<string | null>(props.processID ?? null);
   const [logs, setLogs] = createSignal(new Map<string, ProcessLog>());
   const [listError, setListError] = createSignal<string | null>(null);
   const [outputError, setOutputError] = createSignal<string | null>(null);
   const [loaded, setLoaded] = createSignal(false);
   const [retry, setRetry] = createSignal(0);
+  const [actionPending, setActionPending] = createSignal(false);
+  const [actionError, setActionError] = createSignal<string | null>(null);
+  const actionController = new AbortController();
+  let actionRevision = 0;
   const [wrapOutput, setWrapOutput] = createSignal(false);
   const [followOutput, setFollowOutput] = createSignal(true);
   // oxlint-disable-next-line no-unassigned-vars
   let outputElement: HTMLPreElement | undefined;
+  let dialogElement: HTMLElement | undefined;
   let previousOutputScrollTop = 0;
   let disposed = false;
   onCleanup(() => {
     disposed = true;
+    actionController.abort();
   });
   const selectedProcess = createMemo(() =>
     processes().find((process) => process.id === selectedID())
@@ -80,16 +91,21 @@ export function BackgroundProcessDialog(props: {
       clearTimeout(timer);
     });
     const poll = async () => {
-      if (document.hidden) {
+      if (document.hidden || untrack(actionPending)) {
         timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
         return;
       }
       try {
+        const revision = actionRevision;
         const next = await client.session.backgroundProcesses(sessionID, {
           directory,
           signal: controller.signal,
         });
         if (controller.signal.aborted) return;
+        if (revision !== actionRevision) {
+          timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+          return;
+        }
         const ids = new Set(next.map((process) => process.id));
         // Keep inspected processes and logs after server cleanup and the assistant handoff.
         batch(() => {
@@ -191,7 +207,92 @@ export function BackgroundProcessDialog(props: {
     if (process.status === 'exited')
       return process.exit === undefined ? 'Exited' : `Exited (${process.exit})`;
     if (process.status === 'timeout') return 'Timed out';
-    return process.status === 'killed' ? 'Killed' : 'Running';
+    return process.status === 'killed' ? 'Killed' : process.service ? 'Service running' : 'Running';
+  };
+
+  const changeProcess = async (process: BackgroundProcess, service?: boolean) => {
+    if (actionPending()) return;
+    const focusedControl = document.activeElement;
+    if (focusedControl instanceof HTMLElement && dialogElement?.contains(focusedControl))
+      dialogElement.focus({ preventScroll: true });
+    setActionPending(true);
+    setActionError(null);
+    actionRevision++;
+    let closeAfterStop = false;
+    try {
+      const options = { directory: props.directory, signal: actionController.signal };
+      if (service === undefined)
+        await client.session.stopBackgroundProcess(props.sessionID, process.id, options);
+      else
+        await client.session.setBackgroundProcessService(
+          props.sessionID,
+          process.id,
+          service,
+          options
+        );
+      if (actionController.signal.aborted) return;
+      if (service === undefined) {
+        setAvailableIDs((ids) => {
+          const next = new Set(ids);
+          next.delete(process.id);
+          return next;
+        });
+        closeAfterStop = !processes().some(
+          (candidate) => availableIDs().has(candidate.id) && candidate.status === 'running'
+        );
+      } else
+        setProcesses((current) =>
+          current.map((candidate) =>
+            candidate.id === process.id ? { ...candidate, service } : candidate
+          )
+        );
+      const snapshotStartedAt = captureSessionStatusSnapshotTime();
+      const statuses = await client.session.status({
+        fresh: true,
+        signal: actionController.signal,
+      });
+      if (actionController.signal.aborted) return;
+      sessionStore.setSessionStatuses(statuses, { snapshotStartedAt });
+      await recheckSessionStatus(props.sessionID);
+    } catch (error) {
+      if (!actionController.signal.aborted)
+        setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      actionRevision++;
+      if (!actionController.signal.aborted) {
+        setActionPending(false);
+        if (closeAfterStop) props.onClose();
+        else if (
+          document.activeElement === dialogElement &&
+          focusedControl instanceof HTMLElement &&
+          focusedControl.isConnected &&
+          !focusedControl.hasAttribute('disabled')
+        )
+          focusedControl.focus({ preventScroll: true });
+      }
+    }
+  };
+
+  const steerStop = async (process: BackgroundProcess) => {
+    if (actionPending()) return;
+    setActionPending(true);
+    const sessionID = props.sessionID;
+    const pendingSend = sendMessage(buildStopProcessPrompt(process), {
+      delivery: 'steer',
+      targetSessionId: sessionID,
+      workspaceDirectory: props.directory,
+      preserveComposer: true,
+      omitContext: true,
+    });
+    props.onClose();
+    try {
+      const sent = await pendingSend;
+      if (!sent && state.activeSessionId === sessionID)
+        setError(sendError() ?? 'Could not send the stop request. Try again.');
+    } catch (error) {
+      if (state.activeSessionId === sessionID)
+        setError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   return (
@@ -208,10 +309,14 @@ export function BackgroundProcessDialog(props: {
       >
         <section
           class="background-process-dialog"
+          classList={{ 'has-process-target': props.processID !== undefined }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="background-process-title"
-          ref={(element) => onCleanup(trapModalFocus(element, { preventScrollOnRestore: true }))}
+          ref={(element) => {
+            dialogElement = element;
+            onCleanup(trapModalFocus(element, { preventScrollOnRestore: true }));
+          }}
         >
           <header class="background-process-dialog-header">
             <h2 id="background-process-title">Background processes</h2>
@@ -275,16 +380,79 @@ export function BackgroundProcessDialog(props: {
               <Show when={selectedProcess()}>
                 {(process) => (
                   <div class="background-process-detail">
-                    <div class="background-process-detail-command">{process().command}</div>
-                    <div class="background-process-meta">
+                    <div class="background-process-detail-heading">
+                      <div class="background-process-detail-command">{process().command}</div>
+                      <Show
+                        when={
+                          availableIDs().has(process().id) || process().time.completed !== undefined
+                        }
+                      >
+                        <span class="background-process-duration">{elapsed(process())}</span>
+                      </Show>
+                    </div>
+                    <div class="background-process-meta background-process-detail-meta">
                       {statusLabel(process())} · {process().cwd}
                       <Show when={process().pid !== undefined}> · PID {process().pid}</Show>
                       <Show when={process().signal}> · Signal {process().signal}</Show>
                     </div>
                     <Show when={!availableIDs().has(process().id)}>
-                      <p>
-                        Process removed by the server. Previously loaded output is retained below.
-                      </p>
+                      <p>Removed by server. Output retained.</p>
+                    </Show>
+                    <div class="background-process-controls">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={!process().service}
+                          disabled={
+                            actionPending() ||
+                            !availableIDs().has(process().id) ||
+                            process().status !== 'running'
+                          }
+                          onChange={(event) => {
+                            const service = !event.currentTarget.checked;
+                            event.currentTarget.checked = !process().service;
+                            void changeProcess(process(), service);
+                          }}
+                        />
+                        Wait for completion
+                      </label>
+                      <div class="background-process-actions">
+                        <button
+                          type="button"
+                          disabled={
+                            actionPending() ||
+                            !availableIDs().has(process().id) ||
+                            process().status !== 'running'
+                          }
+                          onClick={() => void changeProcess(process())}
+                        >
+                          Stop process
+                        </button>
+                        <button
+                          type="button"
+                          title="Ask the agent to stop this process"
+                          disabled={
+                            actionPending() ||
+                            !availableIDs().has(process().id) ||
+                            process().status !== 'running'
+                          }
+                          onClick={() => void steerStop(process())}
+                        >
+                          Steer stop
+                        </button>
+                      </div>
+                    </div>
+                    <div class="background-process-meta">
+                      {process().service
+                        ? 'Runs independently. Chat does not wait for this process.'
+                        : 'Chat waits for this process and its completion response.'}
+                    </div>
+                    <Show when={actionError()}>
+                      {(error) => (
+                        <div class="background-process-error" role="alert">
+                          {error()}
+                        </div>
+                      )}
                     </Show>
                     <Show when={outputError()}>
                       {(error) => (
@@ -377,6 +545,7 @@ function sameProcess(a: BackgroundProcess, b: BackgroundProcess): boolean {
     a.pid === b.pid &&
     a.exit === b.exit &&
     a.signal === b.signal &&
+    a.service === b.service &&
     a.time.started === b.time.started &&
     a.time.completed === b.time.completed
   );

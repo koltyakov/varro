@@ -560,6 +560,7 @@ describe('useOpenCode initialization', () => {
       version: '1.0.0',
     });
     clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
     clientMocks.agentList.mockResolvedValue([]);
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
     clientMocks.questionList.mockResolvedValue([]);
@@ -589,6 +590,7 @@ describe('useOpenCode initialization', () => {
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
       await vi.waitFor(() => expect(clientMocks.health).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(stateModule.connectionInitialized()).toBe(true));
       await vi.waitFor(() => expect(stateModule.error()).toBeNull());
     } finally {
       dispose();

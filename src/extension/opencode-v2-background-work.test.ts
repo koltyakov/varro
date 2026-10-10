@@ -1,5 +1,8 @@
 /* oxlint-disable anti-slop/no-module-mocking -- The adapter's logger requires a VS Code extension host. */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ShellInfo } from '@opencode/client';
 import { OpenCodeV2Adapter } from './opencode-v2-adapter';
 import { projectV2Event } from './opencode-v2-events';
@@ -17,9 +20,71 @@ const shell: ShellInfo = {
   time: { started: 1 },
 };
 
-afterEach(() => vi.useRealTimers());
+let stateDirectory: string;
+beforeEach(async () => {
+  stateDirectory = await mkdtemp(join(tmpdir(), 'varro-background-test-'));
+  vi.stubEnv('VARRO_TEST_STATE_ROOT', stateDirectory);
+});
+afterEach(async () => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+  await rm(stateDirectory, { recursive: true, force: true });
+});
 
 describe('v2 background completion', () => {
+  it('keeps awaited-job handoff alongside a service, and chat cancellation leaves the service alive', async () => {
+    const service = { ...shell, id: 'sh_service', command: 'python3 tools/serve.py 18765' };
+    let shells = [shell, service];
+    const wire = vi.fn(async (_method: string, path: string) => ({
+      data:
+        path === '/api/session/active'
+          ? {}
+          : path.startsWith('/api/shell/sh_service')
+            ? service
+            : shells,
+    }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    adapter.observe('shell.created', { info: shell });
+    await adapter.request('PATCH', '/session/ses_one/background-process/sh_service', {
+      service: true,
+    });
+    adapter.observe('session.execution.succeeded', { sessionID: 'ses_one' });
+    expect(adapter.eventContext('ses_one')).toMatchObject({
+      backgroundPending: true,
+      backgroundCommand: 'npm test',
+      backgroundServices: 1,
+    });
+    shells = [service];
+    adapter.observe('shell.exited', { id: shell.id });
+    expect(await adapter.request('GET', '/session/status', undefined)).toMatchObject({
+      ses_one: {
+        type: 'busy',
+        background: true,
+        backgroundCommand: 'npm test',
+        backgroundServices: 1,
+      },
+    });
+    adapter.observe('session.step.started', { sessionID: 'ses_one' });
+    adapter.observe('session.execution.succeeded', { sessionID: 'ses_one' });
+    expect(await adapter.request('GET', '/session/status', undefined)).toEqual({
+      ses_one: { type: 'idle', backgroundServices: 1 },
+    });
+    expect(
+      projectV2Event(
+        { type: 'session.execution.succeeded', data: { sessionID: 'ses_one' } },
+        adapter.eventContext('ses_one')
+      )
+    ).toMatchObject([{ properties: { status: { type: 'idle', backgroundServices: 1 } } }]);
+    adapter.observe('shell.created', { info: shell });
+    wire.mockClear();
+    adapter.observe('session.execution.succeeded', { sessionID: 'ses_one' });
+    await adapter.request('POST', '/session/ses_one/abort', {});
+    expect(wire.mock.calls.map(([method, path]) => [method, path])).toEqual([
+      ['DELETE', '/api/shell/sh_test'],
+      ['POST', '/api/session/ses_one/interrupt?resume=false'],
+    ]);
+    expect(adapter.eventContext('ses_one')?.backgroundServices).toBe(1);
+  });
   it('bounds command summaries and keeps multiline commands on one line', async () => {
     const command = `python3\n  tools/serve.py 18765 ${'x'.repeat(1000)}`;
     const adapter = new OpenCodeV2Adapter(async (_method, path) => ({

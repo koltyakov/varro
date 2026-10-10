@@ -46,6 +46,7 @@ import {
   userMessage,
 } from './MessageList.test-utils';
 import { fixture } from '../test-fixtures';
+import { buildStopProcessPrompt } from '../lib/background-process-action';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -468,6 +469,30 @@ describe('bordered message projection', () => {
     ).toBe(12);
     expect(getAssistantFlowSpacingSize([summary, tray], 8, 4)).toBe(8);
     expect(getAssistantFlowSpacingSize([tray, summary], 8)).toBe(8);
+  });
+
+  it('uses an unbordered layout boundary for compact stop-process actions', () => {
+    const text = buildStopProcessPrompt({
+      id: 'shell-1',
+      status: 'running',
+      command: 'npm test',
+      cwd: '/repo',
+      pid: 42,
+      time: { started: 1 },
+    });
+    const messages: MessageEntry[] = [
+      { info: userMessage('stop-1'), parts: [textPart('stop-text', text)] },
+    ];
+    const boundary = getMessageBlockBoundaryMap(messages, new Map(), {
+      expandedActivityGroup: () => false,
+      renderEmptyMessageIds: new Set(),
+      showThinking: true,
+    }).get('stop-1');
+    expect(boundary).toEqual({
+      startsBordered: false,
+      endsBordered: false,
+      signature: 'user:content:u:u',
+    });
   });
 
   it('excludes delayed activity from a visible row boundary', () => {

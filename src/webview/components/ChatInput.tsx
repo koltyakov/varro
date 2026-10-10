@@ -251,6 +251,8 @@ import {
   QueuedMessages,
   type QueuedMessageItem,
 } from './chat-input/QueuedMessages';
+import { BackgroundServices } from './chat-input/BackgroundServices';
+import { sessionStore } from '../lib/stores/session-store';
 import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
 import { ProviderQuotaWarning } from './chat-input/ProviderQuotaWarning';
@@ -2257,6 +2259,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return status?.type === 'busy' && status.background === true;
     });
   });
+  const composerBackgroundServices = createMemo(() => {
+    return sessionStore.getBackgroundServiceCount(composerSessionId());
+  });
+  const composerBackgroundServiceDirectory = createMemo(
+    () => state.sessions.find((session) => session.id === composerSessionId())?.directory
+  );
   const latestAssistantResponseIsTerminal = createMemo(() => {
     const sessionId = composerSessionId();
     if (!sessionId || composerBackgroundPending()) return false;
@@ -5988,6 +5996,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         <DropOverlay />
       </Show>
 
+      <Show when={!props.newSession && !hasExpandedDiffOverlay() && !composerEditingMessage()}>
+        <BackgroundServices
+          sessionID={composerSessionId()}
+          directory={composerBackgroundServiceDirectory()}
+          count={composerBackgroundServices()}
+        />
+      </Show>
       <Show
         when={
           !hasExpandedDiffOverlay() &&

@@ -1594,11 +1594,28 @@ describe('SessionListView pins', () => {
     const now = Date.now();
     setState('sessions', [session('pinned', now), session('unpinned', now - 1_000)]);
     setState('pinnedSessionIds', ['pinned']);
+    setState('sessionStatus', {
+      pinned: { type: 'busy', background: true },
+      unpinned: { type: 'busy', background: true },
+    });
 
     cleanup = render(() => <SessionListView />, container);
 
     const pinnedRow = container.querySelector<HTMLElement>('[data-session-id="pinned"]');
     expect(pinnedRow?.querySelector('.session-item-drag-handle')).toBeNull();
+    expect(pinnedRow?.querySelector('.session-item-leading.has-status')).not.toBeNull();
+    expect(container.querySelector('.session-item-leading.can-reorder')).toBeNull();
+  });
+
+  it('keeps a non-blocking service counter visible in the sessions list while the session is idle', () => {
+    setState('sessions', [session('server', Date.now())]);
+    setState('sessionStatus', { server: { type: 'idle', backgroundServices: 1 } });
+    cleanup = render(() => <SessionListView />, container);
+    const badge = container.querySelector('.session-item-background-services');
+    expect(badge?.getAttribute('aria-label')).toBe('1 running background service');
+    expect(badge?.querySelector('.session-item-subagents-count')?.textContent).toBe('1');
+    setState('sessionStatus', { server: { type: 'idle' } });
+    expect(container.querySelector('.session-item-background-services')).toBeNull();
   });
 
   it('pins and unpins a session from its row menu and marks it', async () => {
@@ -1694,6 +1711,10 @@ describe('SessionListView pins', () => {
     ]);
     const handles = container.querySelectorAll<HTMLElement>('.session-item-drag-handle');
     expect(handles).toHaveLength(2);
+    expect(container.querySelectorAll('.session-item-leading.can-reorder')).toHaveLength(2);
+    expect(
+      container.querySelector('[data-session-id="unpinned"] .session-item-leading.can-reorder')
+    ).toBeNull();
     expect(rows()[0]?.querySelector('.session-item-leading.has-status')).toBeNull();
     expect(
       rows()[0]?.querySelector('.session-item-leading > .session-item-drag-handle')

@@ -80,6 +80,7 @@ import {
   navArrowDownIcon,
   pinIcon,
   trashIcon,
+  terminalIcon,
   xmarkIcon,
 } from '../../lib/ui-icons';
 import {
@@ -98,6 +99,7 @@ import {
 } from '../chat-input/ToolbarPickers';
 import { Tooltip } from '../Tooltip';
 import { sessionDiffSummaries } from './session-diff-summaries';
+import { sessionStore } from '../../lib/stores/session-store';
 
 const {
   cache: sessionDiffSummaryCache,
@@ -2242,6 +2244,9 @@ function SessionListItem(props: {
   const isActive = () => !!props.embedded && state.activeSessionId === props.session.id;
   const showActions = () => props.actions.sessionId() === props.session.id;
   const status = () => state.sessionStatus[props.session.id];
+  const backgroundServices = createMemo(() => {
+    return sessionStore.getBackgroundServiceCount(props.session.id);
+  });
   const hasUnreadCompletion = () =>
     props.isNewlyCompleted ||
     (props.isCompletedPlanSession &&
@@ -2497,7 +2502,10 @@ function SessionListItem(props: {
       }}
       onDrop={props.onPinnedDrop}
     >
-      <span class={`session-item-leading ${indicatorKind() ? 'has-status' : ''}`}>
+      <span
+        class={`session-item-leading ${indicatorKind() ? 'has-status' : ''}`}
+        classList={{ 'can-reorder': props.canReorderPinned }}
+      >
         <Show when={indicatorKind()}>
           {(kind) => (
             <span
@@ -2717,6 +2725,21 @@ function SessionListItem(props: {
               height={16}
             />
             <span class="session-item-queued-count">{props.queuedMessageCount}</span>
+          </span>
+        </Show>
+        <Show when={backgroundServices() > 0}>
+          <span
+            class="session-item-subagents session-item-subagents-counter session-item-background-services"
+            title={`${backgroundServices()} running background ${backgroundServices() === 1 ? 'service' : 'services'}`}
+            aria-label={`${backgroundServices()} running background ${backgroundServices() === 1 ? 'service' : 'services'}`}
+          >
+            <UiIcon
+              source={terminalIcon}
+              class="session-item-subagents-icon"
+              width={16}
+              height={16}
+            />
+            <span class="session-item-subagents-count">{backgroundServices()}</span>
           </span>
         </Show>
         <Show when={hasSubagents()}>

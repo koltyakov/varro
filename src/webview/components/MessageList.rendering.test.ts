@@ -211,6 +211,144 @@ describe('session pause dividers', () => {
   });
 });
 
+describe('final assistant markers', () => {
+  it.each(['busy', 'retry', 'loading', 'child-busy', 'streaming'] as const)(
+    'waits for %s to settle before marking a completed terminal response',
+    async (workingState) => {
+      setState('activeSessionId', 'session-1');
+      setSessions([session('session-1'), session('child-1', { parentID: 'session-1' })]);
+      replaceMessages([
+        {
+          info: userMessage('previous-prompt'),
+          parts: [textPart('previous-prompt-text', 'First')],
+        },
+        {
+          info: {
+            ...assistantMessage('previous-answer', {
+              parentID: 'previous-prompt',
+              time: { created: 1, completed: 2 },
+            }),
+            finish: 'stop',
+          },
+          parts: [
+            { ...textPart('previous-text', 'Previous answer'), messageID: 'previous-answer' },
+          ],
+        },
+        { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Next')] },
+        {
+          info: assistantMessage('answer', { parentID: 'prompt', time: { created: 3 } }),
+          parts: [{ ...textPart('answer-text', 'Response so far'), messageID: 'answer' }],
+        },
+      ]);
+      if (workingState === 'loading') startLoading(3);
+      else if (workingState === 'streaming') {
+        setState('streamingPartId', 'answer-text');
+        setState('streamingText', 'Response so far');
+      } else if (workingState === 'child-busy')
+        setState('sessionStatus', 'child-1', { type: 'busy' });
+      else
+        setState(
+          'sessionStatus',
+          'session-1',
+          workingState === 'busy'
+            ? { type: 'busy' }
+            : { type: 'retry', attempt: 1, message: 'Retrying', next: 10_000 }
+        );
+
+      cleanup = render(() => MessageList(), container!);
+      upsertMessageInfo({
+        ...assistantMessage('answer', {
+          parentID: 'prompt',
+          time: { created: 3, completed: 4 },
+        }),
+        finish: 'stop',
+      });
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      expect(
+        container?.querySelector(
+          '[data-msg-id="previous-answer"] .assistant-message-flow-item-final'
+        )
+      ).not.toBeNull();
+      expect(
+        container?.querySelector('[data-msg-id="answer"] .assistant-message-flow-item-final')
+      ).toBeNull();
+      expect(
+        container?.querySelector('[data-msg-id="answer"] .assistant-final-mark-pulse')
+      ).toBeNull();
+
+      batch(() => {
+        stopLoading();
+        setState('streamingPartId', null);
+        setState('streamingText', '');
+        setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+      });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(
+        container?.querySelector('[data-msg-id="answer"] .assistant-message-flow-item-final')
+      ).not.toBeNull();
+    }
+  );
+
+  it('clears the marker on resumed work and marks only the settled continuation', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    replaceMessages([
+      { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Run the checks')] },
+      {
+        info: {
+          ...assistantMessage('answer', {
+            parentID: 'prompt',
+            time: { created: 1, completed: 2 },
+          }),
+          finish: 'stop',
+        },
+        parts: [{ ...textPart('answer-text', 'Checks passed.'), messageID: 'answer' }],
+      },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(container?.querySelector('.assistant-message-flow-item-final')).not.toBeNull();
+
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
+    // An automatic notice can arrive as metadata first, then synthetic text.
+    upsertMessage({ info: userMessage('notice'), parts: [] });
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
+    upsertPart({
+      ...textPart('notice-text', '<shell id="check" state="failed">Failed</shell>', {
+        synthetic: true,
+      }),
+      messageID: 'notice',
+    });
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
+    upsertMessage({
+      info: assistantMessage('continuation', { parentID: 'prompt', time: { created: 3 } }),
+      parts: [
+        { ...textPart('continuation-text', 'The process failed.'), messageID: 'continuation' },
+      ],
+    });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
+    upsertMessageInfo({
+      ...assistantMessage('continuation', {
+        parentID: 'prompt',
+        time: { created: 3, completed: 4 },
+      }),
+      finish: 'stop',
+    });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
+
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(container?.querySelectorAll('.assistant-message-flow-item-final')).toHaveLength(1);
+    expect(
+      container?.querySelector('[data-msg-id="continuation"] .assistant-message-flow-item-final')
+    ).not.toBeNull();
+  });
+});
+
 describe('automatic retry notices', () => {
   it.each(['APIError', 'ProviderAuthError'] as const)(
     'hides the previous %s action as soon as a new prompt is sent',
@@ -4686,12 +4824,14 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
 
     // The new execution can start before its first assistant message is hydrated.
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     await Promise.resolve();
     expect(container?.querySelector('.background-process')?.textContent).toContain(
       'Background process: python3 tools/serve.py 18765'
     );
     expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
     replaceMessages([
       ...entries,
       {
@@ -4720,6 +4860,10 @@ describe('MessageList loading row', () => {
     await Promise.resolve();
     expect(container?.textContent).toContain('12s');
     expect(container?.querySelector('.loading-indicator')).toBeNull();
+    expect(container?.querySelectorAll('.assistant-message-flow-item-final')).toHaveLength(1);
+    expect(
+      container?.querySelector('[data-msg-id="assistant-2"] .assistant-message-flow-item-final')
+    ).not.toBeNull();
   });
 
   it('does not show a trailing worked summary before the final text response', async () => {

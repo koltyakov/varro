@@ -56,6 +56,19 @@ function deferred() {
 
 describe('OpenCodeV2SessionState', () => {
   let directory: string;
+  it('atomically preserves an explicit choice against an automatic update from another owner', async () => {
+    const manual = new OpenCodeV2SessionState(directory);
+    const automatic = new OpenCodeV2SessionState(directory);
+    await manual.update('ses_one', { own: false, 'manual:own': true });
+    await automatic.update(
+      'ses_one',
+      { own: true, 'review:own': { next: 300_000 } },
+      undefined,
+      'manual:own'
+    );
+    expect(await manual.read('ses_one')).toMatchObject({ own: false, 'manual:own': true });
+    expect((await manual.read('ses_one'))['review:own']).toBeUndefined();
+  });
 
   beforeEach(async () => {
     vi.mocked(readdir).mockReset();

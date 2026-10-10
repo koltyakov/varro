@@ -20,6 +20,7 @@ import { projectV2Event } from './opencode-v2-events';
 import { openCodeApiVersion, type OpenCodeApiVersion } from './opencode-connection';
 import { OpenCodeResponseTooLargeError } from './opencode-response-error';
 import { ProcessInspectionTimeoutError } from './process-inspection-error';
+import { BackgroundProcessJudge } from './background-process-judge';
 
 export { OpenCodeResponseTooLargeError } from './opencode-response-error';
 
@@ -139,11 +140,34 @@ export class OpenCodeTransport {
     };
     this.requestWorkspaceDirectory = options.getWorkspaceCwd();
     const annotations = new OpenCodeV2SessionState(options.sessionStateDirectory);
+    const backgroundJudge = new BackgroundProcessJudge((method, path, body, requestOptions) =>
+      this.request(method, path, body, requestOptions)
+    );
     this.v2 = new OpenCodeV2Adapter(
       (method, path, body, requestOptions) => this.requestWire(method, path, body, requestOptions),
       annotations,
       options.openExternal,
-      new OpenCodeV2GenerationTiming(annotations)
+      new OpenCodeV2GenerationTiming(annotations),
+      (shell, directory, signal) => backgroundJudge.classify(shell, directory, signal),
+      async (sessionID, directory) => {
+        const statuses = asRecord(
+          await this.request('GET', '/session/status', undefined, { directory })
+        );
+        const current = asRecord(statuses?.[sessionID]) ?? { type: 'idle' };
+        const event = {
+          type: 'session.status',
+          workspaceDirectory: directory,
+          properties: {
+            sessionID,
+            status: {
+              ...current,
+              backgroundServices: this.v2.eventContext(sessionID)?.backgroundServices ?? 0,
+            },
+          },
+        };
+        this.observeServerEvent(event);
+        this.options.emitEvent(event);
+      }
     );
   }
 

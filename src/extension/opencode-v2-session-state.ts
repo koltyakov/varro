@@ -44,13 +44,19 @@ export class OpenCodeV2SessionState {
     }
   }
 
-  async update(sessionID: string, patch: UnknownRecord, signal?: AbortSignal): Promise<void> {
+  async update(
+    sessionID: string,
+    patch: UnknownRecord,
+    signal?: AbortSignal,
+    onlyIfMissing?: string
+  ): Promise<void> {
     signal?.throwIfAborted();
     return this.mutate(
       sessionID,
       async () => {
         signal?.throwIfAborted();
         const current = await this.read(sessionID);
+        if (onlyIfMissing !== undefined && Object.hasOwn(current, onlyIfMissing)) return;
         signal?.throwIfAborted();
         const next = {
           ...current,

@@ -6,7 +6,13 @@ import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type
 export class OpenCodeV2BackgroundWork {
   private readonly shells = new Map<
     string,
-    { sessionID: string; directory?: string; startedAt?: number; command?: string }
+    {
+      sessionID: string;
+      directory?: string;
+      startedAt?: number;
+      command?: string;
+      service?: boolean;
+    }
   >();
   private readonly mutations = new Map<string, number>();
   private readonly sessionMutations = new Map<string, number>();
@@ -28,6 +34,7 @@ export class OpenCodeV2BackgroundWork {
           directory,
           startedAt: isNumber(startedAt) && Number.isFinite(startedAt) ? startedAt : undefined,
           command: isString(info.command) ? summarizeCommand(info.command) : undefined,
+          service: this.shells.get(info.id)?.service,
         });
         this.mutations.set(info.id, ++this.revision);
         this.sessionMutations.set(sessionID, this.revision);
@@ -42,7 +49,7 @@ export class OpenCodeV2BackgroundWork {
       if (sessionID) {
         this.sessionMutations.set(sessionID, this.revision);
         const waiting = this.waiting.get(sessionID);
-        if (waiting && this.shellIDs(sessionID).length === 0) {
+        if (waiting && !shell?.service && this.shellIDs(sessionID).length === 0) {
           waiting.endedAt = Date.now();
           waiting.command = shell?.command ?? waiting.command;
         }
@@ -56,7 +63,7 @@ export class OpenCodeV2BackgroundWork {
       type === 'session.execution.succeeded'
     ) {
       const pendingShell = [...this.shells.values()].find(
-        (shell) => shell.sessionID === data.sessionID
+        (shell) => shell.sessionID === data.sessionID && !shell.service
       );
       if (pendingShell && !this.stoppedSessions.has(data.sessionID))
         this.waiting.set(data.sessionID, {
@@ -81,22 +88,54 @@ export class OpenCodeV2BackgroundWork {
   isWaiting(sessionID: string): boolean {
     return this.waiting.has(sessionID);
   }
+  hasShell(id: string): boolean {
+    return this.shells.has(id);
+  }
 
   shellIDs(sessionID: string): string[] {
-    return [...this.shells].flatMap(([id, shell]) => (shell.sessionID === sessionID ? [id] : []));
+    return [...this.shells].flatMap(([id, shell]) =>
+      shell.sessionID === sessionID && !shell.service ? [id] : []
+    );
+  }
+
+  setService(id: string, service: boolean): void {
+    const shell = this.shells.get(id);
+    if (!shell) return;
+    shell.service = service;
+    this.mutations.set(id, ++this.revision);
+    this.sessionMutations.set(shell.sessionID, this.revision);
+    if (service && this.shellIDs(shell.sessionID).length === 0)
+      this.waiting.delete(shell.sessionID);
+  }
+
+  serviceCount(sessionID: string): number {
+    return [...this.shells.values()].filter(
+      (shell) => shell.sessionID === sessionID && shell.service
+    ).length;
+  }
+
+  serviceSessionIDs(): string[] {
+    return [
+      ...new Set(
+        [...this.shells.values()].filter((shell) => shell.service).map((shell) => shell.sessionID)
+      ),
+    ];
   }
 
   startedAt(sessionID: string): number | undefined {
     const starts = [...this.shells.values()].flatMap((shell) =>
-      shell.sessionID === sessionID && shell.startedAt !== undefined ? [shell.startedAt] : []
+      shell.sessionID === sessionID && !shell.service && shell.startedAt !== undefined
+        ? [shell.startedAt]
+        : []
     );
     return starts.length > 0 ? Math.min(...starts) : undefined;
   }
 
   command(sessionID: string): string | undefined {
     return (
-      [...this.shells.values()].find((shell) => shell.sessionID === sessionID && shell.command)
-        ?.command ?? this.waiting.get(sessionID)?.command
+      [...this.shells.values()].find(
+        (shell) => shell.sessionID === sessionID && !shell.service && shell.command
+      )?.command ?? this.waiting.get(sessionID)?.command
     );
   }
 
@@ -108,7 +147,8 @@ export class OpenCodeV2BackgroundWork {
     shells: ShellInfo[],
     activeSessionIDs: ReadonlySet<string>,
     directory: string | undefined,
-    version: number
+    version: number,
+    serviceIDs: ReadonlySet<string> = new Set()
   ): string[] {
     const snapshot = new Map(
       shells.flatMap((shell) => {
@@ -122,6 +162,7 @@ export class OpenCodeV2BackgroundWork {
                   directory,
                   startedAt: shell.time.started,
                   command: summarizeCommand(shell.command),
+                  service: serviceIDs.has(shell.id),
                 },
               ] as const,
             ]
@@ -139,6 +180,7 @@ export class OpenCodeV2BackgroundWork {
     // Restore that pending work after reload; an idle model is not a finished task.
     for (const shell of this.shells.values()) {
       if (
+        shell.service ||
         shell.directory !== directory ||
         (this.sessionMutations.get(shell.sessionID) ?? 0) > version ||
         activeSessionIDs.has(shell.sessionID) ||

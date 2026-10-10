@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExtensionContext } from '../../shared/extension-context';
+import type { EditorContext } from '../../shared/protocol';
 import {
   applySessionSelectedModelsSnapshot,
   error,
@@ -67,6 +68,81 @@ function createOperations(
 }
 
 describe('SessionSendOperations', () => {
+  it('sends context-free actions without attaching or consuming any composer context', async () => {
+    appStore.setState('activeSessionId', 'session-1');
+    const diagnostic = {
+      path: '/repo/index.html',
+      line: 1,
+      severity: 'error' as const,
+      message: 'Draft diagnostic',
+    };
+    const editorContext: EditorContext = {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/index.html', relativePath: 'index.html', language: 'html' },
+      selection: { startLine: 1, endLine: 1 },
+      diagnostics: [diagnostic],
+      editorText: {
+        kind: 'dirty-buffer',
+        path: '/repo/index.html',
+        relativePath: 'index.html',
+        language: 'html',
+        range: { startLine: 1, endLine: 1 },
+        text: '<h1>Draft</h1>',
+        truncated: false,
+      },
+      extensionContexts: [
+        {
+          provider: 'unavailable.context',
+          version: 1,
+          label: 'Issue',
+          placement: 'replace-document',
+          data: {},
+        },
+      ],
+    };
+    appStore.setState('droppedFiles', [
+      { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
+    ]);
+    appStore.setState('clipboardImages', [
+      {
+        id: 'draft-image',
+        url: 'data:image/png;base64,AA==',
+        mime: 'image/png',
+        filename: 'draft.png',
+        size: 1,
+      },
+    ]);
+    appStore.setState('nativePdfs', [
+      {
+        id: 'draft-pdf',
+        url: 'data:application/pdf;base64,AA==',
+        mime: 'application/pdf',
+        filename: 'draft.pdf',
+        size: 1,
+      },
+    ]);
+    appStore.setState('terminalSelection', { text: 'Draft terminal output', terminalName: 'zsh' });
+    appStore.setState('attachedDiagnostics', { diagnostics: [diagnostic], total: 1 });
+    appStore.setState('inlineProblems', [{ id: 'draft-problem', diagnostic }]);
+    const sendAsync = vi.fn<SendAsync>(async () => {});
+    const operations = createOperations(sendAsync);
+    const text = 'Stop process 42';
+    expect(
+      await operations.sendMessage(text, {
+        omitContext: true,
+        preserveComposer: true,
+        queuedContext: { editorContext, currentDocumentEnabled: true },
+      })
+    ).toBe(true);
+    expect(sendAsync.mock.calls[0]?.[1].parts).toEqual([{ type: 'text', text }]);
+    expect(appStore.state.droppedFiles).toHaveLength(1);
+    expect(appStore.state.clipboardImages).toHaveLength(1);
+    expect(appStore.state.nativePdfs).toHaveLength(1);
+    expect(appStore.state.terminalSelection?.text).toBe('Draft terminal output');
+    expect(appStore.state.attachedDiagnostics?.total).toBe(1);
+    expect(appStore.state.inlineProblems).toHaveLength(1);
+  });
+
   it('sends restored extension snapshots without a provider and reports missing uncaptured providers', async () => {
     appStore.setState('activeSessionId', 'session-1');
     const captured: ExtensionContext = {

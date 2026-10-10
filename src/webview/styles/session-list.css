@@ -598,13 +598,13 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   pointer-events: none;
 }
 
-.session-item-leading.has-status:hover .session-item-indicator,
-.session-item-leading.has-status:focus-within .session-item-indicator {
+.session-item-leading.has-status.can-reorder:hover .session-item-indicator,
+.session-item-leading.has-status.can-reorder:focus-within .session-item-indicator {
   opacity: 0;
 }
 
-.session-item-leading.has-status:hover .session-item-drag-handle,
-.session-item-leading.has-status:focus-within .session-item-drag-handle {
+.session-item-leading.has-status.can-reorder:hover .session-item-drag-handle,
+.session-item-leading.has-status.can-reorder:focus-within .session-item-drag-handle {
   opacity: 0.55;
   pointer-events: auto;
 }

@@ -73,7 +73,8 @@ import {
   parseUserMessageContent,
 } from './message/UserMessageContent';
 import { isString } from '../lib/runtime-values';
-import { playIcon } from '../lib/ui-icons';
+import { playIcon, xmarkCircleSolidIcon } from '../lib/ui-icons';
+import { getStopProcessActionLabel } from '../lib/background-process-action';
 import { UiIcon } from './UiIcon';
 import { isPlanImplementationMessage } from './message-list/plan-actions';
 import { getPresentationPartKey } from './message-list/streaming-presentation';
@@ -557,6 +558,10 @@ export function Message(props: {
   const isPlanImplementation = createMemo(() =>
     isPlanImplementationMessage(props.info, normalizedParts())
   );
+  const stopProcessActionLabel = createMemo(() =>
+    getStopProcessActionLabel(props.info, normalizedParts())
+  );
+  const isCompactUserAction = () => isPlanImplementation() || stopProcessActionLabel() !== null;
   const automaticParts = () => parsedUserContent()?.automaticParts ?? [];
   const hasVisibleAutomaticActions = () =>
     automaticParts().some((part) => {
@@ -572,7 +577,7 @@ export function Message(props: {
     );
   });
   const visiblePromptNumber = () =>
-    isUser() && !isPlanImplementation() && props.showPromptNumber !== false
+    isUser() && !isCompactUserAction() && props.showPromptNumber !== false
       ? props.promptNumber
       : undefined;
   const hasUserContent = createMemo(() => {
@@ -583,7 +588,7 @@ export function Message(props: {
     props.info.role === 'user' && props.info.summary?.diffsOmitted === true;
   const isWrapperlessUserMessage = createMemo(() => {
     const parsed = parsedUserContent();
-    return isPlanImplementation() || (parsed ? isWrapperlessUserMessageContent(parsed) : false);
+    return isCompactUserAction() || (parsed ? isWrapperlessUserMessageContent(parsed) : false);
   });
   const isEditingUserMessage = () => isUser() && editingMessageId() === props.info.id;
   const isSteeringMessage = () =>
@@ -594,7 +599,7 @@ export function Message(props: {
   const canEditUserMessage = () =>
     isUser() &&
     !isSteeringMessage() &&
-    !isPlanImplementation() &&
+    !isCompactUserAction() &&
     hasUserContent() &&
     props.info.sessionID === state.activeSessionId &&
     !isManagedSubagentSession() &&
@@ -616,7 +621,7 @@ export function Message(props: {
     )
   );
   const handleUserCardClick = (event: MouseEvent) => {
-    if (props.info.role !== 'user' || !hasUserContent() || isPlanImplementation()) return;
+    if (props.info.role !== 'user' || !hasUserContent() || isCompactUserAction()) return;
     const target = event.target;
     if (target instanceof Element && target.closest('.user-message-leading-content')) return;
     if (target instanceof Element && target.closest('button, a, textarea')) return;
@@ -719,7 +724,7 @@ export function Message(props: {
             <div
               class={`value chat-turn-content ${
                 isUser()
-                  ? `chat-turn-card user-message-card${isSteeringMessage() ? ' user-message-steering' : ''}${props.promptContinuation ? ' user-message-continuation' : ''}${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}${isPlanImplementation() ? ' plan-implementation-action' : ''}`
+                  ? `chat-turn-card user-message-card${isSteeringMessage() ? ' user-message-steering' : ''}${props.promptContinuation ? ' user-message-continuation' : ''}${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}${isPlanImplementation() ? ' plan-implementation-action' : ''}${stopProcessActionLabel() ? ' stop-process-action' : ''}`
                   : assistantContainerClass()
               } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
               onClick={handleUserCardClick}
@@ -735,11 +740,22 @@ export function Message(props: {
               </Show>
               <Show when={isUser() && hasUserContent()}>
                 <Show
-                  when={!isPlanImplementation()}
+                  when={!isCompactUserAction()}
                   fallback={
-                    <span class="plan-implementation-action-label" role="note">
-                      <UiIcon source={playIcon} width={14} height={14} />
-                      Implement the plan
+                    <span
+                      class={
+                        isPlanImplementation()
+                          ? 'plan-implementation-action-label'
+                          : 'stop-process-action-label'
+                      }
+                      role="note"
+                    >
+                      <UiIcon
+                        source={isPlanImplementation() ? playIcon : xmarkCircleSolidIcon}
+                        width={14}
+                        height={14}
+                      />
+                      {isPlanImplementation() ? 'Implement the plan' : stopProcessActionLabel()}
                     </span>
                   }
                 >
@@ -798,7 +814,7 @@ export function Message(props: {
               outerListVirtualized={props.outerListVirtualized}
             />
           </Show>
-          <Show when={isUser() && hasUserContent() && !isPlanImplementation()}>
+          <Show when={isUser() && hasUserContent() && !isCompactUserAction()}>
             <time
               class={`message-sent-time${timestampVisible() ? ' is-visible' : ''}${timestampTransitionActive() ? ' is-transition-active' : ''}${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}
               dateTime={new Date(props.info.time.created).toISOString()}

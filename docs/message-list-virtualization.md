@@ -527,7 +527,7 @@ Direct input acquires ownership only when it can affect the transcript:
   only a real prompt or the resumed assistant changes that ownership. Explicit resume markers still
   preserve the existing pause-summary boundary.
    `scroll-background-handoff.spec.ts` checks short and measured transcripts frame by frame.
-  Clicking the card opens a read-only process dialog owned outside the loading slot. Preserve
+  Clicking the card opens a process dialog owned outside the loading slot. Preserve
   the transcript's geometry and scroll owner, keep loaded logs through completion and server
   cleanup, and release the dialog on close or session switch. Fetch only session-owned process
   details and bounded output chunks while the dialog is open; never rerun recorded commands.
@@ -537,10 +537,38 @@ Direct input acquires ownership only when it can affect the transcript:
   Output preserves lines by default with horizontal scrolling and optional wrapping. Its own
   follow control yields when the reader scrolls up, resumes on explicit Follow, and never changes
   the transcript's scroll owner. Presentation controls must not issue additional log requests.
+  Wait for completion is an explicit, persisted Varro choice. Disabling it marks the process as a
+  service without stopping it or changing OpenCode's exit notifications. Only awaited shells keep
+  the loading slot pending or stop with the chat; services stay inspectable in compact queue-style
+  rows above the composer, outside the scrolling transcript, and can
+  be stopped individually. A service must not clear another job's completion handoff or hide active
+  model execution. Process mutations verify session ownership and update controls only after success.
+  Stopping the last running process closes the dialog after acknowledgement. Failed stops keep it
+  open with the error; stopping one of several running processes keeps the dialog and retained logs.
+  A bounded, tool-free one-shot judgment uses the owning session's model to classify new processes.
+  Persistent servers and watchers become non-blocking automatically; finite jobs stay awaited.
+  Ambiguity, missing model/generation support, invalid output, and judge failures leave work blocking.
+  Do not delay status snapshots for the judgment or overwrite an explicit choice with a late result.
+  The sessions list shows running-service counts; the chat header does not.
+  Automatic choices are reviewed at 5, 10, 20 and 30 minutes from launch, then every 30 minutes.
+  Persist the next review separately from manual ownership. A manual wait/no-wait choice cancels
+  scheduled and in-flight automatic work and remains authoritative after reload or in another view.
+  Reviews refresh live shells before judging, stop after exit/deletion, and publish changed status
+  without creating prompts or modifying the owning session's messages or timestamps.
+  Service rows and list badges use process-owned counts, not optimistic busy/idle/retry state.
+  Sending, queueing, steering and terminal text must not clear them or require session reselection.
+  Clear counts only on explicit authoritative zero or a current server snapshot; protect those
+  updates from older snapshots independently of the chat status mutation clock.
 - A failed assistant attempt with retry metadata is not a final response while the turn is working,
   even if it has completed partial text and `finish: error`. Keep the loading slot through retry and
   the next empty attempt; do not briefly insert Worked. `automatic-retry.spec.ts` checks that handoff
   and the gap from the retry notice to Thinking every frame.
+- The trailing final-answer marker requires settled execution and presentation, even when a terminal
+  step's Worked summary is already visible or retained. A message completion timestamp or `finish: stop`
+  alone does not prove the session is finished. Remove that marker when work resumes, keep it absent
+  through background notices and continuation loading, and mark only the settled continuation.
+  Earlier completed turns keep their markers while a new turn runs. `MessageList.rendering.test.ts`
+  covers busy, retry, local loading, child execution, streaming, and background handoffs.
 - Starting the next turn moves the previous Worked summary from the shared trailing slot into its
   assistant row. Its painted top must remain fixed across that ownership handoff; row-local spacing
   must match the spacing previously supplied by the assistant row boundary.

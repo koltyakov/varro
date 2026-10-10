@@ -27,6 +27,8 @@ import { fixture } from '../test-fixtures';
 import type { UnknownRecord } from '../../shared/type-utils';
 import { projectV2Message } from '../../extension/opencode-v2-projection';
 import { buildPlanImplementationPrompt } from './message-list/plan-actions';
+import { buildStopProcessPrompt } from '../lib/background-process-action';
+import { xmarkCircleSolidIcon } from '../lib/ui-icons';
 
 const retryMessageMock = vi.hoisted(() => vi.fn());
 const selectSessionMock = vi.hoisted(() => vi.fn());
@@ -436,6 +438,69 @@ describe('stripCompactionBoundaryMarkdown', () => {
 });
 
 describe('Message user prompt rendering', () => {
+  it.each([42, undefined])(
+    'renders a stop request as a compact non-editable action, PID=%s',
+    (pid) => {
+      const text = buildStopProcessPrompt({
+        id: 'shell-1',
+        status: 'running',
+        command: 'npm test',
+        cwd: '/repo',
+        pid,
+        time: { started: 1 },
+      });
+      const parts = [textPart('stop-text', text)];
+      cleanup = render(
+        () =>
+          Message({
+            info: userMessage('message-1'),
+            parts,
+            promptNumber: 2,
+            showSentTimestamp: true,
+          }),
+        container!
+      );
+      const action = container?.querySelector<HTMLElement>('.stop-process-action');
+      expect(action?.textContent?.trim()).toBe(`Stop process ${pid ?? 'shell-1'}`);
+      expect(action?.classList).toContain('user-message-card-wrapperless');
+      expect(action?.classList).not.toContain('user-message-card-editable');
+      expect(
+        action?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+      ).toContain(xmarkCircleSolidIcon);
+      expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
+      expect(container?.querySelector('.prompt-number-badge')).toBeNull();
+      expect(container?.querySelector('.message-sent-time')).toBeNull();
+      expect(parts[0]?.text).toBe(text);
+    }
+  );
+
+  it('does not compact stop requests containing attachments or custom text', () => {
+    const text = buildStopProcessPrompt({
+      id: 'shell-1',
+      status: 'running',
+      command: 'npm test',
+      cwd: '/repo',
+      pid: 42,
+      time: { started: 1 },
+    });
+    cleanup = render(
+      () => [
+        Message({
+          info: userMessage('message-1'),
+          parts: [textPart('text-1', text), filePart('file-1', 'index.html')],
+        }),
+        Message({
+          info: userMessage('message-2'),
+          parts: [textPart('text-2', `${text}\nAlso run the build.`)],
+        }),
+      ],
+      container!
+    );
+    expect(container?.querySelector('.stop-process-action')).toBeNull();
+    expect(container?.textContent).toContain('index.html');
+    expect(container?.textContent).toContain('Also run the build.');
+  });
+
   it('renders the plan implementation prompt as a compact, non-editable action', () => {
     const parts = [textPart('text-1', buildPlanImplementationPrompt([]))];
     cleanup = render(

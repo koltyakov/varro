@@ -58,6 +58,7 @@ export type SessionStatusSnapshotOptions = {
 };
 
 const sessionStatusLocalUpdatedAt = new Map<string, number>();
+const backgroundServicesUpdatedAt = new Map<string, number>();
 const scheduledProviderRetries = new Map<string, Extract<SessionStatus, { type: 'retry' }>>();
 const providerRetryCancellations = new Map<string, () => void>();
 // Once a snapshot acknowledges local markers, older snapshots must not apply after they are pruned.
@@ -69,6 +70,7 @@ export function captureSessionStatusSnapshotTime() {
 
 export function resetSessionStatusSnapshotTracking() {
   sessionStatusLocalUpdatedAt.clear();
+  backgroundServicesUpdatedAt.clear();
   scheduledProviderRetries.clear();
   providerRetryCancellations.clear();
   latestAppliedSessionStatusSnapshotStartedAt = Number.NEGATIVE_INFINITY;
@@ -76,6 +78,15 @@ export function resetSessionStatusSnapshotTracking() {
 }
 
 export const sessionStore = {
+  getBackgroundServiceCount(sessionId: string | null | undefined): number {
+    if (!sessionId) return 0;
+    const saved = state.sessionBackgroundServices[sessionId];
+    if (saved !== undefined) return saved;
+    const status = state.sessionStatus[sessionId];
+    return status?.type === 'idle' || status?.type === 'busy'
+      ? (status.backgroundServices ?? 0)
+      : 0;
+  },
   isProviderRetryScheduled(sessionId: string) {
     return scheduledProviderRetries.has(sessionId);
   },
@@ -175,6 +186,35 @@ export const sessionStore = {
     }
     let reconciledStatuses = effectiveStatuses;
     batch(() => {
+      setState('sessionBackgroundServices', (current) => {
+        let next: Record<string, number> | undefined;
+        for (const sessionId of new Set([...Object.keys(current), ...Object.keys(statuses)])) {
+          const updatedAt = backgroundServicesUpdatedAt.get(sessionId);
+          if (
+            snapshotStartedAt !== undefined &&
+            updatedAt !== undefined &&
+            updatedAt > snapshotStartedAt
+          )
+            continue;
+          if (snapshotStartedAt !== undefined && updatedAt !== undefined)
+            backgroundServicesUpdatedAt.delete(sessionId);
+          const status = statuses[sessionId];
+          const count =
+            status?.type === 'idle' || status?.type === 'busy'
+              ? (status.backgroundServices ?? 0)
+              : 0;
+          if (
+            !Number.isSafeInteger(count) ||
+            count < 0 ||
+            current[sessionId] === count ||
+            (current[sessionId] === undefined && count === 0)
+          )
+            continue;
+          next ??= { ...current };
+          next[sessionId] = count;
+        }
+        return next ?? current;
+      });
       setState('sessionStatus', (current) => {
         if (snapshotStartedAt === undefined) {
           reconciledStatuses = areEqualSessionStatusRecords(current, effectiveStatuses)
@@ -221,11 +261,25 @@ export const sessionStore = {
     return reconciledStatuses;
   },
   setSessionStatusEntry(sessionId: string, status: SessionStatus) {
+    const incomingServiceCount =
+      status.type === 'idle' || status.type === 'busy' ? status.backgroundServices : undefined;
+    const previousServiceCount = sessionStore.getBackgroundServiceCount(sessionId);
+    const retainedServiceCount =
+      state.sessionBackgroundServices[sessionId] === undefined && previousServiceCount > 0
+        ? previousServiceCount
+        : undefined;
     if (status.type === 'idle') status = scheduledProviderRetries.get(sessionId) ?? status;
     const prev = state.sessionStatus[sessionId];
     sessionStatusLocalUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
     recordStatusCompletionTransition(sessionId, prev, status);
     batch(() => {
+      const count = incomingServiceCount ?? retainedServiceCount;
+      if (count !== undefined && Number.isSafeInteger(count) && count >= 0) {
+        if (incomingServiceCount !== undefined)
+          backgroundServicesUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
+        if (state.sessionBackgroundServices[sessionId] !== count)
+          setState('sessionBackgroundServices', sessionId, count);
+      }
       setState('sessionStatus', (current) => {
         const currentStatus = current[sessionId];
         if (currentStatus && isEqualSessionStatus(currentStatus, status)) return current;
@@ -254,11 +308,13 @@ export type SessionStore = typeof sessionStore;
 
 function isEqualSessionStatus(a: SessionStatus, b: SessionStatus): boolean {
   if (a.type !== b.type) return false;
+  if (a.type === 'idle' && b.type === 'idle') return a.backgroundServices === b.backgroundServices;
   if (a.type === 'busy' && b.type === 'busy')
     return (
       !!a.background === !!b.background &&
       a.backgroundStartedAt === b.backgroundStartedAt &&
-      a.backgroundCommand === b.backgroundCommand
+      a.backgroundCommand === b.backgroundCommand &&
+      a.backgroundServices === b.backgroundServices
     );
   if (a.type === 'retry' && b.type === 'retry') {
     return a.attempt === b.attempt && a.message === b.message && a.next === b.next;

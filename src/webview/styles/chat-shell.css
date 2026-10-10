@@ -922,6 +922,7 @@ input:focus-visible {
 }
 
 .user-message-card.plan-implementation-action,
+.user-message-card.stop-process-action,
 .user-message-card.manual-compaction-action {
   align-self: flex-start;
   max-width: 100%;
@@ -933,6 +934,7 @@ input:focus-visible {
 }
 
 .plan-implementation-action-label,
+.stop-process-action-label,
 .manual-compaction-action-label {
   display: inline-flex;
   align-items: center;

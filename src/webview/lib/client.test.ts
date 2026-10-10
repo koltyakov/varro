@@ -70,6 +70,28 @@ afterEach(() => {
 });
 
 describe('client', () => {
+  it('encodes and scopes service choices and stops to a specific session process', async () => {
+    const { client } = await loadClient();
+    const controller = new AbortController();
+    const options = { directory: '/repo', signal: controller.signal };
+    bridgeMocks.apiCall.mockResolvedValue(true);
+    await client.session.setBackgroundProcessService('ses own', 'shell/1', true, options);
+    await client.session.stopBackgroundProcess('ses own', 'shell/1', options);
+    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(
+      1,
+      'PATCH',
+      '/session/ses%20own/background-process/shell%2F1?directory=%2Frepo',
+      { service: true },
+      { signal: controller.signal }
+    );
+    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(
+      2,
+      'DELETE',
+      '/session/ses%20own/background-process/shell%2F1?directory=%2Frepo',
+      undefined,
+      { signal: controller.signal }
+    );
+  });
   it('scopes process reads to the session directory and validates byte-cursor output', async () => {
     const { client } = await loadClient();
     const controller = new AbortController();
@@ -891,6 +913,25 @@ describe('client', () => {
     expect(second).toEqual({ 'session-1': { type: 'idle' } });
     expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(1);
     expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/session/status');
+  });
+
+  it('bypasses an older shared status read for a process mutation refresh', async () => {
+    const { client } = await loadClient();
+    const old = createDeferred<unknown>();
+    bridgeMocks.apiCall.mockReturnValueOnce(old.promise).mockResolvedValueOnce({
+      'session-1': { type: 'idle', backgroundServices: 1 },
+    });
+    const oldRequest = client.session.status();
+    const controller = new AbortController();
+    expect(await client.session.status({ fresh: true, signal: controller.signal })).toEqual({
+      'session-1': { type: 'idle', backgroundServices: 1 },
+    });
+    expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(2);
+    expect(bridgeMocks.apiCall).toHaveBeenLastCalledWith('GET', '/session/status', undefined, {
+      signal: controller.signal,
+    });
+    old.resolve({});
+    await oldRequest;
   });
 
   it.each(['question', 'permission'] as const)(

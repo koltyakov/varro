@@ -2215,6 +2215,21 @@
 .chat-queue-item.is-dragging {
   opacity: 0.5;
 }
+.chat-background-service {
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  padding-inline-end: 8px;
+}
+.chat-background-service:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: -1px;
+}
+.chat-background-service-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-vscode-muted);
+}
 
 .chat-queue-item.is-drag-over {
   --chat-queue-row-surface: color-mix(
@@ -2315,7 +2330,8 @@
   white-space: nowrap;
 }
 
-.chat-steer-icon {
+.chat-steer-icon,
+.chat-background-service-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2325,7 +2341,8 @@
 }
 
 .chat-queue-drag-handle,
-.chat-steer-icon {
+.chat-steer-icon,
+.chat-background-service-icon {
   margin-right: -2px;
   margin-left: -2px;
   color: var(--color-vscode-muted);
@@ -2333,6 +2350,11 @@
 
 .chat-queue-drag-handle {
   cursor: grab;
+}
+
+.chat-background-service-icon > .ui-icon {
+  position: relative;
+  left: 2px;
 }
 
 .chat-queue-drag-handle:hover:not(:disabled),

@@ -187,6 +187,7 @@ export interface OpenCodeRuntime {
       queuedAttachments?: QueuedAttachmentSnapshot;
       queuedContext?: QueuedContextSnapshot;
       preserveComposer?: boolean;
+      omitContext?: boolean;
       targetSessionId?: string | null;
       newSessionWorkspace?: SessionWorkspaceTarget;
       queuedMessageDispatch?: { itemId: string; lease: number };
@@ -3175,6 +3176,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       queuedAttachments?: QueuedAttachmentSnapshot;
       queuedContext?: QueuedContextSnapshot;
       preserveComposer?: boolean;
+      omitContext?: boolean;
       targetSessionId?: string | null;
       workspaceDirectory?: string;
       newSessionWorkspace?: SessionWorkspaceTarget;

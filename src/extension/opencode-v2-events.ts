@@ -35,7 +35,14 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     background: true,
     backgroundStartedAt: context.backgroundStartedAt,
     backgroundCommand: context.backgroundCommand,
+    backgroundServices: context.backgroundServices,
   };
+  const serviceStatus =
+    context.backgroundServices !== undefined
+      ? { backgroundServices: context.backgroundServices }
+      : {};
+  const idleStatus = { type: 'idle', ...serviceStatus };
+  const busyStatus = { type: 'busy', ...serviceStatus };
   if (event.type === 'server.connected') return emit('server.connected');
   if (event.type === 'session.created')
     return emit('session.created', {
@@ -57,7 +64,7 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
   if (event.type === 'session.execution.started')
     return emit('session.status', {
       sessionID,
-      status: context.backgroundPending ? backgroundStatus : { type: 'busy' },
+      status: context.backgroundPending ? backgroundStatus : busyStatus,
     });
   if (
     [
@@ -79,7 +86,7 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
           type: 'session.status',
           properties: {
             sessionID,
-            status: context.backgroundPending ? backgroundStatus : { type: 'idle' },
+            status: context.backgroundPending ? backgroundStatus : idleStatus,
           },
         },
       ];
@@ -87,7 +94,7 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     if (event.type !== 'session.execution.failed')
       return emit('session.status', {
         sessionID,
-        status: context.backgroundPending ? backgroundStatus : { type: 'idle' },
+        status: context.backgroundPending ? backgroundStatus : idleStatus,
       });
     // Record the failure before settling busy state, so an idle notification cannot report success.
     const error = normalizeV2Error(data.error);
@@ -130,7 +137,7 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
         id: `${String(event.id)}:idle`,
         seq: undefined,
         type: 'session.status',
-        properties: { sessionID, status: { type: 'idle' } },
+        properties: { sessionID, status: idleStatus },
       },
     ];
   }

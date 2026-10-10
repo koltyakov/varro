@@ -12,6 +12,7 @@ const { setSessionUsageLimitState, setState, startLoading, stopLoading, state } 
     stopLoading: vi.fn(),
     state: {
       sessionStatus: {} as Record<string, SessionStatus>,
+      sessionBackgroundServices: {} as Record<string, number>,
       sessionUsageLimits: {} as UnknownRecord,
       messages: [] as Array<unknown>,
     },

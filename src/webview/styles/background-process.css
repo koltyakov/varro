@@ -102,7 +102,15 @@
   gap: 6px;
   overflow: auto;
 }
+.background-process-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-shrink: 0;
+}
 .background-process-detail-command {
+  flex: 1;
+  min-width: 0;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 12px;
   font-weight: 400;
@@ -110,6 +118,57 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   flex-shrink: 0;
+}
+.background-process-duration {
+  display: none;
+  flex-shrink: 0;
+  width: 9ch;
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  text-align: right;
+  white-space: nowrap;
+}
+.background-process-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+.background-process-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.background-process-controls input {
+  margin: 0;
+  accent-color: var(--vscode-focusBorder);
+}
+.background-process-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  flex-shrink: 0;
+}
+.background-process-controls button {
+  padding: 3px 8px;
+  border: 1px solid var(--color-vscode-border);
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+.background-process-controls button:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+.background-process-controls button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .background-process-console {
   display: flex;
@@ -183,6 +242,12 @@
 }
 
 @media (max-width: 600px) {
+  .background-process-dialog.has-process-target .background-process-list {
+    display: none;
+  }
+  .background-process-dialog.has-process-target .background-process-duration {
+    display: block;
+  }
   .background-process-dialog-body {
     flex-direction: column;
     height: 75vh;

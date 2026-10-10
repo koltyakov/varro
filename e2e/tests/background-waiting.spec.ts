@@ -152,16 +152,22 @@ test('shows a background process card until the resumed response finishes', asyn
     const cardBox = element.getBoundingClientRect();
     const title = element.querySelector('.tool-invocation-title')!.getBoundingClientRect();
     const duration = element.querySelector('.tool-invocation-duration')!.getBoundingClientRect();
+    const disclosure = element
+      .querySelector('.tool-invocation-header > :last-child')!
+      .getBoundingClientRect();
     return {
-      rightInset: cardBox.right - duration.right,
+      rightInset: cardBox.right - disclosure.right,
       titleEnd: title.right,
       durationStart: duration.left,
+      durationEnd: duration.right,
+      disclosureStart: disclosure.left,
       height: cardBox.height,
     };
   });
   expect(layout.rightInset).toBeGreaterThan(0);
   expect(layout.rightInset).toBeLessThan(16);
   expect(layout.durationStart).toBeGreaterThanOrEqual(layout.titleEnd);
+  expect(layout.disclosureStart).toBeGreaterThanOrEqual(layout.durationEnd);
   expect(layout.height).toBeGreaterThan(24);
   await expect(page.locator('.assistant-dialog-summary')).toHaveCount(0);
   const turnTimer = page.locator('.toolbar-turn-timer-value');

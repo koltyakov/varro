@@ -5420,6 +5420,47 @@ async function handleApiRequest(
     };
   }
 
+  const backgroundMutation = path.match(/^\/session\/([^/]+)\/background-process\/([^/]+)$/);
+  if (backgroundMutation && (method === 'PATCH' || method === 'DELETE')) {
+    const fixture = (window as HarnessWindow).varroBackgroundProcessFixture;
+    const id = decodeURIComponent(backgroundMutation[2]!);
+    const process = fixture?.processes.find((candidate) => candidate.id === id);
+    if (!fixture || fixture.sessionID !== decodeURIComponent(backgroundMutation[1]!) || !process)
+      throw new Error('Background process not found');
+    if (method === 'DELETE')
+      fixture.processes = fixture.processes.filter((candidate) => candidate.id !== id);
+    else {
+      const service = asRecord(body)?.service;
+      if (typeof service !== 'boolean') throw new Error('Service must be a boolean');
+      process.service = service;
+    }
+    const services = fixture.processes.filter(
+      (candidate) => candidate.status === 'running' && candidate.service
+    ).length;
+    const awaited = fixture.processes.find(
+      (candidate) => candidate.status === 'running' && !candidate.service
+    );
+    state.sessionStatuses[fixture.sessionID] = awaited
+      ? {
+          type: 'busy',
+          background: true,
+          backgroundCommand: awaited.command,
+          backgroundServices: services || undefined,
+        }
+      : { type: 'idle', backgroundServices: services || undefined };
+    dispatchToWebview({
+      type: 'server/event',
+      payload: {
+        type: 'session.status',
+        properties: {
+          sessionID: fixture.sessionID,
+          status: { ...state.sessionStatuses[fixture.sessionID]!, backgroundServices: services },
+        },
+      },
+    });
+    return true;
+  }
+
   const startupOptions = new URLSearchParams(window.location.search);
   if (
     startupOptions.has('startupBackgroundPending') &&
@@ -5496,6 +5537,18 @@ async function handleApiRequest(
   }
 
   if (method === 'GET' && path === '/session/status') {
+    const fixture = (window as HarnessWindow).varroBackgroundProcessFixture;
+    const count =
+      fixture?.processes.filter((process) => process.service && process.status === 'running')
+        .length ?? 0;
+    if (fixture && count > 0) {
+      const current = state.sessionStatuses[fixture.sessionID];
+      const type = current?.type === 'busy' ? 'busy' : 'idle';
+      return {
+        ...state.sessionStatuses,
+        [fixture.sessionID]: { ...current, type, backgroundServices: count },
+      };
+    }
     return state.sessionStatuses;
   }
 

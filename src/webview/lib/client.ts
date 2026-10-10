@@ -79,6 +79,37 @@ export const client = {
   },
 
   session: {
+    async setBackgroundProcessService(
+      id: string,
+      processID: string,
+      service: boolean,
+      options?: { directory?: string; signal?: AbortSignal }
+    ): Promise<boolean> {
+      return apiCall(
+        'PATCH',
+        withDirectory(
+          `/session/${encodeURIComponent(id)}/background-process/${encodeURIComponent(processID)}`,
+          options?.directory
+        ),
+        { service },
+        { signal: options?.signal }
+      );
+    },
+    async stopBackgroundProcess(
+      id: string,
+      processID: string,
+      options?: { directory?: string; signal?: AbortSignal }
+    ): Promise<boolean> {
+      return apiCall(
+        'DELETE',
+        withDirectory(
+          `/session/${encodeURIComponent(id)}/background-process/${encodeURIComponent(processID)}`,
+          options?.directory
+        ),
+        undefined,
+        { signal: options?.signal }
+      );
+    },
     async backgroundProcesses(
       id: string,
       options?: { directory?: string; signal?: AbortSignal }
@@ -256,7 +287,18 @@ export const client = {
         withDirectory(`/session/${encodeURIComponent(id)}/diff${query}`, options?.directory)
       ).then(validateFileDiffs);
     },
-    async status(): Promise<Record<string, SessionStatus>> {
+    async status(options?: {
+      fresh?: boolean;
+      signal?: AbortSignal;
+    }): Promise<Record<string, SessionStatus>> {
+      if (options?.fresh || options?.signal) {
+        const path = '/session/status';
+        // SAFETY: The status route returns a record; individual event/status consumers validate its discriminants.
+        return requireRecord(
+          await apiCall('GET', path, undefined, { signal: options.signal }),
+          path
+        ) as Record<string, SessionStatus>;
+      }
       return getSharedSessionStatus();
     },
     async messages(

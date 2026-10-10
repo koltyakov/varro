@@ -3969,6 +3969,37 @@ describe('registerSessionEventHandlers', () => {
     loadingStartedAt.mockReturnValue(null);
   });
 
+  it.each(['idle', 'busy'] as const)('retains validated service counts in %s events', (type) => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        setSessionStatusEntry,
+      })
+    );
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type, backgroundServices: 2 } },
+    });
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', {
+      type,
+      backgroundServices: 2,
+    });
+    setSessionStatusEntry.mockClear();
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type, backgroundServices: 0 } },
+    });
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', {
+      type,
+      backgroundServices: 0,
+    });
+    setSessionStatusEntry.mockClear();
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type, backgroundServices: -1 } },
+    });
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type });
+  });
+
   it('rechecks status after the final text quiets without clearing active loading', () => {
     vi.useFakeTimers();
     try {

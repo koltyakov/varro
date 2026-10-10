@@ -19,14 +19,16 @@ import type {
   SkillInfo,
 } from '@opencode/client';
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { asRecord, isString, type UnknownRecord } from '../shared/type-utils';
+import { asRecord, isBoolean, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 import { withStartupDeadline } from '../shared/startup';
 import { parseSkillAttachment } from '../shared/skill-reference';
 import type {
   ProviderAuthMethod,
   ProviderAuthPromptCondition,
   ProviderAuthPromptText,
+  SessionStatus,
 } from '../shared/opencode-types';
 import type { OpenCodeRequestOptions } from './open-code-transport';
 import { OpenCodeResponseTooLargeError } from './opencode-response-error';
@@ -207,8 +209,20 @@ function v2AuthAnswers(form: FormFields | undefined, value: unknown) {
   return Object.keys(answer).length > 0 ? answer : value;
 }
 
+function nextBackgroundReviewAt(startedAt: number, now: number): number {
+  const minutesRunning = Math.max(0, (now - startedAt) / 60_000);
+  const nextMinute =
+    [5, 10, 20, 30].find((minute) => minute > minutesRunning) ??
+    (Math.floor(minutesRunning / 30) + 1) * 30;
+  return startedAt + nextMinute * 60_000;
+}
+
 export class OpenCodeV2Adapter {
   private readonly backgroundWork = new OpenCodeV2BackgroundWork();
+  private readonly backgroundServices: OpenCodeV2SessionState;
+  private readonly backgroundJudgments = new Map<string, AbortController>();
+  private readonly backgroundReviewTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly manualServiceChoices = new Set<string>();
   private readonly permissions = new Map<string, string>();
   private readonly forms = new Map<string, FormInfo>();
   private readonly messageParents = new Map<string, string>();
@@ -225,8 +239,18 @@ export class OpenCodeV2Adapter {
     private readonly wire: WireRequest,
     private readonly annotations = new OpenCodeV2SessionState(),
     private readonly openExternal: (url: string) => Promise<boolean> = async () => false,
-    private readonly generationTiming = new OpenCodeV2GenerationTiming()
-  ) {}
+    private readonly generationTiming = new OpenCodeV2GenerationTiming(),
+    private readonly classifyBackgroundProcess?: (
+      shell: ShellInfo,
+      directory: string | undefined,
+      signal: AbortSignal
+    ) => Promise<boolean | null>,
+    private readonly backgroundChanged?: (sessionID: string, directory?: string) => Promise<void>
+  ) {
+    this.backgroundServices = new OpenCodeV2SessionState(
+      join(annotations.directory, 'background-services')
+    );
+  }
 
   observe(
     type: string,
@@ -237,6 +261,8 @@ export class OpenCodeV2Adapter {
     sequence?: unknown
   ): void {
     this.generationTiming.observe(type, data, created, sequence);
+    if ((type === 'shell.exited' || type === 'shell.deleted') && isString(data.id))
+      this.cancelBackgroundReview(data.id);
     this.backgroundWork.observe(type, data, eventDirectory);
     if (isString(data.sessionID)) {
       const context = { ...this.contexts.get(data.sessionID) };
@@ -278,6 +304,11 @@ export class OpenCodeV2Adapter {
   }
 
   reset(): void {
+    for (const controller of this.backgroundJudgments.values()) controller.abort();
+    this.backgroundJudgments.clear();
+    for (const timer of this.backgroundReviewTimers.values()) clearTimeout(timer);
+    this.backgroundReviewTimers.clear();
+    this.manualServiceChoices.clear();
     this.generationTiming.reset();
     this.backgroundWork.reset();
     this.permissions.clear();
@@ -295,6 +326,7 @@ export class OpenCodeV2Adapter {
       backgroundPending: this.backgroundWork.isWaiting(sessionID),
       backgroundStartedAt: this.backgroundWork.startedAt(sessionID),
       backgroundCommand: this.backgroundWork.command(sessionID),
+      backgroundServices: this.backgroundWork.serviceCount(sessionID),
       generationTiming: this.generationTiming,
     };
   }
@@ -462,27 +494,66 @@ export class OpenCodeV2Adapter {
         data<Record<string, SessionActive>>('GET', '/api/session/active'),
         data<ShellInfo[]>('GET', query('/api/shell', true)),
       ]);
+      const choices = await this.readBackgroundServiceChoices(shells);
+      const serviceIDs = new Set(
+        shells
+          .filter(
+            (shell) =>
+              isString(shell.metadata.sessionID) &&
+              choices.get(shell.metadata.sessionID)?.[shell.id] === true
+          )
+          .map((shell) => shell.id)
+      );
       const waiting = this.backgroundWork.reconcile(
         shells,
         new Set(Object.keys(active)),
         directory,
-        version
+        version,
+        serviceIDs
       );
+      for (const shell of shells) {
+        const sessionID = shell.metadata.sessionID;
+        if (shell.status !== 'running' || !isString(sessionID)) continue;
+        const saved = choices.get(sessionID) ?? {};
+        const review = asRecord(saved[`review:${shell.id}`]);
+        if (saved[`manual:${shell.id}`] === true || (isBoolean(saved[shell.id]) && !review)) {
+          this.cancelBackgroundReview(shell.id);
+          continue;
+        }
+        this.scheduleBackgroundJudgment(
+          shell,
+          sessionID,
+          directory,
+          isNumber(review?.next) && Number.isFinite(review.next) ? review.next : undefined
+        );
+      }
       return Object.fromEntries([
         ...Object.entries(active).map(([id, status]) => {
           if (status.type !== 'running')
             throw new Error('Invalid OpenCode v2 active-session status');
-          return [id, { type: 'busy' }];
+          const backgroundServices = this.backgroundWork.serviceCount(id);
+          const projected: SessionStatus = { type: 'busy' };
+          if (backgroundServices > 0) projected.backgroundServices = backgroundServices;
+          return [id, projected];
         }),
-        ...waiting.map((id) => [
-          id,
-          {
+        ...waiting.map((id) => {
+          const backgroundServices = this.backgroundWork.serviceCount(id);
+          const projected: SessionStatus = {
             type: 'busy',
             background: true,
             backgroundStartedAt: this.backgroundWork.startedAt(id),
             backgroundCommand: this.backgroundWork.command(id),
-          },
-        ]),
+          };
+          if (backgroundServices > 0) projected.backgroundServices = backgroundServices;
+          return [id, projected];
+        }),
+        ...this.backgroundWork
+          .serviceSessionIDs()
+          .filter((id) => !active[id] && !waiting.includes(id))
+          .map((id) => [
+            id,
+            { type: 'idle', backgroundServices: this.backgroundWork.serviceCount(id) },
+          ]),
       ]);
     }
     if ((route === '/session' || route === '/experimental/session') && method === 'GET') {
@@ -582,6 +653,7 @@ export class OpenCodeV2Adapter {
       const action = sessionRoute[2] ?? '';
       if (method === 'GET' && action === 'background-process') {
         const shells = await data<ShellInfo[]>('GET', query('/api/shell', true));
+        const services = await this.backgroundServices.read(sessionID);
         return shells
           .filter((shell) => shell.metadata.sessionID === sessionID)
           .map((shell): BackgroundProcess => ({
@@ -593,7 +665,45 @@ export class OpenCodeV2Adapter {
             exit: shell.exit,
             signal: shell.signal,
             time: shell.time,
+            service: services[shell.id] === true || undefined,
           }));
+      }
+      const backgroundProcess = action.match(/^background-process\/([^/]+)$/);
+      if (backgroundProcess && (method === 'PATCH' || method === 'DELETE')) {
+        if (method === 'PATCH' && !isBoolean(input.service))
+          throw new Error('Background process service must be a boolean');
+        const shellID = decodeURIComponent(backgroundProcess[1]!);
+        const shellEndpoint = query(`/api/shell/${encodeURIComponent(shellID)}`, true);
+        const shell = await data<ShellInfo>('GET', shellEndpoint);
+        if (shell.metadata.sessionID !== sessionID)
+          throw new Error('404 Background process not found');
+        if (method === 'DELETE') {
+          // TODO: Recheck future OpenCode releases for silent process cancellation that suppresses
+          // completion notifications and agent resumption without injecting a chat message.
+          await raw('DELETE', shellEndpoint);
+          this.cancelBackgroundReview(shellID);
+          this.backgroundWork.observe('shell.deleted', { id: shellID }, directory);
+          this.notifyBackgroundChange(sessionID, directory);
+          return true;
+        }
+        if (shell.status !== 'running') throw new Error('Background process is no longer running');
+        this.manualServiceChoices.add(shellID);
+        this.cancelBackgroundReview(shellID);
+        this.backgroundWork.observe('shell.created', { info: shell }, directory);
+        try {
+          await this.backgroundServices.update(
+            sessionID,
+            { [shellID]: input.service, [`manual:${shellID}`]: true },
+            options.signal
+          );
+        } catch (error) {
+          this.manualServiceChoices.delete(shellID);
+          this.queueBackgroundReview(shellID, sessionID, directory, Date.now() + 60_000);
+          throw error;
+        }
+        this.backgroundWork.setService(shellID, input.service === true);
+        this.notifyBackgroundChange(sessionID, directory);
+        return true;
       }
       const backgroundOutput = action.match(/^background-process\/([^/]+)\/output$/);
       if (method === 'GET' && backgroundOutput) {
@@ -1158,6 +1268,149 @@ export class OpenCodeV2Adapter {
         options
       );
     throw new Error(`OpenCode v2 does not support this Varro operation: ${method} ${route}`);
+  }
+
+  private async readBackgroundServiceChoices(
+    shells: ShellInfo[]
+  ): Promise<ReadonlyMap<string, UnknownRecord>> {
+    const sessionIDs = [
+      ...new Set(
+        shells.flatMap((shell) =>
+          isString(shell.metadata.sessionID) ? [shell.metadata.sessionID] : []
+        )
+      ),
+    ];
+    return new Map(
+      await Promise.all(
+        sessionIDs.map(
+          async (sessionID) => [sessionID, await this.backgroundServices.read(sessionID)] as const
+        )
+      )
+    );
+  }
+
+  private scheduleBackgroundJudgment(
+    shell: ShellInfo,
+    sessionID: string,
+    directory?: string,
+    nextReviewAt?: number
+  ): void {
+    if (
+      !this.classifyBackgroundProcess ||
+      this.backgroundJudgments.has(shell.id) ||
+      this.manualServiceChoices.has(shell.id)
+    )
+      return;
+    if (nextReviewAt !== undefined && nextReviewAt > Date.now()) {
+      this.queueBackgroundReview(shell.id, sessionID, directory, nextReviewAt);
+      return;
+    }
+    if (this.backgroundJudgments.size >= 4) {
+      this.queueBackgroundReview(shell.id, sessionID, directory, Date.now() + 20_000);
+      return;
+    }
+    clearTimeout(this.backgroundReviewTimers.get(shell.id));
+    this.backgroundReviewTimers.delete(shell.id);
+    const controller = new AbortController();
+    this.backgroundJudgments.set(shell.id, controller);
+    // Do not delay status snapshots, startup, or chat rendering while the same-session model judges lifetime.
+    void this.classifyBackgroundProcess(shell, directory, controller.signal)
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          logger.warn(
+            `Background process classification failed; preserving its current wait setting: ${error instanceof Error ? error.message : String(error)}`
+          );
+        return null;
+      })
+      .then(async (service) => {
+        if (
+          controller.signal.aborted ||
+          this.manualServiceChoices.has(shell.id) ||
+          !this.backgroundWork.hasShell(shell.id)
+        )
+          return;
+        const next = nextBackgroundReviewAt(shell.time.started, Date.now());
+        const patch: UnknownRecord = { [`review:${shell.id}`]: { next } };
+        if (service !== null) patch[shell.id] = service;
+        await this.backgroundServices.update(
+          sessionID,
+          patch,
+          controller.signal,
+          `manual:${shell.id}`
+        );
+        if (controller.signal.aborted) return;
+        const saved = await this.backgroundServices.read(sessionID);
+        if (
+          controller.signal.aborted ||
+          this.manualServiceChoices.has(shell.id) ||
+          saved[`manual:${shell.id}`] === true
+        )
+          return;
+        const previousCount = this.backgroundWork.serviceCount(sessionID);
+        if (isBoolean(saved[shell.id]))
+          this.backgroundWork.setService(shell.id, saved[shell.id] === true);
+        this.queueBackgroundReview(shell.id, sessionID, directory, next);
+        if (previousCount !== this.backgroundWork.serviceCount(sessionID))
+          this.notifyBackgroundChange(sessionID, directory);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          logger.warn(
+            `Could not save background process judgment: ${error instanceof Error ? error.message : String(error)}`
+          );
+          this.queueBackgroundReview(shell.id, sessionID, directory, Date.now() + 60_000);
+        }
+      })
+      .finally(() => {
+        if (this.backgroundJudgments.get(shell.id) === controller)
+          this.backgroundJudgments.delete(shell.id);
+      });
+  }
+
+  private queueBackgroundReview(
+    shellID: string,
+    sessionID: string,
+    directory: string | undefined,
+    next: number
+  ): void {
+    if (
+      !this.classifyBackgroundProcess ||
+      this.backgroundReviewTimers.has(shellID) ||
+      this.manualServiceChoices.has(shellID)
+    )
+      return;
+    const timer = setTimeout(
+      () => {
+        this.backgroundReviewTimers.delete(shellID);
+        const refresh = this.backgroundChanged
+          ? this.backgroundChanged(sessionID, directory)
+          : this.request('GET', '/session/status', undefined, { directory });
+        void refresh.catch((error: unknown) => {
+          logger.warn(
+            `Could not refresh background processes for review: ${error instanceof Error ? error.message : String(error)}`
+          );
+          if (this.backgroundWork.hasShell(shellID))
+            this.queueBackgroundReview(shellID, sessionID, directory, Date.now() + 60_000);
+        });
+      },
+      Math.max(0, Math.min(next - Date.now(), 2_147_483_647))
+    );
+    timer.unref();
+    this.backgroundReviewTimers.set(shellID, timer);
+  }
+
+  private cancelBackgroundReview(shellID: string): void {
+    clearTimeout(this.backgroundReviewTimers.get(shellID));
+    this.backgroundReviewTimers.delete(shellID);
+    this.backgroundJudgments.get(shellID)?.abort();
+  }
+
+  private notifyBackgroundChange(sessionID: string, directory?: string): void {
+    void this.backgroundChanged?.(sessionID, directory).catch((error: unknown) =>
+      logger.warn(
+        `Could not publish background process status: ${error instanceof Error ? error.message : String(error)}`
+      )
+    );
   }
 
   private async session(value: SessionInfo): Promise<UnknownRecord> {

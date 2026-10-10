@@ -89,6 +89,47 @@ function toolPart(status: 'running' | 'completed'): Part {
 }
 
 describe('sessionStore', () => {
+  it('retains service lifetime through optimistic send, steering, retry and idle statuses', () => {
+    sessionStore.setSessionStatusEntry('session-1', { type: 'idle', backgroundServices: 1 });
+    for (const status of [
+      { type: 'busy' },
+      { type: 'retry', attempt: 1, message: 'Retrying', next: 1000 },
+      { type: 'idle' },
+    ] satisfies SessionStatus[]) {
+      sessionStore.setSessionStatusEntry('session-1', status);
+      expect(sessionStore.getBackgroundServiceCount('session-1')).toBe(1);
+    }
+    sessionStore.setSessionStatusEntry('session-1', { type: 'idle', backgroundServices: 0 });
+    expect(sessionStore.getBackgroundServiceCount('session-1')).toBe(0);
+  });
+
+  it('protects process lifetime from stale snapshots separately from optimistic turn changes', () => {
+    sessionStore.setSessionStatuses({ 'session-1': { type: 'idle', backgroundServices: 1 } });
+    const snapshotStartedAt = captureSessionStatusSnapshotTime();
+    sessionStore.setSessionStatusEntry('session-1', { type: 'busy', backgroundServices: 0 });
+    sessionStore.setSessionStatuses(
+      { 'session-1': { type: 'idle', backgroundServices: 1 } },
+      { snapshotStartedAt }
+    );
+    expect(sessionStore.getBackgroundServiceCount('session-1')).toBe(0);
+    sessionStore.setSessionStatuses({ 'session-1': { type: 'idle', backgroundServices: 1 } });
+    sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
+    expect(sessionStore.getBackgroundServiceCount('session-1')).toBe(1);
+    sessionStore.setSessionStatuses({});
+    expect(sessionStore.getBackgroundServiceCount('session-1')).toBe(0);
+  });
+  it.each(['idle', 'busy'] as const)(
+    'publishes service-count-only changes for %s sessions',
+    (type) => {
+      sessionStore.setSessionStatusEntry('session-1', { type, backgroundServices: 1 });
+      sessionStore.setSessionStatusEntry('session-1', { type, backgroundServices: 2 });
+      expect(state.sessionStatus['session-1']).toEqual({ type, backgroundServices: 2 });
+      sessionStore.setSessionStatuses({ 'session-1': { type, backgroundServices: 1 } });
+      expect(state.sessionStatus['session-1']).toEqual({ type, backgroundServices: 1 });
+      sessionStore.setSessionStatuses({ 'session-1': { type } });
+      expect(state.sessionStatus['session-1']).toEqual({ type });
+    }
+  );
   it('publishes command-only changes in background status events and snapshots', () => {
     const status: SessionStatus = {
       type: 'busy',

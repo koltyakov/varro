@@ -80,6 +80,15 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('DELETE', output)).toBe(false);
     expect(isAllowedApiRequest('GET', '/api/shell')).toBe(false);
   });
+  it('allows only session-scoped service choices and individual process stops', () => {
+    const process = '/session/ses_own/background-process/shell_1';
+    expect(isAllowedApiRequest('PATCH', `${process}?directory=%2Frepo`)).toBe(true);
+    expect(isAllowedApiRequest('DELETE', process)).toBe(true);
+    expect(isAllowedApiRequest('POST', process)).toBe(false);
+    expect(isAllowedApiRequest('GET', process)).toBe(false);
+    expect(isAllowedApiRequest('PATCH', `${process}?service=true`)).toBe(false);
+    expect(isAllowedApiRequest('DELETE', '/api/shell/shell_1')).toBe(false);
+  });
   it('requires complete model preference update snapshots', () => {
     const preferences = {
       modelVariantSelections: {},

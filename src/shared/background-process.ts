@@ -11,6 +11,7 @@ export type BackgroundProcess = {
   pid?: number;
   exit?: number;
   signal?: string;
+  service?: boolean;
   time: { started: number; completed?: number };
 };
 
@@ -41,7 +42,8 @@ export function parseBackgroundProcess(value: unknown): BackgroundProcess | null
       record.status !== 'killed') ||
     (record.pid !== undefined && !isNumber(record.pid)) ||
     (record.exit !== undefined && !isNumber(record.exit)) ||
-    (record.signal !== undefined && !isString(record.signal))
+    (record.signal !== undefined && !isString(record.signal)) ||
+    (record.service !== undefined && !isBoolean(record.service))
   )
     return null;
   return {
@@ -52,6 +54,7 @@ export function parseBackgroundProcess(value: unknown): BackgroundProcess | null
     pid: record.pid,
     exit: record.exit,
     signal: record.signal,
+    service: record.service,
     time: { started: time.started, completed: time.completed },
   };
 }

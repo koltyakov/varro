@@ -147,6 +147,8 @@ export interface AppState {
   siblingWorkspaceAlerts: SiblingWorkspaceAlert[];
   currentDocumentEnabledBySession: Record<string, boolean>;
   sessionStatus: Record<string, SessionStatus>;
+  /** Process lifetime is independent of optimistic chat-turn status. Zero is authoritative cleanup. */
+  sessionBackgroundServices: Record<string, number>;
   messages: MessageEntry[];
   todos: NormalizedTodo[];
   permissions: Permission[];
@@ -409,6 +411,7 @@ export function createAppState(): AppStateInstance {
     siblingWorkspaceAlerts: initialWebviewState.siblingWorkspaceAlerts ?? [],
     currentDocumentEnabledBySession: {},
     sessionStatus: {},
+    sessionBackgroundServices: {},
     messages: [],
     todos: [],
     permissions: normalizeInitialPermissions(initialWebviewState.pendingPermissions),

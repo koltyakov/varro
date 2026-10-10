@@ -124,6 +124,34 @@ function createState(overrides?: {
 }
 
 describe('session-send helpers', () => {
+  it('keeps action text and routing intact while omitting skill references and all automatic context', () => {
+    const composer = createState({
+      terminalSelection: { text: 'Draft output', terminalName: 'zsh' },
+      droppedFiles: [{ path: '/repo/index.html', relativePath: 'index.html', type: 'file' }],
+      issuesAttachment: { count: 1, text: 'Draft issues' },
+      editorContext: createEditorContext({
+        activeFile: { path: '/repo/index.html', relativePath: 'index.html', language: 'html' },
+      }),
+    });
+    const text = 'Stop process 42 using $[review]';
+    const result = buildSessionSendBody(composer, 'session-1', text, () => true, {
+      omitContext: true,
+      delivery: 'steer',
+      noReply: true,
+    });
+    expect(result?.body).toEqual({
+      parts: [{ type: 'text', text }],
+      agent: 'build',
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+      delivery: 'steer',
+      noReply: true,
+    });
+    expect(result?.optimisticImages).toBeUndefined();
+    expect(
+      buildSessionSendBody(composer, 'session-1', ' ', () => true, { omitContext: true })
+    ).toBeNull();
+  });
+
   it('does not omit an unavailable explicit model and leave routing to the server', () => {
     expect(() =>
       buildSessionSendBody(

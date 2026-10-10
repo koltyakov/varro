@@ -1970,6 +1970,10 @@ const API_ROUTES: ApiRoute[] = [
     '/session/:id/background-process',
     ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)
   ),
+  route(
+    '/session/:id/background-process/:processId',
+    ({ method, url }) => (method === 'PATCH' || method === 'DELETE') && optionalDirectoryQuery(url)
+  ),
   route('/session/:id/background-process/:processId/output', ({ method, url }) => {
     const cursors = url.searchParams.getAll('cursor');
     return (

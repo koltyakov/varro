@@ -10210,14 +10210,19 @@ export function MessageList() {
               outerListVirtualized={shouldVirtualize()}
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
               assistantDialogSummaryMap={rowAssistantDialogSummaryMap()}
-              isFinalAssistantMessage={(messageId) =>
-                assistantDialogSummaryMap().has(messageId) ||
-                (state.activeSessionId !== null &&
-                  state.sessionStatus[state.activeSessionId]?.type !== 'busy' &&
-                  state.sessionStatus[state.activeSessionId]?.type !== 'retry' &&
-                  !activeSessionWorking() &&
-                  trailingFinalResponseMessageId() === messageId)
-              }
+              isFinalAssistantMessage={(messageId) => {
+                // Worked can retain a terminal step while execution continues. Only mark
+                // the trailing answer once work and its queued presentation have settled.
+                if (structurallyTrailingFinalResponseCandidateMessageId() === messageId) {
+                  return (
+                    state.activeSessionId !== null &&
+                    !activeSessionWorking() &&
+                    !waitingForBackground() &&
+                    trailingFinalResponseMessageId() === messageId
+                  );
+                }
+                return assistantDialogSummaryMap().has(messageId);
+              }}
               assistantActivityGroupMap={assistantActivityGroupMap()}
               messageBlockBoundaryMap={messageBlockBoundaryMap()}
               retainedActivityPartKeys={renderedRetainedActivityPartKeys()}

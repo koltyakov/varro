@@ -966,6 +966,7 @@ export function Chat() {
           <BackgroundProcessDialog
             sessionID={view.sessionID}
             directory={view.directory}
+            processID={view.processID}
             onClose={closeBackgroundProcessView}
           />
         )}

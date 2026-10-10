@@ -126,6 +126,7 @@ export async function sendMessage(
     queuedAttachments?: QueuedAttachmentSnapshot;
     queuedContext?: QueuedContextSnapshot;
     preserveComposer?: boolean;
+    omitContext?: boolean;
     targetSessionId?: string | null;
     workspaceDirectory?: string;
     newSessionWorkspace?: SessionWorkspaceTarget;

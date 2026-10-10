@@ -123,7 +123,7 @@ export type SessionSendBody = {
   queuedMessageDispatch?: { itemId: string; lease: number };
 };
 
-type SendFlowOptions = { noReply?: boolean; delivery?: 'steer' | 'queue' };
+type SendFlowOptions = { noReply?: boolean; delivery?: 'steer' | 'queue'; omitContext?: boolean };
 
 export type QueuedAttachmentSnapshot = Pick<
   QueuedMessage,
@@ -281,6 +281,18 @@ export function buildSessionSendBody(
   options?: SendFlowOptions
 ): SessionSendPayload | null {
   const effectiveModel = resolveComposerSendModel(composerState);
+  if (options?.omitContext) {
+    if (!text.trim()) return null;
+    return {
+      body: buildRoutedSendBody(
+        [{ type: 'text', text }],
+        composerState.selectedAgent,
+        effectiveModel,
+        options
+      ),
+      effectiveModel,
+    };
+  }
   const includeNativeClipboardImages = effectiveModel
     ? modelSupportsVision(
         effectiveModel.providerID,
@@ -542,20 +554,7 @@ export function buildSessionSendBody(
 
   if (parts.length === 0) return null;
 
-  const body: SessionSendBody = { parts };
-  if (composerState.selectedAgent) body.agent = composerState.selectedAgent;
-  if (effectiveModel) {
-    body.model = {
-      providerID: effectiveModel.providerID,
-      modelID: effectiveModel.modelID,
-    };
-  }
-  if (effectiveModel?.variant) {
-    body.variant =
-      normalizeModelVariant(effectiveModel.modelID, effectiveModel.variant) || undefined;
-  }
-  if (options?.noReply) body.noReply = true;
-  if (options?.delivery) body.delivery = options.delivery;
+  const body = buildRoutedSendBody(parts, composerState.selectedAgent, effectiveModel, options);
 
   if (delegateClipboardImages) {
     return {
@@ -569,6 +568,22 @@ export function buildSessionSendBody(
     };
   }
   return { body, effectiveModel };
+}
+
+function buildRoutedSendBody(
+  parts: SessionSendBody['parts'],
+  agent: string | null,
+  model: SelectedModel | null,
+  options?: SendFlowOptions
+): SessionSendBody {
+  const body: SessionSendBody = { parts };
+  if (agent) body.agent = agent;
+  if (model) body.model = { providerID: model.providerID, modelID: model.modelID };
+  if (model?.variant)
+    body.variant = normalizeModelVariant(model.modelID, model.variant) || undefined;
+  if (options?.noReply) body.noReply = true;
+  if (options?.delivery) body.delivery = options.delivery;
+  return body;
 }
 
 export function getQueuedAttachmentSnapshot(composerState: {

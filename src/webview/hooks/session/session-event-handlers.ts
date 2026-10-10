@@ -692,7 +692,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       .recheckSessionStatus?.(sessionId)
       .catch((err) => deps.logError('streamedCompletionRecheck', err));
   };
-  const handleSessionIdle = (sessionId: string, abortedRetry: boolean) => {
+  const handleSessionIdle = (
+    sessionId: string,
+    abortedRetry: boolean,
+    status: Extract<SessionStatus, { type: 'idle' }> = { type: 'idle' }
+  ) => {
     if (disposed) return;
     const alreadySettled = settledIdleSessions.has(sessionId);
     if (!alreadySettled) {
@@ -708,8 +712,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       if (!alreadySettled) settleLatestAssistantOnIdle(sessionId, Date.now());
       deps.clearPendingAbort(sessionId);
       sessionStore.setSessionCompacting(sessionId, false);
-      deps.setSessionStatusEntry(sessionId, { type: 'idle' });
-      if (!abortedRetry) deps.updateUsageLimitState(sessionId, { type: 'idle' });
+      deps.setSessionStatusEntry(sessionId, status);
+      if (!abortedRetry) deps.updateUsageLimitState(sessionId, status);
       if (sessionId === deps.getActiveSessionId()) {
         if (isActiveTreeWorking()) uiStore.startLoading();
         else uiStore.stopLoading();
@@ -1353,7 +1357,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           cancelTransientConnectionRetry(sessionID);
         }
         if (transientConnectionRetryTimers.has(sessionID)) return;
-        handleSessionIdle(sessionID, abortedRetry);
+        handleSessionIdle(sessionID, abortedRetry, status);
         return;
       }
       // opencode emits `busy` immediately after both continuation and terminal
@@ -1370,7 +1374,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         (!isRunningSessionStatus(deps.getSessionStatus(sessionID)) ||
           latestAssistantHasExplicitTerminalFinish(sessionID))
       ) {
-        deps.setSessionStatusEntry(sessionID, { type: 'idle' });
+        const idleStatus: Extract<SessionStatus, { type: 'idle' }> = { type: 'idle' };
+        if (status.backgroundServices !== undefined)
+          idleStatus.backgroundServices = status.backgroundServices;
+        deps.setSessionStatusEntry(sessionID, idleStatus);
         if (!isActiveTreeWorking()) uiStore.stopLoading();
         return;
       }
@@ -1846,10 +1853,16 @@ function parseSessionStatus<T>(value: T): SessionStatus | null {
   if (!value || !isObject(value)) return null;
   // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
   const status = value as UnknownRecord;
-  if (status.type === 'idle') return { type: 'idle' };
+  const services =
+    isNumber(status.backgroundServices) &&
+    Number.isSafeInteger(status.backgroundServices) &&
+    status.backgroundServices >= 0
+      ? { backgroundServices: status.backgroundServices }
+      : {};
+  if (status.type === 'idle') return { type: 'idle', ...services };
   if (status.type === 'busy') {
-    if (status.background !== true) return { type: 'busy' };
-    const pending: SessionStatus = { type: 'busy', background: true };
+    if (status.background !== true) return { type: 'busy', ...services };
+    const pending: SessionStatus = { type: 'busy', background: true, ...services };
     if (isNumber(status.backgroundStartedAt) && Number.isFinite(status.backgroundStartedAt))
       pending.backgroundStartedAt = status.backgroundStartedAt;
     if (isString(status.backgroundCommand))

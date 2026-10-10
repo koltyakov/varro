@@ -23,6 +23,7 @@ import {
 } from '../message/UserMessageContent';
 import { getPresentationPartKey } from './streaming-presentation';
 import { isPlanImplementationMessage } from './plan-actions';
+import { getStopProcessActionLabel } from '../../lib/background-process-action';
 
 export type StreamingLayoutProjection = {
   partId: string | null;
@@ -104,7 +105,10 @@ export function getMessageBlockBoundaryMap(
       const parsed = parseUserMessageContent(message.parts);
       const hasContent =
         hasUserMessageContent(parsed) || message.info.summary?.diffsOmitted === true;
-      const hasBorder = hasContent && !isPlanImplementationMessage(message.info, message.parts);
+      const hasBorder =
+        hasContent &&
+        !isPlanImplementationMessage(message.info, message.parts) &&
+        getStopProcessActionLabel(message.info, message.parts) === null;
       const interruptedStart = options.modelChangeMessageIds?.has(messageId) ?? false;
       const interruptedEnd =
         (options.dialogSummaryMessageIds?.has(messageId) ?? false) ||
