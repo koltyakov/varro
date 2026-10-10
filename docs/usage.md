@@ -43,6 +43,14 @@ Varro selects and remembers a loopback port by default with `varro.server.port: 
 
 For normal use, leave `varro.server.autoStart` enabled and let Varro manage OpenCode alongside the VS Code extension host. Docker and separately managed remote servers are not recommended for general use: they disable local integrations and require you to manage networking, authentication, workspace paths, and server maintenance yourself.
 
+New Varro-managed v2 servers use a separate service registration so opening OpenCode
+Desktop with a different CLI version does not restart them. Configuration, provider
+credentials, and session history remain shared. Existing running servers are not
+moved automatically; after active work finishes, `Varro: Restart Server` launches
+a managed replacement with the separate registration. Ordinary terminal CLIs use
+OpenCode's global service, while CLIs invoked by Varro tools inherit Varro's service.
+Do not run the same session concurrently in independent servers.
+
 Only use manual server management if you have a specific requirement and understand the [unsupported and limited features](docker-server.md#feature-availability-in-attach-only-mode). Set `varro.server.port` to your exact port, disable `varro.server.autoStart`, and start OpenCode yourself. VS Code marks this switch as deprecated and debug-only, but it remains available for this advanced workflow:
 
 ```sh

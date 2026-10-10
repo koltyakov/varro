@@ -645,6 +645,25 @@ export class OpenCodeProcess {
     discovered: boolean;
   } | null = null;
   private lastCredentialDiagnostic: string | undefined;
+  private privateServiceSelected = false;
+
+  private get serviceStateHome(): string {
+    return join(getVarroStateDirectory('servers'), 'opencode-service');
+  }
+
+  private async rememberVerifiedPrivateService(
+    lease: Pick<ManagedServerOwnershipLease, 'pid' | 'port'>
+  ): Promise<void> {
+    if (this.privateServiceSelected) return;
+    const registration = await readJsonFile(
+      join(this.serviceStateHome, 'opencode', 'service.json'),
+      asRecord
+    );
+    // This only preserves service selection across editor reloads. The caller
+    // has independently verified the lease; registration never grants stop rights.
+    if (registration?.pid === lease.pid && registration.url === `http://127.0.0.1:${lease.port}`)
+      this.privateServiceSelected = true;
+  }
 
   discoverSharedServer(): false | Promise<boolean> {
     if (openCodeApiVersion(this.installedCliVersionCache?.value ?? '') !== 2) return false;
@@ -664,24 +683,46 @@ export class OpenCodeProcess {
     });
   }
 
-  private async discoverSharedEndpoint(targetUrl?: string): Promise<Endpoint | undefined> {
-    try {
-      const endpoint = await Service.discover({
-        version: (version) => openCodeApiVersion(version) === 2,
-      });
-      if (endpoint && (!targetUrl || endpoint.url === targetUrl)) return endpoint;
-    } catch {
-      // Client discovery may reject an older service contract; verify its registration directly.
+  private async discoverSharedEndpoint(
+    targetUrl?: string,
+    privateOnly = this.privateServiceSelected
+  ): Promise<Endpoint | undefined> {
+    const privateFile = join(this.serviceStateHome, 'opencode', 'service.json');
+    const files = [
+      privateFile,
+      ...(privateOnly
+        ? []
+        : [
+            join(
+              process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
+              'opencode',
+              'service.json'
+            ),
+          ]),
+    ];
+    for (const file of files) {
+      let endpoint: Endpoint | undefined;
+      try {
+        endpoint = await Service.discover({
+          file,
+          version: (version) => openCodeApiVersion(version) === 2,
+        });
+      } catch {
+        // Client discovery may reject an older service contract; verify its registration directly.
+      }
+      if (!endpoint || (targetUrl && endpoint.url !== targetUrl))
+        endpoint = await this.discoverRegisteredServer(file, targetUrl);
+      if (!endpoint) continue;
+      if (file === privateFile) this.privateServiceSelected = true;
+      return endpoint;
     }
-    return this.discoverRegisteredServer(targetUrl);
+    return undefined;
   }
 
-  private async discoverRegisteredServer(targetUrl?: string): Promise<Endpoint | undefined> {
-    const path = join(
-      process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
-      'opencode',
-      'service.json'
-    );
+  private async discoverRegisteredServer(
+    path: string,
+    targetUrl?: string
+  ): Promise<Endpoint | undefined> {
     try {
       const registration = asRecord(JSON.parse(await readFile(path, 'utf8')));
       if (
@@ -869,6 +910,8 @@ export class OpenCodeProcess {
           }
           if (verification.matches) {
             this._port = candidate.port;
+            await this.rememberVerifiedPrivateService(candidate);
+            signal?.throwIfAborted();
             return true;
           }
           if (await this.reconnectSavedConnection(signal)) return true;
@@ -950,6 +993,8 @@ export class OpenCodeProcess {
       this.serverUsername = lease.username;
       this.credentialUrl = this.url;
     }
+    await this.rememberVerifiedPrivateService(lease);
+    signal?.throwIfAborted();
     return true;
   }
 
@@ -2710,16 +2755,10 @@ export class OpenCodeProcess {
     }
 
     const command = this.resolveCommand();
-    // Register v2 launches so a CLI invoked by a tool joins this server instead of
-    // starting another runner against the same session database.
-    const args = [
-      'serve',
-      ...(openCodeApiVersion(this.installedCliVersionCache?.value ?? '') === 2
-        ? ['--service']
-        : []),
-      '--port',
-      String(this._port),
-    ];
+    const v2 = openCodeApiVersion(this.installedCliVersionCache?.value ?? '') === 2;
+    // Nested CLIs inherit this private service registration. Desktop must not
+    // replace our listener when its bundled CLI requires another service version.
+    const args = ['serve', ...(v2 ? ['--service'] : []), '--port', String(this._port)];
     this.serverPassword = undefined;
     this.serverUsername = undefined;
     this.credentialUrl = undefined;
@@ -2741,6 +2780,10 @@ export class OpenCodeProcess {
         env: this.buildServerEnv(configPath, owner),
         windowsHide: true,
       };
+      if (v2) {
+        setEnvironmentValue(spawnOptions.env ?? {}, 'XDG_STATE_HOME', this.serviceStateHome);
+        this.privateServiceSelected = true;
+      }
       const password =
         getEnvironmentValue(spawnOptions.env ?? {}, 'OPENCODE_SERVER_PASSWORD') ||
         randomBytes(32).toString('base64url');
@@ -2822,7 +2865,7 @@ export class OpenCodeProcess {
     // V2 may choose its persisted service password instead of the launch environment.
     // Its listener opens before service registration is published. Wait for verified
     // discovery before probing with credentials, rather than retrying an auth rejection.
-    const endpoint = await this.discoverSharedEndpoint(url);
+    const endpoint = await this.discoverSharedEndpoint(url, true);
     signal?.throwIfAborted();
     if (this._process !== proc || this.url !== url || !endpoint?.auth?.password) return false;
     this.serverPassword = endpoint.auth.password;

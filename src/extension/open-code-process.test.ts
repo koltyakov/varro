@@ -424,16 +424,56 @@ describe('v2 shared service routing', () => {
     }
   );
 
-  it('registers a new v2 server for nested CLI discovery', () => {
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-      exitCode: null,
-      signalCode: null,
-    });
-    spawnMock.mockReturnValue(child);
-    const manager = new OpenCodeProcess(4096, true, 'opencode2');
-    manager.rememberInstalledCliVersion('2.0.6');
+  it.each(['darwin', 'linux', 'win32'] as const)(
+    'registers a new v2 server privately for nested CLI discovery on %s',
+    (platform) => {
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      vi.stubEnv('XDG_CONFIG_HOME', '/fixture/config');
+      vi.stubEnv('XDG_DATA_HOME', '/fixture/data');
+      vi.stubEnv('OPENCODE_DB', '/fixture/data/opencode.db');
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        exitCode: null,
+        signalCode: null,
+      });
+      spawnMock.mockReturnValue(child);
+      const manager = new OpenCodeProcess(4096, true, 'opencode2');
+      manager.rememberInstalledCliVersion('2.0.6');
+      manager.launchServer({
+        getWorkspaceCwd: () => '/repo',
+        onStdout: vi.fn(),
+        onStderr: vi.fn(),
+        onExit: vi.fn(),
+        onError: vi.fn(),
+      });
+      expect(spawnMock).toHaveBeenCalledWith(
+        manager.resolveCommand(),
+        ['serve', '--service', '--port', '4096'],
+        expect.objectContaining({
+          env: expect.objectContaining({
+            XDG_STATE_HOME: join(getVarroStateDirectory('servers'), 'opencode-service'),
+            XDG_CONFIG_HOME: '/fixture/config',
+            XDG_DATA_HOME: '/fixture/data',
+            OPENCODE_DB: '/fixture/data/opencode.db',
+          }),
+        })
+      );
+      expect(process.env.XDG_STATE_HOME).toBe(join(tmpdir(), 'state'));
+    }
+  );
+
+  it('keeps v1 launches in their original state directory', () => {
+    spawnMock.mockReturnValue(
+      Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        exitCode: null,
+        signalCode: null,
+      })
+    );
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
+    manager.rememberInstalledCliVersion('1.18.34');
     manager.launchServer({
       getWorkspaceCwd: () => '/repo',
       onStdout: vi.fn(),
@@ -443,9 +483,109 @@ describe('v2 shared service routing', () => {
     });
     expect(spawnMock).toHaveBeenCalledWith(
       manager.resolveCommand(),
-      ['serve', '--service', '--port', '4096'],
-      expect.anything()
+      ['serve', '--port', '4096'],
+      expect.objectContaining({
+        env: expect.objectContaining({ XDG_STATE_HOME: join(tmpdir(), 'state') }),
+      })
     );
+  });
+
+  it('prefers the private registration and keeps rediscovery off the Desktop service', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'varro-private-service-'));
+    vi.stubEnv('VARRO_TEST_STATE_ROOT', root);
+    const privateFile = join(root, 'servers/opencode-service/opencode/service.json');
+    const globalFile = join(process.env.XDG_STATE_HOME!, 'opencode/service.json');
+    const privateRegistration = JSON.stringify({
+      url: 'http://127.0.0.1:43123',
+      pid: process.pid,
+      version: '2.0.5',
+      password: 'varro-fixture-password',
+    });
+    const desktopRegistration = JSON.stringify({
+      url: 'http://127.0.0.1:43124',
+      pid: process.pid,
+      version: '2.0.7',
+      password: 'desktop-fixture-password',
+    });
+    await mkdir(dirname(privateFile), { recursive: true });
+    await mkdir(dirname(globalFile), { recursive: true });
+    await writeFile(privateFile, privateRegistration);
+    await writeFile(globalFile, desktopRegistration);
+    vi.mocked(Service.discover).mockResolvedValue(undefined);
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(Response.json({ version: '2.0.5', pid: process.pid }));
+    try {
+      const manager = new OpenCodeProcess(
+        'auto',
+        true,
+        'opencode2',
+        false,
+        join(root, 'lease.json')
+      );
+      manager.rememberInstalledCliVersion('2.0.26');
+      expect(await manager.discoverSharedServer()).toBe(true);
+      expect(manager.url).toBe('http://127.0.0.1:43123');
+      expect(manager.serverAuthorization).toBe(
+        `Basic ${Buffer.from('opencode:varro-fixture-password').toString('base64')}`
+      );
+      expect(Service.discover).toHaveBeenCalledExactlyOnceWith({
+        file: privateFile,
+        version: expect.any(Function),
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+      await rm(privateFile);
+      expect(await manager.discoverSharedServer()).toBe(false);
+      expect(Service.discover).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(await readFile(globalFile, 'utf8')).toBe(desktopRegistration);
+      expect(spawnMock).not.toHaveBeenCalled();
+    } finally {
+      await rm(globalFile);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not wait for global service credentials on a private v2 launch', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'varro-private-launch-'));
+    vi.stubEnv('VARRO_TEST_STATE_ROOT', root);
+    const privateFile = join(root, 'servers/opencode-service/opencode/service.json');
+    vi.mocked(Service.discover).mockImplementation(async (options) =>
+      options?.file === privateFile
+        ? undefined
+        : {
+            url: 'http://127.0.0.1:4096',
+            auth: { type: 'basic', username: 'opencode', password: 'desktop-password' },
+          }
+    );
+    spawnMock.mockReturnValue(
+      Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        exitCode: null,
+        signalCode: null,
+      })
+    );
+    const manager = new OpenCodeProcess(4096, true, 'opencode2');
+    manager.rememberInstalledCliVersion('2.0.26');
+    const child = manager.launchServer({
+      getWorkspaceCwd: () => '/repo',
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    });
+    const authorization = manager.serverAuthorization;
+    try {
+      expect(await manager.prepareManagedServerHealth(child)).toBe(false);
+      expect(manager.serverAuthorization).toBe(authorization);
+      expect(Service.discover).toHaveBeenCalledExactlyOnceWith({
+        file: privateFile,
+        version: expect.any(Function),
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it.each(['ready', 'cancelled', 'changed endpoint'] as const)(
@@ -1125,6 +1265,42 @@ describe('OpenCodeProcess server ownership leases', () => {
         manager: new OpenCodeProcess('auto', true),
       };
     }
+
+    it.each(['lease', 'marker'] as const)(
+      'retains private-service selection after reloading a verified %s',
+      async (record) => {
+        const { root, path, lease, raw, manager } = await fixture('linux', 51197, 42424);
+        vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue(lease.executable);
+        const privateFile = join(root, 'servers/opencode-service/opencode/service.json');
+        await mkdir(dirname(privateFile), { recursive: true });
+        await writeFile(
+          privateFile,
+          JSON.stringify({ pid: lease.pid, url: manager.url, version: '2.0.26' })
+        );
+        vi.mocked(Service.discover).mockImplementation(async (options) =>
+          options?.file === privateFile
+            ? undefined
+            : {
+                url: 'http://127.0.0.1:51198',
+                auth: { type: 'basic', username: 'opencode', password: 'desktop-password' },
+              }
+        );
+        if (record === 'marker') await rm(path);
+        try {
+          expect(await manager.refreshStartupRegistration()).toBe(true);
+          await rm(privateFile);
+          manager.rememberInstalledCliVersion('2.0.26');
+          expect(await manager.discoverSharedServer()).toBe(false);
+          expect(Service.discover).toHaveBeenCalledExactlyOnceWith({
+            file: privateFile,
+            version: expect.any(Function),
+          });
+          expect(await readFile(`${path}.managed`, 'utf8')).toBe(raw);
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    );
 
     it.each(
       (['linux', 'win32'] as const).flatMap((platform) =>

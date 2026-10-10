@@ -4,6 +4,22 @@ Varro identifies a managed server independently of the VS Code window that start
 it. Connecting to a server, including a registered OpenCode v2 service, does not
 by itself grant ownership or permission to stop it.
 
+New Varro-managed v2 launches register their service under
+`servers/opencode-service/opencode/service.json` in Varro's per-user state root.
+Only the launched process receives this `XDG_STATE_HOME`; nested CLIs inherit it
+and join that service. OpenCode Desktop uses its own registration and cannot
+replace this listener merely because its bundled CLI has a different version.
+Global/project configuration, provider credentials, and the session database keep
+their existing locations. This separates service lifecycle, not session execution;
+do not run the same session concurrently from independent servers.
+
+Discovery prefers Varro's private service. Once selected, launches and restarts
+stay in that service directory rather than falling back to Desktop's service.
+Legacy global registrations and unmanaged services remain discoverable before
+private-service selection, with the existing admission and ownership checks.
+An already-running global Varro server is reused without moving its registration
+or forcing a restart. A later managed relaunch uses the private directory.
+
 ## Shared records
 
 New server leases and ownership markers use a per-user directory shared by VS Code

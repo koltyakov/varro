@@ -11,6 +11,7 @@ import { OpenCodeProcess } from './open-code-process';
 import { OpenCodeTransport } from './open-code-transport';
 import { diagnosticTimeline } from './diagnostics';
 import { findListeningPids, inspectLocalServerAccount } from './process-inspection';
+import { getVarroStateDirectory } from './varro-state-paths';
 
 const editor = vi.hoisted(() => ({ directory: '' }));
 const logs = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
@@ -42,6 +43,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
     'reboot-reconnect',
     'ownership-unavailable',
     'credential-port-replacement',
+    'desktop-service',
   ] as const)(
     'starts, authenticates a second window, restarts, and stops its own isolated server using %s',
     { timeout: 60000 },
@@ -54,7 +56,8 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
       if (
         (mode === 'service-replacement' ||
           mode === 'marker-reload' ||
-          mode === 'credential-port-replacement') &&
+          mode === 'credential-port-replacement' ||
+          mode === 'desktop-service') &&
         !process.env.VARRO_OPENCODE_TEST_VERSION?.startsWith('2.')
       )
         context.skip();
@@ -113,6 +116,9 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
       let replacement: ChildProcess | undefined;
       let unownedLaunch: ChildProcess | undefined;
       let unownedListener: number | undefined;
+      const desktopBinary = process.env.VARRO_OPENCODE_DESKTOP_TEST_BINARY || binary;
+      let desktopStarted = false;
+      let desktopRegistration: string | undefined;
       const credentialLaunch =
         mode === 'ownership-unavailable' || mode === 'credential-port-replacement';
       const ownershipFailure = credentialLaunch
@@ -203,7 +209,8 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         if (process.env.VARRO_OPENCODE_TEST_VERSION)
           expect(info.health.version).toBe(process.env.VARRO_OPENCODE_TEST_VERSION);
         const recordPath = credentialLaunch ? `${leasePath}.credentials` : leasePath;
-        const lease = asRecord(JSON.parse(await readFile(recordPath, 'utf8')));
+        const initialRecord = await readFile(recordPath, 'utf8');
+        const lease = asRecord(JSON.parse(initialRecord));
         const initialListeners = await findListeningPids(address.port);
         expect(initialListeners).toHaveLength(1);
         if (credentialLaunch) unownedListener = initialListeners[0];
@@ -214,11 +221,16 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         expect(anonymous.status).toBe(401);
         await anonymous.body?.cancel();
         if (info.health.version?.startsWith('2.')) {
-          const registrationPath = join(root, 'state/opencode/service.json');
+          const serviceStateHome = join(getVarroStateDirectory('servers'), 'opencode-service');
+          const registrationPath = join(serviceStateHome, 'opencode/service.json');
           const registration = await readFile(registrationPath, 'utf8');
           expect(asRecord(JSON.parse(registration))?.url).toBe(url);
+          await expect(readFile(join(root, 'state/opencode/service.json'))).rejects.toMatchObject({
+            code: 'ENOENT',
+          });
           const cli = spawnSync(binary, ['api', 'get', '/api/session?limit=1'], {
             cwd: editor.directory,
+            env: { ...process.env, XDG_STATE_HOME: serviceStateHome },
             encoding: 'utf8',
             timeout: 10000,
           });
@@ -231,6 +243,52 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             logs.error.mock.calls,
           ]);
           expect(output).not.toContain(String(lease?.password));
+        }
+        if (mode === 'desktop-service') {
+          phase = 'Desktop background service startup';
+          desktopStarted = true;
+          await new Promise<void>((done) => listener.listen(0, '127.0.0.1', done));
+          const desktopAddress = listener.address();
+          if (!desktopAddress || isString(desktopAddress))
+            throw new Error('No Desktop fixture port');
+          await new Promise<void>((done) => listener.close(() => done()));
+          // Do not contend with a production service on OpenCode's default port.
+          const configured = spawnSync(
+            desktopBinary,
+            ['service', 'set', 'port', String(desktopAddress.port)],
+            { cwd: editor.directory, encoding: 'utf8', timeout: 15000 }
+          );
+          expect(configured.status, configured.stderr).toBe(0);
+          // Desktop runs these service commands using its own bundled CLI. Both
+          // processes use only this fixture's database, config, and state roots.
+          const desktop = spawnSync(desktopBinary, ['service', 'start'], {
+            cwd: editor.directory,
+            encoding: 'utf8',
+            timeout: 30000,
+          });
+          expect(desktop.status, desktop.stderr).toBe(0);
+          desktopRegistration = await readFile(join(root, 'state/opencode/service.json'), 'utf8');
+          const desktopInfo = asRecord(JSON.parse(desktopRegistration));
+          expect(desktopInfo?.url).not.toBe(url);
+          expect(desktopInfo?.pid).not.toBe(initialListeners[0]);
+          expect(await findListeningPids(address.port)).toEqual(initialListeners);
+          expect((await server.readServerInfo()).health.healthy).toBe(true);
+          expect(await readFile(recordPath, 'utf8')).toBe(initialRecord);
+          await writeFile(
+            join(root, 'desktop-service-result.json'),
+            JSON.stringify(
+              {
+                varroVersion: info.health.version,
+                desktopVersion: desktopInfo?.version,
+                varroPid: initialListeners[0],
+                desktopPid: desktopInfo?.pid,
+                varroUrl: url,
+                desktopUrl: desktopInfo?.url,
+              },
+              null,
+              2
+            )
+          );
         }
         attached = new OpenCodeServer(address.port, false, binary, false, leasePath);
         phase = 'second-window attachment';
@@ -528,6 +586,10 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         expect(await server.start()).toBe(url);
         expect(await server.restart()).toBe(url);
         expect((await server.readServerInfo()).health.healthy).toBe(true);
+        if (desktopRegistration)
+          expect(await readFile(join(root, 'state/opencode/service.json'), 'utf8')).toBe(
+            desktopRegistration
+          );
       } catch (error) {
         await writeFile(
           join(root, 'failure.json'),
@@ -552,6 +614,14 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         healthObservation.mockRestore();
         await attached?.dispose();
         await server.dispose();
+        if (desktopStarted) {
+          const stopped = spawnSync(desktopBinary, ['service', 'stop'], {
+            cwd: editor.directory,
+            encoding: 'utf8',
+            timeout: 15000,
+          });
+          expect(stopped.status, stopped.stderr).toBe(0);
+        }
         ownershipFailure?.mockRestore();
         launchObservation?.mockRestore();
         if (unownedListener) {
