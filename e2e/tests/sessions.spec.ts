@@ -488,6 +488,56 @@ test('centers the running-session counter across font metrics', async ({ page })
   }
 });
 
+test('keeps running-session spinners rotating with reduced motion', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/e2e/harness/index.html?scenario=status-filters');
+
+  const rowSpinner = page
+    .locator('.session-item')
+    .filter({ hasText: 'Running lint repair' })
+    .locator('.session-item-indicator');
+  const headerSpinner = page.locator('.chat-header-running-spinner');
+  const count = page.locator('.chat-header-running-count');
+  for (const spinner of [rowSpinner, headerSpinner]) {
+    await expect(spinner).toBeVisible();
+    await expect(spinner).toHaveCSS('animation-name', 'spin');
+    await expect(spinner).toHaveCSS('animation-iteration-count', 'infinite');
+  }
+
+  for (const reducedMotion of ['reduce', 'no-preference'] as const) {
+    await page.emulateMedia({ reducedMotion });
+    for (const [spinner, durationMs] of [
+      [rowSpinner, 850],
+      [headerSpinner, 900],
+    ] as const) {
+      await expect(spinner).toHaveCSS('animation-name', 'spin');
+      await expect(spinner).toHaveCSS('animation-duration', `${durationMs / 1000}s`);
+      await expect(spinner).toHaveCSS('animation-iteration-count', 'infinite');
+      await expect(spinner).toHaveCSS('animation-timing-function', 'linear');
+      expect(await spinner.evaluate((element) => element.getAnimations()[0]!.playState)).toBe(
+        'running'
+      );
+      for (const [progress, transform] of [
+        [0, 'matrix(1, 0, 0, 1, 0, 0)'],
+        [0.25, 'matrix(0, 1, -1, 0, 0, 0)'],
+        [0.5, 'matrix(-1, 0, 0, -1, 0, 0)'],
+        [1, 'matrix(1, 0, 0, 1, 0, 0)'],
+      ] as const) {
+        await spinner.evaluate((element, currentTime) => {
+          const animation = element.getAnimations()[0]!;
+          animation.pause();
+          animation.currentTime = currentTime;
+        }, progress * durationMs);
+        await expect(spinner).toHaveCSS('transform', transform);
+        await expect(spinner).toHaveCSS('opacity', '1');
+        await expect(count).toHaveCSS('opacity', '1');
+        await expect(count).toHaveCSS('transform', 'none');
+      }
+      await spinner.evaluate((element) => element.getAnimations()[0]!.play());
+    }
+  }
+});
+
 test('keeps persistent statuses static and visible with reduced motion', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/e2e/harness/index.html?scenario=status-filters');
@@ -501,6 +551,18 @@ test('keeps persistent statuses static and visible with reduced motion', async (
   await expect(indicator).toHaveAttribute('aria-label', 'Permission request pending');
   await expect(indicator).toHaveCSS('animation-iteration-count', '1');
   await expect(indicator).toHaveCSS('opacity', '1');
+
+  for (const selector of [
+    '.session-item-indicator.is-attention',
+    '.session-item-indicator.is-failed',
+    '.session-item-indicator.is-plan-completed',
+    '.chat-header-attention-dot',
+    '.chat-header-failed-dot',
+    '.chat-header-plan-dot',
+  ]) {
+    await expect(page.locator(selector)).toHaveCSS('animation-iteration-count', '1');
+    await expect(page.locator(selector)).toHaveCSS('opacity', '1');
+  }
 });
 
 test('restores a persisted active session', async ({ page }) => {

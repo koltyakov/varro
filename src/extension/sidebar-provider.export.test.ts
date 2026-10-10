@@ -1,11 +1,12 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/require-safety-comment-for-type-assertion -- These export tests inspect controlled provider internals and deliberately verify opaque response representations. */
 import { PassThrough } from 'node:stream';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createServer,
   createSidebarProviderInstance,
   getSpawnMock,
   getVscodeMock,
+  loadSidebarProvider,
 } from './sidebar-provider.test-support';
 
 const vscodeMock = getVscodeMock();
@@ -48,6 +49,12 @@ function mockExportProcess() {
 }
 
 describe('SidebarProvider export flows', () => {
+  beforeEach(async () => {
+    // The shared hook resets modules. Load the provider before the export test's deadline
+    // so a slow Windows cold import cannot leave an export running into the next case.
+    await loadSidebarProvider();
+  });
+
   it.each([1, 2] as const)('exports a V%i session and opens the result', async (apiVersion) => {
     const { stdout, closeHandlers } = mockExportProcess();
 

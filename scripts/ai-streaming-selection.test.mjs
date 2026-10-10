@@ -6,6 +6,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import http from 'node:http';
+import { fileURLToPath } from 'node:url';
 
 import { buildReplayTimeline, readPlaybackCapture } from './ai-session-playback.mjs';
 import {
@@ -556,8 +557,16 @@ test('Windows status discovery requires one matching listener and database owner
     }
     assert.equal(command, 'powershell.exe');
     assert.equal(executionOptions.timeout, 90_000);
-    assert.ok(args.includes('-NonInteractive'));
-    assert.equal(args.at(-1), await realpath(f.sourceDatabase));
+    assert.deepEqual(args, [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      fileURLToPath(new URL('./windows-database-ownership.ps1', import.meta.url)),
+      '-Database',
+      await realpath(f.sourceDatabase),
+    ]);
     return { stdout: JSON.stringify({ databaseOwners: evidence.databaseOwners }) };
   };
   const result = await readPlatformActiveSessions(options, execute);

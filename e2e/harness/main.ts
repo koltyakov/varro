@@ -2818,6 +2818,46 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         ],
       },
     ];
+    if (new URLSearchParams(window.location.search).get('history') === '1') {
+      const history = Array.from({ length: 72 }, (_, index) => {
+        const entry = makeAssistantMessage(
+          session.id,
+          `question-history-${index}`,
+          user.info.id,
+          '',
+          BASE_TIME - 4_900 + index
+        );
+        entry.parts = [
+          {
+            id: `question-history-tool-${index}`,
+            sessionID: session.id,
+            messageID: entry.info.id,
+            type: 'tool',
+            callID: `question-history-call-${index}`,
+            tool: 'read',
+            state: {
+              status: 'completed',
+              input: { filePath: '/workspace/varro/package.json' },
+              output: 'Read package metadata.',
+              title: 'Read package metadata',
+              metadata: {},
+              time: { start: BASE_TIME - 4_900 + index, end: BASE_TIME - 4_800 + index },
+            },
+          },
+        ];
+        return entry;
+      });
+      const response = makeAssistantMessage(
+        session.id,
+        'question-history-response',
+        user.info.id,
+        'Two facts shape the resume:\n\n' +
+          '- **The tested revision moved:** 25 commits landed since `f987628a` (184 files, includes streaming, permissions, and model-picker work). The automated preflight I ran applies to the old commit; the editor will load `5102e3c6`. I will re-run the preflight once at the new HEAD so the ledger evidence is coherent.\n' +
+          '- **The OpenAI credential is still expired** (token expiry `2026-08-21`, confirmed still expired today). My earlier question was interrupted by the restart, so re-asking:',
+        BASE_TIME - 4_100
+      );
+      state.messagesBySessionId[session.id] = [user, ...history, response, assistant];
+    }
     state.nextSequence = 290;
     return state;
   }

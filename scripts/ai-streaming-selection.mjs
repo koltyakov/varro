@@ -49,6 +49,9 @@ async function readWindowsOwnership(database, execute) {
     [
       '-NoProfile',
       '-NonInteractive',
+      // Process-scoped only; do not change the user's persistent execution policy.
+      '-ExecutionPolicy',
+      'Bypass',
       '-File',
       fileURLToPath(new URL('./windows-database-ownership.ps1', import.meta.url)),
       '-Database',

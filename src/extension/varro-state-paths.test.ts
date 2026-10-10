@@ -174,8 +174,11 @@ describe('Varro state directories', () => {
   });
 
   it('preserves metadata and generation timing across native and legacy annotation writers', async () => {
-    // macOS has distinct native and legacy directories; operations still use this host's real filesystem.
-    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    // Keep distinct native/legacy paths, but use junctions on the real Windows filesystem.
+    Object.defineProperty(process, 'platform', {
+      value: platform === 'win32' ? 'win32' : 'darwin',
+      configurable: true,
+    });
     const legacy = getLegacyVarroStateDirectory('opencode-v2')!;
     const oldStore = new OpenCodeV2SessionState(legacy);
     const timing = { 'msg_one:text:0': { start: 100, end: 200, textHash: 'a'.repeat(64) } };
@@ -215,7 +218,11 @@ describe('Varro state directories', () => {
   });
 
   it('preserves a live legacy lock while exposing the native annotation path', async () => {
-    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    // Keep distinct native/legacy paths, but use junctions on the real Windows filesystem.
+    Object.defineProperty(process, 'platform', {
+      value: platform === 'win32' ? 'win32' : 'darwin',
+      configurable: true,
+    });
     const legacy = getLegacyVarroStateDirectory('opencode-v2')!;
     const oldStore = new OpenCodeV2SessionState(legacy);
     await oldStore.update('ses_fixture', { existing: true });

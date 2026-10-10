@@ -77,9 +77,23 @@ for (const scenario of ['blank', 'mixed-small-transcript', 'large-transcript']) 
       );
       await page.getByLabel('Send (Enter)').click();
       const list = page.locator('.interactive-list');
-      await expect(
-        list.locator('.interactive-loading-row:not(.is-reserved) .loading-verb')
-      ).toBeVisible();
+      const loadingLabel = list.locator('.interactive-loading-row:not(.is-reserved) .loading-verb');
+      await expect(loadingLabel).toBeVisible();
+      if (reducedMotion === 'reduce') {
+        await expect(loadingLabel).toHaveCSS('animation-name', 'pulse-soft');
+        await expect(loadingLabel).toHaveCSS('animation-duration', '2s');
+        await expect(loadingLabel).toHaveCSS('animation-iteration-count', 'infinite');
+        await expect(loadingLabel).toHaveCSS('background-image', 'none');
+        await expect(loadingLabel).toHaveCSS('transform', 'none');
+        expect(
+          await loadingLabel
+            .locator('.chat-animated-ellipsis')
+            .evaluate((element) => getComputedStyle(element, '::after').content)
+        ).toBe('"…"');
+      } else {
+        await expect(loadingLabel).not.toHaveCSS('animation-name', 'pulse-soft');
+        await expect(loadingLabel).not.toHaveCSS('background-image', 'none');
+      }
       // Allow send positioning to finish before checking an untouched, stationary viewport.
       await waitForAnimationFrames(page, 90);
       const result = await list.evaluate(async (element) => {
@@ -98,6 +112,7 @@ for (const scenario of ['blank', 'mixed-small-transcript', 'large-transcript']) 
             samples.push({
               promptTop: prompt.getBoundingClientRect().top,
               labelTop: label.getBoundingClientRect().top,
+              labelOpacity: Number.parseFloat(getComputedStyle(label).opacity),
               loadingHeight: loading.getBoundingClientRect().height,
               scrollTop: element.scrollTop,
               scrollHeight: element.scrollHeight,
@@ -139,6 +154,17 @@ for (const scenario of ['blank', 'mixed-small-transcript', 'large-transcript']) 
         ).toBeLessThanOrEqual(0.1);
       }
       expect(result.samples.every((sample) => sample.loadingHeight === 24)).toBe(true);
+      if (reducedMotion === 'reduce') {
+        const opacities = result.samples.map((sample) => sample.labelOpacity);
+        expect(Math.min(...opacities)).toBeGreaterThanOrEqual(0.4);
+        expect(Math.max(...opacities)).toBeLessThanOrEqual(1);
+        expect(Math.max(...opacities) - Math.min(...opacities)).toBeGreaterThan(0.5);
+        await expect(list.locator('.loading-elapsed')).toHaveCSS('animation-name', 'none');
+        await expect(list.locator('.loading-elapsed')).toHaveCSS('opacity', '0.5');
+        await page.emulateMedia({ reducedMotion: 'no-preference' });
+        await expect(loadingLabel).not.toHaveCSS('animation-name', 'pulse-soft');
+        await expect(loadingLabel).not.toHaveCSS('background-image', 'none');
+      }
       if (scenario === 'blank') {
         expect(
           result.samples.every(

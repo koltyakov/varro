@@ -1,6 +1,8 @@
-/* Motion accessibility: collapse animation and transitions when the OS asks
-   for reduced motion. Near-zero durations (rather than `animation: none`)
-   preserve fill-mode end states, so fade-ins settle at their final frame.
+/* Motion accessibility: collapse animations and disable transitions when the OS
+   asks for reduced motion. Near-zero animation durations preserve fill-mode end
+   states, so fade-ins settle at their final frame. Transitions must be zero:
+   a near-zero global duration creates transitions on normally static elements,
+   delaying transcript visibility and row-height corrections until another frame.
    Effects that animate `content` or depend on an infinite loop to stay
    legible get explicit static fallbacks. Kept at the end of the file so the
    fallbacks win the cascade against the base rules at equal specificity. */
@@ -10,12 +12,34 @@
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 0s !important;
   }
 
   .interactive-item-container .chat-animated-ellipsis::after {
     animation: none;
     content: '…';
+  }
+
+  /* Running-session rings retain rotation as an explicit reduced-motion
+     exception. The header's count is outside the animated ring. */
+  .session-item-indicator.is-running,
+  .session-status-indicator.is-running,
+  .chat-header-running-spinner {
+    animation-duration: 0.85s !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  .chat-header-running-spinner {
+    animation-duration: 0.9s !important;
+  }
+
+  /* The visible waiting label pulses without shimmer; elapsed time stays steady. */
+  .interactive-loading-row:not(.is-reserved) .loading-verb {
+    animation-name: pulse-soft;
+    animation-duration: 2s !important;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite !important;
+    will-change: opacity;
   }
 
   /* Keep the opacity-only working indicator visible as ongoing activity. */
