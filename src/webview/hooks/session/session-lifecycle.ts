@@ -25,6 +25,7 @@ type LifecycleDependencies = {
   getState(): LifecycleState;
   getCurrentWorkspacePath(): string | null;
   getOpenWorkspacePaths(): string[];
+  isSessionTransferred?(sessionId: string): boolean;
   setSessions(sessions: Session[], complete?: boolean): void;
   clearSessionStatusEntry(sessionId: string): void;
   clearPendingAbort(sessionId: string | null | undefined): void;
@@ -66,6 +67,11 @@ export class SessionLifecycleOperations {
         showSessionPicker: uiStore.showSessionPicker(),
       }),
       getCurrentWorkspacePath: deps.getCurrentWorkspacePath,
+      isSessionTransferred: (sessionId) =>
+        Boolean(
+          appStore.state.transferredSessions[sessionId] ||
+          appStore.state.sessions.find((session) => session.id === sessionId)?.transfer
+        ),
       getOpenWorkspacePaths: () =>
         [
           ...(appStore.state.editorContext?.workspaceFolders ?? []).map((folder) => folder.path),
@@ -164,6 +170,8 @@ function isPlaceholderSessionTitle(title: string | null | undefined) {
 
 function mergeFreshSession(existing: Session | undefined, incoming: Session) {
   if (!existing) return incoming;
+  if (existing.transfer && !incoming.transfer)
+    incoming = { ...incoming, transfer: existing.transfer };
   const existingUpdated = existing.time?.updated ?? 0;
   const incomingUpdated = incoming.time?.updated ?? 0;
   if (existingUpdated > incomingUpdated) {
@@ -186,17 +194,34 @@ function mergeFreshSession(existing: Session | undefined, incoming: Session) {
 }
 
 export function applySessions(deps: LifecycleDependencies, sessions: Session[], complete = false) {
-  const existingById = new Map(deps.getState().sessions.map((session) => [session.id, session]));
+  const { activeSessionId, sessions: existingSessions } = deps.getState();
+  const existingById = new Map(existingSessions.map((session) => [session.id, session]));
+  const incomingIds = new Set(sessions.map((session) => session.id));
+  const retainedSessions = [
+    ...sessions,
+    ...existingSessions.filter(
+      (session) =>
+        !incomingIds.has(session.id) &&
+        ((session.transfer &&
+          deps
+            .getOpenWorkspacePaths()
+            .some((root) => isSameWorkspacePath(root, session.transfer?.originDirectory))) ||
+          (session.id === activeSessionId && deps.isSessionTransferred?.(session.id)))
+    ),
+  ];
   const nextSessions = sortSessions(
-    sessions
+    retainedSessions
       .filter((session) => !isNumber(session.time.archived))
       .map((session) => mergeFreshSession(existingById.get(session.id), session))
   );
   batch(() => {
     deps.setSessions(nextSessions, complete);
 
-    const { activeSessionId } = deps.getState();
-    if (activeSessionId && !nextSessions.some((session) => session.id === activeSessionId)) {
+    if (
+      activeSessionId &&
+      !deps.isSessionTransferred?.(activeSessionId) &&
+      !nextSessions.some((session) => session.id === activeSessionId)
+    ) {
       deps.clearActiveSessionState();
     }
   });

@@ -118,6 +118,7 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'workspace/select': true,
   'commands/state': true,
   'session/seen': true,
+  'session/open-transferred': true,
   'session-read-state/update': true,
   'session-model/update': true,
   'session-models/migrate': true,
@@ -250,6 +251,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return { type, payload: parseModelPreferences(payload) };
     }
 
+    case 'session/open-transferred':
     case 'session/seen': {
       const payload = asRecord(message?.payload);
       const sessionId = payload?.sessionId;

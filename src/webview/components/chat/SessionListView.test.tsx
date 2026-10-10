@@ -420,6 +420,40 @@ describe('SessionListView keyboard recovery', () => {
 });
 
 describe('SessionListView model details', () => {
+  it('keeps a transferred conversation in the origin folder with a workspace-style destination label', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      workspaceFolders: [
+        { name: 'Repo', path: '/repo' },
+        { name: 'Other', path: '/other' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setState('sessions', [
+      session('Transferred conversation', Date.now(), {
+        directory: '/outside',
+        transfer: { originDirectory: '/repo', available: false },
+      }),
+      session('Other conversation', Date.now() - 1, { directory: '/other' }),
+    ]);
+    cleanup = render(() => <SessionListView />, container);
+    const selector = container.querySelector('.session-list-workspace-selector');
+    selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    selector?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo"]')?.click();
+    await vi.waitFor(() => expect(container.querySelectorAll('.session-item')).toHaveLength(1));
+    const row = container.querySelector('.session-item');
+    expect(row?.textContent).toContain('Transferred conversation');
+    expect(row?.querySelector('.session-item-folder')?.textContent).toBe('Moved to outside');
+    expect(row?.querySelector('.session-item-folder')?.getAttribute('title')).toBe('/outside');
+    vi.mocked(selectSession).mockClear();
+    row?.querySelector<HTMLButtonElement>('.session-item-main')?.click();
+    expect(selectSession).toHaveBeenCalledWith(
+      'Transferred conversation',
+      expect.objectContaining({ directory: '/outside' })
+    );
+  });
   it('persists project scope from the search-row picker and hides it while searching', async () => {
     const getScope = vi
       .spyOn(client.varro.sessionHistoryScope, 'get')

@@ -2,6 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { isEditorContext, parseExtensionMessage } from './extension-message';
 
 describe('parseExtensionMessage', () => {
+  it('validates session transfer notices without accepting malformed destinations', () => {
+    const message = {
+      type: 'session/transferred',
+      payload: { sessionId: 'session-1', directory: '/outside', available: false },
+    };
+    expect(parseExtensionMessage(message)).toEqual(message);
+    for (const directory of ['', ' ', '/bad\npath', 'x'.repeat(4097), 42]) {
+      expect(
+        parseExtensionMessage({ ...message, payload: { ...message.payload, directory } })
+      ).toBeNull();
+    }
+    expect(
+      parseExtensionMessage({ ...message, payload: { ...message.payload, available: 'true' } })
+    ).toBeNull();
+  });
   it('preserves successful and failed agent selection acknowledgements', () => {
     for (const agent of ['build', undefined]) {
       const message = {

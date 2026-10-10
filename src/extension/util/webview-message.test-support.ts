@@ -61,6 +61,10 @@ export const VALID_WEBVIEW_MESSAGES = {
     },
   },
   'session/seen': { type: 'session/seen', payload: { sessionId: 'session-1' } },
+  'session/open-transferred': {
+    type: 'session/open-transferred',
+    payload: { sessionId: 'session-1' },
+  },
   'session-read-state/update': {
     type: 'session-read-state/update',
     payload: { sessionId: 'session-1', seenAt: 100 },

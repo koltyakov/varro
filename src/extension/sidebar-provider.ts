@@ -1,7 +1,7 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type -- VS Code and OpenCode boundary values are validated before provider actions. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Provider responses are parsed before command-specific use. */
 import * as vscode from 'vscode';
-import { basename, join } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 import { replacesOpenCodeBinary } from '../shared/opencode-install';
 import { MAX_NATIVE_PDF_TOTAL_BYTES } from '../shared/native-pdf';
 import {
@@ -103,6 +103,7 @@ import { FileSearchService } from './file-search-service';
 import { GeneratedDependencyTreeGuard } from './generated-dependency-tree-guard';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
+import { SessionTransferCatalog } from './session-transfer-catalog';
 import { StreamingTextCache } from './streaming-text-cache';
 import { readLocalSessionSummary } from './local-session-summary';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
@@ -295,6 +296,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private lastFocusedContextViewId: string | null = null;
   private readonly permissionModeQueues = new Map<string, Promise<unknown>>();
   private readonly sessionSelectionUpdatedAt = new Map<string, number>();
+  private readonly sessionTransfers = new Map<
+    string,
+    { directory: string; viewIds: Set<string> }
+  >();
+  private readonly sessionTransferCatalog: SessionTransferCatalog;
   private permissionModeFallbackReconciliation: Promise<void> | null = null;
   private permissionModeFallbackReconciliationRequested = false;
   private permissionModeFallbackRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -362,6 +368,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ? (extensionPackageJson as { version: string }).version
         : 'unknown';
     const persistence = new HostPersistence(workspaceState);
+    this.sessionTransferCatalog = new SessionTransferCatalog(persistence);
     this.streamingText = new StreamingTextCache(persistence);
     const globalPersistence = new HostPersistence(globalState);
     this.droppedFilesService = new DroppedFilesService(contextProvider);
@@ -699,7 +706,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         : undefined;
     let initialWorkspacePath =
       webviewContext.surface === 'editor' && sessionWorkspacePath
-        ? sessionWorkspacePath
+        ? this.getOpenSessionDirectory(sessionWorkspacePath)
+          ? sessionWorkspacePath
+          : (restoredWorkspacePath ?? sessionWorkspacePath)
         : (restoredWorkspacePath ??
           (webviewContext.surface === 'editor'
             ? (sidebarWorkspacePath ?? this.contextProvider.context.workspacePath)
@@ -996,6 +1005,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           typeof session.directory !== 'string' ||
           !isSameWorkspacePath(session.directory, directory)
         ) {
+          if (session?.id === sessionID && typeof session.directory === 'string') {
+            await this.handleSessionTransfer(sessionID, session.directory);
+            throw new Error(
+              `Conversation moved to ${session.directory}. Open its folder to continue.`
+            );
+          }
           throw new Error('404 Session not found');
         }
         initialWorkspacePath = currentWorkspacePath;
@@ -1013,6 +1028,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.postSiblingWorkspaceAlerts();
         return session;
       },
+      sessionTransferred: (sessionID, directory, originDirectory) =>
+        this.handleSessionTransfer(sessionID, directory, undefined, originDirectory),
+      getTransferredSessions: (roots) =>
+        this.sessionTransferCatalog.list(this.server.url ?? '', roots).map((session) => ({
+          ...session,
+          transfer: {
+            originDirectory: session.transfer!.originDirectory,
+            available: Boolean(
+              this.getOpenSessionDirectory(session.directory) ||
+              endpointRef.restProxy?.isSessionCatalogEventAuthorized(session.id, session.directory)
+            ),
+          },
+        })),
     });
     endpointRef.restProxy = restProxy;
 
@@ -1175,6 +1203,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.openSessionInEditor(sessionId, title, model, rootSessionId, directory, inWindow),
         openSessionInSidebar: (sessionId, directory) =>
           this.openSessionInSidebar(sessionId, directory),
+        openTransferredSession: (sessionId) =>
+          this.openTransferredSession(sessionId, webviewContext.viewId),
         importLegacySession: async (sessionId, directory) => {
           try {
             if (this.server.isAttachOnly) {
@@ -1863,6 +1893,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   post(msg: ExtensionMessage) {
     let workspaceStructureChanged = false;
+    if (msg.type === 'server/event' && msg.payload.type === 'session.next.moved') {
+      const sessionId = msg.payload.properties?.sessionID;
+      const directory = asRecord(msg.payload.properties?.location)?.directory;
+      if (sessionId && typeof directory === 'string') {
+        // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection boundary.
+        void this.handleSessionTransfer(sessionId, directory, msg.payload).catch((error: unknown) =>
+          logger.warn('Could not follow transferred conversation', error)
+        );
+      }
+      return;
+    }
     if (msg.type === 'server/status' && msg.payload.state === 'running') {
       void this.recoverPendingPermissionModeFallbacks();
     }
@@ -1906,6 +1947,168 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         normalizeWorkspaceIdentity(folder.path),
       ]),
     ]);
+  }
+
+  private sessionTransferRoots() {
+    const roots = (this.contextProvider.context.workspaceFolders ?? []).map(
+      (folder) => folder.path
+    );
+    const workspacePath = this.contextProvider.context.workspacePath;
+    if (!roots.length && workspacePath) roots.push(workspacePath);
+    const workspaceDirectory = this.contextProvider.context.workspaceDirectory;
+    if (
+      workspaceDirectory &&
+      this.getOpenSessionDirectory(workspaceDirectory) &&
+      !roots.some((root) => isSameWorkspacePath(root, workspaceDirectory))
+    )
+      roots.push(workspaceDirectory);
+    return roots;
+  }
+
+  private async handleSessionTransfer(
+    sessionId: string,
+    directory: string,
+    event?: ServerEvent,
+    ownerOriginDirectory?: string
+  ) {
+    if (
+      this.disposing ||
+      !isAbsolute(directory) ||
+      directory.length > 4096 ||
+      /\p{Cc}/u.test(directory)
+    )
+      return;
+    const sourceDirectory = [
+      ownerOriginDirectory,
+      event?.workspaceDirectory,
+      this.sessionState.directoryFor(sessionId),
+    ].find(
+      (candidate) =>
+        candidate &&
+        !isSameWorkspacePath(candidate, directory) &&
+        this.getOpenSessionDirectory(candidate)
+    );
+    const affected = [...this.endpoints].filter((endpoint) => {
+      const knownOrigin =
+        sourceDirectory ||
+        (ownerOriginDirectory &&
+          this.getOpenSessionDirectory(ownerOriginDirectory) &&
+          isSameWorkspacePath(ownerOriginDirectory, endpoint.workspacePath)) ||
+        endpoint.restProxy.isSessionCatalogInventoryAuthorized(sessionId) ||
+        this.sessionTransferCatalog.get(
+          this.server.url ?? '',
+          this.sessionTransferRoots(),
+          sessionId
+        ) ||
+        this.sessionState.isSessionInWorkspace(sessionId, endpoint.workspacePath) ||
+        (event && this.isEventInEndpointWorkspace(event, endpoint));
+      // A webview route alone is not proof that this workspace previously owned the session.
+      return Boolean(knownOrigin);
+    });
+    if (!affected.length) return;
+    if (event?.seq !== undefined) {
+      for (const endpoint of affected) {
+        endpoint.bridge.post({
+          type: 'server/event',
+          payload: {
+            type: 'session.next.moved',
+            properties: { sessionID: sessionId },
+            seq: event.seq,
+            sequenceOnly: true,
+          },
+        });
+      }
+    }
+    const previousTransfer = this.sessionTransfers.get(sessionId);
+    if (
+      isSameWorkspacePath(previousTransfer?.directory, directory) &&
+      affected.every((endpoint) => previousTransfer?.viewIds.has(endpoint.viewId))
+    )
+      return;
+    const transfer = { directory, viewIds: new Set(affected.map((endpoint) => endpoint.viewId)) };
+    this.sessionTransfers.set(sessionId, transfer);
+    while (this.sessionTransfers.size > 512)
+      this.sessionTransfers.delete(this.sessionTransfers.keys().next().value!);
+    // A replayed move must not send a view back to an obsolete location.
+    const session = asRecord(
+      await this.server
+        .request('GET', `/session/${encodeURIComponent(sessionId)}`)
+        // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection boundary.
+        .catch((error: unknown) => {
+          if (this.sessionTransfers.get(sessionId) === transfer)
+            this.sessionTransfers.delete(sessionId);
+          throw error;
+        })
+    );
+    if (
+      this.disposing ||
+      session?.id !== sessionId ||
+      typeof session.directory !== 'string' ||
+      !isSameWorkspacePath(session.directory, directory) ||
+      this.sessionTransfers.get(sessionId) !== transfer
+    ) {
+      if (this.sessionTransfers.get(sessionId) === transfer)
+        this.sessionTransfers.delete(sessionId);
+      return;
+    }
+    const originEndpoint = affected.find((endpoint) => endpoint.route.type === 'session');
+    const previousDirectory = [
+      sourceDirectory,
+      ownerOriginDirectory,
+      event?.workspaceDirectory,
+      originEndpoint?.route.type === 'session' ? originEndpoint.route.directory : undefined,
+      this.sessionState.directoryFor(sessionId),
+    ].find(
+      (candidate) =>
+        candidate &&
+        !isSameWorkspacePath(candidate, directory) &&
+        this.getOpenSessionDirectory(candidate)
+    );
+    const originDirectory = previousDirectory ?? affected[0]!.workspacePath;
+    if (originDirectory) {
+      await this.sessionTransferCatalog.remember(this.server.url ?? '', session, originDirectory, [
+        originDirectory,
+      ]);
+    }
+    if (this.disposing || this.sessionTransfers.get(sessionId) !== transfer) return;
+    this.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: session },
+    });
+    for (const endpoint of affected) {
+      if (!this.endpoints.has(endpoint)) continue;
+      endpoint.restProxy.invalidateSessionCatalog();
+      const available = await endpoint.restProxy.authorizeSessionDirectory(sessionId, directory);
+      if (
+        this.disposing ||
+        !this.endpoints.has(endpoint) ||
+        this.sessionTransfers.get(sessionId) !== transfer
+      )
+        continue;
+      endpoint.bridge.post({
+        type: 'session/transferred',
+        payload: { sessionId, directory, available },
+      });
+    }
+  }
+
+  private async openTransferredSession(sessionId: string, viewId: string) {
+    const transfer = this.sessionTransfers.get(sessionId);
+    const endpoint = [...this.endpoints].find((entry) => entry.viewId === viewId);
+    if (!endpoint || this.disposing) return;
+    const saved = this.sessionTransferCatalog
+      .list(this.server.url ?? '', this.sessionTransferRoots())
+      .find((session) => session.id === sessionId);
+    const directory = transfer?.viewIds.has(viewId) ? transfer.directory : saved?.directory;
+    if (!directory) return;
+    const session = asRecord(
+      await this.server.request('GET', `/session/${encodeURIComponent(sessionId)}`)
+    );
+    if (this.disposing || session?.id !== sessionId) return;
+    if (typeof session.directory !== 'string' || !isSameWorkspacePath(session.directory, directory))
+      throw new Error('The conversation moved again. Refresh the session list to find it.');
+    // Only an explicit button click can open a folder outside this window's workspace.
+    await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(directory), true);
   }
 
   private reconcileWorkspaceMembership(context: EditorContext) {
@@ -1975,6 +2178,22 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   ): Extract<ExtensionMessage, { type: 'server/event' }> | null {
     if (this.isEventInEndpointWorkspace(msg.payload, endpoint)) return msg;
     const sessionIDs = getWorkspaceSessionIdsForEvent(msg.payload);
+    if (
+      /^(?:message\.|session\.next\.(?:text\.|reasoning\.|tool\.|step\.|shell\.|prompted$|synthetic$|compaction\.|retried$))/.test(
+        msg.payload.type
+      ) ||
+      msg.payload.type === 'session.status' ||
+      msg.payload.type === 'session.updated' ||
+      msg.payload.type === 'session.deleted'
+    ) {
+      if (
+        sessionIDs.length &&
+        sessionIDs.every((id) =>
+          this.sessionTransferCatalog.get(this.server.url ?? '', this.sessionTransferRoots(), id)
+        )
+      )
+        return msg;
+    }
     const directory = this.getEventDirectory(msg.payload, sessionIDs);
     const catalogEvent = WORKSPACE_CATALOG_EVENT_TYPES.has(msg.payload.type);
     const attentionEvent = WORKSPACE_ATTENTION_EVENT_TYPES.has(msg.payload.type);
@@ -2071,6 +2290,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.sessionPermissionModes.removeSession(sessionId),
       this.sessionSelectedModels.removeSession(sessionId),
       this.sessionPlanState.removeSession(sessionId),
+      Promise.resolve().then(() =>
+        this.sessionTransferCatalog.remove(this.server.url ?? '', sessionId)
+      ),
     ]);
     void cleanup.catch(
       // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection reasons are normalized for logging at this boundary.

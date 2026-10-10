@@ -431,6 +431,98 @@ describe('getOpenCodeDirectoryHeaders', () => {
 });
 
 describe('RestProxy handleRequest', () => {
+  it('keeps a transferred session link in the originating folder catalog without authorizing execution', async () => {
+    const moved = {
+      id: 'moved',
+      projectID: 'project-1',
+      directory: '/outside',
+      title: 'Transferred conversation',
+      version: '2',
+      time: { created: 1, updated: 2 },
+      transfer: { originDirectory: '/repo', available: false },
+    };
+    const { proxy, callbacks } = createProxy({
+      getTransferredSessions: () => [moved],
+      server: { ...createCallbacks().server, request: vi.fn(async () => []) },
+    });
+    await proxy.handleRequest(makePayload(9010, 'GET', '/session?limit=20&directory=%2Frepo'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 9010,
+      data: { items: [moved], hasMore: false },
+    });
+    expect(proxy.isSessionCatalogEventAuthorized('moved', '/outside')).toBe(false);
+  });
+
+  it('admits session-scoped history reads for a retained transfer but rejects mutations and unrelated directories', async () => {
+    const moved = {
+      id: 'moved',
+      projectID: 'project-1',
+      directory: '/outside',
+      title: 'Transferred conversation',
+      version: '2',
+      time: { created: 1, updated: 2 },
+      transfer: { originDirectory: '/repo', available: false },
+    };
+    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => moved);
+    const { proxy, callbacks } = createProxy({
+      getTransferredSessions: () => [moved],
+      server: { ...createCallbacks().server, request: serverRequest },
+    });
+    await proxy.handleRequest(makePayload(9011, 'GET', '/session/moved?directory=%2Foutside'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 9011, data: moved });
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      expect.stringContaining('/session/moved'),
+      undefined,
+      expect.objectContaining({ directory: '/outside' })
+    );
+    serverRequest.mockClear();
+    await proxy.handleRequest(
+      makePayload(9012, 'POST', '/session/moved/prompt_async?directory=%2Foutside', { parts: [] })
+    );
+    await proxy.handleRequest(makePayload(9013, 'GET', '/session/moved?directory=%2Funrelated'));
+    expect(serverRequest).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 9012,
+      error: 'Conversation moved to /outside. Open its folder to continue.',
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 9013,
+      error: '404 Session not found',
+    });
+  });
+  it('detects a missed transfer when a session read returns a different directory', async () => {
+    const sessionTransferred = vi.fn(async () => {});
+    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => ({
+      id: 'session-1',
+      directory: '/outside',
+    }));
+    const { proxy, callbacks } = createProxy({
+      sessionTransferred,
+      server: { ...createCallbacks().server, request: serverRequest },
+    });
+    await proxy.handleRequest(makePayload(9001, 'GET', '/session/session-1'));
+    expect(sessionTransferred).toHaveBeenCalledExactlyOnceWith('session-1', '/outside', '/repo');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 9001,
+      error: 'Conversation moved to /outside. Open its folder to continue.',
+    });
+    expect(serverRequest.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+  });
+
+  it('does not reveal a foreign session destination as a transfer', async () => {
+    const sessionTransferred = vi.fn(async () => {});
+    const callbacks = createCallbacks();
+    callbacks.sessionState.isSessionInWorkspace = vi.fn(() => false);
+    callbacks.server.request = vi.fn(async () => ({ id: 'foreign', directory: '/outside' }));
+    const { proxy } = createProxy({ ...callbacks, sessionTransferred });
+    await proxy.handleRequest(makePayload(9002, 'GET', '/session/foreign'));
+    expect(sessionTransferred).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 9002,
+      error: '404 Session not found',
+    });
+  });
   it('reads problems from the endpoint workspace without contacting OpenCode', async () => {
     const snapshot = {
       total: 1,

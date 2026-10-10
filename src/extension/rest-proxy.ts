@@ -2,7 +2,11 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Endpoint assertions follow route-specific runtime validation. */
 import * as vscode from 'vscode';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { OpenCodeServerMemoryPermission, PermissionRule } from '../shared/opencode-types';
+import type {
+  OpenCodeServerMemoryPermission,
+  PermissionRule,
+  Session,
+} from '../shared/opencode-types';
 import { parseSessionPromptEndpoint } from '../shared/opencode-endpoints';
 import { getSelectionRangesFromEditorContext } from '../shared/context-files';
 import {
@@ -419,6 +423,12 @@ export interface RestProxyCallbacks {
     catalogRoot: string,
     signal?: AbortSignal
   ): Promise<unknown>;
+  sessionTransferred?(
+    sessionID: string,
+    directory: string,
+    originDirectory?: string
+  ): Promise<void>;
+  getTransferredSessions?(roots: readonly string[]): Session[];
 }
 
 export class RestProxy {
@@ -764,8 +774,33 @@ export class RestProxy {
         parseDirectSessionID(payload.path) ??
         sessionPermissionAllowRequest?.sessionId ??
         projectPermissionAllowRequest?.sessionId;
+      const transfer = directSessionID
+        ? this.callbacks
+            .getTransferredSessions?.(this.getOpenWorkspaceRoots())
+            .find((session) => session.id === directSessionID)
+        : undefined;
+      const transferRead = Boolean(
+        transfer &&
+        method === 'GET' &&
+        /^(?:\/session\/[^/]+(?:\/(?:message(?:\/[^/]+(?:\/part\/[^/]+)?)?|diff|todo))?|\/varro\/session\/[^/]+\/diff-summary)$/.test(
+          new URL(payload.path, 'http://localhost').pathname
+        )
+      );
+      if (transfer && !transfer.transfer?.available && !transferRead) {
+        throw new Error(
+          `Conversation moved to ${transfer.directory}. Open its folder to continue.`
+        );
+      }
       let explicitWorkspaceDirectory: string | null = null;
-      if (requestedWorkspaceDirectory) {
+      if (transferRead && transfer) {
+        if (
+          requestedWorkspaceDirectory &&
+          !isSameWorkspacePath(requestedWorkspaceDirectory, transfer.directory) &&
+          !isSameWorkspacePath(requestedWorkspaceDirectory, transfer.transfer?.originDirectory)
+        )
+          throw new Error('404 Session not found');
+        explicitWorkspaceDirectory = transfer.directory;
+      } else if (requestedWorkspaceDirectory) {
         if (directSessionID) {
           explicitWorkspaceDirectory = this.requireAuthorizedSessionDirectory(
             directSessionID,
@@ -843,7 +878,7 @@ export class RestProxy {
         : payload.path;
       let forwardedBody = payload.body;
 
-      if (directSessionID && !activationRequest) {
+      if (directSessionID && !activationRequest && !transferRead) {
         const currentWorkspaceDirectory = this.getCurrentWorkspaceResolutionRoot();
         const sessionWorkspaceDirectory = explicitWorkspaceDirectory ?? currentWorkspaceDirectory;
         await this.assertSessionInWorkspace(
@@ -1165,7 +1200,10 @@ export class RestProxy {
 
       if (this.isSessionListRequest(method, payload.path)) {
         const data = await this.requestWorkspaceSessions(payload.path, requestSignal);
-        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        this.callbacks.postApiResponse(requestGeneration, {
+          id: payload.id,
+          data: this.includeTransferredSessions(data, payload.path),
+        });
         return;
       }
 
@@ -1184,7 +1222,8 @@ export class RestProxy {
           throw new Error('404 Session not found');
         }
         const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
-        await this.assertSessionInWorkspace(diffSummaryRequest.sessionID, directory, directory);
+        if (!transferRead)
+          await this.assertSessionInWorkspace(diffSummaryRequest.sessionID, directory, directory);
         const data = await this.requestWorkspaceDirectory.run(directory, () =>
           this.readCachedSessionDiffSummary(
             diffSummaryRequest.sessionID,
@@ -1545,6 +1584,34 @@ export class RestProxy {
         throw err;
       }
       this.callbacks.rememberServerMemoryPermissions(legacyServerMemoryRules);
+      if (
+        method === 'GET' &&
+        directSessionID &&
+        requestPathname === `/session/${encodeURIComponent(directSessionID)}`
+      ) {
+        const session = asRecord(response);
+        const requestedDirectory =
+          explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
+        const expectedDirectory = transferRead
+          ? transfer?.directory
+          : (this.sessionDirectories.get(directSessionID) ?? requestedDirectory);
+        if (
+          session?.id === directSessionID &&
+          typeof session.directory === 'string' &&
+          requestedDirectory &&
+          !isSameWorkspacePath(session.directory, expectedDirectory)
+        ) {
+          await this.callbacks.sessionTransferred?.(
+            directSessionID,
+            session.directory,
+            requestedDirectory
+          );
+          if (!transferRead)
+            throw new Error(
+              `Conversation moved to ${session.directory}. Open its folder to continue.`
+            );
+        }
+      }
       if (queuedDispatch && promptSessionID) {
         try {
           const completed = await this.callbacks.completeQueuedMessageDispatchClaim(
@@ -3061,12 +3128,40 @@ export class RestProxy {
       typeof session.directory === 'string' &&
       /^\/session\/[^/]+(?:\/(?:fork|share))?$/.test(url.pathname)
     ) {
-      return this.withSessionWorkspaceScope(
+      const result = this.withSessionWorkspaceScope(
         session,
         this.readAndRememberSessionWorkspaceScope(session)
       );
+      const transfer = this.callbacks
+        .getTransferredSessions?.(this.getOpenWorkspaceRoots())
+        .find((entry) => entry.id === session.id);
+      return transfer ? { ...result, transfer: transfer.transfer } : result;
     }
     return data;
+  }
+
+  private includeTransferredSessions(data: unknown, path: string): unknown {
+    const url = new URL(path, 'http://localhost');
+    const directory = getExplicitWorkspaceDirectory(path);
+    const roots = directory ? [directory] : this.getOpenWorkspaceRoots();
+    const transfers = this.callbacks.getTransferredSessions?.(roots) ?? [];
+    if (!transfers.length) return data;
+    const page = asRecord(data);
+    const items = Array.isArray(data) ? data : Array.isArray(page?.items) ? page.items : null;
+    if (!items) return data;
+    const search = url.searchParams.get('search')?.toLowerCase();
+    const aliases = this.filterWorkspaceVisibleSessions(transfers).filter(
+      (session) =>
+        (!search || session.title.toLowerCase().includes(search)) &&
+        (url.searchParams.get('roots') !== 'true' || !session.parentID)
+    );
+    const byId = new Map(items.map((item) => [asRecord(item)?.id, item]));
+    for (const session of aliases) {
+      const existing = asRecord(byId.get(session.id));
+      byId.set(session.id, existing ? { ...existing, transfer: session.transfer } : session);
+    }
+    const merged = [...byId.values()];
+    return Array.isArray(data) ? merged : { ...page, items: merged };
   }
 
   private rememberSessionList(sessions: unknown[]) {
@@ -3362,8 +3457,13 @@ export class RestProxy {
     if (this.callbacks.getStatus().state !== 'running') {
       await this.callbacks.ensureServerStarted();
     }
+    const knownDirectory = this.sessionDirectories.get(sessionID);
     const directory = await this.lookupSessionDirectory(sessionID, lookupDirectory);
     if (!isSameWorkspacePath(directory, workspacePath)) {
+      if (directory && isSameWorkspacePath(knownDirectory, workspacePath)) {
+        await this.callbacks.sessionTransferred?.(sessionID, directory, knownDirectory);
+        throw new Error(`Conversation moved to ${directory}. Open its folder to continue.`);
+      }
       throw new Error('404 Session not found');
     }
   }

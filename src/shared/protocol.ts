@@ -1029,6 +1029,10 @@ export type ExtensionMessage =
     }
   | { type: 'command/new-session'; payload?: { prefill: string } }
   | { type: 'command/open-session'; payload: { sessionId: string; directory?: string } }
+  | {
+      type: 'session/transferred';
+      payload: { sessionId: string; directory: string; available: boolean };
+    }
   | { type: 'command/highlight-session' }
   | { type: 'command/focus-input' }
   | { type: 'command/attach-problems'; payload: { diagnostics: EditorDiagnostic[] } }
@@ -1052,6 +1056,7 @@ export type WebviewMessage =
       };
     }
   | { type: 'session/seen'; payload: { sessionId: string } }
+  | { type: 'session/open-transferred'; payload: { sessionId: string } }
   | { type: 'session-read-state/update'; payload: { sessionId: string; seenAt: number } }
   | { type: 'webview/focus'; payload: { focused: boolean } }
   | { type: 'permission/reveal'; payload: { permissionId: string } }

@@ -93,6 +93,221 @@ function createPanel() {
 }
 
 describe('SidebarProvider editor panels', () => {
+  it('records the original folder even when a different workspace folder is selected', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/other';
+    contextProvider.context.workspaceFolders = [
+      { name: 'Repo', path: '/repo' },
+      { name: 'Other', path: '/other' },
+    ];
+    contextProvider.getOpenWorkspaceRoot.mockImplementation((path) =>
+      path === '/repo' || path === '/other' ? path : null
+    );
+    const server = createServer({
+      request: vi.fn(async () => ({
+        id: 'session-1',
+        directory: '/outside',
+        projectID: 'project-1',
+        title: 'Transferred chat',
+        version: '2',
+        time: { created: 1, updated: 2 },
+      })),
+    });
+    const { provider, workspaceState } = await createSidebarProviderInstance({
+      contextProvider,
+      server,
+    });
+    try {
+      provider.post({
+        type: 'server/event',
+        payload: {
+          type: 'session.next.moved',
+          workspaceDirectory: '/repo',
+          properties: { sessionID: 'session-1', location: { directory: '/outside' } },
+        },
+      });
+      await vi.waitFor(() =>
+        expect(workspaceState.update).toHaveBeenCalledWith('varro.sessionTransfers', [
+          expect.objectContaining({
+            origins: ['/repo'],
+            session: expect.objectContaining({
+              transfer: { originDirectory: '/repo', available: false },
+            }),
+          }),
+        ])
+      );
+    } finally {
+      await provider.dispose();
+    }
+  });
+
+  it('does not turn an unverified editor route into a transfer read capability', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.getOpenWorkspaceRoot.mockImplementation((path) =>
+      path === '/repo' ? path : null
+    );
+    const server = createServer({
+      request: vi.fn(async () => ({ id: 'foreign', directory: '/outside' })),
+    });
+    const { provider, workspaceState } = await createSidebarProviderInstance({
+      contextProvider,
+      server,
+    });
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    try {
+      await provider.openSessionInEditor('foreign', undefined, undefined, undefined, '/repo');
+      await vi.waitFor(() => expect(editor.panel.webview.html).toContain('documentId'));
+      editor.ready();
+      provider.post({
+        type: 'server/event',
+        payload: {
+          type: 'session.next.moved',
+          workspaceDirectory: '/outside',
+          properties: { sessionID: 'foreign', location: { directory: '/outside' } },
+        },
+      });
+      await Promise.resolve();
+      expect(server.request).not.toHaveBeenCalledWith('GET', '/session/foreign');
+      expect(workspaceState.update).not.toHaveBeenCalledWith(
+        'varro.sessionTransfers',
+        expect.anything()
+      );
+    } finally {
+      await provider.dispose();
+    }
+  });
+  it.each([
+    ['/other', true],
+    ['/outside', false],
+  ] as const)(
+    'handles an active conversation moving to %s without treating it as deleted',
+    async (directory, available) => {
+      const contextProvider = createContextProvider();
+      contextProvider.getOpenWorkspaceRoot.mockImplementation((path) =>
+        path === '/repo' || path === '/other' ? path : null
+      );
+      const server = createServer({
+        request: vi.fn(async () => ({
+          id: 'session-1',
+          directory,
+          projectID: 'project-1',
+          title: 'Transferred chat',
+          version: '2',
+          time: { created: 1, updated: 2 },
+        })),
+      });
+      const { provider } = await createSidebarProviderInstance({ contextProvider, server });
+      const editor = createPanel();
+      getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+      try {
+        await provider.openSessionInEditor(
+          'session-1',
+          'Transferred chat',
+          undefined,
+          undefined,
+          '/repo'
+        );
+        await vi.waitFor(() => expect(editor.panel.webview.html).toContain('documentId'));
+        editor.ready();
+        const move = {
+          type: 'server/event',
+          payload: {
+            type: 'session.next.moved',
+            seq: 9,
+            workspaceDirectory: '/repo',
+            properties: { sessionID: 'session-1', location: { directory } },
+          },
+        } as const;
+        provider.post(move);
+        expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+          type: 'server/event',
+          payload: {
+            type: 'session.next.moved',
+            properties: { sessionID: 'session-1' },
+            seq: 9,
+            sequenceOnly: true,
+          },
+        });
+        await vi.waitFor(() =>
+          expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+            type: 'session/transferred',
+            payload: { sessionId: 'session-1', directory, available },
+          })
+        );
+        expect(editor.panel.dispose).not.toHaveBeenCalled();
+        expect(getVscodeMock().commands.executeCommand).not.toHaveBeenCalledWith(
+          'vscode.openFolder',
+          expect.anything(),
+          expect.anything()
+        );
+        editor.panel.webview.postMessage.mockClear();
+        provider.post(move);
+        await Promise.resolve();
+        expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(
+          expect.objectContaining({ type: 'session/transferred' })
+        );
+        if (!available) {
+          await provider.handleMessage({
+            type: 'session/open-transferred',
+            payload: { sessionId: 'foreign' },
+          });
+          expect(getVscodeMock().commands.executeCommand).not.toHaveBeenCalledWith(
+            'vscode.openFolder',
+            expect.anything(),
+            expect.anything()
+          );
+          editor.receive({ type: 'session/open-transferred', payload: { sessionId: 'session-1' } });
+          await vi.waitFor(() =>
+            expect(getVscodeMock().commands.executeCommand).toHaveBeenCalledWith(
+              'vscode.openFolder',
+              expect.objectContaining({ fsPath: directory }),
+              true
+            )
+          );
+        }
+        expect(server.request.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+      } finally {
+        await provider.dispose();
+      }
+    }
+  );
+
+  it('ignores foreign and obsolete session moves', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.getOpenWorkspaceRoot.mockImplementation((path) =>
+      path === '/repo' ? path : null
+    );
+    const server = createServer({
+      request: vi.fn(async () => ({ id: 'session-1', directory: '/newer' })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server, contextProvider });
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    try {
+      await provider.openSessionInEditor('session-1', undefined, undefined, undefined, '/repo');
+      await vi.waitFor(() => expect(editor.panel.webview.html).toContain('documentId'));
+      editor.ready();
+      for (const sessionID of ['foreign', 'session-1'])
+        provider.post({
+          type: 'server/event',
+          payload: {
+            type: 'session.next.moved',
+            workspaceDirectory: sessionID === 'session-1' ? '/repo' : '/outside',
+            properties: { sessionID, location: { directory: '/obsolete' } },
+          },
+        });
+      await vi.waitFor(() =>
+        expect(server.request).toHaveBeenCalledWith('GET', '/session/session-1')
+      );
+      expect(server.request).not.toHaveBeenCalledWith('GET', '/session/foreign');
+      expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'session/transferred' })
+      );
+    } finally {
+      await provider.dispose();
+    }
+  });
   it('notification clicks reveal the existing root panel and route to its child chat', async () => {
     const { provider } = await createSidebarProviderInstance();
     const editor = createPanel();

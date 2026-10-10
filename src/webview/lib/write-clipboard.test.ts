@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { writeClipboard } from './write-clipboard';
+import { writeClipboard, writeClipboardImage } from './write-clipboard';
+import { fixture } from '../test-fixtures';
 
 type LegacyClipboardDocument = {
   execCommand(commandId: string): boolean;
@@ -107,5 +108,103 @@ describe('writeClipboard', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('writeClipboardImage', () => {
+  const write = vi.fn<(items: ClipboardItem[]) => Promise<void>>();
+  const drawImage = vi.fn();
+  let image: HTMLImageElement;
+  let data: Record<string, Blob | Promise<Blob>>;
+  let encode: BlobCallback;
+  const canvas = () => {
+    const element = vi.mocked(HTMLCanvasElement.prototype.getContext).mock.contexts[0];
+    if (!(element instanceof HTMLCanvasElement)) throw new Error('Expected an image canvas');
+    return element;
+  };
+  let originalClipboard: Clipboard;
+
+  beforeEach(() => {
+    originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { write },
+      configurable: true,
+    });
+    write.mockReset().mockResolvedValue();
+    drawImage.mockClear();
+    vi.stubGlobal(
+      'ClipboardItem',
+      class {
+        readonly types = ['image/png'];
+        constructor(value: Record<string, Blob | Promise<Blob>>) {
+          data = value;
+        }
+      }
+    );
+    image = document.createElement('img');
+    Object.defineProperties(image, {
+      naturalWidth: { value: 1920, configurable: true },
+      naturalHeight: { value: 1080, configurable: true },
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      fixture<CanvasRenderingContext2D>({ drawImage })
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => {
+      encode = callback;
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: originalClipboard,
+      configurable: true,
+    });
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('starts the clipboard write before encoding and copies full-size PNG pixels', async () => {
+    const copying = writeClipboardImage(image);
+    expect(write).toHaveBeenCalledOnce();
+    expect(canvas().width).toBe(1920);
+    expect(canvas().height).toBe(1080);
+    expect(drawImage).toHaveBeenCalledWith(image, 0, 0);
+    expect(HTMLCanvasElement.prototype.toBlob).toHaveBeenCalledWith(
+      expect.any(Function),
+      'image/png'
+    );
+    const blob = new Blob(['pixels'], { type: 'image/png' });
+    encode(blob);
+    await copying;
+    await expect(data['image/png']).resolves.toBe(blob);
+    expect(canvas().width).toBe(0);
+    expect(canvas().height).toBe(0);
+  });
+
+  it('reports clipboard refusal and releases the canvas', async () => {
+    write.mockRejectedValue(new Error('Clipboard permission denied'));
+    const copying = writeClipboardImage(image);
+    encode(new Blob(['pixels'], { type: 'image/png' }));
+    await expect(copying).rejects.toThrow('Clipboard permission denied');
+    expect(canvas().width).toBe(0);
+  });
+
+  it('reports failed PNG encoding', async () => {
+    const copying = writeClipboardImage(image);
+    encode(null);
+    await expect(copying).rejects.toThrow('Could not copy the image');
+    expect(canvas().width).toBe(0);
+  });
+
+  it('does not copy an image that has not decoded', async () => {
+    Object.defineProperty(image, 'naturalWidth', { value: 0 });
+    await expect(writeClipboardImage(image)).rejects.toThrow('finish loading');
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('reports an unavailable image clipboard', async () => {
+    vi.stubGlobal('ClipboardItem', undefined);
+    await expect(writeClipboardImage(image)).rejects.toThrow('unavailable');
+    expect(write).not.toHaveBeenCalled();
   });
 });

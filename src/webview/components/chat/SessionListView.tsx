@@ -1173,6 +1173,8 @@ export function SessionListView(props: {
     return [...folders.values()];
   });
   const getSessionFolderLabel = (session: Session): string | null => {
+    if (session.transfer)
+      return `Moved to ${getWorkspaceCompactLabel(session.directory, state.editorContext.workspaceFolders ?? []) ?? getDirectoryName(session.directory)}`;
     const currentDirectory = sessionHistoryDirectory();
     const showWorkspaceFolder =
       !folderFilter() && (state.editorContext.workspaceFolders?.length ?? 0) > 1;
@@ -1327,14 +1329,18 @@ export function SessionListView(props: {
       needsAttention: (sessionId) => sessionIndicators().attentionIds.has(sessionId),
       isFailed: (sessionId) => sessionIndicators().failedIds.has(sessionId),
       isPlanReady: (item) => sessionIndicators().planReadyIds.has(item.id),
-      preserve: ralphStore.isRalphSession(session.id),
+      preserve: Boolean(session.transfer) || ralphStore.isRalphSession(session.id),
       statusType: state.sessionStatus[session.id]?.type,
     });
   };
   const visibleSessionsForList = createMemo(() =>
     state.sessions.filter(
       (session) =>
-        isVisibleSession(session) && matchesFolderFilter(session.directory, session.workspaceScope)
+        isVisibleSession(session) &&
+        matchesFolderFilter(
+          session.transfer?.originDirectory ?? session.directory,
+          session.transfer ? undefined : session.workspaceScope
+        )
     )
   );
   createEffect(() => {
@@ -1363,7 +1369,11 @@ export function SessionListView(props: {
     for (const session of state.sessions) mergedSessions.set(session.id, session);
     return [...mergedSessions.values()].filter(
       (session) =>
-        isVisibleSession(session) && matchesFolderFilter(session.directory, session.workspaceScope)
+        isVisibleSession(session) &&
+        matchesFolderFilter(
+          session.transfer?.originDirectory ?? session.directory,
+          session.transfer ? undefined : session.workspaceScope
+        )
     );
   });
   const subagentSessions = createMemo(() =>
@@ -1378,7 +1388,10 @@ export function SessionListView(props: {
       .filter(
         (session) =>
           isVisibleSession(session) &&
-          matchesFolderFilter(session.directory, session.workspaceScope)
+          matchesFolderFilter(
+            session.transfer?.originDirectory ?? session.directory,
+            session.transfer ? undefined : session.workspaceScope
+          )
       );
   });
   const filteredSessions = createMemo(() =>

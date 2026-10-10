@@ -81,6 +81,7 @@ export interface SidebarProviderActionDeps {
     inWindow?: boolean
   ): void | Promise<void>;
   openSessionInSidebar(sessionId: string, directory?: string): void | Promise<void>;
+  openTransferredSession?(sessionId: string): Promise<void>;
   importLegacySession: MessageRouterCallbacks['importLegacySession'];
   openNewEditor(): void | Promise<void>;
   openNewWindow(): void | Promise<void>;
@@ -220,6 +221,8 @@ export function createSidebarProviderActions(
       await deps.openSessionInSidebar(sessionId, validatedDirectory);
     },
     importLegacySession: (sessionId, directory) => deps.importLegacySession(sessionId, directory),
+    openTransferredSession: (sessionId) =>
+      deps.openTransferredSession?.(sessionId) ?? Promise.resolve(),
     openNewEditor: () => deps.openNewEditor(),
     openNewWindow: () => deps.openNewWindow(),
     editorRouteChanged: (route) => deps.editorRouteChanged(route),

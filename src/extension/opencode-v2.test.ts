@@ -1642,6 +1642,20 @@ describe('v2 transcript and permission projection', () => {
   });
 
   it('preserves sequence accounting and waits for the execution boundary', () => {
+    expect(
+      parseServerEvent(
+        projectV2Event({
+          id: 'evt_move',
+          created: 49,
+          type: 'session.moved',
+          location: { directory: '/old' },
+          data: { sessionID: 'ses_one', location: { directory: '/new' } },
+        })[0]
+      )
+    ).toMatchObject({
+      type: 'session.next.moved',
+      properties: { sessionID: 'ses_one', location: { directory: '/new' } },
+    });
     const ended = parseServerEvent(
       projectV2Event({
         id: 'evt_one',

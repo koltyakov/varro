@@ -48,7 +48,7 @@ export function createMountBridgeOperations(deps: {
   reloadWorkspaceAfterChange(wasInitialized: boolean): void;
   isInitialized(): boolean;
   createSession(prefill?: string): void;
-  openSession?(sessionId: string, directory?: string): void;
+  openSession?(sessionId: string, directory?: string, preserveTranscript?: boolean): void;
   abortSession(): void;
   refreshMcps(): void;
   refreshLsps?(): void;
@@ -74,6 +74,34 @@ export function createMountBridgeOperations(deps: {
         clearError: () => uiStore.setError(null),
         ensureConnectionInitialized: deps.ensureConnectionInitialized,
         reloadSessionCatalog: deps.reloadSessionCatalog,
+        sessionTransferred: ({ sessionId, directory, available }) => {
+          const session = appStore.state.sessions.find((entry) => entry.id === sessionId);
+          if (session)
+            appStore.setState('sessions', (entry) => entry.id === sessionId, 'transfer', {
+              originDirectory: session.transfer?.originDirectory ?? session.directory,
+              available,
+            });
+          appStore.setState('sessions', (entry) => entry.id === sessionId, 'directory', directory);
+          appStore.setState(
+            'transferredSessions',
+            reconcile(
+              available
+                ? Object.fromEntries(
+                    Object.entries(appStore.state.transferredSessions).filter(
+                      ([id]) => id !== sessionId
+                    )
+                  )
+                : { ...appStore.state.transferredSessions, [sessionId]: directory }
+            )
+          );
+          if (appStore.state.activeSessionId !== sessionId) {
+            void deps.reloadSessionCatalog?.();
+            return;
+          }
+          // Refresh in place. The host admits history reads, not execution in a closed folder.
+          uiStore.setError(null);
+          deps.openSession?.(sessionId, directory, true);
+        },
         getServerState: deps.getServerState,
         invalidateConnection: deps.invalidateConnection,
         clearProvidersState: () => {
@@ -228,6 +256,9 @@ export function handleExtensionMessageWithDependencies(
     removeContextFile(path: string): void;
     createSession(prefill?: string): void;
     openSession?(sessionId: string, directory?: string): void;
+    sessionTransferred?(
+      payload: Extract<ExtensionMessage, { type: 'session/transferred' }>['payload']
+    ): void;
     requestComposerFocus(): void;
     requestOpenAttentionSessions(): void;
     requestOpenCompletedSessions(): void;
@@ -289,6 +320,9 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'session/catalog-invalidated':
       void deps.reloadSessionCatalog?.();
+      break;
+    case 'session/transferred':
+      deps.sessionTransferred?.(msg.payload);
       break;
     case 'workspace/select-failed':
       deps.workspaceSelectionFailed?.(msg.payload);

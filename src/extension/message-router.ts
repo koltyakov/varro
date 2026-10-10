@@ -93,6 +93,7 @@ export interface MessageRouterCallbacks {
   generateUsageReport(includeAllTime: boolean): Promise<void>;
   reloadWebview(): Promise<void>;
   openFolder(): Promise<void>;
+  openTransferredSession?(sessionId: string): Promise<void>;
   openSettings(query?: string): Promise<void>;
   showOutput(): void;
   setMermaidPreviewOpen(open: boolean): void | Promise<void>;
@@ -291,6 +292,9 @@ export class MessageRouter {
           break;
         case 'vscode/open-folder':
           await this.callbacks.openFolder();
+          break;
+        case 'session/open-transferred':
+          await this.callbacks.openTransferredSession?.(msg.payload.sessionId);
           break;
         case 'vscode/open-settings':
           await this.handleOpenSettingsMessage(msg);

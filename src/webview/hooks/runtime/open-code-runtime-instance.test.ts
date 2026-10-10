@@ -36,6 +36,31 @@ function deferred<T>() {
 }
 
 describe('open code runtime synchronization', () => {
+  it('retains the active transcript and pagination when transfer activation changes the workspace', () => {
+    const sessionId = 'session-1';
+    setState('activeSessionId', sessionId);
+    setState('messages', [
+      {
+        info: {
+          id: 'message-1',
+          sessionID: sessionId,
+          role: 'user',
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'test' },
+          time: { created: 1 },
+        },
+        parts: [],
+      },
+    ]);
+    setInputText('Unsent draft');
+    setSessionHistoryCursor(sessionId, 'cursor-1');
+    const messages = state.messages;
+    resetWorkspaceDerivedState({ preserveWorkspaceCatalog: true, preserveTranscript: true });
+    expect(state.activeSessionId).toBe(sessionId);
+    expect(state.messages).toBe(messages);
+    expect(inputText()).toBe('Unsent draft');
+    expect(getSessionHistoryCursor(sessionId)).toBe('cursor-1');
+  });
   beforeEach(() => {
     resetDefaultAppState();
   });

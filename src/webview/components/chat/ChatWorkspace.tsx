@@ -7,7 +7,7 @@ import { WindowChatThemeToggle } from './WindowChatThemeToggle';
 import { SessionListView } from './SessionListView';
 import type { SessionIndicatorSets, SessionListFilter } from './SessionListView';
 import type { SlowApiRequest } from '../../lib/bridge';
-import { onMessage } from '../../lib/bridge';
+import { onMessage, postMessage } from '../../lib/bridge';
 import { editingMessage, inlineEditMount } from '../../lib/message-edit-state';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { state } from '../../lib/state';
@@ -281,6 +281,38 @@ export function ChatWorkspace(props: {
         </div>
       </Show>
       <div class="chat-main-column-shell">
+        <Show
+          when={
+            state.activeSessionId &&
+            (state.transferredSessions[state.activeSessionId] ??
+              (() => {
+                const session = state.sessions.find((entry) => entry.id === state.activeSessionId);
+                return session?.transfer?.available === false ? session.directory : undefined;
+              })())
+          }
+        >
+          {(directory) => (
+            <div class="chat-transport-banner" role="status" aria-live="polite">
+              <div class="chat-transport-copy">
+                <span class="chat-transport-title">Conversation moved</span>
+                <span class="chat-transport-message">
+                  This conversation is now in {directory()}. Its history stays available here. Open
+                  that folder to send messages.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sessionId = state.activeSessionId;
+                    if (sessionId)
+                      postMessage({ type: 'session/open-transferred', payload: { sessionId } });
+                  }}
+                >
+                  Open folder
+                </button>
+              </div>
+            </div>
+          )}
+        </Show>
         <Show
           when={activeRalphSessionId()}
           fallback={

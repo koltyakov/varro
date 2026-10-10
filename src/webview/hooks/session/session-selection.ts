@@ -88,11 +88,15 @@ export async function selectSessionWithDependencies(
   options?: SessionSelectionOptions
 ): Promise<SessionSelectionResult> {
   const generation = generationRef.next();
+  const preserveTranscript =
+    options?.preserveTranscript === true && deps.getActiveSessionId() === id;
   let persistedAgent: string | null = null;
   let persistedModel: SelectedModel | null = null;
   batch(() => {
-    deps.clearDraftCurrentDocumentState();
-    deps.resetToolCallExpansionState();
+    if (!preserveTranscript) {
+      deps.clearDraftCurrentDocumentState();
+      deps.resetToolCallExpansionState();
+    }
     deps.setActiveSessionId(id);
     deps.clearPendingAbort(id);
 
@@ -120,7 +124,7 @@ export async function selectSessionWithDependencies(
     }
 
     deps.resetTodoSync();
-    deps.clearMessages();
+    if (!preserveTranscript) deps.clearMessages();
     deps.setMessagesLoading?.(true);
   });
 
@@ -156,7 +160,11 @@ export async function selectSessionWithDependencies(
       deps.setError('This conversation is unavailable on the connected OpenCode server.');
       return { state: 'unavailable' };
     }
-    deps.setError('Failed to load messages');
+    deps.setError(
+      error instanceof Error && error.message.startsWith('Conversation moved to ')
+        ? error.message
+        : 'Failed to load messages'
+    );
     return { state: 'failed' };
   }
 
@@ -198,7 +206,7 @@ export async function selectSessionWithDependencies(
   await todoSync;
   if (!isCurrentSelection()) return { state: 'superseded' };
   clearMessagesLoadingIfOwned();
-  deps.requestMessageListScrollToBottom();
+  if (!preserveTranscript) deps.requestMessageListScrollToBottom();
 
   const statuses = await statusSync;
   if (!isCurrentSelection()) return { state: 'superseded' };

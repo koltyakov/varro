@@ -36,6 +36,28 @@ function sessionInWorkspace(id: string) {
 }
 
 describe('sendMessage', () => {
+  it.each([undefined, 'queued'] as const)(
+    'blocks sends to an unavailable transferred session including %s targets',
+    async (target) => {
+      const { stateModule, hookModule } = await loadModules();
+      stateModule.setState('activeSessionId', target ? 'other-session' : 'session-1');
+      stateModule.setState('transferredSessions', { 'session-1': '/outside' });
+      stateModule.setInputText('Unsent draft');
+      const messages = [{ info: userMessage('user-1'), parts: [] }];
+      stateModule.replaceMessages(messages);
+      expect(
+        await hookModule.sendMessage(
+          'Do not dispatch',
+          target ? { targetSessionId: 'session-1' } : undefined
+        )
+      ).toBe(false);
+      expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
+      expect(clientMocks.sessionCreate).not.toHaveBeenCalled();
+      expect(stateModule.inputText()).toBe('Unsent draft');
+      expect(stateModule.state.messages).toEqual(messages);
+      expect(stateModule.error()).toContain('Conversation moved to /outside');
+    }
+  );
   it('keeps the latest Build selection when older Ask confirmations arrive before send', async () => {
     const { stateModule, hookModule } = await loadModules();
     stateModule.setState('activeSessionId', 'session-1');

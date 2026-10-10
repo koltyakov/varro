@@ -38,6 +38,7 @@ const {
   setState: vi.fn(),
   state: {
     activeSessionId: null as string | null,
+    transferredSessions: {} as Record<string, string>,
     sessions: [] as Session[],
     questionResponsePendingSessionIds: [] as string[],
   },
@@ -171,6 +172,27 @@ function createDeps(overrides?: {
 }
 
 describe('session-lifecycle helpers', () => {
+  it('keeps inactive transferred sessions in the originating catalog after selection changes', () => {
+    const moved = {
+      ...session('moved', '/outside'),
+      transfer: { originDirectory: '/repo', available: false },
+    };
+    const setup = createDeps({ activeSessionId: 'other', sessions: [moved, session('other')] });
+    applySessions(setup.deps, [session('other')], true);
+    expect(setup.current.sessions).toContainEqual(moved);
+    expect(setup.current.activeSessionId).toBe('other');
+  });
+  it('retains an active transferred transcript when the old folder catalog refreshes', () => {
+    const moved = session('moved', '/outside');
+    const setup = createDeps({ activeSessionId: 'moved', sessions: [moved] });
+    const deps = { ...setup.deps, isSessionTransferred: (id: string) => id === 'moved' };
+    applySessions(deps, [session('other')], true);
+    expect(setup.current.sessions).toContainEqual(moved);
+    expect(setup.current.activeSessionId).toBe('moved');
+    expect(deps.clearActiveSessionState).not.toHaveBeenCalled();
+    clearDeletedSessionState(deps, 'moved');
+    expect(deps.clearActiveSessionState).toHaveBeenCalledOnce();
+  });
   it('normalizes workspace paths and trusts the scoped session catalog', () => {
     expect(normalizeProjectPath('/repo///')).toBe('/repo');
     expect(normalizeProjectPath('C:\\repo\\')).toBe('C:/repo');

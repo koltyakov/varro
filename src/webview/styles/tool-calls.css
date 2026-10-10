@@ -2623,6 +2623,22 @@ kbd {
   opacity: 0.6;
 }
 
+.chat-image-preview-context-menu {
+  z-index: var(--z-modal-raised);
+}
+
+.chat-image-preview-context-menu > button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chat-image-preview-copy-status {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-vscode-muted);
+}
+
 .message-image-carousel {
   margin-top: 12px;
 }

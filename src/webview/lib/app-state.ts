@@ -139,6 +139,7 @@ export interface AppState {
   pinnedSessionIds: string[];
   recycleBinEntries: RecycleBinEntry[];
   activeSessionId: string | null;
+  transferredSessions: Record<string, string>;
   editorTabsOpen: boolean;
   /** Root session ids currently visible in editor tabs. */
   editorSessionIds: string[];
@@ -407,6 +408,7 @@ export function createAppState(): AppStateInstance {
     sessionsPaginationError: null,
     recycleBinLoadError: null,
     messagesLoading: false,
+    transferredSessions: {},
     pendingSessionSelectionId: null,
     pinnedSessionIds: initialWebviewState.pinnedSessionIds ?? [],
     recycleBinEntries: initialWebviewState.recycleBinEntries ?? [],

@@ -108,6 +108,38 @@ function createSelectionDependencies(
 }
 
 describe('selection outcomes', () => {
+  it('refreshes a transferred session without clearing its transcript, draft state, or scroll anchor', async () => {
+    const pending = deferred<Awaited<ReturnType<SelectionDependencies['loadSession']>>>();
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => 'session-1',
+      loadSession: () => pending.promise,
+    });
+    const selection = selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1', {
+      preserveTranscript: true,
+    });
+    expect(deps.clearMessages).not.toHaveBeenCalled();
+    expect(deps.clearDraftCurrentDocumentState).not.toHaveBeenCalled();
+    expect(deps.resetToolCallExpansionState).not.toHaveBeenCalled();
+    pending.resolve(loadedSession('session-1'));
+    expect(await selection).toEqual({ state: 'loaded' });
+    expect(deps.setMessagesIncremental).toHaveBeenCalled();
+    expect(deps.requestMessageListScrollToBottom).not.toHaveBeenCalled();
+  });
+  it('reports a missed transfer without removing the session as unavailable', async () => {
+    const message = 'Conversation moved to /outside. Open its folder to continue.';
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => 'session-1',
+      loadSession: async () => {
+        throw new Error(message);
+      },
+      removeUnavailableSession: vi.fn(),
+    });
+    expect(await selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1')).toEqual({
+      state: 'failed',
+    });
+    expect(deps.setError).toHaveBeenCalledWith(message);
+    expect(deps.removeUnavailableSession).not.toHaveBeenCalled();
+  });
   it('does not report an active ID as successful hydration after a history failure', async () => {
     const deps = createSelectionDependencies({
       getActiveSessionId: () => 'session-1',

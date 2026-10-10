@@ -1012,7 +1012,10 @@ function resolvePermissionJudgeModel(sessionId: string) {
   );
 }
 
-export function resetWorkspaceDerivedState(options?: { preserveWorkspaceCatalog?: boolean }) {
+export function resetWorkspaceDerivedState(options?: {
+  preserveWorkspaceCatalog?: boolean;
+  preserveTranscript?: boolean;
+}) {
   const preserveWorkspaceCatalog = options?.preserveWorkspaceCatalog === true;
   const queuedTreeSessionIds = new Set(
     appStore.state.queuedMessages.flatMap((message) => {
@@ -1028,9 +1031,11 @@ export function resetWorkspaceDerivedState(options?: { preserveWorkspaceCatalog?
   );
   permissionsStore.resetQuestionResolutionState();
   batch(() => {
-    sessionStore.setActiveSessionId(null);
-    sessionStore.persistActiveSessionId(null);
-    sessionStore.clearMessages();
+    if (!options?.preserveTranscript) {
+      sessionStore.setActiveSessionId(null);
+      sessionStore.persistActiveSessionId(null);
+      sessionStore.clearMessages();
+    }
     if (!preserveWorkspaceCatalog) {
       appStore.setState('sessions', []);
       appStore.setState('sessionsLoadError', null);
@@ -1075,11 +1080,13 @@ export function resetWorkspaceDerivedState(options?: { preserveWorkspaceCatalog?
       persistGlobal: false,
     });
 
-    composerStore.clearContextFiles();
-    composerStore.clearClipboardImages();
-    composerStore.clearTerminalSelection();
-    composerStore.clearAttachedDiagnostics();
-    composerStore.resetPastedImageIndex();
+    if (!options?.preserveTranscript) {
+      composerStore.clearContextFiles();
+      composerStore.clearClipboardImages();
+      composerStore.clearTerminalSelection();
+      composerStore.clearAttachedDiagnostics();
+      composerStore.resetPastedImageIndex();
+    }
     uiStore.stopLoading();
     uiStore.setError(null);
     uiStore.setShowModelPicker(false);
@@ -1089,9 +1096,11 @@ export function resetWorkspaceDerivedState(options?: { preserveWorkspaceCatalog?
   appStore.defaultAppState.sessionTreeIndex.invalidate();
   appStore.defaultAppState.setSessionUsageLimitVersion((version) => version + 1);
   resetSessionStatusSnapshotTracking();
-  resetMessageEditState();
-  resetToolCallExpansionState();
-  resetMessageWindowState();
+  if (!options?.preserveTranscript) {
+    resetMessageEditState();
+    resetToolCallExpansionState();
+    resetMessageWindowState();
+  }
 }
 
 export function createOpenCodeRuntime(): OpenCodeRuntime {
@@ -1111,6 +1120,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let sessionActivationGeneration = 0;
   let sessionActivationController: AbortController | null = null;
   let sessionActivationDirectory: string | null = null;
+  let sessionActivationPreserveTranscript = false;
   let initialRouteConsumed = false;
   let restoredPermissionsClassified = false;
   const permissionDecisionReferencesByTree = new Map<string, AutoApproveJudgeReference[]>();
@@ -1331,9 +1341,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
             composerStore.setInputText(prefill);
           }
         },
-        openSession: (sessionId, directory) => {
+        openSession: (sessionId, directory, preserveTranscript) => {
           uiStore.setShowSessionPicker(false);
-          void selectSession(sessionId, { directory });
+          void selectSession(sessionId, { directory, preserveTranscript });
         },
         abortSession: () => {
           void abortSession().catch(() => {});
@@ -2297,7 +2307,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     connectionGeneration += 1;
     invalidateInitializationAttempt();
     invalidateWorkspaceAsyncWork(true, preserveSessionActivation);
-    resetWorkspaceDerivedState({ preserveWorkspaceCatalog: true });
+    resetWorkspaceDerivedState({
+      preserveWorkspaceCatalog: true,
+      preserveTranscript: preserveSessionActivation && sessionActivationPreserveTranscript,
+    });
   }
 
   function reloadWorkspaceAfterChange(wasInitialized: boolean) {
@@ -2887,10 +2900,17 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const activationController = new AbortController();
     sessionActivationController = activationController;
     const knownSession = appStore.state.sessions.find((session) => session.id === id);
+    const readOnlyTransfer = knownSession?.transfer?.available === false;
+    sessionActivationPreserveTranscript =
+      options?.preserveTranscript === true && appStore.state.activeSessionId === id;
     const targetDirectory = options?.directory ?? knownSession?.directory;
     appStore.setState('pendingSessionSelectionId', null);
     sessionActivationDirectory = null;
-    if (targetDirectory && !isSameWorkspacePath(targetDirectory, currentWorkspacePath)) {
+    if (
+      targetDirectory &&
+      !readOnlyTransfer &&
+      !isSameWorkspacePath(targetDirectory, currentWorkspacePath)
+    ) {
       sessionActivationDirectory = targetDirectory;
       batch(() => {
         appStore.setState('pendingSessionSelectionId', id);
@@ -3184,6 +3204,19 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       onOptimisticPublish?: () => void;
     }
   ): Promise<boolean> {
+    const sessionId =
+      options?.targetSessionId === undefined
+        ? appStore.state.activeSessionId
+        : options.targetSessionId;
+    const transfer = appStore.state.sessions.find((session) => session.id === sessionId);
+    const directory =
+      sessionId &&
+      (appStore.state.transferredSessions[sessionId] ??
+        (transfer?.transfer?.available === false ? transfer.directory : undefined));
+    if (directory) {
+      uiStore.setError(`Conversation moved to ${directory}. Open its folder to continue.`);
+      return false;
+    }
     return await sessionSendOperations.sendMessage(text, options);
   }
 

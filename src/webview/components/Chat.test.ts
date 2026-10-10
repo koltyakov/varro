@@ -163,6 +163,7 @@ afterEach(() => {
   setState('editorTabsOpen', false);
   setState('editorSessionIds', []);
   setState('activeSessionId', null);
+  setState('transferredSessions', reconcile({}));
   setState('messages', []);
   setState('queuedMessages', []);
   setState('streamingPartId', null);
@@ -198,6 +199,41 @@ function session(id: string, updated: number, overrides: Partial<Session> = {}):
     ...overrides,
   };
 }
+
+it('keeps a transferred conversation visible with an explicit open-folder action', () => {
+  setState('sessions', [session('session-1', 500)]);
+  setState('activeSessionId', 'session-1');
+  setState('transferredSessions', { 'session-1': '/outside' });
+  setConnectionInitialized(true);
+  setInputText('Unsent draft');
+  setState('selectedModel', { providerID: 'openai', modelID: 'test-model' });
+  const sent: WebviewMessage[] = [];
+  // SAFETY: This fixture owns the extension transport callback and restores it below.
+  const bridgeWindow = window as { __sendToExtension?: (message: WebviewMessage) => void };
+  const previous = bridgeWindow.__sendToExtension;
+  bridgeWindow.__sendToExtension = (message) => sent.push(message);
+  try {
+    cleanup = render(() => Chat(), container!);
+    const banner = container!.querySelector('.chat-transport-banner');
+    expect(banner?.textContent).toContain('Conversation moved');
+    expect(banner?.textContent).toContain('/outside');
+    const open = banner?.querySelector('button');
+    expect(open?.textContent).toBe('Open folder');
+    open?.click();
+    expect(sent).toContainEqual({
+      type: 'session/open-transferred',
+      payload: { sessionId: 'session-1' },
+    });
+    expect(state.activeSessionId).toBe('session-1');
+    const send = container!.querySelector<HTMLButtonElement>('button[aria-label="Send (Enter)"]');
+    expect(send).not.toBeNull();
+    expect(send!.disabled).toBe(true);
+  } finally {
+    if (previous) bridgeWindow.__sendToExtension = previous;
+    else delete bridgeWindow.__sendToExtension;
+    setInputText('');
+  }
+});
 
 function assistantMessageEntry(id: string): MessageEntry<AssistantMessage> {
   const info: AssistantMessage = {

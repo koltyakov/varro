@@ -91,6 +91,21 @@ function mockRuntimeBootstrap() {
 }
 
 describe('useOpenCode session state flows', () => {
+  it('reopens a persisted transferred session read-only without activating its closed folder', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    const moved = {
+      ...session('moved'),
+      directory: '/outside',
+      transfer: { originDirectory: '/repo', available: false },
+    };
+    stateModule.setState('sessions', [moved]);
+    clientMocks.sessionGet.mockResolvedValue(moved);
+    clientMocks.sessionMessages.mockResolvedValue([userEntry('old-prompt', 'moved')]);
+    await hookModule.selectSession('moved', { directory: '/outside' });
+    expect(clientMocks.sessionActivate).not.toHaveBeenCalled();
+    expect(stateModule.state.activeSessionId).toBe('moved');
+    expect(stateModule.state.messages[0]?.info.id).toBe('old-prompt');
+  });
   it('closes the session picker when the host opens a session', async () => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
     bridgeOnMessage.mockImplementation((handler) => {

@@ -18,6 +18,8 @@ export type SessionSelectionOptions = {
   throwOnLoadFailure?: boolean;
   /** Startup restores history without gating the whole chat on MCP connections. */
   waitForMcpSync?: boolean;
+  /** Refresh the selected session without clearing its transcript or moving its scroll anchor. */
+  preserveTranscript?: boolean;
 };
 export type ModelVariantSelections = Record<string, string | null>;
 
