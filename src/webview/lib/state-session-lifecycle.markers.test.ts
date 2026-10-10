@@ -9,6 +9,39 @@ beforeEach(() => vi.resetModules());
 afterEach(() => vi.restoreAllMocks());
 
 describe('catalog marker restoration', () => {
+  it('persists unread interruptions across reloads without treating them as completions', async () => {
+    let state = await import('./state');
+    state.setSessions([session('chat', '/repo')]);
+    state.markSessionResponseInterrupted('chat', 300);
+    expect(state.isSessionInterruptedResponseUnread('chat')).toBe(true);
+    expect(state.isSessionCompletedResponseUnread('chat')).toBe(false);
+
+    vi.resetModules();
+    state = await import('./state');
+    state.syncSessionMarkersForWorkspace('/repo', ['/repo']);
+    state.setSessions([session('chat', '/repo')]);
+    expect(state.isSessionInterruptedResponseUnread('chat')).toBe(true);
+    state.markSessionSeen('chat', 300);
+    expect(state.isSessionInterruptedResponseUnread('chat')).toBe(false);
+    state.markSessionResponseInterrupted('chat', 400);
+    expect(state.isSessionInterruptedResponseUnread('chat')).toBe(true);
+    state.markSessionResponseCompleted('chat', 500);
+    expect(state.isSessionInterruptedResponseUnread('chat')).toBe(false);
+  });
+
+  it('acknowledges a child interruption even when the server clock is ahead', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const state = await import('./state');
+    state.setSessions([
+      session('root', '/repo'),
+      { ...session('child', '/repo'), parentID: 'root' },
+    ]);
+    state.markSessionResponseInterrupted('child', 3_000);
+    state.markSessionSeen('root');
+    expect(state.state.lastSeenSessions.root).toBe(3_000);
+    expect(state.isSessionInterruptedResponseUnread('child')).toBe(false);
+  });
+
   it('imports folder reads and restores them in a workspace with separate browser storage', async () => {
     const bridge = await import('./bridge');
     const post = vi.spyOn(bridge, 'postMessage');
@@ -165,7 +198,11 @@ describe('catalog marker restoration', () => {
   });
 
   it('preserves unloaded markers and storage until an authoritative complete catalog arrives', async () => {
-    const keys = ['varro.skippedPlanSessions', 'varro.completedSessionResponses'];
+    const keys = [
+      'varro.skippedPlanSessions',
+      'varro.completedSessionResponses',
+      'varro.interruptedSessionResponses',
+    ];
     for (const key of keys) {
       window.localStorage.setItem(key, JSON.stringify({ '/repo': { older: 100, deleted: 100 } }));
     }

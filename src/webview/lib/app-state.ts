@@ -191,6 +191,7 @@ export interface AppState {
   modelDisplayNames: Record<string, string>;
   lastSeenSessions: Record<string, number>;
   completedSessionResponses: Record<string, number>;
+  interruptedSessionResponses: Record<string, number>;
   skippedPlanSessions: Record<string, number>;
   compactingSessionIds: string[];
   queuedMessages: QueuedMessage[];
@@ -357,6 +358,11 @@ export function createAppState(): AppStateInstance {
     sessionMarkerWorkspaceScope
   );
   const modelPreferences = initialWebviewState.modelPreferences;
+  const initialInterruptedSessionResponses = readInitialSessionMarkerScope(
+    sessionMarkerStorage,
+    STORAGE_KEYS.interruptedSessionResponses,
+    sessionMarkerWorkspaceScope
+  );
 
   const [state, setState] = createStore<AppState>({
     serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
@@ -470,6 +476,7 @@ export function createAppState(): AppStateInstance {
       modelPreferences?.modelDisplayNames ?? readStoredStringRecord(STORAGE_KEYS.modelDisplayNames),
     lastSeenSessions: initialLastSeenSessions,
     completedSessionResponses: initialCompletedSessionResponses,
+    interruptedSessionResponses: initialInterruptedSessionResponses,
     skippedPlanSessions: initialSkippedPlanSessions,
     compactingSessionIds: [],
     queuedMessages: initialQueuedMessages,

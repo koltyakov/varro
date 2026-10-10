@@ -48,6 +48,7 @@ function restoreCatalogSessionMarkers(sessions: readonly Session[]) {
     'lastSeenSessions',
     'skippedPlanSessions',
     'completedSessionResponses',
+    'interruptedSessionResponses',
   ] as const) {
     const stored = readMergedSessionMarkerState(markerStorage, STORAGE_KEYS[field], [], unrestored);
     batch(() => {
@@ -115,7 +116,9 @@ export function markSessionSeen(id: string, updatedAt?: number) {
     Math.max(
       Date.now(),
       state.sessions.find((session) => session.id === id)?.time.updated ?? 0,
-      state.completedSessionResponses[id] ?? 0
+      state.completedSessionResponses[id] ?? 0,
+      state.interruptedSessionResponses[id] ?? 0,
+      ...getSessionTreeIds(id).map((sessionId) => state.interruptedSessionResponses[sessionId] ?? 0)
     );
   const timestamp = nextSessionMarkerTimestamp(state.lastSeenSessions[id], seenAt);
   if (timestamp === null) return false;
@@ -130,6 +133,29 @@ export function markSessionResponseCompleted(id: string, completedAt?: number) {
   if (timestamp === null) return;
   setState('completedSessionResponses', id, timestamp);
   writeMarkerForSession(STORAGE_KEYS.completedSessionResponses, id, timestamp);
+}
+
+export function markSessionResponseInterrupted(id: string, interruptedAt?: number) {
+  const timestamp = nextSessionMarkerTimestamp(
+    state.interruptedSessionResponses[id],
+    interruptedAt
+  );
+  if (timestamp === null) return;
+  setState('interruptedSessionResponses', id, timestamp);
+  writeMarkerForSession(STORAGE_KEYS.interruptedSessionResponses, id, timestamp);
+}
+
+export function isSessionInterruptedResponseUnread(sessionId: string) {
+  const interruptedAt = state.interruptedSessionResponses[sessionId];
+  if (interruptedAt === undefined) return false;
+  const rootId = getSessionTreeRootId(sessionId) || sessionId;
+  const seenAt = Math.max(
+    state.lastSeenSessions[sessionId] ?? 0,
+    state.lastSeenSessions[rootId] ?? 0
+  );
+  return (
+    interruptedAt > seenAt && interruptedAt > (state.completedSessionResponses[sessionId] ?? 0)
+  );
 }
 
 export function clearSessionSeen(id: string) {
@@ -315,6 +341,11 @@ export function setSessions(nextSessions: Session[], complete = false) {
     );
     writeOpenWorkspaceMarkerState(STORAGE_KEYS.completedSessionResponses, nextCompletedMarkers);
   }
+  const nextInterruptedMarkers = pruneSessionMarkers(state.interruptedSessionResponses, sessionIds);
+  if (nextInterruptedMarkers) {
+    setState('interruptedSessionResponses', reconcile(nextInterruptedMarkers));
+    writeOpenWorkspaceMarkerState(STORAGE_KEYS.interruptedSessionResponses, nextInterruptedMarkers);
+  }
 }
 
 export function syncSessionMarkersForWorkspace(
@@ -327,6 +358,12 @@ export function syncSessionMarkersForWorkspace(
   );
   restoredMarkerDirectories.clear();
   setSessionMarkerWorkspaceScopeValue(scope);
+  setState(
+    'interruptedSessionResponses',
+    reconcile(
+      readMergedSessionMarkerState(markerStorage, STORAGE_KEYS.interruptedSessionResponses, scopes)
+    )
+  );
   setState(
     'lastSeenSessions',
     reconcile(readMergedSessionMarkerState(markerStorage, STORAGE_KEYS.lastSeenSessions, scopes))
@@ -442,7 +479,10 @@ export function syncFailedSessionsFromMessages(messages: MessageEntry[] = state.
 
   for (const [sessionId, info] of latestBySession) {
     if (info.role !== 'assistant' || !info.error) continue;
-    if (isAbortedAssistantError(info.error)) continue;
+    if (isAbortedAssistantError(info.error)) {
+      markSessionResponseInterrupted(sessionId, info.time.completed ?? info.time.created);
+      continue;
+    }
     const session = state.sessions.find((item) => item.id === sessionId);
     if (!session) continue;
     failedSessionIds.add(sessionId);

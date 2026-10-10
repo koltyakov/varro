@@ -27,6 +27,7 @@ export const STORAGE_KEYS = {
   modelPickerOpened: 'varro.modelPickerOpened',
   lastSeenSessions: 'varro.lastSeenSessions',
   completedSessionResponses: 'varro.completedSessionResponses',
+  interruptedSessionResponses: 'varro.interruptedSessionResponses',
   unsharedSessions: 'varro.unsharedSessions',
   queuedMessages: 'varro.queuedMessages',
   queuedMessageEdit: 'varro.queuedMessageEdit',

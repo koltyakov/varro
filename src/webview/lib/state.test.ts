@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createComputed, createRoot } from 'solid-js';
+import { reconcile } from 'solid-js/store';
 import type { WebviewMessage } from '../../shared/protocol';
 import type { AssistantMessage, Part, Permission, ToolPart } from '../types';
 import {
@@ -860,6 +861,7 @@ describe('failed session tracking', () => {
     ]);
     setState('activeSessionId', null);
     setState('lastSeenSessions', { 'session-1': 0, 'session-2': 0 });
+    setState('interruptedSessionResponses', reconcile({}));
   });
 
   it('derives failed sessions from latest assistant message errors', () => {
@@ -919,6 +921,7 @@ describe('failed session tracking', () => {
       {
         info: {
           ...assistantMessage('message-1', 'session-1'),
+          time: { created: 100, completed: 500 },
           error: { name: 'aborted', data: { message: 'Aborted' } },
         },
         parts: [],
@@ -926,6 +929,7 @@ describe('failed session tracking', () => {
     ]);
 
     expect(state.failedSessionIds).toEqual([]);
+    expect(state.interruptedSessionResponses['session-1']).toBe(500);
   });
 
   it('preserves failed flags for sessions outside the synced message set', () => {

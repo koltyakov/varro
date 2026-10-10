@@ -907,6 +907,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }, delay);
     transientConnectionRetryTimers.set(sessionId, timer);
   };
+  const recordSessionInterruption = (sessionId: string, interruptedAt?: number) => {
+    sessionStore.markSessionResponseInterrupted(sessionId, interruptedAt);
+    if (
+      sessionId === deps.getActiveSessionId() &&
+      (readWebviewInstanceContext()?.surface === 'editor' || !uiStore.showSessionPicker())
+    ) {
+      sessionStore.markSessionSeen(sessionId);
+    }
+  };
   const markSessionError = (sessionId: string, error: AssistantMessage['error'] | undefined) => {
     const aborted = deps.hasPendingAbort(sessionId);
     if (aborted || isAbortedAssistantError(error)) cancelledProviderRetries.add(sessionId);
@@ -933,6 +942,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (error && isAbortedAssistantError(error)) {
       sessionStore.setSessionFailed(sessionId, false);
       sessionStore.setSessionUsageLimit(sessionId, null);
+      recordSessionInterruption(sessionId);
     } else {
       sessionStore.setSessionFailed(sessionId, true);
       const notice = parseUsageLimitNotice(error?.data?.message || error?.name);
@@ -1450,7 +1460,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
             sessionID?: string;
             role?: string;
             error?: AssistantMessage['error'];
-            time?: { completed?: number };
+            time?: { created?: number; completed?: number };
           }
         | undefined;
       const sessionID = partialMessage?.sessionID;
@@ -1464,6 +1474,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         partialMessage.role === 'assistant' &&
         !partialMessage.error &&
         !!partialMessage.time?.completed;
+      if (partialMessage.role === 'assistant' && isAbortedAssistantError(partialMessage.error)) {
+        recordSessionInterruption(
+          sessionID,
+          partialMessage.time?.completed ?? partialMessage.time?.created
+        );
+      }
       if (assistantCompleted) {
         cancelTransientConnectionRetry(sessionID);
         providerRetryAttempts.delete(sessionID);

@@ -6,6 +6,9 @@ import type { SessionDiffSummary } from '../../../shared/protocol';
 import { client } from '../../lib/client';
 import {
   error,
+  markSessionResponseCompleted,
+  markSessionResponseInterrupted,
+  markSessionSeen,
   setSessions,
   setError,
   setShowSessionPicker,
@@ -239,6 +242,7 @@ beforeEach(() => {
   });
   setState('editorTabsOpen', false);
   setState('completedSessionResponses', reconcile({}));
+  setState('interruptedSessionResponses', reconcile({}));
   setState('sessionsLoadError', null);
   setState('sessionsHasMore', false);
   setState('sessionsLoadingMore', false);
@@ -267,6 +271,7 @@ afterEach(() => {
   setState('compactingSessionIds', []);
   setState('queuedMessages', []);
   setState('completedSessionResponses', reconcile({}));
+  setState('interruptedSessionResponses', reconcile({}));
   setState('sessionsLoadError', null);
   setState('sessionsHasMore', false);
   setState('sessionsLoadingMore', false);
@@ -819,6 +824,72 @@ describe('SessionListView model details', () => {
     cleanup = render(() => <SessionListView />, container);
 
     expect(container.querySelector('.session-item-indicator.is-completed')).not.toBeNull();
+  });
+
+  it.each(['build', 'plan'])('shows a red marker for an unread interrupted %s session', (agent) => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('lastSeenSessions', { 'session-1': 100 });
+    setState('sessionSelectedAgents', { 'session-1': agent });
+    markSessionResponseInterrupted('session-1', 500);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    const marker = container.querySelector('.session-item-indicator.is-failed');
+    expect(marker?.getAttribute('aria-label')).toBe('Interrupted');
+    expect(container.querySelector('.session-item-indicator.is-completed')).toBeNull();
+    expect(container.querySelector('.session-item-indicator.is-plan-completed')).toBeNull();
+
+    markSessionSeen('session-1', 500);
+    expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
+  });
+
+  it('replaces an unread interrupted marker with a later completion', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('lastSeenSessions', { 'session-1': 100 });
+    setState('sessionSelectedAgents', { 'session-1': 'build' });
+    markSessionResponseInterrupted('session-1', 500);
+    cleanup = render(() => <SessionListView />, container);
+    expect(container.querySelector('.session-item-indicator.is-failed')).not.toBeNull();
+
+    markSessionResponseCompleted('session-1', 600);
+
+    expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
+    expect(container.querySelector('.session-item-indicator.is-completed')).not.toBeNull();
+  });
+
+  it.each(['busy', 'retry', 'visible-editor'] as const)(
+    'does not show an interrupted marker while the session is %s',
+    (visibility) => {
+      setState('sessions', [session('session-1', 500)]);
+      setState('lastSeenSessions', { 'session-1': 100 });
+      markSessionResponseInterrupted('session-1', 500);
+      if (visibility === 'visible-editor') setState('editorSessionIds', ['session-1']);
+      else
+        setState('sessionStatus', {
+          'session-1':
+            visibility === 'retry'
+              ? { type: 'retry', attempt: 1, message: 'Retrying', next: Date.now() + 1_000 }
+              : { type: 'busy' },
+        });
+
+      cleanup = render(() => <SessionListView />, container);
+
+      expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
+    }
+  );
+
+  it('shows an unread child interruption on its parent and acknowledges it on parent read', () => {
+    setSessions([session('root', 500), session('child', 500, { parentID: 'root' })]);
+    setState('sessionStatus', { root: { type: 'idle' }, child: { type: 'idle' } });
+    setState('lastSeenSessions', { root: 100, child: 100 });
+    markSessionResponseInterrupted('child', 500);
+    cleanup = render(() => <SessionListView />, container);
+
+    expect(
+      container.querySelector('.session-item-indicator.is-failed')?.getAttribute('aria-label')
+    ).toBe('Interrupted');
+    markSessionSeen('root', 500);
+    expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
   });
 
   it('reveals a hidden editor when its session is selected from the sidebar', () => {

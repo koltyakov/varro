@@ -43,6 +43,7 @@ const {
   finishMessageStreaming,
   markSessionSeen,
   markSessionResponseCompleted,
+  markSessionResponseInterrupted,
   removePermission,
   removeMessage,
   removeMessagePart,
@@ -84,6 +85,7 @@ const {
     finishMessageStreaming: vi.fn(),
     markSessionSeen: vi.fn(),
     markSessionResponseCompleted: vi.fn(),
+    markSessionResponseInterrupted: vi.fn(),
     removePermission: vi.fn(),
     removeMessage: vi.fn(),
     removeMessagePart: vi.fn(),
@@ -155,6 +157,7 @@ vi.mock('../lib/stores/session-store', async () => {
       finishMessageStreaming,
       markSessionSeen,
       markSessionResponseCompleted,
+      markSessionResponseInterrupted,
       removeMessage,
       removeMessagePart,
       replaceMessages,
@@ -364,7 +367,26 @@ describe('registerSessionEventHandlers', () => {
         properties: { sessionID: 'session-1', error },
       });
       expect(upsertMessageInfo).toHaveBeenCalledWith({ ...assistant.info, error });
+      expect(markSessionResponseInterrupted).toHaveBeenCalledWith('session-1', undefined);
       expect(steering.info.pendingDelivery).toBe('steer');
+    } finally {
+      for (const cleanup of cleanups) cleanup();
+    }
+  });
+
+  it('records an unread interruption from a background assistant update', () => {
+    const handlers = installHandlers();
+    const assistant = createAssistantEntry({
+      time: { created: 100, completed: 500 },
+      error: { name: 'MessageAbortedError', data: {} },
+    });
+    markSessionResponseInterrupted.mockClear();
+    markSessionResponseCompleted.mockClear();
+    const cleanups = registerSessionEventHandlers(createDefaultDeps());
+    try {
+      emitServerEvent(handlers, 'message.updated', { properties: { info: assistant.info } });
+      expect(markSessionResponseInterrupted).toHaveBeenCalledWith('session-1', 500);
+      expect(markSessionResponseCompleted).not.toHaveBeenCalled();
     } finally {
       for (const cleanup of cleanups) cleanup();
     }
