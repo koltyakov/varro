@@ -92,6 +92,21 @@ for (const width of [486, 1100]) {
     expect(stop.width).toBeCloseTo(steer.width, 1);
     expect(stop.y).toBeCloseTo(steer.y, 1);
     expect(steer.x - (stop.x + stop.width)).toBeCloseTo(6, 1);
+    for (const name of ['Stop process', 'Steer stop']) {
+      const button = dialog.getByRole('button', { name, exact: true });
+      await expect(button).toHaveCSS('display', 'flex');
+      await expect(button).toHaveCSS('align-items', 'center');
+      await expect(button).toHaveCSS('justify-content', 'center');
+      await expect(button).toHaveCSS('line-height', '11px');
+      const centerOffset = await button.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const text = range.getBoundingClientRect();
+        const bounds = element.getBoundingClientRect();
+        return Math.abs(text.y + text.height / 2 - (bounds.y + bounds.height / 2));
+      });
+      expect(centerOffset).toBeLessThanOrEqual(1);
+    }
     // Crossing the breakpoint must preserve the selected process without reopening the dialog.
     await page.setViewportSize({ width: width <= 600 ? 1100 : 486, height: 794 });
     if (width <= 600) {
