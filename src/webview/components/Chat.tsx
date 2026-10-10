@@ -66,6 +66,8 @@ import {
 } from '../lib/session-navigation';
 import { isFunction } from '../lib/runtime-values';
 import { ProviderConnectionDialog } from './ProviderConnectionDialog';
+import { BackgroundProcessDialog } from './BackgroundProcessDialog';
+import { backgroundProcessView, closeBackgroundProcessView } from '../lib/background-process-view';
 import { readWebviewInstanceContext } from '../lib/state-stored-values';
 
 type HeaderSessionCounts = {
@@ -150,6 +152,11 @@ export function Chat() {
     );
   });
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
+  createEffect(() => {
+    const view = backgroundProcessView();
+    if (view && view.sessionID !== state.activeSessionId) closeBackgroundProcessView();
+  });
+  onCleanup(closeBackgroundProcessView);
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
   const [sidebarSubagentParentId, setSidebarSubagentParentId] = createSignal<string | null>(null);
   const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
@@ -954,6 +961,15 @@ export function Chat() {
         onSendFromPicker={() => setShowSessionPicker(false)}
         onCreateSession={startNewChatDraft}
       />
+      <Show when={backgroundProcessView()} keyed>
+        {(view) => (
+          <BackgroundProcessDialog
+            sessionID={view.sessionID}
+            directory={view.directory}
+            onClose={closeBackgroundProcessView}
+          />
+        )}
+      </Show>
       <Show when={providerConnectionData()}>
         {(data) => (
           <ProviderConnectionDialog

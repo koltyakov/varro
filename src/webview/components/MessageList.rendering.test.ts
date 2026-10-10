@@ -4667,12 +4667,21 @@ describe('MessageList loading row', () => {
       { info: interim, parts: [textPart('text-assistant-1', 'Testing is still running.')] },
     ];
     replaceMessages(entries);
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy', background: true } }));
+    setState(
+      'sessionStatus',
+      reconcile({
+        'session-1': {
+          type: 'busy',
+          background: true,
+          backgroundCommand: 'python3 tools/serve.py 18765',
+        },
+      })
+    );
     startLoading(1_000);
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
     expect(container?.querySelector('.background-process')?.textContent).toContain(
-      'Background process'
+      'Background process: python3 tools/serve.py 18765'
     );
     expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
 
@@ -4680,7 +4689,7 @@ describe('MessageList loading row', () => {
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     await Promise.resolve();
     expect(container?.querySelector('.background-process')?.textContent).toContain(
-      'Background process'
+      'Background process: python3 tools/serve.py 18765'
     );
     expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
     replaceMessages([

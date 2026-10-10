@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import { markLoadingActivity, startLoading, stopLoading } from '../../lib/state';
+import { markLoadingActivity, setState, startLoading, stopLoading } from '../../lib/state';
+import {
+  backgroundProcessView,
+  closeBackgroundProcessView,
+} from '../../lib/background-process-view';
 import { attachmentIcon, hourglassIcon, mediaImageIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 import type { Permission, QuestionRequest } from '../../types';
@@ -51,6 +55,8 @@ describe('MessageListChrome', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     stopLoading();
+    closeBackgroundProcessView();
+    setState('activeSessionId', null);
   });
 
   it('keeps elapsed time moving after a stale loading session resumes', () => {
@@ -100,6 +106,36 @@ describe('MessageListChrome', () => {
     expect(container?.querySelector('.loading-indicator')).toBeNull();
     expect(container?.textContent).not.toContain('Session may be stale');
     expect(container?.querySelector('.loading-action')).toBeNull();
+  });
+
+  it('opens a session-scoped details view without changing the loading slot', () => {
+    setState('activeSessionId', 'ses_background');
+    startLoading();
+    cleanup = render(() => <LoadingRow compacting={false} visible waiting />, container!);
+    const button = container!.querySelector<HTMLButtonElement>(
+      '[aria-label="View background process details"]'
+    )!;
+    expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+    button.click();
+    expect(backgroundProcessView()?.sessionID).toBe('ses_background');
+    expect(container!.querySelector('.background-process')).not.toBeNull();
+    expect(container!.querySelector('.loading-indicator')).toBeNull();
+  });
+  it('shows the command and retains it during the resume handoff without leaking across sessions', () => {
+    setState('activeSessionId', 'ses_background');
+    const [command, setCommand] = createSignal<string | undefined>('python3 tools/serve.py 18765');
+    startLoading();
+    cleanup = render(
+      () => <LoadingRow compacting={false} visible waiting waitingCommand={command()} />,
+      container!
+    );
+    const title = () => container!.querySelector('.background-process .tool-invocation-title');
+    expect(title()?.textContent).toBe('Background process: python3 tools/serve.py 18765');
+    expect(title()?.getAttribute('title')).toBe('python3 tools/serve.py 18765');
+    setCommand(undefined);
+    expect(title()?.textContent).toBe('Background process: python3 tools/serve.py 18765');
+    setState('activeSessionId', 'ses_other');
+    expect(title()?.textContent).toBe('Background process');
   });
 
   it('counts from the last completion without resetting on ordinary activity', () => {

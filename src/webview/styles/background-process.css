@@ -1,0 +1,197 @@
+.background-process-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.background-process-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 960px);
+  max-height: calc(100vh - 32px);
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-card);
+  background: var(--color-vscode-sidebar);
+  color: var(--color-vscode-fg);
+  box-shadow: var(--shadow-popover);
+  overflow: hidden;
+}
+
+.background-process-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 10px 12px 16px;
+  border-bottom: 1px solid var(--color-vscode-border);
+}
+
+.background-process-dialog-header h2 {
+  margin: 0;
+  font-size: 14px;
+}
+.background-process-close {
+  display: flex;
+  padding: 6px;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.background-process-close:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+.background-process-dialog-body {
+  display: flex;
+  min-height: 0;
+  height: min(65vh, 600px);
+}
+.background-process-list {
+  flex: 0 0 240px;
+  overflow: auto;
+  padding: 8px;
+  border-right: 1px solid var(--color-vscode-border);
+}
+.background-process-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.background-process-list-item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.background-process-list-item.is-selected {
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-inactiveSelectionBackground);
+}
+.background-process-command {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+.background-process-meta {
+  font-size: 11px;
+  color: var(--color-vscode-muted);
+  overflow-wrap: anywhere;
+}
+.background-process-detail {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  gap: 6px;
+  overflow: auto;
+}
+.background-process-detail-command {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  flex-shrink: 0;
+}
+.background-process-console {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 100px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-vscode-border);
+  border-radius: 4px;
+  background: var(--vscode-editor-background, var(--color-vscode-sidebar));
+}
+.background-process-output-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-vscode-border);
+}
+.background-process-output-actions {
+  display: flex;
+  gap: 4px;
+}
+.background-process-output-actions button {
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-vscode-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.background-process-output-actions button:hover,
+.background-process-output-actions button[aria-pressed='true'] {
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--color-vscode-fg);
+}
+.background-process-output {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  overflow-anchor: none;
+  color: var(--color-vscode-fg);
+  background: transparent;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.background-process-output.is-wrapped {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.background-process-empty,
+.background-process-error {
+  padding: 12px 16px;
+}
+.background-process-error {
+  color: var(--vscode-errorForeground);
+}
+.background-process-error button {
+  margin-left: 8px;
+}
+
+@media (max-width: 600px) {
+  .background-process-dialog-body {
+    flex-direction: column;
+    height: 75vh;
+  }
+  .background-process-list {
+    flex-basis: auto;
+    max-height: 160px;
+    flex-shrink: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-vscode-border);
+  }
+}

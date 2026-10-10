@@ -32,6 +32,8 @@ import type { OpenCodeRequestOptions } from './open-code-transport';
 import { OpenCodeResponseTooLargeError } from './opencode-response-error';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { OpenCodeV2BackgroundWork } from './opencode-v2-background-work';
+import { BACKGROUND_OUTPUT_CHUNK_BYTES } from '../shared/background-process';
+import type { BackgroundProcess, BackgroundProcessOutput } from '../shared/background-process';
 import { OpenCodeV2GenerationTiming } from './opencode-v2-generation-timing';
 import { logger } from './logger';
 import {
@@ -292,6 +294,7 @@ export class OpenCodeV2Adapter {
       ...this.contexts.get(sessionID),
       backgroundPending: this.backgroundWork.isWaiting(sessionID),
       backgroundStartedAt: this.backgroundWork.startedAt(sessionID),
+      backgroundCommand: this.backgroundWork.command(sessionID),
       generationTiming: this.generationTiming,
     };
   }
@@ -477,6 +480,7 @@ export class OpenCodeV2Adapter {
             type: 'busy',
             background: true,
             backgroundStartedAt: this.backgroundWork.startedAt(id),
+            backgroundCommand: this.backgroundWork.command(id),
           },
         ]),
       ]);
@@ -576,6 +580,46 @@ export class OpenCodeV2Adapter {
       const sessionID = decodeURIComponent(sessionRoute[1]!);
       const endpoint = `/api/session/${encodeURIComponent(sessionID)}`;
       const action = sessionRoute[2] ?? '';
+      if (method === 'GET' && action === 'background-process') {
+        const shells = await data<ShellInfo[]>('GET', query('/api/shell', true));
+        return shells
+          .filter((shell) => shell.metadata.sessionID === sessionID)
+          .map((shell): BackgroundProcess => ({
+            id: shell.id,
+            status: shell.status,
+            command: shell.command.slice(0, 16 * 1024),
+            cwd: shell.cwd,
+            pid: shell.pid,
+            exit: shell.exit,
+            signal: shell.signal,
+            time: shell.time,
+          }));
+      }
+      const backgroundOutput = action.match(/^background-process\/([^/]+)\/output$/);
+      if (method === 'GET' && backgroundOutput) {
+        const shellID = decodeURIComponent(backgroundOutput[1]!);
+        const shellEndpoint = `/api/shell/${encodeURIComponent(shellID)}`;
+        const shell = await data<ShellInfo>('GET', query(shellEndpoint, true));
+        if (shell.metadata.sessionID !== sessionID)
+          throw new Error('404 Background process not found');
+        const target = new URL(query(`${shellEndpoint}/output`, true), 'http://localhost');
+        const cursor = url.searchParams.get('cursor');
+        if (cursor !== null && (!/^\d+$/.test(cursor) || !Number.isSafeInteger(Number(cursor))))
+          throw new Error('Invalid background output cursor');
+        // On first open, inspect the size then read only the tail. Never transfer a full log.
+        target.searchParams.set('cursor', cursor ?? '0');
+        target.searchParams.set(
+          'limit',
+          cursor === null ? '1' : String(BACKGROUND_OUTPUT_CHUNK_BYTES)
+        );
+        const first = await data<BackgroundProcessOutput>('GET', target.pathname + target.search);
+        if (cursor !== null) return first;
+        const start = Math.max(0, first.size - BACKGROUND_OUTPUT_CHUNK_BYTES);
+        target.searchParams.set('cursor', String(start));
+        target.searchParams.set('limit', String(BACKGROUND_OUTPUT_CHUNK_BYTES));
+        const output = await data<BackgroundProcessOutput>('GET', target.pathname + target.search);
+        return { ...output, truncated: start > 0 || output.truncated };
+      }
       const restoreGenerationTiming = async (messages: readonly SessionMessageInfo[]) => {
         try {
           // Timing metadata is optional. Bound annotation reads and admission as

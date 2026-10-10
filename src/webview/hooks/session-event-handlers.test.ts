@@ -3949,13 +3949,19 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: {
         sessionID: 'session-1',
-        status: { type: 'busy', background: true, backgroundStartedAt: 1 },
+        status: {
+          type: 'busy',
+          background: true,
+          backgroundStartedAt: 1,
+          backgroundCommand: 'python3 tools/serve.py 18765',
+        },
       },
     });
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', {
       type: 'busy',
       background: true,
       backgroundStartedAt: 1,
+      backgroundCommand: 'python3 tools/serve.py 18765',
     });
     expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
     expect(startLoading).toHaveBeenCalled();

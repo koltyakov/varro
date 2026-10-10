@@ -1,15 +1,19 @@
 import type { ShellInfo } from '@opencode/client';
+import { BACKGROUND_COMMAND_SUMMARY_CHARS } from '../shared/background-process';
 import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 
 /** Shell calls settle before their background processes and automatic follow-up turns do. */
 export class OpenCodeV2BackgroundWork {
   private readonly shells = new Map<
     string,
-    { sessionID: string; directory?: string; startedAt?: number }
+    { sessionID: string; directory?: string; startedAt?: number; command?: string }
   >();
   private readonly mutations = new Map<string, number>();
   private readonly sessionMutations = new Map<string, number>();
-  private readonly waiting = new Map<string, { directory?: string; endedAt: number | null }>();
+  private readonly waiting = new Map<
+    string,
+    { directory?: string; endedAt: number | null; command?: string }
+  >();
   private readonly stoppedSessions = new Set<string>();
   private revision = 0;
 
@@ -23,20 +27,25 @@ export class OpenCodeV2BackgroundWork {
           sessionID,
           directory,
           startedAt: isNumber(startedAt) && Number.isFinite(startedAt) ? startedAt : undefined,
+          command: isString(info.command) ? summarizeCommand(info.command) : undefined,
         });
         this.mutations.set(info.id, ++this.revision);
         this.sessionMutations.set(sessionID, this.revision);
       }
     }
     if ((type === 'shell.exited' || type === 'shell.deleted') && isString(data.id)) {
-      const sessionID = this.shells.get(data.id)?.sessionID;
+      const shell = this.shells.get(data.id);
+      const sessionID = shell?.sessionID;
       this.shells.delete(data.id);
       this.mutations.set(data.id, ++this.revision);
       // Keep Waiting through the gap before the completion notification resumes the model.
       if (sessionID) {
         this.sessionMutations.set(sessionID, this.revision);
         const waiting = this.waiting.get(sessionID);
-        if (waiting && this.shellIDs(sessionID).length === 0) waiting.endedAt = Date.now();
+        if (waiting && this.shellIDs(sessionID).length === 0) {
+          waiting.endedAt = Date.now();
+          waiting.command = shell?.command ?? waiting.command;
+        }
       }
     }
     if (!isString(data.sessionID)) return;
@@ -50,7 +59,11 @@ export class OpenCodeV2BackgroundWork {
         (shell) => shell.sessionID === data.sessionID
       );
       if (pendingShell && !this.stoppedSessions.has(data.sessionID))
-        this.waiting.set(data.sessionID, { directory: pendingShell.directory, endedAt: null });
+        this.waiting.set(data.sessionID, {
+          directory: pendingShell.directory,
+          endedAt: null,
+          command: pendingShell.command,
+        });
     }
     if (type === 'session.execution.started' || type === 'session.step.started')
       this.stoppedSessions.delete(data.sessionID);
@@ -80,6 +93,13 @@ export class OpenCodeV2BackgroundWork {
     return starts.length > 0 ? Math.min(...starts) : undefined;
   }
 
+  command(sessionID: string): string | undefined {
+    return (
+      [...this.shells.values()].find((shell) => shell.sessionID === sessionID && shell.command)
+        ?.command ?? this.waiting.get(sessionID)?.command
+    );
+  }
+
   snapshotVersion(): number {
     return this.revision;
   }
@@ -94,7 +114,17 @@ export class OpenCodeV2BackgroundWork {
       shells.flatMap((shell) => {
         const sessionID = shell.metadata.sessionID;
         return shell.status === 'running' && isString(sessionID)
-          ? [[shell.id, { sessionID, directory, startedAt: shell.time.started }] as const]
+          ? [
+              [
+                shell.id,
+                {
+                  sessionID,
+                  directory,
+                  startedAt: shell.time.started,
+                  command: summarizeCommand(shell.command),
+                },
+              ] as const,
+            ]
           : [];
       })
     );
@@ -115,7 +145,11 @@ export class OpenCodeV2BackgroundWork {
         this.stoppedSessions.has(shell.sessionID)
       )
         continue;
-      this.waiting.set(shell.sessionID, { directory, endedAt: null });
+      this.waiting.set(shell.sessionID, {
+        directory,
+        endedAt: null,
+        command: this.command(shell.sessionID),
+      });
     }
     for (const [sessionID, waiting] of this.waiting) {
       if (waiting.directory !== directory) continue;
@@ -146,4 +180,8 @@ export class OpenCodeV2BackgroundWork {
     this.stoppedSessions.clear();
     this.revision = 0;
   }
+}
+
+function summarizeCommand(command: string): string {
+  return command.slice(0, BACKGROUND_COMMAND_SUMMARY_CHARS).replace(/\s+/g, ' ').trim();
 }

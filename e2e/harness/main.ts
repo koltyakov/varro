@@ -10,6 +10,8 @@ import type {
   WebviewThemeKind,
 } from '../../src/shared/protocol';
 import { isPermissionMode } from '../../src/shared/protocol';
+import { BACKGROUND_OUTPUT_CHUNK_BYTES } from '../../src/shared/background-process';
+import type { BackgroundProcess } from '../../src/shared/background-process';
 import { getSessionPermissionRulesForMode } from '../../src/shared/permission-rules';
 import { normalizeWorkspaceIdentity } from '../../src/shared/workspace-path';
 import type {
@@ -185,6 +187,11 @@ type ScenarioState = {
 };
 
 type HarnessWindow = Window & {
+  varroBackgroundProcessFixture?: {
+    sessionID: string;
+    processes: BackgroundProcess[];
+    output: Record<string, string>;
+  };
   __initialTheme?: string;
   __initialWebviewState?: InitialWebviewState;
   __sendToExtension?: (message: WebviewMessage) => void | Promise<void>;
@@ -5390,6 +5397,28 @@ async function handleApiRequest(
 ) {
   const url = new URL(rawPath, 'http://varro.test');
   const path = url.pathname;
+
+  const backgroundRoute = path.match(
+    /^\/session\/([^/]+)\/background-process(?:\/([^/]+)\/output)?$/
+  );
+  if (method === 'GET' && backgroundRoute) {
+    const fixture = (window as HarnessWindow).varroBackgroundProcessFixture;
+    if (!fixture || fixture.sessionID !== decodeURIComponent(backgroundRoute[1]!)) return [];
+    if (!backgroundRoute[2]) return structuredClone(fixture.processes);
+    const id = decodeURIComponent(backgroundRoute[2]);
+    if (!fixture.processes.some((process) => process.id === id)) throw new Error('Process removed');
+    const output = fixture.output[id] ?? '';
+    const start = url.searchParams.has('cursor')
+      ? Number(url.searchParams.get('cursor'))
+      : Math.max(0, output.length - BACKGROUND_OUTPUT_CHUNK_BYTES);
+    const end = Math.min(start + BACKGROUND_OUTPUT_CHUNK_BYTES, output.length);
+    return {
+      output: output.slice(start, end),
+      cursor: end,
+      size: output.length,
+      truncated: start > 0 && !url.searchParams.has('cursor'),
+    };
+  }
 
   const startupOptions = new URLSearchParams(window.location.search);
   if (

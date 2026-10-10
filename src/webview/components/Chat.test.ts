@@ -32,6 +32,7 @@ import {
   shouldShowSessionHeaderBadge,
 } from './Chat';
 import { client } from '../lib/client';
+import { openBackgroundProcessView } from '../lib/background-process-view';
 import { EMPTY_SESSION_PRUNE_GRACE_MS } from '../lib/empty-session';
 import {
   requestOpenAttentionSessions,
@@ -1142,6 +1143,21 @@ describe('header status badges', () => {
     expect(marker?.getAttribute('aria-label')).toBe('Pending background task');
     expect(marker?.textContent).toBe('');
     expect(marker?.querySelector('.ui-icon')).not.toBeNull();
+  });
+  it('keeps background details through completion and closes them on session switch', async () => {
+    const now = Date.now();
+    setState('sessions', [session('waiting', now), session('other', now)]);
+    setState('activeSessionId', 'waiting');
+    setShowSessionPicker(false);
+    vi.spyOn(client.session, 'backgroundProcesses').mockResolvedValue([]);
+    cleanup = render(() => Chat(), container!);
+    openBackgroundProcessView('waiting', '/repo');
+    await Promise.resolve();
+    expect(document.querySelector('.background-process-dialog')).not.toBeNull();
+    setState('sessionStatus', 'waiting', { type: 'idle' });
+    expect(document.querySelector('.background-process-dialog')).not.toBeNull();
+    setState('activeSessionId', 'other');
+    expect(document.querySelector('.background-process-dialog')).toBeNull();
   });
   it('derives quick statuses from Recent sessions and excludes recycled sessions', () => {
     const now = Date.now();

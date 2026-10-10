@@ -1,4 +1,5 @@
 import { batch } from 'solid-js';
+import { BACKGROUND_COMMAND_SUMMARY_CHARS } from '../../../shared/background-process';
 import {
   isAbortedAssistantError,
   isProviderAuthFailure,
@@ -1851,6 +1852,11 @@ function parseSessionStatus<T>(value: T): SessionStatus | null {
     const pending: SessionStatus = { type: 'busy', background: true };
     if (isNumber(status.backgroundStartedAt) && Number.isFinite(status.backgroundStartedAt))
       pending.backgroundStartedAt = status.backgroundStartedAt;
+    if (isString(status.backgroundCommand))
+      pending.backgroundCommand = status.backgroundCommand.slice(
+        0,
+        BACKGROUND_COMMAND_SUMMARY_CHARS
+      );
     return pending;
   }
   if (

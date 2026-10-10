@@ -255,7 +255,11 @@ export type SessionStore = typeof sessionStore;
 function isEqualSessionStatus(a: SessionStatus, b: SessionStatus): boolean {
   if (a.type !== b.type) return false;
   if (a.type === 'busy' && b.type === 'busy')
-    return !!a.background === !!b.background && a.backgroundStartedAt === b.backgroundStartedAt;
+    return (
+      !!a.background === !!b.background &&
+      a.backgroundStartedAt === b.backgroundStartedAt &&
+      a.backgroundCommand === b.backgroundCommand
+    );
   if (a.type === 'retry' && b.type === 'retry') {
     return a.attempt === b.attempt && a.message === b.message && a.next === b.next;
   }

@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { recheckSessionStatus } from '../../hooks/useOpenCode';
 import { useSecondClock } from '../../lib/clock';
+import { openBackgroundProcessView } from '../../lib/background-process-view';
 import { logError } from '../../lib/log';
 import { formatMessageSentTime } from '../../lib/message-time';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
@@ -11,6 +12,7 @@ import {
   mediaImageIcon,
   navArrowUpIcon,
   navArrowDownIcon,
+  navArrowRightIcon,
 } from '../../lib/ui-icons';
 import type { Part, Permission, QuestionRequest } from '../../types';
 import { PermissionPrompt } from '../PermissionPrompt';
@@ -486,6 +488,7 @@ export function LoadingRow(props: {
   waiting?: boolean;
   toolsRunning?: boolean;
   waitingStartedAt?: number;
+  waitingCommand?: string;
   turnStartedAt?: number;
   elapsedStartedAt?: number;
 }) {
@@ -546,19 +549,22 @@ export function LoadingRow(props: {
     });
   });
   const waiting = () => props.waiting && !props.compacting;
-  const waitingClock = createMemo<{ sessionId: string | null; startedAt: number } | null>(
-    (previous) => {
-      if (!waiting()) return null;
-      const sessionId = state.activeSessionId;
-      return {
-        sessionId,
-        startedAt:
-          props.waitingStartedAt ??
-          (previous?.sessionId === sessionId ? previous.startedAt : Date.now()),
-      };
-    },
-    null
-  );
+  const waitingClock = createMemo<{
+    sessionId: string | null;
+    startedAt: number;
+    command?: string;
+  } | null>((previous) => {
+    if (!waiting()) return null;
+    const sessionId = state.activeSessionId;
+    return {
+      sessionId,
+      startedAt:
+        props.waitingStartedAt ??
+        (previous?.sessionId === sessionId ? previous.startedAt : Date.now()),
+      command:
+        props.waitingCommand ?? (previous?.sessionId === sessionId ? previous.command : undefined),
+    };
+  }, null);
 
   const isStale = () => {
     if (props.waiting) return false;
@@ -659,7 +665,21 @@ export function LoadingRow(props: {
           aria-label="Background process running"
           aria-live="off"
         >
-          <div class="tool-invocation-header">
+          <button
+            type="button"
+            class="tool-invocation-header"
+            aria-label="View background process details"
+            aria-haspopup="dialog"
+            title="View commands, status, and output"
+            onClick={() => {
+              const sessionID = state.activeSessionId;
+              if (sessionID)
+                openBackgroundProcessView(
+                  sessionID,
+                  state.sessions.find((session) => session.id === sessionID)?.directory
+                );
+            }}
+          >
             <UiIcon
               source={hourglassIcon}
               class="tool-call-icon tool-call-wait-icon tool-status-running"
@@ -667,11 +687,15 @@ export function LoadingRow(props: {
               height="16"
               aria-hidden="true"
             />
-            <span class="tool-invocation-title shimmer-progress">Background process</span>
+            <span class="tool-invocation-title shimmer-progress" title={waitingClock()?.command}>
+              Background process
+              <Show when={waitingClock()?.command}>{(command) => <>: {command()}</>}</Show>
+            </span>
             <span class="tool-invocation-duration" title="Background process elapsed time">
               {formatElapsed()}
             </span>
-          </div>
+            <UiIcon source={navArrowRightIcon} width="14" height="14" aria-hidden="true" />
+          </button>
         </div>
       </Show>
     </div>

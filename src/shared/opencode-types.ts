@@ -439,7 +439,12 @@ export type SessionStatus =
       };
       next: number;
     }
-  | { type: 'busy'; background?: boolean; backgroundStartedAt?: number };
+  | {
+      type: 'busy';
+      background?: boolean;
+      backgroundStartedAt?: number;
+      backgroundCommand?: string;
+    };
 
 export type FileDiff = {
   file?: string;

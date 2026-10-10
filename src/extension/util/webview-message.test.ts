@@ -60,6 +60,26 @@ function createRalphRun() {
 }
 
 describe('webview message validation', () => {
+  it('allows only read-only session-scoped background process inspection with valid byte cursors', () => {
+    const list = '/session/ses_own/background-process';
+    const output = `${list}/shell_1/output`;
+    expect(isAllowedApiRequest('GET', `${list}?directory=%2Frepo`)).toBe(true);
+    expect(isAllowedApiRequest('GET', output)).toBe(true);
+    expect(isAllowedApiRequest('GET', `${output}?cursor=0&directory=%2Frepo`)).toBe(true);
+    for (const query of [
+      'cursor=-1',
+      'cursor=1.5',
+      'cursor=NaN',
+      'cursor=9007199254740992',
+      'cursor=1&cursor=2',
+      'limit=1000000',
+      'cursor=',
+    ])
+      expect(isAllowedApiRequest('GET', `${output}?${query}`)).toBe(false);
+    expect(isAllowedApiRequest('POST', list)).toBe(false);
+    expect(isAllowedApiRequest('DELETE', output)).toBe(false);
+    expect(isAllowedApiRequest('GET', '/api/shell')).toBe(false);
+  });
   it('requires complete model preference update snapshots', () => {
     const preferences = {
       modelVariantSelections: {},

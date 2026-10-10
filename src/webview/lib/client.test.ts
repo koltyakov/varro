@@ -70,6 +70,53 @@ afterEach(() => {
 });
 
 describe('client', () => {
+  it('scopes process reads to the session directory and validates byte-cursor output', async () => {
+    const { client } = await loadClient();
+    const controller = new AbortController();
+    bridgeMocks.apiCall
+      .mockResolvedValueOnce([
+        {
+          id: 'shell-1',
+          status: 'running',
+          command: 'npm test',
+          cwd: '/repo',
+          time: { started: 100 },
+        },
+      ])
+      .mockResolvedValueOnce({ output: 'ok', cursor: 2, size: 2, truncated: false });
+    expect(
+      await client.session.backgroundProcesses('ses_own', {
+        directory: '/repo',
+        signal: controller.signal,
+      })
+    ).toHaveLength(1);
+    expect(
+      await client.session.backgroundProcessOutput('ses_own', 'shell-1', {
+        directory: '/repo',
+        cursor: 0,
+        signal: controller.signal,
+      })
+    ).toEqual({ output: 'ok', cursor: 2, size: 2, truncated: false });
+    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(
+      1,
+      'GET',
+      '/session/ses_own/background-process?directory=%2Frepo',
+      undefined,
+      { signal: controller.signal }
+    );
+    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(
+      2,
+      'GET',
+      '/session/ses_own/background-process/shell-1/output?directory=%2Frepo&cursor=0',
+      undefined,
+      { signal: controller.signal }
+    );
+    bridgeMocks.apiCall
+      .mockResolvedValueOnce([{ id: 'invalid' }])
+      .mockResolvedValueOnce({ output: 'ok', cursor: -1 });
+    await expect(client.session.backgroundProcesses('ses_own')).rejects.toThrow();
+    await expect(client.session.backgroundProcessOutput('ses_own', 'shell-1')).rejects.toThrow();
+  });
   it('marks only interrupted recovery prompts for host admission checks', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue(undefined);

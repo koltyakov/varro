@@ -526,7 +526,17 @@ Direct input acquires ownership only when it can affect the transcript:
   response candidate. Keep the background slot and suppress Worked through split notice delivery;
   only a real prompt or the resumed assistant changes that ownership. Explicit resume markers still
   preserve the existing pause-summary boundary.
-  `scroll-background-handoff.spec.ts` checks short and measured transcripts frame by frame.
+   `scroll-background-handoff.spec.ts` checks short and measured transcripts frame by frame.
+  Clicking the card opens a read-only process dialog owned outside the loading slot. Preserve
+  the transcript's geometry and scroll owner, keep loaded logs through completion and server
+  cleanup, and release the dialog on close or session switch. Fetch only session-owned process
+  details and bounded output chunks while the dialog is open; never rerun recorded commands.
+  The card includes a bounded, single-line command summary from the background status, with
+  ellipsis for narrow views. Keep its timer and disclosure arrow visible, and retain the command
+  through the shell-exit and resume handoff without carrying it into another session.
+  Output preserves lines by default with horizontal scrolling and optional wrapping. Its own
+  follow control yields when the reader scrolls up, resumes on explicit Follow, and never changes
+  the transcript's scroll owner. Presentation controls must not issue additional log requests.
 - A failed assistant attempt with retry metadata is not a final response while the turn is working,
   even if it has completed partial text and `finish: error`. Keep the loading slot through retry and
   the next empty attempt; do not briefly insert Worked. `automatic-retry.spec.ts` checks that handoff

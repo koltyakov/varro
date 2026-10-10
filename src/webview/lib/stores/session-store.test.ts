@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEffect, createRoot } from 'solid-js';
-import type { AssistantMessage, FileDiff, Part, Session } from '../../types';
+import type { AssistantMessage, FileDiff, Part, Session, SessionStatus } from '../../types';
 import {
   markProviderAuthFailure,
   providerRequiresReconnection,
@@ -89,6 +89,26 @@ function toolPart(status: 'running' | 'completed'): Part {
 }
 
 describe('sessionStore', () => {
+  it('publishes command-only changes in background status events and snapshots', () => {
+    const status: SessionStatus = {
+      type: 'busy',
+      background: true,
+      backgroundStartedAt: 1,
+      backgroundCommand: 'npm test',
+    };
+    sessionStore.setSessionStatusEntry('session-1', status);
+    sessionStore.setSessionStatusEntry('session-1', {
+      ...status,
+      backgroundCommand: 'npm run build',
+    });
+    expect(state.sessionStatus['session-1']).toMatchObject({ backgroundCommand: 'npm run build' });
+    sessionStore.setSessionStatuses({
+      'session-1': { ...status, backgroundCommand: 'python3 tools/serve.py 18765' },
+    });
+    expect(state.sessionStatus['session-1']).toMatchObject({
+      backgroundCommand: 'python3 tools/serve.py 18765',
+    });
+  });
   beforeEach(() => {
     // SAFETY: The test removes the optional host-provided initial state from the window fixture.
     delete (window as { __initialWebviewState?: unknown }).__initialWebviewState;

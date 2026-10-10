@@ -217,6 +217,7 @@ export type V2MessageContext = {
   hasAssistant?: boolean;
   backgroundPending?: boolean;
   backgroundStartedAt?: number;
+  backgroundCommand?: string;
   error?: SessionStructuredError;
   generationTiming?: OpenCodeV2GenerationTiming;
 };

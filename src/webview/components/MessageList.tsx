@@ -915,6 +915,17 @@ export function MessageList() {
     });
     return starts.length > 0 ? Math.min(...starts) : undefined;
   });
+  const backgroundWorkCommand = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return undefined;
+    const rootId = getSessionTreeRootId(sessionId) || sessionId;
+    for (const id of [sessionId, rootId, ...getSessionTreeIds(rootId)]) {
+      const status = state.sessionStatus[id];
+      if (status?.type === 'busy' && status.background && status.backgroundCommand)
+        return status.backgroundCommand;
+    }
+    return undefined;
+  });
   const activePermissionReviewInFlight = createMemo(() => {
     const sessionId = state.activeSessionId;
     if (!sessionId) return false;
@@ -10263,6 +10274,7 @@ export function MessageList() {
                   waiting={waitingForBackground()}
                   toolsRunning={waitingForTools()}
                   waitingStartedAt={backgroundWorkStartedAt()}
+                  waitingCommand={backgroundWorkCommand()}
                   turnStartedAt={loadingTurnStartedAt()}
                   elapsedStartedAt={loadingElapsedStartedAt()}
                   visible={!state.messagesLoading && showLoadingRow()}

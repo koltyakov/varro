@@ -20,6 +20,20 @@ const shell: ShellInfo = {
 afterEach(() => vi.useRealTimers());
 
 describe('v2 background completion', () => {
+  it('bounds command summaries and keeps multiline commands on one line', async () => {
+    const command = `python3\n  tools/serve.py 18765 ${'x'.repeat(1000)}`;
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => ({
+      data: path === '/api/session/active' ? {} : [{ ...shell, command }],
+    }));
+    const statuses = await adapter.request('GET', '/session/status', undefined, {
+      directory: '/repo',
+    });
+    expect(statuses).toMatchObject({
+      ses_one: { backgroundCommand: expect.stringContaining('python3 tools/serve.py 18765') },
+    });
+    expect(adapter.eventContext('ses_one')?.backgroundCommand?.length).toBeLessThanOrEqual(512);
+    expect(adapter.eventContext('ses_one')?.backgroundCommand).not.toContain('\n');
+  });
   it('waits for a background command and its resumed response after execution succeeds', () => {
     const adapter = new OpenCodeV2Adapter(async () => ({ data: [] }));
     adapter.observe('shell.created', { info: shell }, undefined, '/repo');
@@ -30,7 +44,14 @@ describe('v2 background completion', () => {
     );
     expect(ended.at(-1)).toMatchObject({
       type: 'session.status',
-      properties: { status: { type: 'busy', background: true, backgroundStartedAt: 1 } },
+      properties: {
+        status: {
+          type: 'busy',
+          background: true,
+          backgroundStartedAt: 1,
+          backgroundCommand: 'npm test',
+        },
+      },
     });
     adapter.observe('session.execution.succeeded', { sessionID: 'ses_one' });
     expect(
@@ -41,6 +62,7 @@ describe('v2 background completion', () => {
     ).toMatchObject([{ properties: { status: { type: 'busy', background: true } } }]);
     adapter.observe('shell.exited', { id: shell.id, status: 'exited', exit: 0 });
     expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(true);
+    expect(adapter.eventContext('ses_one')?.backgroundCommand).toBe('npm test');
     adapter.observe('session.execution.started', { sessionID: 'ses_one' });
     expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(true);
     adapter.observe('session.step.started', { sessionID: 'ses_one' });
@@ -56,7 +78,7 @@ describe('v2 background completion', () => {
 
   it('keeps waiting when one of several background commands exits', async () => {
     vi.useFakeTimers();
-    const other = { ...shell, id: 'sh_second' };
+    const other = { ...shell, id: 'sh_second', command: 'npm run build' };
     const adapter = new OpenCodeV2Adapter(async (_method, path) => ({
       data: path === '/api/session/active' ? {} : [other],
     }));
@@ -67,7 +89,14 @@ describe('v2 background completion', () => {
     vi.advanceTimersByTime(60_000);
     expect(
       await adapter.request('GET', '/session/status', undefined, { directory: '/repo' })
-    ).toEqual({ ses_one: { type: 'busy', background: true, backgroundStartedAt: 1 } });
+    ).toEqual({
+      ses_one: {
+        type: 'busy',
+        background: true,
+        backgroundStartedAt: 1,
+        backgroundCommand: 'npm run build',
+      },
+    });
   });
 
   it('restores background work when reopening a session with no active model execution', async () => {
@@ -79,7 +108,12 @@ describe('v2 background completion', () => {
       await adapter.request('GET', '/session/status', undefined, { directory: '/repo' })
     ).toEqual({
       ses_other: { type: 'busy' },
-      ses_one: { type: 'busy', background: true, backgroundStartedAt: 1 },
+      ses_one: {
+        type: 'busy',
+        background: true,
+        backgroundStartedAt: 1,
+        backgroundCommand: 'npm test',
+      },
     });
     expect(wire).toHaveBeenCalledWith(
       'GET',
@@ -114,7 +148,7 @@ describe('v2 background completion', () => {
     adapter.observe('shell.exited', { id: shell.id, status: 'exited' });
     expect(
       await adapter.request('GET', '/session/status', undefined, { directory: '/repo' })
-    ).toEqual({ ses_one: { type: 'busy', background: true } });
+    ).toEqual({ ses_one: { type: 'busy', background: true, backgroundCommand: 'npm test' } });
     vi.advanceTimersByTime(2_000);
     expect(
       await adapter.request('GET', '/session/status', undefined, { directory: '/repo' })
@@ -146,7 +180,14 @@ describe('v2 background completion', () => {
     vi.advanceTimersByTime(60_000);
     expect(
       await adapter.request('GET', '/session/status', undefined, { directory: '/repo' })
-    ).toEqual({ ses_one: { type: 'busy', background: true, backgroundStartedAt: 1 } });
+    ).toEqual({
+      ses_one: {
+        type: 'busy',
+        background: true,
+        backgroundStartedAt: 1,
+        backgroundCommand: 'npm test',
+      },
+    });
     expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(true);
   });
 
@@ -198,7 +239,12 @@ describe('v2 background completion', () => {
     adapter.observe('session.execution.succeeded', { sessionID: 'ses_one' });
     resolveShells({ data: [] });
     expect(await pending).toEqual({
-      ses_one: { type: 'busy', background: true, backgroundStartedAt: 1 },
+      ses_one: {
+        type: 'busy',
+        background: true,
+        backgroundStartedAt: 1,
+        backgroundCommand: 'npm test',
+      },
     });
   });
 

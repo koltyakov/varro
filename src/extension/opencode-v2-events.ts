@@ -34,6 +34,7 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     type: 'busy',
     background: true,
     backgroundStartedAt: context.backgroundStartedAt,
+    backgroundCommand: context.backgroundCommand,
   };
   if (event.type === 'server.connected') return emit('server.connected');
   if (event.type === 'session.created')

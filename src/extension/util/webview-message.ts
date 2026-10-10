@@ -1967,6 +1967,20 @@ const API_ROUTES: ApiRoute[] = [
   ),
   route('/session/:id/todo', ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)),
   route(
+    '/session/:id/background-process',
+    ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)
+  ),
+  route('/session/:id/background-process/:processId/output', ({ method, url }) => {
+    const cursors = url.searchParams.getAll('cursor');
+    return (
+      method === 'GET' &&
+      queryWithOptionalDirectory(url, 'cursor') &&
+      cursors.length <= 1 &&
+      (cursors.length === 0 ||
+        (/^\d+$/.test(cursors[0]!) && Number.isSafeInteger(Number(cursors[0]))))
+    );
+  }),
+  route(
     '/session/:id/share',
     ({ method, url }) => (method === 'POST' || method === 'DELETE') && optionalDirectoryQuery(url)
   ),
