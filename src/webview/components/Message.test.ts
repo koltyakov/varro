@@ -1998,6 +1998,23 @@ describe('Message user editing', () => {
     );
   });
 
+  it('hides generic session instruction updates', () => {
+    const text =
+      '<system-reminder>\nSession instructions changed.\nLong internal instructions\n</system-reminder>';
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('session-instructions'),
+          parts: [{ ...textPart('auto', text), synthetic: true }],
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
+    expect(container?.querySelector('.chat-turn')).toBeNull();
+    expect(container?.textContent).not.toContain(text);
+  });
+
   it('keeps a user-authored continuation prompt editable even with synthetic context', () => {
     setAppState('activeSessionId', 'session-1');
     const text =

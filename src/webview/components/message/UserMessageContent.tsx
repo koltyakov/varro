@@ -361,8 +361,11 @@ function parseUserMessageParts(parts: Part[]): ParsedUserMessageContent {
     attachments.push(...parsedText.attachments);
     if (part.synthetic) {
       if (parsedText.messageTexts.some((value) => value.trim())) {
-        automaticActions.add(getAutomaticAction(part));
-        automaticParts.push(automaticActionPart(part));
+        const action = getAutomaticAction(part);
+        if (action) {
+          automaticActions.add(action);
+          automaticParts.push(automaticActionPart(part, action));
+        }
       }
       continue;
     }
@@ -399,8 +402,7 @@ function parseUserMessageParts(parts: Part[]): ParsedUserMessageContent {
 
 const SHELL_HEADER_RE = /^<shell\s+((?:"[^"]*"|'[^']*'|[^'">])*)>/;
 
-function automaticActionPart(part: TextPart): ToolPart {
-  const title = getAutomaticAction(part);
+function automaticActionPart(part: TextPart, title: string): ToolPart {
   const text = part.text.trim();
   const shell = text.startsWith('<shell ') ? SHELL_HEADER_RE.exec(text) : null;
   const input: Record<string, string> = {};
@@ -466,7 +468,7 @@ export function projectAutomaticActionMessage(message: MessageEntry): MessageEnt
   return { info: getAutomaticActionInfo(message.info), parts: parsed.automaticParts };
 }
 
-function getAutomaticAction(part: TextPart): string {
+function getAutomaticAction(part: TextPart): string | null {
   const text = part.text.trim();
   if (
     part.metadata?.compaction_continue === true ||
@@ -502,7 +504,7 @@ function getAutomaticAction(part: TextPart): string {
       return 'Switched to build mode';
     if (text.includes('Plan mode is active') || text.includes('Plan Mode'))
       return 'Entered plan mode';
-    return 'Updated session instructions';
+    return null;
   }
   if (/^The user explicitly (?:mentioned these skills|invoked .+ skill)/s.test(text)) {
     return 'Added skill instructions';
