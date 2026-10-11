@@ -51,6 +51,7 @@ export type OpenCodeModelRouting = {
   globalVisionModel?: OpenCodeModelRoute | null;
   commitMessageModel: OpenCodeModelRoute | null;
   autoApproveModel: OpenCodeModelRoute | null;
+  promptCompletionModel?: OpenCodeModelRoute | null;
   providerConfigPaths?: Record<string, string[]>;
 };
 

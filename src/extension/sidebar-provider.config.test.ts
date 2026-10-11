@@ -636,6 +636,7 @@ describe('SidebarProvider local config routing', () => {
           },
           commitMessageModel: null,
           autoApproveModel: null,
+          promptCompletionModel: null,
           providerConfigPaths: { anthropic: ['/repo/opencode.json'] },
         },
       },
@@ -699,6 +700,7 @@ describe('SidebarProvider local config routing', () => {
           agentModels: {},
           commitMessageModel: null,
           autoApproveModel: null,
+          promptCompletionModel: null,
         },
       },
     });
@@ -749,6 +751,7 @@ describe('SidebarProvider local config routing', () => {
           agentModels: {},
           commitMessageModel: null,
           autoApproveModel: null,
+          promptCompletionModel: null,
         },
       },
     });
@@ -801,9 +804,30 @@ describe('SidebarProvider local config routing', () => {
   it.each([
     ['commit_message', 'commitMessage.model', 'commitMessageModel'],
     ['auto_approve', 'chat.autoApproveModel', 'autoApproveModel'],
+    ['prompt_completion', 'chat.promptCompletionModel', 'promptCompletionModel'],
   ] as const)('writes %s routing to VS Code user settings', async (target, key, responseKey) => {
     vscodeMock.workspace.fs.readFile.mockRejectedValue({ code: 'FileNotFound' });
-    const { provider } = await createSidebarProviderInstance();
+    const server = createServer({ apiVersion: 2 });
+    server.request.mockImplementation(async (_method: string, path: string) => {
+      if (path === '/config/providers')
+        return {
+          providers: [
+            {
+              id: 'openai',
+              package: '@opencode/ai/providers/openai',
+              models: { 'gpt-5-mini': {} },
+            },
+          ],
+        };
+      if (path === '/api/credential')
+        return {
+          data: [
+            { active: true, integrationID: 'openai', value: { type: 'key', key: 'test-key' } },
+          ],
+        };
+      return {};
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
     const { posted } = attachTestView(provider);
 
     await provider.handleMessage({
@@ -832,6 +856,7 @@ describe('SidebarProvider local config routing', () => {
   it.each([
     ['commit_message', 'commitMessage.model', 'commitMessageModel'],
     ['auto_approve', 'chat.autoApproveModel', 'autoApproveModel'],
+    ['prompt_completion', 'chat.promptCompletionModel', 'promptCompletionModel'],
   ] as const)('clears %s routing from VS Code user settings', async (target, key, responseKey) => {
     const config = vscodeMock.workspace.getConfiguration('varro');
     await config.update(key, 'openai/gpt-5-mini', vscodeMock.ConfigurationTarget.Global);
@@ -1073,6 +1098,7 @@ describe('SidebarProvider local config routing', () => {
           agentModels: { build: { providerID: 'openai', modelID: 'gpt-5' } },
           commitMessageModel: null,
           autoApproveModel: null,
+          promptCompletionModel: null,
         },
       },
     });

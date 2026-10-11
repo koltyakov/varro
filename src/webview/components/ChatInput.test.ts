@@ -162,6 +162,9 @@ vi.mock('../lib/client', () => ({
       resumeSteering: vi.fn(async () => true),
     },
     varro: {
+      completePrompt: vi.fn<typeof client.varro.completePrompt>(async () => ({
+        suffix: ' with tests',
+      })),
       workspaceProblems: vi.fn(async () => ({ total: 0, diagnostics: [] })),
       session: {
         diffSummary: vi.fn(async () => ({
@@ -291,6 +294,7 @@ afterEach(() => {
   setState('inlineProblems', []);
   setState('issuesEnabled', true);
   setState('enableProblemsContext', true);
+  setState('promptCompletionModel', '');
   setState('debugShowQuotaWarning', false);
   setState('editorContext', {
     databaseContext: undefined,
@@ -730,6 +734,313 @@ function availableProviderLimit(
 }
 
 describe('ChatInput', () => {
+  it('sends only the last ten user prompts from the composer chat, preserving repeated prompts', async () => {
+    vi.useFakeTimers();
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_001, { parentID: 'session-1' }),
+      session('other-chat', 2_002),
+    ]);
+    const prompts = Array.from({ length: 20 }, (_, index) =>
+      historyEntry(`prompt-${index}`, index >= 18 ? 'Add a feature' : `Prompt ${index}`)
+    );
+    const child = historyEntry('child-prompt', 'Private child prompt');
+    child.info.sessionID = 'child-1';
+    const other = historyEntry('other-prompt', 'Private other chat prompt');
+    other.info.sessionID = 'other-chat';
+    // Cached and live windows overlap by message ID. Foreign entries must not leak from either.
+    setSessionHistoryPrompts('session-1', [...prompts.slice(0, 15), other]);
+    const assistant = assistantMessageEntry({ input: 1, output: 1 });
+    setState('messages', [
+      ...prompts.slice(10),
+      child,
+      other,
+      {
+        ...assistant,
+        parts: [
+          {
+            id: 'assistant-text',
+            sessionID: 'session-1',
+            messageID: assistant.info.id,
+            type: 'text',
+            text: 'Assistant reply, not a user prompt',
+          },
+        ],
+      },
+    ]);
+    setState('promptCompletionModel', 'openai/fast');
+    setInputText('Add a feature');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(client.varro.completePrompt).toHaveBeenCalledWith(
+      {
+        draft: 'Add a feature',
+        history: [
+          ...Array.from({ length: 8 }, (_, index) => `Prompt ${index + 10}`),
+          'Add a feature',
+          'Add a feature',
+        ],
+        variant: undefined,
+      },
+      { signal: expect.any(AbortSignal), directory: '/repo' }
+    );
+  });
+
+  it('does not send another chat history when composing a new chat', async () => {
+    vi.useFakeTimers();
+    setState('messages', [historyEntry('other-prompt', 'Another chat prompt')]);
+    setState('promptCompletionModel', 'openai/fast');
+    setInputText('Add a feature');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(client.varro.completePrompt).toHaveBeenCalledWith(
+      { draft: 'Add a feature', history: [], variant: undefined },
+      { signal: expect.any(AbortSignal), directory: undefined }
+    );
+  });
+  it('marks the composer pending only while a completion request is in flight', async () => {
+    vi.useFakeTimers();
+    setState('promptCompletionModel', 'openai/fast');
+    setInputText('Add a feature');
+    let resolve!: (result: { suffix: string }) => void;
+    vi.mocked(client.varro.completePrompt).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(599);
+    expect(editor.dataset.promptCompletionPending).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(editor.dataset.promptCompletionPending).toBe('true');
+    expect(inputText()).toBe('Add a feature');
+    resolve({ suffix: ' with tests' });
+    await Promise.resolve();
+    expect(editor.dataset.promptCompletionPending).toBeUndefined();
+    expect(editor.dataset.promptSuggestion).toBe(' with tests');
+  });
+  it.each([false, true])(
+    'clears completion warnings when submitting a prompt in the same chat, busy=%s',
+    async (busy) => {
+      vi.useFakeTimers();
+      setupModelState();
+      setState('activeSessionId', 'session-1');
+      setState('sessions', [session('session-1', 2_000)]);
+      setState('sessionStatus', 'session-1', { type: busy ? 'busy' : 'idle' });
+      setState('promptCompletionModel', 'openai/fast');
+      setInputText('Add a feature');
+      sendMessageMock.mockResolvedValue(true);
+      vi.mocked(client.varro.completePrompt).mockRejectedValueOnce(new Error('Unavailable'));
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+      editor.focus();
+      setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(container!.querySelector('.prompt-completion-warning')).not.toBeNull();
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+      await flushAsyncWork();
+      expect(inputText()).toBe('');
+      expect(state.activeSessionId).toBe('session-1');
+      expect(container!.querySelector('.prompt-completion-warning')).toBeNull();
+      if (busy) expect(state.queuedMessages[0]?.text).toBe('Add a feature');
+      else expect(sendMessageMock).toHaveBeenCalledWith('Add a feature', expect.anything());
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(container!.querySelector('.prompt-completion-warning')).toBeNull();
+    }
+  );
+  it('uses the model-selection warning location and styles for completion failures, with a keyboard-focus tooltip', async () => {
+    vi.useFakeTimers();
+    setState('promptCompletionModel', 'openai/fast');
+    setInputText('Add a feature');
+    vi.mocked(client.varro.completePrompt).mockRejectedValueOnce(
+      new Error('Prompt completion API returned HTTP 403')
+    );
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
+    expect(container!.querySelector('.prompt-completion-warning')).toBeNull();
+    await vi.advanceTimersByTimeAsync(599);
+    expect(container!.querySelector('.prompt-completion-warning')).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    const warning = container!.querySelector<HTMLElement>(
+      '.toolbar-main .toolbar-left .prompt-completion-warning'
+    )!;
+    expect(warning).not.toBeNull();
+    expect(warning.classList.contains('model-selection-cost-warning')).toBe(true);
+    expect(
+      warning.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-width')
+    ).toBe('16px');
+    expect(container!.querySelector('.toolbar-meta .prompt-completion-warning')).toBeNull();
+    warning.focus();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(container!.querySelector('.prompt-completion-warning')).toBe(warning);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+      'Prompt completion failed (openai/fast): Prompt completion API returned HTTP 403'
+    );
+    expect(document.querySelector('[role="tooltip"] [role="separator"]')).toBeNull();
+    expect(inputText()).toBe('Add a feature');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    setState('promptCompletionModel', '');
+    expect(container!.querySelector('.prompt-completion-warning')).toBeNull();
+  });
+
+  it('shares one warning icon with the model-selection warning and retains that warning after completion recovers', async () => {
+    vi.useFakeTimers();
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 2_000)]);
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+    setState('providers', 0, 'models', 'gpt-4o', 'variants', { high: {} });
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o', variant: 'high' });
+    setState('promptCompletionModel', 'openai/fast');
+    setInputText('Add a feature');
+    vi.mocked(client.varro.completePrompt).mockRejectedValueOnce(new Error('Unavailable'));
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(container!.querySelectorAll('.model-selection-cost-warning')).toHaveLength(1);
+    const warning = container!.querySelector<HTMLElement>('.prompt-completion-warning')!;
+    warning.focus();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+      'Switching the model'
+    );
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+      'Current session: OpenAI / GPT-4o'
+    );
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+      'Prompt completion failed (openai/fast): Unavailable'
+    );
+    const separator = document.querySelector('[role="tooltip"] [role="separator"]');
+    expect(separator?.classList.contains('toolbar-picker-tooltip-separator')).toBe(true);
+    expect(separator?.previousElementSibling?.textContent).toContain('Current session:');
+    expect(separator?.nextElementSibling?.textContent).toContain('Prompt completion failed');
+    editor.focus();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(container!.querySelector('.prompt-completion-warning')).toBeNull();
+    expect(container!.querySelectorAll('.model-selection-cost-warning')).toHaveLength(1);
+    warning.focus();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+      'Switching the model'
+    );
+    expect(document.querySelector('[role="tooltip"]')?.textContent).not.toContain(
+      'Prompt completion failed'
+    );
+    expect(document.querySelector('[role="tooltip"] [role="separator"]')).toBeNull();
+  });
+  it("uses the completion model's lowest variant rather than the active chat reasoning level", async () => {
+    vi.useFakeTimers();
+    setupModelState();
+    setState('providers', 0, 'models', 'gpt-4o', 'variants', { high: {}, low: {}, none: {} });
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o', variant: 'high' });
+    setState('promptCompletionModel', 'openai/gpt-4o');
+    setInputText('Add a feature');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected composer');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, 'Add a feature'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(client.varro.completePrompt).toHaveBeenCalledWith(
+      {
+        draft: 'Add a feature',
+        history: [],
+        variant: 'none',
+      },
+      { signal: expect.any(AbortSignal), directory: undefined }
+    );
+    expect(state.selectedModel?.variant).toBe('high');
+  });
+  it.each(['Tab', 'Escape', 'Enter'])(
+    'handles inline prompt suggestions with %s without auto-sending',
+    async (key) => {
+      vi.useFakeTimers();
+      setState('promptCompletionModel', 'openai/fast');
+      setInputText('Add a feature');
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected composer');
+      editor.focus();
+      setCollapsedSelection(editor.firstChild, 'Add a feature'.length);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(editor.dataset.promptSuggestion).toBe(' with tests');
+      expect(editor.textContent).toBe('Add a feature');
+      expect(inputText()).toBe('Add a feature');
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      editor.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      await flushAsyncWork();
+      if (key === 'Tab') {
+        expect(inputText()).toBe('Add a feature with tests');
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(editor.dataset.promptSuggestion).toBeUndefined();
+        expect(client.varro.completePrompt).toHaveBeenCalledOnce();
+        expect(sendMessageMock).not.toHaveBeenCalled();
+        editor.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true })
+        );
+        expect(inputText()).toBe('Add a feature');
+      } else if (key === 'Escape') {
+        expect(inputText()).toBe('Add a feature');
+        expect(editor.dataset.promptSuggestion).toBeUndefined();
+        expect(sendMessageMock).not.toHaveBeenCalled();
+      } else {
+        expect(sendMessageMock).toHaveBeenCalledWith('Add a feature', expect.anything());
+      }
+    }
+  );
+
+  it('hides prompt suggestions during composition and a text selection', async () => {
+    vi.useFakeTimers();
+    setState('promptCompletionModel', 'openai/fast');
+    setInputText('Add a feature');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected composer');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, 'Add a feature'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(editor.dataset.promptSuggestion).toBeTruthy();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+    expect(editor.dataset.promptSuggestion).toBeUndefined();
+    setCollapsedSelection(editor.firstChild, 'Add a feature'.length);
+    document.dispatchEvent(new Event('selectionchange'));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(editor.dataset.promptSuggestion).toBeTruthy();
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    expect(editor.dataset.promptSuggestion).toBeUndefined();
+  });
+
   describe('image preview fallback', () => {
     const broken = {
       id: 'broken-image',
@@ -6900,6 +7211,78 @@ describe('ChatInput', () => {
       variant: 'high',
     });
   });
+
+  it.each([
+    { providerID: '', modelID: '' },
+    { providerID: 'openai', modelID: '' },
+    { providerID: '', modelID: 'current' },
+  ])(
+    'keeps the composer model when the edited prompt has an incomplete route %j',
+    async (model) => {
+      setState('activeSessionId', 'session-1');
+      setState('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            current: {
+              id: 'current',
+              name: 'Current model',
+              capabilities: { toolcall: true, reasoning: true },
+              cost: { input: 0, output: 0 },
+              variants: { low: {}, high: {} },
+            },
+          },
+        },
+      ]);
+      const selection = { providerID: 'openai', modelID: 'current', variant: 'high' };
+      setState('selectedModel', selection);
+      setState('messages', [
+        {
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            role: 'user',
+            time: { created: 1 },
+            agent: 'build',
+            model,
+          },
+          parts: [],
+        },
+      ]);
+
+      cleanup = render(() => ChatInput(), container!);
+      startEditingMessage('message-1', 'session-1', 'edited prompt', undefined, model);
+      await Promise.resolve();
+
+      expect(container?.querySelector('.model-picker-btn')?.textContent).toContain('Current model');
+      expect(container?.querySelector('[aria-label="Thinking level"]')?.textContent).toContain(
+        'High'
+      );
+      expect(state.selectedModel).toEqual(selection);
+
+      container?.querySelector<HTMLButtonElement>('[title="Cancel editing (Esc)"]')?.click();
+      expect(container?.querySelector('.model-picker-btn')?.textContent).toContain('Current model');
+      expect(state.selectedModel).toEqual(selection);
+
+      startEditingMessage('message-1', 'session-1', 'edited prompt', undefined, model);
+      await Promise.resolve();
+      container
+        ?.querySelector<HTMLElement>('.rich-composer')
+        ?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      await flushAsyncWork();
+
+      expect(editMessageMock).toHaveBeenCalledWith(
+        'message-1',
+        'edited prompt',
+        expect.objectContaining({ selectedModel: selection })
+      );
+      expect(state.selectedModel).toEqual(selection);
+    }
+  );
 
   it('retrieves provider limits as soon as a model is selected while editing', async () => {
     setState('activeSessionId', 'session-1');

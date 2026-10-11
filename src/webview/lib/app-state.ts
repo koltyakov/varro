@@ -122,6 +122,7 @@ export interface AppState {
   currentDocumentEnabled: boolean;
   issuesEnabled: boolean;
   enableProblemsContext: boolean;
+  promptCompletionModel: string;
   debugShowQuotaWarning: boolean;
   debugResetWarningDays?: number;
   draftCurrentDocumentEnabled: boolean | null;
@@ -387,6 +388,7 @@ export function createAppState(): AppStateInstance {
         ? storedInlineProblems.filter(isInlineProblem)
         : [],
     enableProblemsContext: initialWebviewState.enableProblemsContext ?? true,
+    promptCompletionModel: initialWebviewState.promptCompletionModel ?? '',
     debugShowQuotaWarning: initialWebviewState.debugShowQuotaWarning ?? false,
     debugResetWarningDays: initialWebviewState.debugResetWarningDays,
     emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',

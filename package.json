@@ -574,6 +574,14 @@
           "patternErrorMessage": "Use provider/model, or leave the setting empty.",
           "markdownDescription": "Provider/model used by the auto-approve judge. Leave empty to let Varro select a suitable model automatically. Select a configured model from Varro's Models view."
         },
+        "varro.chat.promptCompletionModel": {
+          "type": "string",
+          "scope": "application",
+          "default": "",
+          "pattern": "^$|^[^/\\s]+/[^\\s]+$",
+          "patternErrorMessage": "Use provider/model, or leave the setting empty.",
+          "markdownDescription": "Optional provider/model for inline prompt suggestions. Requires OpenCode V2 and a supported direct completion API with API-key authentication. Subscription/OAuth connections and unsupported APIs cannot be used, and no utility chats are created. Leave empty to disable. Suggestions send your draft and recent prompts from the current conversation to this model. Choose an eligible fast model in Varro's Models view. Tab accepts a suggestion; Escape dismisses it. Enter sends typed or accepted text."
+        },
         "varro.chat.autoRenameUntitledSessions": {
           "type": "boolean",
           "default": false,

@@ -72,6 +72,11 @@ import { getRelativePath } from './util/path';
 import { FULL_SESSION_LIST_LIMIT, FULL_SESSION_LIST_PATH } from './util/session-list';
 import { WorkspaceSessionStatusCoordinator } from './workspace-session-status-coordinator';
 import { OpenCodeConfigService, type OpenCodeConfigRequest } from './opencode-config-service';
+import { PromptCompletionService } from './prompt-completion-service';
+import {
+  parsePromptCompletionRequest,
+  parsePromptCompletionTestRequest,
+} from '../shared/prompt-completion';
 import {
   projectFileDiffs,
   projectPartFileLists,
@@ -337,6 +342,9 @@ export interface RestProxyCallbacks {
     | 'isHidden'
     | 'observeSessionList'
     | 'retainUntilDeleted'
+    | 'registerPendingTitle'
+    | 'forgetPendingTitle'
+    | 'hide'
   >;
   autoApproveJudge: Pick<AutoApproveJudge, 'judge' | 'resolveModel'>;
   decisionProviders?: Pick<DecisionProviders, 'status' | 'handle'>;
@@ -473,8 +481,10 @@ export class RestProxy {
   }>();
   private disposed = false;
   private readonly openCodeConfig: OpenCodeConfigService;
+  private readonly promptCompletion: PromptCompletionService;
 
   constructor(private readonly callbacks: RestProxyCallbacks) {
+    this.promptCompletion = new PromptCompletionService(callbacks.server);
     this.openCodeConfig = new OpenCodeConfigService(
       callbacks,
       (...args) => this.requestServer(...args),
@@ -680,7 +690,12 @@ export class RestProxy {
     if (this.disposed) return;
     this.disposed = true;
     this.cancelAllRequests('REST proxy disposed');
+    this.promptCompletion.invalidate();
     this.imageThumbnails.dispose();
+  }
+
+  invalidatePromptCompletion() {
+    this.promptCompletion.invalidate();
   }
 
   handleRequest(payload: ApiRequestPayload, defaultWorkspaceDirectory?: string) {
@@ -1032,11 +1047,70 @@ export class RestProxy {
         payload.path,
         payload.body
       );
+      if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.promptCompletionTest) {
+        const model = parsePromptCompletionTestRequest(payload.body);
+        const data = await this.promptCompletion.test(
+          model,
+          scopedWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
+          requestSignal
+        );
+        requestSignal?.throwIfAborted();
+        if (!this.disposed && this.callbacks.getRequestGeneration() === requestGeneration) {
+          const label = `${model.providerID}/${model.modelID}`;
+          const duration = `${(data.elapsedMs / 1_000).toFixed(2)} s`;
+          if (data.success) {
+            void vscode.window.showInformationMessage(
+              `Prompt completion test succeeded for ${label} in ${duration}.`
+            );
+          } else {
+            void vscode.window.showErrorMessage(
+              `Prompt completion test failed for ${label} after ${duration}: ${data.error}`
+            );
+          }
+        }
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+      if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.promptCompletion) {
+        const model = parseModelRoute(
+          vscode.workspace.getConfiguration('varro').get('chat.promptCompletionModel')
+        );
+        const data = model
+          ? await this.promptCompletion.complete(
+              parsePromptCompletionRequest(payload.body),
+              model,
+              scopedWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
+              requestSignal
+            )
+          : { suffix: '' };
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
       if (openCodeConfigRequest) {
+        if (
+          openCodeConfigRequest.kind === 'update' &&
+          openCodeConfigRequest.target === 'prompt_completion' &&
+          !openCodeConfigRequest.unset
+        ) {
+          await this.promptCompletion.assertAvailable(
+            openCodeConfigRequest,
+            this.getCurrentWorkspacePath(),
+            requestSignal
+          );
+        }
         const data =
           openCodeConfigRequest.kind === 'get'
             ? await this.openCodeConfig.readOpenCodeModelRouting()
             : await this.openCodeConfig.updateModelRouting(openCodeConfigRequest);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      if (method === 'GET' && requestPathname === VARRO_API_ENDPOINTS.promptCompletionModels) {
+        const data = await this.promptCompletion.availability(
+          this.getCurrentWorkspacePath(),
+          requestSignal
+        );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -4101,7 +4175,11 @@ export class RestProxy {
       return { kind: 'update', target, providerID, modelID, unset };
     }
 
-    if (target === 'commit_message' || target === 'auto_approve') {
+    if (
+      target === 'commit_message' ||
+      target === 'auto_approve' ||
+      target === 'prompt_completion'
+    ) {
       return { kind: 'update', target, providerID, modelID, unset };
     }
 

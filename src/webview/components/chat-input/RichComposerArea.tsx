@@ -78,6 +78,9 @@ export function RichComposerArea(props: {
   editorRef: (el: HTMLDivElement) => void;
   placeholder: string;
   value: string;
+  promptSuggestion?: string;
+  promptCompletionPending?: boolean;
+  onCompositionChange?: (composing: boolean) => void;
   pendingPaste?: RichComposerPasteInsertion;
   cursorOffset?: number;
   chips: RichComposerChip[];
@@ -106,6 +109,11 @@ export function RichComposerArea(props: {
 }) {
   let editorEl: HTMLDivElement | undefined;
   const [isComposing, setIsComposing] = createSignal(false);
+  createEffect(() => props.onCompositionChange?.(isComposing()));
+  const promptSuggestion = () =>
+    props.isFocused && !isComposing() && !props.showCompletionMenu
+      ? (props.promptSuggestion ?? '')
+      : '';
   let historyHandledByKeydown = false;
   let revealCaretAfterControlledInput = false;
   let pendingControlledCursorReveal = false;
@@ -1124,7 +1132,15 @@ export function RichComposerArea(props: {
         role="textbox"
         aria-label="Message composer"
         aria-multiline="true"
+        aria-autocomplete={promptSuggestion() ? 'inline' : 'none'}
         aria-placeholder={props.placeholder}
+        aria-description={
+          promptSuggestion()
+            ? `Suggestion: ${promptSuggestion()}. Press Tab to accept or Escape to dismiss.`
+            : undefined
+        }
+        data-prompt-suggestion={promptSuggestion() || undefined}
+        data-prompt-completion-pending={props.promptCompletionPending ? 'true' : undefined}
         data-placeholder={props.placeholder}
         onInput={handleInput}
         onContextMenu={handleContextMenu}

@@ -332,6 +332,8 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (isBoolean(payload.expandThinking)) config.expandThinking = payload.expandThinking;
       if (isBoolean(payload.showChangedFiles)) config.showChangedFiles = payload.showChangedFiles;
       if (isBoolean(payload.showTurnTimer)) config.showTurnTimer = payload.showTurnTimer;
+      if (isString(payload.promptCompletionModel))
+        config.promptCompletionModel = payload.promptCompletionModel;
       if (isBoolean(payload.debugShowQuotaWarning))
         config.debugShowQuotaWarning = payload.debugShowQuotaWarning;
       if (

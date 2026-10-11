@@ -6,6 +6,8 @@ export const PERMISSION_JUDGE_SESSION_TITLE_PREFIX = 'Varro permission judge: ';
 export const PERMISSION_JUDGE_SESSION_METADATA = { varroInternal: 'permission-judge' } as const;
 export const COMMIT_MESSAGE_SESSION_TITLE_PREFIX = 'Varro commit message: ';
 export const COMMIT_MESSAGE_SESSION_METADATA = { varroInternal: 'commit-message' } as const;
+export const PROMPT_COMPLETION_SESSION_TITLE_PREFIX = 'Varro prompt completion: ';
+export const PROMPT_COMPLETION_SESSION_METADATA = { varroInternal: 'prompt-completion' } as const;
 
 // Cover queued helper events without retaining IDs forever when deletion events are missed.
 const DELETION_TOMBSTONE_TTL_MS = 30_000;
@@ -57,6 +59,8 @@ function isInternalHelperSession(session: SessionSnapshot) {
   return (
     metadata?.varroInternal === PERMISSION_JUDGE_SESSION_METADATA.varroInternal ||
     metadata?.varroInternal === COMMIT_MESSAGE_SESSION_METADATA.varroInternal ||
+    metadata?.varroInternal === PROMPT_COMPLETION_SESSION_METADATA.varroInternal ||
+    (title?.startsWith(PROMPT_COMPLETION_SESSION_TITLE_PREFIX) === true && hasHelperRules) ||
     (title?.startsWith(PERMISSION_JUDGE_SESSION_TITLE_PREFIX) === true && hasHelperRules) ||
     (commitMessageSequence !== null && /^[1-9]\d*$/.test(commitMessageSequence) && hasHelperRules)
   );

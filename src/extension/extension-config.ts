@@ -17,6 +17,7 @@ export function readExtensionConfigState(
     expandThinking: config.get<boolean>('chat.expandThinking', false),
     showChangedFiles: config.get<boolean>('chat.showChangedFiles', false),
     showTurnTimer: config.get<boolean>('chat.showTurnTimer', true),
+    promptCompletionModel: config.get<string>('chat.promptCompletionModel', ''),
     debugShowQuotaWarning: config.get<boolean>('debug.showQuotaWarning', false),
     debugResetWarningDays: readResetWarningDays(config),
     enableProblemsContext: config.get<boolean>('chat.enableProblemsContext', true),

@@ -145,6 +145,7 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
   toolbarRightRef: (el: HTMLDivElement) => void;
   showLeftPopupState: boolean;
   showModelPicker: boolean;
+  promptCompletionError?: string;
   selectionCostWarning: {
     providerName: string;
     modelName: string;
@@ -179,26 +180,43 @@ function VarroRepositoryLink() {
   );
 }
 
-function SelectionCostWarning(props: {
-  providerName: string;
-  modelName: string;
-  reasoningLabel: string;
-}) {
-  const detail = `Current session: ${props.providerName} / ${props.modelName} · ${props.reasoningLabel}`;
+function ComposerWarning(
+  props: Pick<ChatInputMainToolbarProps, 'selectionCostWarning' | 'promptCompletionError'>
+) {
+  const detail = () => {
+    const warning = props.selectionCostWarning;
+    return warning
+      ? `Current session: ${warning.providerName} / ${warning.modelName} · ${warning.reasoningLabel}`
+      : '';
+  };
+  const label = () =>
+    [
+      props.selectionCostWarning ? `${SELECTION_COST_WARNING} ${detail()}` : '',
+      props.promptCompletionError,
+    ]
+      .filter(Boolean)
+      .join(' ');
   return (
     <Tooltip
       delay={0}
       content={
         <span class="model-selection-cost-tooltip">
-          <span>{SELECTION_COST_WARNING}</span>
-          <span class="model-selection-cost-tooltip-detail">{detail}</span>
+          <Show when={props.selectionCostWarning}>
+            <span>{SELECTION_COST_WARNING}</span>
+            <span class="model-selection-cost-tooltip-detail">{detail()}</span>
+          </Show>
+          <Show when={props.selectionCostWarning && props.promptCompletionError}>
+            <span class="toolbar-picker-tooltip-separator" role="separator" />
+          </Show>
+          <Show when={props.promptCompletionError}>{(error) => <span>{error()}</span>}</Show>
         </span>
       }
     >
       <span
         class="model-selection-cost-warning"
+        classList={{ 'prompt-completion-warning': !!props.promptCompletionError }}
         role="img"
-        aria-label={`${SELECTION_COST_WARNING} ${detail}`}
+        aria-label={label()}
         tabIndex={0}
       >
         <UiIcon source={warningTriangleIcon} width={16} height={16} />
@@ -290,8 +308,11 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
           />
         </Show>
 
-        <Show when={props.selectionCostWarning}>
-          {(warning) => <SelectionCostWarning {...warning()} />}
+        <Show when={props.selectionCostWarning || props.promptCompletionError}>
+          <ComposerWarning
+            selectionCostWarning={props.selectionCostWarning}
+            promptCompletionError={props.promptCompletionError}
+          />
         </Show>
       </div>
 

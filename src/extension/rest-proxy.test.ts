@@ -12,11 +12,13 @@ const mocks = vi.hoisted(() => ({
       activeTerminal: undefined as unknown,
       showOpenDialog: vi.fn(() => Promise.resolve(undefined)),
       showTextDocument: vi.fn(() => Promise.resolve()),
+      showInformationMessage: vi.fn(() => Promise.resolve(undefined)),
+      showErrorMessage: vi.fn(() => Promise.resolve(undefined)),
     },
     workspace: {
       textDocuments: [],
       getWorkspaceFolder: vi.fn(() => undefined),
-      getConfiguration: vi.fn(() => ({ get: vi.fn(() => undefined) })),
+      getConfiguration: vi.fn(() => ({ get: vi.fn<() => string | undefined>(() => undefined) })),
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath),
       fs: {
         readFile: vi.fn(),
@@ -47,6 +49,7 @@ import { SharedThumbnailClient } from './image-thumbnail-shared-client';
 import * as workspaceProblems from './workspace-problems';
 import { OpenCodeResponseTooLargeError } from './open-code-transport';
 import { HiddenSessionManager } from './hidden-session-manager';
+import { PromptCompletionService } from './prompt-completion-service';
 import { QueuedMessageStore } from './queued-message-store';
 import { SessionStateManager } from './session-state-manager';
 import type { OpenCodeServerMemoryPermission } from '../shared/opencode-types';
@@ -148,6 +151,9 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       ),
     },
     hiddenSessions: {
+      registerPendingTitle: vi.fn(),
+      forgetPendingTitle: vi.fn(),
+      hide: vi.fn(),
       filterVisibleSessionRequests: vi.fn(<T>(arr: T[]) => arr) as never,
       filterVisibleSessions: vi.fn(<T>(arr: T[]) => arr) as never,
       filterVisibleSessionStatuses: vi.fn(<T>(obj: Record<string, T>) => obj) as never,
@@ -431,6 +437,161 @@ describe('getOpenCodeDirectoryHeaders', () => {
 });
 
 describe('RestProxy handleRequest', () => {
+  it.each([true, false])(
+    'notifies completion test results without changing model assignment, success=%s',
+    async (success) => {
+      const testResult = success
+        ? { success: true, elapsedMs: 1234 }
+        : { success: false, elapsedMs: 1234, error: 'Prompt completion API returned HTTP 403' };
+      const spy = vi.spyOn(PromptCompletionService.prototype, 'test').mockResolvedValue(testResult);
+      mocks.vscode.window.showInformationMessage.mockClear();
+      mocks.vscode.window.showErrorMessage.mockClear();
+      try {
+        const { proxy, callbacks } = createProxy();
+        await proxy.handleRequest(
+          makePayload(504, 'POST', '/varro/prompt-completion/test', {
+            providerID: 'openrouter',
+            modelID: 'openai/gpt-6-luna',
+          })
+        );
+        expect(spy).toHaveBeenCalledWith(
+          { providerID: 'openrouter', modelID: 'openai/gpt-6-luna' },
+          '/repo',
+          expect.any(AbortSignal)
+        );
+        expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+          id: 504,
+          data: testResult,
+        });
+        expect(callbacks.server.request).not.toHaveBeenCalled();
+        if (success) {
+          expect(mocks.vscode.window.showInformationMessage).toHaveBeenCalledWith(
+            'Prompt completion test succeeded for openrouter/openai/gpt-6-luna in 1.23 s.'
+          );
+          expect(mocks.vscode.window.showErrorMessage).not.toHaveBeenCalled();
+        } else {
+          expect(mocks.vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            'Prompt completion test failed for openrouter/openai/gpt-6-luna after 1.23 s: Prompt completion API returned HTTP 403'
+          );
+          expect(mocks.vscode.window.showInformationMessage).not.toHaveBeenCalled();
+        }
+      } finally {
+        spy.mockRestore();
+      }
+    }
+  );
+
+  it('rejects malformed test requests before inference', async () => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(
+      makePayload(505, 'POST', '/varro/prompt-completion/test', { modelID: 'missing-provider' })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 505,
+      error: 'Invalid prompt completion test model',
+    });
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+  });
+
+  it('does not notify tests after their request generation changes', async () => {
+    const { proxy, callbacks } = createProxy();
+    const spy = vi
+      .spyOn(PromptCompletionService.prototype, 'test')
+      .mockImplementationOnce(async () => {
+        callbacks.getRequestGeneration = () => 2;
+        return { success: true, elapsedMs: 1 };
+      });
+    mocks.vscode.window.showInformationMessage.mockClear();
+    try {
+      await proxy.handleRequest(
+        makePayload(506, 'POST', '/varro/prompt-completion/test', {
+          providerID: 'openai',
+          modelID: 'fast',
+        })
+      );
+      expect(mocks.vscode.window.showInformationMessage).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('does not notify a completion test cancelled while inference is pending', async () => {
+    const completion = deferred<{ success: boolean; elapsedMs: number }>();
+    const spy = vi
+      .spyOn(PromptCompletionService.prototype, 'test')
+      .mockReturnValueOnce(completion.promise);
+    const { proxy } = createProxy();
+    mocks.vscode.window.showInformationMessage.mockClear();
+    mocks.vscode.window.showErrorMessage.mockClear();
+    try {
+      const pending = proxy.handleRequest({
+        ...makePayload(507, 'POST', '/varro/prompt-completion/test', {
+          providerID: 'openai',
+          modelID: 'fast',
+        }),
+        cancelKey: 'completion-test',
+      });
+      await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+      proxy.cancelRequest({ id: 507, cancelKey: 'completion-test' });
+      completion.resolve({ success: true, elapsedMs: 100 });
+      await pending;
+      expect(mocks.vscode.window.showInformationMessage).not.toHaveBeenCalled();
+      expect(mocks.vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it('rejects prompt completion assignment before saving an unsupported connection', async () => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(
+      makePayload(500, 'POST', '/varro/opencode-config/model-routing', {
+        target: 'prompt_completion',
+        providerID: 'openai',
+        modelID: 'subscription-model',
+      })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 500,
+      error: expect.stringContaining('V2'),
+    });
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+  });
+
+  it('rejects manually configured unsupported completion without creating chats', async () => {
+    mocks.vscode.workspace.getConfiguration.mockReturnValueOnce({
+      get: vi.fn(() => 'openai/subscription-model'),
+    });
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(
+      makePayload(502, 'POST', '/varro/prompt-completion', { draft: 'Add a feature', history: [] })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 502,
+      error: expect.stringContaining('V2'),
+    });
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+  });
+
+  it('reports direct API eligibility as a host-only check', async () => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(makePayload(503, 'GET', '/varro/prompt-completion/models'));
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 503, data: {} });
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+  });
+  it('does not generate or create helpers when prompt completion is disabled', async () => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(
+      makePayload(501, 'POST', '/varro/prompt-completion', {
+        draft: 'Add a feature',
+        history: [],
+      })
+    );
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 501,
+      data: { suffix: '' },
+    });
+  });
   it('keeps a transferred session link in the originating folder catalog without authorizing execution', async () => {
     const moved = {
       id: 'moved',

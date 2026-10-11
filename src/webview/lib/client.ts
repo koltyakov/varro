@@ -4,6 +4,10 @@ import {
   parseBackgroundProcessOutput,
 } from '../../shared/background-process';
 import type { BackgroundProcess, BackgroundProcessOutput } from '../../shared/background-process';
+import type {
+  PromptCompletionAvailability,
+  PromptCompletionTestResult,
+} from '../../shared/prompt-completion';
 import { validateFileDiffs } from './validate-diffs';
 import type {
   Session,
@@ -763,6 +767,33 @@ export const client = {
     async openCodeConfig(): Promise<OpenCodeModelRouting> {
       return apiCall('GET', VARRO_API_ENDPOINTS.openCodeConfig);
     },
+    async promptCompletionModels(): Promise<PromptCompletionAvailability> {
+      return apiCall('GET', VARRO_API_ENDPOINTS.promptCompletionModels, undefined, {
+        timeoutMs: 10_000,
+        retries: 0,
+      });
+    },
+    async completePrompt(
+      body: { draft: string; history: string[]; variant?: string },
+      options: { signal: AbortSignal; directory?: string }
+    ): Promise<{ suffix: string }> {
+      return apiCall(
+        'POST',
+        withDirectory(VARRO_API_ENDPOINTS.promptCompletion, options.directory),
+        body,
+        { signal: options.signal, timeoutMs: 10_000, retries: 0 }
+      );
+    },
+    async testPromptCompletion(
+      model: { providerID: string; modelID: string },
+      options: { signal: AbortSignal }
+    ): Promise<PromptCompletionTestResult> {
+      return apiCall('POST', VARRO_API_ENDPOINTS.promptCompletionTest, model, {
+        signal: options.signal,
+        timeoutMs: 10_000,
+        retries: 0,
+      });
+    },
     async openCodePermissionConfig(): Promise<OpenCodePermissionConfig> {
       return apiCall('GET', VARRO_API_ENDPOINTS.openCodeConfigPermissions);
     },
@@ -793,7 +824,7 @@ export const client = {
       );
     },
     async saveModelRouting(body: {
-      target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve';
+      target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve' | 'prompt_completion';
       providerID: string;
       modelID: string;
       agentName?: string;

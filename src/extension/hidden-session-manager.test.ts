@@ -26,6 +26,32 @@ const legacyJudgePermission = [
 ];
 
 describe('HiddenSessionManager', () => {
+  it('rediscovers completion helpers after reload and schedules stale ones for cleanup', () => {
+    const manager = new HiddenSessionManager();
+    const now = Date.now();
+    expect(
+      manager.observeSessionList(
+        [
+          {
+            id: 'completion-metadata',
+            metadata: { varroInternal: 'prompt-completion' },
+            time: { updated: now - 180_000 },
+          },
+          {
+            id: 'completion-legacy',
+            title: 'Varro prompt completion: 1',
+            permission: legacyJudgePermission,
+            time: { updated: now - 180_000 },
+          },
+          { id: 'ordinary', title: 'Varro prompt completion: 1', time: { updated: now - 180_000 } },
+        ],
+        now
+      )
+    ).toEqual(['completion-metadata', 'completion-legacy']);
+    expect(manager.isHidden('completion-metadata')).toBe(true);
+    expect(manager.isHidden('completion-legacy')).toBe(true);
+    expect(manager.isHidden('ordinary')).toBe(false);
+  });
   it('hides sessions whose create or update event matches a pending title', () => {
     const manager = new HiddenSessionManager();
     manager.registerPendingTitle('Generated title');

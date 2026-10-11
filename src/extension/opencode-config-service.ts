@@ -28,7 +28,7 @@ export type OpenCodeConfigRequest =
   | { kind: 'get' }
   | {
       kind: 'update';
-      target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve';
+      target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve' | 'prompt_completion';
       providerID: string;
       modelID: string;
       agentName?: string;
@@ -145,6 +145,7 @@ export class OpenCodeConfigService {
       agentModels,
       commitMessageModel: parseModelRoute(extensionConfig.get('commitMessage.model')),
       autoApproveModel: parseModelRoute(extensionConfig.get('chat.autoApproveModel')),
+      promptCompletionModel: parseModelRoute(extensionConfig.get('chat.promptCompletionModel')),
     };
   }
 
@@ -219,9 +220,17 @@ export class OpenCodeConfigService {
   async updateModelRouting(
     request: Extract<OpenCodeConfigRequest, { kind: 'update' }>
   ): Promise<OpenCodeModelRouting> {
-    if (request.target === 'commit_message' || request.target === 'auto_approve') {
+    if (
+      request.target === 'commit_message' ||
+      request.target === 'auto_approve' ||
+      request.target === 'prompt_completion'
+    ) {
       const key =
-        request.target === 'commit_message' ? 'commitMessage.model' : 'chat.autoApproveModel';
+        request.target === 'commit_message'
+          ? 'commitMessage.model'
+          : request.target === 'prompt_completion'
+            ? 'chat.promptCompletionModel'
+            : 'chat.autoApproveModel';
       await vscode.workspace
         .getConfiguration('varro')
         .update(

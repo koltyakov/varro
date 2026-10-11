@@ -672,6 +672,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.fontSize') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.showTurnTimer') ||
+        event.affectsConfiguration('varro.chat.promptCompletionModel') ||
         event.affectsConfiguration('varro.debug.showQuotaWarning') ||
         event.affectsConfiguration('varro.debug.resetWarningDays') ||
         event.affectsConfiguration('varro.chat.enableProblemsContext') ||
@@ -1892,6 +1893,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   post(msg: ExtensionMessage) {
+    if (
+      msg.type === 'config/update' ||
+      msg.type === 'providers/refresh' ||
+      msg.type === 'server/status'
+    ) {
+      for (const endpoint of this.endpoints) endpoint.restProxy.invalidatePromptCompletion();
+    }
     let workspaceStructureChanged = false;
     if (msg.type === 'server/event' && msg.payload.type === 'session.next.moved') {
       const sessionId = msg.payload.properties?.sessionID;

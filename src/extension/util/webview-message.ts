@@ -1862,6 +1862,12 @@ const API_ROUTES: ApiRoute[] = [
   ),
   route(VARRO_API_ENDPOINTS.openCodeConfig, methodsNoQuery('GET')),
   route(VARRO_API_ENDPOINTS.openCodeConfigModelRouting, methodsNoQuery('POST')),
+  route(
+    VARRO_API_ENDPOINTS.promptCompletion,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(VARRO_API_ENDPOINTS.promptCompletionModels, methodsNoQuery('GET')),
+  route(VARRO_API_ENDPOINTS.promptCompletionTest, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.openCodeConfigDisableProvider, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.openCodeConfigPermissions, methodsNoQuery('GET', 'POST')),
   route(VARRO_API_ENDPOINTS.permissionJudge, methodsNoQuery('POST')),

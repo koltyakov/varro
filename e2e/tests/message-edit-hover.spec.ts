@@ -45,6 +45,63 @@ test('keeps inline edit controls clear of the preceding sticky prompt', async ({
   await expect(page.locator('.inline-edit-composer-slot')).toHaveCount(0);
 });
 
+test('keeps model and reasoning when clicking a prompt with an empty historical model', async ({
+  page,
+}) => {
+  const session: Session = {
+    id: 'session-edit-model',
+    projectID: 'test',
+    directory: '/workspace',
+    title: 'Edit model',
+    version: '1',
+    time: { created: 1, updated: 1 },
+  };
+  const message: MessageEntry = {
+    info: {
+      id: 'prompt',
+      sessionID: session.id,
+      role: 'user',
+      time: { created: 1 },
+      agent: 'build',
+      model: { providerID: '', modelID: '' },
+    },
+    parts: [
+      {
+        id: 'prompt-text',
+        sessionID: session.id,
+        messageID: 'prompt',
+        type: 'text',
+        text: 'Keep the selected model when editing this message.',
+      },
+    ],
+  };
+  await page.addInitScript(
+    (fixture) => {
+      // SAFETY: The isolated playback harness reads this fixture before mounting.
+      (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
+        fixture;
+    },
+    { session, initialMessages: [message] }
+  );
+  await page.goto('/e2e/harness/index.html?scenario=session-playback');
+  await page.locator('.model-picker-btn').click();
+  await page.getByRole('button', { name: 'GPT-4.1', exact: true }).click();
+  await page.getByLabel('Thinking level').click();
+  await page.getByRole('button', { name: 'High', exact: true }).click();
+  await expect(page.locator('.model-picker-btn')).toContainText('GPT-4.1');
+  await expect(page.getByLabel('Thinking level')).toContainText('High');
+
+  await page.locator('[data-msg-id="prompt"] .user-message-card').click();
+  const inlineComposer = page.locator('.inline-edit-composer-slot');
+  await expect(inlineComposer).toBeVisible();
+  await expect(inlineComposer.locator('.model-picker-btn')).toContainText('GPT-4.1');
+  await expect(inlineComposer.getByLabel('Thinking level')).toContainText('High');
+  await page.locator('.composer-edit-banner-cancel').click();
+  await expect(inlineComposer).toHaveCount(0);
+  await expect(page.locator('.model-picker-btn')).toContainText('GPT-4.1');
+  await expect(page.getByLabel('Thinking level')).toContainText('High');
+});
+
 for (const withImage of [false, true]) {
   test(`only highlights editable prompts on hover with image=${withImage}`, async ({ page }) => {
     const session: Session = {

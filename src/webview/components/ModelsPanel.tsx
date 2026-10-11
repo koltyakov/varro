@@ -2,6 +2,8 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import { setHostDragImage } from '../host/extensions';
 import { Portal } from 'solid-js/web';
 import { asRecord } from '../../shared/type-utils';
+import type { PromptCompletionAvailability } from '../../shared/prompt-completion';
+import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 import {
   isModelPinned,
   getListedProviderModels,
@@ -80,7 +82,7 @@ type ModelRenameState = {
   displayName: string;
 };
 type ModelRouteTag = {
-  kind: 'agent' | 'small' | 'approve' | 'commit';
+  kind: 'agent' | 'small' | 'approve' | 'commit' | 'complete';
   text: string;
   label: string;
   change?: 'old' | 'new' | 'removed' | 'overridden';
@@ -141,6 +143,11 @@ export function ModelsPanel() {
 
   const [query, setQuery] = createSignal('');
   const [routing, setRouting] = createSignal<OpenCodeModelRouting>(createEmptyRouting());
+  const [completionAvailability, setCompletionAvailability] =
+    createSignal<PromptCompletionAvailability>({});
+  const [completionAvailabilityError, setCompletionAvailabilityError] = createSignal(
+    'Checking direct completion API support...'
+  );
   const [previousRouting, setPreviousRouting] = createSignal<OpenCodeModelRouting | null>(null);
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [providerContextMenu, setProviderContextMenu] =
@@ -169,6 +176,9 @@ export function ModelsPanel() {
     }
   }
   const [isSaving, setIsSaving] = createSignal(false);
+  const [isTestingCompletion, setIsTestingCompletion] = createSignal(false);
+  let completionTestController: AbortController | undefined;
+  onCleanup(() => completionTestController?.abort());
   const [showReloadIndicator, setShowReloadIndicator] = createSignal(false);
   const isReloading = () => showReloadIndicator() || state.providersRefreshing;
   const [showRefreshAnimation, setShowRefreshAnimation] = createSignal(false);
@@ -294,7 +304,31 @@ export function ModelsPanel() {
   }
 
   let routingRequestId = 0;
+  let completionAvailabilityRequestId = 0;
+  async function loadCompletionAvailability() {
+    const requestId = ++completionAvailabilityRequestId;
+    setCompletionAvailability({});
+    setCompletionAvailabilityError('Checking direct completion API support...');
+    try {
+      const result = await client.varro.promptCompletionModels();
+      if (requestId !== completionAvailabilityRequestId) return;
+      setCompletionAvailability(result);
+      setCompletionAvailabilityError(
+        'This model has no supported direct completion API connection. An API key and OpenCode V2 are required.'
+      );
+    } catch {
+      if (requestId === completionAvailabilityRequestId)
+        setCompletionAvailabilityError(
+          'Could not verify direct completion API support. Refresh models and try again.'
+        );
+    }
+  }
+  function completionUnavailableReason(menu: ModelContextMenuState) {
+    const support = completionAvailability()[`${menu.providerID}/${menu.modelID}`];
+    return support?.available ? '' : support?.reason || completionAvailabilityError();
+  }
   async function loadRouting() {
+    void loadCompletionAvailability();
     const requestId = ++routingRequestId;
     try {
       const next = normalizeModelRouting(await client.varro.openCodeConfig());
@@ -305,7 +339,7 @@ export function ModelsPanel() {
   }
 
   async function saveRouting(body: {
-    target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve';
+    target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve' | 'prompt_completion';
     providerID: string;
     modelID: string;
     agentName?: string;
@@ -331,6 +365,32 @@ export function ModelsPanel() {
 
   function closeContextMenu() {
     setContextMenu(null);
+  }
+
+  async function testCompletion(menu: ModelContextMenuState) {
+    if (isTestingCompletion() || completionUnavailableReason(menu)) return;
+    closeContextMenu();
+    setIsTestingCompletion(true);
+    const controller = new AbortController();
+    completionTestController = controller;
+    try {
+      await client.varro.testPromptCompletion(
+        { providerID: menu.providerID, modelID: menu.modelID },
+        { signal: controller.signal }
+      );
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        showSessionActionFeedback(
+          `Prompt completion test could not finish: ${error instanceof Error ? error.message : 'Connection unavailable.'}`,
+          'warning'
+        );
+      }
+    } finally {
+      if (completionTestController === controller) {
+        completionTestController = undefined;
+        setIsTestingCompletion(false);
+      }
+    }
   }
 
   function reorderProvider(sourceID: string, targetID: string) {
@@ -977,6 +1037,63 @@ export function ModelsPanel() {
                   );
                 }}
               </For>
+              <Show
+                when={
+                  !completionUnavailableReason(menu) ||
+                  isModelRoute(
+                    routing().promptCompletionModel ?? null,
+                    menu.providerID,
+                    menu.modelID
+                  )
+                }
+              >
+                <div class="models-context-menu-separator" role="separator" />
+                <div role="group" aria-label="Prompt completion">
+                  <button
+                    type="button"
+                    class="models-context-menu-item"
+                    disabled={isSaving()}
+                    title={
+                      completionUnavailableReason(menu) ||
+                      'Suggest prompt continuations through a direct API using your draft and recent prompts. Tab accepts; Escape dismisses.'
+                    }
+                    onClick={() =>
+                      void saveRouting({
+                        target: 'prompt_completion',
+                        providerID: menu.providerID,
+                        modelID: menu.modelID,
+                        unset: isModelRoute(
+                          routing().promptCompletionModel ?? null,
+                          menu.providerID,
+                          menu.modelID
+                        )
+                          ? true
+                          : undefined,
+                      })
+                    }
+                  >
+                    {isModelRoute(
+                      routing().promptCompletionModel ?? null,
+                      menu.providerID,
+                      menu.modelID
+                    )
+                      ? "Don't use for "
+                      : 'Use for '}
+                    <strong>prompt completion</strong>
+                  </button>
+                  <Show when={!completionUnavailableReason(menu)}>
+                    <button
+                      type="button"
+                      class="models-context-menu-item"
+                      disabled={isTestingCompletion()}
+                      title="Make one direct API request using a sample draft. This may consume provider usage; it does not change your completion model."
+                      onClick={() => void testCompletion(menu)}
+                    >
+                      Test prompt completion
+                    </button>
+                  </Show>
+                </div>
+              </Show>
             </div>
           </Portal>
         )}
@@ -1398,25 +1515,42 @@ function ProviderSection(props: {
   const isModelEnabled = (modelID: string) =>
     !state.hiddenModels.includes(modelVisibilityKey(props.provider.id, modelID));
   const enabledCount = () => props.models.filter((model) => isModelEnabled(model.id)).length;
+  const hasRouteTags = createMemo(() =>
+    props.models.some(
+      (model) =>
+        getModelRouteTags(
+          props.routing,
+          props.provider.id,
+          model.id,
+          props.previousRouting,
+          props.jevHandlesAutoApprove
+        ).length > 0
+    )
+  );
 
   const [expanded, setExpanded] = createSignal(
-    isProviderVisible(props.provider.id) && enabledCount() > 0
+    hasRouteTags() || (isProviderVisible(props.provider.id) && enabledCount() > 0)
   );
   const [draggedModelID, setDraggedModelID] = createSignal<string | null>(null);
   const [dragOverModelID, setDragOverModelID] = createSignal<string | null>(null);
   let providerWasVisible = isProviderVisible(props.provider.id);
   let previousModelCount = props.models.length;
+  let previouslyHadRouteTags = hasRouteTags();
 
   createEffect(() => {
     const providerIsVisible = isProviderVisible(props.provider.id);
     const modelCount = props.models.length;
+    const tagged = hasRouteTags();
     if (providerIsVisible !== providerWasVisible) {
-      setExpanded(providerIsVisible && enabledCount() > 0);
+      setExpanded(tagged || (providerIsVisible && enabledCount() > 0));
+    } else if (!providerIsVisible && tagged && !previouslyHadRouteTags) {
+      setExpanded(true);
     } else if (providerIsVisible && previousModelCount === 0 && modelCount > 0) {
       setExpanded(true);
     }
     providerWasVisible = providerIsVisible;
     previousModelCount = modelCount;
+    previouslyHadRouteTags = tagged;
   });
 
   const allEnabled = () => props.models.length > 0 && enabledCount() === props.models.length;
@@ -1927,6 +2061,10 @@ function getModelRouteTags(
     );
   }
 
+  if (isModelRoute(routing.promptCompletionModel ?? null, providerID, modelID)) {
+    tags.push({ kind: 'complete', text: 'prompt', label: 'Prompt completion model' });
+  }
+
   const agentNames = new Set([
     ...Object.keys(routing.agentModels ?? {}),
     ...Object.keys(previousRouting?.agentModels ?? {}),
@@ -2007,6 +2145,7 @@ function createEmptyRouting(): OpenCodeModelRouting {
     agentModels: {},
     commitMessageModel: null,
     autoApproveModel: null,
+    promptCompletionModel: null,
   };
 }
 
@@ -2018,6 +2157,7 @@ function normalizeModelRouting<T>(value: T): OpenCodeModelRouting {
   const smallModel = parseModelRoute(record.smallModel) ?? parseModelRoute(record.small_model);
   const commitMessageModel = parseModelRoute(record.commitMessageModel);
   const autoApproveModel = parseModelRoute(record.autoApproveModel);
+  const promptCompletionModel = parseModelRoute(record.promptCompletionModel);
   const agentModels: OpenCodeModelRouting['agentModels'] = {};
   const rawAgents = asRecord(record.agent);
 
@@ -2052,6 +2192,7 @@ function normalizeModelRouting<T>(value: T): OpenCodeModelRouting {
     agentModels,
     commitMessageModel,
     autoApproveModel,
+    promptCompletionModel,
   };
   if (record.globalVisionModel !== undefined) {
     normalized.globalVisionModel = parseModelRoute(record.globalVisionModel);

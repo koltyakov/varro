@@ -21,10 +21,24 @@
   white-space: pre-wrap;
   word-wrap: break-word;
   cursor: text;
+  caret-color: currentColor;
+  caret-shape: bar;
 }
 
 .chat-input-container:hover .rich-composer {
   --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 16%, transparent);
+}
+
+.rich-composer[data-prompt-completion-pending='true'] {
+  caret-color: var(--color-vscode-accent);
+}
+
+/* Generated text stays outside the editable DOM, clipboard, and draft history. */
+.rich-composer[data-prompt-suggestion]::after {
+  content: attr(data-prompt-suggestion);
+  color: var(--vscode-editorGhostText-foreground, var(--color-vscode-input-placeholder));
+  pointer-events: none;
+  user-select: none;
 }
 
 .rich-composer[data-empty='true']::before {

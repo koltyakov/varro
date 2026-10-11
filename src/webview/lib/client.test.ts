@@ -1584,6 +1584,51 @@ describe('client', () => {
     ]);
   });
 
+  it('forwards completion reasoning and cancellation without retries', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue({ suffix: ' with tests' });
+    const signal = new AbortController().signal;
+    const body = { draft: 'Add a feature', history: [], variant: 'none' };
+    await client.varro.completePrompt(body, { signal, directory: '/fixture' });
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/varro/prompt-completion?directory=%2Ffixture',
+      body,
+      {
+        signal,
+        timeoutMs: 10_000,
+        retries: 0,
+      }
+    );
+  });
+  it('queries prompt completion eligibility without sending any credentials', async () => {
+    const { client } = await loadClient();
+    const availability = { 'meta/fast': { available: true } };
+    bridgeMocks.apiCall.mockResolvedValue(availability);
+    expect(await client.varro.promptCompletionModels()).toEqual(availability);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'GET',
+      '/varro/prompt-completion/models',
+      undefined,
+      { timeoutMs: 10_000, retries: 0 }
+    );
+  });
+
+  it('tests an explicitly selected completion model without retries', async () => {
+    const { client } = await loadClient();
+    const result = { success: true, elapsedMs: 1234 };
+    bridgeMocks.apiCall.mockResolvedValue(result);
+    const signal = new AbortController().signal;
+    const model = { providerID: 'openrouter', modelID: 'openai/gpt-6-luna' };
+    expect(await client.varro.testPromptCompletion(model, { signal })).toEqual(result);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/varro/prompt-completion/test',
+      model,
+      { signal, timeoutMs: 10_000, retries: 0 }
+    );
+  });
+
   it('forwards mcp connect and disconnect calls', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue(true);

@@ -11,6 +11,7 @@ import { STORAGE_KEYS } from '../lib/state-storage';
 import { fixture } from '../test-fixtures';
 import { ModelsPanel } from './ModelsPanel';
 import { DEFAULT_TOOLTIP_DELAY } from './Tooltip';
+import { SessionActionFeedback } from './chat/SessionActionFeedback';
 
 type TestRuntimeValue =
   | string
@@ -39,6 +40,8 @@ const clientMocks = vi.hoisted(() => ({
   decisionProviderStatus: vi.fn(),
   updateDecisionProvider: vi.fn(),
   openCodeConfig: vi.fn(),
+  promptCompletionModels: vi.fn(),
+  testPromptCompletion: vi.fn(),
   saveModelRouting: vi.fn(),
   providers: vi.fn(),
   providerAuth: vi.fn(),
@@ -62,6 +65,8 @@ vi.mock('../lib/client', () => ({
   client: {
     varro: {
       openCodeConfig: clientMocks.openCodeConfig,
+      promptCompletionModels: clientMocks.promptCompletionModels,
+      testPromptCompletion: clientMocks.testPromptCompletion,
       saveModelRouting: clientMocks.saveModelRouting,
       decisionProviders: {
         status: clientMocks.decisionProviderStatus,
@@ -172,6 +177,10 @@ beforeEach(() => {
     commitMessageModel: { providerID: 'openai', modelID: 'gpt-5' },
     autoApproveModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
   });
+  clientMocks.promptCompletionModels.mockResolvedValue({
+    'openai/gpt-5-mini': { available: true },
+  });
+  clientMocks.testPromptCompletion.mockResolvedValue({ success: true, elapsedMs: 1200 });
   clientMocks.saveModelRouting.mockResolvedValue({
     small_model: 'openai/gpt-5',
     agent: { build: { model: 'openai/gpt-5' } },
@@ -328,6 +337,101 @@ afterEach(() => {
 });
 
 describe('ModelsPanel', () => {
+  it('reports unexpected completion test transport failures', async () => {
+    clientMocks.testPromptCompletion.mockRejectedValueOnce(new Error('API call timed out'));
+    cleanup = render(() => [ModelsPanel(), SessionActionFeedback()], container!);
+    await vi.waitFor(() => expect(clientMocks.promptCompletionModels).toHaveBeenCalled());
+    await Promise.resolve();
+    const row = Array.from(container!.querySelectorAll<HTMLElement>('.models-model-row')).find(
+      (item) => item.textContent?.includes('GPT-5 mini')
+    )!;
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document.body, 'Test prompt completion')!.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('.session-action-feedback.is-warning')?.textContent).toContain(
+        'Prompt completion test could not finish: API call timed out'
+      )
+    );
+  });
+  it('tests the context-menu model without assigning it and prevents duplicate tests', async () => {
+    let resolve!: (result: { success: boolean; elapsedMs: number }) => void;
+    clientMocks.testPromptCompletion.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    cleanup = render(() => ModelsPanel(), container!);
+    await vi.waitFor(() => expect(clientMocks.promptCompletionModels).toHaveBeenCalled());
+    await Promise.resolve();
+    const row = Array.from(container!.querySelectorAll<HTMLElement>('.models-model-row')).find(
+      (item) => item.textContent?.includes('GPT-5 mini')
+    )!;
+    const open = () =>
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    open();
+    const testButton = findButton(document.body, 'Test prompt completion')!;
+    const group = testButton.closest('[role="group"]');
+    expect(group?.getAttribute('aria-label')).toBe('Prompt completion');
+    expect(group?.previousElementSibling?.getAttribute('role')).toBe('separator');
+    expect(group?.previousElementSibling?.previousElementSibling?.textContent).toContain('agent');
+    expect(findButton(group, 'Use for prompt completion')).toBeTruthy();
+    expect(group?.querySelectorAll('button')).toHaveLength(2);
+    expect(testButton.disabled).toBe(false);
+    expect(testButton.title).toContain('consume provider usage');
+    testButton.click();
+    expect(clientMocks.testPromptCompletion).toHaveBeenCalledWith(
+      { providerID: 'openai', modelID: 'gpt-5-mini' },
+      { signal: expect.any(AbortSignal) }
+    );
+    expect(clientMocks.saveModelRouting).not.toHaveBeenCalled();
+    open();
+    expect(findButton(document.body, 'Test prompt completion')?.disabled).toBe(true);
+    resolve({ success: true, elapsedMs: 1200 });
+    await Promise.resolve();
+    expect(findButton(document.body, 'Test prompt completion')?.disabled).toBe(false);
+  });
+
+  it('hides the completion group for an unsupported model', async () => {
+    cleanup = render(() => ModelsPanel(), container!);
+    await vi.waitFor(() => expect(clientMocks.promptCompletionModels).toHaveBeenCalled());
+    await Promise.resolve();
+    container!
+      .querySelector<HTMLElement>('.models-model-row')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(findButton(document.body, 'Test prompt completion')).toBeUndefined();
+    expect(findButton(document.body, 'Use for prompt completion')).toBeUndefined();
+    expect(document.querySelector('[role="group"][aria-label="Prompt completion"]')).toBeNull();
+    expect(document.querySelectorAll('.models-context-menu [role="separator"]')).toHaveLength(1);
+    expect(clientMocks.testPromptCompletion).not.toHaveBeenCalled();
+  });
+
+  it('cancels a completion test when the models panel closes', async () => {
+    let reject!: (error: Error) => void;
+    clientMocks.testPromptCompletion.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        })
+    );
+    cleanup = render(() => ModelsPanel(), container!);
+    await vi.waitFor(() => expect(clientMocks.promptCompletionModels).toHaveBeenCalled());
+    await Promise.resolve();
+    const row = Array.from(container!.querySelectorAll<HTMLElement>('.models-model-row')).find(
+      (item) => item.textContent?.includes('GPT-5 mini')
+    )!;
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document.body, 'Test prompt completion')!.click();
+    const signal = clientMocks.testPromptCompletion.mock.calls[0]![1].signal;
+    cleanup?.();
+    cleanup = undefined;
+    expect(signal.aborted).toBe(true);
+    reject(new Error('API call aborted'));
+    await Promise.resolve();
+    const cleanupFeedback = render(() => SessionActionFeedback(), container!);
+    expect(document.querySelector('.session-action-feedback')).toBeNull();
+    cleanupFeedback();
+  });
   it('keeps large catalogs out of the model list until models are added', async () => {
     const template = {
       capabilities: { toolcall: true },
@@ -789,6 +893,7 @@ describe('ModelsPanel', () => {
   });
 
   it('hides and shows a provider from its context menu', async () => {
+    clientMocks.openCodeConfig.mockResolvedValue({});
     setState('hiddenModels', ['openai:gpt-5-mini']);
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
@@ -1996,12 +2101,106 @@ describe('ModelsPanel', () => {
   });
 
   it.each([
+    [
+      {
+        available: false,
+        reason: 'Prompt completion requires an API key, not a subscription or OAuth connection.',
+      },
+    ],
+    [
+      {
+        available: false,
+        reason: 'This provider has no supported direct completion API in Varro.',
+      },
+    ],
+  ])('hides prompt completion actions for unsupported connections: %j', async (support) => {
+    clientMocks.promptCompletionModels.mockResolvedValue({ 'openai/gpt-5-mini': support });
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+    const row = Array.from(
+      container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
+    ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
+    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const button = findButton(document, 'Use for prompt completion');
+    expect(button).toBeUndefined();
+    expect(findButton(document, 'Test prompt completion')).toBeUndefined();
+    expect(clientMocks.saveModelRouting).not.toHaveBeenCalled();
+    expect(findButton(document, 'Use for commit messages')?.disabled).toBe(false);
+  });
+
+  it('allows removing an existing unsupported prompt completion assignment', async () => {
+    clientMocks.promptCompletionModels.mockResolvedValue({});
+    clientMocks.openCodeConfig.mockResolvedValue({
+      smallModel: null,
+      commitMessageModel: null,
+      autoApproveModel: null,
+      agentModels: {},
+      promptCompletionModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+    const row = Array.from(
+      container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
+    ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
+    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const button = findButton(document, "Don't use for prompt completion");
+    expect(button?.disabled).toBe(false);
+    expect(findButton(document, 'Test prompt completion')).toBeUndefined();
+    button?.click();
+    expect(clientMocks.saveModelRouting).toHaveBeenCalledWith({
+      target: 'prompt_completion',
+      providerID: 'openai',
+      modelID: 'gpt-5-mini',
+      unset: true,
+    });
+  });
+
+  it('fails closed while API support is loading or verification fails', async () => {
+    clientMocks.promptCompletionModels.mockRejectedValue(new Error('Disconnected'));
+    cleanup = render(() => ModelsPanel(), container!);
+    const row = Array.from(
+      container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
+    ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
+    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const button = findButton(document, 'Use for prompt completion');
+    expect(button).toBeUndefined();
+    await Promise.resolve();
+    expect(findButton(document, 'Use for prompt completion')).toBeUndefined();
+    expect(findButton(document, 'Test prompt completion')).toBeUndefined();
+  });
+
+  it('does not restore eligibility from an obsolete provider connection response', async () => {
+    let finishOldRead!: (value: { 'openai/gpt-5-mini': { available: boolean } }) => void;
+    clientMocks.promptCompletionModels.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOldRead = resolve;
+        })
+    );
+    cleanup = render(() => ModelsPanel(), container!);
+    clientMocks.promptCompletionModels.mockResolvedValue({
+      'openai/gpt-5-mini': { available: false, reason: 'Requires an API key' },
+    });
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'providers/refresh' } }));
+    await Promise.resolve();
+    finishOldRead({ 'openai/gpt-5-mini': { available: true } });
+    await Promise.resolve();
+    const row = Array.from(
+      container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
+    ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
+    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(findButton(document, 'Use for prompt completion')).toBeUndefined();
+  });
+
+  it.each([
     ['small_model', 'Use as small model', false, undefined],
     ['small_model', "Don't use as small model", true, undefined],
     ['commit_message', 'Use for commit messages', false, undefined],
     ['commit_message', "Don't use for commit messages", true, undefined],
     ['auto_approve', 'Use for auto-approve', false, undefined],
     ['auto_approve', "Don't use for auto-approve", true, undefined],
+    ['prompt_completion', 'Use for prompt completion', false, undefined],
+    ['prompt_completion', "Don't use for prompt completion", true, undefined],
     ['agent', 'Use for review agent', false, 'review'],
     ['agent', "Don't use for review agent", true, 'review'],
   ])('closes the menu immediately for %s: %s', async (target, label, unset, agentName) => {
@@ -2010,6 +2209,7 @@ describe('ModelsPanel', () => {
       smallModel: route,
       commitMessageModel: route,
       autoApproveModel: route,
+      promptCompletionModel: route,
       agentModels: route ? { review: route } : {},
     };
     clientMocks.openCodeConfig.mockResolvedValue(savedRouting);
@@ -2278,7 +2478,8 @@ describe('ModelsPanel', () => {
     expect(clientMocks.workspaceStatus).not.toHaveBeenCalled();
   });
 
-  it('collapses hidden providers by default', async () => {
+  it('collapses hidden providers without routing tags by default', async () => {
+    clientMocks.openCodeConfig.mockResolvedValue({});
     setState('hiddenProviders', ['openai']);
 
     cleanup = render(() => ModelsPanel(), container!);
@@ -2291,7 +2492,73 @@ describe('ModelsPanel', () => {
     expect(container?.querySelector('.models-model-row')).toBeNull();
   });
 
+  it.each([
+    ['smallModel', 'Small model'],
+    ['commitMessageModel', 'Commit message model'],
+    ['autoApproveModel', 'Auto-approve model'],
+    ['promptCompletionModel', 'Prompt completion model'],
+    ['agentModels', 'Agent model: vision'],
+  ])('expands a hidden provider with a %s routing tag', async (target, label) => {
+    const route = { providerID: 'openai', modelID: 'gpt-5-mini' };
+    clientMocks.openCodeConfig.mockResolvedValue({
+      [target]: target === 'agentModels' ? { vision: route } : route,
+    });
+    setState('hiddenProviders', ['openai']);
+    setState('hiddenModels', ['openai:gpt-5', 'openai:gpt-5-mini']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const section = container?.querySelector<HTMLElement>('.models-provider');
+    expect(section?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(true);
+    expect(section?.querySelectorAll('.models-model-row')).toHaveLength(2);
+    expect(section?.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
+    expect(section?.querySelector('.models-provider-hidden-marker')?.textContent).toBe('Hidden');
+    expect(state.hiddenProviders).toEqual(['openai']);
+    expect(state.hiddenModels).toEqual(['openai:gpt-5', 'openai:gpt-5-mini']);
+
+    section?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'providers/refresh' } }));
+    await Promise.resolve();
+
+    expect(clientMocks.openCodeConfig).toHaveBeenCalledTimes(2);
+    expect(section?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(false);
+    expect(section?.querySelector('.models-model-row')).toBeNull();
+  });
+
+  it('expands a hidden provider when a routing tag is added after loading', async () => {
+    clientMocks.openCodeConfig.mockResolvedValue({});
+    setState('hiddenProviders', ['openai']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+    expect(container?.querySelector('.models-model-row')).toBeNull();
+
+    clientMocks.openCodeConfig.mockResolvedValue({
+      promptCompletionModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+    });
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'providers/refresh' } }));
+    await Promise.resolve();
+
+    expect(container?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(true);
+    expect(container?.querySelector('[aria-label="Prompt completion model"]')).not.toBeNull();
+    expect(state.hiddenProviders).toEqual(['openai']);
+  });
+
+  it('keeps a tagged provider expanded when it is hidden', async () => {
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    container
+      ?.querySelector<HTMLElement>('.models-provider-header')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document.body, 'Hide provider')?.click();
+
+    expect(state.hiddenProviders).toEqual(['openai']);
+    expect(container?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(true);
+    expect(container?.querySelector('[aria-label="Small model"]')).not.toBeNull();
+  });
+
   it('keeps a hidden provider expanded and hidden when a model is enabled', async () => {
+    clientMocks.openCodeConfig.mockResolvedValue({});
     setState('hiddenProviders', ['openai']);
     setState('hiddenModels', ['openai:gpt-5-mini']);
     cleanup = render(() => ModelsPanel(), container!);
@@ -2314,6 +2581,7 @@ describe('ModelsPanel', () => {
   });
 
   it('keeps a hidden provider expanded when its managed model set changes', async () => {
+    clientMocks.openCodeConfig.mockResolvedValue({});
     setState('hiddenProviders', ['openai']);
     setState('addedModels', ['openai:*', 'openai:gpt-5', 'openai:gpt-5-mini']);
     cleanup = render(() => ModelsPanel(), container!);

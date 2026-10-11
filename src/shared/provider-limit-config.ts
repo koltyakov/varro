@@ -8,6 +8,7 @@ export type ExtensionConfigState = {
   expandThinking?: boolean;
   showChangedFiles?: boolean;
   showTurnTimer?: boolean;
+  promptCompletionModel?: string;
   debugShowQuotaWarning?: boolean;
   debugResetWarningDays?: number;
   enableProblemsContext?: boolean;
@@ -24,6 +25,7 @@ export type WebviewConfigUpdatePayload = Pick<
   | 'expandThinking'
   | 'showChangedFiles'
   | 'showTurnTimer'
+  | 'promptCompletionModel'
   | 'debugShowQuotaWarning'
   | 'debugResetWarningDays'
   | 'enableProblemsContext'

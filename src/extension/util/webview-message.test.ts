@@ -199,6 +199,9 @@ describe('webview message validation', () => {
   });
 
   it('accepts known API routes used by the webview client', () => {
+    expect(isAllowedApiRequest('POST', '/varro/prompt-completion/test')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/prompt-completion/test')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/varro/prompt-completion/test?model=other')).toBe(false);
     expect(isAllowedApiRequest('GET', '/command')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session?limit=100')).toBe(true);

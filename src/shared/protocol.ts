@@ -445,6 +445,9 @@ export type WorkspaceStatusEventSummary = {
 export const VARRO_API_NAMESPACE = '/varro' as const;
 
 export const VARRO_API_ENDPOINTS = {
+  promptCompletion: `${VARRO_API_NAMESPACE}/prompt-completion`,
+  promptCompletionModels: `${VARRO_API_NAMESPACE}/prompt-completion/models`,
+  promptCompletionTest: `${VARRO_API_NAMESPACE}/prompt-completion/test`,
   modelPricing: `${VARRO_API_NAMESPACE}/model-pricing`,
   providerLimit: `${VARRO_API_NAMESPACE}/provider-limit`,
   planOpen: `${VARRO_API_NAMESPACE}/plan/open`,
@@ -866,6 +869,7 @@ export type InitialWebviewState = {
   expandThinking?: boolean;
   showChangedFiles?: boolean;
   showTurnTimer?: boolean;
+  promptCompletionModel?: string;
   debugShowQuotaWarning?: boolean;
   debugResetWarningDays?: number;
   enableProblemsContext?: boolean;
