@@ -3650,35 +3650,37 @@ export function MessageList() {
     if (!containerRef) return null;
     const containerRect = containerRef.getBoundingClientRect();
     const selector = 'p, h1, h2, h3, h4, h5, h6, pre, table, li';
-    const assistantCandidates = Array.from(
-      containerRef.querySelectorAll<HTMLElement>('[data-assistant-render-key]')
-    ).flatMap((renderItem) =>
-      Array.from(renderItem.querySelectorAll<HTMLElement>(selector))
-        .filter((element) => !skipThinking || !element.closest('.chat-thinking-box'))
-        .map((element) => ({ element, renderItem }))
-    );
-    const userCandidates = Array.from(
-      containerRef.querySelectorAll<HTMLElement>('.user-message-card')
-    ).map((element) => ({ element, renderItem: null }));
-    const candidates = [...assistantCandidates, ...userCandidates]
-      .filter(({ element }) => {
-        const rect = element.getBoundingClientRect();
-        return (
-          rect.top - predictedMovement >= containerRect.top + 8 &&
-          rect.bottom - predictedMovement <= containerRect.bottom - 8 &&
-          rect.height > 8
-        );
-      })
-      .toSorted(
-        (left, right) =>
-          left.element.getBoundingClientRect().top - right.element.getBoundingClientRect().top
-      );
-    const selected = candidates[0];
+    const selection: {
+      candidate: { element: HTMLElement; renderItem: HTMLElement | null; rect: DOMRect } | null;
+    } = { candidate: null };
+    const consider = (element: HTMLElement, renderItem: HTMLElement | null) => {
+      const rect = element.getBoundingClientRect();
+      if (
+        rect.top - predictedMovement >= containerRect.top + 8 &&
+        rect.bottom - predictedMovement <= containerRect.bottom - 8 &&
+        rect.height > 8 &&
+        (!selection.candidate || rect.top < selection.candidate.rect.top)
+      ) {
+        selection.candidate = { element, renderItem, rect };
+      }
+    };
+    // Preserve assistant-before-user ordering for ties without sorting or rereading rectangles.
+    for (const renderItem of containerRef.querySelectorAll<HTMLElement>(
+      '[data-assistant-render-key]'
+    )) {
+      for (const element of renderItem.querySelectorAll<HTMLElement>(selector)) {
+        if (!skipThinking || !element.closest('.chat-thinking-box')) consider(element, renderItem);
+      }
+    }
+    for (const element of containerRef.querySelectorAll<HTMLElement>('.user-message-card')) {
+      consider(element, null);
+    }
+    const selected = selection.candidate;
     const row = selected?.element.closest<HTMLElement>('[data-msg-id]');
     const messageId = row?.dataset.msgId;
     if (!selected || !row || !messageId) return null;
 
-    const rect = selected.element.getBoundingClientRect();
+    const rect = selected.rect;
     const sameTag = selected.renderItem
       ? Array.from(selected.renderItem.querySelectorAll<HTMLElement>(selected.element.tagName))
       : [];

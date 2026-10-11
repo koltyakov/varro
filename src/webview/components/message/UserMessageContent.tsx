@@ -1753,7 +1753,9 @@ function isStandaloneFileReference(text: string): boolean {
   if (isAbsolutePath(normalized)) {
     return hasTrailingSlash || hasFileLikeExtension;
   }
-  if (trimmed.includes(' ') && !normalized.endsWith('/') && !/\.\w{1,12}$/.test(trimmed)) {
+  // Whitespace in an unrooted relative path is ambiguous with prose mentioning a path.
+  // Keep it as text unless an explicit attachment marker supplies the path.
+  if (/\s/.test(trimmed) && !/^(?:~|\.\.?)\//.test(normalizedInput)) {
     return false;
   }
   if (hasTrailingSlash) {
