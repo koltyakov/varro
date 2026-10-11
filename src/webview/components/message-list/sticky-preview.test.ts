@@ -7,6 +7,7 @@ import {
   shouldShowStickyUserMessagePreview,
   isMessageHiddenBehindStickyPreview,
 } from './sticky-preview';
+import { buildPlanImplementationPrompt } from './plan-actions';
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise sticky-preview integration with the Message renderer. */
 vi.mock('../Message', () => ({
@@ -288,6 +289,17 @@ describe('getNextVisibleUserMessageTopMap', () => {
     const bounds = new Map<string, { top: number; bottom: number }>([
       ['u2', { top: 0, bottom: 0 }],
     ]);
+    const result = getNextVisibleUserMessageTopMap(messages, bounds);
+    expect(result.get('u1')).toBeNull();
+  });
+
+  it('does not treat plan implementation actions as the next visible prompt', () => {
+    const implementation = user('implement', buildPlanImplementationPrompt([]));
+    const messages = [user('u1'), implementation, assistant('a1', 'implement')];
+    const bounds = new Map<string, { top: number; bottom: number }>([
+      ['implement', { top: 60, bottom: 100 }],
+    ]);
+
     const result = getNextVisibleUserMessageTopMap(messages, bounds);
     expect(result.get('u1')).toBeNull();
   });

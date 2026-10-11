@@ -183,7 +183,10 @@ import {
   getVisibleThreadMessages,
   hasVisibleRunningToolPart,
 } from './message-list/thread-visibility';
-import { getLatestPlanImplementationMessageId } from './message-list/plan-actions';
+import {
+  getLatestPlanImplementationMessageId,
+  isPlanImplementationMessage,
+} from './message-list/plan-actions';
 import {
   sameAssistantRetryScanState,
   scanAssistantRetryStates,
@@ -4555,6 +4558,7 @@ export function MessageList() {
       const nextMessage = currentMessages[index];
       if (nextMessage?.info.role !== 'user') continue;
       if (steeringIds.has(nextMessage.info.id)) continue;
+      if (isPlanImplementationMessage(nextMessage.info, nextMessage.parts)) continue;
 
       const nextRow = mountedMessageRows.get(nextMessage.info.id);
       if (!nextRow) return null;
@@ -4581,8 +4585,12 @@ export function MessageList() {
     if (!containerRef) return null;
     const steeringIds = steeringMessageIds();
     for (const row of containerRef.querySelectorAll<HTMLElement>('.interactive-request')) {
-      if (row.dataset.msgId === messageId) continue;
-      if (row.dataset.msgId && steeringIds.has(row.dataset.msgId)) continue;
+      const rowMessageId = row.dataset.msgId;
+      if (rowMessageId === messageId) continue;
+      if (rowMessageId && steeringIds.has(rowMessageId)) continue;
+      const rowMessageIndex = rowMessageId ? messageIndexById().get(rowMessageId) : undefined;
+      const rowMessage = rowMessageIndex === undefined ? undefined : messages()[rowMessageIndex];
+      if (rowMessage && isPlanImplementationMessage(rowMessage.info, rowMessage.parts)) continue;
       const source = row.querySelector<HTMLElement>(
         '.user-message-card, .inline-edit-composer-slot'
       );

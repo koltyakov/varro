@@ -5,6 +5,7 @@ import {
   getUserMessagePreviewText,
   parseUserMessageContent,
 } from '../Message';
+import { isPlanImplementationMessage } from './plan-actions';
 import type { UserMessageMarkupFormat } from '../Message';
 import type { Message, MessageEntry, Part } from '../../types';
 
@@ -67,6 +68,7 @@ export function getStickyUserMessagePreview(
     firstVisibleEntry.info.role === 'user' &&
     !steeringMessageIds.has(firstVisibleEntry.info.id) &&
     !isSessionResumeMessage(firstVisibleEntry.parts) &&
+    !isPlanImplementationMessage(firstVisibleEntry.info, firstVisibleEntry.parts) &&
     !subagentSessionIds.has(firstVisibleEntry.info.sessionID) &&
     getUserMessagePreviewText(firstVisibleEntry.parts) !== EMPTY_USER_MESSAGE_PREVIEW
   ) {
@@ -82,6 +84,7 @@ export function getStickyUserMessagePreview(
     if (entry.info.role !== 'user') continue;
     if (steeringMessageIds.has(entry.info.id)) continue;
     if (isSessionResumeMessage(entry.parts)) continue;
+    if (isPlanImplementationMessage(entry.info, entry.parts)) continue;
     if (subagentSessionIds.has(entry.info.sessionID)) continue;
     const text = getUserMessagePreviewText(entry.parts);
     if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
@@ -122,7 +125,7 @@ export function getUserMessageNavigationPreviews(
 }
 
 export function getNextVisibleUserMessageTopMap(
-  messages: Array<{ info: Message }>,
+  messages: readonly MessageEntry[],
   observedVisibleMessageBounds: ReadonlyMap<string, { top: number; bottom: number }>
 ) {
   const result = new Map<string, number | null>();
@@ -135,6 +138,7 @@ export function getNextVisibleUserMessageTopMap(
     if (entry.info.role !== 'user') continue;
 
     if (subagentSessionIds.has(entry.info.sessionID)) continue;
+    if (isPlanImplementationMessage(entry.info, entry.parts)) continue;
 
     const bounds = observedVisibleMessageBounds.get(entry.info.id);
     if (bounds && bounds.bottom > 0) {

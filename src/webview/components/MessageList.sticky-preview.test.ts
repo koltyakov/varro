@@ -13,6 +13,7 @@ import {
 import type { MessageEntry } from '../types';
 import { MessageList } from './MessageList';
 import { getAssistantDialogSummaryMap } from './message-list/assistant-dialog';
+import { buildPlanImplementationPrompt } from './message-list/plan-actions';
 import * as toolCallMatching from '../lib/tool-call-matching';
 import {
   getNextVisibleUserMessageTopMap,
@@ -143,6 +144,32 @@ describe('getStickyUserMessagePreview', () => {
       id: 'user-2',
       index: 2,
       text: 'Newest prompt',
+      attachmentCount: 0,
+      imageCount: 0,
+    });
+  });
+
+  it('keeps the preceding real prompt for a plan implementation response', () => {
+    expect(
+      getStickyUserMessagePreview(
+        [
+          { info: userMessage('user-1'), parts: [textPart('text-1', 'Create a migration plan')] },
+          { info: assistantMessage('plan-1', { agent: 'plan', parentID: 'user-1' }), parts: [] },
+          {
+            info: userMessage('implement-1'),
+            parts: [textPart('implement-text', buildPlanImplementationPrompt([]))],
+          },
+          {
+            info: assistantMessage('assistant-1', { parentID: 'implement-1' }),
+            parts: [],
+          },
+        ],
+        3
+      )
+    ).toEqual({
+      id: 'user-1',
+      index: 0,
+      text: 'Create a migration plan',
       attachmentCount: 0,
       imageCount: 0,
     });
@@ -2242,7 +2269,7 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
-  it.each(['notice', 'compaction', 'steer', 'legacy steer'] as const)(
+  it.each(['notice', 'compaction', 'steer', 'legacy steer', 'plan implementation'] as const)(
     'does not hide the sticky prompt when a %s crosses the overlay',
     async (kind) => {
       const animationFrames = installQueuedAnimationFrameMocks();
@@ -2273,9 +2300,17 @@ describe('MessageList sticky prompt preview', () => {
                       auto: true,
                     },
                   ]
-                : [textPart('steer-text', 'Steered instruction')],
+                : kind === 'plan implementation'
+                  ? [textPart('implement-text', buildPlanImplementationPrompt([]))]
+                  : [textPart('steer-text', 'Steered instruction')],
         },
-        { info: assistantMessage('assistant-2'), parts: [textPart('result-text', 'Tests passed')] },
+        {
+          info: assistantMessage(
+            'assistant-2',
+            kind === 'plan implementation' ? { parentID: 'notice-1' } : undefined
+          ),
+          parts: [textPart('result-text', 'Tests passed')],
+        },
       ]);
       let noticeTop = 200;
       vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
