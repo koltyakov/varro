@@ -50,7 +50,7 @@ import { handleWorkspaceSelectionFailure } from '../lib/workspace-selection';
 import { startNewChatDraft } from '../lib/new-chat-draft';
 import { client } from '../lib/client';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
-import { setSessionHistoryPrompts } from '../lib/message-window';
+import { setCachedSessionMessages, setSessionHistoryPrompts } from '../lib/message-window';
 import { hasExpandedDiffOverlay, setExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import {
   providerConnectionRequest,
@@ -734,6 +734,101 @@ function availableProviderLimit(
 }
 
 describe('ChatInput', () => {
+  it.each(['live messages', 'cached messages'])(
+    'includes only the latest same-chat agent text from %s',
+    async (source) => {
+      vi.useFakeTimers();
+      setupModelState();
+      setState('activeSessionId', 'session-1');
+      setState('sessions', [session('session-1', 2_000)]);
+      const base = assistantMessageEntry({ input: 1, output: 1 });
+      const textPart = (id: string, text: string): TextPart => ({
+        id: `${id}-text`,
+        messageID: id,
+        sessionID: 'session-1',
+        type: 'text',
+        text,
+      });
+      const earlier: MessageEntry = {
+        ...base,
+        info: { ...base.info, id: 'earlier' },
+        parts: [textPart('earlier', 'Old agent reply')],
+      };
+      const latest: MessageEntry = {
+        ...base,
+        info: { ...base.info, id: 'latest' },
+        parts: [
+          textPart('latest', 'The test fails because the handler ignores cancellation.'),
+          {
+            id: 'reasoning',
+            sessionID: 'session-1',
+            messageID: 'latest',
+            type: 'reasoning',
+            text: 'Private reasoning',
+            time: { start: 0 },
+          },
+          { ...textPart('latest', 'Synthetic context'), id: 'synthetic', synthetic: true },
+          {
+            id: 'tool',
+            sessionID: 'session-1',
+            messageID: 'latest',
+            type: 'tool',
+            callID: 'call',
+            tool: 'bash',
+            state: {
+              status: 'completed',
+              input: {},
+              output: 'Private tool output',
+              title: 'Tests',
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+          { ...textPart('latest', 'Ignored text'), id: 'ignored', ignored: true },
+          { ...textPart('latest', 'Foreign part'), id: 'foreign-part', sessionID: 'other-chat' },
+          { ...textPart('latest', 'Should I fix the handler or change the test?'), id: 'question' },
+        ],
+      };
+      const summary: MessageEntry = {
+        ...base,
+        info: { ...base.info, id: 'summary', summary: true },
+        parts: [textPart('summary', 'Internal compaction summary')],
+      };
+      const empty: MessageEntry = { ...base, info: { ...base.info, id: 'empty' }, parts: [] };
+      const child: MessageEntry = {
+        ...base,
+        info: { ...base.info, id: 'child', sessionID: 'child-chat' },
+        parts: [textPart('child', 'Child agent reply')],
+      };
+      const other: MessageEntry = {
+        ...base,
+        info: { ...base.info, id: 'other', sessionID: 'other-chat' },
+        parts: [textPart('other', 'Another chat reply')],
+      };
+      const entries = [earlier, latest, summary, empty, child, other];
+      if (source === 'live messages') setState('messages', entries);
+      else setCachedSessionMessages('session-1', entries);
+      setState('promptCompletionModel', 'openai/fast');
+      setInputText('Please fix');
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+      editor.focus();
+      setCollapsedSelection(editor.firstChild!, 'Please fix'.length);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'x', bubbles: true }));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(client.varro.completePrompt).toHaveBeenCalledWith(
+        {
+          draft: 'Please fix',
+          history: [],
+          lastAssistantResponse:
+            'The test fails because the handler ignores cancellation.\n\nShould I fix the handler or change the test?',
+          variant: undefined,
+        },
+        { signal: expect.any(AbortSignal), directory: '/repo' }
+      );
+    }
+  );
+
   it('sends only the last ten user prompts from the composer chat, preserving repeated prompts', async () => {
     vi.useFakeTimers();
     setupModelState();
@@ -786,6 +881,7 @@ describe('ChatInput', () => {
           'Add a feature',
           'Add a feature',
         ],
+        lastAssistantResponse: 'Assistant reply, not a user prompt',
         variant: undefined,
       },
       { signal: expect.any(AbortSignal), directory: '/repo' }
@@ -794,7 +890,22 @@ describe('ChatInput', () => {
 
   it('does not send another chat history when composing a new chat', async () => {
     vi.useFakeTimers();
-    setState('messages', [historyEntry('other-prompt', 'Another chat prompt')]);
+    const previousReply = assistantMessageEntry({ input: 1, output: 1 });
+    setState('messages', [
+      historyEntry('other-prompt', 'Another chat prompt'),
+      {
+        ...previousReply,
+        parts: [
+          {
+            id: 'old-text',
+            sessionID: 'session-1',
+            messageID: previousReply.info.id,
+            type: 'text',
+            text: 'Another chat agent reply',
+          },
+        ],
+      },
+    ]);
     setState('promptCompletionModel', 'openai/fast');
     setInputText('Add a feature');
     cleanup = render(() => ChatInput(), container!);

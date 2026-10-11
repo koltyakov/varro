@@ -1,5 +1,5 @@
 import { createRoot } from 'solid-js';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PermissionRule } from '../../shared/opencode-types';
 import type { onMessage } from '../lib/bridge';
 import {
@@ -36,6 +36,12 @@ function sessionInWorkspace(id: string) {
 }
 
 describe('sendMessage', () => {
+  // Keep cold runtime imports out of the assertion timeout. A timed-out import can
+  // otherwise overlap the next test's module reset and mix separate store instances.
+  beforeEach(async () => {
+    await loadModules();
+  }, 15_000);
+
   it.each([undefined, 'queued'] as const)(
     'blocks sends to an unavailable transferred session including %s targets',
     async (target) => {

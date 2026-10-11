@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { glob } from 'node:fs/promises';
+import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
@@ -44,6 +45,15 @@ test('runs backend tests without browser setup and retains browser contracts in 
   }
   assert.ok(backendFiles.includes('src/extension/open-code-transport.test.ts'));
   assert.ok(backendFiles.includes('src/shared/protocol.test.ts'));
+});
+
+test('bounds worker concurrency without relaxing test timeouts', () => {
+  assert.equal(
+    config.test.maxWorkers,
+    Math.min(4, Math.max(1, Math.floor(availableParallelism() / 2)))
+  );
+  assert.equal(config.test.testTimeout, undefined);
+  assert.equal(config.test.hookTimeout, undefined);
 });
 
 test('runs native Windows inspection after all other projects without relaxing coverage', async () => {

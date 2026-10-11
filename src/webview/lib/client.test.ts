@@ -1588,7 +1588,12 @@ describe('client', () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue({ suffix: ' with tests' });
     const signal = new AbortController().signal;
-    const body = { draft: 'Add a feature', history: [], variant: 'none' };
+    const body = {
+      draft: 'Add a feature',
+      history: [],
+      lastAssistantResponse: 'The agent asks which feature to implement',
+      variant: 'none',
+    };
     await client.varro.completePrompt(body, { signal, directory: '/fixture' });
     expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
       'POST',

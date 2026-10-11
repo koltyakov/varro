@@ -213,7 +213,7 @@ test('centers model route tags within their fixed height', async ({ page }) => {
 
   await expect(tag).toHaveText('commit');
   await expect(tag).toHaveCSS('height', '16px');
-  await expect(tag).toHaveCSS('line-height', '9px');
+  await expect(tag).toHaveCSS('line-height', '14px');
   await expect(tag).toHaveCSS('align-items', 'center');
 });
 

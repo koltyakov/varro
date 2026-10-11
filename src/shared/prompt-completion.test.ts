@@ -118,12 +118,24 @@ describe('prompt completion boundaries', () => {
     { draft: 'valid', history: [], variant: 3 },
     { draft: 'valid', history: [], variant: '' },
     { draft: 'valid', history: [], variant: 'x'.repeat(101) },
+    { draft: 'valid', history: [], lastAssistantResponse: null },
+    { draft: 'valid', history: [], lastAssistantResponse: 3 },
+    { draft: 'valid', history: [], lastAssistantResponse: 'x'.repeat(6_001) },
   ])('rejects malformed or oversized requests', (value) => {
     expect(() => parsePromptCompletionRequest(value)).toThrow('Invalid prompt completion request');
   });
 
   it('preserves a validated reasoning variant without changing the draft', () => {
     const request = { draft: 'Add a test', history: [], variant: 'none' };
+    expect(parsePromptCompletionRequest(request)).toEqual(request);
+  });
+
+  it('preserves the optional latest agent reply, including the maximum length', () => {
+    const request = {
+      draft: 'Please fix',
+      history: ['Add tests'],
+      lastAssistantResponse: 'x'.repeat(6_000),
+    };
     expect(parsePromptCompletionRequest(request)).toEqual(request);
   });
 

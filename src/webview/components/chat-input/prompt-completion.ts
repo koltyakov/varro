@@ -2,6 +2,7 @@ import { createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import {
   MAX_COMPLETION_DRAFT_LENGTH,
+  MAX_COMPLETION_RESPONSE_LENGTH,
   normalizePromptSuffix,
   recentCompletionPrompts,
   type PromptCompletionRequest,
@@ -13,6 +14,7 @@ type PromptCompletionOptions = {
   eligible: () => boolean;
   scope: () => string;
   history: () => readonly string[];
+  lastAssistantResponse?: () => string | undefined;
   request: (input: PromptCompletionRequest, signal: AbortSignal) => Promise<{ suffix: string }>;
 };
 
@@ -56,8 +58,14 @@ export class PromptCompletion {
       const controller = new AbortController();
       const timer = setTimeout(() => {
         const history = untrack(() => recentCompletionPrompts(options.history()));
+        // Read context only after the typing pause; streamed replies must not restart the debounce.
+        const lastAssistantResponse = untrack(() =>
+          options.lastAssistantResponse?.()?.trim().slice(-MAX_COMPLETION_RESPONSE_LENGTH)
+        );
+        const input: PromptCompletionRequest = { draft, history };
+        if (lastAssistantResponse) input.lastAssistantResponse = lastAssistantResponse;
         setPending(true);
-        void options.request({ draft, history }, controller.signal).then(
+        void options.request(input, controller.signal).then(
           (result) => {
             if (!controller.signal.aborted && key() === requestKey && options.eligible()) {
               setPending(false);

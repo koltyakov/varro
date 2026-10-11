@@ -17,6 +17,7 @@ function setup() {
     const [model, setModel] = createSignal('openai/fast');
     const [eligible, setEligible] = createSignal(true);
     const [scope, setScope] = createSignal('session-1');
+    const [lastAssistantResponse, setLastAssistantResponse] = createSignal<string | undefined>();
     const request = vi.fn<
       (input: PromptCompletionRequest, signal: AbortSignal) => Promise<{ suffix: string }>
     >(async () => ({ suffix: ' for the new feature' }));
@@ -27,6 +28,7 @@ function setup() {
       scope,
       request,
       history: () => ['Previous prompt'],
+      lastAssistantResponse,
     });
     return {
       suggestion: completion.suggestion,
@@ -37,12 +39,47 @@ function setup() {
       setModel,
       setEligible,
       setScope,
+      setLastAssistantResponse,
       request,
     };
   });
 }
 
 describe('inline prompt completion scheduling', () => {
+  it('snapshots the latest reply after the pause without rescheduling when it streams', async () => {
+    const test = setup();
+    test.setLastAssistantResponse('An earlier partial reply');
+    await vi.advanceTimersByTimeAsync(400);
+    test.setLastAssistantResponse('The final reply asks which option to implement');
+    await vi.advanceTimersByTimeAsync(200);
+    expect(test.request).toHaveBeenCalledWith(
+      {
+        draft: 'Add a test',
+        history: ['Previous prompt'],
+        lastAssistantResponse: 'The final reply asks which option to implement',
+      },
+      expect.any(AbortSignal)
+    );
+    test.setLastAssistantResponse('More streamed reply text');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(test.request).toHaveBeenCalledOnce();
+  });
+
+  it('bounds the latest reply while keeping its concluding question', async () => {
+    const test = setup();
+    const reply = `${'Earlier details '.repeat(1_000)}Which option should I implement?`;
+    test.setLastAssistantResponse(reply);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(test.request.mock.calls[0]![0].lastAssistantResponse).toBe(reply.slice(-6_000));
+  });
+
+  it('omits blank or missing replies', async () => {
+    const test = setup();
+    test.setLastAssistantResponse('  \n ');
+    await vi.advanceTimersByTimeAsync(600);
+    expect(test.request.mock.calls[0]![0]).not.toHaveProperty('lastAssistantResponse');
+  });
+
   it.each(['suggestion', 'empty', 'error'] as const)(
     'reports pending only during generation and clears it after %s',
     async (result) => {

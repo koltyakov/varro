@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { resolve } from 'node:path';
 import solid from 'vite-plugin-solid';
 import { configDefaults, defineConfig } from 'vitest/config';
@@ -28,6 +29,8 @@ export default defineConfig({
   },
   test: {
     pool: 'forks',
+    // Leave CPU headroom for cold runtime imports and large jsdom fixtures.
+    maxWorkers: Math.min(4, Math.max(1, Math.floor(availableParallelism() / 2))),
     projects: [
       {
         extends: true,

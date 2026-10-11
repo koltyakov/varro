@@ -214,7 +214,7 @@ import {
   type ComposerHistoryAction,
   type ComposerSnapshot,
 } from '../lib/composer-history';
-import { getSessionHistoryPrompts } from '../lib/message-window';
+import { getCachedSessionMessages, getSessionHistoryPrompts } from '../lib/message-window';
 import { recordSessionPause } from '../lib/session-pauses';
 import { isSessionResumeMessage } from '../../shared/session-pauses';
 import { setError } from '../lib/app-state';
@@ -4174,6 +4174,35 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         getNewChatDraftGeneration(),
       ]),
     history: messageHistory,
+    lastAssistantResponse: () => {
+      const sessionId = composerSessionId();
+      if (!sessionId) return undefined;
+      const live = getMessageLookup().bySessionId.get(sessionId);
+      const entries = live?.length ? live : getCachedSessionMessages(sessionId);
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const entry = entries[index]!;
+        if (
+          entry.info.sessionID !== sessionId ||
+          entry.info.role !== 'assistant' ||
+          entry.info.summary
+        )
+          continue;
+        const text = entry.parts
+          .flatMap((part) =>
+            part.type === 'text' &&
+            !part.synthetic &&
+            !part.ignored &&
+            part.sessionID === sessionId &&
+            part.messageID === entry.info.id
+              ? [part.text]
+              : []
+          )
+          .join('\n\n')
+          .trim();
+        if (text) return text;
+      }
+      return undefined;
+    },
     eligible: () =>
       isFocused() &&
       connectionInitialized() &&

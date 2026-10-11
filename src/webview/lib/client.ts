@@ -6,6 +6,7 @@ import {
 import type { BackgroundProcess, BackgroundProcessOutput } from '../../shared/background-process';
 import type {
   PromptCompletionAvailability,
+  PromptCompletionRequest,
   PromptCompletionTestResult,
 } from '../../shared/prompt-completion';
 import { validateFileDiffs } from './validate-diffs';
@@ -774,7 +775,7 @@ export const client = {
       });
     },
     async completePrompt(
-      body: { draft: string; history: string[]; variant?: string },
+      body: PromptCompletionRequest,
       options: { signal: AbortSignal; directory?: string }
     ): Promise<{ suffix: string }> {
       return apiCall(

@@ -6,9 +6,15 @@ import { normalizeModelVariant } from './model-variant';
 export const MAX_COMPLETION_DRAFT_LENGTH = 4_000;
 export const MAX_COMPLETION_HISTORY = 10;
 export const MAX_COMPLETION_HISTORY_LENGTH = 1_000;
+export const MAX_COMPLETION_RESPONSE_LENGTH = 6_000;
 export const MAX_COMPLETION_SUFFIX_LENGTH = 240;
 
-export type PromptCompletionRequest = { draft: string; history: string[]; variant?: string };
+export type PromptCompletionRequest = {
+  draft: string;
+  history: string[];
+  lastAssistantResponse?: string;
+  variant?: string;
+};
 export type PromptCompletionAvailability = Record<string, { available: boolean; reason?: string }>;
 export type PromptCompletionTestResult = { success: boolean; elapsedMs: number; error?: string };
 
@@ -96,6 +102,9 @@ export function parsePromptCompletionRequest(value: unknown): PromptCompletionRe
     record.draft.length > MAX_COMPLETION_DRAFT_LENGTH ||
     !Array.isArray(record.history) ||
     record.history.length > MAX_COMPLETION_HISTORY ||
+    (record.lastAssistantResponse !== undefined &&
+      (!isString(record.lastAssistantResponse) ||
+        record.lastAssistantResponse.length > MAX_COMPLETION_RESPONSE_LENGTH)) ||
     (record.variant !== undefined &&
       (!isString(record.variant) || !record.variant.trim() || record.variant.length > 100)) ||
     !record.history.every(
@@ -109,6 +118,8 @@ export function parsePromptCompletionRequest(value: unknown): PromptCompletionRe
     history: record.history.filter(isString),
   };
   if (isString(record.variant)) request.variant = record.variant;
+  if (isString(record.lastAssistantResponse))
+    request.lastAssistantResponse = record.lastAssistantResponse;
   return request;
 }
 
