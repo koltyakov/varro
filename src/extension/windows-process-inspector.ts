@@ -154,6 +154,8 @@ public static class VarroProcessInspection {
   }
 }
 '@
+[Console]::Out.WriteLine('{"ready":true}')
+[Console]::Out.Flush()
 while ($null -ne ($line = [Console]::In.ReadLine())) {
   $fields = $line.Split(' ')
   $id = 0
@@ -188,6 +190,37 @@ export class WindowsProcessInspector {
     }
   >();
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
+  private ready = false;
+  private preparation:
+    | { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void }
+    | undefined;
+
+  /** Prepare the helper without observing or trusting any process identity. */
+  prepare(): Promise<void> {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
+    const worker = this.worker ?? this.start();
+    if (this.preparation) return this.preparation.promise;
+    if (this.ready) {
+      this.retireWhenIdle(worker);
+      return Promise.resolve();
+    }
+    let resolvePreparation!: () => void;
+    let rejectPreparation!: (error: Error) => void;
+    const timeout = setTimeout(() => {
+      if (this.worker === worker)
+        this.stop(new Error('Windows process inspection helper startup timed out after 15000ms'));
+    }, 15_000);
+    const promise = new Promise<void>((resolve, reject) => {
+      resolvePreparation = resolve;
+      rejectPreparation = reject;
+    }).finally(() => {
+      clearTimeout(timeout);
+      this.retireWhenIdle(worker);
+    });
+    this.preparation = { promise, resolve: resolvePreparation, reject: rejectPreparation };
+    return promise;
+  }
 
   read(pid: number, ancestorPid = 0): Promise<WindowsProcessDetails> {
     if (!Number.isSafeInteger(pid) || pid <= 0 || pid > 0x7fffffff)
@@ -228,13 +261,16 @@ export class WindowsProcessInspector {
     } finally {
       if (timeout) clearTimeout(timeout);
       this.pending.delete(id);
-      if (!this.pending.size && this.worker === worker) {
-        // stdin EOF also makes the helper exit when its extension host disappears.
-        if (this.idleTimer) clearTimeout(this.idleTimer);
-        this.idleTimer = setTimeout(() => this.dispose(), 60_000);
-        this.idleTimer.unref();
-      }
+      this.retireWhenIdle(worker);
     }
+  }
+
+  private retireWhenIdle(worker: ChildProcessWithoutNullStreams): void {
+    if (this.pending.size || this.preparation || this.worker !== worker) return;
+    // stdin EOF also makes the helper exit when its extension host disappears.
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => this.dispose(), 60_000);
+    this.idleTimer.unref();
   }
 
   private start(): ChildProcessWithoutNullStreams {
@@ -275,6 +311,13 @@ export class WindowsProcessInspector {
         buffer = buffer.slice(end + 1);
         try {
           const response = asRecord(JSON.parse(line));
+          if (response?.ready === true && Object.keys(response).length === 1 && !this.ready) {
+            this.ready = true;
+            const preparation = this.preparation;
+            this.preparation = undefined;
+            preparation?.resolve();
+            continue;
+          }
           const pending = this.pending.get(Number(response?.id));
           if (!pending) throw new Error('Unexpected Windows process inspection response');
           if (isString(response?.error)) {
@@ -328,6 +371,10 @@ export class WindowsProcessInspector {
     this.idleTimer = undefined;
     const worker = this.worker;
     this.worker = undefined;
+    this.ready = false;
+    const preparation = this.preparation;
+    this.preparation = undefined;
+    preparation?.reject(error);
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
     worker?.stdin.destroy();

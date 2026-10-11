@@ -32,11 +32,15 @@ sets never select an arbitrary process as launch ownership proof.
 The native helper integration test runs in a Node-environment Vitest project after
 the parallel unit suite. This avoids making PowerShell startup and `Add-Type`
 compete with jsdom workers on Windows CI without relaxing the production timeout.
-Its suite fixture shares one helper and allows one retry only when cold startup
-hits that five-second deadline. Assertion reads never retry and always obtain fresh
-observations. Persistent startup failures still fail setup; deterministic unit tests
-check the exact deadline, rejection of all pending reads, and restart without cached
-or partial evidence. The native suite does not prove cold startup always fits five seconds.
+Its suite fixture shares one helper and waits up to fifteen seconds for an explicit
+readiness message after compilation, without restarting compilation at five seconds.
+Preparation reads no process identity and readiness grants no account or ownership proof.
+Production reads do not wait for preparation and retain their five-second total bound,
+including cold startup. Fixture and assertion reads also retain that bound, never retry,
+and always obtain fresh observations. Persistent startup failures still fail setup;
+deterministic unit tests check both deadlines, rejection of all pending reads, and
+restart without cached or partial evidence. The native suite does not prove cold
+startup always fits five seconds.
 
 Logical REST requests carry an internal admission ticket through their adapter wire
 requests. For strict initial/foreign/unknown admission, its expiry is the **earlier

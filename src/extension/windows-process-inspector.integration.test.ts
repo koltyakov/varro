@@ -8,21 +8,11 @@ describe.skipIf(process.platform !== 'win32')('native Windows process inspection
   const inspector = new WindowsProcessInspector();
 
   beforeAll(async () => {
-    // Cold PowerShell/Add-Type startup can exceed the production deadline even
-    // without parallel workers. Retry fixture setup once, never an assertion read.
-    try {
-      await inspector.read(process.pid);
-    } catch (error) {
-      if (
-        !(error instanceof Error) ||
-        error.message !== 'Windows native process inspection timed out after 5000ms'
-      )
-        throw error;
-      // oxlint-disable-next-line no-console -- Report fixture recovery in the CI test output.
-      console.warn('Native Windows fixture cold startup timed out; retrying setup once');
-      await inspector.read(process.pid);
-    }
-  }, 15_000);
+    // Wait for compilation once, without restarting it at the inspection deadline.
+    // Readiness is not identity evidence; all reads retain the production deadline.
+    await inspector.prepare();
+    await inspector.read(process.pid);
+  }, 25_000);
 
   afterAll(() => inspector.dispose());
 

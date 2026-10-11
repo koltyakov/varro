@@ -53,6 +53,119 @@ afterEach(() => {
 });
 
 describe('Windows native process inspector', () => {
+  it('prepares one helper through slow compilation without reading process identity', async () => {
+    vi.useFakeTimers();
+    const { inspector, children } = setup();
+    const preparation = inspector.prepare();
+    expect(inspector.prepare()).toBe(preparation);
+    expect(children[0]!.stdin.read()).toBeNull();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(children[0]!.kill).not.toHaveBeenCalled();
+    children[0]!.stdout.write('{"ready":');
+    children[0]!.stdout.write('true}\r\n');
+    await preparation;
+    await inspector.prepare();
+    const inspection = inspector.read(1234);
+    respond(children[0]!);
+    await expect(inspection).resolves.toMatchObject({ birthIdentity: 'win32:123' });
+    expect(spawnMock).toHaveBeenCalledOnce();
+    // SAFETY: The helper launch always provides an encoded script as its final argument.
+    const args = spawnMock.mock.calls[0]![1] as string[];
+    const script = Buffer.from(args.at(-1)!, 'base64').toString('utf16le');
+    expect(script.indexOf('[Console]::Out.WriteLine(\'{"ready":true}\')')).toBeGreaterThan(
+      script.indexOf("'@")
+    );
+    expect(script.indexOf('[Console]::Out.WriteLine(\'{"ready":true}\')')).toBeLessThan(
+      script.indexOf('while ($null -ne')
+    );
+  });
+
+  it('bounds preparation and ignores readiness from a retired helper', async () => {
+    vi.useFakeTimers();
+    const { inspector, children } = setup();
+    const rejected = expect(inspector.prepare()).rejects.toThrow(
+      'helper startup timed out after 15000ms'
+    );
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(children[0]!.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(children[0]!.kill).toHaveBeenCalledOnce();
+    const next = inspector.prepare();
+    let prepared = false;
+    void next.then(() => {
+      prepared = true;
+    });
+    children[0]!.stdout.write('{"ready":true}\n');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(prepared).toBe(false);
+    children[1]!.stdout.write('{"ready":true}\n');
+    await next;
+    expect(prepared).toBe(true);
+  });
+
+  it('retains the five-second inspection deadline after preparation', async () => {
+    vi.useFakeTimers();
+    const { inspector, children } = setup();
+    const preparation = inspector.prepare();
+    children[0]!.stdout.write('{"ready":true}\n');
+    await preparation;
+    const rejected = expect(inspector.read(1234)).rejects.toThrow(
+      'native process inspection timed out after 5000ms'
+    );
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(children[0]!.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(children[0]!.kill).toHaveBeenCalledOnce();
+  });
+
+  it('does not treat readiness as identity or extend an unprepared production read', async () => {
+    vi.useFakeTimers();
+    const { inspector, children } = setup();
+    const rejected = expect(inspector.read(1234)).rejects.toThrow(
+      'native process inspection timed out after 5000ms'
+    );
+    await vi.advanceTimersByTimeAsync(4000);
+    children[0]!.stdout.write('{"ready":true}\n');
+    await vi.advanceTimersByTimeAsync(1000);
+    await rejected;
+    expect(children[0]!.kill).toHaveBeenCalledOnce();
+  });
+
+  it('rejects preparation too when a concurrent inspection reaches its deadline', async () => {
+    vi.useFakeTimers();
+    const { inspector, children } = setup();
+    const preparation = expect(inspector.prepare()).rejects.toThrow('inspection timed out');
+    const inspection = expect(inspector.read(1234)).rejects.toThrow('inspection timed out');
+    await vi.advanceTimersByTimeAsync(5000);
+    await Promise.all([preparation, inspection]);
+    expect(children[0]!.kill).toHaveBeenCalledOnce();
+  });
+
+  it.each(['exit', 'dispose'] as const)('rejects preparation on helper %s', async (action) => {
+    const { inspector, children } = setup();
+    const rejected = expect(inspector.prepare()).rejects.toThrow(
+      action === 'exit' ? 'helper exited' : 'inspector stopped'
+    );
+    if (action === 'exit') children[0]!.emit('close', 1);
+    else inspector.dispose();
+    await rejected;
+  });
+
+  it('retires a prepared but unused helper and prepares a fresh one next time', async () => {
+    vi.useFakeTimers();
+    const { inspector, children } = setup();
+    const preparation = inspector.prepare();
+    children[0]!.stdout.write('{"ready":true}\n');
+    await preparation;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(children[0]!.kill).toHaveBeenCalledOnce();
+    const next = inspector.prepare();
+    children[1]!.stdout.write('{"ready":true}\n');
+    await next;
+  });
+
   it('verifies launch ancestry independently of ordinary identity reads', async () => {
     const { inspector, children } = setup();
     const identity = inspector.read(1234);
