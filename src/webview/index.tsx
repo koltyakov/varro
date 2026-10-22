@@ -4,6 +4,8 @@ import { AppRoot } from './App';
 import { cleanupBridge, initializeBridge, postMessage } from './lib/bridge';
 // oxlint-disable-next-line no-unassigned-import
 import './index.css';
+// oxlint-disable-next-line no-unassigned-import
+import 'katex/dist/katex.min.css';
 import { applyChatFontConfig } from './lib/chat-font-config';
 import { isFunction } from './lib/runtime-values';
 import { readInitialWebviewState } from './lib/state-stored-values';

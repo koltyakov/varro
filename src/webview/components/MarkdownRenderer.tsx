@@ -2,7 +2,9 @@ import { Show, createSignal, createEffect, createMemo, onMount, onCleanup } from
 import type { JSX } from 'solid-js';
 import { Portal, render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
+import { renderToString as renderKatex } from 'katex';
 import { marked, Tokenizer } from 'marked';
+import markedKatex from 'marked-katex-extension';
 import type { Token, Tokens } from 'marked';
 import type { Mermaid, MermaidConfig } from 'mermaid';
 import { writeClipboard } from '../lib/write-clipboard';
@@ -188,6 +190,84 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'y1',
   'y2',
 ];
+const KATEX_HTML_TAGS = [
+  'annotation',
+  'annotation-xml',
+  'math',
+  'menclose',
+  'merror',
+  'mfrac',
+  'mi',
+  'mmultiscripts',
+  'mn',
+  'mo',
+  'mover',
+  'mpadded',
+  'mphantom',
+  'mprescripts',
+  'mrow',
+  'mroot',
+  'ms',
+  'mspace',
+  'msqrt',
+  'mstyle',
+  'msub',
+  'msubsup',
+  'msup',
+  'mtable',
+  'mtd',
+  'mtext',
+  'mtr',
+  'munder',
+  'munderover',
+  'none',
+  'semantics',
+];
+const KATEX_HTML_ATTRIBUTES = [
+  'accent',
+  'accentunder',
+  'align',
+  'bevelled',
+  'columnlines',
+  'columnalign',
+  'columnspacing',
+  'columnspan',
+  'display',
+  'displaystyle',
+  'encoding',
+  'equalcolumns',
+  'equalrows',
+  'frame',
+  'framespacing',
+  'linethickness',
+  'lspace',
+  'mathvariant',
+  'maxsize',
+  'minsize',
+  'movablelimits',
+  'notation',
+  'preserveAspectRatio',
+  'rowalign',
+  'rowlines',
+  'rowspacing',
+  'rowspan',
+  'rspace',
+  'scriptlevel',
+  'separator',
+  'stretchy',
+  'symmetric',
+  'voffset',
+  'xmlns',
+];
+const KATEX_RENDER_OPTIONS = {
+  throwOnError: false,
+  strict: 'ignore',
+  trust: false,
+  output: 'htmlAndMathml',
+} as const;
+// Models commonly emit display math as "$$first line\nlast line$$" instead of
+// placing the delimiters on their own lines. Match that form at block level.
+const DISPLAY_MATH_BLOCK_RE = /^\$\$[ \t]*\n?([\s\S]+?)\$\$(?=\n|$)/;
 const MAX_COPY_TEXT_LENGTH = 20_000;
 const MAX_MERMAID_SOURCE_LENGTH = 100_000;
 const MERMAID_SVG_CACHE_LIMIT = 20;
@@ -572,6 +652,30 @@ marked.setOptions({
   gfm: true,
   breaks: false,
 });
+marked.use(markedKatex(KATEX_RENDER_OPTIONS));
+marked.use({
+  extensions: [
+    {
+      name: 'displayKatexBlock',
+      level: 'block',
+      tokenizer(src) {
+        const match = DISPLAY_MATH_BLOCK_RE.exec(src);
+        if (!match) return undefined;
+        const text = match[1]?.trim();
+        if (!text) return undefined;
+        return {
+          type: 'displayKatexBlock',
+          raw: match[0],
+          text,
+        };
+      },
+      renderer(token) {
+        const text = getString(token.text);
+        return text ? `${renderKatex(text, { ...KATEX_RENDER_OPTIONS, displayMode: true })}\n` : '';
+      },
+    },
+  ],
+});
 
 const PATH_SEPARATOR_SOURCE = String.raw`[\\/]`;
 const PATH_SEGMENT_CHARS_SOURCE = String.raw`[\w.@+-]`;
@@ -746,7 +850,7 @@ function linkifySessionReferences(fragment: DocumentFragment) {
     // SAFETY: The surrounding shape or discriminator check establishes the Text contract used below.
     const node = walker.currentNode as Text;
     const parent = node.parentElement;
-    if (!parent || parent.closest('a, button, code, pre')) continue;
+    if (!parent || parent.closest('a, button, code, pre, .katex')) continue;
     textNodes.push(node);
   }
 
@@ -793,6 +897,33 @@ function linkifySessionReferences(fragment: DocumentFragment) {
   }
 }
 
+function rehydrateKatexMath(fragment: DocumentFragment) {
+  for (const element of Array.from(fragment.querySelectorAll<HTMLElement>('.katex'))) {
+    const annotation = element.querySelector('annotation[encoding="application/x-tex"]');
+    const tex = annotation?.textContent;
+    if (!tex) continue;
+
+    const displayMode =
+      element.closest('.katex-display') !== null ||
+      element.querySelector('math[display="block"]') !== null;
+    const rendered = renderKatex(tex, {
+      displayMode,
+      throwOnError: false,
+      strict: 'ignore',
+      trust: false,
+      output: 'htmlAndMathml',
+    });
+    const template = document.createElement('template');
+    template.innerHTML = rendered;
+    const wrapper = template.content.firstElementChild;
+    const replacement =
+      displayMode && wrapper?.classList.contains('katex-display')
+        ? wrapper.querySelector('.katex')
+        : wrapper;
+    if (replacement) element.replaceWith(replacement);
+  }
+}
+
 function sanitizeHtml(
   html: string,
   disableCache: boolean,
@@ -810,12 +941,18 @@ function sanitizeHtml(
   // second time, which is where mutation-XSS lives. Mutating the fragment
   // DOMPurify vetted keeps a single parse/serialize round trip.
   const fragment = DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: ALLOWED_HTML_TAGS,
-    ALLOWED_ATTR: ALLOWED_HTML_ATTRIBUTES,
+    ALLOWED_TAGS: [...ALLOWED_HTML_TAGS, ...KATEX_HTML_TAGS],
+    ALLOWED_ATTR: [...ALLOWED_HTML_ATTRIBUTES, ...KATEX_HTML_ATTRIBUTES],
     ALLOW_DATA_ATTR: false,
     FORBID_ATTR: ['style'],
     RETURN_DOM_FRAGMENT: true,
   });
+
+  // DOMPurify removes the inline styles KaTeX needs for layout. Re-render each
+  // formula from its (sanitized) TeX annotation after sanitization so the
+  // trusted KaTeX markup keeps its positioning without allowing model-authored
+  // style attributes through the general Markdown sanitizer.
+  rehydrateKatexMath(fragment);
 
   const privateSelector = PRIVATE_RENDERER_ATTRIBUTES.map((name) => `[${name}]`).join(',');
   for (const element of Array.from(fragment.querySelectorAll<HTMLElement>(privateSelector))) {
@@ -1518,7 +1655,7 @@ function linkifyPaths(fragment: DocumentFragment) {
     if (
       !parent ||
       parent.closest(
-        'a, button, code, pre, svg, .interactive-result-code-block, .mermaid-diagram, .markdown-task-checkbox, .markdown-inline-slot'
+        'a, button, code, pre, svg, .katex, .interactive-result-code-block, .mermaid-diagram, .markdown-task-checkbox, .markdown-inline-slot'
       )
     ) {
       continue;

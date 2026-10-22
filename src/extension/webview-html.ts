@@ -146,7 +146,7 @@ export function renderWebviewHtml(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}' ${cspSource}; worker-src blob:; connect-src ${cspSource}; style-src 'unsafe-inline' ${cspSource}; font-src data:;" />
+    content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}' ${cspSource}; worker-src blob:; connect-src ${cspSource}; style-src 'unsafe-inline' ${cspSource}; font-src ${cspSource} data:;" />
   <title>Varro</title>
   <style>${LOADING_STYLES}${editorLoadingStyles}</style>${logoPreload}
   <link rel="stylesheet" href="${escapeHtmlAttribute(cssUri)}" />${modulePreloads}

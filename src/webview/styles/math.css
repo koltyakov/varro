@@ -1,0 +1,15 @@
+/* Display math can exceed the chat column on narrow views. Keep the formula
+   centered when it fits and scrollable instead of clipping it when it does not. */
+.katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.katex-display > .katex {
+  max-width: none;
+}
+
+.katex {
+  color: inherit;
+}

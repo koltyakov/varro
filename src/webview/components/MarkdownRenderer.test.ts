@@ -481,6 +481,80 @@ describe('MarkdownRenderer', () => {
     expect(mounted).not.toHaveBeenCalled();
   });
 
+  it('renders inline and display LaTeX with KaTeX', () => {
+    const html = __parseMarkdownForTests(
+      [
+        'Inline: $\\mathcal{N}(\\mu_t^{(p)},\\Sigma_t^{(p)})$',
+        '',
+        '$$',
+        '\\hat\\mu_t^{(p)}=A_t^{(p)}\\mu_t^{(p)}+b_t^{(p)},\\qquad',
+        '\\hat\\Sigma_t^{(p)}=A_t^{(p)}\\Sigma_t^{(p)}(A_t^{(p)})^\\top',
+        '$$',
+      ].join('\n'),
+      { cacheByContent: false }
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    expect(root.querySelectorAll('.katex')).toHaveLength(2);
+    expect(root.querySelector('.katex-display')).not.toBeNull();
+    expect(root.querySelector('.katex-html [style]')).not.toBeNull();
+    expect(root.querySelector('.katex-error')).toBeNull();
+  });
+
+  it('renders display math when delimiters share lines with the formula', () => {
+    const html = __parseMarkdownForTests(
+      [
+        '然后按逆协方差加权融合：',
+        '',
+        '$$\\mu_t=\\Sigma_t\\sum_{p}',
+        '(\\hat\\Sigma_t^{(p)})^{-1}\\hat\\mu_t^{(p)},\\qquad',
+        '\\Sigma_t=\\Big(\\sum_{p}(\\hat\\Sigma_t^{(p)})^{-1}\\Big)^{-1}$$',
+      ].join('\n'),
+      { cacheByContent: false }
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    expect(root.querySelector('.katex-display')).not.toBeNull();
+    expect(root.querySelector('.katex-html [style]')).not.toBeNull();
+    expect(root.querySelector('.katex-error')).toBeNull();
+  });
+
+  it('keeps LaTeX literal inside code spans and fenced code blocks', () => {
+    const html = __parseMarkdownForTests(
+      ['Inline code: `$x^2$`', '', '```text', '$y^2$', '```'].join('\n'),
+      { cacheByContent: false }
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    expect(root.querySelector('.katex')).toBeNull();
+    expect(root.querySelector('code')?.textContent).toBe('$x^2$');
+    expect(root.querySelector('pre')?.textContent).toContain('$y^2$');
+  });
+
+  it('does not treat currency amounts as math', () => {
+    const html = __parseMarkdownForTests('It costs $5 and $10.', { cacheByContent: false });
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    expect(root.querySelector('.katex')).toBeNull();
+    expect(root.textContent?.trim()).toBe('It costs $5 and $10.');
+  });
+
+  it('renders math followed by CJK punctuation', () => {
+    const html = __parseMarkdownForTests(
+      '查询出 $\\mathcal{N}(\\mu_t^{(p)},\\Sigma_t^{(p)})$，再变换回全局：',
+      { cacheByContent: false }
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    expect(root.querySelector('.katex')).not.toBeNull();
+    expect(root.querySelector('.katex-error')).toBeNull();
+  });
+
   it('renders indented text as prose while preserving fenced code blocks', () => {
     const indentedHtml = __parseMarkdownForTests(
       'Failure details\n\n    Error: expected 37\n    Received: 36.71875',

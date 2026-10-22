@@ -220,6 +220,17 @@ describe('renderWebviewHtml', () => {
     expect(imgSrc).toBe('vscode-webview-resource: data:');
   });
 
+  it('allows bundled KaTeX fonts from the webview resource source', () => {
+    const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
+      scriptUri: 'webview.js',
+      cssUri: 'webview.css',
+      version: 'fixed-cache-key',
+    });
+    const fontSrc = html.match(/font-src ([^;]+);/)?.[1];
+
+    expect(fontSrc).toBe('vscode-webview-resource: data:');
+  });
+
   it('allows module chunks only from the webview resource source', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
       scriptUri: 'webview.js',
