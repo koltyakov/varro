@@ -2970,7 +2970,8 @@
   border-color: var(--color-vscode-border-soft);
 }
 
-.chat-attachment-chip.disabled .chip-label {
+.chat-attachment-chip.disabled .chip-label,
+.chat-attachment-chip.disabled .chip-detail {
   text-decoration: line-through;
 }
 
@@ -3096,6 +3097,22 @@
 }
 
 .chat-attachment-chip .chip-remove:hover {
+  color: var(--color-vscode-fg);
+}
+
+.chat-attachment-chip .chip-pin {
+  display: flex;
+  align-items: center;
+  color: var(--color-vscode-fg-muted);
+  cursor: pointer;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 10px;
+  transition: color 0.1s;
+}
+
+.chat-attachment-chip .chip-pin:hover {
   color: var(--color-vscode-fg);
 }
 .composer-send-exit {

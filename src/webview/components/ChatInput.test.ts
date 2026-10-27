@@ -11934,6 +11934,42 @@ describe('ChatInput', () => {
     }
   });
 
+  it('pins the active-context chip so the file stays attached on focus change', async () => {
+    const bridgeWindow = fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window);
+    const originalSend = bridgeWindow.__sendToExtension;
+    const sent: WebviewMessage[] = [];
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    try {
+      setState('activeSessionId', 'session-1');
+      setState('editorContext', {
+        workspacePath: '/repo',
+        activeFile: {
+          path: '/repo/src/app.ts',
+          relativePath: 'src/app.ts',
+          language: 'typescript',
+        },
+        selection: null,
+        diagnostics: [],
+      });
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const pinButton = container?.querySelector<HTMLButtonElement>(
+        '.chat-attachments-container .chat-attachment-chip .chip-pin'
+      );
+      if (!pinButton) throw new Error('Expected the active-context attachment pin button');
+      pinButton.click();
+
+      expect(sent).toContainEqual({
+        type: 'files/drop',
+        payload: { paths: ['/repo/src/app.ts'] },
+      });
+    } finally {
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
   it('automatically enables and stores a non-vision image without a vision mention', async () => {
     const fileReader = installControllableFileReader();
     setupVisionDelegationModelState();

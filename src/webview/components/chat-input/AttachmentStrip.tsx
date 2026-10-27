@@ -46,6 +46,7 @@ export function AttachmentStrip(props: {
   nativePdfsSupported: boolean;
   clipboardImagesNeedVision: boolean;
   onToggleActiveContext: () => void;
+  onPinActiveContext?: () => void;
   onClearTerminalSelection: () => void;
   onClearDiagnostics: () => void;
   onRemoveFile: (path: string) => void;
@@ -102,6 +103,7 @@ export function AttachmentStrip(props: {
                 title={props.activeContextTitle || item.value.filename}
                 toggle
                 onClick={props.onToggleActiveContext}
+                onPin={item.value.icon === 'table' ? undefined : props.onPinActiveContext}
               />
             );
           }

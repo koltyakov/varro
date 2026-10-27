@@ -98,6 +98,20 @@ describe('AttachmentChip', () => {
     expect(chip.getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('pins an attachment without triggering the chip toggle', () => {
+    const onClick = vi.fn();
+    const onPin = vi.fn();
+    cleanup = render(
+      () => <AttachmentChip label="app.ts" toggle onClick={onClick} onPin={onPin} />,
+      container
+    );
+    const pinButton = container.querySelector<HTMLButtonElement>('.chip-pin')!;
+    expect(pinButton.getAttribute('aria-label')).toBe('Keep app.ts attached');
+    pinButton.click();
+    expect(onPin).toHaveBeenCalledOnce();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
   it('still announces an unsupported attachment as disabled', () => {
     cleanup = render(() => <AttachmentChip label="diagram.png" icon="image" disabled />, container);
     const chip = container.querySelector<HTMLElement>('.chat-attachment-chip')!;

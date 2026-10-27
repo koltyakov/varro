@@ -12,6 +12,7 @@ type MockAttachmentChipProps = {
   icon?: 'file' | 'folder' | 'image' | 'terminal' | 'table';
   onClick?: () => void;
   onRemove?: () => void;
+  onPin?: () => void;
   previewImage?: { url: string; alt: string };
   title?: string;
 };
@@ -29,12 +30,16 @@ vi.mock('./AttachmentChip', () => ({
       data-path={props.path ?? ''}
       data-preview-url={props.previewImage?.url ?? ''}
       data-title={props.title ?? ''}
+      data-pinnable={props.onPin ? 'true' : 'false'}
     >
       <button class="attachment-chip-mock-click" onClick={() => props.onClick?.()}>
         click
       </button>
       <button class="attachment-chip-mock-remove" onClick={() => props.onRemove?.()}>
         remove
+      </button>
+      <button class="attachment-chip-mock-pin" onClick={() => props.onPin?.()}>
+        pin
       </button>
     </div>
   ),
@@ -192,6 +197,55 @@ describe('AttachmentStrip', () => {
       'Selection from src/active.ts'
     );
     expect(titledActiveContextChip?.getAttribute('data-detail')).toBe('');
+  });
+
+  it('offers a pin affordance for a real-document active context without triggering the toggle', () => {
+    const onPinActiveContext = vi.fn();
+    const onToggleActiveContext = vi.fn();
+    renderAttachmentStrip({
+      activeContext: { filename: 'src/active.ts', lineRange: null },
+      onToggleActiveContext,
+      onPinActiveContext,
+    });
+
+    const activeContextChip = getChip('src/active.ts');
+    expect(activeContextChip?.getAttribute('data-pinnable')).toBe('true');
+    activeContextChip
+      ?.querySelector<HTMLButtonElement>('.attachment-chip-mock-pin')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onPinActiveContext).toHaveBeenCalledOnce();
+    expect(onToggleActiveContext).not.toHaveBeenCalled();
+  });
+
+  it('hides the pin affordance for a database context', () => {
+    renderAttachmentStrip({
+      activeContext: { filename: 'users', icon: 'table', lineRange: '2 rows' },
+      onPinActiveContext: vi.fn(),
+    });
+    expect(getChip('users')?.getAttribute('data-pinnable')).toBe('false');
+  });
+
+  it('hides the pin affordance without a handler', () => {
+    renderAttachmentStrip({
+      activeContext: { filename: 'src/active.ts', lineRange: null },
+    });
+    expect(getChip('src/active.ts')?.getAttribute('data-pinnable')).toBe('false');
+  });
+
+  it('hides the pin affordance for extension-context chips', () => {
+    renderAttachmentStrip({
+      extensionContexts: [
+        {
+          provider: 'acme.ext',
+          version: 1,
+          label: 'Ticket #4',
+          placement: 'alongside-document',
+          data: null,
+        },
+      ],
+      onPinActiveContext: vi.fn(),
+    });
+    expect(getChip('Ticket #4')?.getAttribute('data-pinnable')).toBe('false');
   });
 
   it('formats dropped-file chips for ranged files and directories', () => {

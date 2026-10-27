@@ -1,6 +1,6 @@
 import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
-import { gymIcon, xmarkIcon } from '../../lib/ui-icons';
+import { gymIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
 import { AttachmentLabel } from '../AttachmentLabel';
 import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
@@ -20,6 +20,7 @@ export function AttachmentChip(props: {
   toggle?: boolean;
   onClick?: () => void;
   onRemove?: () => void;
+  onPin?: () => void;
   previewImage?: { url: string; alt: string };
   title?: string;
   onCompress?: (event: MouseEvent) => void;
@@ -154,6 +155,19 @@ export function AttachmentChip(props: {
       />
       <Show when={props.detail}>
         <span class="chip-detail">{props.detail}</span>
+      </Show>
+      <Show when={props.onPin}>
+        <button
+          class="chip-pin"
+          title={`Keep ${props.label} attached`}
+          aria-label={`Keep ${props.label} attached`}
+          onClick={(e) => {
+            e.stopPropagation();
+            props.onPin?.();
+          }}
+        >
+          <UiIcon source={pinIcon} width={10} height={10} />
+        </button>
       </Show>
       <Show when={props.compressionHint}>
         <span

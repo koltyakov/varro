@@ -2230,6 +2230,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         : ` · Current ${source} context is disabled. Click to enable it again`
     }`;
   });
+  const canPinActiveContext = () => {
+    const context = activeContext();
+    if (!context || context.icon === 'table') return false;
+    if (!composerActiveFile()?.path) return false;
+    return !explicitContextForActiveFile();
+  };
+  const pinActiveContext = () => {
+    const path = composerActiveFile()?.path;
+    if (!path) return;
+    postMessage({ type: 'files/drop', payload: { paths: [path] } });
+  };
   const hasAttachmentStripItems = () =>
     !!composerExtensionContexts()?.length ||
     !!activeContext() ||
@@ -6512,6 +6523,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               nativePdfsSupported={currentModelSupportsPdf()}
               clipboardImagesNeedVision={clipboardImagesNeedVision()}
               onToggleActiveContext={() => toggleCurrentDocumentEnabled(composerSessionId())}
+              onPinActiveContext={canPinActiveContext() ? pinActiveContext : undefined}
               onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
               onClearDiagnostics={() => setState('attachedDiagnostics', null)}
               onRemoveFile={(path) => {
