@@ -1578,6 +1578,33 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it('preserves file-reference ranges and session scope', () => {
+    const message = {
+      type: 'vscode/open',
+      payload: {
+        path: 'models/file.py',
+        line: 710,
+        endLine: 744,
+        sessionID: 'nested-session',
+        directory: '/repo/packages/app',
+      },
+    };
+    expect(parseWebviewMessage(message)).toEqual(message);
+  });
+
+  it.each([
+    { endLine: 10 },
+    { line: 0, endLine: 10 },
+    { line: 10, endLine: 9 },
+    { line: 10, endLine: 10.5 },
+    { line: 10, endLine: '20' },
+    { line: 10, endLine: Number.MAX_SAFE_INTEGER + 1 },
+  ])('rejects invalid file-reference range %j', (range) => {
+    expect(
+      parseWebviewMessage({ type: 'vscode/open', payload: { path: 'file.py', ...range } })
+    ).toBeNull();
+  });
+
   it('preserves the exact session directory for native diff requests', () => {
     expect(
       parseWebviewMessage({

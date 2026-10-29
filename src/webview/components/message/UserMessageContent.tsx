@@ -1297,6 +1297,7 @@ export function UserMessageContent(props: {
           when={hasImageTiles()}
           fallback={
             <UserMessageTextList
+              sessionID={props.parts[0]?.sessionID}
               messageTexts={messageTexts()}
               attachments={indexedAttachments()}
               imageParts={imageParts()}
@@ -1318,6 +1319,7 @@ export function UserMessageContent(props: {
               )}
             </Show>
             <UserMessageTextList
+              sessionID={props.parts[0]?.sessionID}
               messageTexts={messageTexts()}
               attachments={indexedAttachments()}
               imageParts={imageParts()}
@@ -1360,6 +1362,7 @@ export function UserMessageContent(props: {
 }
 
 function UserMessageTextList(props: {
+  sessionID?: string;
   messageTexts: string[];
   attachments: IndexedMessageAttachment[];
   fileParts: FilePart[];
@@ -1375,6 +1378,7 @@ function UserMessageTextList(props: {
       <For each={props.messageTexts}>
         {(text) => (
           <UserMessageTextContent
+            sessionID={props.sessionID}
             text={text}
             attachments={props.attachments}
             fileParts={props.fileParts}
@@ -1453,6 +1457,7 @@ function getDisplayAgentParts(parsed: ParsedUserMessageContent): AgentPart[] {
 }
 
 function UserMessageTextContent(props: {
+  sessionID?: string;
   text: string;
   attachments: IndexedMessageAttachment[];
   fileParts: FilePart[];
@@ -1522,6 +1527,7 @@ function UserMessageTextContent(props: {
         ) : hasUserMarkdownSyntax(segment.content) ? (
           <Show when={segment.content.length > 0}>
             <MarkdownRenderer
+              sessionID={props.sessionID}
               content={segment.content}
               cacheByContent
               class="user-message-text user-message-markdown user-message-code-block"

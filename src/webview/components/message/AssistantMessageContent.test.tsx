@@ -17,6 +17,8 @@ import { fixture } from '../../test-fixtures';
 
 type MockMarkdownRendererProps = {
   content: string;
+  sessionID?: string;
+  directory?: string;
   cacheByContent?: boolean;
 };
 
@@ -1236,6 +1238,12 @@ describe('AssistantMessageContent', () => {
     });
 
     expect(container?.querySelector('.assistant-read-overlay')).toBeNull();
+    expect(markdownRendererMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sessionID: 'session-1',
+        directory: '/workspace',
+      })
+    );
     expect(document.body.classList.contains('chat-read-mode-open')).toBe(true);
     expect(document.querySelector('.assistant-read-mode-content')?.textContent).toContain(
       'Final answer for read mode.'

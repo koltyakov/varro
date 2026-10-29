@@ -710,6 +710,75 @@ describe('createSidebarProviderActions', () => {
     });
   });
 
+  it.each(['/repo', '/repo/packages/app', '/worktrees/feature', '/scratch/no-project'])(
+    'passes the authorized session directory %s and full range to file resolution',
+    async (directory) => {
+      const { actions, contextProvider, restProxy } = createActionFixture();
+      restProxy.authorizeSessionDirectory.mockResolvedValue(true);
+      await actions.openPath({
+        path: 'models/file.py',
+        line: 710,
+        endLine: 744,
+        sessionID: 'session-1',
+        directory,
+      });
+      expect(restProxy.authorizeSessionDirectory).toHaveBeenCalledWith('session-1', directory);
+      expect(contextProvider.openPath).toHaveBeenCalledWith('models/file.py', {
+        line: 710,
+        endLine: 744,
+        workspaceDirectory: '/repo',
+        sessionDirectory: directory,
+      });
+    }
+  );
+
+  it('does not resolve a file in an unauthorized session directory', async () => {
+    const { actions, contextProvider, restProxy } = createActionFixture();
+    restProxy.authorizeSessionDirectory.mockResolvedValue(false);
+    await expect(
+      actions.openPath({
+        path: 'file.py',
+        sessionID: 'session-1',
+        directory: '/closed-repo',
+      })
+    ).rejects.toThrow('Session workspace folder is not open');
+    expect(contextProvider.openPath).not.toHaveBeenCalled();
+  });
+
+  it.each(['denied', 'error'] as const)(
+    'posts a correlated failure when directory authorization returns %s',
+    async (failure) => {
+      const { actions, deps, contextProvider, restProxy } = createActionFixture();
+      if (failure === 'denied') restProxy.authorizeSessionDirectory.mockResolvedValue(false);
+      else restProxy.authorizeSessionDirectory.mockRejectedValue(new Error('Catalog unavailable'));
+      await expect(
+        actions.openPath({
+          path: 'file.py',
+          sessionID: 'session-1',
+          directory: '/closed-repo',
+          requestId: 42,
+        })
+      ).rejects.toThrow(
+        failure === 'denied' ? 'Session workspace folder is not open' : 'Catalog unavailable'
+      );
+      expect(deps.post).toHaveBeenCalledExactlyOnceWith({
+        type: 'vscode/open-result',
+        payload: { requestId: 42, status: 'unavailable' },
+      });
+      expect(contextProvider.openPath).not.toHaveBeenCalled();
+    }
+  );
+
+  it('posts cancellation without reporting a missing file', async () => {
+    const { actions, deps, contextProvider } = createActionFixture();
+    contextProvider.openPath.mockResolvedValueOnce('cancelled');
+    await actions.openPath({ path: 'shared.ts', requestId: 42 });
+    expect(deps.post).toHaveBeenCalledWith({
+      type: 'vscode/open-result',
+      payload: { requestId: 42, status: 'cancelled' },
+    });
+  });
+
   it('opens the native folder picker', async () => {
     const { actions } = createActionFixture();
 

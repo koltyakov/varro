@@ -57,6 +57,33 @@ afterEach(() => {
 });
 
 describe('bridge', () => {
+  it('waits for a file picker decision and accepts cancellation after thirty seconds', async () => {
+    const bridge = await loadBridge();
+    vi.useFakeTimers();
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    const settled = vi.fn();
+    const request = bridge
+      .openPathWithResult({
+        path: 'models/file.py',
+        line: 710,
+        endLine: 744,
+        sessionID: 'nested-session',
+        directory: '/repo/packages/app',
+      })
+      .then(settled, settled);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(settled).not.toHaveBeenCalled();
+    const requestId = send.mock.lastCall![0].payload.requestId;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'vscode/open-result', payload: { requestId, status: 'cancelled' } },
+      })
+    );
+    await request;
+    expect(settled).toHaveBeenCalledExactlyOnceWith('cancelled');
+  });
+
   it('exposes startup cleanup until the bridge is disposed', async () => {
     const bridge = await loadBridge();
 

@@ -13,7 +13,10 @@ export type SlowApiRequest = {
   path: string;
   startedAt: number;
 };
-export type OpenPathResult = 'opened' | 'unavailable';
+export type OpenPathResult = Extract<
+  ExtensionMessage,
+  { type: 'vscode/open-result' }
+>['payload']['status'];
 type SlowApiRequestHandler = (requests: readonly SlowApiRequest[]) => void;
 type ApiCallOptions = {
   timeoutMs?: number;
@@ -213,14 +216,18 @@ initializeBridge();
 export function openPathWithResult(payload: {
   path: string;
   line?: number;
+  endLine?: number;
+  sessionID?: string;
+  directory?: string;
   kind?: 'auto' | 'file' | 'directory';
 }): Promise<OpenPathResult> {
   const requestId = ++openPathRequestId;
   return new Promise((resolve, reject) => {
+    // File resolution may wait for the user to choose an ambiguous reference.
     const timer = setTimeout(() => {
       pendingOpenPaths.delete(requestId);
       reject(new Error('Timed out opening file'));
-    }, 10_000);
+    }, 300_000);
     pendingOpenPaths.set(requestId, { resolve, reject, timer });
     if (!postMessage({ type: 'vscode/open', payload: { ...payload, requestId } })) {
       clearTimeout(timer);

@@ -1002,7 +1002,7 @@ export type ExtensionMessage =
     }
   | {
       type: 'vscode/open-result';
-      payload: { requestId: number; status: 'opened' | 'unavailable' };
+      payload: { requestId: number; status: 'opened' | 'unavailable' | 'cancelled' };
     }
   | {
       type: 'api/response';
@@ -1228,6 +1228,7 @@ export type WebviewMessage =
       payload: {
         path: string;
         line?: number;
+        endLine?: number;
         kind?: 'auto' | 'file' | 'directory';
         view?: 'diff';
         sessionID?: string;

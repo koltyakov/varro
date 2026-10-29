@@ -444,7 +444,9 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (
         !payload ||
         !isNumber(payload.requestId) ||
-        (payload.status !== 'opened' && payload.status !== 'unavailable')
+        (payload.status !== 'opened' &&
+          payload.status !== 'unavailable' &&
+          payload.status !== 'cancelled')
       ) {
         return null;
       }

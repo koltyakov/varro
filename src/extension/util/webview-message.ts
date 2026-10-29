@@ -825,6 +825,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message?.payload);
       const path = getBoundedString(payload?.path, MAX_PATH_LENGTH);
       const line = payload?.line === undefined ? undefined : getSafeInteger(payload.line);
+      const endLine = payload?.endLine === undefined ? undefined : getSafeInteger(payload.endLine);
       const kind = payload?.kind;
       const view = payload?.view;
       const sessionID = getOptionalBoundedString(payload?.sessionID, 512);
@@ -832,6 +833,11 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const requestId =
         payload?.requestId === undefined ? undefined : getSafeInteger(payload.requestId);
       if (!path || (payload?.line !== undefined && line === null)) return null;
+      if (
+        payload?.endLine !== undefined &&
+        (endLine == null || line == null || line < 1 || endLine < line)
+      )
+        return null;
       if (payload?.requestId !== undefined && requestId === null) return null;
       if (payload?.sessionID !== undefined && !sessionID) return null;
       if (payload?.directory !== undefined && !directory) return null;
@@ -840,6 +846,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (view !== undefined && view !== 'diff') return null;
       const openPayload: Extract<WebviewMessage, { type: 'vscode/open' }>['payload'] = { path };
       if (line !== undefined && line !== null) openPayload.line = line;
+      if (endLine !== undefined && endLine !== null) openPayload.endLine = endLine;
       if (kind) openPayload.kind = kind;
       if (view) openPayload.view = view;
       if (sessionID) openPayload.sessionID = sessionID;

@@ -341,7 +341,12 @@ export function SideQuestionDialog(props: {
                     aria-label="Assistant response"
                   >
                     <div class="chat-turn-content">
-                      <MarkdownRenderer content={turn.answer} escapeHtml />
+                      <MarkdownRenderer
+                        content={turn.answer}
+                        sessionID={props.sessionID}
+                        directory={props.directory}
+                        escapeHtml
+                      />
                     </div>
                     <div class="model-change-indicator assistant-dialog-summary side-question-answer-actions">
                       <div class="assistant-dialog-summary-content">

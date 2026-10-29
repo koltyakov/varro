@@ -800,33 +800,42 @@ export class ContextProvider implements vscode.Disposable {
     path: string,
     options?: {
       line?: number;
+      endLine?: number;
       kind?: 'auto' | 'file' | 'directory';
       view?: 'diff';
       workspaceDirectory?: string;
+      /** Session directory already authorized by the action handler, including nested projects. */
+      sessionDirectory?: string;
     }
-  ): Promise<'opened' | 'unavailable'> {
+  ): Promise<'opened' | 'unavailable' | 'cancelled'> {
     try {
       const input = path.trim();
+      if (!input) return 'unavailable';
       if (
         !isAbsolute(input) &&
+        !options?.sessionDirectory &&
         options?.workspaceDirectory &&
         !this.getOpenWorkspaceFolder(options.workspaceDirectory)
       ) {
         return 'unavailable';
       }
-      let resolved = await this.resolveWorkspaceUri(path, {
+      const targetPath =
+        !isAbsolute(input) && options?.sessionDirectory
+          ? join(options.sessionDirectory, input)
+          : path;
+      let resolved = await this.resolveWorkspaceUri(targetPath, {
         allowMissing: options?.view === 'diff',
         workspaceDirectory: options?.workspaceDirectory,
       });
       if (!resolved && options?.view !== 'diff') {
-        const basenameOnly = !isAbsolute(input) && !/[\\/]/.test(input);
         const missingAbsolute = isAbsolute(input);
-        const filename = basenameOnly
-          ? input
-          : missingAbsolute
-            ? input.split(/[\\/]/).at(-1) || ''
-            : '';
-        if (/^[\w.@+-]+$/.test(filename)) {
+        const suffix = missingAbsolute
+          ? input.split(/[\\/]/).at(-1) || ''
+          : input.replace(/\\/g, '/').replace(/^(\.\/)+/, '');
+        if (
+          /^[\w.@+ -]+(?:\/[\w.@+ -]+)*$/.test(suffix) &&
+          !suffix.split('/').some((part) => part === '..' || part === '.')
+        ) {
           const workspaceFolder =
             !isAbsolute(input) && options?.workspaceDirectory
               ? this.getOpenWorkspaceFolder(options.workspaceDirectory)
@@ -836,31 +845,58 @@ export class ContextProvider implements vscode.Disposable {
             ? parentDirectory !== parse(parentDirectory).root
               ? vscode.Uri.file(parentDirectory)
               : undefined
-            : workspaceFolder?.uri;
+            : options?.sessionDirectory
+              ? vscode.Uri.file(options.sessionDirectory)
+              : workspaceFolder?.uri;
           // An absolute reference must not resolve to a namesake in another project.
           // A filesystem-root reference also has no bounded project to search.
           if (missingAbsolute && !searchRoot) return 'unavailable';
-          const matches = await vscode.workspace.findFiles(
-            searchRoot
-              ? new vscode.RelativePattern(searchRoot, `**/${filename}`)
-              : `**/${filename}`,
-            null,
-            2
-          );
+          let matches: vscode.Uri[] = [];
+          try {
+            matches = await vscode.workspace.findFiles(
+              searchRoot ? new vscode.RelativePattern(searchRoot, `**/${suffix}`) : `**/${suffix}`,
+              null,
+              100
+            );
+          } catch {
+            // The file index is unavailable in some hosts; use bounded directory traversal.
+          }
           const searchRoots = searchRoot ? [searchRoot] : undefined;
-          let uri =
-            matches.length === 1
-              ? matches[0]
-              : matches.length === 0
-                ? await this.findUniqueWorkspaceFile(filename, searchRoots)
-                : undefined;
-          if (!uri && matches.length === 0 && parentDirectory) {
-            const localPath = await this.findUniqueLocalFile(parentDirectory, filename);
-            if (localPath) uri = vscode.Uri.file(localPath);
+          if (matches.length === 0) {
+            matches = await this.findWorkspaceFiles(suffix, searchRoots);
+          }
+          if (matches.length === 0 && searchRoot) {
+            matches = (await this.findLocalFiles(searchRoot.fsPath, suffix)).map((localPath) =>
+              vscode.Uri.file(localPath)
+            );
+          }
+          let uri = matches[0];
+          if (matches.length > 1) {
+            const picked = await vscode.window.showQuickPick(
+              matches.map((candidate) => ({
+                label: searchRoot
+                  ? relative(searchRoot.fsPath, candidate.fsPath)
+                  : vscode.workspace.asRelativePath(candidate),
+                description: candidate.fsPath,
+                uri: candidate,
+              })),
+              { placeHolder: `Choose a file for ${input}`, matchOnDescription: true }
+            );
+            if (!picked) return 'cancelled';
+            uri = picked.uri;
           }
           if (uri) {
             resolved = { uri, workspaceFolder: vscode.workspace.getWorkspaceFolder(uri) };
           }
+        }
+      }
+      // Search the owning session before accepting a namesake at the workspace root.
+      if (!resolved && !isAbsolute(input) && options?.sessionDirectory && options.view !== 'diff') {
+        const sessionWorkspace = getWorkingFolder(vscode.Uri.file(options.sessionDirectory));
+        if (sessionWorkspace) {
+          resolved = await this.resolveWorkspaceUri(input, {
+            workspaceDirectory: sessionWorkspace.uri.fsPath,
+          });
         }
       }
       const uri = resolved?.uri;
@@ -901,12 +937,18 @@ export class ContextProvider implements vscode.Disposable {
       const doc = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(doc, { preview: false });
       if (options?.line !== undefined && options.line >= 1) {
-        const position = new vscode.Position(options.line - 1, 0);
-        editor.selection = new vscode.Selection(position, position);
-        editor.revealRange(
-          new vscode.Range(position, position),
-          vscode.TextEditorRevealType.InCenter
-        );
+        const startLine = Math.min(options.line - 1, doc.lineCount - 1);
+        const position = new vscode.Position(startLine, 0);
+        const endLine =
+          options.endLine === undefined
+            ? startLine
+            : Math.min(Math.max(options.endLine - 1, startLine), doc.lineCount - 1);
+        const end =
+          options.endLine === undefined
+            ? position
+            : new vscode.Position(endLine, doc.lineAt(endLine).text.length);
+        editor.selection = new vscode.Selection(position, end);
+        editor.revealRange(new vscode.Range(position, end), vscode.TextEditorRevealType.InCenter);
       }
       return 'opened';
     } catch (err) {
@@ -915,10 +957,10 @@ export class ContextProvider implements vscode.Disposable {
     }
   }
 
-  private async findUniqueWorkspaceFile(
-    filename: string,
+  private async findWorkspaceFiles(
+    suffix: string,
     searchRoots?: vscode.Uri[]
-  ): Promise<vscode.Uri | undefined> {
+  ): Promise<vscode.Uri[]> {
     const ignoredDirectories = new Set([
       '.git',
       '.next',
@@ -930,7 +972,7 @@ export class ContextProvider implements vscode.Disposable {
       'out',
     ]);
     const pending = searchRoots ?? getWorkingFolders().map((folder) => folder.uri);
-    let match: vscode.Uri | undefined;
+    const matches: vscode.Uri[] = [];
     let visitedEntries = 0;
 
     while (pending.length > 0) {
@@ -943,26 +985,23 @@ export class ContextProvider implements vscode.Disposable {
       }
 
       visitedEntries += entries.length;
-      if (visitedEntries > 20_000) return undefined;
+      if (visitedEntries > 20_000) return [];
       for (const [name, type] of entries) {
         const uri = vscode.Uri.joinPath(directory, name);
         if (type & vscode.FileType.Directory) {
           if (!ignoredDirectories.has(name)) pending.push(uri);
           continue;
         }
-        if (name !== filename) continue;
-        if (match) return undefined;
-        match = uri;
+        if (!uri.fsPath.replace(/\\/g, '/').endsWith(`/${suffix}`)) continue;
+        matches.push(uri);
+        if (matches.length >= 100) return matches;
       }
     }
 
-    return match;
+    return matches;
   }
 
-  private async findUniqueLocalFile(
-    rootDirectory: string,
-    filename: string
-  ): Promise<string | undefined> {
+  private async findLocalFiles(rootDirectory: string, suffix: string): Promise<string[]> {
     const ignoredDirectories = new Set([
       '.git',
       '.next',
@@ -974,7 +1013,7 @@ export class ContextProvider implements vscode.Disposable {
       'out',
     ]);
     const pending = [rootDirectory];
-    let match: string | undefined;
+    const matches: string[] = [];
     let visitedEntries = 0;
 
     while (pending.length > 0) {
@@ -987,20 +1026,20 @@ export class ContextProvider implements vscode.Disposable {
       }
 
       visitedEntries += entries.length;
-      if (visitedEntries > 20_000) return undefined;
+      if (visitedEntries > 20_000) return [];
       for (const entry of entries) {
         const entryPath = join(directory, entry.name);
         if (entry.isDirectory()) {
           if (!ignoredDirectories.has(entry.name)) pending.push(entryPath);
           continue;
         }
-        if (entry.name !== filename) continue;
-        if (match) return undefined;
-        match = entryPath;
+        if (!entryPath.replace(/\\/g, '/').endsWith(`/${suffix}`)) continue;
+        matches.push(entryPath);
+        if (matches.length >= 100) return matches;
       }
     }
 
-    return match;
+    return matches;
   }
 
   private async resolveWorkspaceUri(

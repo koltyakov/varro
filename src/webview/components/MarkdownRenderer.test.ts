@@ -1861,7 +1861,7 @@ $$`,
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: {
-        path: '/repo/src/webview/App.tsx',
+        path: './src/webview/App.tsx',
         kind: 'file',
         line: undefined,
         requestId: expect.any(Number),
@@ -1879,12 +1879,12 @@ $$`,
 
   it.each([
     ['/other/dap/dashboard.sql#L68', '/other/dap/dashboard.sql', 68],
-    ['./src/query.py#L91', '/repo/src/query.py', 91],
-    ['./src/query.py#L91-L105', '/repo/src/query.py', 91],
-    ['./src/query.py#L91-105', '/repo/src/query.py', 91],
+    ['./src/query.py#L91', './src/query.py', 91],
+    ['./src/query.py#L91-L105', './src/query.py', 91, 105],
+    ['./src/query.py#L91-105', './src/query.py', 91, 105],
     ['C:/work/query.py#L91', 'C:/work/query.py', 91],
     ['file:///other/dashboard.sql#L68', '/other/dashboard.sql', 68],
-  ])('opens the file and line in Markdown target %s', (href, path, line) => {
+  ])('opens the file and line in Markdown target %s', (href, path, line, endLine?: number) => {
     const send = vi.fn();
     window.__sendToExtension = send;
     setState('editorContext', {
@@ -1903,16 +1903,20 @@ $$`,
     );
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
-    expect(link?.dataset.file).toBe(JSON.stringify({ path, line }));
-    if (!path.startsWith('C:')) expect(link?.getAttribute('href')).toBe(`${path}:${line}`);
+    expect(link?.dataset.file).toBe(JSON.stringify({ path, line, endLine }));
+    const absolutePath = path.replace(/^\.\//, '/repo/');
+    if (!path.startsWith('C:'))
+      expect(link?.getAttribute('href')).toBe(
+        `${absolutePath}:${line}${endLine ? `-${endLine}` : ''}`
+      );
     expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toMatchObject({
-      varroFilePath: path,
+      varroFilePath: absolutePath,
       webviewSection: 'varroFileLink',
     });
     dispatchAnchorClick(link);
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path, line, kind: 'file', requestId: expect.any(Number) },
+      payload: { path, line, endLine, kind: 'file', requestId: expect.any(Number) },
     });
     const requestId = send.mock.calls[0]![0].payload.requestId;
     window.dispatchEvent(
@@ -2006,7 +2010,13 @@ $$`,
     dispatchAnchorClick(container?.querySelector<HTMLAnchorElement>('a'));
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: '/other/query.py', line: 91, kind: 'file', requestId: expect.any(Number) },
+      payload: {
+        path: '/other/query.py',
+        line: 91,
+        endLine: 105,
+        kind: 'file',
+        requestId: expect.any(Number),
+      },
     });
     const requestId = send.mock.calls[0]![0].payload.requestId;
     window.dispatchEvent(
@@ -2056,7 +2066,7 @@ $$`,
     dispatchAnchorClick(link);
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: '/repo/go.mod', line: 3, kind: 'file', requestId: expect.any(Number) },
+      payload: { path: 'go.mod', line: 3, kind: 'file', requestId: expect.any(Number) },
     });
     // SAFETY: The fixture provides the { payload: { requestId: number } } fields read by this statement.
     const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
@@ -2064,6 +2074,210 @@ $$`,
     window.dispatchEvent(
       new MessageEvent('message', {
         data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
+      })
+    );
+  });
+
+  it.each([
+    'perceiver_lang_io.py (line 710-744)',
+    '`models/perceiver_lang_io.py:710-744`',
+    '[Source](models/perceiver_lang_io.py#L710-L744)',
+    '<a href="models/perceiver_lang_io.py#L710-L744">Source</a>',
+  ])('preserves the relative reference and range in %s', (content) => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    setState('editorContext', 'workspacePath', '/other-workspace');
+    setState('activeSessionId', 'different-session');
+    setState('sessions', [
+      {
+        id: 'owner-session',
+        projectID: 'project',
+        directory: '/repo/packages/app',
+        title: 'Nested session',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+    ]);
+    cleanup = render(
+      () => MarkdownRenderer({ content, sessionID: 'owner-session', cacheByContent: true }),
+      container!
+    );
+    const link = container!.querySelector<HTMLAnchorElement>('a')!;
+    expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath).toBe(
+      content.startsWith('perceiver')
+        ? '/repo/packages/app/perceiver_lang_io.py'
+        : '/repo/packages/app/models/perceiver_lang_io.py'
+    );
+    dispatchAnchorClick(container?.querySelector<HTMLAnchorElement>('a'));
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: {
+        path: content.startsWith('perceiver')
+          ? 'perceiver_lang_io.py'
+          : 'models/perceiver_lang_io.py',
+        line: 710,
+        endLine: 744,
+        kind: 'file',
+        sessionID: 'owner-session',
+        directory: '/repo/packages/app',
+        requestId: expect.any(Number),
+      },
+    });
+    const requestId = send.mock.lastCall![0].payload.requestId;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
+      })
+    );
+  });
+
+  it.each(['/repo', '/repo/packages/app', '/worktrees/feature', '/scratch/no-project'])(
+    'uses the supplied modal session directory %s without relying on the session list',
+    (directory) => {
+      const send = vi.fn();
+      window.__sendToExtension = send;
+      setState('activeSessionId', 'other');
+      setState('editorContext', 'workspacePath', '/other');
+      cleanup = render(
+        () =>
+          MarkdownRenderer({
+            content: '`app.ts`',
+            sessionID: 'modal-session',
+            directory,
+          }),
+        container!
+      );
+      dispatchAnchorClick(container?.querySelector<HTMLAnchorElement>('a'));
+      expect(send).toHaveBeenCalledWith({
+        type: 'vscode/open',
+        payload: {
+          path: 'app.ts',
+          sessionID: 'modal-session',
+          directory,
+          kind: 'file',
+          requestId: expect.any(Number),
+        },
+      });
+      const requestId = send.mock.lastCall![0].payload.requestId;
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
+        })
+      );
+    }
+  );
+
+  it.each([
+    '`src/app.ts:10-12`',
+    'src/app.ts (line 10-12)',
+    '[Source](src/app.ts#L10-L12)',
+    '<a href="src/app.ts#L10-L12">Source</a>',
+  ])('scopes cached link metadata to each session directory for %s', async (content) => {
+    vi.useFakeTimers();
+    const sanitize = vi.spyOn(DOMPurify, 'sanitize');
+    setState('activeSessionId', 'other');
+    setState('editorContext', 'workspacePath', '/other-workspace');
+    for (const directory of ['/repo/packages/app', '/worktrees/feature', '/repo/packages/app']) {
+      cleanup = render(
+        () =>
+          MarkdownRenderer({
+            content,
+            sessionID: 'owner-session',
+            directory,
+            cacheByContent: true,
+          }),
+        container!
+      );
+      const link = container!.querySelector<HTMLAnchorElement>('a')!;
+      expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath).toBe(
+        `${directory}/src/app.ts`
+      );
+      if (link.classList.contains('file-path-link')) {
+        expect(link.getAttribute('href')).toBe(`${directory}/src/app.ts:10-12`);
+        link.dispatchEvent(new MouseEvent('mouseenter'));
+        await vi.advanceTimersByTimeAsync(400);
+        expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+          `${directory}/src/app.ts (line 10-12)`
+        );
+        link.dispatchEvent(new MouseEvent('mouseleave'));
+      }
+      cleanup();
+      cleanup = undefined;
+    }
+    expect(sanitize).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves absolute link metadata when a session directory is supplied', () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content: '`/shared/src/app.ts:10-12`',
+          sessionID: 'owner-session',
+          directory: '/repo/packages/app',
+          cacheByContent: true,
+        }),
+      container!
+    );
+    const link = container!.querySelector<HTMLAnchorElement>('a')!;
+    expect(link.getAttribute('href')).toBe('/shared/src/app.ts:10-12');
+    expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath).toBe(
+      '/shared/src/app.ts'
+    );
+  });
+
+  it('updates stable and tail link metadata when the owning session directory changes', async () => {
+    const [directory, setDirectory] = createSignal('/repo/packages/app');
+    const content = '`src/stable.ts`\n\n`src/tail.ts`';
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          content,
+          sessionID: 'owner-session',
+          get directory() {
+            return directory();
+          },
+        }),
+      container!
+    );
+    const linkPaths = () =>
+      Array.from(container!.querySelectorAll('a')).map(
+        (link) => JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath
+      );
+    expect(linkPaths()).toEqual([
+      '/repo/packages/app/src/stable.ts',
+      '/repo/packages/app/src/tail.ts',
+    ]);
+    setDirectory('/worktrees/feature');
+    await vi.waitFor(() =>
+      expect(linkPaths()).toEqual([
+        '/worktrees/feature/src/stable.ts',
+        '/worktrees/feature/src/tail.ts',
+      ])
+    );
+  });
+
+  it('keeps an ambiguous link clickable after cancelling the file picker', async () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    cleanup = render(() => MarkdownRenderer({ content: '`shared.ts`' }), container!);
+    const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
+    dispatchAnchorClick(link);
+    const requestId = send.mock.lastCall![0].payload.requestId;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'vscode/open-result', payload: { requestId, status: 'cancelled' } },
+      })
+    );
+    await Promise.resolve();
+    expect(link?.classList.contains('is-unavailable')).toBe(false);
+    expect(link?.hasAttribute('href')).toBe(true);
+    expect(showSessionActionFeedbackMock).not.toHaveBeenCalled();
+    dispatchAnchorClick(link);
+    expect(send).toHaveBeenCalledTimes(2);
+    const retryId = send.mock.lastCall![0].payload.requestId;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'vscode/open-result', payload: { requestId: retryId, status: 'opened' } },
       })
     );
   });
@@ -2365,7 +2579,7 @@ $$`,
 
     const link = container?.querySelector('a.file-path-link');
     expect(link?.getAttribute('href')).toBe('/repo/src/webview/App.tsx');
-    expect(link?.getAttribute('data-file')).toContain('/repo/src/webview/App.tsx');
+    expect(link?.getAttribute('data-file')).toBe(JSON.stringify({ path: './src/webview/App.tsx' }));
     expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
       preventDefaultContextMenuItems: true,
       varroLinkText: 'Open file',
@@ -2409,7 +2623,7 @@ $$`,
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: {
-        path: '/repo/src/shared/protocol.ts',
+        path: 'src/shared/protocol.ts',
         line: undefined,
         kind: 'file',
         requestId: expect.any(Number),

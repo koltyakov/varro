@@ -1352,6 +1352,8 @@ export function AssistantMessageContent(props: {
               >
                 <div class="assistant-read-mode-content">
                   <MarkdownRenderer
+                    sessionID={props.info.sessionID}
+                    directory={props.info.path.cwd}
                     content={finalTextContent()}
                     cacheByContent={
                       !!props.info.time.completed &&

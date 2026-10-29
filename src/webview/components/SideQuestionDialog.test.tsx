@@ -125,6 +125,26 @@ afterEach(() => {
 });
 
 describe('SideQuestionDialog', () => {
+  it('opens answer citations in the modal session even when another session is active', async () => {
+    vi.mocked(bridge.apiCall).mockResolvedValue({ text: '`models/file.py:710-744`' });
+    const open = vi.spyOn(bridge, 'openPathWithResult').mockResolvedValue('opened');
+    mount('Where is the implementation?');
+    await settle();
+    button('Send (Enter)').click();
+    await settle();
+    setState('activeSessionId', 'another-session');
+    setState('editorContext', 'workspacePath', '/other');
+    dialog().querySelector<HTMLAnchorElement>('a.file-path-link')!.click();
+    expect(open).toHaveBeenCalledWith({
+      path: 'models/file.py',
+      line: 710,
+      endLine: 744,
+      kind: 'file',
+      sessionID: 'ses_side',
+      directory: '/repo',
+    });
+  });
+
   it('sends successive questions without creating unowned computations', async () => {
     const warn = vi.spyOn(console, 'warn');
     mount();

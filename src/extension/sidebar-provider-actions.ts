@@ -293,45 +293,57 @@ export function createSidebarProviderActions(
       deps.postContext();
     },
     openPath: async (payload: OpenPathPayload) => {
-      const workspaceDirectory = deps.getWorkspaceDirectory();
-      let fallbackPath = payload.path;
-      if (payload.view === 'diff' && payload.sessionID) {
-        const result = await deps.sessionDiffProvider.open(
-          payload.sessionID,
-          payload.path,
-          payload.directory
-        );
-        if (result !== 'unavailable') {
-          if (payload.requestId !== undefined) {
-            deps.post({
-              type: 'vscode/open-result',
-              payload: {
-                requestId: payload.requestId,
-                status: result === 'opened' ? 'opened' : 'unavailable',
-              },
-            });
-          }
-          return;
-        }
-        if (payload.directory && !isAbsolute(fallbackPath)) {
-          const directory = await getAuthorizedSessionDirectory(
+      try {
+        const workspaceDirectory = deps.getWorkspaceDirectory();
+        let fallbackPath = payload.path;
+        if (payload.view === 'diff' && payload.sessionID) {
+          const result = await deps.sessionDiffProvider.open(
             payload.sessionID,
+            payload.path,
             payload.directory
           );
-          if (directory) fallbackPath = resolve(directory, fallbackPath);
+          if (result !== 'unavailable') {
+            if (payload.requestId !== undefined) {
+              deps.post({
+                type: 'vscode/open-result',
+                payload: {
+                  requestId: payload.requestId,
+                  status: result === 'opened' ? 'opened' : 'unavailable',
+                },
+              });
+            }
+            return;
+          }
         }
-      }
-      const status = await deps.contextProvider.openPath(fallbackPath, {
-        line: payload.line,
-        kind: payload.kind,
-        view: payload.view,
-        workspaceDirectory,
-      });
-      if (payload.requestId !== undefined) {
-        deps.post({
-          type: 'vscode/open-result',
-          payload: { requestId: payload.requestId, status },
+        const sessionDirectory =
+          payload.sessionID && payload.directory
+            ? await getAuthorizedSessionDirectory(payload.sessionID, payload.directory)
+            : undefined;
+        if (payload.view === 'diff' && sessionDirectory && !isAbsolute(fallbackPath)) {
+          fallbackPath = resolve(sessionDirectory, fallbackPath);
+        }
+        const status = await deps.contextProvider.openPath(fallbackPath, {
+          line: payload.line,
+          endLine: payload.endLine,
+          kind: payload.kind,
+          view: payload.view,
+          workspaceDirectory,
+          sessionDirectory,
         });
+        if (payload.requestId !== undefined) {
+          deps.post({
+            type: 'vscode/open-result',
+            payload: { requestId: payload.requestId, status },
+          });
+        }
+      } catch (error) {
+        if (payload.requestId !== undefined) {
+          deps.post({
+            type: 'vscode/open-result',
+            payload: { requestId: payload.requestId, status: 'unavailable' },
+          });
+        }
+        throw error;
       }
     },
     openText: async (payload) => {

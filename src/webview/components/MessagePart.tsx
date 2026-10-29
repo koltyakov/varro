@@ -91,6 +91,8 @@ export function MessagePart(props: {
       fallback={
         <Show when={p().type === 'text'} fallback={render()}>
           <MarkdownRenderer
+            sessionID={p().sessionID}
+            directory={props.messageInfo?.path.cwd}
             // SAFETY: The Show branch only renders text parts. Read the current snapshot without remounting the renderer.
             content={props.streamedText ?? (p() as TextPart).text}
             cacheByContent={cacheMarkdownByContent()}
@@ -358,6 +360,8 @@ function ReasoningBlock(props: {
             </Show>
             <Show when={!detail.loading() && !detail.error()}>
               <MarkdownRenderer
+                sessionID={props.part.sessionID}
+                directory={props.messageInfo?.path.cwd}
                 content={bodyText()}
                 cacheByContent={!isStreaming()}
                 forceStreaming={isStreaming()}

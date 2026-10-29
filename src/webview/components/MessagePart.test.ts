@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { createSignal } from 'solid-js';
 import { createStore } from 'solid-js/store';
@@ -14,6 +14,7 @@ import {
   splitReasoningText,
 } from './MessagePart';
 import { toCssUrl } from './UiIcon';
+import * as bridge from '../lib/bridge';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -27,6 +28,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup?.();
   cleanup = undefined;
   container?.remove();
@@ -69,6 +71,38 @@ function reasoningPart(text: string, overrides: Partial<ReasoningPart> = {}): Re
 function nextFrame() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
+
+it.each(['text', 'reasoning'] as const)(
+  'opens %s citations using the child message owner and directory',
+  async (type) => {
+    const open = vi.spyOn(bridge, 'openPathWithResult').mockResolvedValue('opened');
+    setState('activeSessionId', 'parent-session');
+    setState('editorContext', 'workspacePath', '/other');
+    const text = '`models/file.py:710-744`';
+    const part =
+      type === 'reasoning'
+        ? reasoningPart(`Inspecting implementation\n\n${text}`, { sessionID: 'child-session' })
+        : { id: 'text-1', sessionID: 'child-session', messageID: 'message-1', type, text };
+    renderPart(part, {
+      messageInfo: assistantMessage('message-1', {
+        sessionID: 'child-session',
+        path: { cwd: '/repo/packages/child', root: '/repo' },
+      }),
+    });
+    if (type === 'reasoning')
+      container!.querySelector<HTMLButtonElement>('.thinking-header')!.click();
+    await nextFrame();
+    container!.querySelector<HTMLAnchorElement>('a.file-path-link')!.click();
+    expect(open).toHaveBeenCalledWith({
+      path: 'models/file.py',
+      line: 710,
+      endLine: 744,
+      kind: 'file',
+      sessionID: 'child-session',
+      directory: '/repo/packages/child',
+    });
+  }
+);
 
 it('retains the Markdown renderer when a text part snapshot is replaced', async () => {
   const [part, setPart] = createSignal<TextPart>({
