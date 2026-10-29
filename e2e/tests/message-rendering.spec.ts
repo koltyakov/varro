@@ -323,9 +323,9 @@ test('renders real-session file variants as isolated canonical links', async ({ 
       })
     )
     .toEqual([
-      { path: '/workspace/varro/missing-file.ts', kind: 'file' },
+      { path: 'missing-file.ts', kind: 'file' },
       {
-        path: '/workspace/varro/MarkdownRenderer.tsx',
+        path: 'MarkdownRenderer.tsx',
         kind: 'file',
         line: 1447,
       },
@@ -344,12 +344,12 @@ test('renders real-session file variants as isolated canonical links', async ({ 
       })
     )
     .toEqual([
-      { path: '/workspace/varro/missing-file.ts', kind: 'file' },
+      { path: 'missing-file.ts', kind: 'file' },
       {
-        path: '/workspace/varro/MarkdownRenderer.tsx',
+        path: 'MarkdownRenderer.tsx',
         kind: 'file',
         line: 1447,
       },
-      { path: '/workspace/varro/README.md', kind: 'file' },
+      { path: 'README.md', kind: 'file' },
     ]);
 });

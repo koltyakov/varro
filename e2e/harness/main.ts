@@ -6829,7 +6829,7 @@ function installBridge(state: ScenarioState) {
           harnessWindow.__varroE2E?.openTargets?.push(openTarget);
         }
         if (typeof webviewMessage.payload.requestId === 'number') {
-          const status = webviewMessage.payload.path.endsWith('/missing-file.ts')
+          const status = /(?:^|[/\\])missing-file\.ts$/.test(webviewMessage.payload.path)
             ? 'unavailable'
             : 'opened';
           queueMicrotask(() => {

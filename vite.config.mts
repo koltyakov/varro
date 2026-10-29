@@ -47,10 +47,16 @@ const webviewAssetVersionPlugin: Plugin = {
 
 export default defineConfig(({ mode }) => ({
   base: './',
+  // Independent E2E servers must not invalidate each other's optimized module URLs.
+  cacheDir:
+    mode === 'e2e'
+      ? resolve(projectRoot, 'node_modules/.vite-e2e', process.env.VARRO_E2E_PORT ?? '4174')
+      : undefined,
   plugins: [solid(), tailwindcss(), webviewAssetVersionPlugin],
   worker: { format: 'iife' },
   optimizeDeps: {
-    entries: ['preview.html', 'e2e/harness/index.html'],
+    // Workers are loaded after startup; discover their CJS dependencies before serving tests.
+    entries: ['preview.html', 'e2e/harness/index.html', 'src/webview/lib/highlight-worker.ts'],
   },
   // Disabling HMR alone still lets Vite reload the page after a socket reconnect.
   server: mode === 'e2e' ? { hmr: false, ws: false, watch: null } : undefined,

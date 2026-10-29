@@ -485,8 +485,10 @@ function toAbsolutePath(path: string) {
   return `${trimTrailingSlashes(normalizePath(workspacePath))}/${relativePath}`;
 }
 
-function buildFileLink(raw: string, label?: string) {
-  const parsed = splitPathReference(getLocalFilePath(raw) ?? raw);
+function buildFileLink(raw: string, label?: string, fromHref = false) {
+  const parsed = fromHref
+    ? parseLocalFileHref(raw)
+    : splitPathReference(getLocalFilePath(raw) ?? raw);
   if (!parsed) return null;
 
   const absolutePath = toAbsolutePath(parsed.path);
@@ -661,7 +663,7 @@ renderer.link = function ({ href, text: rawText, title, tokens }) {
   if (renderMarkdownContext?.escapeHtml && href.startsWith('mailto:')) return text;
 
   if (isLocalFileHref(href)) {
-    const link = buildFileLink(href, rawText);
+    const link = buildFileLink(href, rawText, true);
     if (link) {
       const titleAttr = ` title="${escapeHtml(title || link.title)}"`;
       return `<a href="${escapeHtml(link.href)}" class="file-path-link" ${TRUSTED_RENDERER_ATTRIBUTE} data-file="${escapeHtml(link.payload)}"${titleAttr}>${escapeHtml(link.label)}</a>`;
@@ -816,6 +818,22 @@ function getLocalFilePath(href: string | null): string | null {
   return href;
 }
 
+function parseLocalFileHref(href: string) {
+  // Split line syntax before decoding so an encoded # or colon stays part of the filename.
+  const parsed = splitPathReference(href);
+  if (!parsed) return null;
+  let path = getLocalFilePath(parsed.path);
+  if (path === null) return null;
+  if (!/^file:\/\//i.test(parsed.path)) {
+    try {
+      path = decodeURIComponent(path);
+    } catch {
+      // Bare paths can contain literal percent signs rather than URI escapes.
+    }
+  }
+  return { ...parsed, path };
+}
+
 function isLikelyFilePathReference(raw: string, requireCanonicalSpecialName = false): boolean {
   const parsed = splitPathReference(raw);
   if (!parsed || !FILE_PATH_REFERENCE_RE.test(raw.trim())) return false;
@@ -839,29 +857,39 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
   }
 
   const href = anchor.getAttribute('href')?.trim() || '';
-  const localPath = getLocalFilePath(href);
-  let filePath = localPath ? splitPathReference(localPath)?.path : undefined;
-  if (!filePath && anchor.dataset.file) {
-    // DOMPurify strips Windows drive-letter hrefs; the trusted renderer payload retains the path.
+  let reference = anchor.dataset.file ? null : parseLocalFileHref(href);
+  if (anchor.dataset.file) {
+    // Generated payloads already hold filesystem paths. Do not decode them again.
+    // They also survive DOMPurify stripping Windows drive-letter hrefs.
     try {
-      filePath = getString(asRecord(JSON.parse(anchor.dataset.file))?.path);
+      const payload = asRecord(JSON.parse(anchor.dataset.file));
+      const path = getString(payload?.path);
+      if (path) reference = { path };
     } catch {
       // A malformed optional file payload must not supply native menu context.
     }
   }
   const text = anchor.textContent || anchor.querySelector('img')?.getAttribute('alt') || '';
   anchor.setAttribute('data-vscode-context', getLinkContext(text));
-  if (filePath) {
+  if (reference) {
     anchor.setAttribute(
       'data-vscode-context',
-      getLinkContext(text, { path: toAbsolutePath(filePath) })
+      getLinkContext(text, { path: toAbsolutePath(reference.path) })
     );
-  }
-  if (isLocalFileHref(href)) {
-    anchor.setAttribute('href', localPath!);
+    if (!anchor.dataset.file) {
+      anchor.dataset.file = JSON.stringify({
+        path: reference.path,
+        line: reference.line,
+        endLine: reference.endLine,
+      });
+      anchor.setAttribute(
+        'href',
+        `${reference.path}${reference.line == null ? '' : `:${reference.line}${reference.endLine == null ? '' : `-${reference.endLine}`}`}`
+      );
+    }
     anchor.removeAttribute('data-external');
     if (anchor.classList.contains('file-path-link')) {
-      prependLinkIcon(anchor, createFileTypeIconElement(filePath), true);
+      prependLinkIcon(anchor, createFileTypeIconElement(reference.path), true);
     }
     return;
   }
@@ -2806,9 +2834,11 @@ export function MarkdownRenderer(props: MarkdownProps) {
     }
 
     // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
-    const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a.file-path-link');
+    const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[data-file]');
     if (link) {
       e.preventDefault();
+      // The host forwards bubbled anchor clicks even when default is prevented.
+      e.stopPropagation();
       if (link.classList.contains('is-unavailable')) return;
       try {
         const payload = JSON.parse(link.dataset.file || '{}');
@@ -2864,6 +2894,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
     if (anchor && isLocalFileHref(anchor.getAttribute('href'))) {
       e.preventDefault();
+      e.stopPropagation();
       const payload = splitPathReference(anchor.getAttribute('href') || '');
       if (payload?.path) {
         void openFileReference({

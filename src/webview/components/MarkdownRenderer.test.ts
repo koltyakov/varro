@@ -1879,6 +1879,25 @@ $$`,
 
   it.each([
     ['/other/dap/dashboard.sql#L68', '/other/dap/dashboard.sql', 68],
+    [
+      '/repo/reports/Varro%20startup%20performance.md#L10-L12',
+      '/repo/reports/Varro startup performance.md',
+      10,
+      12,
+    ],
+    [
+      './reports/Varro%20startup%20performance.md#L10-L12',
+      './reports/Varro startup performance.md',
+      10,
+      12,
+    ],
+    ['./reports/literal%2520name.md#L10', './reports/literal%20name.md', 10],
+    ['./reports/caf%C3%A9.md#L10', './reports/café.md', 10],
+    ['./reports/notes%23L12.md#L10', './reports/notes#L12.md', 10],
+    ['./reports/literal%3A12#L10', './reports/literal:12', 10],
+    ['./reports/100%.md#L10', './reports/100%.md', 10],
+    ['file:///repo/reports/literal%2520name.md#L10', '/repo/reports/literal%20name.md', 10],
+    ['C:/repo/reports/Varro%20startup.md#L10', 'C:/repo/reports/Varro startup.md', 10],
     ['./src/query.py#L91', './src/query.py', 91],
     ['./src/query.py#L91-L105', './src/query.py', 91, 105],
     ['./src/query.py#L91-105', './src/query.py', 91, 105],
@@ -1924,6 +1943,39 @@ $$`,
         data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
       })
     );
+  });
+
+  it.each([
+    '[startup performance report](/repo/reports/Varro%20startup%20performance.md)',
+    '<a href="/repo/reports/Varro%20startup%20performance.md">startup performance report</a>',
+    '[startup performance report](file:///repo/reports/Varro%20startup%20performance.md)',
+  ])('decodes report link %s and consumes its native host click', (content) => {
+    const send = vi.fn();
+    const hostClick = vi.fn();
+    window.__sendToExtension = send;
+    cleanup = render(() => MarkdownRenderer({ content }), container!);
+    const link = container!.querySelector<HTMLAnchorElement>('a')!;
+    const path = '/repo/reports/Varro startup performance.md';
+    expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}')).toMatchObject({
+      varroFilePath: path,
+    });
+    document.addEventListener('click', hostClick);
+    try {
+      dispatchAnchorClick(link);
+      expect(send).toHaveBeenCalledWith({
+        type: 'vscode/open',
+        payload: { path, kind: 'file', requestId: expect.any(Number) },
+      });
+      expect(hostClick).not.toHaveBeenCalled();
+      const requestId = send.mock.lastCall![0].payload.requestId;
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
+        })
+      );
+    } finally {
+      document.removeEventListener('click', hostClick);
+    }
   });
 
   it.each([false, true])(

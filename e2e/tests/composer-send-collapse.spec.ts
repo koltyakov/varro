@@ -1,7 +1,28 @@
 import { writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import type { HarnessComposerState } from '../harness/main';
 import { waitForHarnessStartup } from './helpers';
+
+const browserDiagnostics = new WeakMap<Page, { errors: string[]; failedRequests: string[] }>();
+
+test.beforeEach(({ page }) => {
+  const errors: string[] = [];
+  const failedRequests: string[] = [];
+  const diagnostics = { errors, failedRequests };
+  browserDiagnostics.set(page, diagnostics);
+  page.on('pageerror', (error) => diagnostics.errors.push(String(error)));
+  page.on('requestfailed', (request) =>
+    diagnostics.failedRequests.push(`${request.url()}: ${request.failure()?.errorText}`)
+  );
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      diagnostics.failedRequests.push(
+        `${response.url()}: ${response.status()} ${response.statusText()}`
+      );
+    }
+  });
+});
 
 test.afterEach(async ({ page }, testInfo) => {
   if (testInfo.status === testInfo.expectedStatus || page.isClosed()) return;
@@ -13,12 +34,17 @@ test.afterEach(async ({ page }, testInfo) => {
       }
     ).__varroE2E;
     return {
+      harnessPresent: Boolean(harness),
       composer: harness?.getComposerState?.(),
       editorText: document.querySelector('.rich-composer')?.textContent,
     };
   });
   const path = testInfo.outputPath('composer-state.json');
-  await writeFile(path, JSON.stringify(diagnostics, null, 2), 'utf8');
+  await writeFile(
+    path,
+    JSON.stringify({ ...diagnostics, ...browserDiagnostics.get(page) }, null, 2),
+    'utf8'
+  );
   await testInfo.attach('composer-state', { path, contentType: 'application/json' });
 });
 
@@ -29,8 +55,7 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
     test(`${action} a tall draft collapses ${reducedMotion ? 'immediately with reduced motion' : 'smoothly'}`, async ({
       page,
     }) => {
-      const errors: string[] = [];
-      page.on('pageerror', (error) => errors.push(String(error)));
+      const errors = browserDiagnostics.get(page)!.errors;
       await page.clock.install({ time: new Date('2030-01-01T00:00:00Z') });
       await page.emulateMedia({ reducedMotion: reducedMotion ? 'reduce' : 'no-preference' });
       await page.goto(`/e2e/harness/index.html?scenario=${scenario}`);

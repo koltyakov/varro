@@ -2150,7 +2150,8 @@ test.describe('auto-scroll', () => {
       await composer.fill(
         Array.from(
           { length: promptLines },
-          (_, index) => `Keep Explored fixed through first-turn completion, line ${index + 1}.`
+          // Keep the 10-line fixture below the overflow boundary, including the echoed response.
+          (_, index) => `Keep Explored fixed after completion, line ${index + 1}.`
         ).join('\n')
       );
       await page.getByLabel('Send (Enter)').click();
@@ -2209,8 +2210,15 @@ test.describe('auto-scroll', () => {
         scrollTop: element.scrollTop,
         scrollHeight: element.scrollHeight,
         clientHeight: element.clientHeight,
+        rows: Array.from(element.querySelectorAll<HTMLElement>('[data-msg-id]')).map((row) => ({
+          id: row.dataset.msgId,
+          height: row.getBoundingClientRect().height,
+        })),
       }));
-      expect(initialGeometry.scrollHeight > initialGeometry.clientHeight).toBe(promptLines === 30);
+      expect(
+        initialGeometry.scrollHeight > initialGeometry.clientHeight,
+        JSON.stringify(initialGeometry)
+      ).toBe(promptLines === 30);
       const completeAndSample = (indexes: number[]) =>
         list.evaluate(async (element, completedIndexes) => {
           const harnessWindow = window as typeof window & {
