@@ -260,7 +260,7 @@ describe('MarkdownRenderer', () => {
   });
 
   it.each([false, true])(
-    'preserves compact file links across lightweight transitions starting at %s',
+    'preserves full inferred paths across lightweight transitions starting at %s',
     async (initialLightweight) => {
       const [lightweight, setLightweight] = createSignal(initialLightweight);
       cleanup = render(
@@ -281,8 +281,10 @@ describe('MarkdownRenderer', () => {
         await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
         expect(
           [...container!.querySelectorAll('a.file-path-link')].map((link) => link.textContent)
-        ).toEqual(['MarkdownRenderer.tsx (line 100-120)', 'MessageList.tsx (line 200-220)']);
-        expect(container!.textContent).not.toContain('/repo/src/webview/components/');
+        ).toEqual([
+          '/repo/src/webview/components/MarkdownRenderer.tsx:100-120',
+          '/repo/src/webview/components/MessageList.tsx:200-220',
+        ]);
       }
     }
   );
@@ -2640,6 +2642,95 @@ $$`,
     });
   });
 
+  it.each([
+    'A link opening `/repo/packages/app/src/app.ts` can therefore copy and display `/other-workspace/src/app.ts`.',
+    '- A link opening `/repo/packages/app/src/app.ts` can therefore copy and display `/other-workspace/src/app.ts`.',
+    'For example, `/repo/packages/app/src/app.ts` and `/other-workspace/src/app.ts` are different paths.',
+    'The reference `/repo/packages/app/src/app.ts` becomes `/other-workspace/src/app.ts`.',
+    '| Example |\n| --- |\n| Suppose `/repo/packages/app/src/app.ts` resolves to `/other-workspace/src/app.ts`. |',
+  ])('preserves illustrative inline-code paths in %s', (content) => {
+    container!.innerHTML = __parseMarkdownForTests(content, { cacheByContent: true });
+
+    expect([...container!.querySelectorAll('code')].map((code) => code.textContent)).toEqual([
+      '/repo/packages/app/src/app.ts',
+      '/other-workspace/src/app.ts',
+    ]);
+    expect(container!.querySelector('a.file-path-link')).toBeNull();
+    expect(container!.querySelector('[data-inferred-code-path]')).toBeNull();
+  });
+
+  it('limits illustrative prose to its block and preserves explicit Markdown links', () => {
+    container!.innerHTML = __parseMarkdownForTests(
+      'For example, `/repo/packages/app/src/app.ts` could display `/other-workspace/src/app.ts`. ' +
+        'See [`src/app.ts`](src/app.ts#L10-L12).\n\n' +
+        'Updated `src/examples/app.ts` and `src/other/app.ts`.',
+      { cacheByContent: true }
+    );
+
+    const links = [...container!.querySelectorAll<HTMLAnchorElement>('a.file-path-link')];
+    expect(links.map((link) => link.textContent)).toEqual([
+      'app.ts (line 10-12)',
+      'src/examples/app.ts',
+      'src/other/app.ts',
+    ]);
+    expect(links.map((link) => JSON.parse(link.dataset.file!))).toEqual([
+      { path: 'src/app.ts', line: 10, endLine: 12 },
+      { path: 'src/examples/app.ts' },
+      { path: 'src/other/app.ts' },
+    ]);
+    expect(container!.querySelectorAll('code')).toHaveLength(2);
+  });
+
+  it('keeps the screenshot example filename as code during streaming and after completion', async () => {
+    const [content, setContent] = createSignal(
+      'The new regressions pass, including the two `app.ts` example paths'
+    );
+    const [streaming, setStreaming] = createSignal(true);
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          get forceStreaming() {
+            return streaming();
+          },
+        }),
+      container!
+    );
+
+    for (const complete of [false, true]) {
+      if (complete) {
+        setContent(
+          'The new regressions pass, including the two `app.ts` example paths and ordinary references that should stay clickable. ' +
+            'All 341 renderer tests pass, and both type checks are clean.'
+        );
+        setStreaming(false);
+      }
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(container!.querySelector('code')?.textContent).toBe('app.ts');
+      expect(container!.querySelector('a.file-path-link')).toBeNull();
+    }
+  });
+
+  it.each([
+    '`src/first/app.ts:10-12` and `src/second/app.ts:20-22`',
+    'You can open `src/first/app.ts:10-12` and `src/second/app.ts:20-22`.',
+    'src/first/app.ts:10-12 and src/second/app.ts:20-22',
+  ])('retains full inferred path text and ranges in %s', (content) => {
+    container!.innerHTML = __parseMarkdownForTests(content, { cacheByContent: true });
+
+    const links = [...container!.querySelectorAll<HTMLAnchorElement>('a.file-path-link')];
+    expect(links.map((link) => link.textContent)).toEqual([
+      'src/first/app.ts:10-12',
+      'src/second/app.ts:20-22',
+    ]);
+    expect(links.map((link) => JSON.parse(link.dataset.file!))).toEqual([
+      { path: 'src/first/app.ts', line: 10, endLine: 12 },
+      { path: 'src/second/app.ts', line: 20, endLine: 22 },
+    ]);
+  });
+
   it('links file-only inline code but not ordinary inline or fenced code', async () => {
     const send = vi.fn();
     window.__sendToExtension = send;
@@ -2662,12 +2753,12 @@ $$`,
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(1);
-    expect(link?.textContent).toBe('protocol.ts');
+    expect(link?.textContent).toBe('src/shared/protocol.ts');
     expect(link?.querySelector('code')).toBeNull();
     expect(link?.getAttribute('href')).toBe('/repo/src/shared/protocol.ts');
     expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
     expect(link?.firstElementChild?.classList).toContain('link-leading-content');
-    expect(link?.querySelector('.link-leading-label')?.textContent).toBe('protocol.ts');
+    expect(link?.querySelector('.link-leading-label')?.textContent).toBe('src/shared/protocol.ts');
     expect(container?.querySelector('pre a.file-path-link')).toBeNull();
     expect(container?.textContent).toContain('spotlight');
 
@@ -2719,17 +2810,17 @@ $$`,
   it.each([
     {
       content: '`src/shared/protocol.ts`',
-      label: 'protocol.ts',
+      label: 'src/shared/protocol.ts',
       path: '/repo/src/shared/protocol.ts',
     },
     {
       content: 'Review src/shared/protocol.ts.',
-      label: 'protocol.ts',
+      label: 'src/shared/protocol.ts',
       path: '/repo/src/shared/protocol.ts',
     },
     {
       content: '`src/shared/protocol.ts:12-15`',
-      label: 'protocol.ts (line 12-15)',
+      label: 'src/shared/protocol.ts:12-15',
       path: '/repo/src/shared/protocol.ts',
     },
     {
@@ -2739,7 +2830,7 @@ $$`,
     },
     {
       content: '`C:\\repo\\src\\App.tsx:12`',
-      label: 'App.tsx (line 12)',
+      label: 'C:\\repo\\src\\App.tsx:12',
       path: 'C:/repo/src/App.tsx',
     },
     { content: '[Project folder](src)', label: 'Project folder', path: '/repo/src' },
@@ -2801,7 +2892,7 @@ $$`,
     expect(metadata?.getAttribute('aria-label')).toBe('docs/guide.md');
     const links = root.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
     expect(links).toHaveLength(1);
-    expect(links[0]?.textContent).toBe('protocol.ts');
+    expect(links[0]?.textContent).toBe('src/shared/protocol.ts');
     expect(links[0]?.title).toBe('/repo/src/shared/protocol.ts');
   });
 
@@ -3260,7 +3351,7 @@ $$`,
 
     expect(stableLinks).toHaveLength(0);
     expect(tailLinks).toHaveLength(1);
-    expect(tailLinks?.[0]?.textContent).toBe('App.tsx');
+    expect(tailLinks?.[0]?.textContent).toBe('./src/webview/App.tsx');
     expect(tailLinks?.[0]?.getAttribute('href')).toBe('/repo/src/webview/App.tsx');
   });
 
@@ -3300,11 +3391,11 @@ $$`,
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
-    expect(link?.textContent).toBe('MarkdownRenderer.test.ts');
+    expect(link?.textContent).toBe('src/webview/components/MarkdownRenderer.test.ts');
     expect(link?.getAttribute('href')).toBe(
       '/repo/src/webview/components/MarkdownRenderer.test.ts'
     );
-    expect(container?.textContent).not.toContain('src/webview/components/');
+    expect(container?.textContent).toContain('src/webview/components/MarkdownRenderer.test.ts');
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
   });
 
@@ -3649,7 +3740,7 @@ $$`,
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
       const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
-      expect(link?.textContent).toBe('FileTypeIcon.tsx');
+      expect(link?.textContent).toBe(testCase.complete);
       expect(link?.getAttribute('href')).toBe(testCase.title);
       expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
 
@@ -3724,7 +3815,7 @@ $$`,
 
     const links = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
     expect(links).toHaveLength(2);
-    expect(links?.[0]?.textContent).toBe('App.tsx');
+    expect(links?.[0]?.textContent).toBe('C:\\work\\project\\App.tsx');
     expect(links?.[0]?.dataset.file).toBe(JSON.stringify({ path: 'C:/work/project/App.tsx' }));
     expect(links?.[1]?.textContent).toBe('open it');
     expect(links?.[1]?.dataset.file).toBe(JSON.stringify({ path: 'C:/work/project/App.tsx' }));
@@ -3782,17 +3873,17 @@ $$`,
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     const streamingLinks = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
     expect(streamingLinks).toHaveLength(2);
-    expect(streamingLinks?.[0]?.textContent).toBe('protocol.ts');
-    expect(streamingLinks?.[1]?.textContent).toBe('onboarding-verification.md');
+    expect(streamingLinks?.[0]?.textContent).toBe('src/shared/protocol.ts');
+    expect(streamingLinks?.[1]?.textContent).toBe('docs/onboarding-verification.md');
 
     setCompleted(true);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     const links = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
     expect(links).toHaveLength(2);
-    expect(links?.[0]?.textContent).toBe('protocol.ts');
+    expect(links?.[0]?.textContent).toBe('src/shared/protocol.ts');
     expect(links?.[0]?.getAttribute('href')).toBe('/repo/src/shared/protocol.ts');
-    expect(links?.[1]?.textContent).toBe('onboarding-verification.md');
+    expect(links?.[1]?.textContent).toBe('docs/onboarding-verification.md');
     expect(links?.[1]?.getAttribute('href')).toBe('/repo/docs/onboarding-verification.md');
     expect(container?.querySelectorAll('.file-path-icon')).toHaveLength(2);
     expect(links?.[0]).toBe(streamingLinks?.[0]);
@@ -3866,7 +3957,7 @@ $$`,
     const stableParagraph = stableSegment?.firstElementChild;
     const streamingLink = container?.querySelector('a.file-path-link');
     expect(stableParagraph?.textContent).toBe('Stable paragraph.');
-    expect(streamingLink?.textContent).toBe('protocol.ts');
+    expect(streamingLink?.textContent).toBe('src/shared/protocol.ts');
 
     setCompleted(true);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -3898,7 +3989,7 @@ $$`,
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     const streamingLink = container?.querySelector('a.file-path-link');
-    expect(streamingLink?.textContent).toBe('protocol.ts');
+    expect(streamingLink?.textContent).toBe('src/shared/protocol.ts');
 
     setCompleted(true);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -4019,7 +4110,7 @@ $$`,
     );
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
-    expect(link?.textContent).toBe('global.d.ts');
+    expect(link?.textContent).toBe('src/webview/global.d.ts');
     expect(container?.textContent).not.toContain('`');
     expect(link?.getAttribute('href')).toBe('/repo/src/webview/global.d.ts');
     expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);

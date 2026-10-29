@@ -51,6 +51,8 @@ import {
   setError,
   setErrorRetry,
   setState,
+  setShowModels,
+  showModels,
   state,
 } from './lib/state';
 import { ralphStore } from './lib/stores/ralph-store';
@@ -58,6 +60,10 @@ import { showSessionActionFeedback } from './components/chat/SessionActionFeedba
 import { wifiIcon } from './lib/ui-icons';
 import { statusIcons } from './lib/status-icons';
 import { toCssUrl } from './components/UiIcon';
+import {
+  providerConnectionRequest,
+  resetProviderConnectionState,
+} from './lib/provider-connection-state';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -69,6 +75,7 @@ function mountAppRoot() {
 describe('AppRoot', () => {
   beforeEach(() => {
     resetDefaultAppState();
+    resetProviderConnectionState();
     appMocks.ralphError.current = null;
     ralphStore.setShowRalphForm(false);
     appMocks.cleanupBridge.mockReset();
@@ -86,6 +93,7 @@ describe('AppRoot', () => {
     container?.remove();
     container = null;
     resetDefaultAppState();
+    resetProviderConnectionState();
     vi.useRealTimers();
   });
 
@@ -154,6 +162,46 @@ describe('AppRoot', () => {
 
     expect(container?.querySelector('[role="status"]')).toBeNull();
     expect(container?.textContent).toContain('New Chat');
+  });
+
+  it('opens provider management and add dialog only after empty-provider startup is ready', () => {
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setState('providersLoaded', true);
+    setState('providers', []);
+    mountAppRoot();
+
+    expect(showModels()).toBe(false);
+    expect(providerConnectionRequest()).toBeNull();
+    expect(appMocks.chatMountCount).toBe(0);
+
+    setConnectionInitialized(true);
+
+    expect(appMocks.chatMountCount).toBe(1);
+    expect(container?.textContent).not.toContain('No providers configured');
+    expect(showModels()).toBe(true);
+    const request = providerConnectionRequest();
+    expect(request).not.toBeNull();
+
+    setShowModels(false);
+    setState('serverReconnecting', true);
+    setConnectionInitialized(false);
+    setConnectionInitialized(true);
+    setState('serverReconnecting', false);
+    expect(showModels()).toBe(false);
+    expect(providerConnectionRequest()).toBe(request);
+    expect(appMocks.chatMountCount).toBe(1);
+  });
+
+  it('does not open provider setup for configured providers', () => {
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setState('providersLoaded', true);
+    setState('providers', [{ id: 'openai', name: 'OpenAI', source: 'api', models: {} }]);
+    setConnectionInitialized(true);
+    mountAppRoot();
+
+    expect(showModels()).toBe(false);
+    expect(providerConnectionRequest()).toBeNull();
+    expect(appMocks.chatMountCount).toBe(1);
   });
 
   it('keeps the mounted chat visible while a running server reconnects', () => {

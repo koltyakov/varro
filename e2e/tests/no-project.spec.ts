@@ -52,7 +52,7 @@ test('empty window still exposes missing CLI recovery instead of asking for a fo
   await page.goto('/e2e/harness/index.html?scenario=server-error-missing-cli&noProject=1');
   await expect(page.getByText('OpenCode is not installed', { exact: true })).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Open terminal and install', exact: true })
+    page.getByRole('button', { name: 'Run install command in terminal', exact: true })
   ).toBeVisible();
   await expect(page.getByText('Open a folder to use Varro')).toHaveCount(0);
 });

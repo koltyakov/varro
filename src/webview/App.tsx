@@ -1,4 +1,4 @@
-import { ErrorBoundary, Show, onCleanup, onMount } from 'solid-js';
+import { ErrorBoundary, Show, createEffect, onCleanup, onMount } from 'solid-js';
 import { useOpenCode } from './hooks/useOpenCode';
 import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/runtime/useOpenCode.runtime';
 import { connectionInitialized, defaultAppState } from './lib/state';
@@ -16,6 +16,7 @@ import { statusIcons } from './lib/status-icons';
 import { wifiIcon } from './lib/ui-icons';
 import { UiIcon } from './components/UiIcon';
 import { RalphForm } from './components/ralph/RalphForm';
+import { requestProviderConnection } from './lib/provider-connection-state';
 
 export function AppRoot() {
   onCleanup(cleanupBridge);
@@ -34,9 +35,8 @@ function InitializedApp() {
 }
 
 const showChat = () =>
-  (defaultAppState.state.serverStatus.state === 'running' ||
-    defaultAppState.state.serverReconnecting) &&
-  !(defaultAppState.state.providersLoaded && defaultAppState.state.providers.length === 0);
+  defaultAppState.state.serverStatus.state === 'running' ||
+  defaultAppState.state.serverReconnecting;
 
 const isRestoringWorkspace = () =>
   defaultAppState.state.serverStatus.state === 'running' &&
@@ -85,6 +85,27 @@ function hasWrappedCause(err: Error): err is Error & { cause: unknown } {
 
 export function App() {
   useOpenCode();
+
+  let providerSetupOpened = false;
+  createEffect(() => {
+    if (defaultAppState.state.providers.length > 0) {
+      providerSetupOpened = false;
+      return;
+    }
+    if (
+      providerSetupOpened ||
+      !connectionInitialized() ||
+      defaultAppState.state.serverStatus.state !== 'running' ||
+      defaultAppState.state.serverReconnecting ||
+      defaultAppState.state.restartBlocked ||
+      !defaultAppState.state.providersLoaded
+    ) {
+      return;
+    }
+    providerSetupOpened = true;
+    defaultAppState.setShowModels(true);
+    requestProviderConnection();
+  });
 
   onMount(() => {
     ralphRunner.reattachAll();

@@ -180,6 +180,7 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'data-copy-text',
   'data-external',
   'data-file',
+  'data-inferred-code-path',
   'data-lang',
   'data-highlight-lang',
   'data-mermaid-source',
@@ -299,6 +300,7 @@ const PRIVATE_RENDERER_ATTRIBUTES = [
   'data-copy-text',
   'data-external',
   'data-file',
+  'data-inferred-code-path',
   'data-lang',
   'data-highlight-lang',
   'data-mermaid-source',
@@ -498,8 +500,11 @@ function buildFileLink(raw: string, label?: string, fromHref = false) {
     .replace(/^<code>([\s\S]*)<\/code>$/i, '$1')
     .replace(/^`+|`+$/g, '')
     .trim();
-  const visibleLabel =
-    !plainLabel || FILE_PATH_REFERENCE_RE.test(plainLabel) ? canonicalPath : label!.trim();
+  const visibleLabel = !fromHref
+    ? raw.trim()
+    : !plainLabel || FILE_PATH_REFERENCE_RE.test(plainLabel)
+      ? canonicalPath
+      : label!.trim();
   const payload = JSON.stringify({
     path: normalizePath(parsed.path),
     line: parsed.line,
@@ -651,7 +656,7 @@ renderer.codespan = function ({ text }: { text: string }) {
   if (!renderMarkdownContext?.disablePathLinkify && isLikelyFilePathReference(text)) {
     const link = buildFileLink(text);
     if (link) {
-      return `<a href="${escapeHtml(link.href)}" class="file-path-link" ${TRUSTED_RENDERER_ATTRIBUTE} data-file="${escapeHtml(link.payload)}" title="${escapeHtml(link.title)}">${escapeHtml(link.label)}</a>`;
+      return `<a href="${escapeHtml(link.href)}" class="file-path-link" ${TRUSTED_RENDERER_ATTRIBUTE} data-inferred-code-path data-file="${escapeHtml(link.payload)}" title="${escapeHtml(link.title)}">${escapeHtml(link.label)}</a>`;
     }
   }
 
@@ -1054,6 +1059,18 @@ function sanitizeHtml(
     if (element.hasAttribute(TRUSTED_RENDERER_ATTRIBUTE)) continue;
     for (const attribute of PRIVATE_RENDERER_ATTRIBUTES) element.removeAttribute(attribute);
   }
+  const illustrativeBlocks = new Map<Element, boolean>();
+  for (const anchor of fragment.querySelectorAll('a[data-inferred-code-path]')) {
+    const block = anchor.closest('p, li, td, th, h1, h2, h3, h4, h5, h6');
+    if (block && !illustrativeBlocks.has(block)) {
+      illustrativeBlocks.set(block, hasIllustrativePathProse(block));
+    }
+    anchor.removeAttribute('data-inferred-code-path');
+    if (!block || !illustrativeBlocks.get(block)) continue;
+    const code = document.createElement('code');
+    code.textContent = anchor.textContent;
+    anchor.replaceWith(code);
+  }
   for (const element of Array.from(
     fragment.querySelectorAll<HTMLElement>(`[${TRUSTED_RENDERER_ATTRIBUTE}]`)
   )) {
@@ -1075,6 +1092,29 @@ function sanitizeHtml(
 
   if (!disableCache) setCachedValue(sanitizeHtmlCache, cacheKey, result);
   return result;
+}
+
+function hasIllustrativePathProse(block: Element): boolean {
+  // Only prose supplies intent cues. A directory named examples must still be linkable.
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+  let prose = '';
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    // Keep reference positions without interpreting words inside their filenames as prose.
+    if (node.parentElement?.closest('a[data-inferred-code-path]')) prose += '\uFFFC';
+    else if (!node.parentElement?.closest('a, code, pre')) prose += node.textContent;
+  }
+  if (
+    /\b(?:for example|for instance|suppose|hypothetical(?:ly)?|illustrative)\b|\be\.g\.|\bexamples?\s*:|\b(?:example|sample|placeholder)\s+(?:paths?|files?|filenames?|references?)\b/i.test(
+      prose
+    )
+  ) {
+    return true;
+  }
+  // Require the comparison between paths, not an instruction such as "You can open A and B".
+  return /\uFFFC[^\uFFFC]*?(?:\b(?:becomes?|instead of|rather than|versus)\b|\b(?:can|could|would|might)\b[^\uFFFC]*?\b(?:copy|display|resolve|open|show|point)\b)[^\uFFFC]*?\uFFFC/i.test(
+    prose
+  );
 }
 
 function renderMarkdownHtml(

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <style>
+    .compact { display: none; }
+    @media (max-width: 16px) {
+      .regular { display: none; }
+      .compact { display: inline; }
+    }
+  </style>
+  <g class="regular">
+    <g stroke="#d7dae0" stroke-width="3" stroke-linecap="butt">
+      <line x1="9.43" y1="6.7" x2="13.57" y2="8.3" />
+      <line x1="5.67" y1="9.7" x2="6.33" y2="14.3" />
+      <line x1="10.68" y1="15.99" x2="14.32" y2="13.01" />
+    </g>
+    <g fill="#d7dae0">
+      <circle cx="5" cy="5" r="4" />
+      <circle cx="18" cy="10" r="4" />
+      <circle cx="7" cy="19" r="4" />
+    </g>
+  </g>
+  <g class="compact" transform="scale(1.5)">
+    <g stroke="#d7dae0" stroke-width="2.5" stroke-linecap="butt">
+      <line x1="6.113" y1="3.934" x2="9.887" y2="5.066" />
+      <line x1="3.637" y1="6.187" x2="4.363" y2="9.813" />
+      <line x1="7.446" y1="10.86" x2="10.554" y2="8.14" />
+    </g>
+    <g fill="#d7dae0">
+      <circle cx="3" cy="3" r="2.75" />
+      <circle cx="13" cy="6" r="2.75" />
+      <circle cx="5" cy="13" r="2.75" />
+    </g>
+  </g>
+</svg>

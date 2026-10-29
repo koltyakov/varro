@@ -1,4 +1,5 @@
 /* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These activation tests intentionally verify module wiring with minimal extension-host fixtures. */
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import packageJson from '../../package.json';
 
@@ -213,6 +214,108 @@ const primarySidebarHosts: [string, string][] = [
   ['Cursor Insiders', 'cursor-insiders'],
   ['Unbranded Editor', 'windsurf-next'],
 ];
+
+type ViewContributions = {
+  viewsContainers: Record<string, { id: string }[]>;
+  views: Record<string, { id: string }[]>;
+};
+
+// Model the editor registration contract, not a successful move command: Cursor rejects
+// Secondary, container registration is first-wins, and saved view moves override defaults.
+// See ViewsExtensionHandler.addCustomViewContainers/addViews and
+// ViewDescriptorService.regroupViews in the editor's workbench sources.
+function registerChatContribution(
+  contributions: ViewContributions,
+  acceptsSecondary: boolean,
+  savedViewContainer?: string,
+  savedContainerLocations: Record<string, string> = {}
+) {
+  const containerLocations = new Map<string, string>([['workbench.view.explorer', 'activitybar']]);
+  for (const [location, containers] of Object.entries(contributions.viewsContainers)) {
+    if (location === 'secondarySidebar' && !acceptsSecondary) continue;
+    for (const { id } of containers) {
+      const containerId = `workbench.view.extension.${id}`;
+      if (!containerLocations.has(containerId)) containerLocations.set(containerId, location);
+    }
+  }
+  for (const [container, location] of Object.entries(savedContainerLocations)) {
+    containerLocations.set(container, location);
+  }
+  for (const [container, views] of Object.entries(contributions.views)) {
+    if (!views.some(({ id }) => id === 'varro.chat')) continue;
+    const declaredContainer = `workbench.view.extension.${container}`;
+    const defaultContainer = containerLocations.has(declaredContainer)
+      ? declaredContainer
+      : 'workbench.view.explorer';
+    const currentContainer = savedViewContainer ?? defaultContainer;
+    return {
+      defaultContainer,
+      currentContainer,
+      location: containerLocations.get(currentContainer),
+    };
+  }
+  throw new Error('The manifest does not declare varro.chat');
+}
+
+describe('view registration in restricted forks', () => {
+  it('repairs a rejected-container Explorer default before activation, without migration markers', () => {
+    const rejectedContributions = {
+      ...packageJson.contributes,
+      viewsContainers: {
+        ...packageJson.contributes.viewsContainers,
+        activitybar: packageJson.contributes.viewsContainers.activitybar.filter(
+          ({ id }) => id !== 'varro'
+        ),
+      },
+    };
+    expect(registerChatContribution(rejectedContributions, false)).toEqual({
+      defaultContainer: 'workbench.view.explorer',
+      currentContainer: 'workbench.view.explorer',
+      location: 'activitybar',
+    });
+    expect(registerChatContribution(packageJson.contributes, false)).toEqual({
+      defaultContainer: 'workbench.view.extension.varro',
+      currentContainer: 'workbench.view.extension.varro',
+      location: 'activitybar',
+    });
+  });
+
+  it('keeps native Secondary registration when the host accepts it', () => {
+    expect(registerChatContribution(packageJson.contributes, true)).toEqual({
+      defaultContainer: 'workbench.view.extension.varro',
+      currentContainer: 'workbench.view.extension.varro',
+      location: 'secondarySidebar',
+    });
+  });
+
+  it.each([
+    ['workbench.view.explorer', 'activitybar'],
+    ['workbench.view.extension.varro-primary', 'activitybar'],
+    ['workbench.views.service.panel.saved-varro', 'panel'],
+    ['workbench.views.service.sidebar.saved-varro', 'activitybar'],
+    ['workbench.view.extension.other-extension', 'activitybar'],
+  ])('preserves an intentional saved placement in %s', (container, location) => {
+    expect(
+      registerChatContribution(packageJson.contributes, false, container, { [container]: location })
+    ).toEqual({
+      defaultContainer: 'workbench.view.extension.varro',
+      currentContainer: container,
+      location,
+    });
+  });
+
+  it('preserves a user-relocated Varro container instead of resetting it to Primary', () => {
+    expect(
+      registerChatContribution(packageJson.contributes, false, undefined, {
+        'workbench.view.extension.varro': 'panel',
+      })
+    ).toEqual({
+      defaultContainer: 'workbench.view.extension.varro',
+      currentContainer: 'workbench.view.extension.varro',
+      location: 'panel',
+    });
+  });
+});
 
 describe('extension activation', () => {
   beforeEach(() => {
@@ -664,6 +767,62 @@ describe('extension activation', () => {
       expect(executeCommandMock.mock.calls.filter(([command]) => command !== 'setContext')).toEqual(
         [['varro.chat.focus']]
       );
+      expect(globalState.update).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([undefined, 'workbench.view.explorer', 'workbench.views.service.panel.saved-varro'])(
+    'does not force an upgrade move after rejected Secondary registration with saved location %s',
+    async (savedContainer) => {
+      envMock.appName = 'Cursor';
+      envMock.uriScheme = 'cursor';
+      const registration = registerChatContribution(
+        packageJson.contributes,
+        false,
+        savedContainer,
+        {
+          'workbench.views.service.panel.saved-varro': 'panel',
+        }
+      );
+      const globalState = {
+        get: vi.fn(
+          (key: string) =>
+            key === 'layout.initialSidebarReveal.v1' || key === 'layout.cursorPrimarySidebar.v1'
+        ),
+        update: vi.fn(() => Promise.resolve()),
+      };
+      sidebarProviderMock.mockImplementationOnce(() => {
+        latestSidebarProviderInstance.current!.view.visible = false;
+      });
+      executeCommandMock.mockImplementation((command: string) => {
+        if (command === 'varro.chat.focus') {
+          latestSidebarProviderInstance.current!.view.visible = registration.location !== undefined;
+        }
+        return Promise.resolve();
+      });
+      const { activate } = await import('./extension');
+      await activate({
+        extensionUri: {},
+        extension: { id: 'koltyakov.varro' },
+        globalState,
+        workspaceState: {},
+        subscriptions: [],
+      } as never);
+
+      expect(executeCommandMock.mock.calls.filter(([command]) => command !== 'setContext')).toEqual(
+        []
+      );
+      const reveal = registerCommandsMock.mock.calls[0]?.[4] as () => Promise<void>;
+      await reveal();
+      await reveal();
+
+      expect(registration.currentContainer).toBe(
+        savedContainer ?? 'workbench.view.extension.varro'
+      );
+      expect(executeCommandMock.mock.calls.filter(([command]) => command !== 'setContext')).toEqual(
+        [['varro.chat.focus'], ['varro.chat.focus']]
+      );
+      expect(getCommandsMock).not.toHaveBeenCalled();
       expect(globalState.update).not.toHaveBeenCalled();
     }
   );
@@ -1354,6 +1513,64 @@ describe('extension activation', () => {
 });
 
 describe('extension manifest', () => {
+  it('uses a packaged square vector icon for all editor view locations', () => {
+    const icon = 'assets/workbench-icon.svg';
+    for (const containers of Object.values(packageJson.contributes.viewsContainers)) {
+      for (const container of containers) expect(container.icon).toBe(icon);
+    }
+    for (const views of Object.values(packageJson.contributes.views)) {
+      for (const view of views) expect(view.icon).toBe(icon);
+    }
+    expect(packageJson.files).toContain(icon);
+    expect(packageJson.icon).toBe('assets/icon.png');
+    const svg = readFileSync(new URL('../../assets/workbench-icon.svg', import.meta.url), 'utf8');
+    expect(svg).toContain('width="24" height="24" viewBox="0 0 24 24"');
+    expect(svg).toContain('@media (max-width: 16px)');
+    expect(svg).toContain('.regular { display: none; }');
+    expect(svg).toContain('.compact { display: inline; }');
+    expect(svg).toContain('class="compact" transform="scale(1.5)"');
+    expect(svg).not.toMatch(/<image\b/);
+    const readAttribute = (tag: string, name: string): number => {
+      const value = new RegExp(`\\s${name}="([^"]+)"`).exec(tag)?.[1];
+      expect(value).toBeDefined();
+      return Number(value);
+    };
+    const compactStart = svg.indexOf('<g class="compact"');
+    expect(compactStart).toBeGreaterThan(svg.indexOf('<g class="regular"'));
+    const variants = [
+      [svg.slice(0, compactStart), 0.7, 4],
+      [svg.slice(compactStart), 0.49, 3.5],
+    ] as const;
+    for (const [variant, minimumGap, minimumConnectorLength] of variants) {
+      const nodes = [...variant.matchAll(/<circle\s[^>]+\/>/g)].map(([circle]) => ({
+        x: readAttribute(circle, 'cx'),
+        y: readAttribute(circle, 'cy'),
+        radius: readAttribute(circle, 'r'),
+      }));
+      const connectors = [...variant.matchAll(/<line\s[^>]+\/>/g)].map(([line]) => line);
+      expect(nodes).toHaveLength(3);
+      expect(connectors).toHaveLength(3);
+      expect(variant).toContain('stroke-linecap="butt"');
+      for (const connector of connectors) {
+        expect(
+          Math.hypot(
+            readAttribute(connector, 'x2') - readAttribute(connector, 'x1'),
+            readAttribute(connector, 'y2') - readAttribute(connector, 'y1')
+          )
+        ).toBeGreaterThanOrEqual(minimumConnectorLength);
+        for (const endpoint of ['1', '2']) {
+          const x = readAttribute(connector, `x${endpoint}`);
+          const y = readAttribute(connector, `y${endpoint}`);
+          for (const node of nodes) {
+            expect(Math.hypot(x - node.x, y - node.y) - node.radius).toBeGreaterThanOrEqual(
+              minimumGap
+            );
+          }
+        }
+      }
+    }
+  });
+
   it('contributes quick actions to the Varro view title', () => {
     expect(packageJson.contributes.commands).toContainEqual({
       command: 'varro.chat.openSettings',
@@ -1547,12 +1764,19 @@ describe('extension manifest', () => {
     expect(packageJson.activationEvents).not.toContain('onStartupFinished');
   });
 
-  it('declares the chat in Secondary before activation and retains a Primary fallback for restricted forks', () => {
+  it('declares Secondary first and the same container in Primary for hosts that reject Secondary', () => {
+    expect(Object.keys(packageJson.contributes.viewsContainers)).toEqual([
+      'secondarySidebar',
+      'activitybar',
+    ]);
     expect(packageJson.contributes.viewsContainers.secondarySidebar).toContainEqual(
       expect.objectContaining({ id: 'varro' })
     );
     expect(packageJson.contributes.viewsContainers.activitybar).toContainEqual(
       expect.objectContaining({ id: 'varro-primary' })
+    );
+    expect(packageJson.contributes.viewsContainers.activitybar).toContainEqual(
+      expect.objectContaining({ id: 'varro' })
     );
     expect(Object.keys(packageJson.contributes.views)).toEqual(['varro']);
     expect(packageJson.contributes.commands).toContainEqual(

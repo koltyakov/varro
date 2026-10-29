@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- These tests exercise the VS Code import boundary with partial editor, terminal, and workspace fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
 import { DiagnosticSeverity } from 'vscode';
 import type * as FsPromises from 'node:fs/promises';
 import type { Diagnostic } from 'vscode';
@@ -1463,12 +1464,12 @@ describe('ContextProvider', () => {
       expect(vscodeMock.window.showQuickPick).toHaveBeenCalledWith(
         [
           {
-            label: 'src/first/Shared.ts',
+            label: join('src', 'first', 'Shared.ts'),
             description: '/repo/src/first/Shared.ts',
             uri: { fsPath: '/repo/src/first/Shared.ts' },
           },
           {
-            label: 'src/second/Shared.ts',
+            label: join('src', 'second', 'Shared.ts'),
             description: '/repo/src/second/Shared.ts',
             uri: { fsPath: '/repo/src/second/Shared.ts' },
           },
@@ -1712,8 +1713,8 @@ describe('ContextProvider', () => {
           provider.openPath('models/shared.ts', { sessionDirectory: '/repo' })
         ).resolves.toBe('opened');
         expect(vscodeMock.window.showQuickPick.mock.calls[0]![0]).toEqual([
-          { label: 'first/models/shared.ts', description: first.fsPath, uri: first },
-          { label: 'second/models/shared.ts', description: second.fsPath, uri: second },
+          { label: join('first', 'models', 'shared.ts'), description: first.fsPath, uri: first },
+          { label: join('second', 'models', 'shared.ts'), description: second.fsPath, uri: second },
         ]);
         expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith('vscode.open', second, {
           preview: false,

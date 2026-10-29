@@ -37,6 +37,7 @@
     "docs/thumbnail-distribution.md",
     "dist/webview",
     "assets/icon.png",
+    "assets/workbench-icon.svg",
     "README.md",
     "CHANGELOG.md",
     "NOTICES.md",
@@ -133,25 +134,30 @@
   },
   "contributes": {
     "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "varro-primary",
-          "title": "Varro",
-          "icon": "assets/icon.png"
-        }
-      ],
       "secondarySidebar": [
         {
           "id": "varro",
           "title": "Varro",
-          "icon": "assets/icon.png"
+          "icon": "assets/workbench-icon.svg"
+        }
+      ],
+      "activitybar": [
+        {
+          "id": "varro-primary",
+          "title": "Varro",
+          "icon": "assets/workbench-icon.svg"
+        },
+        {
+          "id": "varro",
+          "title": "Varro",
+          "icon": "assets/workbench-icon.svg"
         }
       ]
     },
     "views": {
       "varro": [
         {
-          "icon": "assets/icon.png",
+          "icon": "assets/workbench-icon.svg",
           "type": "webview",
           "id": "varro.chat",
           "name": "Varro"

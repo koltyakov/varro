@@ -109,10 +109,10 @@ for (const url of ['http://ingest.above-all.test/', 'https://example.test/docs']
     await link.click({ button: 'right' });
     expect(await host.evaluate((observations) => observations.contextMenus)).toBe(1);
     const fileLink = assistant.locator('a.file-path-link').nth(0);
-    await expect(fileLink).toHaveText('protocol.ts (line 12-15)');
+    await expect(fileLink).toHaveText('src/shared/protocol.ts:12-15');
     expect(JSON.parse((await fileLink.getAttribute('data-vscode-context')) ?? '{}')).toEqual({
       preventDefaultContextMenuItems: true,
-      varroLinkText: 'protocol.ts (line 12-15)',
+      varroLinkText: 'src/shared/protocol.ts:12-15',
       webviewSection: 'varroFileLink',
       varroFilePath: '/workspace/varro/src/shared/protocol.ts',
     });

@@ -12,11 +12,22 @@ function thinOutline(svg: string): string {
   return `data:image/svg+xml,${encodeURIComponent(thinSvg)}`;
 }
 
+function warningOutline(svg: string): string {
+  // Iconoir's tiny round-capped segment becomes subpixel when the outline is thinned.
+  // Keep an explicit filled dot visible at the 20px status-icon size.
+  return thinOutline(
+    svg.replace(
+      /<path d="M12 17\.01L12\.01 16\.9989"[^>]*\/>/,
+      '<circle cx="12" cy="17" r="1" fill="currentColor" stroke="none" />'
+    )
+  );
+}
+
 export const statusIcons = {
   brainWarning: thinOutline(brainWarningSvg),
   clock: thinOutline(clockSvg),
   download: thinOutline(downloadSvg),
   folder: thinOutline(folderSvg),
-  warningCircle: thinOutline(warningCircleSvg),
-  warningTriangle: thinOutline(warningTriangleSvg),
+  warningCircle: warningOutline(warningCircleSvg),
+  warningTriangle: warningOutline(warningTriangleSvg),
 };

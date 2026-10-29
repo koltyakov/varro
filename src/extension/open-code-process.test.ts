@@ -6436,6 +6436,16 @@ describe('OpenCodeProcess config ownership', () => {
 });
 
 describe('OpenCodeProcess install resolution', () => {
+  it('keeps the missing-CLI notification focused on installing OpenCode v2', () => {
+    const message = OpenCodeProcess.MISSING_CLI_MESSAGE;
+
+    expect(message).toBe(
+      'OpenCode CLI not found. Install OpenCode v2 with: npm i -g @opencode/cli.'
+    );
+    expect(message).not.toMatch(/\bv1\b|restart/i);
+    expect(OpenCodeProcess.isMissingCliFailure(message)).toBe(true);
+  });
+
   it.each([
     { configured: false, laterVersion: '2.0.17', brokenWrapper: false },
     { configured: true, laterVersion: '2.0.17', brokenWrapper: false },

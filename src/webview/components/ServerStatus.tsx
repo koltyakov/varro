@@ -1,18 +1,20 @@
 import { Match, Show, Switch, createMemo, createSignal, onCleanup } from 'solid-js';
+import type { JSX } from 'solid-js';
 import { OPENCODE_UPDATE_REQUIRED_PREFIX } from '../../shared/opencode-compatibility';
 import {
   OPENCODE_INSTALL_COMMAND,
   OPENCODE_INSTALL_DOCS_URL,
   OPENCODE_UPGRADE_COMMAND,
-  OPENCODE_V1_INSTALL_COMMAND,
 } from '../../shared/opencode-install';
 import type { ServerErrorDetail } from '../../shared/protocol';
 import { postMessage } from '../lib/bridge';
-import { openProviderSetup } from '../lib/provider-setup';
+import { client } from '../lib/client';
 import { defaultAppState } from '../lib/state';
 import { statusIcons } from '../lib/status-icons';
-import { checkIcon, copyIcon } from '../lib/ui-icons';
+import { checkIcon, copyIcon, playIcon, terminalIcon } from '../lib/ui-icons';
 import { writeClipboard } from '../lib/write-clipboard';
+import type { Provider } from '../types';
+import { ProviderConnectionDialog } from './ProviderConnectionDialog';
 import { Tooltip } from './Tooltip';
 import { UiIcon } from './UiIcon';
 
@@ -36,7 +38,7 @@ function runInTerminal(command: string, title: string) {
   postMessage({ type: 'terminal/run', payload: { command, title } });
 }
 
-function SetupCommandCard(props: { label: string; command: string }) {
+function SetupCommandCard(props: { label: string; command: string; onRun: () => void }) {
   const [copied, setCopied] = createSignal(false);
   let copyTimeout: ReturnType<typeof setTimeout> | undefined;
 
@@ -50,16 +52,33 @@ function SetupCommandCard(props: { label: string; command: string }) {
   };
 
   return (
-    <div class="w-full">
-      <div class="w-full rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2 text-left">
-        <div class="flex items-center justify-between gap-2">
-          <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted">
-            {props.label}
-          </p>
+    <div class="server-status-command">
+      <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted">
+        {props.label}
+        <span class="ml-1 font-normal normal-case tracking-normal opacity-70">
+          (run in terminal)
+        </span>
+      </p>
+      <div class="server-status-command-field" role="group" aria-label={`${props.label} command`}>
+        <UiIcon source={terminalIcon} class="shrink-0 text-vscode-muted" width={16} height={16} />
+        <pre class="server-status-command-text" title={props.command}>
+          {props.command}
+        </pre>
+        <div class="flex shrink-0 items-center gap-1">
+          <Tooltip content="Run in terminal" delay={500}>
+            <button
+              type="button"
+              class="server-status-command-button"
+              aria-label={`Run ${props.label.toLowerCase()} command in terminal`}
+              onClick={props.onRun}
+            >
+              <UiIcon source={playIcon} width={14} height={14} />
+            </button>
+          </Tooltip>
           <Tooltip content={copied() ? 'Copied' : `Copy: ${props.command}`} delay={500}>
             <button
               type="button"
-              class="shrink-0 text-vscode-muted transition-colors hover:text-vscode-fg"
+              class="server-status-command-button"
               aria-label={copied() ? 'Copied' : `Copy command: ${props.command}`}
               onClick={() => void handleCopy()}
             >
@@ -77,15 +96,12 @@ function SetupCommandCard(props: { label: string; command: string }) {
             </button>
           </Tooltip>
         </div>
-        <code class="mt-1 block break-all font-mono text-[12px] text-vscode-fg">
-          {props.command}
-        </code>
       </div>
     </div>
   );
 }
 
-function SecondaryButton(props: { label: string; onClick: () => void }) {
+function ServiceButton(props: { label: string; onClick: () => void }) {
   return (
     <button type="button" class="server-status-secondary-button" onClick={props.onClick}>
       {props.label}
@@ -93,30 +109,45 @@ function SecondaryButton(props: { label: string; onClick: () => void }) {
   );
 }
 
+function ServiceHeading(props: { icon: JSX.Element; title: string; description?: string }) {
+  return (
+    <div class="server-status-heading">
+      {props.icon}
+      <div class="flex w-full flex-col gap-1.5">
+        <p class="text-[13px] font-medium text-vscode-fg">{props.title}</p>
+        <Show when={props.description}>
+          <p class="whitespace-pre-line text-[12px] leading-normal text-vscode-muted">
+            {props.description}
+          </p>
+        </Show>
+      </div>
+    </div>
+  );
+}
+
 /**
- * Every error state offers a way out without leaving the panel - except where
- * restarting is the destructive act the state exists to prevent: a restart
- * stops the running server unconditionally, which is exactly what the
- * active-sessions gate refused to do.
+ * Only offer restart when the CLI is available and restarting is safe.
+ * In particular, preserve the active-sessions gate that refused to stop it.
  */
 function RecoveryActions(props: {
   settingId?: string;
   showOutput?: boolean;
   allowRestart?: boolean;
+  checkAgain?: boolean;
 }) {
   return (
     <div class="flex flex-wrap items-center justify-center gap-2">
+      <Show when={props.checkAgain}>
+        <ServiceButton label="Check Again" onClick={restartServer} />
+      </Show>
       <Show when={props.allowRestart !== false}>
-        <SecondaryButton label="Restart Server" onClick={restartServer} />
+        <ServiceButton label="Restart Server" onClick={restartServer} />
       </Show>
       <Show when={props.settingId}>
-        <SecondaryButton
-          label="Open Settings"
-          onClick={() => openSettings(props.settingId || '')}
-        />
+        <ServiceButton label="Open Settings" onClick={() => openSettings(props.settingId || '')} />
       </Show>
       <Show when={props.showOutput}>
-        <SecondaryButton label="Show Output" onClick={showOutput} />
+        <ServiceButton label="Show Output" onClick={showOutput} />
       </Show>
     </div>
   );
@@ -124,40 +155,34 @@ function RecoveryActions(props: {
 
 function WarningIcon() {
   return (
-    <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-warning/10">
-      <UiIcon
-        source={statusIcons.warningTriangle}
-        class="h-5 w-5 text-vscode-warning"
-        width={20}
-        height={20}
-      />
-    </div>
+    <UiIcon
+      source={statusIcons.warningTriangle}
+      class="h-6 w-6 shrink-0 text-vscode-warning"
+      width={24}
+      height={24}
+    />
   );
 }
 
 function UpdateIcon() {
   return (
-    <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-warning/10">
-      <UiIcon
-        source={statusIcons.download}
-        class="h-5 w-5 text-vscode-warning"
-        width={20}
-        height={20}
-      />
-    </div>
+    <UiIcon
+      source={statusIcons.download}
+      class="h-6 w-6 shrink-0 text-vscode-warning"
+      width={24}
+      height={24}
+    />
   );
 }
 
 function WaitingIcon() {
   return (
-    <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-accent/10">
-      <UiIcon
-        source={statusIcons.clock}
-        class="h-5 w-5 text-vscode-accent"
-        width={20}
-        height={20}
-      />
-    </div>
+    <UiIcon
+      source={statusIcons.clock}
+      class="h-6 w-6 shrink-0 text-vscode-accent"
+      width={24}
+      height={24}
+    />
   );
 }
 
@@ -231,7 +256,7 @@ export function ServerStatus() {
             <MissingCliState />
           </Match>
           <Match when={errorKind() === 'cli-path-invalid'}>
-            <InvalidPathState message={errorMessage()} detail={errorDetail()} />
+            <InvalidPathState detail={errorDetail()} />
           </Match>
           <Match
             when={
@@ -246,112 +271,78 @@ export function ServerStatus() {
       </Show>
 
       <Show when={noProvidersConfigured()}>
-        <div class="server-status-content">
-          <div
-            class="flex shrink-0 items-center justify-center rounded-full bg-vscode-accent/10"
-            style={{ width: '40px', height: '40px', 'aspect-ratio': '1 / 1' }}
-          >
-            <UiIcon
-              source={statusIcons.brainWarning}
-              width={20}
-              height={20}
-              class="text-vscode-accent"
-            />
-          </div>
-          <div class="flex w-full flex-col gap-1.5">
-            <p class="text-[13px] font-medium text-vscode-fg">No providers configured</p>
-            <p class="text-[12px] leading-normal text-vscode-muted">
-              OpenCode is running, but it does not have any providers configured yet.
-              <br />
-              Add one with the provider login command. Varro will refresh the provider list
-              automatically when setup completes.
-            </p>
-          </div>
-          <SetupCommandCard label="Setup" command="opencode auth login" />
-          <button type="button" class="server-status-action-button" onClick={openProviderSetup}>
-            <span>Open terminal and add a provider</span>
-          </button>
-          <button
-            type="button"
-            class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
-            onClick={() => openExternal('https://opencode.ai/v2/docs/providers')}
-          >
-            Provider setup docs (v2)
-          </button>
-          <button
-            type="button"
-            class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
-            onClick={() => openExternal('https://opencode.ai/docs/providers')}
-          >
-            Provider setup docs (v1)
-          </button>
-        </div>
+        <NoProvidersState />
       </Show>
     </div>
+  );
+}
+
+function NoProvidersState() {
+  const [connectionData, setConnectionData] = createSignal<{
+    providers: Provider[];
+    error: string;
+    loading: boolean;
+  } | null>(null);
+  onCleanup(() => setConnectionData(null));
+
+  async function openProviders() {
+    if (connectionData()) return;
+    const loadingState = { providers: [], error: '', loading: true };
+    setConnectionData(loadingState);
+    try {
+      const catalog = await client.config.providerCatalog();
+      if (connectionData() !== loadingState) return;
+      setConnectionData({ providers: catalog.all, error: '', loading: false });
+    } catch (error) {
+      if (connectionData() !== loadingState) return;
+      setConnectionData({
+        providers: [],
+        error: error instanceof Error ? error.message : String(error),
+        loading: false,
+      });
+    }
+  }
+
+  return (
+    <>
+      <div class="server-status-content">
+        <ServiceHeading
+          icon={
+            <UiIcon
+              source={statusIcons.brainWarning}
+              width={24}
+              height={24}
+              class="h-6 w-6 shrink-0 text-vscode-accent"
+            />
+          }
+          title="No providers configured"
+          description="OpenCode is running, but it does not have any providers configured yet. Connect a provider in Varro."
+        />
+        <ServiceButton label="Open Providers" onClick={() => void openProviders()} />
+      </div>
+      <Show when={connectionData()}>
+        {(data) => (
+          <ProviderConnectionDialog
+            catalogProviders={data().providers}
+            providerLoadError={data().error}
+            isLoadingProviders={data().loading}
+            onClose={() => setConnectionData(null)}
+          />
+        )}
+      </Show>
+    </>
   );
 }
 
 function MissingCliState() {
   return (
     <div class="server-status-content">
-      <WarningIcon />
-      <div class="flex w-full flex-col gap-1.5">
-        <p class="text-[13px] font-medium text-vscode-fg">OpenCode is not installed</p>
-        <p class="text-[12px] leading-normal text-vscode-muted">
-          Varro gives{' '}
-          <button
-            type="button"
-            class="text-vscode-link hover:text-vscode-link-active hover:underline"
-            onClick={() => openExternal(OPENCODE_INSTALL_DOCS_URL)}
-          >
-            OpenCode
-          </button>{' '}
-          a native UI.
-          <br />
-          Install OpenCode v2 to get started. V1 is also supported.
-        </p>
-      </div>
-      <SetupCommandCard label="Install v2 (recommended)" command={OPENCODE_INSTALL_COMMAND} />
-      <button
-        type="button"
-        class="server-status-action-button"
-        onClick={() => runInTerminal(OPENCODE_INSTALL_COMMAND, 'OpenCode Install')}
-      >
-        <span>Open terminal and install</span>
-      </button>
-      <p class="text-[11px] leading-normal text-vscode-muted">
-        Use npm on macOS, Linux, or WSL. On native Windows, download the CLI from the install docs
-        below and set its path in varro.server.command.
-      </p>
-      <details class="w-full text-[11px] text-vscode-muted">
-        <summary class="cursor-pointer">Use OpenCode v1 instead</summary>
-        <div class="mt-3 flex flex-col items-center gap-3">
-          <SetupCommandCard label="Install v1" command={OPENCODE_V1_INSTALL_COMMAND} />
-          <SecondaryButton
-            label="Open terminal and install v1"
-            onClick={() => runInTerminal(OPENCODE_V1_INSTALL_COMMAND, 'OpenCode Install')}
-          />
-          <p>
-            Set varro.server.command to your v1 executable to keep using v1. Both versions now use
-            the opencode command; use separate executable paths if you keep both.
-          </p>
-        </div>
-      </details>
-      <RecoveryActions />
-      {/* Installs under a Node version manager land outside the directories
-          Varro can scan, so point at the escape hatch instead of insisting
-          OpenCode is missing. */}
-      <p class="text-[11px] leading-normal text-vscode-muted">
-        Already installed? Varro could not find it on PATH - set the full path in{' '}
-        <button
-          type="button"
-          class="text-vscode-link hover:text-vscode-link-active hover:underline"
-          onClick={() => openSettings('varro.server.command')}
-        >
-          varro.server.command
-        </button>
-        .
-      </p>
+      <ServiceHeading icon={<WarningIcon />} title="OpenCode is not installed" />
+      <SetupCommandCard
+        label="Install"
+        command={OPENCODE_INSTALL_COMMAND}
+        onRun={() => runInTerminal(OPENCODE_INSTALL_COMMAND, 'OpenCode Install')}
+      />
       <button
         type="button"
         class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
@@ -363,25 +354,26 @@ function MissingCliState() {
   );
 }
 
-function InvalidPathState(props: { message: string; detail: ServerErrorDetail }) {
+function InvalidPathState(props: { detail: ServerErrorDetail }) {
   return (
     <div class="server-status-content">
-      <WarningIcon />
-      <div class="flex w-full flex-col gap-1.5">
-        <p class="text-[13px] font-medium text-vscode-fg">Configured OpenCode path not found</p>
-        <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
-      </div>
+      <ServiceHeading
+        icon={<WarningIcon />}
+        title="Configured OpenCode path not found"
+        description="Update the configured path or clear it to search PATH."
+      />
       <Show when={props.detail.configuredCommand}>
-        <SetupCommandCard label="Configured path" command={props.detail.configuredCommand || ''} />
+        <SetupCommandCard
+          label="Configured path"
+          command={props.detail.configuredCommand || ''}
+          onRun={() => runInTerminal(props.detail.configuredCommand || '', 'OpenCode Command')}
+        />
       </Show>
-      <button
-        type="button"
-        class="server-status-action-button"
-        onClick={() => openSettings(props.detail.settingId || 'varro.server.command')}
-      >
-        <span>Open settings</span>
-      </button>
-      <RecoveryActions showOutput />
+      <RecoveryActions
+        settingId={props.detail.settingId || 'varro.server.command'}
+        showOutput
+        allowRestart={false}
+      />
     </div>
   );
 }
@@ -398,36 +390,43 @@ function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
       : props.detail.kind === 'update-failed'
         ? 'OpenCode update failed'
         : 'OpenCode update required';
+  const description = () => {
+    if (isWaiting()) {
+      return 'The server has active sessions and was not stopped to avoid interrupting work.';
+    }
+    if (props.detail.kind === 'update-failed') return 'The automatic update failed.';
+    const message = props.message.startsWith(OPENCODE_UPDATE_REQUIRED_PREFIX)
+      ? props.message.slice(OPENCODE_UPDATE_REQUIRED_PREFIX.length).trim()
+      : props.message;
+    return message
+      .replace(
+        /(Varro requires OpenCode \S+ or newer), but the (?:installed CLI|running server) is \S+\./,
+        '$1.'
+      )
+      .replace('. Automatic updates', '.\nAutomatic updates');
+  };
 
   return (
     <div class="server-status-content">
-      <Show when={isWaiting()} fallback={<UpdateIcon />}>
-        <WaitingIcon />
-      </Show>
-      <div class="flex w-full flex-col gap-1.5">
-        <p class="text-[13px] font-medium text-vscode-fg">{title()}</p>
-        <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
-      </div>
+      <ServiceHeading
+        icon={
+          <Show when={isWaiting()} fallback={<UpdateIcon />}>
+            <WaitingIcon />
+          </Show>
+        }
+        title={title()}
+        description={description()}
+      />
 
       <Show when={!isWaiting() && allowsUpdateCommand() && props.detail.suggestedCommand}>
-        <SetupCommandCard label="Update" command={props.detail.suggestedCommand || ''} />
-        <button
-          type="button"
-          class="server-status-action-button"
-          onClick={() => runInTerminal(props.detail.suggestedCommand || '', 'OpenCode Update')}
-        >
-          <span>Open terminal and update</span>
-        </button>
+        <SetupCommandCard
+          label="Update"
+          command={props.detail.suggestedCommand || ''}
+          onRun={() => runInTerminal(props.detail.suggestedCommand || '', 'OpenCode Update')}
+        />
       </Show>
 
-      <Show when={isWaiting()}>
-        <p class="text-[11px] leading-normal text-vscode-muted">
-          Varro will check again and only restart after the server is idle.
-        </p>
-        <SecondaryButton label="Check Again" onClick={restartServer} />
-      </Show>
-
-      <RecoveryActions settingId={props.detail.settingId} showOutput allowRestart={!isWaiting()} />
+      <RecoveryActions showOutput allowRestart={!isWaiting()} checkAgain={isWaiting()} />
     </div>
   );
 }
@@ -435,19 +434,19 @@ function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
 function GenericErrorState(props: { message: string }) {
   return (
     <div class="server-status-content">
-      <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-error/10">
-        <UiIcon
-          source={statusIcons.warningCircle}
-          class="h-5 w-5 text-vscode-error"
-          width={20}
-          height={20}
-        />
-      </div>
-      <div class="flex w-full flex-col gap-1.5">
-        <p class="text-[13px] font-medium text-vscode-fg">OpenCode is unavailable</p>
-        <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
-      </div>
-      <RecoveryActions showOutput />
+      <ServiceHeading
+        icon={
+          <UiIcon
+            source={statusIcons.warningCircle}
+            class="h-6 w-6 shrink-0 text-vscode-error"
+            width={24}
+            height={24}
+          />
+        }
+        title="OpenCode is unavailable"
+        description={props.message.replace('. The server', '.\nThe server')}
+      />
+      <RecoveryActions settingId="varro.server" showOutput />
     </div>
   );
 }

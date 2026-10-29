@@ -2566,7 +2566,7 @@ describe('Message streamed assistant text rendering', () => {
     await vi.waitFor(() => {
       expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
       expect(container?.querySelector('a.file-path-link')?.textContent).toBe(
-        'MarkdownRenderer.tsx'
+        'src/webview/components/MarkdownRenderer.tsx'
       );
     });
   });

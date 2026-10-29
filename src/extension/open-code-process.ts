@@ -548,7 +548,7 @@ export function sweepStaleInjectedConfigDirectories(now = Date.now()): Promise<v
 
 // Owns OpenCode spawn and termination mechanics; OpenCodeServer owns lifecycle and retry policy.
 export class OpenCodeProcess {
-  static readonly MISSING_CLI_MESSAGE = `OpenCode CLI not found. Install OpenCode v2 with: ${OPENCODE_INSTALL_COMMAND}. OpenCode v1 is also supported; see Varro's setup guide for installation options.`;
+  static readonly MISSING_CLI_MESSAGE = `OpenCode CLI not found. Install OpenCode v2 with: ${OPENCODE_INSTALL_COMMAND}.`;
 
   /** Unambiguous "the binary is not there": the spawn itself never got started. */
   static isMissingCliFailure(text: string): boolean {

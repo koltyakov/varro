@@ -13,8 +13,6 @@ describe('statusIcons', () => {
     ['clock', clockSvg],
     ['download', downloadSvg],
     ['folder', folderSvg],
-    ['warningCircle', warningCircleSvg],
-    ['warningTriangle', warningTriangleSvg],
   ] as const)('keeps the %s Iconoir outline with a lighter stroke', (name, original) => {
     const source = statusIcons[name];
     expect(source).toMatch(/^data:image\/svg\+xml,/);
@@ -27,5 +25,31 @@ describe('statusIcons', () => {
     expect(document.documentElement.getAttribute('fill')).toBe('none');
     expect(document.documentElement.getAttribute('viewBox')).toBe('0 0 24 24');
     expect(document.documentElement.innerHTML).toBe(originalDocument.documentElement.innerHTML);
+  });
+
+  it.each([
+    ['warningCircle', warningCircleSvg],
+    ['warningTriangle', warningTriangleSvg],
+  ] as const)('keeps a visible filled exclamation dot in %s', (name, original) => {
+    const source = statusIcons[name];
+    const svg = decodeURIComponent(source.slice(source.indexOf(',') + 1));
+    const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
+    const originalDocument = new DOMParser().parseFromString(original, 'image/svg+xml');
+    expect(document.querySelector('parsererror')).toBeNull();
+    expect(document.documentElement.getAttribute('stroke-width')).toBe('1');
+    expect(document.documentElement.getAttribute('fill')).toBe('none');
+    expect(document.documentElement.getAttribute('viewBox')).toBe('0 0 24 24');
+    const paths = (value: Document) =>
+      [...value.querySelectorAll('path')].map((path) => path.getAttribute('d'));
+    expect(paths(document)).toEqual(
+      paths(originalDocument).filter((path) => path !== 'M12 17.01L12.01 16.9989')
+    );
+    expect(document.querySelectorAll('circle')).toHaveLength(1);
+    const dot = document.querySelector('circle');
+    expect(dot?.getAttribute('cx')).toBe('12');
+    expect(dot?.getAttribute('cy')).toBe('17');
+    expect(dot?.getAttribute('r')).toBe('1');
+    expect(dot?.getAttribute('fill')).toBe('currentColor');
+    expect(dot?.getAttribute('stroke')).toBe('none');
   });
 });

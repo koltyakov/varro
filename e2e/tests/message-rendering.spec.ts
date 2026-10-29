@@ -220,7 +220,7 @@ test('routes safe external markdown links through the extension bridge', async (
     .toEqual(['https://example.com/varro/releases']);
 });
 
-test('renders real-session file variants as isolated canonical links', async ({ page }) => {
+test('renders real-session explicit and inferred file links', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=message-rendering');
   // Wait for syntax highlighting to finish replacing the initial markdown before focusing links.
   await expect(page.locator('.rendered-markdown .hljs-keyword').first()).toBeVisible();
@@ -234,9 +234,9 @@ test('renders real-session file variants as isolated canonical links', async ({ 
     '.gitignore',
     'Dockerfile',
     'index.css',
-    'suite.cjs',
+    'scripts/vscode-sandbox/suite.cjs',
     '.oxlintrc.json',
-    'architecture.md',
+    'docs/architecture.md',
     'MarkdownRenderer.tsx (line 1447)',
     'missing-file.ts',
   ]);
@@ -262,7 +262,11 @@ test('renders real-session file variants as isolated canonical links', async ({ 
     .poll(() => readme.evaluate((element) => getComputedStyle(element).outlineStyle))
     .toBe('none');
 
-  const hoverTargets = ['suite.cjs', 'architecture.md', '.oxlintrc.json'];
+  const hoverTargets = [
+    'scripts/vscode-sandbox/suite.cjs',
+    'docs/architecture.md',
+    '.oxlintrc.json',
+  ];
   for (const name of hoverTargets) {
     await page.getByRole('link', { name }).hover();
     await expect

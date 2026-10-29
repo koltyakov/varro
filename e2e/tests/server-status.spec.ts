@@ -87,14 +87,23 @@ test('finishes startup when catalog events supersede the first routing loads', a
     .toBeGreaterThanOrEqual(2);
 });
 
-test('shows no-provider setup actions and triggers provider setup commands', async ({ page }) => {
+test('opens provider management and add dialog directly when no providers are configured', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=no-providers');
 
-  await expect(page.getByText('No providers configured', { exact: true })).toBeVisible();
-  await expect(page.getByText('opencode auth login', { exact: true })).toBeVisible();
+  await expect(page.locator('.models-panel')).toBeVisible();
+  await expect(page.locator('.server-status-surface')).toHaveCount(0);
+  await expect(page.getByText('opencode auth login', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Provider setup docs/ })).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Open terminal and add a provider' }).click();
-  await page.getByRole('button', { name: 'Provider setup docs (v2)', exact: true }).click();
+  await expect(page.getByLabel('Search providers')).toBeVisible();
+  await page
+    .locator('.provider-connect-dialog')
+    .getByRole('button', { name: 'Close', exact: true })
+    .click();
+  await expect(page.locator('.provider-connect-dialog')).toHaveCount(0);
+  await expect(page.locator('.models-panel')).toBeVisible();
 
   await expect
     .poll(() =>
@@ -108,14 +117,14 @@ test('shows no-provider setup actions and triggers provider setup commands', asy
           }
         ).__varroE2E;
         return {
-          terminal: value?.terminalCommands?.[0] || null,
-          url: value?.externalUrls?.[0] || null,
+          terminal: value?.terminalCommands ?? [],
+          urls: value?.externalUrls ?? [],
         };
       })
     )
     .toEqual({
-      terminal: { command: 'opencode auth login', title: 'OpenCode Provider Setup' },
-      url: 'https://opencode.ai/v2/docs/providers',
+      terminal: [],
+      urls: [],
     });
 });
 

@@ -7,7 +7,7 @@ test('shows the missing-cli error state and offers install actions', async ({ pa
 
   await expect(page.getByText('OpenCode is not installed', { exact: true })).toBeVisible();
   await expect(page.getByText('npm i -g @opencode/cli', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Open terminal and install', exact: true }).click();
+  await page.getByRole('button', { name: 'Run install command in terminal', exact: true }).click();
 
   await expect
     .poll(() =>
@@ -37,63 +37,50 @@ test('shows the missing-cli error state and offers install actions', async ({ pa
     )
     .toBe('https://opencode.ai/v2/docs/');
 
-  await page.getByText('Use OpenCode v1 instead', { exact: true }).click();
-  await expect(page.getByText('npm i -g opencode-ai', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Open terminal and install v1', exact: true }).click();
-  await expect
-    .poll(() =>
-      getE2EState(page, () => {
-        const value = (
-          window as Window & {
-            __varroE2E?: { terminalCommands?: Array<{ command: string; title?: string }> };
-          }
-        ).__varroE2E;
-        return value?.terminalCommands?.[1] || null;
-      })
-    )
-    .toEqual({ command: 'npm i -g opencode-ai', title: 'OpenCode Install' });
+  await expect(page.getByText('Use OpenCode v1 instead', { exact: true })).toHaveCount(0);
 });
 
-test('centers install button labels without font-metric padding', async ({ page }) => {
+test('centers install command icons across fonts and narrow layouts', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=server-error-missing-cli');
 
-  const button = page.getByRole('button', { name: 'Open terminal and install', exact: true });
-  const label = button.locator('span');
-  await expect(label).toHaveCSS('text-box-trim', 'trim-both');
-  await expect(label).toHaveCSS('text-box-edge', 'cap alphabetic');
+  const field = page.getByRole('group', { name: 'Install command', exact: true });
+  const run = field.getByRole('button', { name: 'Run install command in terminal', exact: true });
+  const copy = field.getByRole('button', { name: 'Copy command: npm i -g @opencode/cli' });
+  await expect(run).toBeVisible();
+  await expect(copy).toBeVisible();
 
-  for (const fontFamily of ['Arial, sans-serif', 'serif', 'monospace']) {
-    await button.evaluate((element, font) => {
-      element.style.fontFamily = font;
-    }, fontFamily);
+  for (const width of [470, 220]) {
+    await page.setViewportSize({ width, height: 700 });
+    for (const fontFamily of ['Arial, sans-serif', 'serif', 'monospace']) {
+      await field.evaluate((element, font) => {
+        element.style.fontFamily = font;
+      }, fontFamily);
 
-    const buttonBox = await button.boundingBox();
-    const labelBox = await label.boundingBox();
-    expect(buttonBox).not.toBeNull();
-    expect(labelBox).not.toBeNull();
-    if (!buttonBox || !labelBox) throw new Error('Install button or label is not rendered');
-    expect(
-      Math.abs(labelBox.y + labelBox.height / 2 - (buttonBox.y + buttonBox.height / 2))
-    ).toBeLessThanOrEqual(0.5);
-    expect(buttonBox.height).toBeGreaterThanOrEqual(32);
-    // Cap-height trimming removes the extra leading from the 16.8px line box.
-    expect(labelBox.height).toBeLessThan(12);
+      const fieldBox = await field.boundingBox();
+      if (!fieldBox) throw new Error('Install command field is not rendered');
+      for (const button of [run, copy]) {
+        const buttonBox = await button.boundingBox();
+        const iconBox = await button.locator('.ui-icon').boundingBox();
+        if (!buttonBox || !iconBox)
+          throw new Error('Install command button or icon is not rendered');
+        expect(buttonBox.width).toBe(24);
+        expect(buttonBox.height).toBe(24);
+        expect(
+          Math.abs(iconBox.x + iconBox.width / 2 - (buttonBox.x + buttonBox.width / 2))
+        ).toBeLessThanOrEqual(0.5);
+        expect(
+          Math.abs(iconBox.y + iconBox.height / 2 - (buttonBox.y + buttonBox.height / 2))
+        ).toBeLessThanOrEqual(0.5);
+        expect(
+          Math.abs(buttonBox.y + buttonBox.height / 2 - (fieldBox.y + fieldBox.height / 2))
+        ).toBeLessThanOrEqual(0.5);
+        expect(buttonBox.x).toBeGreaterThanOrEqual(fieldBox.x);
+        expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(fieldBox.x + fieldBox.width);
+      }
+    }
   }
 
-  await page.setViewportSize({ width: 220, height: 700 });
-  // Force wrapping independently of the platform's monospace fallback width.
-  await button.evaluate((element) => {
-    element.style.maxWidth = '140px';
-  });
-  await expect(button).toBeVisible();
-  await expect.poll(async () => (await label.boundingBox())?.height ?? 0).toBeGreaterThan(12);
-  const buttonBox = await button.boundingBox();
-  const labelBox = await label.boundingBox();
-  if (!buttonBox || !labelBox) throw new Error('Wrapped install button or label is not rendered');
-  expect(
-    Math.abs(labelBox.y + labelBox.height / 2 - (buttonBox.y + buttonBox.height / 2))
-  ).toBeLessThanOrEqual(0.5);
-  await button.click();
+  await run.click();
 });
 
 test('shows a generic startup error message', async ({ page }) => {
@@ -151,11 +138,11 @@ test('recommends the install-specific command after a failed update', async ({ p
 
   await expect(page.getByText('OpenCode update failed', { exact: true })).toBeVisible();
   await expect(page.getByText('npm install -g opencode-ai@latest', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Close the OpenCode TUI/)).toBeVisible();
+  await expect(page.getByText('The automatic update failed.', { exact: true })).toBeVisible();
   // `opencode upgrade` is the command that just failed; it must not be offered.
   await expect(page.getByText('opencode upgrade', { exact: true })).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Open terminal and update' }).click();
+  await page.getByRole('button', { name: 'Run update command in terminal', exact: true }).click();
 
   await expect
     .poll(() =>
@@ -175,8 +162,16 @@ test('presents an update deferred by active sessions as a wait', async ({ page }
   await page.goto('/e2e/harness/index.html?scenario=server-error-update-blocked-sessions');
 
   await expect(page.getByText('Waiting to update OpenCode', { exact: true })).toBeVisible();
-  await expect(page.getByText(/only restart after the server is idle/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Open terminal and update' })).toHaveCount(0);
+  await expect(
+    page.getByText(
+      'The server has active sessions and was not stopped to avoid interrupting work.',
+      {
+        exact: true,
+      }
+    )
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run update command in terminal' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Restart Server' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Check Again' }).click();
 
   await expect
@@ -193,23 +188,25 @@ test('presents an update deferred by active sessions as a wait', async ({ page }
     .toBe(1);
 });
 
-test('opens the blocking setting when auto-update is disabled', async ({ page }) => {
+test('offers manual update when auto-update is disabled', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=server-error-update-blocked-setting');
 
   await expect(page.getByText('OpenCode update required', { exact: true })).toBeVisible();
   await expect(page.getByText('brew upgrade opencode', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Open Settings' }).click();
+  await expect(page.getByText(/Automatic updates are disabled\./)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open Settings' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Run update command in terminal', exact: true }).click();
 
   await expect
     .poll(() =>
       getE2EState(page, () => {
         const value = (
           window as Window & {
-            __varroE2E?: { settingsQueries?: string[] };
+            __varroE2E?: { terminalCommands?: Array<{ command: string; title?: string }> };
           }
         ).__varroE2E;
-        return value?.settingsQueries?.[0] || null;
+        return value?.terminalCommands?.[0] || null;
       })
     )
-    .toBe('varro.server.autoUpdate');
+    .toEqual({ command: 'brew upgrade opencode', title: 'OpenCode Update' });
 });
