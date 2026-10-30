@@ -90,7 +90,7 @@
   "dependencies": {
     "@imagemagick/magick-wasm": "0.0.45",
     "@opencode-ai/sdk": "^1.19.5",
-    "@opencode/client": "^2.2.2",
+    "@opencode/client": "^2.2.3",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.17",
     "highlight.js": "11.12.0",
@@ -98,7 +98,7 @@
     "katex": "0.19.1",
     "marked": "18.1.2",
     "mermaid": "^12.2.0",
-    "solid-js": "^1.9.17"
+    "solid-js": "^1.9.18"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
@@ -120,7 +120,7 @@
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.5",
-    "vite-plugin-solid": "2.11.14",
+    "vite-plugin-solid": "2.11.15",
     "vitest": "5.0.5",
     "ws": "8.22.0"
   },
