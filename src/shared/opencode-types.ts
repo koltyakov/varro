@@ -216,6 +216,8 @@ export type FilePart = {
   mime: string;
   filename?: string;
   url: string;
+  /** Bounded display context supplied by the host before deferring annotation contents. */
+  annotation?: { selectedText: string; note: string; sourceSessionId?: string };
   source?: {
     text: { value: string; start: number; end: number };
     type: 'file' | 'symbol' | 'resource';

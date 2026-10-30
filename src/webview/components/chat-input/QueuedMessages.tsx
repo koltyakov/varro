@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { getChatAnnotationLabel, readChatAnnotation } from '../../../shared/chat-annotation';
 import { setHostDragImage } from '../../host/extensions';
 import type { QueuedMessage } from '../../lib/app-state-types';
 import { QUEUE_ONLY_SELECTION_TOOLTIP } from './active-turn-selection';
@@ -16,6 +17,7 @@ import {
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { UiIcon } from '../UiIcon';
 import { RefreshIcon } from '../ControlIcons';
+import { isSamePath } from '../../lib/path-display';
 import {
   problemReferenceMarker,
   problemReferenceLocation,
@@ -39,7 +41,10 @@ export type QueuedMessageItem = Pick<
   | 'inlineProblems'
   | 'attachedDiagnostics'
   | 'queuedContext'
->;
+> & {
+  /** Display labels from canonical pending-message file parts, not composer attachments. */
+  annotationLabels?: Record<string, string>;
+};
 
 function bindQueueOverflowFade(element: HTMLElement, trackItemCount: () => number) {
   const update = () => {
@@ -125,29 +130,32 @@ export function QueuedMessages(props: {
             }
           >
             <For each={props.pendingSteers}>
-              {(item) => (
-                <div class="chat-queue-item" role="listitem" data-steered-message-id={item.id}>
-                  <div class="chat-queue-body">
-                    <span class="chat-steer-icon" aria-hidden="true">
-                      <UiIcon source={hourglassIcon} width={12} height={12} />
-                    </span>
-                    <span class="chat-queue-label" title={item.text}>
-                      {item.text || 'Attached context'}
-                    </span>
+              {(item) => {
+                const label = getAnnotationPreviewText(item) || 'Attached context';
+                return (
+                  <div class="chat-queue-item" role="listitem" data-steered-message-id={item.id}>
+                    <div class="chat-queue-body">
+                      <span class="chat-steer-icon" aria-hidden="true">
+                        <UiIcon source={hourglassIcon} width={12} height={12} />
+                      </span>
+                      <span class="chat-queue-label" title={label}>
+                        {label}
+                      </span>
+                    </div>
+                    <QueueAttachmentIcons
+                      imageCount={item.imageCount ?? item.clipboardImages?.length ?? 0}
+                      attachmentCount={
+                        item.attachmentCount ??
+                        getQueueFileCount(item) +
+                          (item.nativePdfs?.length ?? 0) +
+                          (item.terminalSelection ? 1 : 0) +
+                          (item.inlineProblems?.length ?? 0) +
+                          (item.attachedDiagnostics ? 1 : 0)
+                      }
+                    />
                   </div>
-                  <QueueAttachmentIcons
-                    imageCount={item.imageCount ?? item.clipboardImages?.length ?? 0}
-                    attachmentCount={
-                      item.attachmentCount ??
-                      (item.droppedFiles?.length ?? 0) +
-                        (item.nativePdfs?.length ?? 0) +
-                        (item.terminalSelection ? 1 : 0) +
-                        (item.inlineProblems?.length ?? 0) +
-                        (item.attachedDiagnostics ? 1 : 0)
-                    }
-                  />
-                </div>
-              )}
+                );
+              }}
             </For>
           </div>
         </div>
@@ -176,7 +184,7 @@ export function QueuedMessages(props: {
                   (item.queuedContext?.currentDocumentEnabled
                     ? (item.queuedContext.editorContext.extensionContexts?.length ?? 0)
                     : 0) +
-                  (item.droppedFiles?.length || 0) +
+                  getQueueFileCount(item) +
                   (item.nativePdfs?.length ?? 0) +
                   (item.terminalSelection ? 1 : 0) +
                   (item.inlineProblems?.length ?? 0) +
@@ -188,7 +196,7 @@ export function QueuedMessages(props: {
                         problemReferenceMarker(reference),
                         `${problemReferenceLabel(reference)} ${problemReferenceLocation(reference)}`
                       ),
-                    item.text
+                    getAnnotationPreviewText(item)
                   ) ||
                   [
                     imageCount > 0 ? `${imageCount} ${imageCount === 1 ? 'image' : 'images'}` : '',
@@ -419,6 +427,27 @@ export function QueuedMessages(props: {
       </Show>
     </>
   );
+}
+
+function getAnnotationPreviewText(
+  item: Pick<QueuedMessageItem, 'text' | 'droppedFiles' | 'annotationLabels'>
+): string {
+  let text = item.text;
+  const labels = new Map(Object.entries(item.annotationLabels ?? {}));
+  for (const file of item.droppedFiles ?? []) {
+    const annotation = readChatAnnotation(file);
+    if (!annotation) continue;
+    labels.set(`@${file.relativePath || file.path}`, getChatAnnotationLabel(annotation.note));
+  }
+  for (const [marker, label] of labels) text = text.replaceAll(marker, () => `[${label}]`);
+  return text;
+}
+
+function getQueueFileCount(item: QueuedMessageItem): number {
+  const files = item.droppedFiles ?? [];
+  return files.filter(
+    (file, index) => files.findIndex((candidate) => isSamePath(candidate.path, file.path)) === index
+  ).length;
 }
 
 function QueueAttachmentIcons(props: { imageCount: number; attachmentCount: number }) {

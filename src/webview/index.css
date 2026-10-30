@@ -17,6 +17,7 @@
 @import './styles/models.css' layer(components);
 @import './styles/background-process.css' layer(components);
 @import './styles/side-question.css' layer(components);
+@import './styles/chat-annotation.css' layer(components);
 @import './styles/followups.css' layer(components);
 @import './styles/permission-settings.css' layer(components);
 @import './styles/prompts.css' layer(components);

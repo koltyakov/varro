@@ -305,6 +305,14 @@ const readV2 = (database) => {
     : null;
   const metadata = metadataJSON === null ? undefined : parseData({ data: metadataJSON });
   const sessionIDs = sessions.map((session) => session.id);
+  // V2.2.2 can read assistant content from session_part instead of the message envelope.
+  // Let the API hydrate those rows rather than returning incomplete context or tool totals.
+  const hasParts = database.prepare('PRAGMA table_info(session_part)').all().length > 0;
+  if (hasParts && database.prepare(
+    'SELECT 1 FROM session_part WHERE session_id IN (' + sessionIDs.map(() => '?').join(',') + ') LIMIT 1'
+  ).get(...sessionIDs)) {
+    return { fallbackReason: 'OpenCode v2 separately stored parts require the API' };
+  }
   const messagesBySession = new Map(sessionIDs.map((id) => [id, []]));
   const contexts = new Map(sessionIDs.map((id) => [id, contextCharacters()]));
   const inputTokens = new Map();

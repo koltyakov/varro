@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getFileTypeIcon } from '../FileTypeIcon';
 import { AttachmentChip } from './AttachmentChip';
 import { dismissComposerOverlays } from './composer-overlay-dismiss';
+import { messageTextIcon } from '../../lib/ui-icons';
+import { toCssUrl } from '../UiIcon';
 
 let container: HTMLDivElement;
 let cleanup: () => void;
@@ -20,6 +22,16 @@ afterEach(() => {
 });
 
 describe('AttachmentChip', () => {
+  it('uses the message-text icon for an annotation instead of a file icon', () => {
+    cleanup = render(
+      () => <AttachmentChip label="Please clarify" icon="message-text" />,
+      container
+    );
+    const icon = container.querySelector<HTMLElement>('.chip-icon.ui-icon');
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(messageTextIcon));
+    expect(container.querySelector('.file-type-icon')).toBeNull();
+  });
+
   it('shows a failure reason when a previously valid image becomes broken', () => {
     const [error, setError] = createSignal<string>();
     cleanup = render(

@@ -15,6 +15,10 @@ import { logger } from './logger';
 import { compareVersions, extractVersion } from './server-utils';
 import { openCodeApiVersion } from './opencode-connection';
 import { renderAboutHtml } from './about-view';
+import type { AboutViewData } from './about-view';
+import { AboutDatabase } from './about-database';
+import { DatabaseCompaction } from './database-compaction';
+import type { AboutDatabaseDetails } from './about-database';
 import { diagnosticTimeline } from './diagnostics';
 import { parseExtensionMessage } from '../shared/extension-message';
 import { toEditorDiagnostic } from './workspace-problems';
@@ -47,6 +51,18 @@ export function registerCommands(
   let aboutPanel: vscode.WebviewPanel | undefined;
   let aboutDiagnostics = '';
   let aboutDiagnosticsWithPaths = '';
+  let aboutRefreshing = false;
+  const aboutDatabase = new AboutDatabase(server);
+  const databaseCompaction = new DatabaseCompaction(server);
+  const refreshAboutDatabase = () => {
+    void aboutDatabase
+      .read()
+      .catch((error: unknown) =>
+        logger.warn(
+          `Failed to refresh About database details: ${error instanceof Error ? error.message : String(error)}`
+        )
+      );
+  };
 
   context.subscriptions.push(
     vscode.languages.registerCodeActionsProvider(
@@ -187,6 +203,33 @@ export function registerCommands(
       }
     }),
 
+    vscode.commands.registerCommand('varro.chat.deleteOldSessions', async () => {
+      try {
+        await sidebar.deleteOldSessions();
+      } finally {
+        aboutDatabase.invalidate();
+        if (aboutPanel) refreshAboutDatabase();
+      }
+    }),
+
+    vscode.commands.registerCommand('varro.database.compact', async () => {
+      try {
+        await databaseCompaction.run();
+      } finally {
+        aboutDatabase.invalidate();
+        if (aboutPanel) refreshAboutDatabase();
+      }
+    }),
+
+    vscode.commands.registerCommand('varro.chat.exportUsageCsv', async () => {
+      try {
+        await sidebar.exportUsageCsv();
+      } catch (err) {
+        // The export service has already displayed the actionable failure.
+        logger.warn(`Usage CSV export failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }),
+
     vscode.commands.registerCommand('varro.chat.abort', async () => {
       sidebar.postCommand('abort');
       await revealSidebar();
@@ -203,14 +246,9 @@ export function registerCommands(
     }),
 
     vscode.commands.registerCommand('varro.about', async () => {
+      let openedPanel: vscode.WebviewPanel | undefined;
+      let ownsRefresh = false;
       try {
-        const serverInfo = await server.readServerInfo();
-        const markdown = renderAboutMarkdown(context, serverInfo);
-        aboutDiagnostics = diagnosticTimeline.export(markdown);
-        aboutDiagnosticsWithPaths = diagnosticTimeline.export(markdown, false);
-        const uri = await sidebar.openMarkdownDocument(markdown, 'Varro About', false);
-        if (!uri) throw new Error('Could not open the generated about report.');
-
         const pkg = readPackageJson(context);
         const iconPath = vscode.Uri.joinPath(context.extensionUri, 'assets', 'icon.png');
         const panel =
@@ -219,10 +257,18 @@ export function registerCommands(
             enableScripts: true,
             localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'assets')],
           });
+        openedPanel = panel;
+        if (aboutPanel) {
+          panel.reveal(vscode.ViewColumn.Active);
+          if (aboutRefreshing) return;
+        }
+        aboutRefreshing = true;
+        ownsRefresh = true;
         if (!aboutPanel) {
           aboutPanel = panel;
           panel.iconPath = iconPath;
-          let refreshing = false;
+          aboutDiagnostics = '';
+          aboutDiagnosticsWithPaths = '';
           const messageSubscription = panel.webview.onDidReceiveMessage(
             async (message: unknown) => {
               if (!message || typeof message !== 'object') return;
@@ -231,12 +277,18 @@ export function registerCommands(
                 includePaths?: unknown;
               };
               if (action === 'refresh') {
-                if (refreshing || !panel.visible || aboutPanel !== panel) return;
-                refreshing = true;
+                if (aboutRefreshing || !panel.visible || aboutPanel !== panel) return;
+                aboutRefreshing = true;
                 try {
+                  refreshAboutDatabase();
                   const updatedInfo = await server.readServerInfo();
+                  const updatedDatabase = aboutDatabase.snapshot();
                   if (aboutPanel !== panel || !panel.visible) return;
-                  const updatedMarkdown = renderAboutMarkdown(context, updatedInfo);
+                  const updatedMarkdown = renderAboutMarkdown(
+                    context,
+                    updatedInfo,
+                    updatedDatabase
+                  );
                   aboutDiagnostics = diagnosticTimeline.export(updatedMarkdown);
                   aboutDiagnosticsWithPaths = diagnosticTimeline.export(updatedMarkdown, false);
                   await panel.webview.postMessage({
@@ -244,7 +296,8 @@ export function registerCommands(
                     data: createAboutViewData(
                       readPackageJson(context),
                       updatedInfo,
-                      panel.webview.asWebviewUri(iconPath).toString()
+                      panel.webview.asWebviewUri(iconPath).toString(),
+                      updatedDatabase
                     ),
                   });
                 } catch (error) {
@@ -252,11 +305,22 @@ export function registerCommands(
                     `Failed to refresh Varro about: ${error instanceof Error ? error.message : String(error)}`
                   );
                 } finally {
-                  refreshing = false;
+                  if (aboutPanel === panel) aboutRefreshing = false;
                 }
                 return;
               }
+              if (action === 'compactDatabase') {
+                await vscode.commands.executeCommand('varro.database.compact');
+                return;
+              }
               if (action !== 'copyDiagnostics' && action !== 'saveDiagnostics') return;
+              if (!aboutDiagnostics) {
+                await panel.webview.postMessage({
+                  type: 'diagnostics-result',
+                  text: 'Details are still loading.',
+                });
+                return;
+              }
               const report = includePaths === true ? aboutDiagnosticsWithPaths : aboutDiagnostics;
               try {
                 if (action === 'copyDiagnostics') {
@@ -290,27 +354,58 @@ export function registerCommands(
           );
           panel.onDidDispose(() => {
             messageSubscription.dispose();
-            if (aboutPanel === panel) aboutPanel = undefined;
+            if (aboutPanel === panel) {
+              aboutPanel = undefined;
+              aboutRefreshing = false;
+            }
           });
-        } else {
-          panel.reveal(vscode.ViewColumn.Active);
-        }
-        panel.webview.html = renderAboutHtml(
-          {
-            ...createAboutViewData(
+          panel.webview.html = renderAboutHtml(
+            createInitialAboutViewData(
               pkg,
-              serverInfo,
-              panel.webview.asWebviewUri(iconPath).toString()
+              panel.webview.asWebviewUri(iconPath).toString(),
+              aboutDatabase.snapshot()
             ),
-            diagnostics: aboutDiagnostics,
-            diagnosticsWithPaths: aboutDiagnosticsWithPaths,
-          },
-          panel.webview.cspSource
-        );
+            panel.webview.cspSource
+          );
+        }
+
+        refreshAboutDatabase();
+        const serverInfo = await server.readServerInfo();
+        if (aboutPanel !== panel || !panel.visible) return;
+        const database = aboutDatabase.snapshot();
+        const markdown = renderAboutMarkdown(context, serverInfo, database);
+        aboutDiagnostics = diagnosticTimeline.export(markdown);
+        aboutDiagnosticsWithPaths = diagnosticTimeline.export(markdown, false);
+        await panel.webview.postMessage({
+          type: 'about-update',
+          data: createAboutViewData(
+            pkg,
+            serverInfo,
+            panel.webview.asWebviewUri(iconPath).toString(),
+            database
+          ),
+        });
+        const uri = await sidebar.openMarkdownDocument(markdown, 'Varro About', false);
+        if (!uri) throw new Error('Could not open the generated about report.');
       } catch (err) {
         const message = `Failed to open Varro about: ${err instanceof Error ? err.message : String(err)}`;
         logger.error(message);
         vscode.window.showErrorMessage(message);
+        if (openedPanel && aboutPanel === openedPanel && openedPanel.visible) {
+          await openedPanel.webview.postMessage({
+            type: 'about-update',
+            data: createInitialAboutViewData(
+              readPackageJson(context),
+              openedPanel.webview
+                .asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'assets', 'icon.png'))
+                .toString(),
+              aboutDatabase.snapshot(),
+              message
+            ),
+          });
+        }
+      } finally {
+        if (ownsRefresh && aboutPanel === openedPanel) aboutRefreshing = false;
       }
     }),
 
@@ -657,7 +752,11 @@ function describeOpenCodeUpdate(
   return notice;
 }
 
-function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenCodeServerInfo) {
+function renderAboutMarkdown(
+  context: vscode.ExtensionContext,
+  serverInfo: OpenCodeServerInfo,
+  database: AboutDatabaseDetails
+) {
   const pkg = readPackageJson(context);
   const name = getString(pkg.displayName) || getString(pkg.name) || 'Varro';
   const description =
@@ -732,6 +831,16 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     `- **Auto updates:** ${autoUpdate ? 'enabled' : 'disabled'}`,
     ...updateNoticeLines,
     '',
+    '## OpenCode database',
+    `- **Location:** ${markdownCode(database.location)}`,
+    `- **Size:** ${database.size}`,
+    `- **Reusable space:** ${database.reusable}`,
+    `- **History age:** ${database.age}`,
+    `- **Projects:** ${database.projects}`,
+    `- **Sessions:** ${database.sessions}`,
+    '',
+    database.note,
+    '',
     '## Runtime',
     `- **VS Code:** ${markdownCode(vscode.version)}`,
     `- **Node:** ${markdownCode(process.version)}`,
@@ -740,10 +849,53 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
   ].join('\n');
 }
 
+function createInitialAboutViewData(
+  pkg: ExtensionPackageJson,
+  logoUri: string,
+  database: AboutDatabaseDetails,
+  error?: string
+): AboutViewData {
+  const placeholder = error ? 'Unknown' : 'Loading...';
+  return {
+    name: getString(pkg.displayName) || getString(pkg.name) || 'Varro',
+    description:
+      'OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.',
+    logoUri,
+    varroVersion: getString(pkg.version) || 'unknown',
+    cliVersion: placeholder,
+    installMethod: placeholder,
+    installedOn: placeholder,
+    binary: placeholder,
+    serverVersion: placeholder,
+    serverUrl: placeholder,
+    serverProcessId: placeholder,
+    ownership: placeholder,
+    serverStatus: error ?? 'Loading server details...',
+    healthy: false,
+    loading: !error,
+    activeAgents: placeholder,
+    serverStartedOn: placeholder,
+    vscodeClients: placeholder,
+    otherClients: '0',
+    databaseLocation: database.location,
+    databaseSize: database.size,
+    databaseReusable: database.reusable,
+    databaseAge: database.age,
+    databaseProjects: database.projects,
+    databaseSessions: database.sessions,
+    databaseNote: database.note,
+    autoUpdate: vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', true),
+    vscodeVersion: vscode.version,
+    nodeVersion: process.version,
+    platform: `${process.platform} ${process.arch}`,
+  };
+}
+
 function createAboutViewData(
   pkg: ExtensionPackageJson,
   serverInfo: OpenCodeServerInfo,
-  logoUri: string
+  logoUri: string,
+  database: AboutDatabaseDetails
 ) {
   const ownership = isVarroManagedServer(serverInfo) ? 'Managed by Varro' : 'Unmanaged';
   const serverStatus =
@@ -774,12 +926,20 @@ function createAboutViewData(
     ownership,
     serverStatus,
     healthy: serverInfo.health.healthy,
+    loading: false,
     activeAgents: serverInfo.activeAgentError
       ? `Error: ${serverInfo.activeAgentError}`
       : String(serverInfo.activeAgentCount ?? 'Unknown'),
     serverStartedOn: formatAboutDateTime(serverInfo.connections?.startedAt),
     vscodeClients: String(serverInfo.connections?.vscodeClients ?? 'Unknown'),
     otherClients: String(serverInfo.connections?.otherClients ?? 'Unknown'),
+    databaseLocation: database.location,
+    databaseSize: database.size,
+    databaseReusable: database.reusable,
+    databaseAge: database.age,
+    databaseProjects: database.projects,
+    databaseSessions: database.sessions,
+    databaseNote: database.note,
     autoUpdate,
     vscodeVersion: vscode.version,
     nodeVersion: process.version,

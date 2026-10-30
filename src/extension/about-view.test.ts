@@ -22,6 +22,13 @@ const data: AboutViewData = {
   serverStartedOn: 'Oct 1, 2026, 10:00:00 AM',
   vscodeClients: '1',
   otherClients: '0',
+  databaseLocation: '/data/opencode/opencode.db',
+  databaseSize: '1.2 GB',
+  databaseReusable: '300.0 MB',
+  databaseAge: '9 months',
+  databaseProjects: '12',
+  databaseSessions: '345',
+  databaseNote: 'Stored V1 and V2 records. Size includes the SQLite WAL.',
   autoUpdate: true,
   vscodeVersion: '1.120.0',
   nodeVersion: 'v24.15.0',
@@ -59,6 +66,37 @@ function openPage(hiddenInitially = false) {
 }
 
 describe('About page', () => {
+  it('opens the confirmed compaction workflow rather than doing maintenance in the page', () => {
+    const view = openPage();
+    view.page.querySelector<HTMLButtonElement>('#compact-database')!.click();
+    expect(view.postMessage).toHaveBeenLastCalledWith({ action: 'compactDatabase' });
+  });
+
+  it('shows a database card with escaped location, size, projects, and sessions', () => {
+    const root = document.createElement('div');
+    const location = '/data/<img src=x onerror=alert(1)>/opencode.db';
+    root.innerHTML = renderAboutHtml(
+      { ...data, databaseLocation: location },
+      'vscode-webview-resource:'
+    );
+    const card = root.querySelector('[aria-label="OpenCode database"]')!;
+    expect(card.querySelector('h2')?.textContent).toBe('OpenCode database');
+    expect(card.querySelector('[data-about-field="databaseLocation"]')?.textContent).toBe(location);
+    expect(card.querySelector('[data-about-field="databaseSize"]')?.textContent).toBe('1.2 GB');
+    expect(card.querySelector('[data-about-field="databaseReusable"]')?.textContent).toBe(
+      '300.0 MB'
+    );
+    expect(card.textContent).toContain('History age');
+    expect(card.querySelector('[data-about-field="databaseAge"]')?.textContent).toBe('9 months');
+    expect(card.querySelector('[data-about-field="databaseProjects"]')?.textContent).toBe('12');
+    expect(card.querySelector('[data-about-field="databaseSessions"]')?.textContent).toBe('345');
+    expect(card.querySelector('[data-about-field="databaseTurns"]')).toBeNull();
+    expect(card.querySelector('[data-about-field="databaseNote"]')?.textContent).toBe(
+      data.databaseNote
+    );
+    expect(card.querySelector('img')).toBeNull();
+  });
+
   it.each(['1234', 'Unknown'])('shows the server PID as %s', (serverProcessId) => {
     const root = document.createElement('div');
     root.innerHTML = renderAboutHtml({ ...data, serverProcessId }, 'vscode-webview-resource:');
@@ -147,6 +185,11 @@ describe('About page', () => {
       serverStartedOn: 'Oct 2, 2026, 11:00:00 AM',
       vscodeClients: '3',
       otherClients: '2',
+      databaseSize: '1.3 GB',
+      databaseAge: '10 months',
+      databaseProjects: '13',
+      databaseSessions: '346',
+      databaseNote: '<script>not executable</script>',
       autoUpdate: false,
       updateNotice: '<img src=x onerror=alert(1)>',
     });
@@ -166,6 +209,12 @@ describe('About page', () => {
     expect(field('serverStartedOn')).toBe('Oct 2, 2026, 11:00:00 AM');
     expect(field('vscodeClients')).toBe('3');
     expect(field('otherClients')).toBe('2');
+    expect(field('databaseSize')).toBe('1.3 GB');
+    expect(field('databaseAge')).toBe('10 months');
+    expect(field('databaseProjects')).toBe('13');
+    expect(field('databaseSessions')).toBe('346');
+    expect(field('databaseNote')).toBe('<script>not executable</script>');
+    expect(view.page.querySelector('.database-note script')).toBeNull();
     for (const element of otherClientsRow) expect(element.hidden).toBe(false);
     expect(field('autoUpdate')).toBe('Disabled');
     expect(view.page.getElementById('server-status')!.classList.contains('unhealthy')).toBe(true);

@@ -47,14 +47,12 @@ export function RestartBlocked() {
       </button>
 
       <div class="server-status-content">
-        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-accent/10">
-          <UiIcon
-            source={statusIcons.clock}
-            class="h-5 w-5 text-vscode-accent"
-            width={20}
-            height={20}
-          />
-        </div>
+        <UiIcon
+          source={statusIcons.clock}
+          class="h-5 w-5 text-vscode-accent"
+          width={20}
+          height={20}
+        />
 
         <div class="w-full">
           <p class="text-[13px] font-medium text-vscode-fg">Waiting to restart OpenCode</p>
@@ -71,10 +69,10 @@ export function RestartBlocked() {
         >
           <For each={blockers()?.directories ?? []}>
             {(row) => (
-              <div class="flex items-center gap-3 rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2.5">
-                <code class="min-w-0 flex-1 break-all font-mono text-[11px] leading-relaxed text-vscode-fg">
+              <div class="flex items-center gap-3 rounded-md border border-vscode-border-soft px-3 py-2.5">
+                <span class="min-w-0 flex-1 break-all font-mono text-[11px] leading-relaxed text-vscode-fg">
                   {row.directory ?? 'Unknown directory'}
-                </code>
+                </span>
                 <span
                   class="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-vscode-badge-bg px-1.5 text-[11px] font-medium text-vscode-badge-fg"
                   aria-label={`${row.sessionCount} ${row.sessionCount === 1 ? 'session' : 'sessions'}`}
@@ -89,16 +87,25 @@ export function RestartBlocked() {
         <p class="text-[11px] leading-normal text-vscode-muted">
           Force restart stops the server immediately and may interrupt active work.
         </p>
-        <button
-          type="button"
-          class="server-status-secondary-button"
-          disabled={forcing()}
-          onClick={forceRestart}
-        >
-          <Show when={!forcing()} fallback="Restarting...">
-            Force Restart
-          </Show>
-        </button>
+        <div class="flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            class="server-status-secondary-button"
+            disabled={forcing()}
+            onClick={forceRestart}
+          >
+            <Show when={!forcing()} fallback="Restarting...">
+              Force Restart
+            </Show>
+          </button>
+          <button
+            type="button"
+            class="server-status-secondary-button"
+            onClick={() => defaultAppState.setState('restartBlocked', null)}
+          >
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );

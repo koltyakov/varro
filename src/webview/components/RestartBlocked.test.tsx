@@ -51,7 +51,7 @@ describe('RestartBlocked', () => {
     });
   });
 
-  it('offers force restart and a close control', () => {
+  it('offers force restart and a top close control', () => {
     const forceButton = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'Force Restart'
     );
@@ -69,5 +69,16 @@ describe('RestartBlocked', () => {
     expect(closeButton?.classList.contains('server-status-close')).toBe(true);
     closeButton?.click();
     expect(state.restartBlocked).toBeNull();
+  });
+
+  it('closes from the bottom action row without restarting', () => {
+    const closeButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Close'
+    );
+    expect(closeButton).toBeDefined();
+    closeButton?.click();
+
+    expect(state.restartBlocked).toBeNull();
+    expect(postMessageMock).not.toHaveBeenCalled();
   });
 });

@@ -47,6 +47,7 @@ import lockIcon from 'iconoir/icons/lock.svg';
 import mediaImageIcon from 'iconoir/icons/media-image.svg';
 import mediaVideoIcon from 'iconoir/icons/media-video.svg';
 import menuIcon from 'iconoir/icons/menu.svg';
+import messageTextIcon from 'iconoir/icons/message-text.svg';
 import microphoneIcon from 'iconoir/icons/microphone.svg';
 import microphoneSpeakingSolidIcon from 'iconoir/icons/microphone-speaking-solid.svg';
 import navArrowDownIcon from 'iconoir/icons/nav-arrow-down.svg';
@@ -136,6 +137,7 @@ export {
   mediaImageIcon,
   mediaVideoIcon,
   menuIcon,
+  messageTextIcon,
   microphoneIcon,
   microphoneSpeakingSolidIcon,
   navArrowDownIcon,

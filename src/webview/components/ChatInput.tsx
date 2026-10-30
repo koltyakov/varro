@@ -363,6 +363,12 @@ import {
 } from './chat-input/active-turn-selection';
 import { isString } from '../lib/runtime-values';
 import { LspPicker } from './LspPicker';
+import {
+  getChatAnnotationLabel,
+  readChatAnnotation,
+  readChatAnnotationFilePart,
+} from '../../shared/chat-annotation';
+import { ChatTextAnnotation } from './chat-input/ChatTextAnnotation';
 import { McpPicker } from './McpPicker';
 import { ModelPicker } from './ModelPicker';
 
@@ -1456,6 +1462,25 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     };
   }
 
+  function attachChatAnnotation(file: DroppedFile) {
+    const totalBytes = composerFiles().reduce(
+      (sum, item) => sum + pastedTextBytes(item.pastedText ?? ''),
+      pastedTextBytes(file.pastedText ?? '')
+    );
+    if (totalBytes > MAX_PASTED_TEXT_TOTAL_BYTES) {
+      throw new Error('Annotations and pasted text are limited to 256 KB per draft.');
+    }
+    batch(() => {
+      const text = inputText();
+      const prefix = shouldPadInlineInsertion(text.at(-1)) ? ' ' : '';
+      const nextText = `${text}${prefix}@${file.relativePath} `;
+      addContextFile(file);
+      setInputText(nextText);
+      setCaretPosition(nextText.length);
+    });
+    queueMicrotask(() => richEditorRef?.focus({ preventScroll: true }));
+  }
+
   const composerHistory = createComposerHistory();
   createEffect(() => {
     writeStored(
@@ -1722,7 +1747,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
 
     for (const file of composerFiles()) {
-      const label = file.database?.name ?? getLeafPathName(file.relativePath || file.path);
+      const annotation = readChatAnnotation(file);
+      const label = annotation
+        ? getChatAnnotationLabel(annotation.note)
+        : (file.database?.name ?? getLeafPathName(file.relativePath || file.path));
       const marker = `@${file.relativePath || file.path}`;
       const directoryMarker = marker.endsWith('/') ? marker : `${marker}/`;
       const hasDirectorySlash = file.type === 'directory' && text.includes(directoryMarker);
@@ -1740,9 +1768,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           type: 'mention-file',
           label: hasDirectorySlash ? `${label}/` : label,
           path: file.relativePath || file.path,
-          title,
+          title: annotation ? undefined : title,
+          annotation: annotation ?? undefined,
           detail: lineRange || undefined,
-          icon: file.database ? 'table' : file.type === 'directory' ? 'folder' : 'file',
+          icon: annotation
+            ? 'message-text'
+            : file.database
+              ? 'table'
+              : file.type === 'directory'
+                ? 'folder'
+                : 'file',
           textMarker: hasDirectorySlash ? directoryMarker : marker,
         });
       }
@@ -6194,10 +6229,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         )
         .map((entry) => {
           const parsed = parseUserMessageContent(entry.parts);
+          const annotationLabels: Record<string, string> = {};
+          for (const part of parsed.fileParts) {
+            const annotation = readChatAnnotationFilePart(part);
+            if (annotation && part.filename) {
+              annotationLabels[`@${part.filename}`] = getChatAnnotationLabel(annotation.note);
+            }
+          }
           return {
             id: entry.info.id,
             sessionId: entry.info.sessionID,
             text: parsed.messageTexts.join('\n'),
+            annotationLabels,
             imageCount: parsed.fileParts.filter((part) => part.mime.startsWith('image/')).length,
             attachmentCount:
               parsed.attachments.length +
@@ -6292,6 +6335,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''}${editReconciliationPending() ? ' is-edit-reconciling' : ''} ${showModelPicker() ? 'model-picker-open' : ''} ${showMcpPicker() || showLspPicker() ? 'mcp-picker-open' : ''} ${showMentionCompletionMenu() ? 'mention-completion-open' : ''}`}
       aria-busy={editReconciliationPending()}
     >
+      <Show when={!props.newSession}>
+        <ChatTextAnnotation
+          chatRoot={() => containerRef?.closest<HTMLElement>('.chat-main-column-shell') ?? null}
+          sessionId={composerSessionId()}
+          onSave={attachChatAnnotation}
+        />
+      </Show>
       <Show when={editReconciliationPending()}>
         <div
           class="composer-edit-loading chat-messages-loading"

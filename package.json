@@ -90,7 +90,7 @@
   "dependencies": {
     "@imagemagick/magick-wasm": "0.0.45",
     "@opencode-ai/sdk": "^1.19.5",
-    "@opencode/client": "^2.2.1",
+    "@opencode/client": "^2.2.2",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.17",
     "highlight.js": "11.12.0",
@@ -216,6 +216,18 @@
         "command": "varro.chat.openStats",
         "title": "Varro: Usage Stats",
         "shortTitle": "Usage Stats"
+      },
+      {
+        "command": "varro.chat.exportUsageCsv",
+        "title": "Varro: Export All-Time Usage to CSV"
+      },
+      {
+        "command": "varro.chat.deleteOldSessions",
+        "title": "Varro: Delete Old OpenCode Sessions"
+      },
+      {
+        "command": "varro.database.compact",
+        "title": "Varro: Compact OpenCode Database"
       },
       {
         "command": "varro.chat.abort",

@@ -141,6 +141,7 @@ import { SidebarProviderRuntime } from './sidebar-provider-runtime';
 import { WebviewSession } from './webview-session';
 import { WorkspaceSessionStatusCoordinator } from './workspace-session-status-coordinator';
 import { UsageReportService } from './usage-report-service';
+import { SessionCleanupService } from './session-cleanup-service';
 import { getWorkspaceSessionIdsForEvent } from './sidebar-provider-utils';
 import { resolveServerLaunch } from './util/server-launch';
 
@@ -3406,6 +3407,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   async generateUsageReport() {
     await this.usageReportService.openReport(false);
+  }
+
+  async exportUsageCsv() {
+    await this.usageReportService.exportCsv();
+  }
+
+  async deleteOldSessions() {
+    await new SessionCleanupService(this.server, () => this.runtime.ensureServerStarted()).run();
   }
 
   async openMarkdownDocument(content: string, title: string, show = true) {

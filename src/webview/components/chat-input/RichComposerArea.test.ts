@@ -1,7 +1,7 @@
 import { batch, createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
-import { emptyPageIcon, folderIcon } from '../../lib/ui-icons';
+import { emptyPageIcon, folderIcon, messageTextIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 import { dismissComposerOverlays } from './composer-overlay-dismiss';
 import {
@@ -112,6 +112,51 @@ function renderComposer(props: {
 }
 
 describe('RichComposerArea', () => {
+  it('shows an annotation comment preview with a custom tooltip instead of a native title', async () => {
+    vi.useFakeTimers();
+    try {
+      const chip: RichComposerChip = {
+        id: 'file:annotation-1',
+        type: 'mention-file',
+        label: 'Please check this assumption',
+        icon: 'message-text',
+        textMarker: '@annotation-1.txt',
+        annotation: { selectedText: 'The original passage', note: 'Please check this assumption' },
+      };
+      const [chips, setChips] = createSignal([chip]);
+      renderComposer({
+        value: chip.textMarker,
+        cursorOffset: chip.textMarker.length,
+        get chips() {
+          return chips();
+        },
+      });
+      await flushAsyncWork();
+      const element = container!.querySelector<HTMLElement>('.inline-chip')!;
+      expect(element.textContent).toBe(chip.label);
+      expectChipUiIcon(element.querySelector('.inline-chip-icon'), messageTextIcon);
+      expect(element.querySelector('.file-type-icon')).toBeNull();
+      expect(element.hasAttribute('title')).toBe(false);
+      expect(element.getAttribute('aria-describedby')).toBeTruthy();
+      element.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(400);
+      const tooltip = document.querySelector('[role="tooltip"]');
+      expect(tooltip?.querySelector('.chat-annotation-tooltip-note')?.textContent).toBe(
+        chip.annotation!.note
+      );
+      expect(tooltip?.querySelector('.chat-annotation-tooltip-quote')?.textContent).toBe(
+        chip.annotation!.selectedText
+      );
+      setChips([{ ...chip, annotation: { ...chip.annotation! } }]);
+      expect(container!.querySelector('.inline-chip')).toBe(element);
+      setChips([]);
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+      expect(element.hasAttribute('aria-describedby')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps image chips mounted without serializing their payload while typing', () => {
     const url = `data:image/png;base64,${'A'.repeat(1024 * 1024)}`;
     const [value, setValue] = createSignal('[image.png]');

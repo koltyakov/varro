@@ -1,6 +1,6 @@
 import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
-import { gymIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
+import { gymIcon, messageTextIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
 import { AttachmentLabel } from '../AttachmentLabel';
 import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
@@ -12,10 +12,11 @@ import type { EditorDiagnostic } from '../../../shared/protocol';
 
 export function AttachmentChip(props: {
   label: string;
+  preserveExtension?: boolean;
   path?: string;
   detail?: string | null;
   disabled?: boolean;
-  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'warning' | 'table';
+  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'warning' | 'table' | 'message-text';
   severity?: EditorDiagnostic['severity'];
   toggle?: boolean;
   onClick?: () => void;
@@ -142,6 +143,9 @@ export function AttachmentChip(props: {
       <Show when={props.icon === 'table'}>
         <MaterialChipIcon kind="table" class="chip-icon" />
       </Show>
+      <Show when={props.icon === 'message-text'}>
+        <UiIcon source={messageTextIcon} class="chip-icon" width={12} height={12} />
+      </Show>
       <Show when={props.icon === 'warning'}>
         <ProblemsIcon severity={props.severity} />
       </Show>
@@ -151,7 +155,9 @@ export function AttachmentChip(props: {
       <AttachmentLabel
         ref={(element) => (labelElement = element)}
         label={props.label}
-        preserveExtension={props.icon !== 'folder' && props.icon !== 'terminal'}
+        preserveExtension={
+          props.preserveExtension ?? (props.icon !== 'folder' && props.icon !== 'terminal')
+        }
       />
       <Show when={props.detail}>
         <span class="chip-detail">{props.detail}</span>

@@ -33,6 +33,11 @@ const workerMocks = vi.hoisted(() => {
       this.listeners.set(event, listener);
       return this;
     }
+
+    on(event: string, listener: (...args: unknown[]) => void): this {
+      this.listeners.set(event, listener);
+      return this;
+    }
   }
 
   const instances: FakeWorker[] = [];
@@ -56,7 +61,12 @@ vi.mock('vscode', () => ({
 }));
 
 import type { OpenCodeServer } from './server';
-import { UsageReportService } from './usage-report-service';
+import {
+  archiveSessionUsage,
+  readAllTimeUsageCsv,
+  readUsageCleanupArtifacts,
+  UsageReportService,
+} from './usage-report-service';
 
 type Request = OpenCodeServer['request'];
 
@@ -315,6 +325,167 @@ describe('UsageReportService', () => {
     expect(workerMocks.instances).toHaveLength(1);
     expect(workerMocks.instances[0]?.terminate).toHaveBeenCalledOnce();
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('forwards archive phase updates without treating them as completion', async () => {
+    const progress = vi.fn();
+    const operation = archiveSessionUsage(
+      [{ id: 'old', directory: '/project', updated: 1 }],
+      progress
+    );
+    const worker = workerMocks.instances.at(-1)!;
+    worker.listeners.get('message')?.({ progress: 'Resolving usage identities' });
+    worker.listeners.get('message')?.({ progress: 'Collecting owned artifacts for old' });
+    expect(progress.mock.calls).toEqual([
+      ['Resolving usage identities'],
+      ['Collecting owned artifacts for old'],
+    ]);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    worker.listeners.get('message')?.({ archived: 1 });
+    await operation;
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the bounded archive timeout and reports its last phase', async () => {
+    const operation = archiveSessionUsage([{ id: 'old', directory: '/project', updated: 1 }]);
+    const worker = workerMocks.instances.at(-1)!;
+    worker.listeners.get('message')?.({ progress: 'Collecting owned artifacts for old' });
+    const rejected = expect(operation).rejects.toThrow(
+      'Last phase: Collecting owned artifacts for old'
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    await rejected;
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('lets a progressing artifact scan pass 30 seconds and counts more than one million rows', async () => {
+    const operation = readUsageCleanupArtifacts(['old']);
+    const worker = workerMocks.instances.at(-1)!;
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    worker.listeners.get('message')?.({
+      progress: 'Checked artifact references',
+      processed: 2_000_000,
+    });
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    worker.listeners.get('message')?.([{ id: 'old', paths: [] }]);
+    expect(await operation).toEqual(new Map([['old', []]]));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([100, 50, -1, 100.5, Number.NaN])(
+    'does not extend an artifact scan for repeated or invalid progress %s',
+    async (processed) => {
+      const operation = readUsageCleanupArtifacts(['old']);
+      const rejected = expect(operation).rejects.toThrow(
+        'artifact reference scan made no row progress for 60 seconds'
+      );
+      const worker = workerMocks.instances.at(-1)!;
+      await vi.advanceTimersByTimeAsync(20_000);
+      worker.listeners.get('message')?.({ progress: 'Checked 100 rows', processed: 100 });
+      await vi.advanceTimersByTimeAsync(20_000);
+      worker.listeners.get('message')?.({ progress: 'Still scanning', processed });
+      await vi.advanceTimersByTimeAsync(39_999);
+      expect(worker.terminate).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await rejected;
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  );
+
+  it('keeps an absolute ten-minute artifact scan deadline despite increasing progress', async () => {
+    const operation = readUsageCleanupArtifacts(['old']);
+    const rejected = expect(operation).rejects.toThrow(
+      'artifact reference scan exceeded the 10-minute scan limit'
+    );
+    const worker = workerMocks.instances.at(-1)!;
+    for (let index = 1; index <= 11; index++) {
+      await vi.advanceTimersByTimeAsync(50_000);
+      worker.listeners.get('message')?.({
+        progress: 'Checking artifact references',
+        processed: index * 1000,
+      });
+    }
+    expect(worker.terminate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(50_000);
+    await rejected;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('terminates an artifact scan on cancellation and ignores a late successful reply', async () => {
+    const controller = new AbortController();
+    const progress = vi.fn();
+    const operation = readUsageCleanupArtifacts(['old'], progress, controller.signal);
+    const rejected = expect(operation).rejects.toThrow('cancelled');
+    const worker = workerMocks.instances.at(-1)!;
+    controller.abort();
+    await rejected;
+    worker.listeners.get('message')?.([{ id: 'old', paths: [] }]);
+    worker.listeners.get('message')?.({ progress: 'Late progress', processed: 5000 });
+    expect(progress).not.toHaveBeenCalled();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('lets a progressing CSV export run beyond the interactive 30-second deadline', async () => {
+    const operation = readAllTimeUsageCsv();
+    const outcome = operation.catch((error: unknown) => error);
+    const worker = workerMocks.instances.at(-1)!;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    worker.listeners.get('message')?.({
+      progress: 'Read 10,000 assistant messages',
+      processed: 10_000,
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    worker.listeners.get('message')?.({ csv: 'header\r\n', rowCount: 0 });
+    expect(await outcome).toEqual({ csv: 'header\r\n', rowCount: 0 });
+  });
+
+  it('times out a stalled CSV even if it repeats the same row count or phase messages', async () => {
+    const operation = readAllTimeUsageCsv();
+    const rejected = expect(operation).rejects.toThrow('made no row progress for 60 seconds');
+    const worker = workerMocks.instances.at(-1)!;
+    await vi.advanceTimersByTimeAsync(20_000);
+    worker.listeners.get('message')?.({
+      progress: 'Read 10,000 assistant messages',
+      processed: 10_000,
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    worker.listeners.get('message')?.({ progress: 'Still reading', processed: 10_000 });
+    await vi.advanceTimersByTimeAsync(39_999);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('keeps an absolute ten-minute CSV deadline despite increasing row progress', async () => {
+    const operation = readAllTimeUsageCsv();
+    const rejected = expect(operation).rejects.toThrow('exceeded the 10-minute export limit');
+    const worker = workerMocks.instances.at(-1)!;
+    for (let index = 1; index <= 11; index++) {
+      await vi.advanceTimersByTimeAsync(50_000);
+      worker.listeners.get('message')?.({ progress: 'Reading usage', processed: index * 10_000 });
+    }
+    expect(worker.terminate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(50_000);
+    await rejected;
+  });
+
+  it('terminates CSV work on cancellation and ignores a late successful reply', async () => {
+    const controller = new AbortController();
+    const operation = readAllTimeUsageCsv(undefined, controller.signal);
+    const rejected = expect(operation).rejects.toThrow('cancelled');
+    const worker = workerMocks.instances.at(-1)!;
+    controller.abort();
+    await rejected;
+    worker.listeners.get('message')?.({ csv: 'late\r\n', rowCount: 0 });
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('renders compact aggregates returned by the local database worker', async () => {

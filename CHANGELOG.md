@@ -4,6 +4,9 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.33.x - October 2026
 
+- Added OpenCode database location, size, oldest remaining history age, reusable space, and global project and session counts to About, loaded without blocking the page. Added separately confirmed offline database compaction with server restart and disk-space safeguards.
+- Added global session cleanup by retention months, with durable usage-statistics archives, optional parent-only transcript archives in a separate database, and session-owned artifact cleanup. Progress uses stable stages with detailed diagnostics available on request.
+- Added all-time usage CSV export, grouped by UTC day, provider, model, and recorded reasoning setting, including archived usage and token/cache breakdowns, with cancellable large-history scans.
 - Added offline LaTeX rendering for inline and display math in chat, including streamed formulas.
 - Added Handy dictation detection and a composer mic button with toggle and cancellation controls.
 - Added opt-in inline prompt completion with configurable models. Requires OpenCode v2 and a supported API-key connection.

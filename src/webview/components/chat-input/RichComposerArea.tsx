@@ -10,7 +10,7 @@ import {
 } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { splitExternalLinkText } from '../../lib/external-link';
-import { emptyPageIcon, folderIcon, gymIcon } from '../../lib/ui-icons';
+import { emptyPageIcon, folderIcon, gymIcon, messageTextIcon } from '../../lib/ui-icons';
 import { getFileTypeIcon } from '../FileTypeIcon';
 import {
   createMaterialChipIconElement,
@@ -24,6 +24,8 @@ import { registerComposerOverlayDismiss } from './composer-overlay-dismiss';
 import type { EditorDiagnostic } from '../../../shared/protocol';
 import { getProblemsIconSource } from '../ProblemsIcon';
 import { ProblemsTooltip } from '../ProblemsTooltip';
+import type { ChatAnnotation } from '../../../shared/chat-annotation';
+import { AnnotationTooltip } from './AnnotationTooltip';
 
 type ComposerClipboardEvent = ClipboardEvent & {
   __varroPasteText?: string;
@@ -48,6 +50,7 @@ export type RichComposerChip = {
   detail?: string;
   icon?:
     | 'file'
+    | 'message-text'
     | 'table'
     | 'folder'
     | 'image'
@@ -60,6 +63,7 @@ export type RichComposerChip = {
     | 'problems';
   severity?: EditorDiagnostic['severity'];
   problemDetails?: string;
+  annotation?: ChatAnnotation;
   disabled?: boolean;
   previewImage?: { url: string; alt: string };
   textMarker: string;
@@ -124,6 +128,9 @@ export function RichComposerArea(props: {
   let unregisterComposerDismiss: (() => void) | undefined;
   const [problemTooltipTargets, setProblemTooltipTargets] = createSignal<
     Array<{ element: HTMLElement; text: string }>
+  >([]);
+  const [annotationTooltipTargets, setAnnotationTooltipTargets] = createSignal<
+    Array<{ element: HTMLElement; annotation: ChatAnnotation }>
   >([]);
   const [preview, setPreview] = createSignal<{
     chipId: string;
@@ -223,7 +230,9 @@ export function RichComposerArea(props: {
   function buildDom(text: string, chips: Map<string, RichComposerChip>): DocumentFragment {
     const frag = document.createDocumentFragment();
     const tooltipTargets: Array<{ element: HTMLElement; text: string }> = [];
+    const annotationTargets: Array<{ element: HTMLElement; annotation: ChatAnnotation }> = [];
     setProblemTooltipTargets([]);
+    setAnnotationTooltipTargets([]);
     if (!text) return frag;
 
     const sortedMarkers = Array.from(chips.keys()).toSorted((a, b) => b.length - a.length);
@@ -246,6 +255,7 @@ export function RichComposerArea(props: {
           const element = createChipElement(chip);
           frag.appendChild(element);
           if (chip.problemDetails) tooltipTargets.push({ element, text: chip.problemDetails });
+          if (chip.annotation) annotationTargets.push({ element, annotation: chip.annotation });
           if (chip.type !== 'external-link') {
             frag.appendChild(document.createTextNode(CARET_SPACER));
           }
@@ -273,6 +283,7 @@ export function RichComposerArea(props: {
       }
     }
     setProblemTooltipTargets(tooltipTargets);
+    setAnnotationTooltipTargets(annotationTargets);
     return frag;
   }
 
@@ -294,7 +305,7 @@ export function RichComposerArea(props: {
     if (!isInlineReference) span.dataset.chipId = chip.id;
     span.dataset.chipType = chip.type;
     if (chip.previewImage) span.dataset.previewImage = 'true';
-    if (!chip.problemDetails)
+    if (!chip.problemDetails && !chip.annotation)
       span.setAttribute('title', chip.compressionHint || chip.title || chip.label);
 
     const hasFormatIcon =
@@ -884,6 +895,8 @@ export function RichComposerArea(props: {
           chip.textMarker,
           chip.severity,
           JSON.stringify(chip.problemDetails),
+          chip.annotation?.selectedText,
+          chip.annotation?.note,
           chip.compressible,
           chip.compressionHint,
         ]),
@@ -1411,6 +1424,9 @@ export function RichComposerArea(props: {
           />
         )}
       </For>
+      <For each={annotationTooltipTargets()}>
+        {(target) => <AnnotationTooltip target={target.element} annotation={target.annotation} />}
+      </For>
     </div>
   );
 }
@@ -1464,11 +1480,13 @@ export function extractText(el: HTMLElement): string {
 
 function getChipIcon(icon?: string): HTMLSpanElement {
   return createUiIconElement(
-    icon === 'table'
-      ? getMaterialChipIcon('table')
-      : icon === 'folder'
-        ? folderIcon
-        : emptyPageIcon,
+    icon === 'message-text'
+      ? messageTextIcon
+      : icon === 'table'
+        ? getMaterialChipIcon('table')
+        : icon === 'folder'
+          ? folderIcon
+          : emptyPageIcon,
     {
       className: 'inline-chip-icon',
       width: 11,

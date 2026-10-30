@@ -1,15 +1,131 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Usage endpoint payloads are decoded before aggregation. */
 /* oxlint-disable anti-slop/no-known-value-widening -- Query and aggregate values intentionally use their named service contracts. */
-import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { lstat, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { extname, join } from 'node:path';
 import * as vscode from 'vscode';
 
-import { resolveOpenCodeDataDirectory } from '../shared/opencode-data-directory';
 import { asRecord } from '../shared/type-utils';
+import { isSameWorkspacePath } from '../shared/workspace-path';
 import { pauseCompletedAt, readSessionPauses } from '../shared/session-pauses';
 import type { SessionPauseBoundary } from '../shared/session-pauses';
 import type { OpenCodeServer } from './server';
 import { getVarroStateReadDirectory } from './varro-state-paths';
+import { usageDatabasePaths } from './usage-database-paths';
+import { sessionTranscriptArchivePath } from './session-transcript-archive';
+
+export type UsageArchiveSession = {
+  id: string;
+  directory: string;
+  updated: number;
+};
+
+/** The archive commits before the caller is allowed to delete any session. */
+export async function archiveSessionUsage(
+  sessions: UsageArchiveSession[],
+  onProgress?: (message: string) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const result = await runLocalUsageWorker(
+    { archiveSessions: sessions, start: null, windows: [] },
+    onProgress,
+    signal
+  );
+  if (asRecord(result)?.archived !== sessions.length) {
+    throw new Error('Could not archive every session. No sessions were deleted.');
+  }
+}
+
+export async function readPendingUsageCleanup(
+  signal?: AbortSignal
+): Promise<UsageArchiveSession[]> {
+  const result = await runLocalUsageWorker({ cleanupAction: 'pending' }, undefined, signal);
+  if (!Array.isArray(result)) throw new Error('Malformed usage cleanup journal.');
+  return result.map((value) => {
+    const item = asRecord(value);
+    const id = stringValue(item?.id);
+    const directory = stringValue(item?.directory);
+    const updated = numberValue(item?.updated);
+    if (!id || !directory || updated === null) {
+      throw new Error('Malformed session in usage cleanup journal.');
+    }
+    return { id, directory, updated };
+  });
+}
+
+export async function usageCleanupArtifacts(
+  id: string,
+  onProgress?: (message: string) => void,
+  signal?: AbortSignal
+): Promise<string[]> {
+  return (await readUsageCleanupArtifacts([id], onProgress, signal)).get(id)!;
+}
+
+/** Share one remaining-history scan across every already-deleted recovery unit. */
+export async function readUsageCleanupArtifacts(
+  ids: string[],
+  onProgress?: (message: string, processed?: number) => void,
+  signal?: AbortSignal
+): Promise<Map<string, string[]>> {
+  if (!ids.length) return new Map();
+  const result = await runLocalUsageWorker(
+    { cleanupAction: 'artifacts', sessionIDs: ids },
+    onProgress,
+    signal
+  );
+  if (!Array.isArray(result)) throw new Error('Malformed artifact cleanup journal.');
+  const paths = new Map<string, string[]>();
+  for (const value of result) {
+    const item = asRecord(value);
+    if (
+      typeof item?.id !== 'string' ||
+      !ids.includes(item.id) ||
+      paths.has(item.id) ||
+      !Array.isArray(item.paths) ||
+      !item.paths.every((path): path is string => typeof path === 'string')
+    ) {
+      throw new Error('Malformed artifact cleanup journal.');
+    }
+    paths.set(item.id, item.paths);
+  }
+  if (paths.size !== ids.length) throw new Error('Incomplete artifact cleanup journal.');
+  return paths;
+}
+
+export async function finishUsageCleanup(
+  id: string,
+  paths: string[],
+  signal?: AbortSignal
+): Promise<void> {
+  await runLocalUsageWorker({ cleanupAction: 'complete', sessionID: id, paths }, undefined, signal);
+}
+
+export type UsageCsvExport = { csv: string; rowCount: number };
+
+export async function readAllTimeUsageCsv(
+  onProgress?: (message: string) => void,
+  signal?: AbortSignal
+): Promise<UsageCsvExport> {
+  const result = await runLocalUsageWorker(
+    { exportCsv: true, start: null, windows: [] },
+    onProgress,
+    signal
+  );
+  if (result === null)
+    throw new Error('No local OpenCode usage database or statistics archive was found.');
+  const data = asRecord(result);
+  const rowCount = nonnegativeInteger(data?.rowCount);
+  if (
+    typeof data?.csv !== 'string' ||
+    rowCount === null ||
+    rowCount > LOCAL_USAGE_MAX_CSV_ROWS ||
+    Buffer.byteLength(data.csv) > LOCAL_USAGE_MAX_CSV_BYTES
+  ) {
+    throw new Error('Local OpenCode usage export returned malformed CSV data.');
+  }
+  return { csv: data.csv, rowCount };
+}
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'request'> &
   Partial<Pick<OpenCodeServer, 'isAttachOnly'>>;
@@ -83,16 +199,23 @@ const SESSION_USAGE_CACHE_ENTRY_LIMIT = 10_000;
 const SESSION_USAGE_CACHE_TOTAL_LIMIT = 50_000;
 const SESSION_FALLBACK_MAX_SESSIONS = 250;
 const LOCAL_USAGE_WORKER_TIMEOUT_MS = 30_000;
+const LOCAL_USAGE_CSV_STALL_TIMEOUT_MS = 60_000;
+const LOCAL_USAGE_CSV_MAX_DURATION_MS = 10 * 60_000;
+const LOCAL_ARTIFACT_SCAN_STALL_TIMEOUT_MS = 60_000;
+const LOCAL_ARTIFACT_SCAN_MAX_DURATION_MS = 10 * 60_000;
 const LOCAL_USAGE_MAX_ASSISTANT_ROWS = 250_000;
 const LOCAL_USAGE_MAX_SCANNED_ASSISTANT_ROWS = 1_000_000;
 const LOCAL_USAGE_MAX_ROUTES = 4_096;
 const LOCAL_USAGE_MAX_MESSAGE_DATA_BYTES = 1024 * 1024;
+const LOCAL_USAGE_MAX_CSV_ROWS = 100_000;
+const LOCAL_USAGE_MAX_CSV_BYTES = 64 * 1024 * 1024;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export class UsageReportService {
   private readonly sessionUsageCache = new Map<string, CachedSessionUsage>();
   private sessionUsageCacheEntries = 0;
   private reportOperation: { includeAllTime: boolean; promise: Promise<void> } | null = null;
+  private csvExportOperation: Promise<void> | null = null;
 
   constructor(
     private readonly server: OpenCodeRequest,
@@ -117,6 +240,67 @@ export class UsageReportService {
     };
     void promise.then(finish, finish);
     return promise;
+  }
+
+  exportCsv(): Promise<void> {
+    if (this.csvExportOperation) return this.csvExportOperation;
+    const promise = this.exportCsvNow();
+    this.csvExportOperation = promise;
+    const finish = () => {
+      if (this.csvExportOperation === promise) this.csvExportOperation = null;
+    };
+    void promise.then(finish, finish);
+    return promise;
+  }
+
+  private async exportCsvNow(): Promise<void> {
+    const controller = new AbortController();
+    try {
+      if (this.server.isAttachOnly)
+        throw new Error(
+          'All-time usage CSV export requires the local OpenCode database and statistics archive. Run this command on the server host, not in attach-only mode.'
+        );
+      const destination = await vscode.window.showSaveDialog({
+        title: 'Export all-time OpenCode usage to CSV',
+        defaultUri: vscode.Uri.file(join(homedir(), 'opencode-usage-all-time.csv')),
+        filters: { CSV: ['csv'] },
+        saveLabel: 'Export usage',
+      });
+      if (!destination) return;
+      await assertUsageCsvDestination(destination);
+      const result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Exporting all-time OpenCode usage',
+          cancellable: true,
+        },
+        async (progress, token) => {
+          const subscription = token.onCancellationRequested(() => controller.abort());
+          if (token.isCancellationRequested) controller.abort();
+          try {
+            return await readAllTimeUsageCsv(
+              (message) => progress.report({ message }),
+              controller.signal
+            );
+          } finally {
+            subscription.dispose();
+          }
+        }
+      );
+      controller.signal.throwIfAborted();
+      await assertUsageCsvDestination(destination);
+      controller.signal.throwIfAborted();
+      await vscode.workspace.fs.writeFile(destination, new TextEncoder().encode(result.csv));
+      await vscode.window.showInformationMessage(
+        `Exported ${result.rowCount.toLocaleString()} daily OpenCode usage rows to ${destination.fsPath}. Dates are UTC; missing reasoning settings are marked unknown.`
+      );
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      await vscode.window.showErrorMessage(
+        `Could not export OpenCode usage CSV: ${errorMessage(error)}`
+      );
+      throw error;
+    }
   }
 
   private async openReportNow(includeAllTime: boolean): Promise<void> {
@@ -309,6 +493,33 @@ export class UsageReportService {
   }
 }
 
+async function assertUsageCsvDestination(destination: vscode.Uri): Promise<void> {
+  if (destination.scheme !== 'file' || extname(destination.fsPath).toLowerCase() !== '.csv') {
+    throw new Error('Choose a local .csv file on the OpenCode server host.');
+  }
+  const metadata = await lstat(destination.fsPath).catch((error: unknown) => {
+    if (asRecord(error)?.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (metadata && (!metadata.isFile() || metadata.isSymbolicLink()))
+    throw new Error('The usage CSV destination must be a regular file, not a symlink.');
+  const { databasePath, archivePath } = usageDatabasePaths();
+  for (const path of [databasePath, archivePath, sessionTranscriptArchivePath()]) {
+    if (isSameWorkspacePath(destination.fsPath, path))
+      throw new Error(
+        'The usage CSV destination must not overwrite an OpenCode database or archive.'
+      );
+    if (!metadata || metadata.ino === 0) continue;
+    try {
+      const source = await stat(path);
+      if (source.dev === metadata.dev && source.ino === metadata.ino)
+        throw new Error('The usage CSV destination refers to an OpenCode database or archive.');
+    } catch (error) {
+      if (asRecord(error)?.code !== 'ENOENT') throw error;
+    }
+  }
+}
+
 async function openAnonymousReportDocument(content: string): Promise<vscode.Uri> {
   const document = await vscode.workspace.openTextDocument({
     language: 'markdown',
@@ -323,30 +534,60 @@ async function readLocalUsageDatabase(
   now = Date.now(),
   includeAllTime = false
 ): Promise<LocalUsageSnapshot | null> {
-  const databasePath =
-    process.env.OPENCODE_DB ?? join(resolveOpenCodeDataDirectory(), 'opencode.db');
   const windows = createReportWindows(now, includeAllTime);
+  const result = await runLocalUsageWorker({ start: start ?? null, windows });
+  if (result === null) return null;
+  const snapshot = normalizeLocalUsageSnapshot(result, windows);
+  if (!snapshot) throw new Error('Local OpenCode usage query returned malformed data.');
+  return snapshot;
+}
+
+type UsageDatabaseTask =
+  | { cleanupAction: 'pending' }
+  | { cleanupAction: 'artifacts'; sessionIDs: string[] }
+  | { cleanupAction: 'complete'; sessionID: string; paths: string[] }
+  | { archiveSessions: UsageArchiveSession[]; start: null; windows: ReportWindow[] }
+  | { exportCsv: true; start: null; windows: [] }
+  | { start: number | null; windows: ReportWindow[] };
+
+async function runLocalUsageWorker(
+  task: UsageDatabaseTask,
+  onProgress?: (message: string, processed?: number) => void,
+  signal?: AbortSignal
+): Promise<unknown> {
+  signal?.throwIfAborted();
   const annotationsDirectory = getVarroStateReadDirectory('opencode-v2');
 
   return new Promise((resolve, reject) => {
     const worker = new Worker(LOCAL_USAGE_WORKER, {
       eval: true,
       workerData: {
-        databasePath,
+        ...usageDatabasePaths(),
         annotationsDirectory,
         maxAssistantRows: LOCAL_USAGE_MAX_ASSISTANT_ROWS,
         maxMessageDataBytes: LOCAL_USAGE_MAX_MESSAGE_DATA_BYTES,
         maxRoutes: LOCAL_USAGE_MAX_ROUTES,
         maxScannedAssistantRows: LOCAL_USAGE_MAX_SCANNED_ASSISTANT_ROWS,
-        start: start ?? null,
-        windows,
+        maxCsvRows: LOCAL_USAGE_MAX_CSV_ROWS,
+        maxCsvBytes: LOCAL_USAGE_MAX_CSV_BYTES,
+        ...task,
       },
     });
     let settled = false;
-    const finish = (result: LocalUsageSnapshot | null, error?: Error) => {
+    let phase: string | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    let processed = 0;
+    const csv = 'exportCsv' in task;
+    const artifacts = 'cleanupAction' in task && task.cleanupAction === 'artifacts';
+    const longScan = csv || artifacts;
+    const cancel = () => finish(null, new Error('Local OpenCode usage operation cancelled.'));
+    const finish = (result: unknown, error?: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      clearTimeout(deadline);
+      signal?.removeEventListener('abort', cancel);
       void worker
         .terminate()
         .catch(() => 0)
@@ -355,40 +596,80 @@ async function readLocalUsageDatabase(
           else resolve(result);
         });
     };
-    const timeout = setTimeout(
-      () =>
-        finish(
-          null,
-          new Error(
-            `Local OpenCode usage query timed out after ${LOCAL_USAGE_WORKER_TIMEOUT_MS / 1_000} seconds.`
-          )
-        ),
-      LOCAL_USAGE_WORKER_TIMEOUT_MS
-    );
-    worker.once('message', (value: unknown) => {
+    const armTimeout = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(
+        () =>
+          finish(
+            null,
+            new Error(
+              `${csv ? 'Local OpenCode usage CSV made no row progress for 60 seconds.' : artifacts ? 'OpenCode artifact reference scan made no row progress for 60 seconds.' : `Local OpenCode usage query timed out after ${LOCAL_USAGE_WORKER_TIMEOUT_MS / 1_000} seconds.`}${phase ? ` Last phase: ${phase}.` : ''}`
+            )
+          ),
+        csv
+          ? LOCAL_USAGE_CSV_STALL_TIMEOUT_MS
+          : artifacts
+            ? LOCAL_ARTIFACT_SCAN_STALL_TIMEOUT_MS
+            : LOCAL_USAGE_WORKER_TIMEOUT_MS
+      );
+    };
+    armTimeout();
+    if (longScan)
+      deadline = setTimeout(
+        () =>
+          finish(
+            null,
+            new Error(
+              `${csv ? 'Local OpenCode usage CSV exceeded the 10-minute export limit.' : 'OpenCode artifact reference scan exceeded the 10-minute scan limit.'}${phase ? ` Last phase: ${phase}.` : ''}`
+            )
+          ),
+        csv ? LOCAL_USAGE_CSV_MAX_DURATION_MS : LOCAL_ARTIFACT_SCAN_MAX_DURATION_MS
+      );
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
+    worker.on('message', (value: unknown) => {
+      if (settled) return;
       if (value === null) {
         finish(null);
         return;
       }
       const workerMessage = asRecord(value);
-      const workerError = stringValue(workerMessage?.error);
-      if (workerError) {
-        finish(null, new Error(`Local OpenCode usage query failed: ${workerError}`));
+      const progress = stringValue(workerMessage?.progress);
+      if (progress) {
+        phase = progress;
+        const count = numberValue(workerMessage?.processed);
+        if (
+          longScan &&
+          count !== null &&
+          Number.isSafeInteger(count) &&
+          count > processed &&
+          count <= (csv ? LOCAL_USAGE_MAX_SCANNED_ASSISTANT_ROWS : Number.MAX_SAFE_INTEGER)
+        ) {
+          processed = count;
+          armTimeout();
+        }
+        if (count !== null && Number.isSafeInteger(count) && count >= 0)
+          onProgress?.(progress, count);
+        else onProgress?.(progress);
         return;
       }
-      const snapshot = normalizeLocalUsageSnapshot(value, windows);
-      finish(
-        snapshot,
-        snapshot ? undefined : new Error('Local OpenCode usage query returned malformed data.')
-      );
+      const workerError = stringValue(workerMessage?.error);
+      if (workerError) {
+        finish(
+          null,
+          new Error(
+            `${artifacts ? 'OpenCode artifact reference scan failed' : 'Local OpenCode usage query failed'}: ${workerError}`
+          )
+        );
+        return;
+      }
+      finish(value);
     });
     worker.once('error', (error) =>
       finish(null, new Error(`Local OpenCode usage worker failed: ${errorMessage(error)}`))
     );
     worker.once('exit', (code) => {
-      if (code !== 0) {
-        finish(null, new Error(`Local OpenCode usage worker exited with code ${code}.`));
-      }
+      finish(null, new Error(`Local OpenCode usage worker exited without a result, code ${code}.`));
     });
   });
 }
@@ -396,8 +677,13 @@ async function readLocalUsageDatabase(
 const LOCAL_USAGE_WORKER = String.raw`
 const { DatabaseSync } = require('node:sqlite');
 const { existsSync, readFileSync } = require('node:fs');
-const { join } = require('node:path');
+const { join, dirname, resolve, basename, isAbsolute } = require('node:path');
+const { fileURLToPath } = require('node:url');
+const { tmpdir } = require('node:os');
 const { parentPort, workerData } = require('node:worker_threads');
+const progress = (message, processed) => {
+  if (workerData.archiveSessions || workerData.exportCsv || workerData.cleanupAction) parentPort.postMessage({ progress: message, processed });
+};
 
 const sessionPauses = new Map();
 const readPauseTime = (sessionID, messageID) => {
@@ -436,41 +722,222 @@ const emptyAggregate = () => ({
   cacheWrite: 0,
 });
 
-try {
-  if (!existsSync(workerData.databasePath)) {
-    parentPort.postMessage(null);
-  } else {
+const csvUsageRow = (row) => {
+  // SQLite extracts the compact scalar tuple once. Large content/tool bodies
+  // never cross the worker boundary or get parsed into JavaScript objects.
+  const fields = JSON.parse(row.fields);
+  const original = row.originalTiming === null ? null : JSON.parse(row.originalTiming);
+  const originalCompleted = original && typeof fields[7] === 'number' && original[0] === 'assistant' &&
+    original[1] === fields[7] && original[2] === (fields[0] ?? fields[1]) &&
+    original[3] === (fields[2] ?? fields[3] ?? fields[4]) &&
+    typeof original[4] === 'number' && original[4] >= fields[7]
+      ? original[4] : null;
+  return {
+    sessionID: row.sessionID, messageID: row.messageID, version: row.version,
+    providerID: fields[0], nestedProviderID: fields[1], modelID: fields[2],
+    nestedModelID: fields[3] ?? fields[4], variant: fields[5] ?? fields[6],
+    timeCreated: fields[7], timeCompleted: fields[8], total: fields[9], cost: fields[10],
+    input: fields[11], output: fields[12], reasoning: fields[13],
+    cacheRead: fields[14], cacheWrite: fields[15], originalCompleted,
+  };
+};
+
+const cleanupJournal = () => {
+  if (!existsSync(workerData.archivePath)) return [];
+  const archive = new DatabaseSync(workerData.archivePath);
+  try {
+    if (workerData.cleanupAction === 'pending') {
+      return archive.prepare('SELECT id, directory, time_updated AS updated FROM usage_cleanup ORDER BY time_updated, id').all();
+    }
+    if (workerData.cleanupAction === 'complete') {
+      archive.exec('BEGIN IMMEDIATE');
+      for (const path of workerData.paths) archive.prepare('DELETE FROM usage_artifact WHERE session_id = ? AND path = ?').run(workerData.sessionID, path);
+      archive.prepare('DELETE FROM usage_cleanup WHERE id = ? AND NOT EXISTS (SELECT 1 FROM usage_artifact WHERE session_id = ?)').run(workerData.sessionID, workerData.sessionID);
+      archive.exec('COMMIT');
+      return [];
+    }
+    const selectPaths = archive.prepare('SELECT path FROM usage_artifact WHERE session_id = ?');
+    const groups = workerData.sessionIDs.map((id) => ({ id, paths: selectPaths.all(id).map((row) => row.path) }));
+    if (!existsSync(workerData.databasePath)) return groups;
+    // Previously each artifact executed a fresh full-history instr() query.
+    // Read each remaining row once, discarding matched names as soon as found.
+    // Matching raw text rather than only structured references stays conservative.
+    const existing = new Set(groups.flatMap((group) => group.paths.filter((path) => existsSync(path))));
+    const names = new Set([...existing].map((path) => basename(path)));
+    if (!names.size) return groups;
+    // A literal union rejects unrelated rows in one native regexp pass instead
+    // of rereading large tool bodies once for every unresolved filename.
+    // A positive row still checks every name with includes(), preserving prefix,
+    // suffix and overlapping matches exactly. Recompile after removing names so
+    // an already-protected common name cannot trigger repeated slow checks.
+    const compileNames = () => new RegExp([...names].map((name) => name.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&')).join('|'));
+    let matcher = compileNames();
+    const referenced = new Set();
     const database = new DatabaseSync(workerData.databasePath, { readOnly: true });
     try {
+      database.exec('PRAGMA busy_timeout = 1000; BEGIN;');
+      const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+      let scanned = 0;
+      let reportedAt = Date.now();
+      for (const table of ['message', 'part', 'session_message', 'session_part', 'session_inbox']) {
+        if (!tables.has(table) || !names.size) continue;
+        progress('Checking artifact references in ' + table + ': ' + names.size.toLocaleString() + ' unresolved names');
+        for (const row of database.prepare('SELECT ' + (table === 'session_inbox' ? 'payload' : 'data') + ' AS data FROM ' + table).iterate()) {
+          if (typeof row.data !== 'string') throw new Error('Cannot safely inspect non-text artifact references in ' + table);
+          scanned++;
+          if (matcher.test(row.data)) {
+            const before = names.size;
+            for (const name of names) {
+              if (!row.data.includes(name)) continue;
+              referenced.add(name);
+              names.delete(name);
+            }
+            if (names.size && names.size !== before) matcher = compileNames();
+          }
+          if (Date.now() - reportedAt >= 1000) {
+            reportedAt = Date.now();
+            progress('Checked artifact references in ' + scanned.toLocaleString() + ' rows; ' + names.size.toLocaleString() + ' names unresolved', scanned);
+          }
+          if (!names.size) break;
+        }
+      }
+      progress('Artifact reference scan complete: ' + scanned.toLocaleString() + ' rows, ' + referenced.size.toLocaleString() + ' referenced names kept', scanned);
+      return groups.map((group) => ({ id: group.id, paths: group.paths.filter((path) => !existing.has(path) || !referenced.has(basename(path))) }));
+    } finally { database.close(); }
+  } finally { archive.close(); }
+};
+
+try {
+  if (workerData.cleanupAction) {
+    parentPort.postMessage(cleanupJournal());
+  } else
+  if (!existsSync(workerData.databasePath) && !existsSync(workerData.archivePath)) {
+    parentPort.postMessage(null);
+  } else {
+    const database = existsSync(workerData.databasePath)
+      ? new DatabaseSync(workerData.databasePath, { readOnly: true })
+      : new DatabaseSync(':memory:');
+    let archive;
+    try {
+      if (existsSync(workerData.archivePath) && !workerData.archiveSessions) {
+        database.prepare('ATTACH DATABASE ? AS stats').run(workerData.archivePath);
+      }
       database.exec('BEGIN');
       const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
       const sources = [];
       if (tables.has('session') && tables.has('message')) {
-        sources.push("SELECT id, id AS identity, time_updated, 1 AS version FROM session");
+        sources.push("SELECT id, id AS identity, time_updated, 1 AS version, 0 AS archived FROM session");
       }
       if (tables.has('session_v2') && tables.has('session_message')) {
-        sources.push("SELECT id, coalesce(json_extract(metadata, '$.varroLegacyImport.sourceSessionID'), id) AS identity, time_updated, 2 AS version FROM session_v2");
+        sources.push("SELECT id, coalesce(json_extract(metadata, '$.varroLegacyImport.sourceSessionID'), id) AS identity, time_updated, 2 AS version, 0 AS archived FROM session_v2");
+      }
+      const archiveSessions = workerData.archiveSessions;
+      if (archiveSessions && !sources.length) throw new Error('No supported OpenCode usage tables found.');
+      let requestedSessions;
+      if (archiveSessions) {
+        progress('Resolving usage identities');
+        // Discover identities by primary key, then resolve their complete live
+        // snapshots once. Reusing this small table avoids ranking all projects
+        // and decoding every session's metadata for each downstream query.
+        database.exec('CREATE TEMP TABLE requested_usage_session (id TEXT PRIMARY KEY); CREATE TEMP TABLE requested_usage_identity (identity TEXT PRIMARY KEY);');
+        const insertRequested = database.prepare('INSERT INTO requested_usage_session VALUES (?)');
+        for (const session of archiveSessions) insertRequested.run(session.id);
+        if (tables.has('session') && tables.has('message')) database.exec('INSERT OR IGNORE INTO requested_usage_identity SELECT s.id FROM requested_usage_session r CROSS JOIN session s ON s.id = r.id');
+        if (tables.has('session_v2') && tables.has('session_message')) database.exec("INSERT OR IGNORE INTO requested_usage_identity SELECT coalesce(json_extract(s.metadata, '$.varroLegacyImport.sourceSessionID'), s.id) FROM requested_usage_session r CROSS JOIN session_v2 s ON s.id = r.id");
+        database.exec('CREATE TEMP TABLE live_usage_session AS SELECT * FROM (' + sources.join(' UNION ALL ') + ') WHERE identity IN (SELECT identity FROM requested_usage_identity)');
+        const liveSnapshots = database.prepare('SELECT * FROM live_usage_session ORDER BY version DESC').all();
+        requestedSessions = archiveSessions.map((expected) => liveSnapshots.find((session) => expected.id === session.id && expected.updated === session.time_updated));
+        if (requestedSessions.some((session) => !session)) throw new Error('Sessions changed or are missing from the local database. Run cleanup again.');
+        sources.splice(0, sources.length, 'SELECT * FROM live_usage_session');
+      }
+      const hasArchive = existsSync(workerData.archivePath);
+      if (hasArchive) {
+        if (workerData.archiveSessions) {
+          // Copy only headers through a separate read connection. Holding an attached
+          // archive read transaction while committing its writer would deadlock.
+          database.exec('CREATE TEMP TABLE archived_usage_session (id TEXT, identity TEXT, time_updated INTEGER, version INTEGER)');
+          const previous = new DatabaseSync(workerData.archivePath, { readOnly: true });
+          try {
+            const identities = database.prepare('SELECT identity FROM requested_usage_identity').all();
+            for (const { identity } of identities) {
+              const row = previous.prepare('SELECT * FROM usage_session WHERE identity = ?').get(identity);
+              if (row) database.prepare('INSERT INTO archived_usage_session VALUES (?, ?, ?, ?)').run(row.id, row.identity, row.time_updated, row.version);
+            }
+          } finally { previous.close(); }
+          sources.push('SELECT id, identity, time_updated, version, 1 AS archived FROM archived_usage_session');
+        } else sources.push('SELECT id, identity, time_updated, version, 1 AS archived FROM stats.usage_session');
       }
       if (!sources.length) throw new Error('No supported OpenCode usage tables found.');
       // Select a complete session before filtering dates or reading messages. Equal timestamps prefer v2.
-      const selected = 'WITH ranked AS (SELECT *, row_number() OVER (PARTITION BY identity ORDER BY time_updated DESC, version DESC, id DESC) AS rank FROM (' + sources.join(' UNION ALL ') + ')), selected AS (SELECT * FROM ranked WHERE rank = 1' + (workerData.start === null ? '' : ' AND time_updated >= ?') + ') ';
-      const parameters = workerData.start === null ? [] : [workerData.start];
-      const sessionCount = database.prepare(selected + 'SELECT count(*) AS count FROM selected').get(...parameters).count;
+      const selected = 'WITH ranked AS (SELECT *, row_number() OVER (PARTITION BY identity ORDER BY time_updated DESC, version DESC, archived ASC, id DESC) AS rank FROM (' + sources.join(' UNION ALL ') + ')), selected AS (SELECT * FROM ranked WHERE rank = 1' + (archiveSessions || workerData.start === null ? '' : ' AND time_updated >= ?') + ') ';
+      const parameters = archiveSessions || workerData.start === null ? [] : [workerData.start];
+      if (workerData.exportCsv) progress('Resolving usage snapshot');
+      const sessionCount = archiveSessions || workerData.exportCsv ? 0 : database.prepare(selected + 'SELECT count(*) AS count FROM selected').get(...parameters).count;
+      if (archiveSessions) {
+        const selectedSessions = database.prepare(selected + 'SELECT * FROM selected WHERE archived = 0').all(...parameters);
+        // Reports bound JSON body size, but archiving must also retain usage from large tool/image messages.
+        for (const session of selectedSessions) {
+          progress('Validating usage for ' + session.id);
+          const table = session.version === 1 ? 'message' : 'session_message';
+          if (database.prepare('SELECT 1 FROM ' + table + ' WHERE session_id = ? AND NOT json_valid(data) LIMIT 1').get(session.id)) {
+            throw new Error('Cannot safely archive malformed history for ' + session.id);
+          }
+        }
+        archive = new DatabaseSync(workerData.archivePath);
+        archive.exec('PRAGMA busy_timeout = 5000; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;');
+        archive.exec('CREATE TABLE IF NOT EXISTS usage_session (id TEXT PRIMARY KEY, identity TEXT NOT NULL UNIQUE, time_updated INTEGER NOT NULL, version INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS usage_message (id TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES usage_session(id) ON DELETE CASCADE, data TEXT NOT NULL, PRIMARY KEY (session_id, id)); CREATE INDEX IF NOT EXISTS usage_message_session_idx ON usage_message(session_id); CREATE TABLE IF NOT EXISTS usage_cleanup (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS usage_artifact (session_id TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY (session_id, path));');
+        archive.exec('BEGIN IMMEDIATE');
+        for (const session of selectedSessions) {
+          archive.prepare('DELETE FROM usage_session WHERE identity = ? OR id = ?').run(session.identity, session.id);
+          archive.prepare('INSERT INTO usage_session VALUES (?, ?, ?, ?)').run(session.id, session.identity, session.time_updated, session.version);
+        }
+        for (let index = 0; index < requestedSessions.length; index += 1) {
+          const session = requestedSessions[index];
+          progress('Collecting owned artifacts for ' + session.id);
+          const directory = archiveSessions[index].directory;
+          archive.prepare('INSERT OR REPLACE INTO usage_cleanup VALUES (?, ?, ?)').run(session.id, directory, session.time_updated);
+          archive.prepare('INSERT OR IGNORE INTO usage_artifact VALUES (?, ?)').run(session.id, join(directory, '.opencode', 'attachments', session.id));
+          archive.prepare('INSERT OR IGNORE INTO usage_artifact VALUES (?, ?)').run(session.id, join(workerData.dataDirectory, 'storage', 'session_diff', session.id + '.json'));
+          // Record only structured file references, never paths found in prose or source code.
+          for (const table of session.version === 1 ? ['message', 'part'] : ['session_message', 'session_part']) {
+            if (!tables.has(table)) continue;
+            for (const row of database.prepare('SELECT DISTINCT j.value AS path FROM ' + table + ' m, json_tree(m.data) j WHERE m.session_id = ? AND j.key IN (\'outputPath\', \'uri\', \'url\') AND j.type = \'text\'').iterate(session.id)) {
+              let path = row.path;
+              if (path.length > 32768 || (!path.startsWith('file:') && !isAbsolute(path))) continue;
+              if (path.startsWith('file:')) {
+                try { path = fileURLToPath(path); } catch { continue; }
+              }
+              const toolOutput = dirname(resolve(path)) === join(resolve(workerData.dataDirectory), 'tool-output') && /^tool_[a-zA-Z0-9._-]+$/.test(basename(path));
+              const temporaryDrop = dirname(dirname(resolve(path))) === join(tmpdir(), 'varro-drops') && /^drop-[a-zA-Z0-9_-]+$/.test(basename(dirname(path))) && /^\d+-[a-f0-9]{32}-.+$/.test(basename(path));
+              if (!toolOutput && !temporaryDrop) continue;
+              archive.prepare('INSERT OR IGNORE INTO usage_artifact VALUES (?, ?)').run(session.id, resolve(path));
+            }
+          }
+        }
+      }
       const messages = [];
+      const bodyLimit = workerData.exportCsv ? '' : ' AND length(m.data) <= ?';
       // Keep selected sessions as the outer loop. Otherwise SQLite can scan and decode
       // every message in both versions before checking whether its session was selected.
       if (tables.has('session') && tables.has('message')) {
-        messages.push("SELECT m.id, 1 AS version, m.session_id, m.data, NULL AS originalCompleted, json_extract(m.data, '$.parentID') AS parentID FROM selected s CROSS JOIN message m ON s.id = m.session_id WHERE s.version = 1 AND length(m.data) <= ? AND json_extract(m.data, '$.role') = 'assistant'");
+        messages.push("SELECT m.id, 1 AS version, m.session_id, m.data, NULL AS originalCompleted, " + (workerData.exportCsv ? 'NULL' : "json_extract(m.data, '$.parentID')") + " AS parentID FROM selected s CROSS JOIN message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 1" + bodyLimit + " AND json_extract(m.data, '$.role') = 'assistant'");
       }
       if (tables.has('session_v2') && tables.has('session_message')) {
         // Migration can replace completion times with the import time. Recover timing only
         // from the same original message, without selecting its older token usage.
         const originalCompleted = tables.has('message')
-          ? "(SELECT CASE WHEN json_valid(original.data) THEN CASE WHEN json_extract(original.data, '$.role') = 'assistant' AND json_extract(original.data, '$.time.created') = json_extract(m.data, '$.time.created') AND json_extract(original.data, '$.providerID') = coalesce(json_extract(m.data, '$.providerID'), json_extract(m.data, '$.model.providerID')) AND json_extract(original.data, '$.modelID') = coalesce(json_extract(m.data, '$.modelID'), json_extract(m.data, '$.model.id'), json_extract(m.data, '$.model.modelID')) AND json_type(original.data, '$.time.completed') IN ('integer', 'real') AND json_extract(original.data, '$.time.completed') >= json_extract(original.data, '$.time.created') THEN json_extract(original.data, '$.time.completed') END END FROM message original WHERE original.id = m.id AND original.session_id = s.identity)"
+          ? workerData.exportCsv
+            ? "(SELECT CASE WHEN json_valid(original.data) THEN json_extract(original.data, '$.role', '$.time.created', '$.providerID', '$.modelID', '$.time.completed') END FROM message original WHERE original.id = m.id AND original.session_id = s.identity)"
+            : "(SELECT CASE WHEN json_valid(original.data) THEN CASE WHEN json_extract(original.data, '$.role') = 'assistant' AND json_extract(original.data, '$.time.created') = json_extract(m.data, '$.time.created') AND json_extract(original.data, '$.providerID') = coalesce(json_extract(m.data, '$.providerID'), json_extract(m.data, '$.model.providerID')) AND json_extract(original.data, '$.modelID') = coalesce(json_extract(m.data, '$.modelID'), json_extract(m.data, '$.model.id'), json_extract(m.data, '$.model.modelID')) AND json_type(original.data, '$.time.completed') IN ('integer', 'real') AND json_extract(original.data, '$.time.completed') >= json_extract(original.data, '$.time.created') THEN json_extract(original.data, '$.time.completed') END END FROM message original WHERE original.id = m.id AND original.session_id = s.identity)"
           : 'NULL';
-        messages.push("SELECT m.id, 2 AS version, m.session_id, m.data, " + originalCompleted + " AS originalCompleted, coalesce(json_extract(m.data, '$.parentID'), (SELECT u.id FROM session_message u WHERE u.session_id = m.session_id AND u.type = 'user' AND u.seq < m.seq ORDER BY u.seq DESC LIMIT 1)) AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.version = 2 AND m.type = 'assistant' AND length(m.data) <= ?");
+        const parentID = workerData.exportCsv ? 'NULL' : "coalesce(json_extract(m.data, '$.parentID'), (SELECT u.id FROM session_message u WHERE u.session_id = m.session_id AND u.type = 'user' AND u.seq < m.seq ORDER BY u.seq DESC LIMIT 1))";
+        messages.push("SELECT m.id, 2 AS version, m.session_id, m.data, " + originalCompleted + " AS originalCompleted, " + parentID + " AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 2 AND m.type = 'assistant'" + bodyLimit);
       }
-      const query = [
+      if (hasArchive && !archiveSessions) {
+        messages.push("SELECT m.id, 0 AS version, m.session_id, m.data, NULL AS originalCompleted, " + (workerData.exportCsv ? 'NULL' : "json_extract(m.data, '$.parentID')") + " AS parentID FROM selected s CROSS JOIN stats.usage_message m ON s.id = m.session_id WHERE s.archived = 1" + bodyLimit);
+      }
+      const query = workerData.exportCsv ? selected +
+        "SELECT m.session_id AS sessionID, m.id AS messageID, m.version AS version, m.originalCompleted AS originalTiming, json_extract(m.data, '$.providerID', '$.model.providerID', '$.modelID', '$.model.id', '$.model.modelID', '$.model.variant', '$.variant', '$.time.created', '$.time.completed', '$.tokens.total', '$.cost', '$.tokens.input', '$.tokens.output', '$.tokens.reasoning', '$.tokens.cache.read', '$.tokens.cache.write') AS fields FROM (" + messages.join(' UNION ALL ') + ') m LIMIT ?' : [
         selected,
         'SELECT m.session_id AS sessionID,',
         'm.id AS messageID, m.version AS version,',
@@ -478,11 +945,13 @@ try {
         "json_extract(m.data, '$.model.providerID') AS nestedProviderID,",
         "json_extract(m.data, '$.modelID') AS modelID,",
         "coalesce(json_extract(m.data, '$.model.id'), json_extract(m.data, '$.model.modelID')) AS nestedModelID,",
+        ...(archiveSessions || workerData.exportCsv ? ["coalesce(json_extract(m.data, '$.model.variant'), json_extract(m.data, '$.variant')) AS variant,"] : []),
         'm.parentID AS parentID,',
         "json_extract(m.data, '$.time.created') AS timeCreated,",
-        "coalesce(m.originalCompleted, json_extract(m.data, '$.time.completed')) AS timeCompleted,",
-        "coalesce(m.originalCompleted, json_extract(m.data, '$.time.completed'), json_extract(m.data, '$.time.created')) AS created,",
+        'm.originalCompleted AS originalCompleted,',
+        "json_extract(m.data, '$.time.completed') AS timeCompleted,",
         "json_extract(m.data, '$.tokens.total') AS total,",
+        "json_extract(m.data, '$.cost') AS cost,",
         "json_extract(m.data, '$.tokens.input') AS input,",
         "json_extract(m.data, '$.tokens.output') AS output,",
         "json_extract(m.data, '$.tokens.reasoning') AS reasoning,",
@@ -492,40 +961,66 @@ try {
         'LIMIT ?',
       ].join(' ');
       const statement = database.prepare(query);
-      const rows = statement.iterate(...parameters, ...messages.map(() => workerData.maxMessageDataBytes), workerData.maxScannedAssistantRows + 1);
+      if (archive) progress('Archiving assistant usage records');
+      const rows = statement.iterate(...parameters, ...(workerData.exportCsv ? [] : messages.map(() => archive ? Number.MAX_SAFE_INTEGER : workerData.maxMessageDataBytes)), workerData.maxScannedAssistantRows + 1);
+      const insertUsage = archive?.prepare('INSERT INTO usage_message VALUES (?, ?, ?)');
       const aggregates = workerData.windows.map(() => ({
         groups: new Map(),
         promptIDs: new Set(),
       }));
       const routes = new Set();
+      const csvGroups = new Map();
+      if (workerData.exportCsv) progress('Aggregating all-time daily usage');
       let assistantRows = 0;
       let scannedAssistantRows = 0;
-      const oldestWindowStart = workerData.windows.some((window) => window.start === null)
+      let csvProgressAt = Date.now();
+      const oldestWindowStart = workerData.exportCsv || workerData.windows.some((window) => window.start === null)
         ? null
         : Math.min(...workerData.windows.map((window) => window.start));
 
-      for (const row of rows) {
+      for (const rawRow of rows) {
         scannedAssistantRows += 1;
         if (scannedAssistantRows > workerData.maxScannedAssistantRows) {
           throw new Error('Usage report exceeds the ' + workerData.maxScannedAssistantRows.toLocaleString() + '-message local scan limit.');
         }
+        if (workerData.exportCsv && (scannedAssistantRows % 10000 === 0 || Date.now() - csvProgressAt >= 1000)) {
+          csvProgressAt = Date.now();
+          progress('Read ' + scannedAssistantRows.toLocaleString() + ' assistant messages', scannedAssistantRows);
+        }
+        const row = workerData.exportCsv ? csvUsageRow(rawRow) : rawRow;
         const sessionID = stringValue(row.sessionID);
         const timeCreated = numberValue(row.timeCreated);
         const pausedAt = row.version === 2 && sessionID ? readPauseTime(sessionID, row.messageID) : undefined;
-        const recordedCompleted = numberValue(row.timeCompleted);
+        const recordedCompleted = numberValue(row.originalCompleted) ?? numberValue(row.timeCompleted);
         const timeCompleted = pausedAt !== undefined && timeCreated !== null
           ? Math.max(timeCreated, Math.min(recordedCompleted ?? pausedAt, pausedAt))
           : recordedCompleted;
-        const created = timeCompleted ?? numberValue(row.created);
+        const created = timeCompleted ?? timeCreated;
+        if (archive) {
+          insertUsage.run(row.messageID, row.sessionID, JSON.stringify({
+            providerID: stringValue(row.providerID) || stringValue(row.nestedProviderID),
+            modelID: stringValue(row.modelID) || stringValue(row.nestedModelID),
+            variant: stringValue(row.variant),
+            parentID: row.parentID,
+            cost: row.cost,
+            time: { created: row.timeCreated, completed: timeCompleted },
+            tokens: { total: row.total, input: row.input, output: row.output, reasoning: row.reasoning, cache: { read: row.cacheRead, write: row.cacheWrite } },
+          }));
+          if (scannedAssistantRows % 1000 === 0) progress('Archived usage for ' + scannedAssistantRows.toLocaleString() + ' assistant messages');
+        }
+        if (workerData.exportCsv && (created === null || !Number.isFinite(new Date(created).getTime()))) throw new Error('Cannot export usage with a missing or invalid message timestamp.');
         if (created === null || (oldestWindowStart !== null && created < oldestWindowStart)) continue;
         assistantRows += 1;
-        if (assistantRows > workerData.maxAssistantRows) {
+        if (assistantRows > (workerData.exportCsv ? workerData.maxScannedAssistantRows : workerData.maxAssistantRows)) {
           throw new Error('Usage report exceeds the ' + workerData.maxAssistantRows.toLocaleString() + '-message local aggregation limit.');
         }
         const providerID = stringValue(row.providerID) || stringValue(row.nestedProviderID);
         const modelID = stringValue(row.modelID) || stringValue(row.nestedModelID);
         const parentID = stringValue(row.parentID);
-        if (!sessionID || !providerID || !modelID) continue;
+        if (!sessionID || !providerID || !modelID) {
+          if (workerData.exportCsv) throw new Error('Cannot export usage with missing session, provider, or model identity.');
+          continue;
+        }
 
         const input = nonnegativeNumber(row.input);
         const output = nonnegativeNumber(row.output);
@@ -534,6 +1029,24 @@ try {
         const cacheWrite = nonnegativeNumber(row.cacheWrite);
         const total = optionalNonnegativeNumber(row.total) ??
           input + output + reasoning + cacheRead + cacheWrite;
+        if (workerData.exportCsv) {
+          const cost = optionalNonnegativeNumber(row.cost);
+          if (total <= 0 && cost === null) continue;
+          const day = new Date(created).toISOString().slice(0, 10);
+          const variant = stringValue(row.variant) ?? 'unknown';
+          const key = JSON.stringify([day, providerID, modelID, variant]);
+          let group = csvGroups.get(key);
+          if (!group) {
+            if (csvGroups.size >= workerData.maxCsvRows) throw new Error('Usage CSV exceeds the daily row limit. No partial export was saved.');
+            group = { day, providerID, modelID, variant, messages: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0, costedMessages: 0 };
+            csvGroups.set(key, group);
+          }
+          group.messages++;
+          group.input += input; group.output += output; group.reasoning += reasoning;
+          group.cacheRead += cacheRead; group.cacheWrite += cacheWrite; group.total += total;
+          if (cost !== null) { group.cost += cost; group.costedMessages++; }
+          continue;
+        }
         if (total <= 0) continue;
         const duration = timeCreated !== null && timeCompleted !== null && timeCompleted >= timeCreated
           ? timeCompleted - timeCreated
@@ -570,7 +1083,28 @@ try {
         }
       }
 
-      parentPort.postMessage({
+      if (archive) {
+        progress('Committing usage archive');
+        archive.exec('COMMIT');
+        parentPort.postMessage({ archived: archiveSessions.length });
+      } else if (workerData.exportCsv) {
+        progress('Formatting daily CSV');
+        const csvCell = (value) => {
+          let text = String(value);
+          // Identifiers are data, not spreadsheet formulas. Quoting alone is not sufficient.
+          if (/^[\u0000-\u0020]*[=+@-]/.test(text)) text = "'" + text;
+          return /[",\r\n]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
+        };
+        const lines = ['day_utc,provider,model,reasoning_setting,messages,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,total_tokens,reported_cost_usd,costed_messages'];
+        let bytes = 3 + Buffer.byteLength(lines[0]) + 2;
+        for (const [, group] of [...csvGroups].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {
+          const line = [group.day, group.providerID, group.modelID, group.variant, group.messages, group.input, group.output, group.reasoning, group.cacheRead, group.cacheWrite, group.total, group.costedMessages ? Number(group.cost.toPrecision(15)) : '', group.costedMessages].map(csvCell).join(',');
+          bytes += Buffer.byteLength(line) + 2;
+          if (bytes > workerData.maxCsvBytes) throw new Error('Usage CSV exceeds the 64 MB export limit. No partial export was saved.');
+          lines.push(line);
+        }
+        parentPort.postMessage({ csv: '\uFEFF' + lines.join('\r\n') + '\r\n', rowCount: csvGroups.size });
+      } else parentPort.postMessage({
         sessionCount: Number(sessionCount),
         windows: aggregates.map((windowAggregate) => ({
           totalPromptCount: windowAggregate.promptIDs.size,
@@ -593,6 +1127,7 @@ try {
         })),
       });
     } finally {
+      archive?.close();
       database.close();
     }
   }

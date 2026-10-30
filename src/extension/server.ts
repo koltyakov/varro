@@ -2980,6 +2980,31 @@ export class OpenCodeServer extends EventEmitter {
     return this.startRestart(options);
   }
 
+  /** Keep ownership and restart admission reserved until offline database work settles. */
+  async withStoppedServer<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.isAttachOnly)
+      throw new Error('Database compaction requires a verified local managed server.');
+    if (this.lifecycle.getRestartPromise<string>() || this.pendingTerminalCliUpgrades > 0)
+      throw new Error('OpenCode is already restarting or updating. Retry after it finishes.');
+    if (this._status.state !== 'running')
+      throw new Error('Connect to the local OpenCode server before compacting its database.');
+    const outcome: { result?: { ok: true; value: T } | { ok: false; error: unknown } } = {};
+    await this.runRestart(async () => {
+      await this.processManager.stopServerForRestart();
+      try {
+        outcome.result = { ok: true, value: await operation() };
+      } catch (error) {
+        outcome.result = { ok: false, error };
+      }
+      // A failed/cancelled VACUUM must still restore the server before surfacing its error.
+    });
+    const result = outcome.result;
+    if (!result)
+      throw new Error('Database maintenance did not run. Retry after the current restart.');
+    if (!result.ok) throw result.error;
+    return result.value;
+  }
+
   private async recoverOwnershipAndRestart(options: { force?: boolean }): Promise<string> {
     const owned = await this.processManager.takeOwnershipOfExistingServer();
     // An error can mean attachment failed, not that a managed process needs

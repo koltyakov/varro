@@ -1,11 +1,38 @@
 import { describe, expect, it, vi } from 'vitest';
 import { projectDeferredPart } from './message-content';
 import { getToolFileChanges } from '../shared/tool-file-change';
-import type { ToolPart } from '../shared/opencode-types';
+import type { FilePart, ToolPart } from '../shared/opencode-types';
 import { getSearchResultCount } from '../shared/tool-summary';
+import { createChatAnnotation } from '../shared/chat-annotation';
+import { pastedTextDataUrl } from '../shared/pasted-text';
 
 describe('deferred history content', () => {
   const base = { id: 'part-1', sessionID: 'session-1', messageID: 'message-1' };
+
+  it('keeps bounded annotation display context when deferring the full attachment', () => {
+    const file = createChatAnnotation(
+      'Selected passage '.repeat(1000),
+      'Please check this. '.repeat(200),
+      'session-source'
+    );
+    const part: FilePart = {
+      ...base,
+      type: 'file',
+      mime: 'text/plain',
+      filename: file.relativePath,
+      url: pastedTextDataUrl(file.pastedText!),
+    };
+    const projected = projectDeferredPart(part, '/workspace');
+    expect(projected.annotation?.note).toBe(
+      file.pastedText!.split('\n\nComment:\n')[1]!.slice(0, 1200)
+    );
+    expect(projected.annotation?.selectedText).toHaveLength(1200);
+    expect(projected.annotation?.sourceSessionId).toBe('session-source');
+    expect(projected.url).toMatch(/^varro-content:/);
+    expect(JSON.stringify(projected).length).toBeLessThan(3000);
+    expect(part.annotation).toBeUndefined();
+    expect(part.url).toMatch(/^data:text\/plain/);
+  });
 
   it('does not construct deferred URLs for unchanged ordinary text', () => {
     const encode = vi.spyOn(globalThis, 'encodeURIComponent');

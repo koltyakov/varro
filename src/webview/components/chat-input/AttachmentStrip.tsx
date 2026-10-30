@@ -9,6 +9,8 @@ import { getDroppedFileLabel } from '../../lib/path-display';
 import { AttachmentChip } from './AttachmentChip';
 import { ProblemsTooltip } from '../ProblemsTooltip';
 import { getProblemsSeverity } from '../../lib/editor-problems';
+import { getChatAnnotationLabel, readChatAnnotation } from '../../../shared/chat-annotation';
+import { AnnotationTooltip } from './AnnotationTooltip';
 
 type AttachmentStripItem =
   | { type: 'active-context'; value: ActiveContextAttachment }
@@ -166,25 +168,46 @@ export function AttachmentStrip(props: {
 
           if (item.type === 'file') {
             const database = item.value.database;
+            const annotation = readChatAnnotation(item.value);
             const lineRange = database
               ? databaseAttachmentDetail(database)
               : formatContextLineRanges(item.value.lineRanges);
-            return (
+            const chip = (
               <AttachmentChip
-                label={getDroppedFileLabel(item.value)}
+                label={
+                  annotation
+                    ? getChatAnnotationLabel(annotation.note)
+                    : getDroppedFileLabel(item.value)
+                }
+                preserveExtension={annotation ? false : undefined}
                 path={item.value.relativePath || item.value.path}
                 detail={lineRange}
-                icon={database ? 'table' : item.value.type === 'directory' ? 'folder' : 'file'}
+                icon={
+                  annotation
+                    ? 'message-text'
+                    : database
+                      ? 'table'
+                      : item.value.type === 'directory'
+                        ? 'folder'
+                        : 'file'
+                }
                 title={
-                  database
-                    ? `${database.name}${database.dataSource ? ` · ${database.dataSource}` : ''} · ${lineRange}`
-                    : lineRange
-                      ? `${item.value.relativePath || item.value.path} ${lineRange}`
-                      : item.value.relativePath || item.value.path
+                  annotation
+                    ? undefined
+                    : database
+                      ? `${database.name}${database.dataSource ? ` · ${database.dataSource}` : ''} · ${lineRange}`
+                      : lineRange
+                        ? `${item.value.relativePath || item.value.path} ${lineRange}`
+                        : item.value.relativePath || item.value.path
                 }
                 onClick={props.onOpenFile ? () => props.onOpenFile?.(item.value) : undefined}
                 onRemove={() => props.onRemoveFile(item.value.path)}
               />
+            );
+            return annotation ? (
+              <AnnotationTooltip annotation={annotation}>{chip}</AnnotationTooltip>
+            ) : (
+              chip
             );
           }
 

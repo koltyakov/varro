@@ -78,6 +78,12 @@ import { closeSideQuestion, sideQuestionView } from '../lib/side-question';
 import { upsertMessageInfo } from '../lib/state-messages';
 import * as imageCompression from '../lib/image-compression';
 import * as imageLoading from '../lib/image-loading';
+import {
+  createChatAnnotation,
+  getChatAnnotationLabel,
+  readChatAnnotation,
+} from '../../shared/chat-annotation';
+import { pastedTextDataUrl } from '../../shared/pasted-text';
 
 describe('composer dictation integration', () => {
   it('places the mic immediately before Attach and focuses the composer on activation', async () => {
@@ -7269,6 +7275,70 @@ describe('ChatInput', () => {
       'Later follow-up'
     );
   });
+
+  it.each([false, true])(
+    'matches queue annotation previews for canonical pending steers with deferred content: %s',
+    (deferred) => {
+      setIsLoading(true);
+      setState('activeSessionId', 'session-1');
+      const file = createChatAnnotation(
+        'Original passage',
+        'Test annotation. '.repeat(5),
+        'session-source'
+      );
+      const text = `Steer @${file.relativePath}`;
+      const info: UserMessage = {
+        id: 'pending-annotation',
+        sessionID: 'session-1',
+        role: 'user',
+        pendingDelivery: 'steer',
+        time: { created: 1 },
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'test-model' },
+      };
+      setState('queuedMessages', [
+        { id: 'queue-annotation', sessionId: 'session-1', text, droppedFiles: [file] },
+      ]);
+      setState('messages', [
+        {
+          info,
+          parts: [
+            {
+              id: 'pending-text',
+              messageID: info.id,
+              sessionID: info.sessionID,
+              type: 'text',
+              text,
+            },
+            {
+              id: 'pending-file',
+              messageID: info.id,
+              sessionID: info.sessionID,
+              type: 'file',
+              mime: 'text/plain',
+              filename: file.relativePath,
+              url: deferred
+                ? 'varro-content:/part/pending-file'
+                : pastedTextDataUrl(file.pastedText!),
+              annotation: deferred ? readChatAnnotation(file)! : undefined,
+            },
+          ],
+        },
+      ]);
+      cleanup = render(() => ChatInput(), container!);
+      const labels = [...container!.querySelectorAll('.chat-queue-label')];
+      expect(labels.map((label) => label.textContent)).toEqual(
+        Array(2).fill(`Steer [${getChatAnnotationLabel('Test annotation. '.repeat(5))}]`)
+      );
+      expect(
+        container!.querySelector('.chat-steer-container .chat-queue-label .ui-icon')
+      ).toBeNull();
+      expect(
+        container!.querySelector('.chat-steer-container [aria-label="1 attachment"]')
+      ).not.toBeNull();
+      expect(state.messages[0]!.parts[0]).toMatchObject({ text });
+    }
+  );
 
   it('does not resend a restored queued steer that OpenCode already admitted', async () => {
     setupMatchingActiveTurn();

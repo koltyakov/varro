@@ -15,10 +15,18 @@ export type AboutViewData = {
   ownership: string;
   serverStatus: string;
   healthy: boolean;
+  loading?: boolean;
   activeAgents: string;
   serverStartedOn: string;
   vscodeClients: string;
   otherClients: string;
+  databaseLocation: string;
+  databaseSize: string;
+  databaseReusable: string;
+  databaseAge: string;
+  databaseProjects: string;
+  databaseSessions: string;
+  databaseNote: string;
   autoUpdate: boolean;
   vscodeVersion: string;
   nodeVersion: string;
@@ -31,8 +39,12 @@ export type AboutViewData = {
 
 export function renderAboutHtml(data: AboutViewData, cspSource: string): string {
   const nonce = randomBytes(16).toString('base64');
-  const statusLabel = data.healthy ? 'System ready' : 'Needs attention';
-  const statusClass = data.healthy ? 'healthy' : 'unhealthy';
+  const statusLabel = data.loading
+    ? 'Loading details...'
+    : data.healthy
+      ? 'System ready'
+      : 'Needs attention';
+  const statusClass = data.loading ? 'loading' : data.healthy ? 'healthy' : 'unhealthy';
   const otherClientsHidden = Number(data.otherClients) > 0 ? '' : ' hidden';
 
   return `<!doctype html>
@@ -78,6 +90,7 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
     .status { display: flex; align-items: center; gap: 10px; font-weight: 600; }
     .status-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-testing-iconFailed); }
     .healthy .status-dot { background: var(--vscode-testing-iconPassed); }
+    .loading .status-dot { background: var(--vscode-descriptionForeground); }
     .status-detail { color: var(--vscode-descriptionForeground); font-size: 12px; text-align: right; }
     .notice { margin-top: 16px; padding: 14px 20px; border: 1px solid var(--vscode-contrastBorder, var(--vscode-notificationsWarningIcon-foreground)); border-radius: 10px; background: var(--vscode-textBlockQuote-background); }
     .notice strong { display: block; margin-bottom: 3px; }
@@ -86,6 +99,7 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
     .card { min-width: 0; padding: 20px; border: 1px solid var(--about-border); border-radius: 10px; background: var(--about-surface); }
     .card-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--about-border); }
     .card h2 { margin: 0; font-size: 14px; font-weight: 600; }
+    .database-note { margin: 14px 0 0; color: var(--vscode-descriptionForeground); font-size: 12px; }
     #diagnostics-result { display: block; margin-top: 8px; color: var(--vscode-descriptionForeground); font-size: 12px; }
     #diagnostics-result:empty { display: none; }
     .card-version { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; padding: 0 8px; border: 1px solid var(--about-border); border-radius: 6px; background: var(--about-inset); color: var(--vscode-foreground); font-family: var(--vscode-editor-font-family); font-size: 11px; font-weight: 500; line-height: 1; }
@@ -195,6 +209,18 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
           <dt data-other-clients${otherClientsHidden} title="Other local client processes with open server connections. Multiple sockets from one process count once. Remote or hidden clients make the count unknown.">Other clients</dt><dd data-other-clients${otherClientsHidden} data-about-field="otherClients">${escapeHtml(data.otherClients)}</dd>
         </dl>
       </section>
+      <section class="card" aria-label="OpenCode database">
+        <div class="card-heading"><h2>OpenCode database</h2><button id="compact-database" type="button">Compact database...</button></div>
+        <dl>
+          <dt>Location</dt><dd><code data-about-field="databaseLocation">${escapeHtml(data.databaseLocation)}</code></dd>
+          <dt>Size</dt><dd data-about-field="databaseSize">${escapeHtml(data.databaseSize)}</dd>
+          <dt title="SQLite pages freed by deletion and available for reuse. Compact the database to return this space to disk.">Reusable space</dt><dd data-about-field="databaseReusable">${escapeHtml(data.databaseReusable)}</dd>
+          <dt title="Age of the oldest remaining stored session, including retained V1 history. Not the database file creation date.">History age</dt><dd data-about-field="databaseAge">${escapeHtml(data.databaseAge)}</dd>
+          <dt>Projects</dt><dd data-about-field="databaseProjects">${escapeHtml(data.databaseProjects)}</dd>
+          <dt>Sessions</dt><dd data-about-field="databaseSessions">${escapeHtml(data.databaseSessions)}</dd>
+        </dl>
+        <p class="database-note" data-about-field="databaseNote">${escapeHtml(data.databaseNote)}</p>
+      </section>
     </div>
 
     <section class="runtime" aria-label="Runtime">
@@ -215,6 +241,7 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
   </main>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
+    document.getElementById('compact-database').addEventListener('click', () => vscode.postMessage({ action: 'compactDatabase' }));
     const refresh = () => {
       if (!document.hidden) vscode.postMessage({ action: 'refresh' });
     };
@@ -237,7 +264,7 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
         const data = event.data.data;
         const fields = {
           ...data,
-          statusLabel: data.healthy ? 'System ready' : 'Needs attention',
+          statusLabel: data.loading ? 'Loading details...' : data.healthy ? 'System ready' : 'Needs attention',
           autoUpdate: data.autoUpdate ? 'Enabled' : 'Disabled',
           updateTitle: data.updateTitle ?? 'OpenCode update available',
           updateNotice: data.updateNotice ?? '',
@@ -246,8 +273,9 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
           element.textContent = fields[element.dataset.aboutField];
         });
         const status = document.getElementById('server-status');
-        status.classList.toggle('healthy', data.healthy);
-        status.classList.toggle('unhealthy', !data.healthy);
+        status.classList.toggle('loading', Boolean(data.loading));
+        status.classList.toggle('healthy', !data.loading && data.healthy);
+        status.classList.toggle('unhealthy', !data.loading && !data.healthy);
         document.getElementById('update-notice').hidden = !data.updateNotice;
         document.querySelectorAll('[data-other-clients]').forEach((element) => {
           element.hidden = !(Number(data.otherClients) > 0);

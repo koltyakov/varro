@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These tests exercise command import boundaries with malformed VS Code and process results. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { runInNewContext } from 'node:vm';
 import { CodeActionTriggerKind, DiagnosticSeverity } from 'vscode';
 import type * as VSCode from 'vscode';
 import type { ReportedError } from './error-hub';
@@ -95,6 +96,49 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
 });
 
 vi.mock('vscode', () => vscodeMock);
+const { readAboutDatabaseMock, invalidateAboutDatabaseMock } = vi.hoisted(() => ({
+  invalidateAboutDatabaseMock: vi.fn(),
+  readAboutDatabaseMock: vi.fn(async () => ({
+    location: '/Users/alex/.local/share/opencode/opencode.db',
+    size: '1.2 GB',
+    reusable: '300.0 MB',
+    age: '9 months',
+    projects: '12',
+    sessions: '345',
+    note: 'Stored V1 and V2 records. Size includes the SQLite WAL.',
+  })),
+}));
+vi.mock('./about-database', () => ({
+  AboutDatabase: class {
+    private details = {
+      location: '/Users/alex/.local/share/opencode/opencode.db',
+      size: '1.2 GB',
+      reusable: '300.0 MB',
+      age: '9 months',
+      projects: '12',
+      sessions: '345',
+      note: 'Stored V1 and V2 records. Size includes the SQLite WAL.',
+    };
+    async read() {
+      this.details = await readAboutDatabaseMock();
+      return this.details;
+    }
+    snapshot() {
+      return this.details;
+    }
+    invalidate() {
+      invalidateAboutDatabaseMock();
+    }
+  },
+}));
+const maintenance = vi.hoisted(() => ({ run: vi.fn(async () => {}) }));
+vi.mock('./database-compaction', () => ({
+  DatabaseCompaction: class {
+    run() {
+      return maintenance.run();
+    }
+  },
+}));
 vi.mock('./open-code-process', () => ({
   getOpenCodeConfigDirectory: () => '/config/opencode',
 }));
@@ -139,6 +183,8 @@ function register(
     generateCommitMessage: vi.fn(() => Promise.resolve()),
     cancelCommitMessage: vi.fn(() => Promise.resolve()),
     generateUsageReport: vi.fn(() => Promise.resolve()),
+    exportUsageCsv: vi.fn(() => Promise.resolve()),
+    deleteOldSessions: vi.fn(() => Promise.resolve()),
     openMarkdownDocument: vi.fn(async (content: string, title: string, _show?: boolean) => {
       await vscodeMock.workspace.openTextDocument({
         language: 'markdown',
@@ -255,6 +301,111 @@ describe('About command', () => {
     vi.clearAllMocks();
   });
 
+  it('dispatches About compaction through the registered command and invalidates database details', async () => {
+    register('/repo', {
+      readServerInfo: vi.fn(async () => ({
+        status: { state: 'running' },
+        url: 'http://localhost:4096',
+      })),
+    });
+    await runCommand('varro.about');
+    const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
+    const receive = panel.webview.onDidReceiveMessage.mock.calls[0]![0];
+    await receive({ action: 'compactDatabase' });
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith('varro.database.compact');
+    await runCommand('varro.database.compact');
+    expect(maintenance.run).toHaveBeenCalledOnce();
+    expect(invalidateAboutDatabaseMock).toHaveBeenCalledOnce();
+  });
+
+  it('renders the page synchronously before server reads or report creation finish', async () => {
+    const info = {
+      status: { state: 'running', url: 'http://localhost:4096' },
+      url: 'http://localhost:4096',
+      health: { healthy: true, version: '1.18.4' },
+      installMethod: 'bun',
+    };
+    let finishServer!: (value: typeof info) => void;
+    const readServerInfo = vi.fn(
+      () =>
+        new Promise<typeof info>((resolve) => {
+          finishServer = resolve;
+        })
+    );
+    const { sidebar } = register('/repo', { readServerInfo });
+    const opening = runCommand('varro.about');
+    try {
+      expect(vscodeMock.window.createWebviewPanel).toHaveBeenCalledOnce();
+      const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
+      const initialHtml = panel.webview.html;
+      expect(initialHtml).toContain('Loading details...');
+      expect(initialHtml).toContain('OpenCode database');
+      expect(sidebar.openMarkdownDocument).not.toHaveBeenCalled();
+      await panel.webview.onDidReceiveMessage.mock.calls[0]![0]({ action: 'refresh' });
+      expect(readServerInfo).toHaveBeenCalledOnce();
+      finishServer(info);
+      await opening;
+      expect(panel.webview.html).toBe(initialHtml);
+      expect(
+        renderedAbout(panel).querySelector('[data-about-field="statusLabel"]')?.textContent
+      ).toBe('System ready');
+    } finally {
+      finishServer(info);
+      await opening;
+    }
+  });
+
+  it('opens and refreshes About while database counts are still pending', async () => {
+    const info = {
+      status: { state: 'running', url: 'http://localhost:4096' },
+      url: 'http://localhost:4096',
+      health: { healthy: true, version: '1.18.4' },
+      installMethod: 'bun',
+    };
+    let finishDatabase!: (details: Awaited<ReturnType<typeof readAboutDatabaseMock>>) => void;
+    const databaseRead = new Promise<Awaited<ReturnType<typeof readAboutDatabaseMock>>>(
+      (resolve) => {
+        finishDatabase = resolve;
+      }
+    );
+    readAboutDatabaseMock.mockReturnValueOnce(databaseRead).mockReturnValueOnce(databaseRead);
+    register('/repo', { readServerInfo: vi.fn().mockResolvedValue(info) });
+    const opening = runCommand('varro.about');
+    try {
+      await vi.waitFor(() => expect(vscodeMock.window.createWebviewPanel).toHaveBeenCalledOnce(), {
+        timeout: 200,
+      });
+      await opening;
+      const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
+      const receive = panel.webview.onDidReceiveMessage.mock.calls[0]![0];
+      await receive({ action: 'refresh' });
+      expect(panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'about-update' })
+      );
+    } finally {
+      finishDatabase({
+        location: '/data/opencode.db',
+        size: '2.0 GB',
+        reusable: '0.5 GB',
+        age: '10 months',
+        projects: '2',
+        sessions: '3',
+        note: 'Complete',
+      });
+      await opening;
+      readAboutDatabaseMock.mockReset();
+      readAboutDatabaseMock.mockResolvedValue({
+        location: '/Users/alex/.local/share/opencode/opencode.db',
+        size: '1.2 GB',
+        reusable: '300.0 MB',
+        age: '9 months',
+        projects: '12',
+        sessions: '345',
+        note: 'Stored V1 and V2 records. Size includes the SQLite WAL.',
+      });
+    }
+  });
+
   it('refreshes visible page data and diagnostic exports without reloading the page', async () => {
     const info = {
       status: { state: 'running', url: 'http://localhost:4096' },
@@ -285,12 +436,24 @@ describe('About command', () => {
       minute: '2-digit',
       second: '2-digit',
     });
-    const root = document.createElement('div');
-    root.innerHTML = html;
+    const root = renderedAbout(panel);
     expect(root.querySelector('[data-about-field="installedOn"]')?.textContent).toBe(installedOn);
     expect(root.querySelector('[data-about-field="vscodeClients"]')?.textContent).toBe('1');
     expect(root.querySelector('[data-about-field="otherClients"]')?.textContent).toBe('0');
     expect(root.querySelector('[data-about-field="serverProcessId"]')?.textContent).toBe('1234');
+    expect(root.querySelector('[data-about-field="databaseLocation"]')?.textContent).toBe(
+      '/Users/alex/.local/share/opencode/opencode.db'
+    );
+    expect(root.querySelector('[data-about-field="databaseSize"]')?.textContent).toBe('1.2 GB');
+    expect(root.querySelector('[data-about-field="databaseAge"]')?.textContent).toBe('9 months');
+    expect(root.querySelector('[data-about-field="databaseProjects"]')?.textContent).toBe('12');
+    expect(root.querySelector('[data-about-field="databaseSessions"]')?.textContent).toBe('345');
+    expect(root.querySelector('[data-about-field="databaseTurns"]')).toBeNull();
+    expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
+      expect.stringContaining('## OpenCode database'),
+      'Varro About',
+      false
+    );
     expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
       expect.stringContaining('  - **PID:** `1234`'),
       'Varro About',
@@ -317,6 +480,16 @@ describe('About command', () => {
       },
     });
 
+    readAboutDatabaseMock.mockResolvedValueOnce({
+      location: '/Users/alex/.local/share/opencode/opencode.db',
+      size: '1.3 GB',
+      reusable: '0.4 GB',
+      age: '10 months',
+      projects: '13',
+      sessions: '346',
+      note: 'Updated database details.',
+    });
+
     await receive({ action: 'refresh' });
 
     expect(readServerInfo).toHaveBeenCalledTimes(2);
@@ -330,6 +503,10 @@ describe('About command', () => {
         vscodeClients: '2',
         otherClients: '1',
         serverProcessId: 'Unknown',
+        databaseSize: '1.3 GB',
+        databaseAge: '10 months',
+        databaseProjects: '13',
+        databaseSessions: '346',
       }),
     });
     expect(panel.webview.html).toBe(html);
@@ -364,8 +541,7 @@ describe('About command', () => {
       });
       await runCommand('varro.about');
       const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
-      const root = document.createElement('div');
-      root.innerHTML = panel.webview.html;
+      const root = renderedAbout(panel);
       expect(root.querySelector('[data-about-field="installedOn"]')?.textContent).toBe('Unknown');
     }
   );
@@ -381,6 +557,7 @@ describe('About command', () => {
     register('/repo', { readServerInfo });
     await runCommand('varro.about');
     const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
+    panel.webview.postMessage.mockClear();
     const receive = panel.webview.onDidReceiveMessage.mock.calls[0]![0];
     panel.visible = false;
     await receive({ action: 'refresh' });
@@ -418,6 +595,7 @@ describe('About command', () => {
     register('/repo', { readServerInfo });
     await runCommand('varro.about');
     const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
+    panel.webview.postMessage.mockClear();
     const receive = panel.webview.onDidReceiveMessage.mock.calls[0]![0];
     readServerInfo.mockRejectedValueOnce(new Error('server unreachable'));
     await receive({ action: 'refresh' });
@@ -459,6 +637,8 @@ describe('About command', () => {
     const report = vscodeMock.env.clipboard.writeText.mock.calls.at(-1)![0];
     expect(report).toContain('Recent diagnostic events');
     expect(report).not.toContain('/Users/alex');
+    expect(report).toContain('## OpenCode database');
+    expect(report).toContain('- **Location:** `[local path]`');
     expect(report).not.toContain('secret-credential');
     expect(panel.webview.postMessage).toHaveBeenLastCalledWith({
       type: 'diagnostics-result',
@@ -564,7 +744,9 @@ describe('About command', () => {
     const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)?.value;
     expect(panel?.webview.html).toContain('<h1>Varro</h1>');
     expect(panel?.webview.html).toContain('src="webview:/extension/assets/icon.png"');
-    expect(panel?.webview.html).toContain('System ready');
+    expect(
+      renderedAbout(panel!).querySelector('[data-about-field="statusLabel"]')?.textContent
+    ).toBe('System ready');
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining('  - **Active sessions:** `1`'),
@@ -629,7 +811,7 @@ describe('About command', () => {
     );
     expect(aboutMarkdown).not.toContain('Varro installs it automatically');
     const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)?.value;
-    expect(panel?.webview.html).toContain(
+    expect(renderedAbout(panel!).documentElement.outerHTML).toContain(
       `OpenCode ${MAXIMUM_TESTED_OPENCODE_VERSION} is available. Install it with: bun add -g opencode-ai@latest`
     );
   });
@@ -662,8 +844,8 @@ describe('About command', () => {
       '**OpenCode 2.0.99 is installed.**\n\nVarro restarts the server on it when no sessions are active.'
     );
     const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)?.value;
-    expect(panel?.webview.html).toContain('OpenCode update installed');
-    expect(panel?.webview.html).not.toContain('Install it with');
+    expect(renderedAbout(panel!).documentElement.outerHTML).toContain('OpenCode update installed');
+    expect(renderedAbout(panel!).documentElement.outerHTML).not.toContain('Install it with');
   });
 
   it('does not distinguish which Varro window manages the server', async () => {
@@ -729,6 +911,23 @@ describe('About command', () => {
     }
   );
 });
+
+function renderedAbout(panel: ReturnType<typeof vscodeMock.window.createWebviewPanel>): Document {
+  const page = document.implementation.createHTMLDocument();
+  page.documentElement.innerHTML = panel.webview.html;
+  const events = new window.EventTarget();
+  runInNewContext(page.querySelector('script')!.textContent!, {
+    document: page,
+    window: events,
+    acquireVsCodeApi: () => ({ postMessage: () => {} }),
+    setInterval: () => 0,
+    clearInterval: () => {},
+  });
+  for (const [message] of panel.webview.postMessage.mock.calls) {
+    events.dispatchEvent(new MessageEvent('message', { data: message }));
+  }
+  return page;
+}
 
 function fileUri(fsPath: string) {
   return { fsPath };
@@ -1178,6 +1377,33 @@ describe('sidebar navigation commands', () => {
     await runCommand('varro.chat.openStats');
 
     expect(sidebar.generateUsageReport).toHaveBeenCalledOnce();
+  });
+
+  it('runs the global session cleanup command', async () => {
+    const { sidebar } = register();
+    await runCommand('varro.chat.deleteOldSessions');
+    expect(sidebar.deleteOldSessions).toHaveBeenCalledOnce();
+    expect(invalidateAboutDatabaseMock).toHaveBeenCalledOnce();
+  });
+
+  it('invalidates database details even if cleanup stops after a partial run', async () => {
+    const { sidebar } = register();
+    sidebar.deleteOldSessions.mockRejectedValueOnce(new Error('Cleanup stopped'));
+    await expect(runCommand('varro.chat.deleteOldSessions')).rejects.toThrow('Cleanup stopped');
+    expect(invalidateAboutDatabaseMock).toHaveBeenCalledOnce();
+  });
+
+  it('exports all-time usage as CSV through the report service', async () => {
+    const { sidebar } = register();
+    await runCommand('varro.chat.exportUsageCsv');
+    expect(sidebar.exportUsageCsv).toHaveBeenCalledOnce();
+  });
+
+  it('contains a CSV export rejection after the service displays its error', async () => {
+    const { sidebar } = register();
+    sidebar.exportUsageCsv.mockRejectedValueOnce(new Error('Export failed'));
+    await expect(runCommand('varro.chat.exportUsageCsv')).resolves.toBeUndefined();
+    expect(loggerMock.warn).toHaveBeenCalledWith('Usage CSV export failed: Export failed');
   });
 
   it('contains a usage-report rejection after the service displays its error', async () => {

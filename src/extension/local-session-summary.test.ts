@@ -197,6 +197,70 @@ describe(
       ]);
     });
 
+    it.each(['root', 'child', 'unrelated', null])(
+      'defers separately stored v2 parts for %s only when they belong to the selected tree',
+      async (partSessionID) => {
+        const databasePath = createV2Database();
+        const database = new DatabaseSync(databasePath);
+        database.exec(`
+          ALTER TABLE session_v2 ADD COLUMN time_busy INTEGER;
+          CREATE TABLE session_part (
+            message_id TEXT NOT NULL, session_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
+            type TEXT NOT NULL, call_id TEXT, time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL, data TEXT NOT NULL,
+            PRIMARY KEY (message_id, ordinal)
+          );
+          CREATE INDEX session_part_session_message_idx ON session_part(session_id, message_id, ordinal);
+        `);
+        const insertSession = database.prepare(
+          'INSERT INTO session_v2 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        insertSession.run('root', null, 0, 0, 0, 0, 0, null, null, 1);
+        insertSession.run('child', 'root', 0, 0, 0, 0, 0, null, null, 1);
+        insertSession.run('unrelated', null, 0, 0, 0, 0, 0, null, null, 1);
+        if (partSessionID) {
+          database
+            .prepare('INSERT INTO session_message VALUES (?, ?, ?, ?, ?)')
+            .run(
+              'reply',
+              partSessionID,
+              'assistant',
+              1,
+              JSON.stringify({ time: { created: 1, completed: 2 }, content: [] })
+            );
+          database
+            .prepare('INSERT INTO session_part VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(
+              'reply',
+              partSessionID,
+              0,
+              'text',
+              null,
+              1,
+              2,
+              JSON.stringify({ type: 'text', text: 'Done' })
+            );
+        }
+        const before = database.prepare('SELECT * FROM session_part').all();
+        database.close();
+
+        const local = await readLocalSessionSummary('root', databasePath, 2);
+        if (partSessionID === 'root' || partSessionID === 'child') {
+          expect(local).toBeNull();
+          expect(logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining('OpenCode v2 separately stored parts require the API'),
+            expect.objectContaining({ databasePath })
+          );
+        } else {
+          expect(local).toMatchObject({ messages: [], descendants: [{ id: 'child' }] });
+          expect(logger.warn).not.toHaveBeenCalled();
+        }
+        const unchanged = new DatabaseSync(databasePath, { readOnly: true });
+        expect(unchanged.prepare('SELECT * FROM session_part').all()).toEqual(before);
+        unchanged.close();
+      }
+    );
+
     it.each([undefined, 6_000, null])(
       'reads native v2 pause metadata with annotation override %s without changing source rows',
       async (pausedAt) => {

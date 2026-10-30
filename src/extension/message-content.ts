@@ -3,6 +3,8 @@ import { getToolFileChanges } from '../shared/tool-file-change';
 import type { ToolState } from '../shared/opencode-types';
 import { getToolKind } from '../shared/tool-normalization';
 import { getSearchResultCount } from '../shared/tool-summary';
+import { isChatAnnotationFilename, readChatAnnotation } from '../shared/chat-annotation';
+import { readPastedTextDataUrl } from '../shared/pasted-text';
 
 export function projectPartAttachments<T extends UnknownRecord>(part: T, directory?: string): T {
   const state = asRecord(part.state);
@@ -24,7 +26,25 @@ export function projectDeferredPart<T extends UnknownRecord>(
   directory?: string
 ): T & { deferred?: string } {
   if (part.type === 'file' && isString(part.url)) {
-    return { ...part, url: `varro-content:${deferredPartPath(part, directory)}` };
+    const annotation =
+      part.mime === 'text/plain' &&
+      isString(part.filename) &&
+      isChatAnnotationFilename(part.filename)
+        ? readChatAnnotation({
+            relativePath: part.filename,
+            pastedText: readPastedTextDataUrl(part.url) ?? undefined,
+          })
+        : null;
+    const projected = { ...part, url: `varro-content:${deferredPartPath(part, directory)}` };
+    if (!annotation) return projected;
+    return {
+      ...projected,
+      annotation: {
+        selectedText: annotation.selectedText.slice(0, 1200),
+        note: annotation.note.slice(0, 1200),
+        sourceSessionId: annotation.sourceSessionId,
+      },
+    };
   }
   if (
     part.type === 'reasoning' &&

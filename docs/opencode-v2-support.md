@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.5` and v2 `2.2.1`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.5` and v2 `2.2.2`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -97,6 +97,64 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.2.2 compatibility review
+
+Reviewed v2.2.1 to v2.2.2, `3ebcf9a32c` through `098aa7fd6e`. The complete
+upstream diff is retained in `artifacts/opencode-2.2.2-upstream.diff`. All 134
+OpenAPI paths remain available. Session/message APIs, permission/form payloads,
+`/api/event` SSE names and payloads, and `serve`/upgrade arguments remain compatible.
+Generated schemas add safe-integer bounds, flatten equivalent unions, and deduplicate
+references. Optional additions include session `time.busy`, attachment source metadata,
+and experimental schedule conditions and outcomes. No HTTP adapter changes are required.
+V1 `1.19.5` remains current, and both support floors remain unchanged.
+
+The new `session_part` table allows assistant content to live outside message
+envelopes. Local session summaries now defer to the API when the selected session
+or a descendant has separately stored parts, avoiding incomplete context and tool
+totals. Empty tables and unrelated sessions retain the local path. Fixture regressions
+cover all four cases without modifying source rows. Usage-report token and cost fields
+remain in message envelopes and need no adaptation.
+
+Image generation is now available by default for connected image-capable providers
+as `experimental_image_generate`. Image-job notices, media preservation on fork/import,
+unattended schedule checks, persistent-terminal working-directory validation, Code Mode,
+and provider usage-limit fixes remain server-owned behavior. App/TUI, quote/annotation,
+question-dock, timeline-cache, and styling changes are optional parity work.
+
+The 307 focused summary/adapter/transport/form/decision tests, 631
+process/server/transport/database tests, and 189 additional v2 adapter/auth tests
+pass. The separately stored-part fixtures first reproduced two incomplete local
+summaries, then passed with the API fallback.
+`npm run fmt`, `npm run typecheck`, `npm run typecheck:suggestions`, and
+`npm run build` pass, with zero suggestion diagnostics. Focused lint passes for
+the changed summary files. Initial repository-wide `npm run lint` and
+`npm run lint:check` reported seven errors in concurrent, unrelated session-cleanup
+and usage-report work. A final lint check after that work changed reports only
+`eslint(no-unassigned-vars)` for `popup` in
+`src/webview/components/chat-input/ChatTextAnnotation.tsx`. These unrelated files
+are not changed by this bump. Evidence uses the `artifacts/opencode-2.2.2-` prefix.
+
+The published-server adapter matrix passed all 151 applicable checks, with
+53 family/platform skips and no leaked or recovered processes. The five
+compatibility-summary tests passed afterward. Evidence is
+`artifacts/opencode-2.2.2-adapters.log`,
+`artifacts/opencode-adapters/run-Kh1PkE/`, and
+`artifacts/opencode-2.2.2-summary-tests.log`.
+
+| Published server | Passed | Skipped | Issues found | All cases complete |
+| --- | ---: | ---: | --- | --- |
+| v1.16.0 | 30 | 21 | None in tested cases | Yes, applicable automated cases |
+| v1.19.5 | 31 | 20 | None in tested cases | Yes, applicable automated cases |
+| v2.0.5 | 42 | 9 | None in tested cases | Yes, applicable automated cases |
+| v2.2.2 | 48 | 3 | None in tested cases | Yes, applicable automated cases |
+
+No further compatibility fixes are indicated by these checks. Resolve the
+unrelated lint diagnostic before requiring a repository-wide lint pass.
+
+The v1 dependency is unchanged, so the Docker v1 support-range matrix was not
+rerun. Real-editor, visual streaming, live-account action parity, and native
+Windows checks were not run for this bump.
 
 ### 2.2.1 compatibility review
 

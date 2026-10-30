@@ -3,13 +3,14 @@ import { render } from 'solid-js/web';
 import type { DroppedFile } from '../../../shared/protocol';
 import type { ClipboardImage } from '../../lib/app-state-types';
 import { AttachmentStrip } from './AttachmentStrip';
+import { createChatAnnotation } from '../../../shared/chat-annotation';
 
 type MockAttachmentChipProps = {
   label: string;
   path?: string;
   detail?: string | null;
   disabled?: boolean;
-  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'table';
+  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'table' | 'message-text';
   onClick?: () => void;
   onRemove?: () => void;
   onPin?: () => void;
@@ -94,6 +95,29 @@ function renderAttachmentStrip(props: Partial<AttachmentStripProps> = {}) {
   cleanup = render(() => AttachmentStrip(merged), container!);
   return merged;
 }
+
+it('displays a saved chat annotation with its passage and note in a custom tooltip', async () => {
+  vi.useFakeTimers();
+  try {
+    const file = createChatAnnotation('Selected passage', 'Please clarify');
+    renderAttachmentStrip({ files: [file] });
+    const chip = container?.querySelector<HTMLElement>('.attachment-chip-mock');
+    expect(chip?.dataset.label).toBe('Please clarify');
+    expect(chip?.dataset.icon).toBe('message-text');
+    expect(chip?.dataset.title).toBe('');
+    chip?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(400);
+    const tooltip = document.querySelector('[role="tooltip"]');
+    expect(tooltip?.querySelector('.chat-annotation-tooltip-note')?.textContent).toBe(
+      'Please clarify'
+    );
+    expect(tooltip?.querySelector('.chat-annotation-tooltip-quote')?.textContent).toBe(
+      'Selected passage'
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 it('displays a database snapshot as a table rather than its manifest filename', () => {
   const file = createDroppedFile({

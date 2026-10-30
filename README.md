@@ -111,7 +111,11 @@ For image analysis with a text-only model, configure an image-capable `vision` a
 
 ## Usage and limits
 
-The composer shows context-window fill; its popup breaks down tokens and reported cost. Run `/stats` or `Varro: Usage Stats` for cross-project token and duration reports covering today, 7 days, and 30 days. Use `/stats all` for all retained history.
+The composer shows context-window fill; its popup breaks down tokens and reported cost. Run `/stats` or `Varro: Usage Stats` for cross-project token and duration reports covering today, 7 days, and 30 days. Use `/stats all` for retained and archived usage history.
+
+Run `Varro: Export All-Time Usage to CSV` to save daily usage by provider, model, and recorded reasoning setting, with separate input, output, reasoning, and cache token columns. It includes the usage archive without double counting live copies. Dates are UTC; unavailable reasoning settings are marked `unknown`.
+
+Run `Varro: Delete Old OpenCode Sessions` from the Command Palette to choose how many months to keep across all projects and whether to preserve trimmed, non-resumable transcripts in a separate database. It uses last activity, always archives usage before deleting, and cleans session-owned temporary files without deleting original attachments or source files. Active sessions and parents with newer children stay. See [session cleanup](docs/session-cleanup.md) for recovery and archive details.
 
 ![Context window and session token breakdown](https://raw.githubusercontent.com/koltyakov/varro/main/assets/context.png)
 
@@ -137,7 +141,7 @@ Global configuration reloads when OpenCode is idle. Project changes may need `Va
 
 - [VS Code](https://code.visualstudio.com/) or [VSCodium](https://vscodium.com/) 1.107 or newer
 - [Node.js](https://nodejs.org/) 22.22.2+ on Node 22, or Node 24.15.0+
-- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or [v1 CLI](https://opencode.ai/docs/) 1.16.0+, on `PATH` or configured through `varro.server.command`. Tested with v2 2.2.1 and v1 1.19.5
+- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or [v1 CLI](https://opencode.ai/docs/) 1.16.0+, on `PATH` or configured through `varro.server.command`. Tested with v2 2.2.2 and v1 1.19.5
 - A trusted, non-virtual workspace. Remote workspaces run Varro and OpenCode on the remote extension host
 
 ## Documentation
