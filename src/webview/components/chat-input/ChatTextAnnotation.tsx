@@ -3,11 +3,13 @@ import { Portal } from 'solid-js/web';
 import { createChatAnnotation } from '../../../shared/chat-annotation';
 import type { DroppedFile } from '../../../shared/protocol';
 import { observePopupViewport } from '../../lib/popup-position';
+import { selectionMarkdown } from '../../lib/selection-markdown';
 import { writeClipboard } from '../../lib/write-clipboard';
 
 type AnnotationSelection = {
   sessionId: string;
   text: string;
+  markdown: string | null;
   x: number;
   y: number;
   bounds?: { top: number; bottom: number };
@@ -86,6 +88,7 @@ export function ChatTextAnnotation(props: {
     setSelection({
       sessionId: props.sessionId,
       text,
+      markdown: selectionMarkdown(range),
       x: event.clientX,
       y: event.clientY,
       bounds: bounds ? { top: bounds.top, bottom: bounds.bottom } : undefined,
@@ -240,6 +243,21 @@ export function ChatTextAnnotation(props: {
                   >
                     Copy
                   </button>
+                  <Show when={current().markdown}>
+                    {(markdown) => (
+                      <button
+                        type="button"
+                        class="dropdown-item"
+                        role="menuitem"
+                        onClick={() => {
+                          void writeClipboard(markdown());
+                          close();
+                        }}
+                      >
+                        Copy markdown
+                      </button>
+                    )}
+                  </Show>
                 </>
               }
             >

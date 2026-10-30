@@ -65,6 +65,64 @@ function enterNote(textarea: HTMLTextAreaElement, text: string) {
 }
 
 describe('chat text annotation', () => {
+  it.each(['Copy', 'Copy markdown'])(
+    'copies a captured selection with %s during streaming',
+    async (action) => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal('navigator', { clipboard: { writeText } });
+      const onSave = mount();
+      const row = root.querySelector('.interactive-item-container')!;
+      row.innerHTML =
+        '<div class="rendered-markdown"><p>A <strong>selected</strong> passage</p><p>Not selected</p></div>';
+      const passage = row.querySelector('p')!;
+      select(passage);
+      contextMenu(passage);
+      await Promise.resolve();
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+      expect(buttons.map((button) => button.textContent)).toEqual([
+        'Annotate',
+        'Copy',
+        'Copy markdown',
+      ]);
+      // Streaming can replace the selected DOM, and virtual rows can unmount before the click.
+      passage.innerHTML = 'Changed while streaming';
+      row.remove();
+      window.getSelection()?.removeAllRanges();
+      buttons.find((button) => button.textContent === action)!.click();
+      expect(writeText).toHaveBeenCalledExactlyOnceWith(
+        action === 'Copy' ? 'A selected passage' : 'A **selected** passage'
+      );
+      expect(document.querySelector('.chat-annotation-popup')).toBeNull();
+      expect(onSave).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not offer Copy markdown for plain message selections', () => {
+    mount();
+    const passage = root.querySelector('p')!;
+    select(passage);
+    contextMenu(passage);
+    expect(
+      Array.from(document.querySelectorAll('[role="menuitem"]'), (item) => item.textContent)
+    ).toEqual(['Annotate', 'Copy']);
+  });
+
+  it('includes Copy markdown in keyboard menu navigation', async () => {
+    mount();
+    const passage = root.querySelector('p')!;
+    passage.className = 'rendered-markdown';
+    select(passage);
+    contextMenu(passage);
+    await Promise.resolve();
+    const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(document.activeElement?.textContent).toBe('Copy markdown');
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement?.textContent).toBe('Annotate');
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(document.activeElement?.textContent).toBe('Copy markdown');
+  });
+
   it.each(['Escape', 'unmount'])(
     'retains a temporary selection highlight while typing and clears it on %s',
     async (action) => {
