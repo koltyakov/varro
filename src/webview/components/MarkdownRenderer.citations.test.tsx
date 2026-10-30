@@ -6,6 +6,7 @@ import { MarkdownRenderer, __resetMarkdownCachesForTests } from './MarkdownRende
 import { citationPathChecks } from '../lib/citation-path-checks';
 import { setState } from '../lib/state';
 import { asRecord, getString, isString } from '../lib/runtime-values';
+import { getFileTypeIcon } from './FileTypeIcon';
 
 vi.mock('../hooks/useOpenCode', () => ({ selectSession: vi.fn() }));
 
@@ -88,18 +89,26 @@ describe('MarkdownRenderer exact citation validation', () => {
     expect(asRecord(requests()[0]?.body)).toEqual({ directory: '/repo', paths: [path] });
   });
 
-  it.each(['missing.ts', 'src/missing.ts', 'app.ts', '/outside/missing.ts', 'seedX/config.yaml'])(
-    'keeps missing citation %s as plain code without discovering namesakes',
-    async (path) => {
-      dispose = render(() => <MarkdownRenderer content={`Inspect \`${path}\`.`} />, root);
-      await respond([null]);
-      expect(root.querySelector('a[data-file]')).toBeNull();
-      expect(root.querySelector('code')?.textContent).toBe(path);
-      expect(send.mock.calls.some(([message]) => asRecord(message)?.type === 'vscode/open')).toBe(
-        false
-      );
-    }
-  );
+  it.each([
+    'missing.ts',
+    'src/missing.ts',
+    'app.ts',
+    '/outside/missing.ts',
+    'seedX/config.yaml',
+    'pdf-source/65129.pdf',
+    'pdf-source/__65129.pdf',
+  ])('keeps missing citation %s as plain code without discovering namesakes', async (path) => {
+    dispose = render(() => <MarkdownRenderer content={`Inspect \`${path}\`.`} />, root);
+    const icon = root.querySelector<HTMLImageElement>('code.citation-path .file-path-icon');
+    expect(icon?.getAttribute('src')).toBe(getFileTypeIcon(path));
+    await respond([null]);
+    expect(root.querySelector('code.citation-path .file-path-icon')).toBe(icon);
+    expect(root.querySelector('a[data-file]')).toBeNull();
+    expect(root.querySelector('code')?.textContent).toBe(path);
+    expect(send.mock.calls.some(([message]) => asRecord(message)?.type === 'vscode/open')).toBe(
+      false
+    );
+  });
 
   it('opens the validated absolute target and preserves the cited line range', async () => {
     dispose = render(() => <MarkdownRenderer content="[app.ts](src/app.ts#L10-L12)" />, root);
@@ -174,6 +183,9 @@ describe('MarkdownRenderer exact citation validation', () => {
     );
     expect(root.querySelectorAll('a[data-file]')).toHaveLength(1);
     expect(root.querySelector('code')?.textContent).toBe('missing.ts');
+    expect(root.querySelector('code.citation-path .file-path-icon')?.getAttribute('src')).toBe(
+      getFileTypeIcon('missing.ts')
+    );
     expect(requests()).toHaveLength(1);
   });
 

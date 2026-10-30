@@ -2398,10 +2398,6 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   border: 0;
 }
 
-.rendered-markdown code.citation-path .file-path-icon {
-  visibility: hidden;
-}
-
 .rendered-markdown a.file-path-link:hover {
   text-decoration: none;
   border-bottom-color: currentColor;
@@ -2460,6 +2456,12 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   user-select: none;
   -webkit-user-select: none;
   -webkit-user-drag: none;
+}
+
+/* File-type decorations belong to the selected citation, unlike standalone images. */
+.rendered-markdown img.file-path-icon {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .rendered-markdown .markdown-image-frame {

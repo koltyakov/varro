@@ -283,6 +283,14 @@ test('renders real-session explicit and inferred file links', async ({ page }) =
 
   const missingCode = page.locator('code.citation-path').filter({ hasText: 'missing-file.ts' });
   await expect(missingCode).toBeVisible();
+  await expect(missingCode.locator('.file-path-icon')).toBeVisible();
+  await expect
+    .poll(() =>
+      missingCode
+        .locator('img.file-path-icon')
+        .evaluate((icon: HTMLImageElement) => icon.naturalWidth)
+    )
+    .toBeGreaterThan(0);
   await expect(missingCode).not.toHaveAttribute('href', /.+/);
   const openCountAfterFailure = await getE2EState(page, () => {
     const value = (
@@ -355,12 +363,14 @@ test('delayed citation validation preserves wrapping and row height', async ({ p
   await expect(page.locator('.rendered-markdown .hljs-keyword').first()).toBeVisible();
   const candidate = page.locator('code.citation-path').filter({ hasText: 'README.md' });
   await expect(candidate).toBeVisible();
+  await expect(candidate.locator('.file-path-icon')).toBeVisible();
   const before = await candidate.evaluate((element) => ({
     width: element.getBoundingClientRect().width,
     height: element.closest('.rendered-markdown')!.getBoundingClientRect().height,
   }));
   const link = page.getByRole('link', { name: 'README.md', exact: true });
   await expect(link).toBeVisible();
+  await expect(link.locator('.file-path-icon')).toBeVisible();
   const after = await link.evaluate((element) => ({
     width: element.getBoundingClientRect().width,
     height: element.closest('.rendered-markdown')!.getBoundingClientRect().height,
@@ -370,4 +380,87 @@ test('delayed citation validation preserves wrapping and row height', async ({ p
   await expect(
     page.locator('code.citation-path').filter({ hasText: 'missing-file.ts' })
   ).toBeVisible();
+  await expect(
+    page
+      .locator('code.citation-path')
+      .filter({ hasText: 'missing-file.ts' })
+      .locator('.file-path-icon')
+  ).toBeVisible();
 });
+
+test('keeps PDF icons visible before and after exact-path validation', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=message-rendering&citationCheckDelayMs=1500');
+  await expect(page.getByRole('link', { name: 'README.md', exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'message-rendering-assistant-part-1',
+              sessionID: 'session-message-rendering',
+              messageID: 'message-rendering-assistant',
+              type: 'text',
+              text: "I'll copy `pdf-source/65129.pdf` to `pdf-source/__65129.pdf`.\n\nCopied to dev `pdf-source/__65129.pdf`.",
+            },
+          },
+        },
+      },
+      '*'
+    );
+  });
+  const pendingIcons = page.locator('code.citation-path img.file-path-icon');
+  await expect(pendingIcons).toHaveCount(3);
+  for (const icon of await pendingIcons.all()) await expect(icon).toBeVisible();
+  await expect
+    .poll(() =>
+      pendingIcons.evaluateAll((icons: HTMLImageElement[]) =>
+        icons.every((icon) => icon.complete && icon.naturalWidth > 0)
+      )
+    )
+    .toBe(true);
+  const links = page.locator('a.file-path-link');
+  await expect(links).toHaveCount(3);
+  for (const icon of await links.locator('img.file-path-icon').all())
+    await expect(icon).toBeVisible();
+});
+
+for (const [kind, selector, label] of [
+  ['validated', 'a.file-path-link', 'README.md'],
+  ['missing', 'code.citation-path', 'missing-file.ts'],
+] as const) {
+  test(`selects the icon with ${kind} citation text without copying decoration`, async ({
+    page,
+  }, testInfo) => {
+    await page.goto('/e2e/harness/index.html?scenario=message-rendering');
+    const reference = page.locator(selector).filter({ hasText: label });
+    await expect(reference).toBeVisible();
+    const icon = reference.locator('img.file-path-icon');
+    await icon.scrollIntoViewIfNeeded();
+    await expect
+      .poll(() =>
+        icon.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)
+      )
+      .toBe(true);
+    const unselected = await icon.screenshot();
+    const selectedText = await reference.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return selection?.toString();
+    });
+    expect(selectedText).toBe(label);
+    const selected = await icon.screenshot();
+    await testInfo.attach(`${kind}-selected-icon`, { body: selected, contentType: 'image/png' });
+    expect(
+      selected.equals(unselected),
+      'The file icon should paint the native selection highlight'
+    ).toBe(false);
+    await expect(icon).toHaveCSS('user-select', 'text');
+    await expect(icon).toHaveCSS('-webkit-user-select', 'text');
+  });
+}
