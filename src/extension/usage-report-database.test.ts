@@ -624,7 +624,10 @@ describe('local usage database versions', () => {
       archiveSessionUsage([{ id: 'old', directory: '/project', updated: now }])
     ).rejects.toThrow('malformed JSON');
     const archive = new DatabaseSync(usageDatabasePaths().archivePath, { readOnly: true });
-    expect(archive.prepare('SELECT count(*) AS count FROM usage_session').get()?.count).toBe(0);
+    expect(
+      archive.prepare("SELECT name FROM sqlite_master WHERE name = 'usage_session'").get()
+    ).toBeUndefined();
+    expect(archive.prepare('PRAGMA user_version').get()?.user_version).toBe(0);
     archive.close();
     database.close();
   });

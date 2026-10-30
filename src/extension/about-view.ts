@@ -72,11 +72,12 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
     }
     main { width: min(820px, 100%); margin: 0 auto; padding: 48px 44px 40px; }
     .hero { display: grid; grid-template-columns: 1fr auto; gap: 44px; align-items: center; padding-bottom: 34px; }
-    h1 { max-width: 580px; margin: 0; font-size: clamp(26px, 3.5vw, 32px); font-weight: 650; line-height: 1.15; letter-spacing: -.025em; }
+    h1, .hero-version { font-size: clamp(26px, 3.5vw, 32px); font-weight: 650; line-height: 1.15; letter-spacing: -.025em; }
+    h1 { display: inline; margin: 0; }
+    .hero-version { color: var(--vscode-descriptionForeground); font-weight: 400; white-space: nowrap; }
     .description { max-width: 570px; margin: 16px 0 0; color: var(--vscode-descriptionForeground); font-size: 15px; line-height: 1.6; }
-    .brand-mark { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 92px; }
+    .brand-mark { display: flex; justify-content: center; min-width: 92px; }
     .brand-mark img { display: block; width: 82px; height: 82px; }
-    .brand-mark span { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: 11px; }
     .status-bar {
       display: flex;
       gap: 20px;
@@ -154,7 +155,7 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
     @media (max-width: 660px) {
       main { padding: 32px 20px; }
       .hero { grid-template-columns: 1fr; gap: 28px; }
-      .brand-mark { align-items: flex-start; }
+      .brand-mark { justify-content: flex-start; }
       .brand-mark img { width: 70px; height: 70px; }
       .runtime { grid-template-columns: 1fr; }
       .runtime-item + .runtime-item { border-left: 0; border-top: 1px solid var(--about-border); }
@@ -172,12 +173,14 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
   <main>
     <header class="hero">
       <div>
-        <h1>${escapeHtml(data.name)}</h1>
+        <div class="hero-title">
+          <h1>${escapeHtml(data.name)}</h1>
+          <span class="hero-version">(${escapeHtml(data.varroVersion)})</span>
+        </div>
         <p class="description">${escapeHtml(data.description)}</p>
       </div>
       <div class="brand-mark">
         <img src="${escapeHtmlAttribute(data.logoUri)}" alt="Varro" />
-        <span>v${escapeHtml(data.varroVersion)}</span>
       </div>
     </header>
 

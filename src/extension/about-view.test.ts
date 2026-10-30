@@ -66,6 +66,22 @@ function openPage(hiddenInitially = false) {
 }
 
 describe('About page', () => {
+  it('shows the escaped version beside the title instead of beneath the logo', () => {
+    const root = document.createElement('div');
+    const name = 'Varro: OpenCode Workbench';
+    const varroVersion = '0.33.27<beta>';
+    root.innerHTML = renderAboutHtml({ ...data, name, varroVersion }, 'vscode-webview-resource:');
+
+    const title = root.querySelector('.hero-title')!;
+    expect(title.querySelector('h1')?.textContent).toBe(name);
+    expect(title.querySelector('h1')?.nextElementSibling?.textContent).toBe(`(${varroVersion})`);
+    expect(title.textContent?.trim().replace(/\s+/g, ' ')).toBe(`${name} (${varroVersion})`);
+    expect(root.querySelectorAll('.hero-version')).toHaveLength(1);
+    expect(title.querySelector('.hero-version')?.children).toHaveLength(0);
+    expect(root.querySelector('.brand-mark')?.children).toHaveLength(1);
+    expect(root.querySelector('.brand-mark img')?.getAttribute('alt')).toBe('Varro');
+  });
+
   it('opens the confirmed compaction workflow rather than doing maintenance in the page', () => {
     const view = openPage();
     view.page.querySelector<HTMLButtonElement>('#compact-database')!.click();

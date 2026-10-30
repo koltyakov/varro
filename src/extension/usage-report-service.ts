@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Usage endpoint payloads are decoded before aggregation. */
 /* oxlint-disable anti-slop/no-known-value-widening -- Query and aggregate values intentionally use their named service contracts. */
 import { Worker } from 'node:worker_threads';
+import { createHash } from 'node:crypto';
 import { lstat, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { extname, join } from 'node:path';
@@ -14,12 +15,38 @@ import type { OpenCodeServer } from './server';
 import { getVarroStateReadDirectory } from './varro-state-paths';
 import { usageDatabasePaths } from './usage-database-paths';
 import { sessionTranscriptArchivePath } from './session-transcript-archive';
+import { acquireFileLock } from './file-lock';
+import { ORIGINAL_USAGE_TIMING_WORKER } from './usage-original-timing';
+import type { OriginalUsageTiming } from './usage-original-timing';
 
 export type UsageArchiveSession = {
   id: string;
   directory: string;
   updated: number;
 };
+
+/** Explicit opt-in only. Reads live history; writes scalar provenance to the statistics sidecar. */
+export async function preserveOriginalUsageTiming(
+  sessions: UsageArchiveSession[],
+  onProgress?: (message: string) => void,
+  signal?: AbortSignal
+): Promise<{ sessions: number; messages: number }> {
+  signal?.throwIfAborted();
+  const release = await acquireFileLock(`${usageDatabasePaths().archivePath}.cleanup.lock`, signal);
+  try {
+    const result = asRecord(
+      await runLocalUsageWorker({ preserveTimings: sessions }, onProgress, signal)
+    );
+    const messages = nonnegativeInteger(result?.messages);
+    if (result?.sessions !== sessions.length || messages === null || messages === 0)
+      throw new Error(
+        'Could not verify preserved original usage timing. No history may be deleted.'
+      );
+    return { sessions: sessions.length, messages };
+  } finally {
+    await release();
+  }
+}
 
 /** The archive commits before the caller is allowed to delete any session. */
 export async function archiveSessionUsage(
@@ -128,13 +155,16 @@ export async function readAllTimeUsageCsv(
 }
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'request'> &
-  Partial<Pick<OpenCodeServer, 'isAttachOnly'>>;
+  Partial<Pick<OpenCodeServer, 'isAttachOnly' | 'apiVersion'>>;
 
 type Session = {
   id: string;
   directory: string;
   updated: number | null;
   pauses?: SessionPauseBoundary[];
+  identity?: string;
+  originalTimings?: Map<string, OriginalUsageTiming>;
+  timingRevision?: string;
 };
 
 type Tokens = {
@@ -172,6 +202,7 @@ type CachedSessionUsage = {
   updated: number;
   usage: Usage[];
   pauseRevision: string;
+  timingRevision: string;
 };
 
 type LocalUsageSnapshot =
@@ -346,6 +377,23 @@ export class UsageReportService {
           : `The local OpenCode usage database is unavailable. Refusing to fetch full history for ${sessions.length.toLocaleString()} sessions.`
       );
     }
+    // Never read this machine's sidecar for an external/unknown server connection.
+    if (sessions.length && this.server.isAttachOnly === false && this.server.apiVersion === 2) {
+      const timings = await readOriginalUsageTimings(sessions.map((session) => session.id));
+      const bySession = new Map<string, OriginalUsageTiming[]>();
+      for (const timing of timings) {
+        const rows = bySession.get(timing.session_id) ?? [];
+        rows.push(timing);
+        bySession.set(timing.session_id, rows);
+      }
+      for (const session of sessions) {
+        const rows = bySession.get(session.id) ?? [];
+        session.originalTimings = new Map(rows.map((row) => [row.message_id, row]));
+        session.timingRevision = createHash('sha256')
+          .update(JSON.stringify([session.identity, rows]))
+          .digest('hex');
+      }
+    }
     const sessionIDs = new Set(sessions.map((session) => session.id));
     for (const id of this.sessionUsageCache.keys()) {
       if (sessionIDs.has(id)) continue;
@@ -401,6 +449,10 @@ export class UsageReportService {
             directory,
             updated: numberValue(asRecord(record?.time)?.updated),
             pauses: readSessionPauses(record?.metadata),
+            identity:
+              stringValue(
+                asRecord(asRecord(record?.metadata)?.varroLegacyImport)?.sourceSessionID
+              ) ?? id,
           });
           if (sessions.size > SESSION_FALLBACK_MAX_SESSIONS) return [...sessions.values()];
         }
@@ -423,6 +475,7 @@ export class UsageReportService {
       session.updated !== null &&
       cached?.updated === session.updated &&
       cached.pauseRevision === JSON.stringify(session.pauses ?? []) &&
+      cached.timingRevision === (session.timingRevision ?? '') &&
       cached.directory === session.directory
     ) {
       this.sessionUsageCache.delete(session.id);
@@ -477,6 +530,7 @@ export class UsageReportService {
       directory: session.directory,
       updated: session.updated,
       pauseRevision: JSON.stringify(session.pauses ?? []),
+      timingRevision: session.timingRevision ?? '',
       usage,
     });
     this.sessionUsageCacheEntries += usage.length;
@@ -529,6 +583,48 @@ async function openAnonymousReportDocument(content: string): Promise<vscode.Uri>
   return document.uri;
 }
 
+async function readOriginalUsageTimings(ids: string[]): Promise<OriginalUsageTiming[]> {
+  const result = await runLocalUsageWorker({ readTimings: ids });
+  if (!Array.isArray(result)) throw new Error('Invalid original usage timing reply.');
+  return result.map((value: unknown) => {
+    const row = asRecord(value);
+    const sessionID = stringValue(row?.session_id);
+    const messageID = stringValue(row?.message_id);
+    const sourceSessionID = stringValue(row?.source_session_id);
+    const sourceMessageID = stringValue(row?.source_message_id);
+    const providerID = stringValue(row?.provider_id);
+    const modelID = stringValue(row?.model_id);
+    const created = nonnegativeInteger(row?.time_created);
+    const completed = nonnegativeInteger(row?.time_completed);
+    if (
+      !sessionID ||
+      !ids.includes(sessionID) ||
+      !messageID ||
+      !sourceSessionID ||
+      !sourceMessageID ||
+      sourceMessageID !== messageID ||
+      !providerID ||
+      !modelID ||
+      created === null ||
+      completed === null ||
+      completed < created ||
+      row?.provenance !== 'v1-message'
+    )
+      throw new Error('Invalid preserved original usage timing.');
+    return {
+      session_id: sessionID,
+      message_id: messageID,
+      source_session_id: sourceSessionID,
+      source_message_id: sourceMessageID,
+      provider_id: providerID,
+      model_id: modelID,
+      time_created: created,
+      time_completed: completed,
+      provenance: 'v1-message',
+    };
+  });
+}
+
 async function readLocalUsageDatabase(
   start?: number,
   now = Date.now(),
@@ -543,6 +639,8 @@ async function readLocalUsageDatabase(
 }
 
 type UsageDatabaseTask =
+  | { preserveTimings: UsageArchiveSession[] }
+  | { readTimings: string[] }
   | { cleanupAction: 'pending' }
   | { cleanupAction: 'artifacts'; sessionIDs: string[] }
   | { cleanupAction: 'complete'; sessionID: string; paths: string[] }
@@ -682,8 +780,9 @@ const { fileURLToPath } = require('node:url');
 const { tmpdir } = require('node:os');
 const { parentPort, workerData } = require('node:worker_threads');
 const progress = (message, processed) => {
-  if (workerData.archiveSessions || workerData.exportCsv || workerData.cleanupAction) parentPort.postMessage({ progress: message, processed });
+  if (workerData.archiveSessions || workerData.exportCsv || workerData.cleanupAction || workerData.preserveTimings) parentPort.postMessage({ progress: message, processed });
 };
+${ORIGINAL_USAGE_TIMING_WORKER}
 
 const sessionPauses = new Map();
 const readPauseTime = (sessionID, messageID) => {
@@ -733,7 +832,7 @@ const csvUsageRow = (row) => {
     typeof original[4] === 'number' && original[4] >= fields[7]
       ? original[4] : null;
   return {
-    sessionID: row.sessionID, messageID: row.messageID, version: row.version,
+    sessionID: row.sessionID, messageID: row.messageID, version: row.version, identity: row.identity,
     providerID: fields[0], nestedProviderID: fields[1], modelID: fields[2],
     nestedModelID: fields[3] ?? fields[4], variant: fields[5] ?? fields[6],
     timeCreated: fields[7], timeCompleted: fields[8], total: fields[9], cost: fields[10],
@@ -746,6 +845,7 @@ const cleanupJournal = () => {
   if (!existsSync(workerData.archivePath)) return [];
   const archive = new DatabaseSync(workerData.archivePath);
   try {
+    checkTimingSchema(archive);
     if (workerData.cleanupAction === 'pending') {
       return archive.prepare('SELECT id, directory, time_updated AS updated FROM usage_cleanup ORDER BY time_updated, id').all();
     }
@@ -808,7 +908,13 @@ const cleanupJournal = () => {
 };
 
 try {
-  if (workerData.cleanupAction) {
+  if (workerData.preserveTimings) {
+    parentPort.postMessage(preserveUsageTimings(workerData.preserveTimings));
+  } else if (workerData.readTimings) {
+    const timing = new OriginalUsageTimingStore(workerData.archivePath);
+    try { parentPort.postMessage(timing.readSessions(workerData.readTimings)); }
+    finally { timing.close(); }
+  } else if (workerData.cleanupAction) {
     parentPort.postMessage(cleanupJournal());
   } else
   if (!existsSync(workerData.databasePath) && !existsSync(workerData.archivePath)) {
@@ -818,7 +924,9 @@ try {
       ? new DatabaseSync(workerData.databasePath, { readOnly: true })
       : new DatabaseSync(':memory:');
     let archive;
+    let timing;
     try {
+      timing = new OriginalUsageTimingStore(workerData.archivePath);
       if (existsSync(workerData.archivePath) && !workerData.archiveSessions) {
         database.prepare('ATTACH DATABASE ? AS stats').run(workerData.archivePath);
       }
@@ -875,6 +983,7 @@ try {
       const sessionCount = archiveSessions || workerData.exportCsv ? 0 : database.prepare(selected + 'SELECT count(*) AS count FROM selected').get(...parameters).count;
       if (archiveSessions) {
         const selectedSessions = database.prepare(selected + 'SELECT * FROM selected WHERE archived = 0').all(...parameters);
+        timing.freeze(selectedSessions.filter(session => session.version === 2).map(session => session.id));
         // Reports bound JSON body size, but archiving must also retain usage from large tool/image messages.
         for (const session of selectedSessions) {
           progress('Validating usage for ' + session.id);
@@ -883,10 +992,11 @@ try {
             throw new Error('Cannot safely archive malformed history for ' + session.id);
           }
         }
+        validateUsageArchiveFile();
         archive = new DatabaseSync(workerData.archivePath);
         archive.exec('PRAGMA busy_timeout = 5000; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;');
-        archive.exec('CREATE TABLE IF NOT EXISTS usage_session (id TEXT PRIMARY KEY, identity TEXT NOT NULL UNIQUE, time_updated INTEGER NOT NULL, version INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS usage_message (id TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES usage_session(id) ON DELETE CASCADE, data TEXT NOT NULL, PRIMARY KEY (session_id, id)); CREATE INDEX IF NOT EXISTS usage_message_session_idx ON usage_message(session_id); CREATE TABLE IF NOT EXISTS usage_cleanup (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS usage_artifact (session_id TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY (session_id, path));');
         archive.exec('BEGIN IMMEDIATE');
+        initializeUsageArchive(archive);
         for (const session of selectedSessions) {
           archive.prepare('DELETE FROM usage_session WHERE identity = ? OR id = ?').run(session.identity, session.id);
           archive.prepare('INSERT INTO usage_session VALUES (?, ?, ?, ?)').run(session.id, session.identity, session.time_updated, session.version);
@@ -920,7 +1030,7 @@ try {
       // Keep selected sessions as the outer loop. Otherwise SQLite can scan and decode
       // every message in both versions before checking whether its session was selected.
       if (tables.has('session') && tables.has('message')) {
-        messages.push("SELECT m.id, 1 AS version, m.session_id, m.data, NULL AS originalCompleted, " + (workerData.exportCsv ? 'NULL' : "json_extract(m.data, '$.parentID')") + " AS parentID FROM selected s CROSS JOIN message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 1" + bodyLimit + " AND json_extract(m.data, '$.role') = 'assistant'");
+        messages.push("SELECT m.id, s.identity, 1 AS version, m.session_id, m.data, NULL AS originalCompleted, " + (workerData.exportCsv ? 'NULL' : "json_extract(m.data, '$.parentID')") + " AS parentID FROM selected s CROSS JOIN message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 1" + bodyLimit + " AND json_extract(m.data, '$.role') = 'assistant'");
       }
       if (tables.has('session_v2') && tables.has('session_message')) {
         // Migration can replace completion times with the import time. Recover timing only
@@ -931,16 +1041,16 @@ try {
             : "(SELECT CASE WHEN json_valid(original.data) THEN CASE WHEN json_extract(original.data, '$.role') = 'assistant' AND json_extract(original.data, '$.time.created') = json_extract(m.data, '$.time.created') AND json_extract(original.data, '$.providerID') = coalesce(json_extract(m.data, '$.providerID'), json_extract(m.data, '$.model.providerID')) AND json_extract(original.data, '$.modelID') = coalesce(json_extract(m.data, '$.modelID'), json_extract(m.data, '$.model.id'), json_extract(m.data, '$.model.modelID')) AND json_type(original.data, '$.time.completed') IN ('integer', 'real') AND json_extract(original.data, '$.time.completed') >= json_extract(original.data, '$.time.created') THEN json_extract(original.data, '$.time.completed') END END FROM message original WHERE original.id = m.id AND original.session_id = s.identity)"
           : 'NULL';
         const parentID = workerData.exportCsv ? 'NULL' : "coalesce(json_extract(m.data, '$.parentID'), (SELECT u.id FROM session_message u WHERE u.session_id = m.session_id AND u.type = 'user' AND u.seq < m.seq ORDER BY u.seq DESC LIMIT 1))";
-        messages.push("SELECT m.id, 2 AS version, m.session_id, m.data, " + originalCompleted + " AS originalCompleted, " + parentID + " AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 2 AND m.type = 'assistant'" + bodyLimit);
+        messages.push("SELECT m.id, s.identity, 2 AS version, m.session_id, m.data, " + originalCompleted + " AS originalCompleted, " + parentID + " AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 2 AND m.type = 'assistant'" + bodyLimit);
       }
       if (hasArchive && !archiveSessions) {
-        messages.push("SELECT m.id, 0 AS version, m.session_id, m.data, NULL AS originalCompleted, " + (workerData.exportCsv ? 'NULL' : "json_extract(m.data, '$.parentID')") + " AS parentID FROM selected s CROSS JOIN stats.usage_message m ON s.id = m.session_id WHERE s.archived = 1" + bodyLimit);
+        messages.push("SELECT m.id, s.identity, 0 AS version, m.session_id, m.data, NULL AS originalCompleted, " + (workerData.exportCsv ? 'NULL' : "json_extract(m.data, '$.parentID')") + " AS parentID FROM selected s CROSS JOIN stats.usage_message m ON s.id = m.session_id WHERE s.archived = 1" + bodyLimit);
       }
       const query = workerData.exportCsv ? selected +
-        "SELECT m.session_id AS sessionID, m.id AS messageID, m.version AS version, m.originalCompleted AS originalTiming, json_extract(m.data, '$.providerID', '$.model.providerID', '$.modelID', '$.model.id', '$.model.modelID', '$.model.variant', '$.variant', '$.time.created', '$.time.completed', '$.tokens.total', '$.cost', '$.tokens.input', '$.tokens.output', '$.tokens.reasoning', '$.tokens.cache.read', '$.tokens.cache.write') AS fields FROM (" + messages.join(' UNION ALL ') + ') m LIMIT ?' : [
+        "SELECT m.session_id AS sessionID, m.id AS messageID, m.identity, m.version AS version, m.originalCompleted AS originalTiming, json_extract(m.data, '$.providerID', '$.model.providerID', '$.modelID', '$.model.id', '$.model.modelID', '$.model.variant', '$.variant', '$.time.created', '$.time.completed', '$.tokens.total', '$.cost', '$.tokens.input', '$.tokens.output', '$.tokens.reasoning', '$.tokens.cache.read', '$.tokens.cache.write') AS fields FROM (" + messages.join(' UNION ALL ') + ') m LIMIT ?' : [
         selected,
         'SELECT m.session_id AS sessionID,',
-        'm.id AS messageID, m.version AS version,',
+        'm.id AS messageID, m.version AS version, m.identity,',
         "json_extract(m.data, '$.providerID') AS providerID,",
         "json_extract(m.data, '$.model.providerID') AS nestedProviderID,",
         "json_extract(m.data, '$.modelID') AS modelID,",
@@ -991,7 +1101,11 @@ try {
         const sessionID = stringValue(row.sessionID);
         const timeCreated = numberValue(row.timeCreated);
         const pausedAt = row.version === 2 && sessionID ? readPauseTime(sessionID, row.messageID) : undefined;
-        const recordedCompleted = numberValue(row.originalCompleted) ?? numberValue(row.timeCompleted);
+        const preserved = row.version === 2 ? timing.completed(row) : null;
+        const original = numberValue(row.originalCompleted);
+        if (original !== null && preserved !== null && original !== preserved)
+          throw new Error('Conflicting original usage timing for ' + row.messageID);
+        const recordedCompleted = original ?? preserved ?? numberValue(row.timeCompleted);
         const timeCompleted = pausedAt !== undefined && timeCreated !== null
           ? Math.max(timeCreated, Math.min(recordedCompleted ?? pausedAt, pausedAt))
           : recordedCompleted;
@@ -1128,6 +1242,7 @@ try {
       });
     } finally {
       archive?.close();
+      timing?.close();
       database.close();
     }
   }
@@ -1201,10 +1316,19 @@ function normalizeUsage(
   const time = asRecord(info.time);
   const startedAt = numberValue(time?.created);
   const pausedAt = session.pauses?.find((pause) => pause.messageId === id)?.pausedAt;
+  const timing = id ? session.originalTimings?.get(id) : undefined;
+  const original =
+    timing?.source_session_id === (session.identity ?? session.id) &&
+    timing.time_created === startedAt &&
+    timing.provider_id === providerID &&
+    timing.model_id === modelID
+      ? timing.time_completed
+      : undefined;
+  const recordedCompleted = original ?? numberValue(time?.completed);
   const completedAt =
     pausedAt !== undefined && startedAt !== null
-      ? pauseCompletedAt(startedAt, numberValue(time?.completed) ?? undefined, pausedAt)
-      : numberValue(time?.completed);
+      ? pauseCompletedAt(startedAt, recordedCompleted ?? undefined, pausedAt)
+      : recordedCompleted;
   const created = completedAt ?? startedAt;
   if (!id || !providerID || !modelID || created === null) {
     warnings.push(`Ignored malformed assistant usage in session ${session.id}.`);
