@@ -1163,8 +1163,10 @@ describe('global session cleanup', () => {
       expectStopped('malformed');
     }
   );
+  // This end-to-end fixture starts multiple SQLite workers and verifies real file deletion.
   it.each([1, 2])(
     'deletes V%i sessions globally in oldest-first order and preserves usage and original files',
+    { timeout: 30_000 },
     async (version) => {
       const f = await fixture(version);
       const newer = await f.add('newer', OLD + 1, 'project-b');

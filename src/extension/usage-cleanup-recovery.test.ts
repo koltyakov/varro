@@ -96,23 +96,34 @@ describe('batched artifact recovery', () => {
     expect((await readUsageCleanupArtifacts(['old'])).get('old')).toEqual([]);
   });
 
-  it('handles 876 filenames without testing each one against every unrelated row', async () => {
-    const f = await fixture();
-    const ids = Array.from({ length: 876 }, (_, index) => `old-${index}`);
-    for (const [index, id] of ids.entries())
-      await f.add(id, index === 0 ? 'tool_common' : `tool_${index.toString(16).padStart(32, '0')}`);
-    // Once found, a common name must leave the regexp as well as the name set.
-    f.database
-      .prepare(
-        'WITH RECURSIVE n(value) AS (VALUES(1) UNION ALL SELECT value+1 FROM n WHERE value < 1000) INSERT INTO message SELECT ? FROM n'
-      )
-      .run(JSON.stringify({ text: 'tool_common and unrelated tool_state '.repeat(1000) }));
-    const result = await readUsageCleanupArtifacts(ids);
-    expect(result.get(ids[0]!)).toEqual([]);
-    expect([...result.values()].flat()).toHaveLength(875);
-    expect(scanWork.matcherCalls).toBe(1000);
-    expect(scanWork.includesCalls).toBe(876);
-  });
+  // Real files, SQLite commits, and worker startup need headroom on Windows CI.
+  it(
+    'handles 876 filenames without testing each one against every unrelated row',
+    { timeout: 30_000 },
+    async () => {
+      const f = await fixture();
+      const ids = Array.from({ length: 876 }, (_, index) => `old-${index}`);
+      // Seed the journal in one transaction rather than 876 durable commits.
+      f.archive.exec('BEGIN');
+      for (const [index, id] of ids.entries())
+        await f.add(
+          id,
+          index === 0 ? 'tool_common' : `tool_${index.toString(16).padStart(32, '0')}`
+        );
+      f.archive.exec('COMMIT');
+      // Once found, a common name must leave the regexp as well as the name set.
+      f.database
+        .prepare(
+          'WITH RECURSIVE n(value) AS (VALUES(1) UNION ALL SELECT value+1 FROM n WHERE value < 1000) INSERT INTO message SELECT ? FROM n'
+        )
+        .run(JSON.stringify({ text: 'tool_common and unrelated tool_state '.repeat(1000) }));
+      const result = await readUsageCleanupArtifacts(ids);
+      expect(result.get(ids[0]!)).toEqual([]);
+      expect([...result.values()].flat()).toHaveLength(875);
+      expect(scanWork.matcherCalls).toBe(1000);
+      expect(scanWork.includesCalls).toBe(876);
+    }
+  );
 
   it('preserves literal, prefix, suffix, overlapping and Unicode matches exactly', async () => {
     const f = await fixture();

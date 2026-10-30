@@ -81,6 +81,8 @@ async function fixture() {
     CREATE TABLE session_message (id TEXT PRIMARY KEY,session_id TEXT,type TEXT,seq INTEGER,data TEXT);
     CREATE INDEX session_message_session_type_seq_idx ON session_message(session_id,type,seq);`);
   const add = (id = 'live', count = 2, identity = id) => {
+    // Large fixtures seed both histories atomically, not one disk commit per row.
+    database.exec('BEGIN');
     database.prepare('INSERT INTO session VALUES (?,?)').run(identity, NOW);
     database
       .prepare('INSERT INTO session_v2 VALUES (?,?,?)')
@@ -120,6 +122,7 @@ async function fixture() {
         })
       );
     }
+    database.exec('COMMIT');
     return { id, updated: NOW, directory: root };
   };
   const report = async () => {
@@ -146,6 +149,7 @@ describe('preserved original usage timing', () => {
     const messages = f.database
       .prepare("SELECT id,data FROM session_message WHERE type='assistant' ORDER BY session_id,seq")
       .all();
+    f.database.exec('BEGIN');
     messages.forEach((row, index) => {
       const duration = index === 61 ? 1_199_798 - 61 * 19_000 : 19_000;
       const completed = NOW - 30_000 + duration;
@@ -160,6 +164,7 @@ describe('preserved original usage timing', () => {
         )
         .run(NOW - 30_000, completed + (index < 22 ? 1 : 0), String(row.id));
     });
+    f.database.exec('COMMIT');
     const source = await readFile(f.path);
     const before = await f.report();
     const csv = await readAllTimeUsageCsv();
@@ -277,8 +282,10 @@ describe('preserved original usage timing', () => {
     }
   });
 
+  // Include real lock publication, worker startup/termination, and disk cleanup on CI.
   it.each(['role', 'session', 'provider', 'created', 'completion'])(
     'does not preserve unmatched V1 %s data',
+    { timeout: 30_000 },
     async (field) => {
       const f = await fixture();
       const session = f.add();
