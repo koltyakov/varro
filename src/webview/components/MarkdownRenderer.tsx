@@ -38,6 +38,7 @@ import { createUiIconElement, UiIcon } from './UiIcon';
 import { Tooltip } from './Tooltip';
 import { RemoteMarkdownImage } from './RemoteMarkdownImage';
 import { MarkdownCitationLinks } from './markdown-citation-links';
+import { markdownCitationSelection } from './markdown-citation-selection';
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 
 interface MarkdownProps {
@@ -2962,6 +2963,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   onMount(() => {
     ref?.addEventListener('click', handleClick);
+    if (ref) onCleanup(markdownCitationSelection.bind(ref));
     hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
     hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
     stableHighlights.reconcile([stableRef], initialCacheByContent ? 0 : 1);

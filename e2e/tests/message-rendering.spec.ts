@@ -1,6 +1,33 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These E2E callbacks mutate protocol-shaped messages owned by the controlled harness fixture. */
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { getE2EState } from './helpers';
+
+async function expectSelectionEdgeContinuity(
+  page: Page,
+  screenshot: Buffer,
+  xs: number[],
+  ys: number[]
+): Promise<void> {
+  const colors = await page.evaluate(
+    async ({ png, columns, rows }) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${png}`;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Expected screenshot canvas');
+      context.drawImage(image, 0, 0);
+      return rows.map((y) => columns.map((x) => Array.from(context.getImageData(x, y, 1, 1).data)));
+    },
+    { png: screenshot.toString('base64'), columns: xs, rows: ys }
+  );
+  for (const row of colors) {
+    for (const color of row) expect(color).toEqual(row[0]);
+  }
+}
 
 test('a pathological code line preserves text and leaves the browser event loop responsive', async ({
   page,
@@ -430,13 +457,41 @@ test('keeps PDF icons visible before and after exact-path validation', async ({ 
 for (const [kind, selector, label] of [
   ['validated', 'a.file-path-link', 'README.md'],
   ['missing', 'code.citation-path', 'missing-file.ts'],
+  ['PDF', 'a.file-path-link', 'pdf-source/__65129.pdf'],
 ] as const) {
   test(`selects the icon with ${kind} citation text without copying decoration`, async ({
     page,
   }, testInfo) => {
     await page.goto('/e2e/harness/index.html?scenario=message-rendering');
+    if (kind === 'PDF') {
+      await expect(page.getByRole('link', { name: 'README.md', exact: true })).toBeVisible();
+      await page.evaluate(() =>
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: {
+              type: 'message.part.updated',
+              properties: {
+                part: {
+                  id: 'message-rendering-assistant-part-1',
+                  sessionID: 'session-message-rendering',
+                  messageID: 'message-rendering-assistant',
+                  type: 'text',
+                  text: 'Copied to dev `pdf-source/__65129.pdf` using the server credentials. Verified its SHA-256 matches the original.\n\nThe scheduled sync may delete it on the next run.',
+                },
+              },
+            },
+          },
+          '*'
+        )
+      );
+    }
     const reference = page.locator(selector).filter({ hasText: label });
     await expect(reference).toBeVisible();
+    if (kind === 'PDF')
+      await reference.evaluate((element) => {
+        if (element.parentElement) element.parentElement.style.width = '365px';
+      });
     const icon = reference.locator('img.file-path-icon');
     await icon.scrollIntoViewIfNeeded();
     await expect
@@ -444,23 +499,151 @@ for (const [kind, selector, label] of [
         icon.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)
       )
       .toBe(true);
+    const leading = reference.locator('.link-leading-content');
+    const beforeLayout = await reference.evaluate((element) => {
+      const row = element.closest('.assistant-message-flow-item');
+      return [element, element.querySelector('img'), row].map((node) =>
+        node?.getBoundingClientRect().toJSON()
+      );
+    });
     const unselected = await icon.screenshot();
-    const selectedText = await reference.evaluate((element) => {
+    const selectedText = await reference.evaluate((element, fullParagraph) => {
       const range = document.createRange();
-      range.selectNodeContents(element);
+      const target = fullParagraph ? (element.parentElement ?? element) : element;
+      range.selectNodeContents(target);
+      if (fullParagraph && target.firstChild instanceof Text) {
+        range.setStart(target.firstChild, target.firstChild.data.indexOf('dev'));
+      }
       const selection = window.getSelection();
       selection?.removeAllRanges();
       selection?.addRange(range);
       return selection?.toString();
-    });
-    expect(selectedText).toBe(label);
+    }, kind === 'PDF');
+    expect(selectedText).toBe(
+      kind === 'PDF'
+        ? `dev ${label} using the server credentials. Verified its SHA-256 matches the original.`
+        : label
+    );
+    await expect(leading).toHaveClass(/file-icon-selected/);
     const selected = await icon.screenshot();
+    const geometry = await leading.evaluate((element) => {
+      const labelElement = element.querySelector('.link-leading-label');
+      if (!labelElement) throw new Error('Expected citation label');
+      const range = document.createRange();
+      range.selectNodeContents(labelElement);
+      const textBox = range.getBoundingClientRect();
+      const wrapperBox = element.getBoundingClientRect();
+      const layer = getComputedStyle(element, '::before');
+      return {
+        top: wrapperBox.top + parseFloat(layer.top),
+        height: parseFloat(layer.height),
+        right: wrapperBox.left + parseFloat(layer.width),
+        textLeft: textBox.left,
+        wrapperTop: wrapperBox.top,
+        wrapperLeft: wrapperBox.left,
+        wrapperHeight: wrapperBox.height,
+        color: layer.backgroundColor,
+        textColor: getComputedStyle(labelElement, '::selection').backgroundColor,
+      };
+    });
+    expect(geometry.top).toBeCloseTo(geometry.wrapperTop, 2);
+    expect(geometry.height).toBeCloseTo(geometry.wrapperHeight, 2);
+    expect(geometry.right).toBeCloseTo(geometry.textLeft, 2);
+    expect(geometry.color).toBe(geometry.textColor);
+    const edgeRows = [1, Math.floor(geometry.wrapperHeight) - 1];
+    const textX = Math.round(geometry.textLeft - geometry.wrapperLeft);
+    if (kind === 'PDF') {
+      const paragraph = reference.locator('..');
+      const paragraphBox = await paragraph.boundingBox();
+      if (!paragraphBox) throw new Error('Expected selected paragraph');
+      const screenshot = await paragraph.screenshot({
+        path: testInfo.outputPath('PDF-selected-paragraph.png'),
+      });
+      const iconX = Math.round(geometry.wrapperLeft - paragraphBox.x);
+      const labelX = Math.round(geometry.textLeft - paragraphBox.x);
+      const referenceRight = await reference.evaluate(
+        (element) => element.getBoundingClientRect().right
+      );
+      await expectSelectionEdgeContinuity(
+        page,
+        screenshot,
+        [
+          iconX - 1,
+          iconX + 1,
+          labelX - 1,
+          labelX + 1,
+          Math.round(referenceRight - paragraphBox.x) + 1,
+        ],
+        edgeRows
+      );
+    }
+    // Check both edges of the line box, not just the smaller glyph bounds.
+    await expectSelectionEdgeContinuity(
+      page,
+      await leading.screenshot(),
+      [1, textX - 1, textX + 1],
+      edgeRows
+    );
+    expect(
+      await reference.evaluate((element) => {
+        const row = element.closest('.assistant-message-flow-item');
+        return [element, element.querySelector('img'), row].map((node) =>
+          node?.getBoundingClientRect().toJSON()
+        );
+      })
+    ).toEqual(beforeLayout);
+    await testInfo.attach(`${kind}-selected-reference`, {
+      body: await reference.screenshot({
+        path: testInfo.outputPath(`${kind}-selected-reference.png`),
+      }),
+      contentType: 'image/png',
+    });
     await testInfo.attach(`${kind}-selected-icon`, { body: selected, contentType: 'image/png' });
     expect(
       selected.equals(unselected),
-      'The file icon should paint the native selection highlight'
+      'The file icon should paint the continuous selection highlight'
     ).toBe(false);
-    await expect(icon).toHaveCSS('user-select', 'text');
-    await expect(icon).toHaveCSS('-webkit-user-select', 'text');
+    await expect(icon).toHaveCSS('user-select', 'none');
+    await expect(icon).toHaveCSS('-webkit-user-select', 'none');
+
+    for (const backward of [false, true]) {
+      const firstCharacter = await reference.evaluate((element, reverse) => {
+        const text = element.querySelector('.link-leading-label')?.firstChild;
+        if (!(text instanceof Text)) throw new Error('Expected citation text');
+        const end = Array.from(text.data)[0]?.length ?? 1;
+        window.getSelection()?.setBaseAndExtent(text, reverse ? end : 0, text, reverse ? 0 : end);
+        return window.getSelection()?.toString();
+      }, backward);
+      expect(firstCharacter).toBe(label[0]);
+      await expect(leading).toHaveClass(/file-icon-selected/);
+      await expectSelectionEdgeContinuity(
+        page,
+        await leading.screenshot(),
+        [1, textX - 1, textX + 1],
+        edgeRows
+      );
+    }
+    // Selecting a suffix must not paint the unselected icon.
+    await reference.evaluate((element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let last: Text | undefined;
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node instanceof Text && node.length) last = node;
+      }
+      if (!last) throw new Error('Expected citation text');
+      window.getSelection()?.setBaseAndExtent(last, last.length - 1, last, last.length);
+    });
+    await expect(leading).not.toHaveClass(/file-icon-selected/);
+    await reference.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+    });
+    await expect(leading).toHaveClass(/file-icon-selected/);
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+    await expect(leading).not.toHaveClass(/file-icon-selected/);
+    expect(await leading.getAttribute('style')).toBe('');
   });
 }

@@ -2360,6 +2360,27 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   white-space: nowrap;
 }
 
+.rendered-markdown .link-leading-content.file-icon-selected {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Native selection fills the line box, which is taller than text-range glyph bounds. */
+.rendered-markdown .file-icon-selected::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--file-selection-width);
+  background: var(
+    --vscode-editor-selectionBackground,
+    color-mix(in srgb, var(--color-vscode-accent) 30%, transparent)
+  );
+}
+
 .rendered-markdown a:not(.file-path-link):hover .link-leading-label,
 .rendered-markdown a:not(.file-path-link):active .link-leading-label {
   text-decoration: underline;
@@ -2456,12 +2477,6 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   user-select: none;
   -webkit-user-select: none;
   -webkit-user-drag: none;
-}
-
-/* File-type decorations belong to the selected citation, unlike standalone images. */
-.rendered-markdown img.file-path-icon {
-  user-select: text;
-  -webkit-user-select: text;
 }
 
 .rendered-markdown .markdown-image-frame {
