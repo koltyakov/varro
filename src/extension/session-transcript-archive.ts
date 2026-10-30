@@ -78,7 +78,7 @@ export class SessionTranscriptArchive {
       : deadline.signal;
     try {
       const histories =
-        this.server.apiVersion === 2
+        this.server.apiVersion === 2 || roots.some((session) => session.version === 1)
           ? await new LocalSessionTranscriptReader().read(roots, options.onProgress, signal)
           : new Map<string, unknown[]>();
       for (const session of roots) {
@@ -121,7 +121,7 @@ export class SessionTranscriptArchive {
     const cursors = new Set<string>();
     let cursor: string | undefined;
     let bytes = 0;
-    const v2 = this.server.apiVersion === 2;
+    const v2 = session.version !== 1 && this.server.apiVersion === 2;
     const append = (data: unknown[]) => {
       for (const value of data) {
         signal.throwIfAborted();
@@ -142,6 +142,8 @@ export class SessionTranscriptArchive {
       append(localHistory);
       return records;
     }
+    if (session.version === 1)
+      throw new Error('Legacy cleanup requires a verified local transcript snapshot.');
     onProgress?.(`Reading API transcript ${session.id}`);
     let pages = 0;
     do {
@@ -448,9 +450,10 @@ try {
   const insertTurn = database.prepare('INSERT INTO transcript_turn VALUES (?, ?, ?)');
   for (const { session, turns } of workerData.snapshots) {
     const previous = previousSnapshot.get(session.id);
+    if (session.version === 1 && previous && previous.time_updated >= session.updated) continue;
     if (previous && previous.time_updated > session.updated) throw new Error('Refusing to replace a newer transcript snapshot.');
     removeSnapshot.run(session.id);
-    insertSession.run(session.id, session.identity ?? session.id, session.parentID ?? null, session.title ?? '', session.directory, session.created ?? null, session.updated, workerData.version, workerData.archivedAt);
+    insertSession.run(session.id, session.identity ?? session.id, session.parentID ?? null, session.title ?? '', session.directory, session.created ?? null, session.updated, session.version ?? workerData.version, workerData.archivedAt);
     for (let index = 0; index < turns.length; index++) {
       insertTurn.run(session.id, index, JSON.stringify(turns[index]));
       if ((index + 1) % 1000 === 0) parentPort.postMessage({ progress: 'Writing transcript ' + session.id + ': ' + (index + 1).toLocaleString() + ' turns' });

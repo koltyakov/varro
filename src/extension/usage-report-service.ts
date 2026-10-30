@@ -4,7 +4,7 @@ import { Worker } from 'node:worker_threads';
 import { createHash } from 'node:crypto';
 import { lstat, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { extname, join } from 'node:path';
+import { extname, isAbsolute, join } from 'node:path';
 import * as vscode from 'vscode';
 
 import { asRecord } from '../shared/type-utils';
@@ -23,7 +23,74 @@ export type UsageArchiveSession = {
   id: string;
   directory: string;
   updated: number;
+  version?: 1 | 2;
+  directories?: string[];
 };
+
+export type LegacyCleanupSession = UsageArchiveSession & {
+  version: 1;
+  parentID?: string;
+  title: string;
+  created: number;
+};
+
+export async function readLegacyCleanupSessions(
+  v2: UsageArchiveSession[]
+): Promise<LegacyCleanupSession[]> {
+  const result = await runLocalUsageWorker({ legacyInventory: v2 });
+  if (!Array.isArray(result)) throw new Error('Malformed legacy cleanup inventory.');
+  return result.map((value: unknown) => {
+    const row = asRecord(value);
+    const id = stringValue(row?.id),
+      directory = stringValue(row?.directory);
+    const updated = nonnegativeInteger(row?.updated),
+      created = nonnegativeInteger(row?.created);
+    if (
+      !id ||
+      !/^[a-zA-Z0-9_-]{1,256}$/.test(id) ||
+      !directory ||
+      !isAbsolute(directory) ||
+      updated === null ||
+      created === null ||
+      typeof row?.title !== 'string' ||
+      (row.parentID !== undefined && typeof row.parentID !== 'string')
+    )
+      throw new Error('Malformed legacy cleanup session.');
+    return {
+      id,
+      directory,
+      updated,
+      created,
+      title: row.title,
+      parentID: row.parentID,
+      version: 1,
+    };
+  });
+}
+
+/** Caller must hold the cleanup lock and the verified server's offline maintenance boundary. */
+export async function cleanupLegacySessionRecords(
+  sessions: LegacyCleanupSession[],
+  cutoff: number,
+  options: {
+    prepared: () => Promise<void>;
+    committing: () => void;
+    onProgress: (message: string) => void;
+    signal: AbortSignal;
+  }
+): Promise<number> {
+  const result = asRecord(
+    await runLocalUsageWorker(
+      { legacySessions: sessions, legacyCutoff: cutoff, start: null, windows: [] },
+      options.onProgress,
+      options.signal,
+      options
+    )
+  );
+  if (result?.deleted !== sessions.length)
+    throw new Error('Legacy deletion did not acknowledge every session.');
+  return sessions.length;
+}
 
 /** Explicit opt-in only. Reads live history; writes scalar provenance to the statistics sidecar. */
 export async function preserveOriginalUsageTiming(
@@ -74,10 +141,20 @@ export async function readPendingUsageCleanup(
     const id = stringValue(item?.id);
     const directory = stringValue(item?.directory);
     const updated = numberValue(item?.updated);
+    const directories = item?.directories;
     if (!id || !directory || updated === null) {
       throw new Error('Malformed session in usage cleanup journal.');
     }
-    return { id, directory, updated };
+    if (
+      directories !== undefined &&
+      (!Array.isArray(directories) ||
+        !directories.length ||
+        !directories.every((entry) => typeof entry === 'string' && isAbsolute(entry)))
+    )
+      throw new Error('Malformed cleanup directory provenance.');
+    const session: UsageArchiveSession = { id, directory, updated };
+    if (Array.isArray(directories)) session.directories = directories;
+    return session;
   });
 }
 
@@ -639,6 +716,8 @@ async function readLocalUsageDatabase(
 }
 
 type UsageDatabaseTask =
+  | { legacyInventory: UsageArchiveSession[] }
+  | { legacySessions: LegacyCleanupSession[]; legacyCutoff: number; start: null; windows: [] }
   | { preserveTimings: UsageArchiveSession[] }
   | { readTimings: string[] }
   | { cleanupAction: 'pending' }
@@ -651,7 +730,8 @@ type UsageDatabaseTask =
 async function runLocalUsageWorker(
   task: UsageDatabaseTask,
   onProgress?: (message: string, processed?: number) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  legacy?: { prepared: () => Promise<void>; committing: () => void }
 ): Promise<unknown> {
   signal?.throwIfAborted();
   const annotationsDirectory = getVarroStateReadDirectory('opencode-v2');
@@ -676,10 +756,14 @@ async function runLocalUsageWorker(
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     let processed = 0;
+    let committing = false;
+    let preparing: Promise<void> | undefined;
     const csv = 'exportCsv' in task;
     const artifacts = 'cleanupAction' in task && task.cleanupAction === 'artifacts';
     const longScan = csv || artifacts;
-    const cancel = () => finish(null, new Error('Local OpenCode usage operation cancelled.'));
+    const cancel = () => {
+      if (!committing) finish(null, new Error('Local OpenCode usage operation cancelled.'));
+    };
     const finish = (result: unknown, error?: Error) => {
       if (settled) return;
       settled = true;
@@ -689,7 +773,8 @@ async function runLocalUsageWorker(
       void worker
         .terminate()
         .catch(() => 0)
-        .then(() => {
+        .then(async () => {
+          await preparing?.catch(() => {});
           if (error) reject(error);
           else resolve(result);
         });
@@ -701,14 +786,16 @@ async function runLocalUsageWorker(
           finish(
             null,
             new Error(
-              `${csv ? 'Local OpenCode usage CSV made no row progress for 60 seconds.' : artifacts ? 'OpenCode artifact reference scan made no row progress for 60 seconds.' : `Local OpenCode usage query timed out after ${LOCAL_USAGE_WORKER_TIMEOUT_MS / 1_000} seconds.`}${phase ? ` Last phase: ${phase}.` : ''}`
+              `${legacy ? 'Legacy cleanup preparation exceeded the 10-minute limit.' : csv ? 'Local OpenCode usage CSV made no row progress for 60 seconds.' : artifacts ? 'OpenCode artifact reference scan made no row progress for 60 seconds.' : `Local OpenCode usage query timed out after ${LOCAL_USAGE_WORKER_TIMEOUT_MS / 1_000} seconds.`}${phase ? ` Last phase: ${phase}.` : ''}`
             )
           ),
-        csv
-          ? LOCAL_USAGE_CSV_STALL_TIMEOUT_MS
-          : artifacts
-            ? LOCAL_ARTIFACT_SCAN_STALL_TIMEOUT_MS
-            : LOCAL_USAGE_WORKER_TIMEOUT_MS
+        legacy
+          ? 10 * 60_000
+          : csv
+            ? LOCAL_USAGE_CSV_STALL_TIMEOUT_MS
+            : artifacts
+              ? LOCAL_ARTIFACT_SCAN_STALL_TIMEOUT_MS
+              : LOCAL_USAGE_WORKER_TIMEOUT_MS
       );
     };
     armTimeout();
@@ -732,6 +819,22 @@ async function runLocalUsageWorker(
         return;
       }
       const workerMessage = asRecord(value);
+      if (workerMessage?.legacyPrepared === true && legacy) {
+        preparing = legacy
+          .prepared()
+          .then(() => {
+            if (settled || signal?.aborted) return;
+            committing = true;
+            clearTimeout(timeout);
+            legacy.committing();
+            // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node worker_threads messages do not accept a browser targetOrigin.
+            worker.postMessage({ commit: true });
+          })
+          .catch((error: unknown) =>
+            finish(null, error instanceof Error ? error : new Error(String(error)))
+          );
+        return;
+      }
       const progress = stringValue(workerMessage?.progress);
       if (progress) {
         phase = progress;
@@ -780,7 +883,7 @@ const { fileURLToPath } = require('node:url');
 const { tmpdir } = require('node:os');
 const { parentPort, workerData } = require('node:worker_threads');
 const progress = (message, processed) => {
-  if (workerData.archiveSessions || workerData.exportCsv || workerData.cleanupAction || workerData.preserveTimings) parentPort.postMessage({ progress: message, processed });
+  if (workerData.archiveSessions || workerData.legacySessions || workerData.exportCsv || workerData.cleanupAction || workerData.preserveTimings) parentPort.postMessage({ progress: message, processed });
 };
 ${ORIGINAL_USAGE_TIMING_WORKER}
 
@@ -847,12 +950,14 @@ const cleanupJournal = () => {
   try {
     checkTimingSchema(archive);
     if (workerData.cleanupAction === 'pending') {
-      return archive.prepare('SELECT id, directory, time_updated AS updated FROM usage_cleanup ORDER BY time_updated, id').all();
+      const locations = archive.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='usage_cleanup_directory'").get();
+      return archive.prepare('SELECT id, directory, time_updated AS updated FROM usage_cleanup ORDER BY time_updated, id').all().map(row => locations ? ({ ...row, directories:[...new Set([row.directory,...archive.prepare('SELECT directory FROM usage_cleanup_directory WHERE session_id=?').all(row.id).map(location => location.directory)])] }) : row);
     }
     if (workerData.cleanupAction === 'complete') {
       archive.exec('BEGIN IMMEDIATE');
       for (const path of workerData.paths) archive.prepare('DELETE FROM usage_artifact WHERE session_id = ? AND path = ?').run(workerData.sessionID, path);
       archive.prepare('DELETE FROM usage_cleanup WHERE id = ? AND NOT EXISTS (SELECT 1 FROM usage_artifact WHERE session_id = ?)').run(workerData.sessionID, workerData.sessionID);
+      if (archive.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='usage_cleanup_directory'").get()) archive.prepare('DELETE FROM usage_cleanup_directory WHERE session_id=? AND NOT EXISTS (SELECT 1 FROM usage_cleanup WHERE id=?)').run(workerData.sessionID,workerData.sessionID);
       archive.exec('COMMIT');
       return [];
     }
@@ -907,7 +1012,22 @@ const cleanupJournal = () => {
   } finally { archive.close(); }
 };
 
-try {
+const legacyInventory = (database) => {
+  const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
+  if (!tables.has('session')) return [];
+  return database.prepare('SELECT id,directory,title,parent_id AS parentID,time_created AS created,time_updated AS updated FROM session ORDER BY time_updated,id').all().map(row => ({ ...row, parentID: row.parentID ?? undefined, version: 1 }));
+};
+(async () => { try {
+  if (workerData.legacyInventory) {
+    const database = new DatabaseSync(workerData.databasePath, { readOnly: true });
+    try {
+      database.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=1000; BEGIN;');
+      const stored = database.prepare('SELECT id,directory,time_updated AS updated FROM session_v2').all();
+      const byID = new Map(stored.map(row => [row.id,row]));
+      if (stored.length !== workerData.legacyInventory.length || workerData.legacyInventory.some(expected => { const row = byID.get(expected.id); return !row || row.updated !== expected.updated || row.directory !== expected.directory; })) throw new Error('The local database does not match the connected V2 session inventory. Retry after current activity settles.');
+      parentPort.postMessage(legacyInventory(database));
+    } finally { database.close(); }
+  } else
   if (workerData.preserveTimings) {
     parentPort.postMessage(preserveUsageTimings(workerData.preserveTimings));
   } else if (workerData.readTimings) {
@@ -920,17 +1040,42 @@ try {
   if (!existsSync(workerData.databasePath) && !existsSync(workerData.archivePath)) {
     parentPort.postMessage(null);
   } else {
+    const legacyCleanup = workerData.legacySessions;
+    if (legacyCleanup) {
+      const { lstatSync } = require('node:fs');
+      for (const suffix of ['', '-wal', '-shm', '-journal']) {
+        try { const file = lstatSync(workerData.databasePath + suffix); if (!file.isFile() || file.isSymbolicLink() || file.nlink !== 1) throw new Error('Legacy cleanup requires regular database files without links.'); }
+        catch (error) { if (suffix && error.code === 'ENOENT') continue; throw error; }
+      }
+    }
     const database = existsSync(workerData.databasePath)
-      ? new DatabaseSync(workerData.databasePath, { readOnly: true })
+      ? new DatabaseSync(workerData.databasePath, { readOnly: !legacyCleanup })
       : new DatabaseSync(':memory:');
     let archive;
     let timing;
     try {
-      timing = new OriginalUsageTimingStore(workerData.archivePath);
-      if (existsSync(workerData.archivePath) && !workerData.archiveSessions) {
+      if (existsSync(workerData.archivePath) && !workerData.archiveSessions && !legacyCleanup) {
         database.prepare('ATTACH DATABASE ? AS stats').run(workerData.archivePath);
       }
-      database.exec('BEGIN');
+      if (legacyCleanup) {
+        database.exec('PRAGMA busy_timeout=1000; PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL; BEGIN IMMEDIATE;');
+        const actual = legacyInventory(database);
+        const byID = new Map(actual.map(row => [row.id,row]));
+        const ids = new Set(legacyCleanup.map(row => row.id));
+        if (!ids.size || ids.size !== legacyCleanup.length || legacyCleanup.some(expected => {
+          const row = byID.get(expected.id);
+          return !row || row.updated !== expected.updated || row.directory !== expected.directory || row.parentID !== expected.parentID || row.updated >= workerData.legacyCutoff;
+        }) || actual.some(row => ids.has(row.parentID) && !ids.has(row.id))) throw new Error('Legacy sessions or their child membership changed. No V1 sessions were deleted.');
+        const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+        if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name IN ('session','message','part','todo','session_share') LIMIT 1").get()) throw new Error('Unsupported legacy deletion triggers.');
+        for (const { name } of tables) for (const foreign of database.prepare('PRAGMA foreign_key_list(' + JSON.stringify(name) + ')').all()) {
+          if (['session','message','part'].includes(foreign.table) && !['session','message','part','todo','session_share'].includes(name)) throw new Error('Unsupported legacy foreign-key dependency in ' + name);
+          if (['session','message','part','todo','session_share'].includes(name) && ['session_v2','session_message','session_part'].includes(foreign.table)) throw new Error('Unsupported cross-version legacy foreign key.');
+        }
+        const dependents = database.prepare("SELECT id,time_updated AS updated,coalesce(json_extract(metadata,'$.varroLegacyImport.sourceSessionID'),id) AS identity FROM session_v2").all().filter(row => ids.has(row.identity));
+        for (let index = 0; index < dependents.length; index += 1000) preserveUsageTimings(dependents.slice(index,index + 1000), true);
+      } else database.exec('BEGIN');
+      timing = new OriginalUsageTimingStore(workerData.archivePath);
       const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
       const sources = [];
       if (tables.has('session') && tables.has('message')) {
@@ -939,7 +1084,7 @@ try {
       if (tables.has('session_v2') && tables.has('session_message')) {
         sources.push("SELECT id, coalesce(json_extract(metadata, '$.varroLegacyImport.sourceSessionID'), id) AS identity, time_updated, 2 AS version, 0 AS archived FROM session_v2");
       }
-      const archiveSessions = workerData.archiveSessions;
+      const archiveSessions = workerData.archiveSessions ?? legacyCleanup;
       if (archiveSessions && !sources.length) throw new Error('No supported OpenCode usage tables found.');
       let requestedSessions;
       if (archiveSessions) {
@@ -954,13 +1099,13 @@ try {
         if (tables.has('session_v2') && tables.has('session_message')) database.exec("INSERT OR IGNORE INTO requested_usage_identity SELECT coalesce(json_extract(s.metadata, '$.varroLegacyImport.sourceSessionID'), s.id) FROM requested_usage_session r CROSS JOIN session_v2 s ON s.id = r.id");
         database.exec('CREATE TEMP TABLE live_usage_session AS SELECT * FROM (' + sources.join(' UNION ALL ') + ') WHERE identity IN (SELECT identity FROM requested_usage_identity)');
         const liveSnapshots = database.prepare('SELECT * FROM live_usage_session ORDER BY version DESC').all();
-        requestedSessions = archiveSessions.map((expected) => liveSnapshots.find((session) => expected.id === session.id && expected.updated === session.time_updated));
+        requestedSessions = archiveSessions.map((expected) => liveSnapshots.find((session) => expected.id === session.id && expected.updated === session.time_updated && (expected.version === undefined || expected.version === session.version)));
         if (requestedSessions.some((session) => !session)) throw new Error('Sessions changed or are missing from the local database. Run cleanup again.');
         sources.splice(0, sources.length, 'SELECT * FROM live_usage_session');
       }
       const hasArchive = existsSync(workerData.archivePath);
       if (hasArchive) {
-        if (workerData.archiveSessions) {
+        if (archiveSessions) {
           // Copy only headers through a separate read connection. Holding an attached
           // archive read transaction while committing its writer would deadlock.
           database.exec('CREATE TEMP TABLE archived_usage_session (id TEXT, identity TEXT, time_updated INTEGER, version INTEGER)');
@@ -1005,6 +1150,8 @@ try {
           const session = requestedSessions[index];
           progress('Collecting owned artifacts for ' + session.id);
           const directory = archiveSessions[index].directory;
+          archive.prepare('INSERT OR IGNORE INTO usage_cleanup_directory SELECT id,directory FROM usage_cleanup WHERE id=?').run(session.id);
+          archive.prepare('INSERT OR IGNORE INTO usage_cleanup_directory VALUES (?,?)').run(session.id,directory);
           archive.prepare('INSERT OR REPLACE INTO usage_cleanup VALUES (?, ?, ?)').run(session.id, directory, session.time_updated);
           archive.prepare('INSERT OR IGNORE INTO usage_artifact VALUES (?, ?)').run(session.id, join(directory, '.opencode', 'attachments', session.id));
           archive.prepare('INSERT OR IGNORE INTO usage_artifact VALUES (?, ?)').run(session.id, join(workerData.dataDirectory, 'storage', 'session_diff', session.id + '.json'));
@@ -1200,7 +1347,19 @@ try {
       if (archive) {
         progress('Committing usage archive');
         archive.exec('COMMIT');
-        parentPort.postMessage({ archived: archiveSessions.length });
+        if (legacyCleanup) {
+          parentPort.postMessage({ legacyPrepared: true });
+          await new Promise((resolve,reject) => parentPort.once('message', message => message?.commit === true ? resolve() : reject(new Error('Legacy deletion was not approved.'))));
+          const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
+          for (const session of legacyCleanup) {
+            if (tables.has('part')) database.prepare('DELETE FROM part WHERE session_id=? OR message_id IN (SELECT id FROM message WHERE session_id=?)').run(session.id,session.id);
+            for (const table of ['message','todo','session_share']) if (tables.has(table)) database.prepare('DELETE FROM ' + table + ' WHERE session_id=?').run(session.id);
+            if (database.prepare('DELETE FROM session WHERE id=?').run(session.id).changes !== 1) throw new Error('Legacy deletion did not remove the expected session.');
+          }
+          for (const table of ['message','part','todo','session_share']) if (tables.has(table) && database.prepare('PRAGMA foreign_key_check(' + table + ')').all().length) throw new Error('Legacy foreign-key validation failed.');
+          database.exec('COMMIT');
+          parentPort.postMessage({ deleted: legacyCleanup.length });
+        } else parentPort.postMessage({ archived: archiveSessions.length });
       } else if (workerData.exportCsv) {
         progress('Formatting daily CSV');
         const csvCell = (value) => {
@@ -1249,6 +1408,7 @@ try {
 } catch (error) {
   parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) });
 }
+})();
 `;
 
 function normalizeLocalUsageSnapshot(

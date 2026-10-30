@@ -8,6 +8,8 @@ import type { OpenCodeApiVersion } from './opencode-connection';
 import { SessionCleanupService } from './session-cleanup-service';
 import {
   archiveSessionUsage,
+  cleanupLegacySessionRecords,
+  readLegacyCleanupSessions,
   readPendingUsageCleanup,
   UsageReportService,
 } from './usage-report-service';
@@ -273,7 +275,21 @@ async function fixture(version = 2) {
     }
   );
   const apiVersion: OpenCodeApiVersion = version === 2 ? 2 : 1;
-  const server = { request, isAttachOnly: false, apiVersion };
+  const offline = vi.fn();
+  const restored = vi.fn();
+  const server = {
+    request,
+    isAttachOnly: false,
+    apiVersion,
+    async withStoppedServer<T>(operation: () => Promise<T>): Promise<T> {
+      offline();
+      try {
+        return await operation();
+      } finally {
+        restored();
+      }
+    },
+  };
   const start = vi.fn(async () => undefined);
   const service = new SessionCleanupService(server, start);
   const attachReferences = (id: string, values: string[]) =>
@@ -300,6 +316,8 @@ async function fixture(version = 2) {
     start,
     service,
     attachReferences,
+    offline,
+    restored,
   };
 }
 
@@ -311,7 +329,344 @@ function expectStopped(reason: string): void {
   expect(ui.log).toHaveBeenCalledWith(expect.stringContaining(reason));
 }
 
+async function addLegacy(
+  f: Awaited<ReturnType<typeof fixture>>,
+  id: string,
+  updated = OLD,
+  parentID?: string
+) {
+  const directory = join(f.root, 'legacy-project');
+  await mkdir(directory, { recursive: true });
+  f.database
+    .exec(`CREATE TABLE IF NOT EXISTS session (id TEXT PRIMARY KEY,directory TEXT,title TEXT,parent_id TEXT,time_created INTEGER,time_updated INTEGER,revert TEXT);
+    CREATE TABLE IF NOT EXISTS message (id TEXT PRIMARY KEY,session_id TEXT REFERENCES session(id) ON DELETE CASCADE,time_created INTEGER,data TEXT);
+    CREATE INDEX IF NOT EXISTS legacy_message_session_idx ON message(session_id);
+    CREATE TABLE IF NOT EXISTS part (id TEXT PRIMARY KEY,message_id TEXT REFERENCES message(id) ON DELETE CASCADE,session_id TEXT,time_created INTEGER,data TEXT);
+    CREATE INDEX IF NOT EXISTS legacy_part_session_idx ON part(session_id);`);
+  f.database
+    .prepare('INSERT INTO session VALUES (?,?,?,?,?,?,NULL)')
+    .run(id, directory, `Legacy ${id}`, parentID ?? null, OLD, updated);
+  const insert = f.database.prepare('INSERT INTO message VALUES (?,?,?,?)');
+  insert.run(
+    `${id}-prompt`,
+    id,
+    OLD - 3000,
+    JSON.stringify({ role: 'user', time: { created: OLD - 3000 } })
+  );
+  insert.run(
+    `${id}-reply`,
+    id,
+    OLD - 2000,
+    JSON.stringify({
+      role: 'assistant',
+      parentID: `${id}-prompt`,
+      providerID: 'provider',
+      modelID: 'model',
+      finish: 'stop',
+      time: { created: OLD - 2000, completed: OLD - 1000 },
+      tokens: { input: 10, output: 5 },
+    })
+  );
+  const part = f.database.prepare('INSERT INTO part VALUES (?,?,?,?,?)');
+  part.run(
+    `${id}-text-prompt`,
+    `${id}-prompt`,
+    id,
+    OLD - 3000,
+    JSON.stringify({ type: 'text', text: 'Original legacy prompt' })
+  );
+  part.run(
+    `${id}-text-reply`,
+    `${id}-reply`,
+    id,
+    OLD - 2000,
+    JSON.stringify({ type: 'text', text: 'Final legacy response' })
+  );
+}
+
 describe('global session cleanup', () => {
+  it('includes dormant V1 and V2 records in the same confirmed command and archives both before deletion', async () => {
+    const f = await fixture();
+    await f.add('native');
+    await addLegacy(f, 'legacy');
+    await f.service.run();
+    expect(ui.error, JSON.stringify(ui.log.mock.calls)).not.toHaveBeenCalled();
+    expect(ui.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('including 1 legacy V1 records'),
+      { modal: true },
+      'Delete old sessions'
+    );
+    expect(f.deleted).toEqual(['native']);
+    expect(f.database.prepare('SELECT count(*) AS n FROM session').get()?.n).toBe(0);
+    expect(f.database.prepare('SELECT count(*) AS n FROM message').get()?.n).toBe(0);
+    expect(f.database.prepare('SELECT count(*) AS n FROM part').get()?.n).toBe(0);
+    expect(f.offline).toHaveBeenCalledOnce();
+    expect(f.restored).toHaveBeenCalledOnce();
+    expect(ui.info).toHaveBeenCalledWith(
+      'Cleanup complete. 2 sessions deleted; 0 kept. Usage statistics saved.',
+      'Show details'
+    );
+    const archive = new DatabaseSync(usageDatabasePaths().archivePath, { readOnly: true });
+    try {
+      expect(archive.prepare('SELECT count(*) AS n FROM usage_session').get()?.n).toBe(2);
+    } finally {
+      archive.close();
+    }
+  });
+
+  it('preserves original V2 timing before deleting its dormant V1 source, without changing the live V2 session', async () => {
+    const f = await fixture();
+    await f.add('shared', NOW);
+    await addLegacy(f, 'shared');
+    f.database
+      .prepare(
+        "UPDATE session_message SET data=json_set(data,'$.time.created',?,'$.time.completed',?)"
+      )
+      .run(OLD - 2000, OLD + 5000);
+    const before = f.database.prepare('SELECT * FROM session_v2').all();
+    const messages = f.database.prepare('SELECT * FROM session_message').all();
+    const attachments = join(f.root, 'project-a', '.opencode', 'attachments', 'shared');
+    await mkdir(attachments, { recursive: true });
+    await writeFile(join(attachments, 'keep.txt'), 'Retained V2 copy');
+    await f.service.run();
+    expect(ui.error, JSON.stringify(ui.log.mock.calls)).not.toHaveBeenCalled();
+    expect(f.deleted).toEqual([]);
+    expect(f.database.prepare('SELECT count(*) AS n FROM session').get()?.n).toBe(0);
+    expect(f.database.prepare('SELECT * FROM session_v2').all()).toEqual(before);
+    expect(f.database.prepare('SELECT * FROM session_message').all()).toEqual(messages);
+    expect(await readFile(join(attachments, 'keep.txt'), 'utf8')).toBe('Retained V2 copy');
+    const archive = new DatabaseSync(usageDatabasePaths().archivePath, { readOnly: true });
+    try {
+      expect(
+        archive
+          .prepare(
+            "SELECT time_completed FROM usage_original_timing WHERE message_id='shared-reply'"
+          )
+          .get()?.time_completed
+      ).toBe(OLD - 1000);
+    } finally {
+      archive.close();
+    }
+    await new UsageReportService({ request: vi.fn() }, vi.fn()).openReport(true);
+    expect(ui.content).toContain('| provider | model | 1 | 15 | 1s |');
+  });
+
+  it('preserves local parent-only V1 transcripts and never asks V2 for dormant V1 history', async () => {
+    const f = await fixture();
+    await addLegacy(f, 'root');
+    await addLegacy(f, 'child', OLD + 1, 'root');
+    f.database.prepare('INSERT INTO part VALUES (?,?,?,?,?)').run(
+      'legacy-note',
+      'root-prompt',
+      'root',
+      OLD - 2999,
+      JSON.stringify({
+        type: 'file',
+        mime: 'text/plain',
+        name: 'annotation-deadbeef.txt',
+        data: Buffer.from('Original legacy annotation').toString('base64'),
+      })
+    );
+    ui.pick.mockResolvedValue({ preserve: true });
+    await f.service.run();
+    expect(ui.error, JSON.stringify(ui.log.mock.calls)).not.toHaveBeenCalled();
+    const archive = new DatabaseSync(join(f.root, 'opencode-transcripts.db'), { readOnly: true });
+    try {
+      expect(archive.prepare('SELECT id,source_version FROM transcript_session').all()).toEqual([
+        { id: 'root', source_version: 1 },
+      ]);
+      const turns = archive.prepare('SELECT data FROM transcript_turn').all();
+      expect(JSON.stringify(turns)).toContain('Original legacy prompt');
+      expect(JSON.stringify(turns)).toContain('Final legacy response');
+      expect(JSON.stringify(turns)).toContain('Original legacy annotation');
+    } finally {
+      archive.close();
+    }
+    expect(f.request.mock.calls.some(([, path]) => path.includes('/root/message'))).toBe(false);
+  });
+
+  it('keeps V1 parents with newer descendants while removing independent old V1 leaves', async () => {
+    const f = await fixture();
+    await addLegacy(f, 'parent');
+    await addLegacy(f, 'recent', NOW, 'parent');
+    await addLegacy(f, 'old-child', OLD + 1, 'parent');
+    await f.service.run();
+    expect(ui.error, JSON.stringify(ui.log.mock.calls)).not.toHaveBeenCalled();
+    expect(f.database.prepare('SELECT id FROM session ORDER BY id').all()).toEqual([
+      { id: 'parent' },
+      { id: 'recent' },
+    ]);
+  });
+
+  it('does not delete V1 history when the confirmation is declined', async () => {
+    const f = await fixture();
+    await addLegacy(f, 'legacy');
+    ui.confirm.mockResolvedValue('Cancel');
+    await f.service.run();
+    expect(f.offline).not.toHaveBeenCalled();
+    expect(f.database.prepare('SELECT count(*) AS n FROM session').get()?.n).toBe(1);
+  });
+
+  it('revalidates V1 timestamps and child membership after stopping the server', async () => {
+    const f = await fixture();
+    await addLegacy(f, 'legacy');
+    f.offline.mockImplementation(() =>
+      f.database.prepare('UPDATE session SET time_updated=?').run(NOW)
+    );
+    await f.service.run();
+    expectStopped('Legacy sessions or their child membership changed');
+    expect(f.restored).toHaveBeenCalledOnce();
+    expect(f.database.prepare('SELECT count(*) AS n FROM session').get()?.n).toBe(1);
+  });
+
+  it('rolls back legacy deletion and restores the server when transcript preservation fails', async () => {
+    const f = await fixture();
+    await addLegacy(f, 'legacy');
+    f.database.exec("UPDATE part SET data='invalid'");
+    ui.pick.mockResolvedValue({ preserve: true });
+    await f.service.run();
+    expect(ui.error).toHaveBeenCalled();
+    expect(f.restored).toHaveBeenCalledOnce();
+    expect(f.database.prepare('SELECT count(*) AS n FROM session').get()?.n).toBe(1);
+    expect(f.database.prepare('SELECT count(*) AS n FROM message').get()?.n).toBe(2);
+  });
+
+  it('rejects an unmatched local V2 inventory before confirming any legacy deletion', async () => {
+    const f = await fixture();
+    await f.add('native');
+    await addLegacy(f, 'legacy');
+    f.sessions.clear();
+    await f.service.run();
+    expect(ui.confirm).not.toHaveBeenCalled();
+    expect(f.offline).not.toHaveBeenCalled();
+    expect(f.deleted).toEqual([]);
+    expect(f.database.prepare('SELECT count(*) AS n FROM session').get()?.n).toBe(1);
+  });
+
+  it('keeps the database write lock through preparation and rolls back when preparation fails', async () => {
+    const f = await fixture();
+    await addLegacy(f, 'legacy');
+    const sessions = await readLegacyCleanupSessions([]);
+    f.database.exec('PRAGMA busy_timeout=1;');
+    await expect(
+      cleanupLegacySessionRecords(sessions, NOW - 1, {
+        signal: new AbortController().signal,
+        onProgress: () => {},
+        committing: () => {},
+        prepared: async () => {
+          expect(() => f.database.exec("UPDATE session SET title='changed'")).toThrow('locked');
+          throw new Error('Injected preparation failure');
+        },
+      })
+    ).rejects.toThrow('Injected preparation failure');
+    expect(f.database.prepare('SELECT title FROM session').get()?.title).toBe('Legacy legacy');
+    expect(f.database.prepare('SELECT count(*) AS n FROM message').get()?.n).toBe(2);
+  });
+
+  it('cancels before legacy deletion and restores the server without removing V1 records', async () => {
+    const f = await fixture();
+    await addLegacy(f, 'legacy');
+    f.offline.mockImplementation(() => {
+      ui.cancelled = true;
+    });
+    await f.service.run();
+    expect(f.restored).toHaveBeenCalledOnce();
+    expect(ui.error).not.toHaveBeenCalled();
+    expect(f.database.prepare('SELECT count(*) AS n FROM session').get()?.n).toBe(1);
+  });
+
+  it('does not interrupt a dispatched legacy transaction when cancellation arrives', async () => {
+    const f = await fixture();
+    await addLegacy(f, 'legacy');
+    const controller = new AbortController();
+    const sessions = await readLegacyCleanupSessions([]);
+    await expect(
+      cleanupLegacySessionRecords(sessions, NOW - 1, {
+        signal: controller.signal,
+        onProgress: () => {},
+        prepared: async () => {},
+        committing: () => controller.abort(),
+      })
+    ).resolves.toBe(1);
+    expect(f.database.prepare('SELECT count(*) AS n FROM session').get()?.n).toBe(0);
+  });
+
+  it('refuses legacy deletion triggers rather than risking live V2 records', async () => {
+    const f = await fixture();
+    await f.add('retained', NOW);
+    await addLegacy(f, 'legacy');
+    f.database.exec(
+      'CREATE TRIGGER unexpected_legacy_delete AFTER DELETE ON session BEGIN DELETE FROM session_message; END;'
+    );
+    await f.service.run();
+    expectStopped('Unsupported legacy deletion triggers');
+    expect(f.database.prepare('SELECT count(*) AS n FROM session').get()?.n).toBe(1);
+    expect(f.database.prepare('SELECT count(*) AS n FROM session_message').get()?.n).toBe(1);
+  });
+
+  it('keeps an already saved newer V2 parent transcript while removing its legacy duplicate', async () => {
+    const f = await fixture();
+    await f.add('same', OLD + 100);
+    await addLegacy(f, 'same');
+    f.database.exec("UPDATE session SET revert='{}'");
+    f.transcripts.set('same', [
+      { id: 'prompt', type: 'user', text: 'V2 prompt', time: { created: OLD - 10 } },
+      {
+        id: 'answer',
+        type: 'assistant',
+        content: [{ type: 'text', text: 'V2 final response' }],
+        finish: 'stop',
+        time: { created: OLD - 5, completed: OLD + 100 },
+      },
+    ]);
+    ui.pick.mockResolvedValue({ preserve: true });
+    await f.service.run();
+    expect(ui.error, JSON.stringify(ui.log.mock.calls)).not.toHaveBeenCalled();
+    const archive = new DatabaseSync(join(f.root, 'opencode-transcripts.db'), { readOnly: true });
+    try {
+      expect(
+        archive.prepare('SELECT source_version FROM transcript_session').get()?.source_version
+      ).toBe(2);
+      expect(JSON.stringify(archive.prepare('SELECT data FROM transcript_turn').all())).toContain(
+        'V2 final response'
+      );
+    } finally {
+      archive.close();
+    }
+    expect(f.database.prepare('SELECT count(*) AS n FROM session').get()?.n).toBe(0);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'retains both V1 and V2 attachment-root provenance across a failed cleanup and retry',
+    async () => {
+      const f = await fixture();
+      await f.add('same', OLD + 100);
+      await addLegacy(f, 'same');
+      const native = join(f.root, 'project-a', '.opencode', 'attachments', 'same');
+      const legacy = join(f.root, 'legacy-project', '.opencode', 'attachments', 'same');
+      const external = join(f.root, 'external');
+      await mkdir(native, { recursive: true });
+      await writeFile(join(native, 'owned.txt'), 'Native copy');
+      await mkdir(dirname(legacy), { recursive: true });
+      await mkdir(external);
+      await writeFile(join(external, 'original.txt'), 'Keep original');
+      await symlink(external, legacy);
+      await f.service.run();
+      expectStopped('symlink');
+      expect(f.database.prepare('SELECT count(*) AS n FROM session').get()?.n).toBe(0);
+      expect(f.sessions.size).toBe(0);
+      await rm(legacy);
+      await mkdir(legacy);
+      await writeFile(join(legacy, 'owned.txt'), 'Legacy copy');
+      ui.error.mockClear();
+      await f.service.run();
+      expect(ui.error, JSON.stringify(ui.log.mock.calls)).not.toHaveBeenCalled();
+      await expect(readFile(join(native, 'owned.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(readFile(join(legacy, 'owned.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(join(external, 'original.txt'), 'utf8')).toBe('Keep original');
+      expect(await readPendingUsageCleanup()).toEqual([]);
+    }
+  );
   it('shows a short completion with an explicit details action instead of archive paths', async () => {
     const f = await fixture();
     await f.add('old');
@@ -653,7 +1008,7 @@ describe('global session cleanup', () => {
     ).toBe(true);
   });
 
-  it('preserves legacy transcript text and does not expand cleanup to dormant V1 records', async () => {
+  it('preserves legacy transcript text through the V1 server API', async () => {
     const f = await fixture(1);
     await f.add('old');
     ui.pick.mockResolvedValue({ preserve: true });

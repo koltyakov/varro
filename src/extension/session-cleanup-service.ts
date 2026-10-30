@@ -17,15 +17,19 @@ import {
 } from './session-transcript-archive';
 import {
   archiveSessionUsage,
+  cleanupLegacySessionRecords,
   finishUsageCleanup,
   readPendingUsageCleanup,
+  readLegacyCleanupSessions,
   readUsageCleanupArtifacts,
   usageCleanupArtifacts,
   type UsageArchiveSession,
+  type LegacyCleanupSession,
 } from './usage-report-service';
 
 type CleanupSession = TranscriptArchiveSession;
-type CleanupServer = Pick<OpenCodeServer, 'request' | 'isAttachOnly' | 'apiVersion'>;
+type CleanupServer = Pick<OpenCodeServer, 'request' | 'isAttachOnly' | 'apiVersion'> &
+  Partial<Pick<OpenCodeServer, 'withStoppedServer'>>;
 const PAGE_LIMIT = 1_000;
 const SHOW_DETAILS = 'Show details';
 
@@ -86,9 +90,12 @@ export class SessionCleanupService {
       const release = await acquireFileLock(`${usageDatabasePaths().archivePath}.cleanup.lock`);
       try {
         const sessions = await this.listSessions();
-        const candidates = sessions.filter((session) => session.updated < cutoff);
+        const legacy =
+          this.server.apiVersion === 2 ? await readLegacyCleanupSessions(sessions) : [];
+        const legacyCount = legacy.filter((session) => session.updated < cutoff).length;
+        const candidates = [...sessions, ...legacy].filter((session) => session.updated < cutoff);
         const choice = await vscode.window.showWarningMessage(
-          `Permanently delete up to ${candidates.length.toLocaleString()} OpenCode sessions last touched before ${new Date(cutoff).toLocaleDateString()} across ALL projects? Usage statistics will be archived first.${transcriptNote} Active sessions and trees with newer children are kept. Session-owned temporary files will be removed; original attachments and code files will not be deleted.`,
+          `Permanently delete up to ${candidates.length.toLocaleString()} OpenCode session records last touched before ${new Date(cutoff).toLocaleDateString()} across ALL projects, including ${legacyCount.toLocaleString()} legacy V1 records? Usage statistics will be archived first.${transcriptNote} Active sessions and trees with newer children are kept. Session-owned temporary files will be removed; original attachments and code files will not be deleted.${legacyCount ? ' Legacy cleanup stops and restarts OpenCode and requires all work to be idle. Close other OpenCode clients and back up your data first.' : ''}`,
           { modal: true },
           'Delete old sessions'
         );
@@ -105,7 +112,8 @@ export class SessionCleanupService {
             title: 'OpenCode cleanup',
             cancellable: true,
           },
-          (progress, token) => this.cleanup(sessions, cutoff, transcript.preserve, progress, token)
+          (progress, token) =>
+            this.cleanup(sessions, legacy, cutoff, transcript.preserve, progress, token)
         );
         const deleted = result.deleted.toLocaleString();
         const deletedSessions = `${deleted} ${result.deleted === 1 ? 'session' : 'sessions'}`;
@@ -136,6 +144,7 @@ export class SessionCleanupService {
 
   private async cleanup(
     sessions: CleanupSession[],
+    legacy: LegacyCleanupSession[],
     cutoff: number,
     preserveTranscript: boolean,
     progress: vscode.Progress<{ message?: string }>,
@@ -144,10 +153,11 @@ export class SessionCleanupService {
     const run = new SessionCleanupProgress(
       progress,
       token,
-      sessions.filter((session) => session.updated < cutoff).length
+      [...sessions, ...legacy].filter((session) => session.updated < cutoff).length
     );
     try {
       const retained = new Map(sessions.map((session) => [session.id, session]));
+      const legacyRemaining = new Set(legacy.map((session) => session.id));
       const children = new Map<string, CleanupSession[]>();
       const checked = new Set<string>();
       const markChecked = (id: string) => {
@@ -163,7 +173,7 @@ export class SessionCleanupService {
       // Recovery and newly confirmed deletions share one final reference scan.
       // Do not block the first deletion on files left by earlier runs.
       const pending = (await readPendingUsageCleanup(run.signal)).filter(
-        (session) => !retained.has(session.id)
+        (session) => !retained.has(session.id) && !legacyRemaining.has(session.id)
       );
       const files = new Map(pending.map((session) => [session.id, session]));
       for (const session of sessions.toSorted(
@@ -221,11 +231,69 @@ export class SessionCleanupService {
           retained.delete(entry.id);
           run.deleted += 1;
           markChecked(entry.id);
-          files.set(entry.id, entry);
+          if (!legacyRemaining.has(entry.id)) files.set(entry.id, entry);
         }
         run.deleting = false;
       }
+      if (legacy.length && !token.isCancellationRequested) {
+        const legacyMap = new Map(legacy.map((session) => [session.id, session]));
+        const legacyChildren = new Map<string, CleanupSession[]>();
+        for (const session of legacy)
+          if (session.parentID) {
+            const siblings = legacyChildren.get(session.parentID) ?? [];
+            siblings.push(session);
+            legacyChildren.set(session.parentID, siblings);
+          }
+        const eligible: LegacyCleanupSession[] = [];
+        for (const session of legacy) {
+          if (session.updated >= cutoff) continue;
+          if (
+            collectTree(session, legacyMap, legacyChildren).some((entry) => entry.updated >= cutoff)
+          ) {
+            run.keep(`V1 ${session.id}`, 'tree includes newer sessions');
+            markChecked(`v1:${session.id}`);
+          } else eligible.push(session);
+        }
+        if (eligible.length) {
+          if (!this.server.withStoppedServer)
+            throw new Error('Verified offline maintenance is required to clean legacy V1 history.');
+          run.setPhase(
+            `Preparing offline cleanup of ${eligible.length.toLocaleString()} legacy V1 records`,
+            'Preparing legacy cleanup'
+          );
+          await this.server.withStoppedServer(async () => {
+            const deleted = await cleanupLegacySessionRecords(eligible, cutoff, {
+              signal: run.signal,
+              onProgress: (message) => run.setPhase(message, 'Saving legacy usage and timing'),
+              prepared: async () => {
+                if (preserveTranscript)
+                  await new SessionTranscriptArchive(this.server).archive(eligible, {
+                    signal: run.signal,
+                    onProgress: (message) => run.setPhase(message, 'Saving legacy transcripts'),
+                  });
+                run.signal.throwIfAborted();
+              },
+              committing: () => {
+                run.deleting = true;
+                run.setPhase('Deleting archived legacy V1 records', 'Finishing legacy deletion');
+              },
+            });
+            run.deleted += deleted;
+            for (const session of eligible) {
+              markChecked(`v1:${session.id}`);
+              legacyRemaining.delete(session.id);
+              if (!retained.has(session.id)) files.set(session.id, session);
+            }
+            run.deleting = false;
+          });
+        }
+      }
       if (files.size && !token.isCancellationRequested) {
+        const journal = new Map(
+          (await readPendingUsageCleanup(run.signal)).map((session) => [session.id, session])
+        );
+        for (const [id, session] of files)
+          files.set(id, { ...session, directories: journal.get(id)?.directories });
         run.startReferenceCheck(files.size);
         const paths = await readUsageCleanupArtifacts(
           [...files.keys()],
@@ -410,9 +478,12 @@ export class SessionCleanupService {
     for (const [index, path] of paths.entries()) {
       signal?.throwIfAborted();
       run?.setPhase(`Removing owned file ${index + 1}/${paths.length} for ${session.id}`);
-      const attachmentsRoot = join(resolve(session.directory), '.opencode', 'attachments');
+      const directories = session.directories ?? [session.directory];
       const toolRoot = join(resolve(usageDatabasePaths().dataDirectory), 'tool-output');
       const target = resolve(path);
+      const attachmentDirectory = directories.find(
+        (directory) => target === join(resolve(directory), '.opencode', 'attachments', session.id)
+      );
       const diffPath = join(
         resolve(usageDatabasePaths().dataDirectory),
         'storage',
@@ -425,8 +496,8 @@ export class SessionCleanupService {
         /^drop-[a-zA-Z0-9_-]+$/.test(basename(dirname(target))) &&
         /^\d+-[a-f0-9]{32}-.+$/.test(basename(target));
       const root =
-        target === join(attachmentsRoot, session.id)
-          ? resolve(session.directory)
+        attachmentDirectory !== undefined
+          ? resolve(attachmentDirectory)
           : target === diffPath
             ? resolve(usageDatabasePaths().dataDirectory)
             : dirname(target) === toolRoot && /^tool_[a-zA-Z0-9._-]+$/.test(basename(target))
@@ -469,7 +540,7 @@ export class SessionCleanupService {
           )
             throw new Error('Invalid temporary attachment owner marker.');
         }
-        await rm(target, { recursive: target === join(attachmentsRoot, session.id), force: true });
+        await rm(target, { recursive: attachmentDirectory !== undefined, force: true });
       }
     }
     run?.setPhase(`Saving file cleanup journal for ${session.id}`);

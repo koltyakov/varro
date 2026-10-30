@@ -414,7 +414,7 @@ The CSV query extracts one compact scalar tuple per assistant record and avoids 
 
 ## Sessions
 
-**Varro: Delete Old OpenCode Sessions** removes history across all projects, oldest activity first, after preserving usage statistics. Optional trimmed transcripts retain parent prompts and responses but omit subagent sessions. Progress uses stable stages; **Show details** opens diagnostics. See [session cleanup](session-cleanup.md) for retention, recovery, and attachment protection.
+**Varro: Delete Old OpenCode Sessions** removes history across all projects, oldest activity first, after preserving usage statistics. On V2 it includes dormant V1 records in the matching database, not just sessions visible through the API. The confirmation shows legacy counts and warns that V1 maintenance stops and restarts OpenCode, requires idle work, and needs other clients closed. Original timings needed by retained V2 usage are preserved first. Optional trimmed transcripts retain parent prompts and responses but omit subagent sessions. Progress uses stable stages; **Show details** opens diagnostics. See [session cleanup](session-cleanup.md) for retention, recovery, and attachment protection.
 
 About's **History age** uses the oldest remaining stored session, including retained V1 history, rather than the database file creation date. **Reusable space** shows freed SQLite pages that have not been returned to disk. Use **Varro: Compact OpenCode Database** or About's **Compact database...** button for separately confirmed offline compaction. It requires a local managed server, stops and restarts OpenCode, and checks available disk space before maintenance. Back up first and close other clients.
 

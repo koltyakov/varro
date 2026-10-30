@@ -2983,11 +2983,11 @@ export class OpenCodeServer extends EventEmitter {
   /** Keep ownership and restart admission reserved until offline database work settles. */
   async withStoppedServer<T>(operation: () => Promise<T>): Promise<T> {
     if (this.isAttachOnly)
-      throw new Error('Database compaction requires a verified local managed server.');
+      throw new Error('Offline database maintenance requires a verified local managed server.');
     if (this.lifecycle.getRestartPromise<string>() || this.pendingTerminalCliUpgrades > 0)
       throw new Error('OpenCode is already restarting or updating. Retry after it finishes.');
     if (this._status.state !== 'running')
-      throw new Error('Connect to the local OpenCode server before compacting its database.');
+      throw new Error('Connect to the local OpenCode server before offline database maintenance.');
     const outcome: { result?: { ok: true; value: T } | { ok: false; error: unknown } } = {};
     await this.runRestart(async () => {
       await this.processManager.stopServerForRestart();

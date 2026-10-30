@@ -4,7 +4,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.33.x - October 2026
 
-- Added opt-in preservation of original migration completion timestamps in the statistics sidecar, with guarded usage-reader support that keeps live V2 token totals and current pause boundaries. No legacy history is deleted automatically.
+- Added preservation of original migration completion timestamps in the statistics sidecar, with guarded usage-reader support that keeps live V2 token totals and current pause boundaries. Confirmed session cleanup now includes eligible dormant V1 records through offline, transactional maintenance; no history is deleted at startup.
 
 - Added OpenCode database location, size, oldest remaining history age, reusable space, and global project and session counts to About, loaded without blocking the page. Added separately confirmed offline database compaction with server restart and disk-space safeguards.
 - Added global session cleanup by retention months, with durable usage-statistics archives, optional parent-only transcript archives in a separate database, and session-owned artifact cleanup. Progress uses stable stages with detailed diagnostics available on request.

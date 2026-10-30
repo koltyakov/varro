@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- Decode worker replies before accepting a local transcript snapshot. */
 import { existsSync } from 'node:fs';
 import { Worker } from 'node:worker_threads';
+import { dirname, join, parse } from 'node:path';
 import { asRecord } from '../shared/type-utils';
 import type { TranscriptArchiveSession } from './session-transcript-archive';
 import { usageDatabasePaths } from './usage-database-paths';
@@ -20,6 +21,7 @@ export class LocalSessionTranscriptReader {
         eval: true,
         workerData: {
           path,
+          transcriptPath: join(dirname(path), `${parse(path).name}-transcripts.db`),
           sessions,
           maxMessages: 100_000,
           maxParts: 500_000,
@@ -87,6 +89,7 @@ export class LocalSessionTranscriptReader {
 
 const LOCAL_TRANSCRIPT_WORKER = String.raw`
 const { DatabaseSync } = require('node:sqlite');
+const { existsSync } = require('node:fs');
 const { parentPort, workerData } = require('node:worker_threads');
 class ApiRequired extends Error {}
 let database;
@@ -190,12 +193,48 @@ const read = (session) => {
   progress('Read local transcript ' + session.id + ': ' + messages.length.toLocaleString() + ' messages');
   return messages;
 };
+const readLegacy = (session) => {
+  const header = database.prepare('SELECT time_updated' + (columns('session').has('revert') ? ',revert' : '') + ' FROM session WHERE id=?').get(session.id);
+  if (!header || header.time_updated !== session.updated) throw new Error('Legacy session changed before transcript preservation.');
+  if (existsSync(workerData.transcriptPath)) {
+    const archive = new DatabaseSync(workerData.transcriptPath, { readOnly: true });
+    try {
+      if (archive.prepare('PRAGMA user_version').get().user_version !== 1) throw new Error('Unsupported transcript archive schema.');
+      const previous = archive.prepare('SELECT time_updated FROM transcript_session WHERE id=?').get(session.id);
+      if (previous && previous.time_updated >= session.updated) return [];
+    } finally { archive.close(); }
+  }
+  if (header.revert && header.revert !== 'null') throw new Error('Cannot preserve reverted legacy history safely.');
+  if (!has('part',['id','session_id','message_id','time_created','data']) || !has('message',['id','session_id','time_created','data'])) throw new Error('Unsupported legacy transcript layout.');
+  const messages = [];
+  let count = 0;
+  const parts = database.prepare("SELECT json_valid(data) AS valid, json_extract(data,'$.type','$.synthetic','$.ignored','$.mime','$.filename','$.name') AS fields, CASE WHEN json_extract(data,'$.type')='text' THEN json_extract(data,'$.text') END AS text, CASE WHEN json_extract(data,'$.type')='file' AND json_extract(data,'$.mime')='text/plain' THEN CASE WHEN coalesce(json_extract(data,'$.name'),json_extract(data,'$.filename')) GLOB 'pasted-text-*.txt' OR coalesce(json_extract(data,'$.name'),json_extract(data,'$.filename')) GLOB 'annotation-*.txt' THEN json_extract(data,'$.url','$.data') END END AS attachment FROM part WHERE message_id=? AND session_id=? ORDER BY time_created,id LIMIT ?");
+  for (const row of database.prepare("SELECT id,json_valid(data) AS valid,json_extract(data,'$.role','$.time','$.providerID','$.modelID','$.finish','$.summary') AS fields FROM message WHERE session_id=? ORDER BY time_created,id LIMIT ?").iterate(session.id,workerData.maxMessages+1)) {
+    if (!row.valid || messages.length >= workerData.maxMessages) throw new Error('Malformed or oversized legacy transcript.');
+    const values = JSON.parse(row.fields);
+    const info = { id:row.id, role:values[0], time:values[1], providerID:values[2], modelID:values[3], finish:values[4], summary:values[5] };
+    const projected = [];
+    for (const part of parts.iterate(row.id,session.id,workerData.maxParts+1)) {
+      if (!part.valid || ++count > workerData.maxParts) throw new Error('Malformed or oversized legacy transcript parts.');
+      const fields = JSON.parse(part.fields);
+      const attachment = part.attachment ? JSON.parse(part.attachment) : [];
+      const value = { type:fields[0], synthetic:!!fields[1], ignored:!!fields[2], mime:fields[3], filename:fields[4], name:fields[5], text:part.text, url:attachment[0], data:attachment[1] };
+      totalBytes += Buffer.byteLength(JSON.stringify(value));
+      if (totalBytes > workerData.maxBytes) throw new Error('Projected transcript exceeds 64 MB.');
+      projected.push(value);
+    }
+    messages.push({ info, parts:projected });
+  }
+  return messages;
+};
 try {
   database = new DatabaseSync(workerData.path, { readOnly: true });
   database.exec('PRAGMA busy_timeout = 1000; BEGIN;');
   const histories = [];
-  if (has('session_v2', ['id','time_updated','fork_session_id','revert']) && has('session_message', ['id','session_id','type','seq','data'])) {
-    for (const session of workerData.sessions) {
+  const supportsV2 = has('session_v2', ['id','time_updated','fork_session_id','revert']) && has('session_message', ['id','session_id','type','seq','data']);
+  for (const session of workerData.sessions) {
+    if (session.version === 1) histories.push({ id:session.id, messages:readLegacy(session) });
+    else if (supportsV2) {
       progress('Reading local transcript ' + session.id);
       const beforeBytes = totalBytes;
       try { histories.push({ id: session.id, messages: read(session) }); }

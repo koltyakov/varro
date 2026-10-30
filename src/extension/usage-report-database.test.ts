@@ -31,7 +31,7 @@ vi.mock('node:worker_threads', async (importOriginal) => {
         ) {
           source = source
             .replace(
-              "database.exec('BEGIN');",
+              '\n      timing = new OriginalUsageTimingStore(workerData.archivePath);',
               String.raw`
             const probe = { metadataReads: 0, originalRoleReads: 0, jsonCalls: 0 };
             const builtins = new DatabaseSync(':memory:');
@@ -44,7 +44,7 @@ vi.mock('node:worker_threads', async (importOriginal) => {
               if (!extract) { extract = builtins.prepare('SELECT json_extract(' + args.map(() => '?').join(',') + ') AS value'); extracts.set(args.length, extract); }
               return extract.get(...args).value;
             });
-            database.exec('BEGIN');
+            timing = new OriginalUsageTimingStore(workerData.archivePath);
           `
             )
             .replace(

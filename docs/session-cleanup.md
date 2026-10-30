@@ -8,7 +8,7 @@ Run **Varro: Delete Old OpenCode Sessions** from VS Code's Command Palette. The 
 
 Cancelling either wizard input or the confirmation changes nothing. Transcript preservation is selected for this run only, not remembered as a global preference.
 
-The command inventories the connected local OpenCode server's sessions across every project, including archived sessions and child sessions. Age uses `time.updated`, not creation time. A session exactly at the retention cutoff stays. Calendar arithmetic uses UTC and clamps month-end dates.
+The command inventories the connected local OpenCode server's sessions across every project, including archived sessions and child sessions. On V2 it also inventories retained V1 records in the matching local database. The confirmation counts physical session records, including legacy V1 copies, and explicitly warns when offline V1 maintenance is needed. Age uses `time.updated`, not creation time. A session exactly at the retention cutoff stays. Calendar arithmetic uses UTC and clamps month-end dates.
 
 ## Deletion and recovery
 
@@ -31,7 +31,13 @@ The command serializes cleanup runs across VS Code windows. Other clients can st
 
 For V2, activity checks use global execution status and shell-status reads only in locations already loaded by the server. Cleanup does not open historical project directories, so sessions from deleted or renamed folders can still be removed. Background services in other loaded locations remain protected. A missing-location 404 never counts as confirmation that a session was deleted.
 
-Cleanup requires a local managed connection and a readable matching OpenCode database. It refuses attach-only connections rather than archiving unrelated local statistics or attempting to remove files on a remote host. It does not delete a different OpenCode installation's database or dormant V1 sessions that a V2 server cannot expose.
+Cleanup requires a local managed connection and a readable matching OpenCode database. It refuses attach-only connections rather than archiving unrelated local statistics or attempting to remove files on a remote host. The V2 server inventory must match the local database before legacy cleanup can be confirmed. It does not delete a different OpenCode installation's database.
+
+After the V2 API pass, eligible dormant V1 records are cleaned in a separate atomic transaction. OpenCode is stopped through the existing ownership and idle checks and restarted afterward, including after a failure or cancellation. Close other OpenCode clients and back up first. A database write lock spans the final legacy validation, usage/timing archiving, optional parent transcripts, and deletion, so another writer cannot change the source between preservation and removal. Parents with newer descendants remain protected. Unsupported deletion triggers and cross-version foreign-key dependencies stop the operation rather than risking V2 data.
+
+V1 deletion starts only after the archives commit and transcript preparation succeeds. Cancellation before dispatch rolls back the live transaction; once deletion is dispatched it must settle before OpenCode restarts. Preparation has a ten-minute limit. Legacy rows, messages, parts, and supported dependent records are removed, but retained V2 records are not rewritten. Shared physical session IDs keep their file-cleanup journal pending until neither history version retains them.
+
+The journal retains each verified project directory for a physical session ID. When V1 and V2 copies used different directories, both owned attachment roots remain eligible for checked cleanup and survive interrupted-run recovery. Original external files remain outside this scope.
 
 ## Usage archive
 
@@ -43,7 +49,7 @@ Usage reports merge live V1, live V2, and archived records by original session i
 
 The statistics archive also supports a separate `usage_original_timing` table for original V1 completion timestamps used by retained live V2 messages. This is scalar provenance, not another usage snapshot: tokens, costs, prompts, and new messages still come from the selected live session. Readers use matching live V1 timing first, preserved originals second, and native V2 timing last, then apply current pause boundaries.
 
-Timing preservation is an explicit internal operation, not an automatic migration or a legacy-history deletion command. It reads matching V1/V2 records, commits and verifies the originals in the statistics sidecar, and never changes the live database or queues artifact cleanup. It currently supports migrations that retain message IDs, including mapped session identities. Remapped-message imports without a verified mapping are not guessed. Preservation alone does not authorize deletion: callers must separately revalidate coverage and session activity before any future legacy cleanup.
+The confirmed legacy cleanup pass preserves matching original timing needed by live V2 sessions before removing V1 rows. The standalone timing-preservation API also remains available internally and never changes the live database or queues artifact cleanup itself. This supports migrations that retain message IDs, including mapped session identities. Remapped-message imports without a verified mapping are not guessed. There is no startup migration or unconfirmed history deletion.
 
 Version-zero statistics archives remain readable without modification. Explicit archive writes add schema version 1 and the independent timing table transactionally; ordinary reports and CSV exports never migrate storage. Conflicting or invalid timing and unsupported schema versions stop the operation. Timing records survive replacement of archived usage snapshots. Keep the statistics sidecar with database backups and restore it under the matching basename. Older Varro versions do not read preserved timing, and a completely missing sidecar cannot always be distinguished from history that never needed it.
 
@@ -53,7 +59,7 @@ Artifact recovery does not delay new session deletions. After the session pass, 
 
 Reference scans can run for up to ten minutes, but terminate after 60 seconds without an increasing scanned-row count. Repeated phase labels or repeated row counts do not extend that timeout. Cancellation still terminates the worker and waits for teardown; no file is removed from an incomplete scan. Usage reports, pre-delete usage archiving, and journal writes retain their separate 30-second deadlines. Cancelling or failing before file cleanup completes leaves the remaining paths journaled for retry.
 
-`/stats` continues to show today and rolling 7/30-day windows. `/stats all` includes older archived usage. Reports also work from the archive when the live database is absent. The source database remains read-only during statistics collection and archiving; session deletion goes through OpenCode's API.
+`/stats` continues to show today and rolling 7/30-day windows. `/stats all` includes older archived usage. Reports also work from the archive when the live database is absent. Statistics readers remain read-only. V2 deletion goes through OpenCode's API; dormant V1 deletion uses the separate offline transaction described above.
 
 ## Optional transcript archive
 
@@ -72,6 +78,8 @@ Reasoning, intermediate assistant commentary, tool calls/results, snapshots, nat
 
 Ordinary V2 sessions use a read-only SQLite snapshot. The worker projects prompt/response text and attachment metadata without transferring tools, reasoning, native replay data, or image bytes to the extension. Separately stored assistant parts override inline content in ordinal order, matching OpenCode history. Only recognized pasted-text and annotation attachments load blob bytes. Session timestamps must match the cleanup inventory; missing or stale sessions stop the run.
 
+Dormant V1 parent transcripts are projected locally under the offline cleanup lock. Existing equal-or-newer transcript snapshots are kept rather than replaced by older V1 copies. Unsupported reverted V1 history stops cleanup unless its transcript is already covered by such a snapshot. Child transcripts are still omitted.
+
 Forks, staged reverts, and unrecognized storage layouts fall back to native V2 message pagination so the server resolves their history. The reader follows the cursor after the last nonempty page and accepts OpenCode's empty terminal page with `next: null`, as well as an omitted next cursor. Invalid or repeated cursors still stop cleanup. Both paths preserve idle boundaries. Older/imported history without a boundary uses a completed non-tool response followed by another prompt as an inferred boundary; its outcome remains `unknown`, not `succeeded`. Steering within a tool sequence retains each delivered prompt. Background responses can have no user prompt. V2 sessions with undelivered inbox work are kept rather than dropping queued inputs.
 
 The SQLite format has `PRAGMA user_version = 1`:
@@ -85,7 +93,7 @@ History reads are bounded to 100,000 messages per session. API history is limite
 
 ## History age and disk space
 
-About shows **History age** from the oldest remaining stored session's creation timestamp, not the database file's creation date. Retained V1 history is included even when the connected V2 server cannot list it. Deleting visible V2 sessions can therefore leave the history age unchanged. Cleanup does not delete dormant V1 history.
+About shows **History age** from the oldest remaining stored session's creation timestamp, not the database file's creation date. Retained V1 history is included even when the connected V2 server cannot list it. The cleanup command includes eligible V1 history, but creation age can still exceed the retention window when old conversations were used recently or have protected descendants.
 
 Deleting rows usually frees SQLite pages for reuse without shrinking `opencode.db`. About shows these pages as **Reusable space**. Its total database size includes the SQLite WAL. Usage and transcript archives are separate.
 

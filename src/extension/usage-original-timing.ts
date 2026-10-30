@@ -18,6 +18,7 @@ const USAGE_ARCHIVE_SCHEMA =
   'CREATE TABLE IF NOT EXISTS usage_message (id TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES usage_session(id) ON DELETE CASCADE, data TEXT NOT NULL, PRIMARY KEY (session_id, id)); ' +
   'CREATE INDEX IF NOT EXISTS usage_message_session_idx ON usage_message(session_id); ' +
   'CREATE TABLE IF NOT EXISTS usage_cleanup (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL); ' +
+  'CREATE TABLE IF NOT EXISTS usage_cleanup_directory (session_id TEXT NOT NULL, directory TEXT NOT NULL, PRIMARY KEY(session_id,directory)); ' +
   'CREATE TABLE IF NOT EXISTS usage_artifact (session_id TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY (session_id, path));';
 const TIMING_COLUMNS = 'session_id,message_id,source_session_id,source_message_id,time_created,provider_id,model_id,time_completed,provenance';
 const validateUsageArchiveFile = () => {
@@ -103,7 +104,7 @@ class OriginalUsageTimingStore {
     this.database = undefined;
   }
 }
-const preserveUsageTimings = (sessions) => {
+const preserveUsageTimings = (sessions, allowEmpty = false) => {
   if (!sessions.length || sessions.length > 1000 || new Set(sessions.map(s => s.id)).size !== sessions.length) throw new Error('Preserve between 1 and 1,000 distinct V2 sessions.');
   const database = new DatabaseSync(workerData.databasePath, { readOnly: true });
   let archive;
@@ -135,7 +136,7 @@ const preserveUsageTimings = (sessions) => {
         if (rows.length >= 100000) throw new Error('Original usage timing exceeds the 100,000-record preservation limit.');
         rows.push(row);
       }
-      if (rows.length === start) throw new Error('No matching original usage timing for ' + session.id);
+      if (rows.length === start && !allowEmpty) throw new Error('No matching original usage timing for ' + session.id);
     }
     progress('Committing original usage timing');
     // Do not hold a read connection to this archive while its writer commits.
