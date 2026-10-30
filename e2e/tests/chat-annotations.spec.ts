@@ -288,7 +288,25 @@ for (const theme of ['dark', 'light']) {
     expect(sourceBox).not.toBeNull();
     expect(popupBox).not.toBeNull();
     expect(popupBox!.y).toBeGreaterThanOrEqual(sourceBox!.y + sourceBox!.height);
-    await expect(dialog.locator('.chat-annotation-hint')).toHaveText('Esc to cancel');
+    const hint = dialog.locator('.chat-annotation-hint');
+    await expect(hint).toHaveText('Esc to cancel');
+    await expect(hint).toHaveCSS('align-items', 'center');
+    const hintAlignment = await hint.evaluate((element) => {
+      const keyBox = element.querySelector('kbd')!.getBoundingClientRect();
+      const text = document.createRange();
+      text.selectNodeContents(element.lastChild!);
+      const textBox = text.getBoundingClientRect();
+      const hintBox = element.getBoundingClientRect();
+      return {
+        keyCenter: keyBox.top + keyBox.height / 2,
+        textCenter: textBox.top + textBox.height / 2,
+        hintCenter: hintBox.top + hintBox.height / 2,
+        gap: textBox.left - keyBox.right,
+      };
+    });
+    expect(Math.abs(hintAlignment.keyCenter - hintAlignment.hintCenter)).toBeLessThanOrEqual(1);
+    expect(Math.abs(hintAlignment.textCenter - hintAlignment.keyCenter)).toBeLessThanOrEqual(1);
+    expect(hintAlignment.gap).toBeCloseTo(4, 0);
     await expect(note).toHaveCSS('border-top-width', '0px');
     await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(dialog).toHaveCSS('border-radius', '10px');

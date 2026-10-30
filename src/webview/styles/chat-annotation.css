@@ -63,6 +63,9 @@
 }
 
 .chat-annotation-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin-right: auto;
   padding-left: 4px;
   color: var(--color-vscode-muted);
