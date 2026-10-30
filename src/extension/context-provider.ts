@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
-import { readdir, realpath } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse, relative, sep } from 'path';
 import type { EditorContext, EditorTextContext } from '../shared/protocol';
 import { asRecord, isNumber, isString } from '../shared/type-utils';
@@ -14,6 +14,7 @@ import {
 } from './util/path';
 import { delay } from './server-utils';
 import { getWorkingFolder, getWorkingFolders } from './working-folders';
+import { CitationFileSearch } from './citation-file-search';
 
 export type WorkspaceResolutionOptions = {
   /** Resolve paths that do not exist on disk yet (e.g. a deleted file in a diff). */
@@ -75,6 +76,7 @@ export class ContextProvider implements vscode.Disposable {
   private _lastDiagnosticsSourceKey: string | null = null;
   private onChange: (ctx: EditorContext) => void;
   private selectedWorkspacePath: string | null;
+  private readonly citationFileSearch = new CitationFileSearch();
 
   constructor(
     onChange: (ctx: EditorContext) => void,
@@ -851,25 +853,11 @@ export class ContextProvider implements vscode.Disposable {
           // An absolute reference must not resolve to a namesake in another project.
           // A filesystem-root reference also has no bounded project to search.
           if (missingAbsolute && !searchRoot) return 'unavailable';
-          let matches: vscode.Uri[] = [];
-          try {
-            matches = await vscode.workspace.findFiles(
-              searchRoot ? new vscode.RelativePattern(searchRoot, `**/${suffix}`) : `**/${suffix}`,
-              null,
-              100
-            );
-          } catch {
-            // The file index is unavailable in some hosts; use bounded directory traversal.
-          }
-          const searchRoots = searchRoot ? [searchRoot] : undefined;
-          if (matches.length === 0) {
-            matches = await this.findWorkspaceFiles(suffix, searchRoots);
-          }
-          if (matches.length === 0 && searchRoot) {
-            matches = (await this.findLocalFiles(searchRoot.fsPath, suffix)).map((localPath) =>
-              vscode.Uri.file(localPath)
-            );
-          }
+          const matches = await this.citationFileSearch.find(
+            suffix,
+            searchRoot ? [searchRoot] : getWorkingFolders().map((folder) => folder.uri)
+          );
+          if (!matches) return 'cancelled';
           let uri = matches[0];
           if (matches.length > 1) {
             const picked = await vscode.window.showQuickPick(
@@ -955,91 +943,6 @@ export class ContextProvider implements vscode.Disposable {
       logger.error(`Failed to open file ${path}:`, err);
       return 'unavailable';
     }
-  }
-
-  private async findWorkspaceFiles(
-    suffix: string,
-    searchRoots?: vscode.Uri[]
-  ): Promise<vscode.Uri[]> {
-    const ignoredDirectories = new Set([
-      '.git',
-      '.next',
-      '.turbo',
-      'build',
-      'coverage',
-      'dist',
-      'node_modules',
-      'out',
-    ]);
-    const pending = searchRoots ?? getWorkingFolders().map((folder) => folder.uri);
-    const matches: vscode.Uri[] = [];
-    let visitedEntries = 0;
-
-    while (pending.length > 0) {
-      const directory = pending.shift()!;
-      let entries: [string, vscode.FileType][];
-      try {
-        entries = await vscode.workspace.fs.readDirectory(directory);
-      } catch {
-        continue;
-      }
-
-      visitedEntries += entries.length;
-      if (visitedEntries > 20_000) return [];
-      for (const [name, type] of entries) {
-        const uri = vscode.Uri.joinPath(directory, name);
-        if (type & vscode.FileType.Directory) {
-          if (!ignoredDirectories.has(name)) pending.push(uri);
-          continue;
-        }
-        if (!uri.fsPath.replace(/\\/g, '/').endsWith(`/${suffix}`)) continue;
-        matches.push(uri);
-        if (matches.length >= 100) return matches;
-      }
-    }
-
-    return matches;
-  }
-
-  private async findLocalFiles(rootDirectory: string, suffix: string): Promise<string[]> {
-    const ignoredDirectories = new Set([
-      '.git',
-      '.next',
-      '.turbo',
-      'build',
-      'coverage',
-      'dist',
-      'node_modules',
-      'out',
-    ]);
-    const pending = [rootDirectory];
-    const matches: string[] = [];
-    let visitedEntries = 0;
-
-    while (pending.length > 0) {
-      const directory = pending.shift()!;
-      let entries;
-      try {
-        entries = await readdir(directory, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-
-      visitedEntries += entries.length;
-      if (visitedEntries > 20_000) return [];
-      for (const entry of entries) {
-        const entryPath = join(directory, entry.name);
-        if (entry.isDirectory()) {
-          if (!ignoredDirectories.has(entry.name)) pending.push(entryPath);
-          continue;
-        }
-        if (!entryPath.replace(/\\/g, '/').endsWith(`/${suffix}`)) continue;
-        matches.push(entryPath);
-        if (matches.length >= 100) return matches;
-      }
-    }
-
-    return matches;
   }
 
   private async resolveWorkspaceUri(
@@ -1147,6 +1050,7 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   dispose() {
+    this.citationFileSearch.dispose();
     if (this.terminalHistorySaveTimer) {
       clearTimeout(this.terminalHistorySaveTimer);
       this.terminalHistorySaveTimer = null;
