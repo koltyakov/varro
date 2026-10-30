@@ -307,6 +307,8 @@ const SESSION_USAGE_CACHE_ENTRY_LIMIT = 10_000;
 const SESSION_USAGE_CACHE_TOTAL_LIMIT = 50_000;
 const SESSION_FALLBACK_MAX_SESSIONS = 250;
 const LOCAL_USAGE_WORKER_TIMEOUT_MS = 30_000;
+const LOCAL_USAGE_REPORT_STALL_TIMEOUT_MS = 60_000;
+const LOCAL_USAGE_REPORT_MAX_DURATION_MS = 10 * 60_000;
 const LOCAL_USAGE_CSV_STALL_TIMEOUT_MS = 60_000;
 const LOCAL_USAGE_CSV_MAX_DURATION_MS = 10 * 60_000;
 const LOCAL_ARTIFACT_SCAN_STALL_TIMEOUT_MS = 60_000;
@@ -737,6 +739,7 @@ async function runLocalUsageWorker(
   const annotationsDirectory = getVarroStateReadDirectory('opencode-v2');
 
   return new Promise((resolve, reject) => {
+    const allTime = 'windows' in task && task.windows.some((window) => window.start === null);
     const worker = new Worker(LOCAL_USAGE_WORKER, {
       eval: true,
       workerData: {
@@ -748,6 +751,7 @@ async function runLocalUsageWorker(
         maxScannedAssistantRows: LOCAL_USAGE_MAX_SCANNED_ASSISTANT_ROWS,
         maxCsvRows: LOCAL_USAGE_MAX_CSV_ROWS,
         maxCsvBytes: LOCAL_USAGE_MAX_CSV_BYTES,
+        allTimeReport: allTime,
         ...task,
       },
     });
@@ -760,7 +764,7 @@ async function runLocalUsageWorker(
     let preparing: Promise<void> | undefined;
     const csv = 'exportCsv' in task;
     const artifacts = 'cleanupAction' in task && task.cleanupAction === 'artifacts';
-    const longScan = csv || artifacts;
+    const longScan = csv || artifacts || allTime;
     const cancel = () => {
       if (!committing) finish(null, new Error('Local OpenCode usage operation cancelled.'));
     };
@@ -786,7 +790,7 @@ async function runLocalUsageWorker(
           finish(
             null,
             new Error(
-              `${legacy ? 'Legacy cleanup preparation exceeded the 10-minute limit.' : csv ? 'Local OpenCode usage CSV made no row progress for 60 seconds.' : artifacts ? 'OpenCode artifact reference scan made no row progress for 60 seconds.' : `Local OpenCode usage query timed out after ${LOCAL_USAGE_WORKER_TIMEOUT_MS / 1_000} seconds.`}${phase ? ` Last phase: ${phase}.` : ''}`
+              `${legacy ? 'Legacy cleanup preparation exceeded the 10-minute limit.' : csv ? 'Local OpenCode usage CSV made no row progress for 60 seconds.' : artifacts ? 'OpenCode artifact reference scan made no row progress for 60 seconds.' : allTime ? 'Local OpenCode all-time usage query made no row progress for 60 seconds.' : `Local OpenCode usage query timed out after ${LOCAL_USAGE_WORKER_TIMEOUT_MS / 1_000} seconds.`}${phase ? ` Last phase: ${phase}.` : ''}`
             )
           ),
         legacy
@@ -795,7 +799,9 @@ async function runLocalUsageWorker(
             ? LOCAL_USAGE_CSV_STALL_TIMEOUT_MS
             : artifacts
               ? LOCAL_ARTIFACT_SCAN_STALL_TIMEOUT_MS
-              : LOCAL_USAGE_WORKER_TIMEOUT_MS
+              : allTime
+                ? LOCAL_USAGE_REPORT_STALL_TIMEOUT_MS
+                : LOCAL_USAGE_WORKER_TIMEOUT_MS
       );
     };
     armTimeout();
@@ -805,10 +811,14 @@ async function runLocalUsageWorker(
           finish(
             null,
             new Error(
-              `${csv ? 'Local OpenCode usage CSV exceeded the 10-minute export limit.' : 'OpenCode artifact reference scan exceeded the 10-minute scan limit.'}${phase ? ` Last phase: ${phase}.` : ''}`
+              `${csv ? 'Local OpenCode usage CSV exceeded the 10-minute export limit.' : artifacts ? 'OpenCode artifact reference scan exceeded the 10-minute scan limit.' : 'Local OpenCode all-time usage query exceeded the 10-minute scan limit.'}${phase ? ` Last phase: ${phase}.` : ''}`
             )
           ),
-        csv ? LOCAL_USAGE_CSV_MAX_DURATION_MS : LOCAL_ARTIFACT_SCAN_MAX_DURATION_MS
+        csv
+          ? LOCAL_USAGE_CSV_MAX_DURATION_MS
+          : artifacts
+            ? LOCAL_ARTIFACT_SCAN_MAX_DURATION_MS
+            : LOCAL_USAGE_REPORT_MAX_DURATION_MS
       );
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) cancel();
@@ -844,7 +854,10 @@ async function runLocalUsageWorker(
           count !== null &&
           Number.isSafeInteger(count) &&
           count > processed &&
-          count <= (csv ? LOCAL_USAGE_MAX_SCANNED_ASSISTANT_ROWS : Number.MAX_SAFE_INTEGER)
+          count <=
+            (artifacts || allTime
+              ? Number.MAX_SAFE_INTEGER
+              : LOCAL_USAGE_MAX_SCANNED_ASSISTANT_ROWS)
         ) {
           processed = count;
           armTimeout();
@@ -883,7 +896,7 @@ const { fileURLToPath } = require('node:url');
 const { tmpdir } = require('node:os');
 const { parentPort, workerData } = require('node:worker_threads');
 const progress = (message, processed) => {
-  if (workerData.archiveSessions || workerData.legacySessions || workerData.exportCsv || workerData.cleanupAction || workerData.preserveTimings) parentPort.postMessage({ progress: message, processed });
+  parentPort.postMessage({ progress: message, processed });
 };
 ${ORIGINAL_USAGE_TIMING_WORKER}
 
@@ -900,6 +913,7 @@ const readPauseTime = (sessionID, messageID) => {
         if (error.code !== 'ENOENT') throw error;
       }
     }
+    if (workerData.allTimeReport && sessionPauses.size >= 64) sessionPauses.delete(sessionPauses.keys().next().value);
     sessionPauses.set(sessionID, new Map(entries.map((pause) => [pause.messageId, pause.pausedAt])));
   }
   return sessionPauses.get(sessionID).get(messageID);
@@ -924,7 +938,7 @@ const emptyAggregate = () => ({
   cacheWrite: 0,
 });
 
-const csvUsageRow = (row) => {
+const compactUsageRow = (row) => {
   // SQLite extracts the compact scalar tuple once. Large content/tool bodies
   // never cross the worker boundary or get parsed into JavaScript objects.
   const fields = JSON.parse(row.fields);
@@ -935,7 +949,7 @@ const csvUsageRow = (row) => {
     typeof original[4] === 'number' && original[4] >= fields[7]
       ? original[4] : null;
   return {
-    sessionID: row.sessionID, messageID: row.messageID, version: row.version, identity: row.identity,
+    sessionID: row.sessionID, messageID: row.messageID, version: row.version, identity: row.identity, parentID: row.parentID,
     providerID: fields[0], nestedProviderID: fields[1], modelID: fields[2],
     nestedModelID: fields[3] ?? fields[4], variant: fields[5] ?? fields[6],
     timeCreated: fields[7], timeCompleted: fields[8], total: fields[9], cost: fields[10],
@@ -1054,6 +1068,12 @@ const legacyInventory = (database) => {
     let archive;
     let timing;
     try {
+      if (workerData.allTimeReport) {
+        // Keep all-time prompt deduplication off the JavaScript heap.
+        // Use temporary storage with an 8 MiB page cache, without changing
+        // the live history or the persistent statistics archive.
+        database.exec('PRAGMA temp_store=FILE; PRAGMA temp.cache_size=-8192;');
+      }
       if (existsSync(workerData.archivePath) && !workerData.archiveSessions && !legacyCleanup) {
         database.prepare('ATTACH DATABASE ? AS stats').run(workerData.archivePath);
       }
@@ -1124,7 +1144,7 @@ const legacyInventory = (database) => {
       // Select a complete session before filtering dates or reading messages. Equal timestamps prefer v2.
       const selected = 'WITH ranked AS (SELECT *, row_number() OVER (PARTITION BY identity ORDER BY time_updated DESC, version DESC, archived ASC, id DESC) AS rank FROM (' + sources.join(' UNION ALL ') + ')), selected AS (SELECT * FROM ranked WHERE rank = 1' + (archiveSessions || workerData.start === null ? '' : ' AND time_updated >= ?') + ') ';
       const parameters = archiveSessions || workerData.start === null ? [] : [workerData.start];
-      if (workerData.exportCsv) progress('Resolving usage snapshot');
+      progress('Resolving usage snapshot');
       const sessionCount = archiveSessions || workerData.exportCsv ? 0 : database.prepare(selected + 'SELECT count(*) AS count FROM selected').get(...parameters).count;
       if (archiveSessions) {
         const selectedSessions = database.prepare(selected + 'SELECT * FROM selected WHERE archived = 0').all(...parameters);
@@ -1172,6 +1192,15 @@ const legacyInventory = (database) => {
           }
         }
       }
+      if (!workerData.exportCsv && tables.has('session_v2') && tables.has('session_message')) {
+        // Index the selected user messages once. The source index can cover only
+        // (session_id, seq), making a backwards user lookup rescan long assistant runs.
+        // Temporary tables keep the source database and its schema read-only.
+        progress('Indexing usage prompts');
+        database.prepare('CREATE TEMP TABLE usage_prompt AS ' + selected + "SELECT m.session_id, m.seq, m.id FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 2 AND m.type = 'user'").run(...parameters);
+        database.exec('CREATE INDEX usage_prompt_session_seq_idx ON usage_prompt(session_id, seq)');
+      }
+      const compact = !archiveSessions;
       const messages = [];
       const bodyLimit = workerData.exportCsv ? '' : ' AND length(m.data) <= ?';
       // Keep selected sessions as the outer loop. Otherwise SQLite can scan and decode
@@ -1183,18 +1212,18 @@ const legacyInventory = (database) => {
         // Migration can replace completion times with the import time. Recover timing only
         // from the same original message, without selecting its older token usage.
         const originalCompleted = tables.has('message')
-          ? workerData.exportCsv
+          ? compact
             ? "(SELECT CASE WHEN json_valid(original.data) THEN json_extract(original.data, '$.role', '$.time.created', '$.providerID', '$.modelID', '$.time.completed') END FROM message original WHERE original.id = m.id AND original.session_id = s.identity)"
             : "(SELECT CASE WHEN json_valid(original.data) THEN CASE WHEN json_extract(original.data, '$.role') = 'assistant' AND json_extract(original.data, '$.time.created') = json_extract(m.data, '$.time.created') AND json_extract(original.data, '$.providerID') = coalesce(json_extract(m.data, '$.providerID'), json_extract(m.data, '$.model.providerID')) AND json_extract(original.data, '$.modelID') = coalesce(json_extract(m.data, '$.modelID'), json_extract(m.data, '$.model.id'), json_extract(m.data, '$.model.modelID')) AND json_type(original.data, '$.time.completed') IN ('integer', 'real') AND json_extract(original.data, '$.time.completed') >= json_extract(original.data, '$.time.created') THEN json_extract(original.data, '$.time.completed') END END FROM message original WHERE original.id = m.id AND original.session_id = s.identity)"
           : 'NULL';
-        const parentID = workerData.exportCsv ? 'NULL' : "coalesce(json_extract(m.data, '$.parentID'), (SELECT u.id FROM session_message u WHERE u.session_id = m.session_id AND u.type = 'user' AND u.seq < m.seq ORDER BY u.seq DESC LIMIT 1))";
+        const parentID = workerData.exportCsv ? 'NULL' : "coalesce(json_extract(m.data, '$.parentID'), (SELECT u.id FROM usage_prompt u WHERE u.session_id = m.session_id AND u.seq < m.seq ORDER BY u.seq DESC LIMIT 1))";
         messages.push("SELECT m.id, s.identity, 2 AS version, m.session_id, m.data, " + originalCompleted + " AS originalCompleted, " + parentID + " AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 2 AND m.type = 'assistant'" + bodyLimit);
       }
       if (hasArchive && !archiveSessions) {
         messages.push("SELECT m.id, s.identity, 0 AS version, m.session_id, m.data, NULL AS originalCompleted, " + (workerData.exportCsv ? 'NULL' : "json_extract(m.data, '$.parentID')") + " AS parentID FROM selected s CROSS JOIN stats.usage_message m ON s.id = m.session_id WHERE s.archived = 1" + bodyLimit);
       }
-      const query = workerData.exportCsv ? selected +
-        "SELECT m.session_id AS sessionID, m.id AS messageID, m.identity, m.version AS version, m.originalCompleted AS originalTiming, json_extract(m.data, '$.providerID', '$.model.providerID', '$.modelID', '$.model.id', '$.model.modelID', '$.model.variant', '$.variant', '$.time.created', '$.time.completed', '$.tokens.total', '$.cost', '$.tokens.input', '$.tokens.output', '$.tokens.reasoning', '$.tokens.cache.read', '$.tokens.cache.write') AS fields FROM (" + messages.join(' UNION ALL ') + ') m LIMIT ?' : [
+      const query = compact ? selected +
+        "SELECT m.session_id AS sessionID, m.id AS messageID, m.identity, m.version AS version, m.parentID, m.originalCompleted AS originalTiming, json_extract(m.data, '$.providerID', '$.model.providerID', '$.modelID', '$.model.id', '$.model.modelID', '$.model.variant', '$.variant', '$.time.created', '$.time.completed', '$.tokens.total', '$.cost', '$.tokens.input', '$.tokens.output', '$.tokens.reasoning', '$.tokens.cache.read', '$.tokens.cache.write') AS fields FROM (" + messages.join(' UNION ALL ') + ') m LIMIT ?' : [
         selected,
         'SELECT m.session_id AS sessionID,',
         'm.id AS messageID, m.version AS version, m.identity,',
@@ -1219,32 +1248,36 @@ const legacyInventory = (database) => {
       ].join(' ');
       const statement = database.prepare(query);
       if (archive) progress('Archiving assistant usage records');
-      const rows = statement.iterate(...parameters, ...(workerData.exportCsv ? [] : messages.map(() => archive ? Number.MAX_SAFE_INTEGER : workerData.maxMessageDataBytes)), workerData.maxScannedAssistantRows + 1);
+      const rows = statement.iterate(...parameters, ...(workerData.exportCsv ? [] : messages.map(() => archive ? Number.MAX_SAFE_INTEGER : workerData.maxMessageDataBytes)), workerData.allTimeReport ? -1 : workerData.maxScannedAssistantRows + 1);
       const insertUsage = archive?.prepare('INSERT INTO usage_message VALUES (?, ?, ?)');
       const aggregates = workerData.windows.map(() => ({
         groups: new Map(),
         promptIDs: new Set(),
       }));
+      if (workerData.allTimeReport) database.exec('CREATE TEMP TABLE usage_report_prompt (window_index INTEGER NOT NULL, prompt_id TEXT NOT NULL, route TEXT NOT NULL, PRIMARY KEY(window_index, prompt_id, route)) WITHOUT ROWID');
+      const insertReportPrompt = workerData.allTimeReport
+        ? database.prepare('INSERT OR IGNORE INTO usage_report_prompt VALUES (?, ?, ?)')
+        : undefined;
       const routes = new Set();
       const csvGroups = new Map();
-      if (workerData.exportCsv) progress('Aggregating all-time daily usage');
+      if (compact) progress(workerData.exportCsv ? 'Aggregating all-time daily usage' : 'Aggregating usage report');
       let assistantRows = 0;
       let scannedAssistantRows = 0;
-      let csvProgressAt = Date.now();
+      let progressAt = Date.now();
       const oldestWindowStart = workerData.exportCsv || workerData.windows.some((window) => window.start === null)
         ? null
         : Math.min(...workerData.windows.map((window) => window.start));
 
       for (const rawRow of rows) {
         scannedAssistantRows += 1;
-        if (scannedAssistantRows > workerData.maxScannedAssistantRows) {
+        if (!workerData.allTimeReport && scannedAssistantRows > workerData.maxScannedAssistantRows) {
           throw new Error('Usage report exceeds the ' + workerData.maxScannedAssistantRows.toLocaleString() + '-message local scan limit.');
         }
-        if (workerData.exportCsv && (scannedAssistantRows % 10000 === 0 || Date.now() - csvProgressAt >= 1000)) {
-          csvProgressAt = Date.now();
+        if (compact && (scannedAssistantRows % 10000 === 0 || Date.now() - progressAt >= 1000)) {
+          progressAt = Date.now();
           progress('Read ' + scannedAssistantRows.toLocaleString() + ' assistant messages', scannedAssistantRows);
         }
-        const row = workerData.exportCsv ? csvUsageRow(rawRow) : rawRow;
+        const row = compact ? compactUsageRow(rawRow) : rawRow;
         const sessionID = stringValue(row.sessionID);
         const timeCreated = numberValue(row.timeCreated);
         const pausedAt = row.version === 2 && sessionID ? readPauseTime(sessionID, row.messageID) : undefined;
@@ -1272,7 +1305,7 @@ const legacyInventory = (database) => {
         if (workerData.exportCsv && (created === null || !Number.isFinite(new Date(created).getTime()))) throw new Error('Cannot export usage with a missing or invalid message timestamp.');
         if (created === null || (oldestWindowStart !== null && created < oldestWindowStart)) continue;
         assistantRows += 1;
-        if (assistantRows > (workerData.exportCsv ? workerData.maxScannedAssistantRows : workerData.maxAssistantRows)) {
+        if (!workerData.allTimeReport && assistantRows > (workerData.exportCsv ? workerData.maxScannedAssistantRows : workerData.maxAssistantRows)) {
           throw new Error('Usage report exceeds the ' + workerData.maxAssistantRows.toLocaleString() + '-message local aggregation limit.');
         }
         const providerID = stringValue(row.providerID) || stringValue(row.nestedProviderID);
@@ -1327,8 +1360,17 @@ const legacyInventory = (database) => {
           const windowAggregate = aggregates[index];
           const aggregate = windowAggregate.groups.get(route) || emptyAggregate();
           if (promptID) {
-            aggregate.promptIDs.add(promptID);
-            windowAggregate.promptIDs.add(promptID);
+            if (insertReportPrompt) {
+              // Repeated assistant continuations need no additional SQLite work.
+              // The primary key still deduplicates nonconsecutive occurrences.
+              if (aggregate.lastPromptID !== promptID) {
+                insertReportPrompt.run(index, promptID, route);
+                aggregate.lastPromptID = promptID;
+              }
+            } else {
+              aggregate.promptIDs.add(promptID);
+              windowAggregate.promptIDs.add(promptID);
+            }
           }
           if (duration !== null) {
             aggregate.durationMs += duration;
@@ -1341,6 +1383,16 @@ const legacyInventory = (database) => {
           aggregate.cacheRead += cacheRead;
           aggregate.cacheWrite += cacheWrite;
           windowAggregate.groups.set(route, aggregate);
+        }
+      }
+
+      if (workerData.allTimeReport) {
+        progress('Counting usage prompts');
+        for (const row of database.prepare('SELECT window_index, route, count(*) AS count FROM usage_report_prompt GROUP BY window_index, route').iterate()) {
+          aggregates[row.window_index].groups.get(row.route).promptCount = Number(row.count);
+        }
+        for (const row of database.prepare('SELECT window_index, count(DISTINCT prompt_id) AS count FROM usage_report_prompt GROUP BY window_index').iterate()) {
+          aggregates[row.window_index].totalPromptCount = Number(row.count);
         }
       }
 
@@ -1380,13 +1432,13 @@ const legacyInventory = (database) => {
       } else parentPort.postMessage({
         sessionCount: Number(sessionCount),
         windows: aggregates.map((windowAggregate) => ({
-          totalPromptCount: windowAggregate.promptIDs.size,
+          totalPromptCount: windowAggregate.totalPromptCount ?? windowAggregate.promptIDs.size,
           groups: [...windowAggregate.groups.entries()].map(([route, aggregate]) => {
             const separator = route.indexOf('\u0000');
             return {
               providerID: route.slice(0, separator),
               modelID: route.slice(separator + 1),
-              prompts: aggregate.promptIDs.size,
+              prompts: aggregate.promptCount ?? aggregate.promptIDs.size,
               durationMs: aggregate.durationMs,
               durationCount: aggregate.durationCount,
               total: aggregate.total,

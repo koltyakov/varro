@@ -37,6 +37,7 @@ import { createMaterialChipIconElement } from './MaterialChipIcon';
 import { createUiIconElement, UiIcon } from './UiIcon';
 import { Tooltip } from './Tooltip';
 import { RemoteMarkdownImage } from './RemoteMarkdownImage';
+import { MarkdownCitationLinks } from './markdown-citation-links';
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 
 interface MarkdownProps {
@@ -2340,6 +2341,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     return openPathWithResult({
       ...payload,
       kind: 'file',
+      exact: true,
       sessionID: sessionID ?? undefined,
       directory: sessionDirectory(),
     });
@@ -2419,30 +2421,36 @@ export function MarkdownRenderer(props: MarkdownProps) {
     }
   }
 
+  function hydrateLinkTooltip(anchor: HTMLAnchorElement) {
+    if (linkTooltips.has(anchor)) return;
+    const href = anchor.getAttribute('href');
+    const content =
+      anchor.dataset.external === 'true' && href && anchor.textContent?.trim() !== href
+        ? href
+        : anchor.getAttribute('title');
+    if (!content) return;
+    anchor.removeAttribute('title');
+    const [tooltipContent, setContent] = createSignal(content);
+    const host = document.createElement('div');
+    linkTooltips.set(anchor, {
+      dispose: render(
+        () => <Tooltip target={anchor} content={tooltipContent()} delay={400} />,
+        host
+      ),
+      setContent,
+    });
+  }
+
   function hydrateLinkTooltips(root: HTMLDivElement | undefined) {
     if (!root) return;
     for (const anchor of root.querySelectorAll<HTMLAnchorElement>(
       'a[title], a[data-external="true"]'
     )) {
-      if (linkTooltips.has(anchor)) continue;
-      const href = anchor.getAttribute('href');
-      const content =
-        anchor.dataset.external === 'true' && href && anchor.textContent?.trim() !== href
-          ? href
-          : anchor.getAttribute('title');
-      if (!content) continue;
-      anchor.removeAttribute('title');
-      const [tooltipContent, setContent] = createSignal(content);
-      const host = document.createElement('div');
-      linkTooltips.set(anchor, {
-        dispose: render(
-          () => <Tooltip target={anchor} content={tooltipContent()} delay={400} />,
-          host
-        ),
-        setContent,
-      });
+      hydrateLinkTooltip(anchor);
     }
   }
+
+  const citationLinks = new MarkdownCitationLinks(hydrateLinkTooltip);
 
   function disposeInlineSlots(root?: HTMLElement) {
     for (const [element, dispose] of inlineSlotDisposers) {
@@ -2554,6 +2562,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
     if (disposed) return;
     hydrateRenderedMarkdown(root, flags);
     if (flags.remoteImages) hydrateRemoteImages(root);
+    citationLinks.hydrate(root, {
+      directory: sessionDirectory() || state.editorContext.workspacePath || undefined,
+      sessionID: (props.sessionID ?? state.activeSessionId) || undefined,
+    });
     hydrateInlineSlots(root);
     hydrateLinkTooltips(root);
   }
@@ -2813,6 +2825,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       rafId = null;
     }
     stableHighlights.dispose();
+    citationLinks.dispose();
     tailHighlights.dispose();
     disposeInlineSlots();
     disposeRemoteImages();
@@ -2879,7 +2892,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
       e.preventDefault();
       // The host forwards bubbled anchor clicks even when default is prevented.
       e.stopPropagation();
-      if (link.classList.contains('is-unavailable')) return;
+      if (link.classList.contains('is-unavailable') || link.dataset.fileValidated !== 'true')
+        return;
       try {
         const payload = JSON.parse(link.dataset.file || '{}');
         void openFileReference({

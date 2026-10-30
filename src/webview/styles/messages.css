@@ -2390,6 +2390,18 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   border-bottom: 1px dashed transparent;
 }
 
+/* Validation changes actionability, not wrapping or the measured row height. */
+.rendered-markdown code.citation-path {
+  font: inherit;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.rendered-markdown code.citation-path .file-path-icon {
+  visibility: hidden;
+}
+
 .rendered-markdown a.file-path-link:hover {
   text-decoration: none;
   border-bottom-color: currentColor;

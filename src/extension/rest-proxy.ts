@@ -320,7 +320,7 @@ export interface RestProxyCallbacks {
     Partial<Pick<OpenCodeServer, 'isAttachOnly' | 'url'>>;
   contextProvider: Pick<
     ContextProvider,
-    'context' | 'getOpenWorkspaceRoot' | 'readFile' | 'resolvePath'
+    'context' | 'getOpenWorkspaceRoot' | 'readFile' | 'resolvePath' | 'validateCitationPaths'
   > &
     Partial<Pick<ContextProvider, 'findTerminalText'>>;
   providerLimitService: Pick<ProviderLimitService, 'get'>;
@@ -895,6 +895,48 @@ export class RestProxy {
         payload.body
       );
       const requestPathname = new URL(payload.path, 'http://localhost').pathname;
+      if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.citationPaths) {
+        const body = asRecord(payload.body);
+        const paths = body?.paths;
+        if (
+          !Array.isArray(paths) ||
+          paths.length > 64 ||
+          !paths.every(
+            (path): path is string =>
+              typeof path === 'string' && path.length > 0 && path.length <= 4096
+          )
+        )
+          throw new Error('Invalid citation paths');
+        const requestedDirectory = body?.directory;
+        const sessionID = body?.sessionID;
+        if (
+          requestedDirectory !== undefined &&
+          (typeof requestedDirectory !== 'string' ||
+            !requestedDirectory.trim() ||
+            requestedDirectory.length > 4096)
+        )
+          throw new Error('Invalid citation directory');
+        if (sessionID !== undefined && !isSafePersistedSessionId(sessionID))
+          throw new Error('Invalid citation session');
+        const directory =
+          typeof requestedDirectory === 'string'
+            ? requestedDirectory
+            : this.getCurrentWorkspaceResolutionRoot();
+        if (directory) {
+          if (typeof sessionID === 'string') {
+            if (!(await this.authorizeSessionDirectory(sessionID, directory)))
+              throw new Error('Session workspace folder is not open');
+          } else this.requireOpenWorkspaceRoot(directory);
+        }
+        const data = await this.callbacks.contextProvider.validateCitationPaths(
+          paths,
+          directory ?? undefined,
+          request?.controller.signal
+        );
+        request?.controller.signal.throwIfAborted();
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
       if (
         method === 'POST' &&
         /^\/question\/[^/]+\/reply$/.test(requestPathname) &&
@@ -4006,9 +4048,11 @@ export class RestProxy {
       typeof record.agent === 'string' && record.agent
         ? `The selected agent for this turn is ${JSON.stringify(record.agent)}. Follow this agent's current instructions and permissions. Earlier turns may have used a different agent; their mode restrictions and statements about being read-only do not define the current mode.`
         : '';
+    const citationPrompt =
+      'When referencing existing local files or folders, use complete paths relative to the session working directory shown above. Do not use a basename unless the file is directly in that directory, and do not use paths relative to a deeper subdirectory. For locations outside that directory, use absolute paths. File citations are linked only when the exact path exists. Include line ranges when relevant. Label hypothetical paths and placeholders as examples and keep them in fenced code blocks, not file links.';
     return {
       ...record,
-      system: `${existing ? `${existing}\n\nVS Code workspace context:\n` : ''}${scopePrompt}\n\n${permissionPrompt}${agentPrompt ? `\n\n${agentPrompt}` : ''}`,
+      system: `${existing ? `${existing}\n\nVS Code workspace context:\n` : ''}${scopePrompt}\n\n${citationPrompt}\n\n${permissionPrompt}${agentPrompt ? `\n\n${agentPrompt}` : ''}`,
     };
   }
 

@@ -445,6 +445,72 @@ describe('UsageReportService', () => {
     expect(await outcome).toEqual({ csv: 'header\r\n', rowCount: 0 });
   });
 
+  it('lets an all-time report keep scanning past 30 seconds while rows advance', async () => {
+    const request = vi.fn<Request>();
+    const service = new UsageReportService({ request }, vi.fn());
+    const report = service.openReport(true);
+    const worker = workerMocks.instances.at(-1)!;
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    worker.listeners.get('message')?.({
+      progress: 'Read assistant messages',
+      processed: 1_000_001,
+    });
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    worker.listeners.get('message')?.({
+      sessionCount: 1,
+      windows: Array.from({ length: 4 }, () => ({ totalPromptCount: 0, groups: [] })),
+    });
+    await report;
+    expect(reportContent()).toContain('## All time');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(request).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([10_000, 5_000, -1, 100.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1, undefined])(
+    'does not extend an all-time report for invalid or repeated row progress %s',
+    async (processed) => {
+      const request = vi.fn<Request>();
+      const service = new UsageReportService({ request }, vi.fn());
+      const report = service.openReport(true);
+      const rejected = expect(report).rejects.toThrow(
+        'Local OpenCode all-time usage query made no row progress for 60 seconds. Last phase: Still reading.'
+      );
+      const worker = workerMocks.instances.at(-1)!;
+      await vi.advanceTimersByTimeAsync(20_000);
+      worker.listeners.get('message')?.({ progress: 'Read assistant messages', processed: 10_000 });
+      await vi.advanceTimersByTimeAsync(20_000);
+      worker.listeners.get('message')?.({ progress: 'Still reading', processed });
+      await vi.advanceTimersByTimeAsync(39_999);
+      expect(worker.terminate).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await rejected;
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      expect(request).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  );
+
+  it('keeps an absolute ten-minute all-time report deadline despite row progress', async () => {
+    const service = new UsageReportService({ request: vi.fn<Request>() }, vi.fn());
+    const report = service.openReport(true);
+    const rejected = expect(report).rejects.toThrow(
+      'Local OpenCode all-time usage query exceeded the 10-minute scan limit'
+    );
+    const worker = workerMocks.instances.at(-1)!;
+    for (let index = 1; index <= 11; index++) {
+      await vi.advanceTimersByTimeAsync(50_000);
+      worker.listeners.get('message')?.({ progress: 'Reading usage', processed: index * 10_000 });
+    }
+    expect(worker.terminate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(50_000);
+    await rejected;
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('times out a stalled CSV even if it repeats the same row count or phase messages', async () => {
     const operation = readAllTimeUsageCsv();
     const rejected = expect(operation).rejects.toThrow('made no row progress for 60 seconds');

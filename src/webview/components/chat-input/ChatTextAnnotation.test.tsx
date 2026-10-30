@@ -107,10 +107,35 @@ describe('chat text annotation', () => {
     ).toEqual(['Annotate', 'Copy']);
   });
 
+  it.each(['whole', 'partial'])(
+    'only offers Copy when a %s Markdown selection matches plain text',
+    (selection) => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal('navigator', { clipboard: { writeText } });
+      mount();
+      const passage = root.querySelector('p')!;
+      passage.className = 'rendered-markdown';
+      if (selection === 'whole') {
+        select(passage);
+      } else {
+        passage.innerHTML = '<strong>Not selected</strong> Selected chat passage';
+        const range = document.createRange();
+        range.selectNodeContents(passage.lastChild!);
+        window.getSelection()?.addRange(range);
+      }
+      contextMenu(passage);
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+      expect(buttons.map((button) => button.textContent)).toEqual(['Annotate', 'Copy']);
+      buttons.find((button) => button.textContent === 'Copy')!.click();
+      expect(writeText).toHaveBeenCalledExactlyOnceWith('Selected chat passage');
+    }
+  );
+
   it('includes Copy markdown in keyboard menu navigation', async () => {
     mount();
     const passage = root.querySelector('p')!;
     passage.className = 'rendered-markdown';
+    passage.innerHTML = '<strong>Selected chat passage</strong>';
     select(passage);
     contextMenu(passage);
     await Promise.resolve();

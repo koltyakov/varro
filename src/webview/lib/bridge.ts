@@ -220,6 +220,7 @@ export function openPathWithResult(payload: {
   sessionID?: string;
   directory?: string;
   kind?: 'auto' | 'file' | 'directory';
+  exact?: boolean;
 }): Promise<OpenPathResult> {
   const requestId = ++openPathRequestId;
   return new Promise((resolve, reject) => {

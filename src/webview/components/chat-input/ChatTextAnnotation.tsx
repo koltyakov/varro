@@ -84,11 +84,12 @@ export function ChatTextAnnotation(props: {
       CSS.highlights.set(SELECTION_HIGHLIGHT, selectionHighlight);
     }
     const bounds = range.getBoundingClientRect?.();
+    const markdown = selectionMarkdown(range);
     // Saved content is a text snapshot. The temporary highlight may collapse if virtual rows unmount.
     setSelection({
       sessionId: props.sessionId,
       text,
-      markdown: selectionMarkdown(range),
+      markdown: markdown === text ? null : markdown,
       x: event.clientX,
       y: event.clientY,
       bounds: bounds ? { top: bounds.top, bottom: bounds.bottom } : undefined,

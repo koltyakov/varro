@@ -107,6 +107,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       getOpenWorkspaceRoot: vi.fn((path: string) => path),
       readFile: vi.fn(() => Promise.resolve(null as string | null)),
       resolvePath: vi.fn(() => Promise.resolve(null)),
+      validateCitationPaths: vi.fn(() => Promise.resolve([])),
     },
     providerLimitService: {
       get: vi.fn(() =>
@@ -1364,6 +1365,7 @@ describe('RestProxy handleRequest', () => {
         getOpenWorkspaceRoot: vi.fn((path: string) => path),
         readFile: vi.fn(() => Promise.resolve(null)),
         resolvePath: vi.fn(() => Promise.resolve(null)),
+        validateCitationPaths: vi.fn(() => Promise.resolve([])),
       },
     });
 
@@ -1402,6 +1404,10 @@ describe('RestProxy handleRequest', () => {
         'do not retry the denied action or bypass the rejection through another tool, command, or subagent',
         'Continue independent permitted work when possible',
         'explain what is blocked and ask the user how to proceed',
+        'use complete paths relative to the session working directory',
+        'Do not use a basename unless the file is directly in that directory',
+        'For locations outside that directory, use absolute paths',
+        'keep them in fenced code blocks, not file links',
       ]) {
         expect(body).toEqual(
           expect.objectContaining({ system: expect.stringContaining(instruction) })
@@ -2606,6 +2612,74 @@ describe('RestProxy handleRequest', () => {
     });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 61, data: resolved });
   });
+
+  it('validates citation paths locally without reading file contents or forwarding to OpenCode', async () => {
+    const { proxy, callbacks } = createProxy();
+    vi.mocked(callbacks.contextProvider.validateCitationPaths).mockResolvedValue([
+      '/repo/src/app.ts',
+      '/outside/app.ts',
+      null,
+    ]);
+    await proxy.handleRequest(
+      makePayload(62, 'POST', '/varro/citation-paths', {
+        paths: ['src/app.ts', '/outside/app.ts', 'missing.ts'],
+        directory: '/repo',
+      })
+    );
+    expect(callbacks.contextProvider.validateCitationPaths).toHaveBeenCalledWith(
+      ['src/app.ts', '/outside/app.ts', 'missing.ts'],
+      '/repo',
+      undefined
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 62,
+      data: ['/repo/src/app.ts', '/outside/app.ts', null],
+    });
+    expect(callbacks.contextProvider.readFile).not.toHaveBeenCalled();
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    'authorizes the owning citation session directory, authorized=%s',
+    async (authorized) => {
+      const { proxy, callbacks } = createProxy();
+      const authorize = vi.spyOn(proxy, 'authorizeSessionDirectory').mockResolvedValue(authorized);
+      await proxy.handleRequest(
+        makePayload(63, 'POST', '/varro/citation-paths', {
+          paths: ['src/app.ts'],
+          directory: '/repo/packages/app',
+          sessionID: 'session-1',
+        })
+      );
+      expect(authorize).toHaveBeenCalledWith('session-1', '/repo/packages/app');
+      if (authorized)
+        expect(callbacks.contextProvider.validateCitationPaths).toHaveBeenCalledWith(
+          ['src/app.ts'],
+          '/repo/packages/app',
+          undefined
+        );
+      else {
+        expect(callbacks.contextProvider.validateCitationPaths).not.toHaveBeenCalled();
+        expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+          id: 63,
+          error: 'Session workspace folder is not open',
+        });
+      }
+    }
+  );
+
+  it.each([undefined, ['valid.ts', 1], Array.from({ length: 65 }, () => 'file.ts')])(
+    'rejects malformed or oversized citation batches',
+    async (paths) => {
+      const { proxy, callbacks } = createProxy();
+      await proxy.handleRequest(makePayload(64, 'POST', '/varro/citation-paths', { paths }));
+      expect(callbacks.contextProvider.validateCitationPaths).not.toHaveBeenCalled();
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 64,
+        error: 'Invalid citation paths',
+      });
+    }
+  );
 
   function setActiveEditorSelection(
     start: { line: number; character: number },

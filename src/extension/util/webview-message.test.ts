@@ -646,6 +646,25 @@ describe('webview message validation', () => {
     ).toEqual({ type: 'api/request', payload: { id: 1, method: 'GET', path: '/session' } });
   });
 
+  it('preserves exact citation opening and rejects non-boolean flags', () => {
+    const message = { type: 'vscode/open', payload: { path: '/repo/app.ts', exact: true } };
+    expect(parseWebviewMessage(message)).toEqual(message);
+    expect(
+      parseWebviewMessage({ type: 'vscode/open', payload: { path: '/repo/app.ts', exact: 'true' } })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'api/request',
+        payload: {
+          id: 1,
+          method: 'POST',
+          path: '/varro/citation-paths',
+          body: { paths: ['src/app.ts'] },
+        },
+      })
+    ).not.toBeNull();
+  });
+
   it('validates permission automation lease metadata on API requests', () => {
     expect(
       parseWebviewMessage({

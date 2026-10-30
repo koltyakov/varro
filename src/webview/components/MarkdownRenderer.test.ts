@@ -61,6 +61,18 @@ vi.mock('./chat/SessionActionFeedback', () => ({
   showSessionActionFeedback: showSessionActionFeedbackMock,
 }));
 vi.mock('mermaid', () => ({ default: mermaidMock }));
+// These existing tokenizer/action tests assume the cited files are valid.
+// The real asynchronous validation is covered in MarkdownRenderer.citations.test.tsx.
+vi.mock('./markdown-citation-links', () => ({
+  MarkdownCitationLinks: class {
+    hydrate(root?: HTMLElement) {
+      for (const anchor of root?.querySelectorAll<HTMLElement>('a[data-file]') ?? []) {
+        anchor.dataset.fileValidated = 'true';
+      }
+    }
+    dispose() {}
+  },
+}));
 
 beforeAll(installHighlightWorker);
 
@@ -101,6 +113,7 @@ function withoutLinkTooltipAttributes(html: string) {
   for (const anchor of root.querySelectorAll('a')) {
     anchor.removeAttribute('title');
     anchor.removeAttribute('aria-describedby');
+    anchor.removeAttribute('data-file-validated');
   }
   return root.innerHTML;
 }
@@ -1865,6 +1878,7 @@ $$`,
       payload: {
         path: './src/webview/App.tsx',
         kind: 'file',
+        exact: true,
         line: undefined,
         requestId: expect.any(Number),
       },
@@ -1937,7 +1951,7 @@ $$`,
     dispatchAnchorClick(link);
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path, line, endLine, kind: 'file', requestId: expect.any(Number) },
+      payload: { path, line, endLine, kind: 'file', exact: true, requestId: expect.any(Number) },
     });
     const requestId = send.mock.calls[0]![0].payload.requestId;
     window.dispatchEvent(
@@ -1966,7 +1980,7 @@ $$`,
       dispatchAnchorClick(link);
       expect(send).toHaveBeenCalledWith({
         type: 'vscode/open',
-        payload: { path, kind: 'file', requestId: expect.any(Number) },
+        payload: { path, kind: 'file', exact: true, requestId: expect.any(Number) },
       });
       expect(hostClick).not.toHaveBeenCalled();
       const requestId = send.mock.lastCall![0].payload.requestId;
@@ -2041,7 +2055,7 @@ $$`,
         dispatchAnchorClick(link);
         expect(send).toHaveBeenLastCalledWith({
           type: 'vscode/open',
-          payload: { path, line, kind: 'file', requestId: expect.any(Number) },
+          payload: { path, line, kind: 'file', exact: true, requestId: expect.any(Number) },
         });
         const requestId = send.mock.lastCall![0].payload.requestId;
         window.dispatchEvent(
@@ -2069,6 +2083,7 @@ $$`,
         line: 91,
         endLine: 105,
         kind: 'file',
+        exact: true,
         requestId: expect.any(Number),
       },
     });
@@ -2120,7 +2135,13 @@ $$`,
     dispatchAnchorClick(link);
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: 'go.mod', line: 3, kind: 'file', requestId: expect.any(Number) },
+      payload: {
+        path: 'go.mod',
+        line: 3,
+        kind: 'file',
+        exact: true,
+        requestId: expect.any(Number),
+      },
     });
     // SAFETY: The fixture provides the { payload: { requestId: number } } fields read by this statement.
     const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
@@ -2172,6 +2193,7 @@ $$`,
         line: 710,
         endLine: 744,
         kind: 'file',
+        exact: true,
         sessionID: 'owner-session',
         directory: '/repo/packages/app',
         requestId: expect.any(Number),
@@ -2209,6 +2231,7 @@ $$`,
           sessionID: 'modal-session',
           directory,
           kind: 'file',
+          exact: true,
           requestId: expect.any(Number),
         },
       });
@@ -2769,6 +2792,7 @@ $$`,
         path: 'src/shared/protocol.ts',
         line: undefined,
         kind: 'file',
+        exact: true,
         requestId: expect.any(Number),
       },
     });

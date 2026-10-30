@@ -1,5 +1,17 @@
 import cssEscape from 'css.escape';
-import { beforeEach } from 'vitest';
+import type * as Solid from 'solid-js';
+import type * as SolidStore from 'solid-js/store';
+import type * as SolidWeb from 'solid-js/web';
+import { beforeEach, vi } from 'vitest';
+
+// resetModules must reload application state, not split Solid's owner graph between
+// top-level test imports and dynamically imported hooks/components. Mock factories
+// stay cached across resets and return the real runtime without replacing any APIs.
+/* oxlint-disable anti-slop/no-module-mocking -- Preserve the real Solid runtime across application module resets. */
+vi.mock('solid-js', async (importOriginal) => importOriginal<typeof Solid>());
+vi.mock('solid-js/store', async (importOriginal) => importOriginal<typeof SolidStore>());
+vi.mock('solid-js/web', async (importOriginal) => importOriginal<typeof SolidWeb>());
+/* oxlint-enable anti-slop/no-module-mocking */
 
 if (!globalThis.CSS) {
   Object.defineProperty(globalThis, 'CSS', {

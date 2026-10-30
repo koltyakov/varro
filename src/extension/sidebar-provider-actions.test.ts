@@ -702,7 +702,11 @@ describe('createSidebarProviderActions', () => {
     const { actions, deps, contextProvider } = createActionFixture();
     contextProvider.openPath.mockResolvedValueOnce('unavailable');
 
-    await actions.openPath({ path: '/repo/missing.ts', kind: 'file', requestId: 41 });
+    await actions.openPath({ path: '/repo/missing.ts', kind: 'file', exact: true, requestId: 41 });
+    expect(contextProvider.openPath).toHaveBeenCalledWith(
+      '/repo/missing.ts',
+      expect.objectContaining({ exact: true })
+    );
 
     expect(deps.post).toHaveBeenCalledWith({
       type: 'vscode/open-result',

@@ -14,6 +14,7 @@ import { BACKGROUND_OUTPUT_CHUNK_BYTES } from '../../src/shared/background-proce
 import type { BackgroundProcess } from '../../src/shared/background-process';
 import { getSessionPermissionRulesForMode } from '../../src/shared/permission-rules';
 import { normalizeWorkspaceIdentity } from '../../src/shared/workspace-path';
+import { isAbsolutePath, normalizePath } from '../../src/shared/path-display';
 import type {
   Agent,
   AssistantMessage,
@@ -3868,7 +3869,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         '- CommonJS script: **`scripts/vscode-sandbox/suite.cjs`**',
         '- Tool configuration: **`.oxlintrc.json`**',
         '- Markdown guide: `docs/architecture.md`',
-        '- Review finding: `MarkdownRenderer.tsx (line 1447)`',
+        '- Review finding: [MarkdownRenderer.tsx](src/webview/components/MarkdownRenderer.tsx#L1447)',
         '- Missing reference: `missing-file.ts`',
       ].join('\n'),
       BASE_TIME - 4_000
@@ -5730,6 +5731,25 @@ async function handleApiRequest(
 ) {
   const url = new URL(rawPath, 'http://varro.test');
   const path = url.pathname;
+
+  if (method === 'POST' && path === '/varro/citation-paths') {
+    const request = asRecord(body);
+    const paths = request.paths;
+    if (!Array.isArray(paths)) throw new Error('Missing citation paths');
+    const delayMs = Number(new URLSearchParams(window.location.search).get('citationCheckDelayMs'));
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(delayMs, 2000)));
+    const directory = typeof request.directory === 'string' ? request.directory : WORKSPACE_PATH;
+    // Scenario citations represent existing fixture files except explicitly missing references.
+    return paths.map((value) => {
+      if (typeof value !== 'string' || /(?:^|[/\\])missing-file\.ts$/.test(value)) return null;
+      const normalized = normalizePath(value);
+      if (isAbsolutePath(normalized)) return normalized;
+      return decodeURIComponent(new URL(normalized, `file://${directory}/`).pathname).replace(
+        /\/$/,
+        ''
+      );
+    });
+  }
 
   if (method === 'GET' && /^\/session\/[^/]+\/child-task-controls$/.test(path)) {
     const id = decodeURIComponent(path.split('/')[2]!);

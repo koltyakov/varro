@@ -15,6 +15,7 @@ import {
 } from './MessagePart';
 import { toCssUrl } from './UiIcon';
 import * as bridge from '../lib/bridge';
+import { citationPathChecks } from '../lib/citation-path-checks';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -76,6 +77,9 @@ it.each(['text', 'reasoning'] as const)(
   'opens %s citations using the child message owner and directory',
   async (type) => {
     const open = vi.spyOn(bridge, 'openPathWithResult').mockResolvedValue('opened');
+    const checks = vi
+      .spyOn(citationPathChecks, 'peek')
+      .mockReturnValue('/repo/packages/child/models/file.py');
     setState('activeSessionId', 'parent-session');
     setState('editorContext', 'workspacePath', '/other');
     const text = '`models/file.py:710-744`';
@@ -94,12 +98,17 @@ it.each(['text', 'reasoning'] as const)(
     await nextFrame();
     container!.querySelector<HTMLAnchorElement>('a.file-path-link')!.click();
     expect(open).toHaveBeenCalledWith({
-      path: 'models/file.py',
+      path: '/repo/packages/child/models/file.py',
       line: 710,
       endLine: 744,
       kind: 'file',
+      exact: true,
       sessionID: 'child-session',
       directory: '/repo/packages/child',
+    });
+    expect(checks).toHaveBeenCalledWith('models/file.py', {
+      directory: '/repo/packages/child',
+      sessionID: 'child-session',
     });
   }
 );

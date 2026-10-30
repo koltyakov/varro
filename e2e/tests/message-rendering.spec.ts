@@ -226,7 +226,7 @@ test('renders real-session explicit and inferred file links', async ({ page }) =
   await expect(page.locator('.rendered-markdown .hljs-keyword').first()).toBeVisible();
 
   const links = page.locator('.rendered-markdown a.file-path-link');
-  await expect(links).toHaveCount(11);
+  await expect(links).toHaveCount(10);
   await expect(links).toHaveText([
     'global.d.ts',
     'README.md',
@@ -238,7 +238,6 @@ test('renders real-session explicit and inferred file links', async ({ page }) =
     '.oxlintrc.json',
     'docs/architecture.md',
     'MarkdownRenderer.tsx (line 1447)',
-    'missing-file.ts',
   ]);
   await expect(links.locator('code')).toHaveCount(0);
   await expect(page.locator('.assistant-message-flow-item > .rendered-markdown')).not.toContainText(
@@ -282,15 +281,9 @@ test('renders real-session explicit and inferred file links', async ({ page }) =
 
   await expect(license).toHaveCSS('border-bottom-color', 'rgba(0, 0, 0, 0)');
 
-  const missingLink = page.locator('a.file-path-link').filter({ hasText: 'missing-file.ts' });
-  await missingLink.click();
-  await expect(missingLink).toHaveClass(/is-unavailable/);
-  await expect(missingLink).toHaveAttribute('aria-disabled', 'true');
-  await expect(missingLink).not.toHaveAttribute('href', /.+/);
-  await expect(missingLink).toHaveCSS('cursor', 'default');
-  await expect(page.locator('.session-action-feedback.is-warning')).toContainText(
-    'File not found: missing-file.ts'
-  );
+  const missingCode = page.locator('code.citation-path').filter({ hasText: 'missing-file.ts' });
+  await expect(missingCode).toBeVisible();
+  await expect(missingCode).not.toHaveAttribute('href', /.+/);
   const openCountAfterFailure = await getE2EState(page, () => {
     const value = (
       window as Window & {
@@ -299,7 +292,7 @@ test('renders real-session explicit and inferred file links', async ({ page }) =
     ).__varroE2E;
     return value?.openTargets?.length ?? 0;
   });
-  await missingLink.click({ force: true });
+  await missingCode.click();
   await expect
     .poll(() =>
       getE2EState(page, () => {
@@ -327,9 +320,8 @@ test('renders real-session explicit and inferred file links', async ({ page }) =
       })
     )
     .toEqual([
-      { path: 'missing-file.ts', kind: 'file' },
       {
-        path: 'MarkdownRenderer.tsx',
+        path: '/workspace/varro/src/webview/components/MarkdownRenderer.tsx',
         kind: 'file',
         line: 1447,
       },
@@ -348,12 +340,34 @@ test('renders real-session explicit and inferred file links', async ({ page }) =
       })
     )
     .toEqual([
-      { path: 'missing-file.ts', kind: 'file' },
       {
-        path: 'MarkdownRenderer.tsx',
+        path: '/workspace/varro/src/webview/components/MarkdownRenderer.tsx',
         kind: 'file',
         line: 1447,
       },
-      { path: 'README.md', kind: 'file' },
+      { path: '/workspace/varro/README.md', kind: 'file' },
     ]);
+});
+
+test('delayed citation validation preserves wrapping and row height', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=message-rendering&citationCheckDelayMs=1500');
+  await expect(page.locator('.rendered-markdown .hljs-keyword').first()).toBeVisible();
+  const candidate = page.locator('code.citation-path').filter({ hasText: 'README.md' });
+  await expect(candidate).toBeVisible();
+  const before = await candidate.evaluate((element) => ({
+    width: element.getBoundingClientRect().width,
+    height: element.closest('.rendered-markdown')!.getBoundingClientRect().height,
+  }));
+  const link = page.getByRole('link', { name: 'README.md', exact: true });
+  await expect(link).toBeVisible();
+  const after = await link.evaluate((element) => ({
+    width: element.getBoundingClientRect().width,
+    height: element.closest('.rendered-markdown')!.getBoundingClientRect().height,
+  }));
+  expect(Math.abs(after.width - before.width)).toBeLessThan(1);
+  expect(Math.abs(after.height - before.height)).toBeLessThan(1);
+  await expect(
+    page.locator('code.citation-path').filter({ hasText: 'missing-file.ts' })
+  ).toBeVisible();
 });

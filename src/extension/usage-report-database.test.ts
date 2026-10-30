@@ -17,6 +17,13 @@ import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 
 const mocks = vi.hoisted(() => ({ content: '' }));
 const archiveWork = vi.hoisted(() => ({ metadataReads: 0, originalRoleReads: 0, jsonCalls: 0 }));
+const reportWork = vi.hoisted(() => ({
+  promptSetEntries: -1,
+  promptRows: -1,
+  promptInserts: -1,
+  tempStore: -1,
+  tempCache: -1,
+}));
 vi.mock('node:worker_threads', async (importOriginal) => {
   const original = await importOriginal<typeof workerThreads>();
   return {
@@ -27,7 +34,7 @@ vi.mock('node:worker_threads', async (importOriginal) => {
         if (
           typeof source === 'string' &&
           options?.eval &&
-          (asRecord(options.workerData)?.archiveSessions || asRecord(options.workerData)?.exportCsv)
+          Array.isArray(asRecord(options.workerData)?.windows)
         ) {
           source = source
             .replace(
@@ -51,7 +58,21 @@ vi.mock('node:worker_threads', async (importOriginal) => {
               'parentPort.postMessage({ archived: archiveSessions.length });',
               'parentPort.postMessage({ archived: archiveSessions.length, probe });'
             )
-            .replace('rowCount: csvGroups.size });', 'rowCount: csvGroups.size, probe });');
+            .replace('rowCount: csvGroups.size });', 'rowCount: csvGroups.size, probe });')
+            .replace(
+              'insertReportPrompt.run(index, promptID, route);',
+              'probe.promptInserts = (probe.promptInserts ?? 0) + 1; insertReportPrompt.run(index, promptID, route);'
+            )
+            .replace(
+              'sessionCount: Number(sessionCount),',
+              String.raw`probe: { ...probe,
+                promptSetEntries: aggregates.reduce((count, window) => count + window.promptIDs.size + [...window.groups.values()].reduce((sum, group) => sum + group.promptIDs.size, 0), 0),
+                promptRows: workerData.allTimeReport ? database.prepare('SELECT count(*) AS count FROM usage_report_prompt').get().count : 0,
+                promptInserts: probe.promptInserts ?? 0,
+                tempStore: database.prepare('PRAGMA temp_store').get().temp_store,
+                tempCache: database.prepare('PRAGMA temp.cache_size').get().cache_size,
+              }, sessionCount: Number(sessionCount),`
+            );
         }
         super(source, options);
         this.on('message', (value: unknown) => {
@@ -63,6 +84,15 @@ vi.mock('node:worker_threads', async (importOriginal) => {
             archiveWork.metadataReads = probe.metadataReads;
             archiveWork.originalRoleReads = probe.originalRoleReads;
             if (typeof probe.jsonCalls === 'number') archiveWork.jsonCalls = probe.jsonCalls;
+            for (const key of [
+              'promptSetEntries',
+              'promptRows',
+              'promptInserts',
+              'tempStore',
+              'tempCache',
+            ] as const) {
+              if (typeof probe[key] === 'number') reportWork[key] = probe[key];
+            }
           }
         });
       }
@@ -111,7 +141,7 @@ async function fixture(versions: number[]) {
   if (versions.includes(2)) {
     database.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, time_updated INTEGER, metadata TEXT);
       CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, data TEXT);
-      CREATE INDEX session_message_session_type_seq_idx ON session_message(session_id, type, seq);`);
+      CREATE UNIQUE INDEX session_message_session_seq_idx ON session_message(session_id, seq);`);
   }
   const now = Date.now();
   function add(version: number, id: string, updated: number, model: string, sourceID?: string) {
@@ -162,6 +192,126 @@ async function fixture(versions: number[]) {
 }
 
 describe('local usage database versions', () => {
+  it('reports over one million assistant messages without the recent-report aggregation or scan caps', async () => {
+    const { database, report, now } = await fixture([2]);
+    const count = 1_000_001;
+    database.prepare("INSERT INTO session_v2 VALUES ('all-history',?,NULL)").run(now);
+    database.exec("INSERT INTO session_message VALUES ('prompt','all-history','user',0,'{}');");
+    const body = JSON.stringify({
+      model: { providerID: 'provider', id: 'model' },
+      time: { created: now, completed: now },
+      tokens: { input: 10, output: 5 },
+    });
+    database
+      .prepare(
+        "WITH RECURSIVE n(value) AS (VALUES(1) UNION ALL SELECT value+1 FROM n WHERE value < ?) INSERT INTO session_message SELECT 'reply-'||value,'all-history','assistant',value,? FROM n"
+      )
+      .run(count, body);
+    await expect(
+      new UsageReportService({ request: vi.fn() }, vi.fn()).openReport()
+    ).rejects.toThrow('250,000-message local aggregation limit');
+    const content = await report(true);
+    for (const title of ['Today', 'Last 7 rolling days', 'Last 30 rolling days', 'All time']) {
+      expect(content.split(`## ${title}\n`)[1]?.split('\n## ')[0]).toContain(
+        '| provider | model | 1 | 15,000,015 | <1s | 10,000,010 | 5,000,005 |'
+      );
+    }
+    expect(reportWork).toEqual({
+      promptSetEntries: 0,
+      promptRows: 4,
+      promptInserts: 4,
+      tempStore: 1,
+      tempCache: -8192,
+    });
+  }, 60_000);
+
+  it('deduplicates all-time prompts across models, nonconsecutive replies, sessions, and windows', async () => {
+    const { database, report, now } = await fixture([2]);
+    database.exec("INSERT INTO session_v2 VALUES ('first',1,NULL),('second',1,NULL);");
+    const insert = database.prepare('INSERT INTO session_message VALUES (?, ?, ?, ?, ?)');
+    for (const sessionID of ['first', 'second']) {
+      for (let index = 0; index < 12; index++) {
+        insert.run(
+          `${sessionID}-${index}`,
+          sessionID,
+          'assistant',
+          index,
+          JSON.stringify({
+            parentID: `prompt-${index % 3}`,
+            model: { providerID: 'provider', id: `model-${index % 2}` },
+            time: { created: now - 2000, completed: now - 1000 },
+            tokens: { input: 1, output: 1 },
+          })
+        );
+      }
+    }
+    const older = now - 40 * 24 * 60 * 60 * 1000;
+    insert.run(
+      'older',
+      'first',
+      'assistant',
+      12,
+      JSON.stringify({
+        parentID: 'old-prompt',
+        model: { providerID: 'provider', id: 'model-0' },
+        time: { created: older, completed: older + 1000 },
+        tokens: { input: 1, output: 1 },
+      })
+    );
+    const content = await report(true);
+    for (const title of ['Today', 'Last 7 rolling days', 'Last 30 rolling days']) {
+      const section = content.split(`## ${title}\n`)[1]?.split('\n## ')[0];
+      expect(section).toContain('| provider | model-0 | 6 | 24 | 12s |');
+      expect(section).toContain('| provider | model-1 | 6 | 24 | 12s |');
+      expect(section).toContain('| **Total** |  | 6 | 48 | 24s |');
+    }
+    const allTime = content.split('## All time\n')[1];
+    expect(allTime).toContain('| provider | model-0 | 7 | 26 | 13s |');
+    expect(allTime).toContain('| provider | model-1 | 6 | 24 | 12s |');
+    expect(allTime).toContain('| **Total** |  | 7 | 50 | 25s |');
+    expect(reportWork.promptSetEntries).toBe(0);
+    expect(reportWork.promptRows).toBe(49);
+  });
+
+  it('retains the provider/model route bound for all-time reports', async () => {
+    const { database, report, now } = await fixture([2]);
+    database.exec("INSERT INTO session_v2 VALUES ('many-models',1,NULL);");
+    const body = JSON.stringify({
+      model: { providerID: 'provider', id: 'model' },
+      time: { created: now, completed: now },
+      tokens: { input: 1, output: 1 },
+    });
+    database
+      .prepare(
+        "WITH RECURSIVE n(value) AS (VALUES(1) UNION ALL SELECT value+1 FROM n WHERE value < 4097) INSERT INTO session_message SELECT 'reply-'||value,'many-models','assistant',value,json_set(?,'$.model.id','model-'||value) FROM n"
+      )
+      .run(body);
+    await expect(report(true)).rejects.toThrow('4,096-route local aggregation limit');
+  });
+
+  it('bounds JSON extraction for an all-time report with long assistant runs', async () => {
+    const { database, report, now } = await fixture([2]);
+    const count = 2_001;
+    database.exec(
+      "INSERT INTO session_v2 VALUES ('long-history',1,NULL); INSERT INTO session_message VALUES ('prompt','long-history','user',0,'{}');"
+    );
+    const body = JSON.stringify({
+      model: { providerID: 'provider', id: 'model' },
+      time: { created: now - 1000, completed: now },
+      tokens: { input: 10, output: 5 },
+      content: 'x'.repeat(8 * 1024),
+    });
+    database
+      .prepare(
+        "WITH RECURSIVE n(value) AS (VALUES(1) UNION ALL SELECT value+1 FROM n WHERE value < ?) INSERT INTO session_message SELECT 'reply-'||value,'long-history','assistant',value,? FROM n"
+      )
+      .run(count, body);
+    archiveWork.jsonCalls = 0;
+    const content = await report(true);
+    expect(content).toContain('| provider | model | 1 | 30,015 | 33m 21s |');
+    expect(archiveWork.jsonCalls).toBeLessThanOrEqual(2 * count + 10);
+  }, 30_000);
+
   it('cancels a real CSV scan without changing the source history', async () => {
     const { database } = await fixture([2]);
     database.exec("INSERT INTO session_v2 VALUES ('cancel-history',1,NULL);");

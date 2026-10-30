@@ -25,6 +25,7 @@ import { formatDatabaseAttachmentReference } from '../../../shared/database-cont
 import { formatInlineProblem, problemReferenceMarker } from '../../lib/editor-problems';
 import { pastedTextDataUrl } from '../../../shared/pasted-text';
 import { createChatAnnotation } from '../../../shared/chat-annotation';
+import { citationPathChecks } from '../../lib/citation-path-checks';
 
 const selectSessionMock = vi.hoisted(() => vi.fn());
 const retryMessageMock = vi.hoisted(() => vi.fn());
@@ -361,6 +362,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  vi.restoreAllMocks();
   cleanup = undefined;
   container?.remove();
   container = null;
@@ -1435,6 +1437,7 @@ describe('UserMessageContent', () => {
   it.each(['src/', 'file:///repo/src/'])(
     'offers complete label Copy and Copy path for a user-message folder link to %s',
     (href) => {
+      vi.spyOn(citationPathChecks, 'peek').mockReturnValue('/repo/src');
       setAppState('editorContext', {
         workspacePath: '/repo',
         activeFile: null,

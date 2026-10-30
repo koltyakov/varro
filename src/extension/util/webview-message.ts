@@ -844,11 +844,13 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (kind !== undefined && kind !== 'auto' && kind !== 'file' && kind !== 'directory')
         return null;
       if (view !== undefined && view !== 'diff') return null;
+      if (payload?.exact !== undefined && typeof payload.exact !== 'boolean') return null;
       const openPayload: Extract<WebviewMessage, { type: 'vscode/open' }>['payload'] = { path };
       if (line !== undefined && line !== null) openPayload.line = line;
       if (endLine !== undefined && endLine !== null) openPayload.endLine = endLine;
       if (kind) openPayload.kind = kind;
       if (view) openPayload.view = view;
+      if (payload?.exact !== undefined) openPayload.exact = payload.exact;
       if (sessionID) openPayload.sessionID = sessionID;
       if (directory) openPayload.directory = directory;
       if (requestId !== undefined && requestId !== null) openPayload.requestId = requestId;
@@ -1876,6 +1878,7 @@ const API_ROUTES: ApiRoute[] = [
   route(VARRO_API_ENDPOINTS.workspaceFilePick, methodsNoQuery('GET')),
   route(VARRO_API_ENDPOINTS.copiedSelectionMatch, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.remoteImage, methodsNoQuery('POST')),
+  route(VARRO_API_ENDPOINTS.citationPaths, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.workspaceProblems, methodsNoQuery('GET')),
   route(
     VARRO_API_ENDPOINTS.sessionTransferHide,

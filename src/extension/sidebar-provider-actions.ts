@@ -329,6 +329,7 @@ export function createSidebarProviderActions(
           view: payload.view,
           workspaceDirectory,
           sessionDirectory,
+          exact: payload.exact,
         });
         if (payload.requestId !== undefined) {
           deps.post({

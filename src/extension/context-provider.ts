@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, join, parse, relative, sep } from 'path';
+import { dirname, isAbsolute, join, parse, relative, resolve as resolvePath, sep } from 'path';
 import type { EditorContext, EditorTextContext } from '../shared/protocol';
 import { asRecord, isNumber, isString } from '../shared/type-utils';
 import { isSameWorkspacePath } from '../shared/workspace-path';
@@ -77,6 +77,10 @@ export class ContextProvider implements vscode.Disposable {
   private onChange: (ctx: EditorContext) => void;
   private selectedWorkspacePath: string | null;
   private readonly citationFileSearch = new CitationFileSearch();
+  private readonly citationPathCache = new Map<
+    string,
+    { expiresAt: number; result: Promise<string | null> }
+  >();
 
   constructor(
     onChange: (ctx: EditorContext) => void,
@@ -798,6 +802,55 @@ export class ContextProvider implements vscode.Disposable {
     }
   }
 
+  /** Metadata-only checks against one project root, never basename discovery. */
+  async validateCitationPaths(
+    paths: readonly string[],
+    directory?: string,
+    signal?: AbortSignal
+  ): Promise<Array<string | null>> {
+    const results: Array<string | null> = Array.from({ length: paths.length }, () => null);
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(8, paths.length) }, async () => {
+        while (next < paths.length) {
+          signal?.throwIfAborted();
+          const index = next++;
+          const input = paths[index]!.trim();
+          if (!input || (!isAbsolute(input) && !directory)) continue;
+          const path = isAbsolute(input) ? resolvePath(input) : resolvePath(directory!, input);
+          // References outside the project must be absolute, not ../ aliases.
+          const fromRoot = directory ? relative(directory, path) : '';
+          if (
+            !isAbsolute(input) &&
+            (isAbsolute(fromRoot) || fromRoot === '..' || fromRoot.startsWith(`..${sep}`))
+          )
+            continue;
+          let cached = this.citationPathCache.get(path);
+          if (!cached || cached.expiresAt <= Date.now()) {
+            const result = vscode.workspace.fs.stat(vscode.Uri.file(path)).then(
+              (stat) =>
+                stat.type & (vscode.FileType.File | vscode.FileType.Directory) ? path : null,
+              () => null // Missing or inaccessible paths remain plain code.
+            );
+            cached = { result: Promise.resolve(result), expiresAt: Infinity };
+            this.citationPathCache.delete(path);
+            this.citationPathCache.set(path, cached);
+            if (this.citationPathCache.size > 2048) {
+              this.citationPathCache.delete(this.citationPathCache.keys().next().value!);
+            }
+          }
+          const value = await cached.result;
+          if (cached.expiresAt === Infinity) {
+            cached.expiresAt = Date.now() + (value ? 15_000 : 1_000);
+          }
+          results[index] = value;
+        }
+      })
+    );
+    signal?.throwIfAborted();
+    return results;
+  }
+
   async openPath(
     path: string,
     options?: {
@@ -808,6 +861,7 @@ export class ContextProvider implements vscode.Disposable {
       workspaceDirectory?: string;
       /** Session directory already authorized by the action handler, including nested projects. */
       sessionDirectory?: string;
+      exact?: boolean;
     }
   ): Promise<'opened' | 'unavailable' | 'cancelled'> {
     try {
@@ -829,7 +883,7 @@ export class ContextProvider implements vscode.Disposable {
         allowMissing: options?.view === 'diff',
         workspaceDirectory: options?.workspaceDirectory,
       });
-      if (!resolved && options?.view !== 'diff') {
+      if (!resolved && !options?.exact && options?.view !== 'diff') {
         const missingAbsolute = isAbsolute(input);
         const suffix = missingAbsolute
           ? input.split(/[\\/]/).at(-1) || ''
@@ -879,7 +933,13 @@ export class ContextProvider implements vscode.Disposable {
         }
       }
       // Search the owning session before accepting a namesake at the workspace root.
-      if (!resolved && !isAbsolute(input) && options?.sessionDirectory && options.view !== 'diff') {
+      if (
+        !resolved &&
+        !options?.exact &&
+        !isAbsolute(input) &&
+        options?.sessionDirectory &&
+        options.view !== 'diff'
+      ) {
         const sessionWorkspace = getWorkingFolder(vscode.Uri.file(options.sessionDirectory));
         if (sessionWorkspace) {
           resolved = await this.resolveWorkspaceUri(input, {
@@ -1051,6 +1111,7 @@ export class ContextProvider implements vscode.Disposable {
 
   dispose() {
     this.citationFileSearch.dispose();
+    this.citationPathCache.clear();
     if (this.terminalHistorySaveTimer) {
       clearTimeout(this.terminalHistorySaveTimer);
       this.terminalHistorySaveTimer = null;
