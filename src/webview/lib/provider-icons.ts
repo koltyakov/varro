@@ -23,6 +23,7 @@ const PROVIDER_ICON_MAP = new Map<string, string>(
   Object.entries({
     openai: openaiIcon,
     anthropic: anthropicIcon,
+    'claude-agent': anthropicIcon,
     'claude-code': claudeIcon,
     'varro-claude': claudeIcon,
     openrouter: openrouterIcon,
@@ -50,7 +51,7 @@ export function getProviderIcon(
   providerID: string | null | undefined,
   providerName?: string | null
 ) {
-  if (providerName === 'Claude Code') return claudeIcon;
+  if (providerName === 'Claude Code' && providerID !== 'claude-agent') return claudeIcon;
   if (providerID) {
     const icon = PROVIDER_ICON_MAP.get(providerID);
     if (icon) return icon;

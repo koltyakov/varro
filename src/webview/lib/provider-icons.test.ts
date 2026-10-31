@@ -35,9 +35,14 @@ describe('getProviderIcon', () => {
     expect(getProviderIcon('custom-provider', 'claude code')).toBeNull();
   });
 
+  it('uses the Anthropic icon for claude-agent even when named Claude Code', () => {
+    expect(getProviderIcon('claude-agent', 'Claude Code')).toBe(anthropicIcon);
+  });
+
   it.each([
     ['openai', openaiIcon],
     ['anthropic', anthropicIcon],
+    ['claude-agent', anthropicIcon],
     ['claude-code', claudeIcon],
     ['varro-claude', claudeIcon],
     ['openrouter', openrouterIcon],

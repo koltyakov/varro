@@ -17,6 +17,7 @@ import { deriveSelectedModelFromSession } from '../../hooks/routing-state';
 import { prepareForMessageBlockRemoval } from '../../lib/message-list-layout';
 import { sendMessage } from '../../hooks/useOpenCode';
 import { xmarkIcon } from '../../lib/ui-icons';
+import { InlineCodeText } from '../InlineCodeText';
 import { UiIcon } from '../UiIcon';
 import { Tooltip } from '../Tooltip';
 
@@ -318,7 +319,9 @@ export function FollowupSuggestions(props: {
                 <UiIcon source={xmarkIcon} width={12} height={12} aria-hidden="true" />
               </button>
             </Tooltip>
-            <p class="followup-suggestions-summary">{value().summary}</p>
+            <p class="followup-suggestions-summary">
+              <InlineCodeText text={value().summary} />
+            </p>
             <div class="followup-suggestions-actions">
               <For each={value().actions}>
                 {(action) => (
@@ -328,7 +331,7 @@ export function FollowupSuggestions(props: {
                       disabled={sending() || !current()}
                       onClick={() => void send(action)}
                     >
-                      {action.title}
+                      <InlineCodeText text={action.title} />
                     </button>
                   </Tooltip>
                 )}

@@ -91,42 +91,80 @@ describe('sortProviderModels', () => {
     ]);
   });
 
-  it('orders varro-claude tiers as Fable, Opus, Sonnet, then Haiku', () => {
-    const models = [
-      createModel('haiku', 'Haiku', { release_date: '2027-01-01' }),
-      createModel('sonnet', 'Sonnet', { release_date: '2026-01-01' }),
-      createModel('opus', 'Opus', { release_date: '2025-01-01' }),
-      createModel('fable', 'Fable', { release_date: '2024-01-01' }),
-    ];
+  describe.each(['varro-claude', 'claude-agent'])('%s model ordering', (providerID) => {
+    it('orders tiers as Fable, Opus, Sonnet, then Haiku', () => {
+      const models = [
+        createModel('haiku', 'Haiku', { release_date: '2027-01-01' }),
+        createModel('sonnet', 'Sonnet', { release_date: '2026-01-01' }),
+        createModel('opus', 'Opus', { release_date: '2025-01-01' }),
+        createModel('fable', 'Fable', { release_date: '2024-01-01' }),
+      ];
 
-    expect(sortProviderModels(models, 'varro-claude').map((model) => model.id)).toEqual([
-      'fable',
-      'opus',
-      'sonnet',
-      'haiku',
-    ]);
-    expect(models.map((model) => model.id)).toEqual(['haiku', 'sonnet', 'opus', 'fable']);
+      expect(sortProviderModels(models, providerID).map((model) => model.id)).toEqual([
+        'fable',
+        'opus',
+        'sonnet',
+        'haiku',
+      ]);
+      expect(models.map((model) => model.id)).toEqual(['haiku', 'sonnet', 'opus', 'fable']);
+    });
+
+    it('matches Claude tiers by ID or name and retains release and deprecation ordering', () => {
+      const models = [
+        createModel('default', 'Default', { release_date: '2028-01-01' }),
+        createModel('claude-opus-4-1', 'Older model', { release_date: '2025-08-05' }),
+        createModel('latest', 'Claude OPUS 4.8', { release_date: '2026-05-28' }),
+        createModel('claude-sonnet-4-6', 'Claude Sonnet 4.6', { release_date: '2026-02-17' }),
+        createModel('claude-fable-old', 'Claude Fable', { status: 'deprecated' }),
+      ];
+
+      expect(sortProviderModels(models, providerID).map((model) => model.id)).toEqual([
+        'latest',
+        'claude-opus-4-1',
+        'claude-sonnet-4-6',
+        'default',
+        'claude-fable-old',
+      ]);
+    });
+
+    it('orders versions numerically from largest to smallest within each tier before release dates', () => {
+      const models = [
+        createModel('claude-opus-4-9', 'Claude Opus 4.9', { release_date: '2028-01-01' }),
+        createModel('claude-sonnet-5', 'Claude Sonnet 5'),
+        createModel('claude-3-7-sonnet', 'Claude 3.7 Sonnet'),
+        createModel('claude-opus-4-10', 'Claude Opus 4.10', { release_date: '2026-01-01' }),
+        createModel('claude-opus-5', 'Claude Opus 5'),
+        createModel('claude-opus-4-8-20261030', 'Older model'),
+        createModel('latest-fable', 'Claude Fable 1.2'),
+      ];
+
+      expect(sortProviderModels(models, providerID).map((model) => model.id)).toEqual([
+        'latest-fable',
+        'claude-opus-5',
+        'claude-opus-4-10',
+        'claude-opus-4-9',
+        'claude-opus-4-8-20261030',
+        'claude-sonnet-5',
+        'claude-3-7-sonnet',
+      ]);
+    });
+
+    it('uses release dates to break version ties and keeps deprecated models last', () => {
+      const models = [
+        createModel('claude-opus-4-8-20260528', 'Older model', { release_date: '2026-05-28' }),
+        createModel('claude-opus-4-8', 'Claude Opus 4.8', { release_date: '2026-06-01' }),
+        createModel('claude-opus-5', 'Claude Opus 5', { status: 'deprecated' }),
+      ];
+
+      expect(sortProviderModels(models, providerID).map((model) => model.id)).toEqual([
+        'claude-opus-4-8',
+        'claude-opus-4-8-20260528',
+        'claude-opus-5',
+      ]);
+    });
   });
 
-  it('matches Claude tiers by ID or name and retains release and deprecation ordering', () => {
-    const models = [
-      createModel('default', 'Default', { release_date: '2028-01-01' }),
-      createModel('claude-opus-4-1', 'Older model', { release_date: '2025-08-05' }),
-      createModel('latest', 'Claude OPUS 4.8', { release_date: '2026-05-28' }),
-      createModel('claude-sonnet-4-6', 'Claude Sonnet 4.6', { release_date: '2026-02-17' }),
-      createModel('claude-fable-old', 'Claude Fable', { status: 'deprecated' }),
-    ];
-
-    expect(sortProviderModels(models, 'varro-claude').map((model) => model.id)).toEqual([
-      'latest',
-      'claude-opus-4-1',
-      'claude-sonnet-4-6',
-      'default',
-      'claude-fable-old',
-    ]);
-  });
-
-  it.each([undefined, 'anthropic', 'varro-claude-copy'])(
+  it.each([undefined, 'anthropic', 'varro-claude-copy', 'claude-agent-copy'])(
     'does not apply Claude tier ordering to provider %s',
     (providerID) => {
       const models = [

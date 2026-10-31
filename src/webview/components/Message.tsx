@@ -76,6 +76,7 @@ import { isString } from '../lib/runtime-values';
 import { playIcon, xmarkCircleSolidIcon } from '../lib/ui-icons';
 import { getStopProcessActionLabel } from '../lib/background-process-action';
 import { getFollowupActionTitle } from '../../shared/followups';
+import { InlineCodeText } from './InlineCodeText';
 import { UiIcon } from './UiIcon';
 import { isPlanImplementationMessage } from './message-list/plan-actions';
 import { getPresentationPartKey } from './message-list/streaming-presentation';
@@ -766,8 +767,18 @@ export function Message(props: {
                         width={14}
                         height={14}
                       />
-                      {followupActionTitle() ??
-                        (isPlanImplementation() ? 'Implement the plan' : stopProcessActionLabel())}
+                      <Show
+                        when={followupActionTitle()}
+                        fallback={
+                          isPlanImplementation() ? 'Implement the plan' : stopProcessActionLabel()
+                        }
+                      >
+                        {(title) => (
+                          <span>
+                            <InlineCodeText text={title()} />
+                          </span>
+                        )}
+                      </Show>
                     </span>
                   }
                 >

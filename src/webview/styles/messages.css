@@ -2728,7 +2728,8 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .remote-markdown-ima
   object-fit: contain;
 }
 
-.rendered-markdown code {
+.rendered-markdown code,
+.inline-code-text {
   font-family: var(--font-mono);
   font-size: 0.89em;
   color: var(--color-vscode-preformat-fg);

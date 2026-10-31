@@ -114,6 +114,23 @@ function mount(initialWorking = true, agent = 'build') {
 }
 
 describe('FollowupSuggestions', () => {
+  it('renders backticked text in the summary and actions as inline code', async () => {
+    vi.mocked(client.varro.followups).mockResolvedValue({
+      summary: 'The `parseToken` helper still fails.',
+      actions: [{ title: 'Fix `parseToken`', prompt: 'Fix the `parseToken` helper.' }],
+    });
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    const summaryCode = container.querySelector('.followup-suggestions-summary code');
+    const actionCode = container.querySelector('.followup-suggestions-actions button code');
+    expect(summaryCode?.textContent).toBe('parseToken');
+    expect(actionCode?.textContent).toBe('parseToken');
+    expect(container.querySelector('.followup-suggestions-actions button')?.textContent).toBe(
+      'Fix parseToken'
+    );
+  });
+
   it('does not send an action dismissed in another window', async () => {
     const { setWorking } = mount();
     setWorking(false);

@@ -43,6 +43,16 @@ function claudeModelTier(model: ProviderModel) {
   return tier >= 0 ? tier : CLAUDE_MODEL_TIER_ORDER.length;
 }
 
+function claudeModelVersion(model: ProviderModel): number[] {
+  for (const identity of [model.name, model.id]) {
+    const version = identity.match(
+      /\b(?:claude|fable|opus|sonnet|haiku)[-\s]+v?(\d+(?:[.-]\d{1,3}\b)*)\b/i
+    )?.[1];
+    if (version) return version.split(/[.-]/).map(Number);
+  }
+  return [];
+}
+
 function modelReleaseTime(model: ProviderModel) {
   if (!model.release_date) return null;
   const time = Date.parse(model.release_date);
@@ -121,9 +131,16 @@ export function sortProviderModels(
     const deprecatedOrder = Number(a.status === 'deprecated') - Number(b.status === 'deprecated');
     if (deprecatedOrder !== 0) return deprecatedOrder;
 
-    if (providerID === 'varro-claude') {
+    if (providerID === 'varro-claude' || providerID === 'claude-agent') {
       const claudeTierOrder = claudeModelTier(a) - claudeModelTier(b);
       if (claudeTierOrder !== 0) return claudeTierOrder;
+
+      const aVersion = claudeModelVersion(a);
+      const bVersion = claudeModelVersion(b);
+      for (let index = 0; index < Math.max(aVersion.length, bVersion.length); index++) {
+        const versionOrder = (bVersion[index] ?? 0) - (aVersion[index] ?? 0);
+        if (versionOrder !== 0) return versionOrder;
+      }
     }
 
     const aGptTier = gptModelTier(a);
