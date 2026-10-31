@@ -384,6 +384,50 @@ test('renders real-session explicit and inferred file links', async ({ page }) =
     ]);
 });
 
+test('delayed symbol resolution preserves code geometry and opens only verified definitions', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 900 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=message-rendering&symbolCitations&citationCheckDelayMs=1500'
+  );
+  const code = page.locator('code[data-citation-symbol]').filter({ hasText: 'loss_weights()' });
+  await expect(code).toBeVisible();
+  await expect(page.getByRole('link', { name: 'loss_weights()', exact: true })).toHaveCount(0);
+  const geometry = () =>
+    code.evaluate((element) => ({
+      width: element.getBoundingClientRect().width,
+      height: element.getBoundingClientRect().height,
+      rowHeight: element.closest('.rendered-markdown')!.getBoundingClientRect().height,
+    }));
+  const before = await geometry();
+  const link = page.getByRole('link', { name: 'loss_weights()', exact: true });
+  await expect(link).toBeVisible();
+  expect(await geometry()).toEqual(before);
+  await expect(
+    page.getByRole('link', { name: 'CustomMultiTaskRLBenchEnv', exact: true })
+  ).toBeVisible();
+  await expect(page.getByRole('link', { name: 'soft_updates()', exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole('link', { name: 'transporter / franka / clip', exact: true })
+  ).toHaveCount(0);
+  await link.focus();
+  await expect(page.getByRole('tooltip')).toHaveText('/workspace/varro/src/loss.py:12');
+  await link.press('Enter');
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (
+          window as Window & {
+            __varroE2E?: { openTargets?: Array<{ path: string; line?: number; kind?: string }> };
+          }
+        ).__varroE2E;
+        return value?.openTargets ?? [];
+      })
+    )
+    .toEqual([{ path: '/workspace/varro/src/loss.py', line: 12, kind: 'file' }]);
+});
+
 test('delayed citation validation preserves wrapping and row height', async ({ page }) => {
   await page.setViewportSize({ width: 486, height: 900 });
   await page.goto('/e2e/harness/index.html?scenario=message-rendering&citationCheckDelayMs=1500');

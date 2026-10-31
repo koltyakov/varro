@@ -3871,6 +3871,13 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         '- Markdown guide: `docs/architecture.md`',
         '- Review finding: [MarkdownRenderer.tsx](src/webview/components/MarkdownRenderer.tsx#L1447)',
         '- Missing reference: `missing-file.ts`',
+        ...(new URLSearchParams(window.location.search).has('symbolCitations')
+          ? [
+              '',
+              'Symbols: `loss_weights()`, `soft_updates()`, `stack_on_channel()`, and `CustomMultiTaskRLBenchEnv`.',
+              'Grouped modules: `transporter / franka / clip`.',
+            ]
+          : []),
       ].join('\n'),
       BASE_TIME - 4_000
     );
@@ -5731,6 +5738,22 @@ async function handleApiRequest(
 ) {
   const url = new URL(rawPath, 'http://varro.test');
   const path = url.pathname;
+
+  if (method === 'POST' && path === '/varro/citation-symbols') {
+    const request = asRecord(body);
+    if (!Array.isArray(request.symbols)) throw new Error('Missing citation symbols');
+    const delayMs = Number(new URLSearchParams(window.location.search).get('citationCheckDelayMs'));
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(delayMs, 2000)));
+    const targets = new Map([
+      ['loss_weights()', { path: `${WORKSPACE_PATH}/src/loss.py`, line: 12 }],
+      ['stack_on_channel()', { path: `${WORKSPACE_PATH}/src/stack.py`, line: 56 }],
+      ['CustomMultiTaskRLBenchEnv', { path: `${WORKSPACE_PATH}/src/env.py`, line: 78 }],
+    ]);
+    // soft_updates has ambiguous definitions in this fixture and must remain code.
+    return request.symbols.map((value) =>
+      typeof value === 'string' ? (targets.get(value) ?? null) : null
+    );
+  }
 
   if (method === 'POST' && path === '/varro/citation-paths') {
     const request = asRecord(body);

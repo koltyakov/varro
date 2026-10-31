@@ -320,7 +320,12 @@ export interface RestProxyCallbacks {
     Partial<Pick<OpenCodeServer, 'isAttachOnly' | 'url'>>;
   contextProvider: Pick<
     ContextProvider,
-    'context' | 'getOpenWorkspaceRoot' | 'readFile' | 'resolvePath' | 'validateCitationPaths'
+    | 'context'
+    | 'getOpenWorkspaceRoot'
+    | 'readFile'
+    | 'resolvePath'
+    | 'validateCitationPaths'
+    | 'resolveCitationSymbols'
   > &
     Partial<Pick<ContextProvider, 'findTerminalText'>>;
   providerLimitService: Pick<ProviderLimitService, 'get'>;
@@ -895,18 +900,25 @@ export class RestProxy {
         payload.body
       );
       const requestPathname = new URL(payload.path, 'http://localhost').pathname;
-      if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.citationPaths) {
+      if (
+        method === 'POST' &&
+        (requestPathname === VARRO_API_ENDPOINTS.citationPaths ||
+          requestPathname === VARRO_API_ENDPOINTS.citationSymbols)
+      ) {
+        const symbolRequest = requestPathname === VARRO_API_ENDPOINTS.citationSymbols;
         const body = asRecord(payload.body);
-        const paths = body?.paths;
+        const paths = symbolRequest ? body?.symbols : body?.paths;
         if (
           !Array.isArray(paths) ||
-          paths.length > 64 ||
+          paths.length > (symbolRequest ? 32 : 64) ||
           !paths.every(
             (path): path is string =>
-              typeof path === 'string' && path.length > 0 && path.length <= 4096
+              typeof path === 'string' &&
+              path.length > 0 &&
+              path.length <= (symbolRequest ? 128 : 4096)
           )
         )
-          throw new Error('Invalid citation paths');
+          throw new Error(symbolRequest ? 'Invalid citation symbols' : 'Invalid citation paths');
         const requestedDirectory = body?.directory;
         const sessionID = body?.sessionID;
         if (
@@ -928,11 +940,17 @@ export class RestProxy {
               throw new Error('Session workspace folder is not open');
           } else this.requireOpenWorkspaceRoot(directory);
         }
-        const data = await this.callbacks.contextProvider.validateCitationPaths(
-          paths,
-          directory ?? undefined,
-          request?.controller.signal
-        );
+        const data = symbolRequest
+          ? await this.callbacks.contextProvider.resolveCitationSymbols(
+              paths,
+              directory ?? undefined,
+              request?.controller.signal
+            )
+          : await this.callbacks.contextProvider.validateCitationPaths(
+              paths,
+              directory ?? undefined,
+              request?.controller.signal
+            );
         request?.controller.signal.throwIfAborted();
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
@@ -4049,7 +4067,7 @@ export class RestProxy {
         ? `The selected agent for this turn is ${JSON.stringify(record.agent)}. Follow this agent's current instructions and permissions. Earlier turns may have used a different agent; their mode restrictions and statements about being read-only do not define the current mode.`
         : '';
     const citationPrompt =
-      'When referencing existing local files or folders, use complete paths relative to the session working directory shown above. Do not use a basename unless the file is directly in that directory, and do not use paths relative to a deeper subdirectory. For locations outside that directory, use absolute paths. File citations are linked only when the exact path exists. Include line ranges when relevant. Label hypothetical paths and placeholders as examples and keep them in fenced code blocks, not file links.';
+      'When referencing existing local files or folders, use complete paths relative to the session working directory shown above. Do not use a basename unless the file is directly in that directory, and do not use paths relative to a deeper subdirectory. For locations outside that directory, use absolute paths. File citations are linked only when the exact path exists. Include line ranges when relevant. To cite a function, class, or module, use a Markdown link with the symbol as its label and the verified file path and line as its target, such as [`loss_weights()`](src/loss.py:12). Bare symbols and grouped labels such as `transporter / franka / clip` do not identify a file. Do not invent targets for symbols you have not located. Label hypothetical paths and placeholders as examples and keep them in fenced code blocks, not file links.';
     return {
       ...record,
       system: `${existing ? `${existing}\n\nVS Code workspace context:\n` : ''}${scopePrompt}\n\n${citationPrompt}\n\n${permissionPrompt}${agentPrompt ? `\n\n${agentPrompt}` : ''}`,

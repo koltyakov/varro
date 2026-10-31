@@ -482,6 +482,7 @@ export const VARRO_API_ENDPOINTS = {
   workspaceProblems: `${VARRO_API_NAMESPACE}/workspace-problems`,
   workspacePathResolve: `${VARRO_API_NAMESPACE}/workspace-path/resolve`,
   citationPaths: `${VARRO_API_NAMESPACE}/citation-paths`,
+  citationSymbols: `${VARRO_API_NAMESPACE}/citation-symbols`,
   copiedSelectionMatch: `${VARRO_API_NAMESPACE}/copied-selection/match`,
   permissionJudge: `${VARRO_API_NAMESPACE}/permission/judge`,
   permissionJudgeModel: `${VARRO_API_NAMESPACE}/permission/judge/model`,

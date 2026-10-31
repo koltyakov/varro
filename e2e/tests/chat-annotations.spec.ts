@@ -7,28 +7,33 @@ import { waitForHarnessStartup } from './helpers';
 async function selectPassage(page: Page, expectedPrefix = 'Mock assistant'): Promise<Locator> {
   const passage = page.locator('.chat-turn-assistant p').last();
   await expect(passage).toBeVisible();
-  await expect
-    .poll(() =>
-      passage.evaluate((element) => {
-        const range = document.createRange();
-        range.selectNodeContents(element);
-        return range.getClientRects().length;
+  const measure = () =>
+    passage.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const boxes = Array.from(range.getClientRects());
+      const first = boxes[0];
+      const last = boxes.at(-1);
+      if (!first || !last) return null;
+      return {
+        left: first.left,
+        right: last.right,
+        startY: first.top + first.height / 2,
+        endY: last.top + last.height / 2,
+      };
+    });
+  // Retain the coordinates from the successful read. A second read can hit an
+  // empty streaming paragraph after the first read has already passed.
+  let rect = await measure();
+  if (!rect) {
+    await expect
+      .poll(async () => {
+        rect = await measure();
+        return rect;
       })
-    )
-    .toBeGreaterThan(0);
-  const rect = await passage.evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const boxes = Array.from(range.getClientRects());
-    const first = boxes[0]!;
-    const last = boxes.at(-1)!;
-    return {
-      left: first.left,
-      right: last.right,
-      startY: first.top + first.height / 2,
-      endY: last.top + last.height / 2,
-    };
-  });
+      .not.toBeNull();
+  }
+  if (!rect) throw new Error('Expected rendered assistant text for selection');
   await page.mouse.move(rect.left, rect.startY);
   await page.mouse.down();
   await page.mouse.move(rect.right + 2, rect.endY, { steps: 10 });
@@ -50,6 +55,27 @@ async function prepare(page: Page, theme = 'dark') {
   await expect(page.getByLabel('Send (Enter)')).toBeVisible();
   return composer;
 }
+
+test('selects assistant text when its geometry is temporarily empty', async ({ page }) => {
+  await page.addInitScript(() => {
+    const getClientRects = Range.prototype.getClientRects;
+    let reads = 0;
+    Range.prototype.getClientRects = function () {
+      if (
+        this.startContainer === this.endContainer &&
+        this.startContainer instanceof Element &&
+        this.startContainer.matches('.chat-turn-assistant p')
+      ) {
+        // Reproduce an empty paragraph between reads without timing the stream.
+        reads += 1;
+        if (reads % 2 === 1) return getClientRects.call(document.createRange());
+      }
+      return getClientRects.call(this);
+    };
+  });
+  await prepare(page);
+  await selectPassage(page);
+});
 
 test('annotates selected chat text, preserves the draft, and sends the passage and note', async ({
   page,

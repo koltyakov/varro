@@ -108,6 +108,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       readFile: vi.fn(() => Promise.resolve(null as string | null)),
       resolvePath: vi.fn(() => Promise.resolve(null)),
       validateCitationPaths: vi.fn(() => Promise.resolve([])),
+      resolveCitationSymbols: vi.fn(() => Promise.resolve([])),
     },
     providerLimitService: {
       get: vi.fn(() =>
@@ -1366,6 +1367,7 @@ describe('RestProxy handleRequest', () => {
         readFile: vi.fn(() => Promise.resolve(null)),
         resolvePath: vi.fn(() => Promise.resolve(null)),
         validateCitationPaths: vi.fn(() => Promise.resolve([])),
+        resolveCitationSymbols: vi.fn(() => Promise.resolve([])),
       },
     });
 
@@ -1407,6 +1409,8 @@ describe('RestProxy handleRequest', () => {
         'use complete paths relative to the session working directory',
         'Do not use a basename unless the file is directly in that directory',
         'For locations outside that directory, use absolute paths',
+        'use a Markdown link with the symbol as its label',
+        'Do not invent targets for symbols you have not located',
         'keep them in fenced code blocks, not file links',
       ]) {
         expect(body).toEqual(
@@ -2637,6 +2641,58 @@ describe('RestProxy handleRequest', () => {
     });
     expect(callbacks.contextProvider.readFile).not.toHaveBeenCalled();
     expect(callbacks.server.request).not.toHaveBeenCalled();
+  });
+
+  it('resolves symbol citations locally without forwarding to OpenCode', async () => {
+    const { proxy, callbacks } = createProxy();
+    const targets = [{ path: '/repo/loss.py', line: 12 }, null];
+    vi.mocked(callbacks.contextProvider.resolveCitationSymbols).mockResolvedValue(targets);
+    await proxy.handleRequest(
+      makePayload(62, 'POST', '/varro/citation-symbols', {
+        symbols: ['loss_weights()', 'CustomMultiTaskRLBenchEnv'],
+        directory: '/repo',
+      })
+    );
+    expect(callbacks.contextProvider.resolveCitationSymbols).toHaveBeenCalledWith(
+      ['loss_weights()', 'CustomMultiTaskRLBenchEnv'],
+      '/repo',
+      undefined
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 62, data: targets });
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    'authorizes the owning symbol session directory, authorized=%s',
+    async (authorized) => {
+      const { proxy, callbacks } = createProxy();
+      const authorize = vi.spyOn(proxy, 'authorizeSessionDirectory').mockResolvedValue(authorized);
+      await proxy.handleRequest(
+        makePayload(63, 'POST', '/varro/citation-symbols', {
+          symbols: ['loss_weights()'],
+          directory: '/repo/packages/app',
+          sessionID: 'session-1',
+        })
+      );
+      expect(authorize).toHaveBeenCalledWith('session-1', '/repo/packages/app');
+      if (authorized) expect(callbacks.contextProvider.resolveCitationSymbols).toHaveBeenCalled();
+      else expect(callbacks.contextProvider.resolveCitationSymbols).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    undefined,
+    ['loss_weights()', 1],
+    ['x'.repeat(129)],
+    Array.from({ length: 33 }, () => 'f()'),
+  ])('rejects malformed or oversized symbol batches', async (symbols) => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(makePayload(64, 'POST', '/varro/citation-symbols', { symbols }));
+    expect(callbacks.contextProvider.resolveCitationSymbols).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 64,
+      error: 'Invalid citation symbols',
+    });
   });
 
   it.each([true, false])(

@@ -668,6 +668,25 @@ describe('webview message validation', () => {
     ).not.toBeNull();
   });
 
+  it('allows only POST without query parameters for citation symbol checks', () => {
+    for (const [method, path, allowed] of [
+      ['POST', '/varro/citation-symbols', true],
+      ['GET', '/varro/citation-symbols', false],
+      ['POST', '/varro/citation-symbols?directory=/other', false],
+    ] as const) {
+      const parsed = parseWebviewMessage({
+        type: 'api/request',
+        payload: {
+          id: 1,
+          method,
+          path,
+          body: { symbols: ['loss_weights()'] },
+        },
+      });
+      expect(parsed !== null).toBe(allowed);
+    }
+  });
+
   it('validates permission automation lease metadata on API requests', () => {
     expect(
       parseWebviewMessage({

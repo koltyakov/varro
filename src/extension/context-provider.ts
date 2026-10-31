@@ -15,6 +15,7 @@ import {
 import { delay } from './server-utils';
 import { getWorkingFolder, getWorkingFolders } from './working-folders';
 import { CitationFileSearch } from './citation-file-search';
+import { CitationSymbolSearch } from './citation-symbol-search';
 
 export type WorkspaceResolutionOptions = {
   /** Resolve paths that do not exist on disk yet (e.g. a deleted file in a diff). */
@@ -77,6 +78,7 @@ export class ContextProvider implements vscode.Disposable {
   private onChange: (ctx: EditorContext) => void;
   private selectedWorkspacePath: string | null;
   private readonly citationFileSearch = new CitationFileSearch();
+  private readonly citationSymbolSearch = new CitationSymbolSearch();
   private readonly citationPathCache = new Map<
     string,
     { expiresAt: number; result: Promise<string | null> }
@@ -802,6 +804,10 @@ export class ContextProvider implements vscode.Disposable {
     }
   }
 
+  resolveCitationSymbols(symbols: readonly string[], directory?: string, signal?: AbortSignal) {
+    return this.citationSymbolSearch.find(symbols, directory, signal);
+  }
+
   /** Metadata-only checks against one project root, never basename discovery. */
   async validateCitationPaths(
     paths: readonly string[],
@@ -1111,6 +1117,7 @@ export class ContextProvider implements vscode.Disposable {
 
   dispose() {
     this.citationFileSearch.dispose();
+    this.citationSymbolSearch.dispose();
     this.citationPathCache.clear();
     if (this.terminalHistorySaveTimer) {
       clearTimeout(this.terminalHistorySaveTimer);

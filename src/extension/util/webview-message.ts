@@ -1880,6 +1880,7 @@ const API_ROUTES: ApiRoute[] = [
   route(VARRO_API_ENDPOINTS.copiedSelectionMatch, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.remoteImage, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.citationPaths, methodsNoQuery('POST')),
+  route(VARRO_API_ENDPOINTS.citationSymbols, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.workspaceProblems, methodsNoQuery('GET')),
   route(
     VARRO_API_ENDPOINTS.sessionTransferHide,

@@ -2704,6 +2704,17 @@ $$`,
     expect(container!.querySelectorAll('code')).toHaveLength(2);
   });
 
+  it('strips inline code backticks from symbol labels of file links', () => {
+    container!.innerHTML = __parseMarkdownForTests(
+      '- [`preprocess()`](src/utils.py:12): normalizes inputs',
+      { cacheByContent: true }
+    );
+
+    const link = container!.querySelector<HTMLAnchorElement>('a.file-path-link');
+    expect(link?.textContent).toBe('preprocess()');
+    expect(JSON.parse(link!.dataset.file!)).toEqual({ path: 'src/utils.py', line: 12 });
+  });
+
   it('keeps the screenshot example filename as code during streaming and after completion', async () => {
     const [content, setContent] = createSignal(
       'The new regressions pass, including the two `app.ts` example paths'

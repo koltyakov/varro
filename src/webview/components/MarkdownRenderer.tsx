@@ -30,6 +30,7 @@ import { getExternalLinkContext, isSafeExternalHref } from '../lib/external-link
 import { parseRemoteImageUrl } from '../../shared/remote-images';
 import { getLinkContext } from '../lib/link-context';
 import { asRecord, getString } from '../lib/runtime-values';
+import { parseCitationSymbol } from '../../shared/citation-symbol';
 import { checkIcon, copyIcon, expandIcon, xmarkIcon } from '../lib/ui-icons';
 import { createExternalLinkIconElement } from './ExternalLinkIcon';
 import { createFileTypeIconElement, hasRecognizedFileType } from './FileTypeIcon';
@@ -183,6 +184,7 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'data-external',
   'data-file',
   'data-inferred-code-path',
+  'data-citation-symbol',
   'data-lang',
   'data-highlight-lang',
   'data-mermaid-source',
@@ -303,6 +305,7 @@ const PRIVATE_RENDERER_ATTRIBUTES = [
   'data-external',
   'data-file',
   'data-inferred-code-path',
+  'data-citation-symbol',
   'data-lang',
   'data-highlight-lang',
   'data-mermaid-source',
@@ -506,7 +509,7 @@ function buildFileLink(raw: string, label?: string, fromHref = false) {
     ? raw.trim()
     : !plainLabel || FILE_PATH_REFERENCE_RE.test(plainLabel)
       ? canonicalPath
-      : label!.trim();
+      : plainLabel;
   const payload = JSON.stringify({
     path: normalizePath(parsed.path),
     line: parsed.line,
@@ -662,6 +665,13 @@ renderer.codespan = function ({ text }: { text: string }) {
     }
   }
 
+  const symbol = !renderMarkdownContext?.disablePathLinkify && parseCitationSymbol(text);
+  if (symbol) {
+    // Scope is part of the cached HTML so a project change replaces old candidates,
+    // even when the visible code text is identical. Pending results cannot cross projects.
+    const candidate = JSON.stringify([renderMarkdownContext?.directory || '', symbol]);
+    return `<code ${TRUSTED_RENDERER_ATTRIBUTE} data-citation-symbol="${escapeHtml(candidate)}">${escapeHtml(text)}</code>`;
+  }
   return `<code>${escapeHtml(text)}</code>`;
 };
 
@@ -1062,6 +1072,10 @@ function sanitizeHtml(
     for (const attribute of PRIVATE_RENDERER_ATTRIBUTES) element.removeAttribute(attribute);
   }
   const illustrativeBlocks = new Map<Element, boolean>();
+  for (const code of fragment.querySelectorAll('code[data-citation-symbol]')) {
+    const block = code.closest('p, li, td, th, h1, h2, h3, h4, h5, h6');
+    if (block && hasIllustrativePathProse(block)) code.removeAttribute('data-citation-symbol');
+  }
   for (const anchor of fragment.querySelectorAll('a[data-inferred-code-path]')) {
     const block = anchor.closest('p, li, td, th, h1, h2, h3, h4, h5, h6');
     if (block && !illustrativeBlocks.has(block)) {
@@ -2563,10 +2577,14 @@ export function MarkdownRenderer(props: MarkdownProps) {
     if (disposed) return;
     hydrateRenderedMarkdown(root, flags);
     if (flags.remoteImages) hydrateRemoteImages(root);
-    citationLinks.hydrate(root, {
-      directory: sessionDirectory() || state.editorContext.workspacePath || undefined,
-      sessionID: (props.sessionID ?? state.activeSessionId) || undefined,
-    });
+    citationLinks.hydrate(
+      root,
+      {
+        directory: sessionDirectory() || state.editorContext.workspacePath || undefined,
+        sessionID: (props.sessionID ?? state.activeSessionId) || undefined,
+      },
+      !props.disablePathLinkify
+    );
     hydrateInlineSlots(root);
     hydrateLinkTooltips(root);
   }
