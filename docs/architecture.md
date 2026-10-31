@@ -64,6 +64,7 @@ The implementation is split across focused components: `open-code-process.ts` ow
 Important behavior:
 
 - Workspace-sensitive requests carry an authoritative directory through both the request bridge and OpenCode transport. `RestProxy` resolves the persisted session-history preference, aggregates lists and statuses using exact-directory, project, or cross-project catalogs, and filters cross-project catalogs to the selected directory for Nested scope. This includes sessions from nested Git projects without exposing sibling directories. It filters hidden and recycled sessions before global sorting and pagination, then authorizes direct session operations from the validated catalog. Permissions, questions, messages, tools, and diffs remain directory-owned.
+- On macOS and Linux, `OpenCodeTransport` sends managed servers the physical (symlink-resolved) workspace directory, matching a terminal-launched OpenCode TUI, and restores the editor's symlinked spelling in single-line path values from responses and events. The rest of Varro keeps comparing VS Code paths. Windows and attach-only servers receive exact editor paths.
 - If the SSE stream drops while the server is running, Varro retries with exponential backoff.
 - If the event stream drops but REST still works, Varro marks the event stream as degraded so the UI can show a reconnecting banner.
 - If the child process exits after startup, Varro attempts a limited restart sequence.

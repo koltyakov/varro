@@ -1,6 +1,8 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These transport tests deliberately model malformed HTTP values, stream readers, and module-boundary logging. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolve as resolvePath } from 'node:path';
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve as resolvePath } from 'node:path';
 
 const { warnMock, updateEventStreamStateMock, emitEventMock } = vi.hoisted(() => ({
   warnMock: vi.fn(),
@@ -585,6 +587,8 @@ describe('AI test server isolation', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+const HOST_PLATFORM = process.platform;
 
 function stubPlatform(platform: NodeJS.Platform) {
   Object.defineProperty(process, 'platform', {
@@ -2232,6 +2236,78 @@ describe('OpenCodeTransport request scoping', () => {
       'http://localhost:4096',
       '/session',
       'C:\\Users\\Andrew\\Projects\\Varro'
+    );
+  });
+});
+
+describe.skipIf(HOST_PLATFORM === 'win32')('OpenCodeTransport symlinked workspaces', () => {
+  let root: string;
+  let physical: string;
+  let logical: string;
+
+  beforeEach(async () => {
+    stubPlatform(HOST_PLATFORM);
+    root = await realpath(await mkdtemp(join(tmpdir(), 'varro-transport-alias-')));
+    physical = join(root, 'data', 'Project');
+    logical = join(root, 'home', 'Project');
+    await mkdir(physical, { recursive: true });
+    await mkdir(join(root, 'home'));
+    await symlink(physical, logical, 'dir');
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('scopes OpenCode to the physical directory and reports the workspace spelling', async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => ({
+      ok: true,
+      text: async () => JSON.stringify({ id: 'session-1', directory: physical }),
+    }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const transport = createTransport({ getWorkspaceCwd: () => logical });
+
+    await expect(
+      transport.request('POST', '/session', { path: join(logical, 'README.md') })
+    ).resolves.toEqual({ id: 'session-1', directory: logical });
+
+    expect(scopeOpenCodeRequest).toHaveBeenLastCalledWith(
+      'http://localhost:4096',
+      '/session',
+      physical
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      path: join(physical, 'README.md'),
+    });
+
+    (transport as unknown as { processSseChunk(chunk: string): void }).processSseChunk(
+      `data: ${JSON.stringify({
+        directory: physical,
+        payload: { type: 'session.idle', properties: { sessionID: 'session-1' } },
+      })}`
+    );
+    expect(emitEventMock).toHaveBeenLastCalledWith({
+      directory: logical,
+      payload: { type: 'session.idle', properties: { sessionID: 'session-1' } },
+    });
+  });
+
+  it('keeps exact workspace paths for attach-only servers', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, text: async () => '[]' })) as unknown as typeof fetch
+    );
+    const transport = createTransport({
+      getWorkspaceCwd: () => logical,
+      canAliasWorkspacePaths: () => false,
+    });
+
+    await transport.request('GET', '/session');
+
+    expect(scopeOpenCodeRequest).toHaveBeenLastCalledWith(
+      'http://localhost:4096',
+      '/session',
+      logical
     );
   });
 });

@@ -413,6 +413,7 @@ export class OpenCodeServer extends EventEmitter {
       },
       getUrl: () => this.url,
       getWorkspaceCwd: () => this.processManager.getWorkspaceCwd(),
+      canAliasWorkspacePaths: () => !this.isAttachOnly,
       getStatus: () => this._status,
       isDisposing: () => this.isDisposing,
       updateEventStreamState: (eventStream) => this.updateEventStreamState(eventStream),

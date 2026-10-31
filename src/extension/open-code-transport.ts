@@ -12,6 +12,7 @@ import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
 import { diagnosticRoute, diagnosticTimeline } from './diagnostics';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
+import { OpenCodePathAliases } from './util/opencode-path-aliases';
 import { asRecord, findSseChunkBoundary, getString } from './server-utils';
 import { OpenCodeV2Adapter } from './opencode-v2-adapter';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
@@ -65,6 +66,8 @@ interface OpenCodeTransportOptions {
   refreshAuthorization?: () => Promise<void>;
   getUrl: () => string;
   getWorkspaceCwd: () => string | undefined;
+  /** Attach-only servers must see the editor's exact paths; see docs/docker-server.md. */
+  canAliasWorkspacePaths?: () => boolean;
   getStatus: () => ServerStatus;
   isDisposing: () => boolean;
   updateEventStreamState: (eventStream: EventStreamState) => void;
@@ -109,6 +112,7 @@ export class OpenCodeTransport {
   private authorizationRefresh: Promise<void> | null = null;
   private requestAdmissions = new WeakMap<AbortSignal, { url: string; expiresAt: number }>();
   private readonly v2: OpenCodeV2Adapter;
+  private readonly pathAliases: OpenCodePathAliases;
 
   get healthError(): string | undefined {
     return this.healthFailure;
@@ -139,6 +143,7 @@ export class OpenCodeTransport {
       },
     };
     this.requestWorkspaceDirectory = options.getWorkspaceCwd();
+    this.pathAliases = new OpenCodePathAliases(options.canAliasWorkspacePaths);
     const annotations = new OpenCodeV2SessionState(options.sessionStateDirectory);
     const backgroundJudge = new BackgroundProcessJudge((method, path, body, requestOptions) =>
       this.request(method, path, body, requestOptions)
@@ -264,10 +269,12 @@ export class OpenCodeTransport {
     }
     const scoped = scopeOpenCodeRequest(
       this.options.getUrl(),
-      path,
-      options?.unscoped
-        ? undefined
-        : (options?.directory ?? this.getWorkspaceDirectoryForRequest(method, path))
+      this.pathAliases.toServerRequestPath(path),
+      this.pathAliases.toServerDirectory(
+        options?.unscoped
+          ? undefined
+          : (options?.directory ?? this.getWorkspaceDirectoryForRequest(method, path))
+      )
     );
     if (this.apiVersion === 1) {
       const url = new URL(scoped.url);
@@ -302,7 +309,7 @@ export class OpenCodeTransport {
     try {
       if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
         headers['Content-Type'] = 'application/json';
-        init.body = JSON.stringify(body);
+        init.body = JSON.stringify(this.pathAliases.toServer(body));
       }
       const res = await this.fetchAuthenticated(scoped.url, init);
       responseStatus = res.status;
@@ -316,7 +323,7 @@ export class OpenCodeTransport {
       );
       let data: unknown = text;
       try {
-        data = text ? JSON.parse(text) : null;
+        data = this.pathAliases.fromServer(text ? JSON.parse(text) : null);
       } catch {}
       if (!res.ok) {
         const msg = getResponseErrorMessage(data, res.statusText);
@@ -652,6 +659,8 @@ export class OpenCodeTransport {
     this.eventStreamServerUrl = serverUrl;
     this.resetEventStream();
     this.eventStreamDirectory = eventStreamDirectory;
+    // Learn the workspace alias before events report its physical directory.
+    this.pathAliases.toServerDirectory(eventStreamDirectory);
     if (promoteDirectoryImmediately) {
       this.requestWorkspaceDirectory = eventStreamDirectory;
     }
@@ -850,6 +859,7 @@ export class OpenCodeTransport {
 
     this.requestWorkspaceDirectory = directory;
     this.eventStreamDirectory = directory;
+    this.pathAliases.toServerDirectory(directory);
     diagnosticTimeline.record({ event: 'workspace-activated', directory });
     return Promise.resolve({ state: 'connected', directory });
   }
@@ -938,7 +948,7 @@ export class OpenCodeTransport {
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(data);
+      parsed = this.pathAliases.fromServer(JSON.parse(data));
     } catch (err) {
       logger.warn(
         `Ignoring malformed event stream payload: ${err instanceof Error ? err.message : String(err)}`
