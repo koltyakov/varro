@@ -312,7 +312,8 @@ describe('Windows native process inspector', () => {
     const { inspector, children } = setup();
     const first = inspector.read(1234);
     const second = inspector.read(5678);
-    children[0]!.stdin.read();
+    // Node 26 returns one buffered write per read(); drain both requests.
+    while (children[0]!.stdin.read() !== null);
     for (const id of [1, 2]) {
       children[0]!.stdout.write(
         JSON.stringify({

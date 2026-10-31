@@ -18,6 +18,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Remembered the last selected agent for new chats, including custom primary agents.
 - Improved startup and server recovery; isolated managed v2 servers from OpenCode Desktop.
 - Fixed steering queues, model selection, failed edits, image sends, scrolling, and composer behavior.
+- Fixed symlinked workspaces on macOS and Linux showing different session history in Varro and a terminal-launched OpenCode TUI. Varro-managed servers now receive the resolved workspace path; Windows and attach-only servers keep the editor's exact path.
 
 ## 0.32.x - October 2026
 
