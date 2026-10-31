@@ -50,6 +50,7 @@ import {
 // shell text in the user's terminal.
 const ALLOWED_TERMINAL_COMMANDS = new Set<string>([
   'opencode auth login',
+  'claude auth login',
   'opencode auth',
   'opencode auth logout',
   ...OPENCODE_TERMINAL_COMMANDS,

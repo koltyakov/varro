@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Anthropic API and credential files are untrusted and validated field by field. */
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Credential and API assertions follow required-field and token validation. */
 import { randomUUID } from 'crypto';
+import { execFile } from 'child_process';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -66,7 +67,7 @@ type AnthropicCredentials = {
   accessToken: string;
   refreshToken: string | null;
   credentialsFilePath: string | null;
-  origin: 'opencode-auth' | 'claude-credentials';
+  origin: 'opencode-auth' | 'claude-credentials' | 'claude-keychain' | 'claude-env';
 };
 
 export function createAnthropicAdapter(): ProviderLimitAdapter {
@@ -77,7 +78,7 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
       oauthRefresh: true,
     },
     matches(provider) {
-      return provider.id === 'anthropic';
+      return provider.id === 'anthropic' || provider.id === 'claude-agent';
     },
     async fetch({
       provider,
@@ -98,7 +99,7 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
       );
       if (combinedStatus && hasHiddenAnthropicWindows(combinedStatus)) return combinedStatus;
 
-      let credentials = await resolveAnthropicCredentials(authStore);
+      let credentials = await resolveAnthropicCredentials(authStore, provider.id);
       if (!credentials?.accessToken) {
         if (combinedStatus) return combinedStatus;
 
@@ -115,16 +116,18 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
           provider.id,
           modelID,
           checkedAt,
-          'No Anthropic OAuth credentials available'
+          provider.id === 'claude-agent'
+            ? 'Claude Code OAuth credentials are unavailable. Run claude auth login to sign in.'
+            : 'No Anthropic OAuth credentials available'
         );
       }
 
       const poll = async (): Promise<ProviderLimitStatus> => {
         try {
           if (!credentials) throw new Error('Anthropic credentials unavailable');
-          if (coordinate && credentials.origin === 'claude-credentials') {
-            // A previous lock holder may have rotated the file while we waited.
-            const current = await readAnthropicCredentialsFromClaudeCredentials();
+          if (coordinate && credentials.origin !== 'opencode-auth') {
+            // Claude Code or a previous lock holder may have rotated credentials while we waited.
+            const current = await resolveAnthropicCredentials(authStore, provider.id);
             if (!current?.accessToken) throw new ProviderQuotaIdentityChanged();
             const changed = current.accessToken !== credentials.accessToken;
             credentials = current;
@@ -133,7 +136,10 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
           let response = await fetchAnthropicUsage(credentials.accessToken);
           let note = 'Polled Anthropic OAuth usage endpoint';
 
-          if (shouldRefreshAnthropicCredentials(response.status, credentials)) {
+          if (
+            provider.id !== 'claude-agent' &&
+            shouldRefreshAnthropicCredentials(response.status, credentials)
+          ) {
             const refreshed = await refreshAnthropicAccessToken(credentials.refreshToken);
             if (refreshed.status === 'unsupported') {
               return unsupportedProviderStatus(provider.id, modelID, checkedAt, refreshed.note);
@@ -173,7 +179,9 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
               provider.id,
               modelID,
               checkedAt,
-              `Anthropic usage endpoint rejected credentials (${response.status})`
+              `Anthropic usage endpoint rejected credentials (${response.status})${
+                provider.id === 'claude-agent' ? '. Run claude auth login to sign in again.' : ''
+              }`
             );
           }
 
@@ -224,7 +232,8 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
           ? await coordinate([ANTHROPIC_USAGE_ENDPOINT, accessToken], poll, {
               enabled: !combinedStatus && !localProxyBaseUrl,
               isIdentityCurrent: async (currentAuth) =>
-                (await resolveAnthropicCredentials(currentAuth))?.accessToken === accessToken,
+                (await resolveAnthropicCredentials(currentAuth, provider.id))?.accessToken ===
+                accessToken,
             })
           : await poll();
         return mergeAnthropicStatuses(combinedStatus, apiStatus) ?? apiStatus;
@@ -562,8 +571,23 @@ function buildAnthropicStatuslineWindow(
 }
 
 async function resolveAnthropicCredentials(
-  authStore: Record<string, ProviderAuthRecord>
+  authStore: Record<string, ProviderAuthRecord>,
+  providerID: string
 ): Promise<AnthropicCredentials | null> {
+  // The official provider uses Claude Code's login, not OpenCode's Anthropic account.
+  if (providerID === 'claude-agent') {
+    const token = getString(process.env.CLAUDE_CODE_OAUTH_TOKEN);
+    if (token) {
+      return {
+        accessToken: token,
+        refreshToken: null,
+        credentialsFilePath: null,
+        origin: 'claude-env',
+      };
+    }
+    const keychain = await readClaudeKeychainCredentials();
+    return keychain ?? readAnthropicCredentialsFromClaudeCredentials();
+  }
   const auth = authStore.anthropic;
   if (auth?.type === 'oauth' && getString(auth.access)) {
     return {
@@ -574,6 +598,22 @@ async function resolveAnthropicCredentials(
     };
   }
   return readAnthropicCredentialsFromClaudeCredentials();
+}
+
+async function readClaudeKeychainCredentials(): Promise<AnthropicCredentials | null> {
+  if (process.platform !== 'darwin') return null;
+  return new Promise((resolve) => {
+    execFile(
+      '/usr/bin/security',
+      ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
+      { encoding: 'utf8', timeout: 2_000, maxBuffer: 256 * 1024 },
+      (error, stdout) => {
+        // Missing or inaccessible Keychain entries fall back to Claude Code's credential file.
+        const credentials = error ? null : parseAnthropicCredentials(stdout, null);
+        resolve(credentials ? { ...credentials, origin: 'claude-keychain' } : null);
+      }
+    );
+  });
 }
 
 async function readAnthropicCredentialsFromClaudeCredentials(): Promise<AnthropicCredentials | null> {
@@ -596,7 +636,7 @@ function getAnthropicStatuslineFilePath(home = homedir()) {
 
 function parseAnthropicCredentials(
   raw: string,
-  credentialsFilePath: string
+  credentialsFilePath: string | null
 ): AnthropicCredentials | null {
   try {
     const oauth = asRecord(asRecord(JSON.parse(raw) as unknown)?.claudeAiOauth);

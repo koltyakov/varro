@@ -839,6 +839,37 @@ describe('v2 authentication fields', () => {
     );
   });
 
+  it('registers Claude Agent through its Claude Code external login without starting OAuth', async () => {
+    const integration = {
+      id: 'claude-agent',
+      methods: [
+        { id: 'claude-login', type: 'external', label: 'Claude Code login (claude auth login)' },
+      ],
+    };
+    const wire = vi.fn(async (_method: string, path: string) => {
+      if (path === '/api/provider') return { data: [] };
+      if (path === '/api/integration') return { data: [integration] };
+      if (path === '/api/provider/claude-agent') return { data: { integrationID: 'claude-agent' } };
+      if (path === '/api/integration/claude-agent') return { data: integration };
+      if (path === '/api/integration/claude-agent/connect/external') return null;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    expect(await adapter.request('GET', '/provider/auth', undefined)).toMatchObject({
+      'claude-agent': [{ type: 'external', label: 'Claude Code login (claude auth login)' }],
+    });
+    await expect(
+      adapter.request('POST', '/provider/claude-agent/oauth/authorize', { method: 0 })
+    ).resolves.toEqual({ url: '', method: 'complete', instructions: '' });
+    expect(wire).toHaveBeenLastCalledWith(
+      'POST',
+      '/api/integration/claude-agent/connect/external',
+      { methodID: 'claude-login', answer: undefined },
+      expect.anything()
+    );
+    expect(wire.mock.calls.some(([, path]) => path.includes('/connect/oauth'))).toBe(false);
+  });
+
   it('does not report an external connection as complete when the server rejects it', async () => {
     const wire = vi.fn(async (method: string, path: string) => {
       if (path === '/api/provider/azure') return { data: {} };

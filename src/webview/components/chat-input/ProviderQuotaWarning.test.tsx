@@ -557,6 +557,7 @@ describe('ProviderQuotaWarning', () => {
   it.each([
     ['openai', 'https://chatgpt.com/settings/usage?tab=overview'],
     ['anthropic', 'https://claude.ai/settings/usage'],
+    ['claude-agent', 'https://claude.ai/settings/usage'],
   ])('opens reset details before linking to %s usage', (providerID, url) => {
     const expiresAt = NOW + HOUR;
     mount({

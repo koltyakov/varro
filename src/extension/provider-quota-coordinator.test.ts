@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import type * as OsModule from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
+import type * as ChildProcessModule from 'child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus } from '../shared/protocol';
 import type * as ProviderLimitModule from './util/provider-limit';
@@ -16,6 +17,12 @@ import type { OpenCodeServer } from './server';
 import { getVarroStateDirectory } from './varro-state-paths';
 
 const auth = vi.hoisted(() => ({ path: '', home: '' }));
+vi.mock('child_process', async () => ({
+  ...(await vi.importActual<typeof ChildProcessModule>('child_process')),
+  execFile: vi.fn((_command, _args, _options, callback: (error: Error) => void) =>
+    callback(new Error('No Keychain entry'))
+  ),
+}));
 vi.mock('os', async () => ({
   ...(await vi.importActual<typeof OsModule>('os')),
   default: { ...(await vi.importActual<typeof OsModule>('os')), homedir: () => auth.home },
@@ -82,6 +89,7 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
     auth.path = join(root, 'absent-auth.json');
     auth.home = root;
     vi.stubEnv('VARRO_TEST_STATE_ROOT', join(root, 'varro-state'));
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
     now = Date.now();
     vi.spyOn(Date, 'now').mockImplementation(() => now);
   });
@@ -163,7 +171,7 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it.each(['openai', 'anthropic', 'varro-claude'])(
+  it.each(['openai', 'anthropic', 'claude-agent', 'varro-claude'])(
     'shares %s subscription windows across models and isolates credential rotation',
     async (providerID) => {
       const provider: ProviderMetadata = {
@@ -184,6 +192,16 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
         [providerID]: { type: 'oauth' as const, access: 'oauth-secret', accountId: 'account-a' },
       };
       await fs.writeFile(auth.path, JSON.stringify(store));
+      const claudeCredentialsPath = join(root, '.claude', '.credentials.json');
+      if (providerID === 'claude-agent') {
+        await fs.mkdir(join(root, '.claude'));
+        await fs.writeFile(
+          claudeCredentialsPath,
+          JSON.stringify({
+            claudeAiOauth: { accessToken: 'oauth-secret' },
+          })
+        );
+      }
       const backend = { request: vi.fn(async () => ({ providers: [provider] })) };
       const payload =
         providerID === 'openai'
@@ -194,7 +212,7 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
                 secondary_window: { used_percent: 30 },
               },
             }
-          : providerID === 'anthropic'
+          : providerID === 'anthropic' || providerID === 'claude-agent'
             ? { five_hour: { utilization: 20 }, seven_day: { utilization: 30 } }
             : {
                 schemaVersion: 1,
@@ -261,6 +279,13 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
             },
           },
         };
+      } else if (providerID === 'claude-agent') {
+        await fs.writeFile(
+          claudeCredentialsPath,
+          JSON.stringify({
+            claudeAiOauth: { accessToken: 'rotated-secret' },
+          })
+        );
       } else {
         store[providerID] = { type: 'oauth', access: 'rotated-secret', accountId: 'account-a' };
         await fs.writeFile(auth.path, JSON.stringify(store));

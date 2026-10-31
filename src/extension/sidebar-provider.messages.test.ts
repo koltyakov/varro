@@ -1053,15 +1053,25 @@ describe('SidebarProvider terminal commands', () => {
     }
   });
 
-  it('leaves the server alone for commands that do not touch the binary', async () => {
-    const server = createServer();
-    const { provider } = await createSidebarProviderInstance({ server });
-    attachTestView(provider);
+  it.each(['opencode auth login', 'claude auth login'])(
+    'leaves the server alone for %s',
+    async (command) => {
+      const server = createServer();
+      const { provider } = await createSidebarProviderInstance({ server });
+      attachTestView(provider);
 
-    await runInTerminal(provider, 'opencode auth login', 'OpenCode Auth');
+      await runInTerminal(provider, command, 'Provider Login');
 
-    expect(server.prepareForWindowsCliUpgrade).not.toHaveBeenCalled();
-  });
+      expect(server.prepareForWindowsCliUpgrade).not.toHaveBeenCalled();
+      expect(getVscodeMock().window.createTerminal).toHaveBeenCalledWith({
+        name: 'Provider Login',
+        cwd: '/repo',
+      });
+      expect(
+        getVscodeMock().window.createTerminal.mock.results[0]?.value.sendText
+      ).toHaveBeenCalledWith(command, true);
+    }
+  );
 
   it('does not open a terminal when the server cannot be stopped safely', async () => {
     const server = createServer({

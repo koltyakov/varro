@@ -393,6 +393,23 @@ describe('isProviderAuthFailure', () => {
     ).toBe(true);
   });
 
+  it.each([
+    'Claude Code is not logged in. Run claude auth login in a terminal.',
+    'Not logged in. Run `claude auth login` in a terminal',
+  ])('detects Claude Agent login failures without an HTTP status: %s', (message) => {
+    expect(isProviderAuthFailure({ name: 'UnknownError', data: { message } })).toBe(true);
+  });
+
+  it.each([
+    'Claude Code is not installed. Install it, then run claude auth login.',
+    'Claude Code subscription limit reached. Resets at 2026-10-31T00:00:00Z.',
+  ])(
+    'does not mistake Claude Agent installation or quota errors for expired login: %s',
+    (message) => {
+      expect(isProviderAuthFailure({ name: 'UnknownError', data: { message } })).toBe(false);
+    }
+  );
+
   it('rejects retryable non-auth errors', () => {
     expect(
       isProviderAuthFailure({

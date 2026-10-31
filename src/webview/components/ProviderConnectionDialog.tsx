@@ -60,7 +60,9 @@ export function ProviderConnectionDialog(props: {
         {
           id: provider.id,
           name: provider.name,
-          methods: state.providerAuthMethods[provider.id] ?? [GENERIC_API_METHOD],
+          methods: state.providerAuthMethods[provider.id] ?? [
+            provider.id === 'claude-agent' ? CLAUDE_AGENT_AUTH_METHOD : GENERIC_API_METHOD,
+          ],
         },
       ])
     );
@@ -83,6 +85,8 @@ export function ProviderConnectionDialog(props: {
     const index = methodIndex();
     return index === null ? undefined : selectedProvider()?.methods[index];
   });
+  const usesClaudeCodeLogin = () =>
+    providerID() === 'claude-agent' && selectedMethod()?.type === 'external';
   const visiblePrompts = createMemo(() => {
     const prompts = selectedMethod()?.prompts ?? [];
     return prompts.filter((prompt) => !prompt.hidden && promptIsVisible(prompt, inputs(), prompts));
@@ -297,6 +301,11 @@ export function ProviderConnectionDialog(props: {
 
   function useTerminal() {
     authController?.abort(new Error('Provider authorization cancelled'));
+    const id = providerID();
+    if (id === 'claude-agent') {
+      openProviderSetup(id);
+      return;
+    }
     openProviderSetup();
     props.onClose();
   }
@@ -438,6 +447,22 @@ export function ProviderConnectionDialog(props: {
                         Back to methods
                       </button>
                       <Show when={!authorization()}>
+                        <Show when={usesClaudeCodeLogin()}>
+                          <div class="provider-connect-authorization">
+                            <div class="provider-connect-instructions">
+                              Claude Code manages this login. Run <code>claude auth login</code> in
+                              the terminal, then return here to confirm you've signed in.
+                            </div>
+                            <button
+                              type="button"
+                              class="provider-connect-secondary"
+                              disabled={isSubmitting()}
+                              onClick={() => openProviderSetup('claude-agent')}
+                            >
+                              Run claude auth login
+                            </button>
+                          </div>
+                        </Show>
                         <Show when={method().type === 'oauth' && visiblePrompts().length === 0}>
                           <div class="provider-connect-oauth-handoff">
                             <div class="provider-connect-oauth-icon" aria-hidden="true">
@@ -583,9 +608,11 @@ export function ProviderConnectionDialog(props: {
                               : 'Connecting...'
                             : authorization()?.method === 'code'
                               ? 'Complete connection'
-                              : method().type === 'oauth'
-                                ? 'Continue'
-                                : 'Connect'}
+                              : usesClaudeCodeLogin()
+                                ? "I've signed in"
+                                : method().type === 'oauth'
+                                  ? 'Continue'
+                                  : 'Connect'}
                         </button>
                       </div>
                     </form>
@@ -608,6 +635,10 @@ export function ProviderConnectionDialog(props: {
 }
 
 const GENERIC_API_METHOD: ProviderAuthMethod = { type: 'api', label: 'API key' };
+const CLAUDE_AGENT_AUTH_METHOD: ProviderAuthMethod = {
+  type: 'external',
+  label: 'Claude Code login (claude auth login)',
+};
 
 function BackArrowIcon() {
   return <UiIcon source={arrowLeftIcon} width={11} height={11} aria-hidden="true" />;

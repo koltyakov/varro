@@ -222,9 +222,13 @@ export class ProviderLimitService {
     // contained into `error` statuses so callers always get a renderable
     // result and last-known-good fallback still applies.
     let providers: ProviderMetadata[];
-    const canCoordinate = ['openrouter', 'openai', 'anthropic', 'varro-claude'].includes(
-      providerID
-    );
+    const canCoordinate = [
+      'openrouter',
+      'openai',
+      'anthropic',
+      'claude-agent',
+      'varro-claude',
+    ].includes(providerID);
     try {
       providers = await this.getProviderMetadata(canCoordinate, signal);
       signal.throwIfAborted();

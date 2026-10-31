@@ -53,10 +53,10 @@ describe('provider limit adapters', () => {
     expect(adapter?.id).toBe('openai');
   });
 
-  it('matches the Anthropic adapter for Anthropic providers', () => {
+  it.each(['anthropic', 'claude-agent'])('matches the Anthropic adapter for %s', (providerID) => {
     const adapter = findProviderLimitAdapter(
       {
-        id: 'anthropic',
+        id: providerID,
         options: { apiKey: 'opencode-oauth-dummy-key' },
         models: { 'claude-sonnet-4': { api: { url: 'https://api.anthropic.com/v1' } } },
       },

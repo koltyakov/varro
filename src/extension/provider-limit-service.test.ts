@@ -925,40 +925,43 @@ describe('ProviderLimitService', () => {
     expect(mocks.extractOpenCodeProviderLimitMock).not.toHaveBeenCalled();
   });
 
-  it('rechecks subscription credentials instead of suppressing file-backed rotation for the session', async () => {
-    const server = createProviderServer([{ id: 'anthropic', models: {} }]);
-    const service = new ProviderLimitService(server);
-    mocks.parseProviderAuthStoreMock.mockReturnValue({
-      anthropic: { type: 'oauth', access: 'token-1' },
-    });
-    mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue({
-      providerID: 'anthropic',
-      modelID: null,
-      status: 'unsupported',
-      source: 'provider',
-      checkedAt: Date.now(),
-      note: 'Anthropic usage endpoint rejected credentials (401)',
-    });
+  it.each(['anthropic', 'claude-agent'])(
+    'rechecks %s credentials instead of suppressing file-backed rotation for the session',
+    async (providerID) => {
+      const server = createProviderServer([{ id: providerID, models: {} }]);
+      const service = new ProviderLimitService(server);
+      mocks.parseProviderAuthStoreMock.mockReturnValue({
+        anthropic: { type: 'oauth', access: 'token-1' },
+      });
+      mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue({
+        providerID,
+        modelID: null,
+        status: 'unsupported',
+        source: 'provider',
+        checkedAt: Date.now(),
+        note: 'Anthropic usage endpoint rejected credentials (401)',
+      });
 
-    await expect(service.get('anthropic', null)).resolves.toMatchObject({
-      providerID: 'anthropic',
-      modelID: null,
-      status: 'unsupported',
-      note: 'Anthropic usage endpoint rejected credentials (401)',
-    });
-    expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(1);
+      await expect(service.get(providerID, null)).resolves.toMatchObject({
+        providerID,
+        modelID: null,
+        status: 'unsupported',
+        note: 'Anthropic usage endpoint rejected credentials (401)',
+      });
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(60_000);
-    await expect(service.get('anthropic', null)).resolves.toEqual({
-      providerID: 'anthropic',
-      modelID: null,
-      status: 'unsupported',
-      source: 'provider',
-      checkedAt: Date.now(),
-      note: 'Anthropic usage endpoint rejected credentials (401)',
-    });
-    expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(2);
-  });
+      await vi.advanceTimersByTimeAsync(60_000);
+      await expect(service.get(providerID, null)).resolves.toEqual({
+        providerID,
+        modelID: null,
+        status: 'unsupported',
+        source: 'provider',
+        checkedAt: Date.now(),
+        note: 'Anthropic usage endpoint rejected credentials (401)',
+      });
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it('retries a cached auth failure after the auth store snapshot changes', async () => {
     const sourceCheckedAt = Date.now();

@@ -183,6 +183,72 @@ it('finishes an external credential connection without a key, browser handoff, o
   expect(onClose).toHaveBeenCalledOnce();
 });
 
+it.each([false, true])(
+  'uses Claude Code login and waits for confirmation before reconnecting (auth methods loaded: %s)',
+  async (methodsLoaded) => {
+    if (methodsLoaded) {
+      setState('providerAuthMethods', 'claude-agent', [
+        {
+          type: 'external',
+          label: 'Claude Code login (claude auth login)',
+        },
+      ]);
+    }
+    markProviderAuthFailure('claude-agent', 'message-1');
+    clientMocks.authorizeProvider.mockResolvedValue({
+      url: '',
+      method: 'complete',
+      instructions: '',
+    });
+    const onClose = renderDialog({
+      catalogProviders: [catalogProvider('claude-agent', 'Claude Agent')],
+      initialProviderID: 'claude-agent',
+      lockProvider: true,
+      reauthentication: true,
+    });
+    chooseMethod('Claude Code login');
+    expect(dialog()?.textContent).toContain('Claude Code manages this login');
+    expect(dialog()?.querySelector('input[type="password"]')).toBeNull();
+    expect(primaryButton().textContent).toBe("I've signed in");
+
+    findButton('Run claude auth login')!.click();
+    expect(openProviderSetupMock).toHaveBeenCalledWith('claude-agent');
+    expect(clientMocks.authorizeProvider).not.toHaveBeenCalled();
+    expect(providerRequiresReconnection('claude-agent')).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+
+    primaryButton().click();
+    await flush();
+    expect(clientMocks.authorizeProvider).toHaveBeenCalledWith(
+      { providerID: 'claude-agent', method: 0, inputs: {} },
+      { signal: expect.any(AbortSignal) }
+    );
+    expect(clientMocks.completeProviderAuth).not.toHaveBeenCalled();
+    expect(clientMocks.connectApiProvider).not.toHaveBeenCalled();
+    expect(providerRequiresReconnection('claude-agent')).toBe(false);
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'providers/auth-changed' });
+    expect(postMessageMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'vscode/open-external' })
+    );
+    expect(onClose).toHaveBeenCalledOnce();
+  }
+);
+
+it('routes Claude Agent terminal fallback to Claude Code without prematurely completing reauthentication', () => {
+  markProviderAuthFailure('claude-agent', 'message-1');
+  const onClose = renderDialog({
+    catalogProviders: [catalogProvider('claude-agent', 'Claude Agent')],
+    initialProviderID: 'claude-agent',
+    lockProvider: true,
+    reauthentication: true,
+  });
+  findButton('Use terminal setup')!.click();
+  expect(openProviderSetupMock).toHaveBeenCalledWith('claude-agent');
+  expect(providerRequiresReconnection('claude-agent')).toBe(true);
+  expect(onClose).not.toHaveBeenCalled();
+  expect(postMessageMock).not.toHaveBeenCalledWith({ type: 'providers/auth-changed' });
+});
+
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);

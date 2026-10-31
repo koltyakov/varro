@@ -1,9 +1,13 @@
 import { postMessage } from './bridge';
 
-export function openProviderSetup() {
+export function openProviderSetup(providerID?: string | null) {
+  const claudeAgent = providerID === 'claude-agent';
   postMessage({
     type: 'terminal/run',
-    payload: { command: 'opencode auth login', title: 'OpenCode Provider Setup' },
+    payload: {
+      command: claudeAgent ? 'claude auth login' : 'opencode auth login',
+      title: claudeAgent ? 'Claude Code Login' : 'OpenCode Provider Setup',
+    },
   });
 }
 

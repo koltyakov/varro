@@ -13,6 +13,8 @@ export function friendlyErrorName(name: string | null | undefined): string | nul
 
 const AUTH_INVALIDATED_RE =
   /\bunauthorized\b|token refresh failed:\s*401\b|invalid_grant|(?:authentication|access|refresh)?\s*token (?:has )?(?:expired|been revoked|been invalidated)|(?:api key|credentials?) (?:is |are )?missing|try signing in again/i;
+const CLAUDE_CODE_LOGIN_REQUIRED_RE =
+  /\bClaude Code is not logged in\b|\brun `?claude auth login`? in a terminal\b/i;
 
 export function isProviderAuthFailure(
   error:
@@ -24,7 +26,8 @@ export function isProviderAuthFailure(
 ) {
   if (!error) return false;
   if (error.data?.statusCode === 401) return true;
-  return AUTH_INVALIDATED_RE.test(error.data?.message || '');
+  const message = error.data?.message || '';
+  return AUTH_INVALIDATED_RE.test(message) || CLAUDE_CODE_LOGIN_REQUIRED_RE.test(message);
 }
 
 const TRANSIENT_CONNECTION_RE =

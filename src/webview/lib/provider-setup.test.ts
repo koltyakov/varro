@@ -31,4 +31,12 @@ describe('openProviderSetup', () => {
       payload: { command: 'opencode auth logout', title: 'OpenCode Provider Logout' },
     });
   });
+
+  it('uses Claude Code to manage the official Claude Agent login', () => {
+    openProviderSetup('claude-agent');
+    expect(postMessageMock).toHaveBeenCalledWith({
+      type: 'terminal/run',
+      payload: { command: 'claude auth login', title: 'Claude Code Login' },
+    });
+  });
 });

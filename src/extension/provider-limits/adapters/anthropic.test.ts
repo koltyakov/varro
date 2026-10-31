@@ -5,6 +5,9 @@ const { readFileMock } = vi.hoisted(() => ({
   readFileMock: vi.fn(),
 }));
 
+const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }));
+vi.mock('child_process', () => ({ execFile: execFileMock }));
+
 const { statMock } = vi.hoisted(() => ({
   statMock: vi.fn(),
 }));
@@ -67,6 +70,11 @@ function deferred<T>() {
 describe('createAnthropicAdapter', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((_command, _args, _options, callback: (error: Error) => void) =>
+      callback(new Error('No Keychain entry'))
+    );
     vi.mocked(mkdir).mockReset();
     vi.mocked(mkdir).mockResolvedValue(undefined);
     vi.mocked(readFile).mockReset();
@@ -79,10 +87,186 @@ describe('createAnthropicAdapter', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it('matches Anthropic providers so fetch can resolve file-backed OAuth', () => {
     expect(adapter.matches(provider, {})).toBe(true);
+    expect(adapter.matches({ ...provider, id: 'claude-agent' }, {})).toBe(true);
+    expect(adapter.matches({ ...provider, id: 'claude-agent-copy' }, {})).toBe(false);
+  });
+
+  it('loads Claude Agent quotas from Claude Code instead of the separate Anthropic account', async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ claudeAiOauth: { accessToken: 'claude-code-token' } })
+    );
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({ five_hour: { utilization: 20 }, seven_day: { utilization: 30 } })
+    );
+    const status = await adapter.fetch({
+      provider: { id: 'claude-agent', models: {} },
+      authStore: { anthropic: { type: 'oauth', access: 'other-account-token' } },
+      modelID: 'opus',
+      checkedAt: 1_000,
+      coordinate: async (identity, poll, observation) => {
+        expect(identity).toEqual([
+          'https://api.anthropic.com/api/oauth/usage',
+          'claude-code-token',
+        ]);
+        const result = await poll();
+        expect(await observation?.isIdentityCurrent?.({})).toBe(true);
+        vi.mocked(readFile).mockResolvedValue(
+          JSON.stringify({ claudeAiOauth: { accessToken: 'rotated-token' } })
+        );
+        expect(await observation?.isIdentityCurrent?.({})).toBe(false);
+        return result;
+      },
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.anthropic.com/api/oauth/usage',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer claude-code-token' }),
+      })
+    );
+    expect(status).toMatchObject({
+      providerID: 'claude-agent',
+      modelID: 'opus',
+      status: 'available',
+      windows: [
+        { id: 'five_hour', remaining: 80, limit: 100 },
+        { id: 'seven_day', remaining: 70, limit: 100 },
+      ],
+    });
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('does not substitute Anthropic credentials when Claude Agent has no Claude Code login', async () => {
+    vi.mocked(readFile).mockRejectedValue(new Error('No credential file'));
+    const status = await adapter.fetch({
+      provider: { id: 'claude-agent', models: {} },
+      authStore: { anthropic: { type: 'oauth', access: 'other-account-token' } },
+      modelID: null,
+      checkedAt: 1_000,
+    });
+    expect(status).toMatchObject({ providerID: 'claude-agent', status: 'unsupported' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('uses an explicit Claude Code OAuth token before saved credentials', async () => {
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'explicit-token');
+    vi.mocked(fetch).mockResolvedValue(Response.json({ five_hour: { utilization: 10 } }));
+    const status = await adapter.fetch({
+      provider: { id: 'claude-agent', models: {} },
+      authStore: {},
+      modelID: 'sonnet',
+      checkedAt: 1_000,
+    });
+    expect(status).toMatchObject({ providerID: 'claude-agent', status: 'available' });
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.anthropic.com/api/oauth/usage',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer explicit-token' }),
+      })
+    );
+    expect(execFileMock).not.toHaveBeenCalled();
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it('directs expired Claude Agent file credentials to claude auth login without rotating them', async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({
+        claudeAiOauth: { accessToken: 'expired-token', refreshToken: 'claude-owned-refresh' },
+      })
+    );
+    vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 401 }));
+    const status = await adapter.fetch({
+      provider: { id: 'claude-agent', models: {} },
+      authStore: {},
+      modelID: 'opus',
+      checkedAt: 1_000,
+      coordinate: async (_identity, poll) => poll(),
+    });
+    expect(status).toMatchObject({
+      providerID: 'claude-agent',
+      status: 'unsupported',
+      note: 'Anthropic usage endpoint rejected credentials (401). Run claude auth login to sign in again.',
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
+    expect(mkdir).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform !== 'darwin')(
+    'prefers macOS Keychain and leaves its token rotation to Claude Code',
+    async () => {
+      execFileMock.mockImplementation(
+        (_command, _args, _options, callback: (error: null, stdout: string) => void) =>
+          callback(
+            null,
+            JSON.stringify({
+              claudeAiOauth: { accessToken: 'keychain-token', refreshToken: 'keychain-refresh' },
+            })
+          )
+      );
+      vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 401 }));
+      const status = await adapter.fetch({
+        provider: { id: 'claude-agent', models: {} },
+        authStore: {},
+        modelID: 'opus',
+        checkedAt: 1_000,
+      });
+      expect(execFileMock).toHaveBeenCalledWith(
+        '/usr/bin/security',
+        ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
+        expect.objectContaining({ timeout: 2_000, maxBuffer: 256 * 1024 }),
+        expect.any(Function)
+      );
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.anthropic.com/api/oauth/usage',
+        expect.objectContaining({
+          headers: expect.objectContaining({ Authorization: 'Bearer keychain-token' }),
+        })
+      );
+      expect(status).toMatchObject({ providerID: 'claude-agent', status: 'unsupported' });
+      expect(readFile).not.toHaveBeenCalled();
+      expect(writeFile).not.toHaveBeenCalled();
+      expect(rename).not.toHaveBeenCalled();
+    }
+  );
+
+  it('shows fresh statusline limits for Claude Agent without polling', async () => {
+    vi.mocked(stat).mockResolvedValue({
+      isFile: () => true,
+      mtimeMs: Date.now(),
+    } as Awaited<ReturnType<typeof stat>>);
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({
+        rate_limits: {
+          five_hour: { used_percentage: 25 },
+          seven_day: { used_percentage: 50 },
+        },
+      })
+    );
+    const status = await adapter.fetch({
+      provider: { id: 'claude-agent', models: {} },
+      authStore: {},
+      modelID: 'sonnet',
+      checkedAt: 1_000,
+    });
+    expect(status).toMatchObject({
+      providerID: 'claude-agent',
+      modelID: 'sonnet',
+      status: 'available',
+      windows: [
+        { id: 'five_hour', remaining: 75 },
+        { id: 'seven_day', remaining: 50 },
+      ],
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(execFileMock).not.toHaveBeenCalled();
   });
 
   it('advertises local-file and OAuth-refresh capabilities', () => {

@@ -30,6 +30,11 @@ Supported identities:
    observation; the next demand resolves the new identity outside the old lock.
    The identity-change signal also bypasses process-local fallback caching. Refresh
    initiated by the lock holder still runs normally under its captured identity.
+  The official `claude-agent` provider instead uses Claude Code's login: an explicit
+  `CLAUDE_CODE_OAUTH_TOKEN`, macOS Keychain, then the Claude credentials file. It never
+  substitutes OpenCode's separate Anthropic account. All Claude Agent credential
+  sources are read-only; Claude Code owns their rotation through `claude auth login`.
+  Provider IDs keep their own shared snapshots even when the resolved tokens match.
 - Claude Code IPC: validated literal-loopback descriptor URL and exact bearer token.
   Requests still reject redirects. Different bridge ports, paths or tokens do not
   share, even if the bridges happen to use the same subscription. The descriptor

