@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.5` and v2 `2.2.3`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.5` and v2 `2.2.5`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -97,6 +97,59 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.2.5 compatibility review
+
+Reviewed v2.2.3 to v2.2.5, `b44b7164ba` through `4878a0e30f`. The complete
+upstream diff is retained in `artifacts/opencode-2.2.5-upstream.diff`. All 134
+existing OpenAPI paths remain available; four paths add opt-in experimental
+artifacts. Consumed session/message/part shapes, permission/form payloads,
+`/api/event` SSE names and payloads, and `serve`/upgrade arguments remain
+compatible. No Varro adapter changes are required. V1 `1.19.5` remains current,
+and both support floors remain unchanged.
+
+Optional additions include artifact APIs/tools and `artifact.updated`, persistent
+terminal renaming with `userTitle` and `persistent-pty.updated`, and percentage
+`compaction.buffer` values. Varro does not consume the changed persistent-PTY
+contract. The direct `@opencode/ai` API refactor does not affect its HTTP client.
+App/TUI, desktop terminal, quote-popup, and styling changes are optional parity work.
+
+Server-owned changes move background-job markers into a SQLite `job` table,
+cancel jobs when deleting their session, coordinate opt-in schedules under `serve`,
+allow local overrides of Console-supplied providers, and bypass environment proxies
+for CLI loopback requests. Varro does not read the old job markers. MCP framing and
+shutdown, compaction limits, reasoning replay, tool diagnostics, and the `bash` to
+`shell` fallback also remain server-owned behavior.
+
+All 309 focused adapter, transcript, inbox, transport, and authentication tests
+pass, along with 120 local-summary, usage-database, background-work, and native
+decision tests. `npm run lint`, `npm run fmt`, `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` pass, with zero suggestion
+diagnostics. Evidence uses the `artifacts/opencode-2.2.5-` prefix. The lockfile
+also synchronizes the existing Varro `0.33.31` manifest version change.
+
+`npm audit` reports two moderate findings in the unchanged development-tool
+chain, `@vscode/vsce` and its `minimatch` dependency, with no automatic fix available.
+They are advisory to this OpenCode bump; no unrelated dependency changes were made.
+
+The published-server adapter matrix passed all 151 applicable checks, with
+53 family/platform skips and no leaked or recovered processes. The five
+compatibility-summary tests passed afterward. Evidence is
+`artifacts/opencode-2.2.5-adapters.log`,
+`artifacts/opencode-adapters/run-6Xxtkq/`, and
+`artifacts/opencode-2.2.5-summary-tests.log`.
+
+| Published server | Passed | Skipped | Issues found | All cases complete |
+| --- | ---: | ---: | --- | --- |
+| v1.16.0 | 30 | 21 | None in tested cases | Yes, applicable automated cases |
+| v1.19.5 | 31 | 20 | None in tested cases | Yes, applicable automated cases |
+| v2.0.5 | 42 | 9 | None in tested cases | Yes, applicable automated cases |
+| v2.2.5 | 48 | 3 | None in tested cases | Yes, applicable automated cases |
+
+No further compatibility fixes are indicated by these checks. The v1 dependency
+is unchanged, so the Docker v1 support-range matrix was not rerun. Real-editor,
+visual streaming, live-account action parity, and native Windows checks were not
+run for this bump.
 
 ### 2.2.3 compatibility review
 
