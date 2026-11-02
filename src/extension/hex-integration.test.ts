@@ -175,7 +175,8 @@ describe('HexIntegration', () => {
 
   it('finds Linux executables on absolute PATH entries only', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
-    const directory = '/custom/bin with spaces;safe';
+    // Exercise shell syntax without using Windows' PATH separator.
+    const directory = '/custom/bin with spaces&safe';
     vi.stubEnv('PATH', `.${delimiter}${directory}`);
     mocks.stat.mockImplementation(async (path: string) => {
       if (path === join(directory, 'hex')) return { isFile: () => true };
