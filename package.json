@@ -102,7 +102,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
-    "@tailwindcss/vite": "4.3.3",
+    "@tailwindcss/vite": "4.3.4",
     "@types/css.escape": "1.5.2",
     "@types/node": "26.6.6",
     "@types/vscode": "1.107.0",
@@ -117,7 +117,7 @@
     "oxlint": "1.90.0",
     "oxlint-plugin-anti-slop": "github:dmmulroy/anti-slop#13909c9",
     "oxlint-tsgolint": "7.0.2005",
-    "tailwindcss": "4.3.3",
+    "tailwindcss": "4.3.4",
     "typescript": "7.0.2",
     "vite": "8.3.5",
     "vite-plugin-solid": "2.11.15",
