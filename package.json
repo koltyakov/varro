@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.33.34",
+  "version": "0.33.35",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -96,7 +96,7 @@
     "highlight.js": "11.12.0",
     "jsonc-parser": "3.3.1",
     "katex": "0.19.1",
-    "marked": "18.1.2",
+    "marked": "18.1.3",
     "mermaid": "^12.2.0",
     "solid-js": "^1.9.18"
   },
@@ -106,7 +106,7 @@
     "@types/css.escape": "1.5.2",
     "@types/node": "26.6.6",
     "@types/vscode": "1.107.0",
-    "@vitest/coverage-v8": "5.0.5",
+    "@vitest/coverage-v8": "5.1.0",
     "@vscode/vsce": "4.1.0",
     "css.escape": "1.5.1",
     "esbuild": "0.28.2",
@@ -121,7 +121,7 @@
     "typescript": "7.0.2",
     "vite": "8.3.5",
     "vite-plugin-solid": "2.11.15",
-    "vitest": "5.0.5",
+    "vitest": "5.1.0",
     "ws": "8.22.1"
   },
   "overrides": {
@@ -129,7 +129,7 @@
       "@azure/msal-node": "7.1.2"
     },
     "@vscode/vsce": {
-      "minimatch": "11.0.3"
+      "minimatch": "11.0.4"
     },
     "mermaid": {
       "katex": "0.19.1"
@@ -485,12 +485,6 @@
     "configuration": {
       "title": "Varro",
       "properties": {
-        "varro.dictation.handyPath": {
-          "type": "string",
-          "scope": "application",
-          "default": "",
-          "markdownDescription": "Optional absolute path to the Handy executable. When empty, Varro searches standard installation locations and PATH. Handy must already be running with its model and permissions configured. Click the composer mic again to finish and keep the text; right-click to cancel. Requires a local desktop extension host. Lifecycle logs are detected in Handy's standard location or its executable-relative portable Data/logs directory; missing or disabled logs do not block dictation. Disable Handy's Auto Submit option to review dictated text before sending."
-        },
         "varro.notifications.sound": {
           "type": "object",
           "scope": "application",

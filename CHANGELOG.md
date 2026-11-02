@@ -11,6 +11,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Added all-time usage CSV export, grouped by UTC day, provider, model, and recorded reasoning setting, including archived usage and token/cache breakdowns, with cancellable large-history scans.
 - Added offline LaTeX rendering for inline and display math in chat, including streamed formulas.
 - Added Handy dictation detection and a composer mic button with toggle and cancellation controls.
+- Added Hex dictation through the same composer mic, automatically preferring Hex when both Hex and Handy are running.
 - Added opt-in inline prompt completion with configurable models. Requires OpenCode v2 and a supported API-key connection.
 - Added live background-process logs and non-blocking services with wait and stop controls.
 - Preserved conversations and drafts across folder transfers, with read-only history for unavailable destinations.

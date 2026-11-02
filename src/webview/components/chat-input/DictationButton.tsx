@@ -1,12 +1,12 @@
 import { Show, createSignal, onCleanup, onMount } from 'solid-js';
-import type { HandyAction } from '../../../shared/protocol';
+import type { DictationAction, DictationProvider, WebviewMessage } from '../../../shared/protocol';
 import { onMessage, postMessage } from '../../lib/bridge';
 import { microphoneIcon, microphoneSpeakingSolidIcon } from '../../lib/ui-icons';
 import { Tooltip } from '../Tooltip';
 import { UiIcon } from '../UiIcon';
 import { showSessionActionFeedback } from '../chat/SessionActionFeedback';
 
-const REQUEST_TIMEOUT_MS = 8_000;
+const REQUEST_TIMEOUT_MS = 25_000;
 
 export function DictationButton(props: {
   focusComposer: () => void;
@@ -16,21 +16,23 @@ export function DictationButton(props: {
 }) {
   const [available, setAvailable] = createSignal(false);
   const [running, setRunning] = createSignal(false);
-  // Prefer observed Handy state; the host supplies requested-state fallback
-  // when Handy's optional lifecycle logs are unavailable.
+  const [provider, setProvider] = createSignal<DictationProvider>();
+  const providerName = () => (provider() === 'hex' ? 'Hex' : 'Handy');
+  // Prefer observed app state; Handy can fall back to the requested state
+  // when its optional lifecycle logs are unavailable.
   const [activationRequested, setActivationRequested] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
-  let queuedAction: Exclude<HandyAction, 'status'> | undefined;
+  let queuedAction: Exclude<DictationAction, 'status'> | undefined;
   let watchedRequestId: string | undefined;
   let lastRevision = -1;
   let pending:
-    | { id: string; action: HandyAction; timer: ReturnType<typeof setTimeout> }
+    | { id: string; action: DictationAction; timer: ReturnType<typeof setTimeout> }
     | undefined;
 
-  const label = () => (activationRequested() ? 'Stop Handy dictation' : 'Start Handy dictation');
+  const label = () => `${activationRequested() ? 'Stop' : 'Start'} ${providerName()} dictation`;
   const tooltip = () =>
     !running()
-      ? 'Open Handy to dictate'
+      ? `Open ${providerName()} to dictate`
       : activationRequested()
         ? 'Click to finish dictation'
         : 'Click to dictate. Click again when done.';
@@ -41,7 +43,7 @@ export function DictationButton(props: {
     props.onActivationChange?.(requested);
   }
 
-  function request(action: HandyAction) {
+  function request(action: DictationAction) {
     if (props.remote) return;
     if (pending) {
       if (action !== 'status' && pending.action === 'status' && !queuedAction) {
@@ -61,7 +63,7 @@ export function DictationButton(props: {
       if (action !== 'status') {
         updateActivationRequested(false);
         showSessionActionFeedback(
-          'Handy did not respond. Check its recording state before toggling again.',
+          `${providerName()} did not respond. Check its recording state before trying again.`,
           'warning'
         );
       } else {
@@ -69,13 +71,18 @@ export function DictationButton(props: {
       }
     }, REQUEST_TIMEOUT_MS);
     pending = { id, action, timer };
-    if (!postMessage({ type: 'handy/request', payload: { requestId: id, action } })) {
+    const payload: Extract<WebviewMessage, { type: 'dictation/request' }>['payload'] = {
+      requestId: id,
+      action,
+    };
+    if ((action === 'stop' || action === 'cancel') && provider()) payload.provider = provider();
+    if (!postMessage({ type: 'dictation/request', payload })) {
       clearTimeout(timer);
       pending = undefined;
       setBusy(false);
       updateActivationRequested(false);
       if (action !== 'status')
-        showSessionActionFeedback('Handy integration is unavailable.', 'warning');
+        showSessionActionFeedback(`${providerName()} integration is unavailable.`, 'warning');
     }
   }
 
@@ -86,7 +93,7 @@ export function DictationButton(props: {
   }
 
   const unsubscribe = onMessage((message) => {
-    if (message.type !== 'handy/result') return;
+    if (message.type !== 'dictation/result') return;
     const command = message.payload.requestId === pending?.id ? pending : undefined;
     if (!command && message.payload.requestId !== watchedRequestId) return;
     if (command) {
@@ -100,6 +107,7 @@ export function DictationButton(props: {
       return;
     }
     if (revision !== undefined) lastRevision = revision;
+    setProvider(message.payload.provider);
     const availabilityChanged = available() !== message.payload.available;
     setAvailable(message.payload.available);
     if (availabilityChanged) props.onAvailabilityChange?.();

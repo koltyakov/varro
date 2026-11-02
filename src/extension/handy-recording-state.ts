@@ -2,7 +2,7 @@ import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
-import type { HandyRecordingState } from '../shared/protocol';
+import type { DictationRecordingState } from '../shared/protocol';
 
 const MAX_READ_BYTES = 64 * 1024;
 const EVENT_COALESCE_MS = 100;
@@ -18,20 +18,20 @@ interface LogCursor {
 
 /** Read-only, bounded lifecycle observation. No watcher or timer exists while idle. */
 export class HandyRecordingStateReader {
-  state: HandyRecordingState = 'unknown';
+  state: DictationRecordingState = 'unknown';
   revision = 0;
   observation = 0;
   private cursor: LogCursor | undefined;
-  private reading: Promise<HandyRecordingState> | undefined;
+  private reading: Promise<DictationRecordingState> | undefined;
   private watcher: FSWatcher | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private generation = 0;
   private disposed = false;
-  private listener: ((state: HandyRecordingState) => void) | undefined;
+  private listener: ((state: DictationRecordingState) => void) | undefined;
 
   constructor(private readonly getPath: () => string | undefined) {}
 
-  read(): Promise<HandyRecordingState> {
+  read(): Promise<DictationRecordingState> {
     // File events and explicit clicks share one ordered reader. A click always
     // takes its own fresh snapshot after an already-running event read finishes.
     const operation = (this.reading ?? Promise.resolve()).then(() => this.readLog());
@@ -42,7 +42,7 @@ export class HandyRecordingStateReader {
     return operation;
   }
 
-  watch(listener: (state: HandyRecordingState) => void): boolean {
+  watch(listener: (state: DictationRecordingState) => void): boolean {
     if (this.disposed) return false;
     // Logging is optional. Never watch for a log that was not readable during
     // the user's explicit command.
@@ -116,13 +116,13 @@ export class HandyRecordingStateReader {
     this.listener = undefined;
   }
 
-  reset(state: HandyRecordingState): void {
+  reset(state: DictationRecordingState): void {
     this.stopWatching();
     this.cursor = undefined;
     this.setState(state);
   }
 
-  assume(state: HandyRecordingState): void {
+  assume(state: DictationRecordingState): void {
     // Preserve the byte cursor: old log lines must not undo a newer command
     // when logging is disabled or omits this transition.
     this.setState(state);
@@ -133,7 +133,7 @@ export class HandyRecordingStateReader {
     this.reset('unknown');
   }
 
-  private setState(state: HandyRecordingState): HandyRecordingState {
+  private setState(state: DictationRecordingState): DictationRecordingState {
     if (this.state !== state) {
       this.state = state;
       this.revision++;
@@ -141,7 +141,7 @@ export class HandyRecordingStateReader {
     return state;
   }
 
-  private async readLog(): Promise<HandyRecordingState> {
+  private async readLog(): Promise<DictationRecordingState> {
     if (this.disposed) return 'unknown';
     try {
       const path = this.getPath();
@@ -175,7 +175,7 @@ export class HandyRecordingStateReader {
           mtimeMs: metadata.mtimeMs,
           partial: partial.slice(0, MAX_READ_BYTES),
         };
-        let state: HandyRecordingState = complete ? this.state : 'unknown';
+        let state: DictationRecordingState = complete ? this.state : 'unknown';
         for (const line of lines) {
           const observed = readLifecycleLine(line.trimEnd());
           if (observed !== undefined) {
@@ -195,7 +195,7 @@ export class HandyRecordingStateReader {
   }
 }
 
-function readLifecycleLine(line: string): HandyRecordingState | undefined {
+function readLifecycleLine(line: string): DictationRecordingState | undefined {
   const match = line.match(
     /^\[\d{4}-\d{2}-\d{2}\]\[\d{2}:\d{2}:\d{2}\]\[handy_app_lib::(tray|utils|actions|managers::audio)\]\[(?:DEBUG|INFO|WARN|ERROR)\] (.*)$/
   );

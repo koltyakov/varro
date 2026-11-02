@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { isEditorContext, parseExtensionMessage } from './extension-message';
 
 describe('parseExtensionMessage', () => {
-  it('validates Handy results', () => {
+  it('validates dictation results and provider names', () => {
     const message = {
-      type: 'handy/result',
+      type: 'dictation/result',
       payload: { requestId: '1', available: true, running: true, state: 'idle' },
     };
     expect(parseExtensionMessage(message)).toEqual(message);
+    for (const provider of ['handy', 'hex']) {
+      const withProvider = { ...message, payload: { ...message.payload, provider } };
+      expect(parseExtensionMessage(withProvider)).toEqual(withProvider);
+    }
     expect(
       parseExtensionMessage({ ...message, payload: { ...message.payload, error: 'Start Handy' } })
     ).toEqual({ ...message, payload: { ...message.payload, error: 'Start Handy' } });
@@ -21,6 +25,7 @@ describe('parseExtensionMessage', () => {
       { ...message.payload, revision: Infinity },
       { ...message.payload, revision: 1.5 },
       { ...message.payload, error: 1 },
+      { ...message.payload, provider: 'other' },
       { ...message.payload, requestId: '' },
     ]) {
       expect(parseExtensionMessage({ ...message, payload })).toBeNull();

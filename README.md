@@ -81,9 +81,11 @@ Use slash commands for reviews, compaction, exports, stats, skills, diagnostics,
 
 On v2, `/pause` interrupts the run and pauses its queue in the current view. Resume from the transcript divider or send a message. It preserves the conversation, not an in-flight operation for exact resumption. Paused time does not count toward work duration or usage statistics.
 
-### Handy dictation
+### Dictation with Handy or Hex
 
-Install and configure [Handy](https://github.com/cjpais/Handy) to enable the microphone button. Click to start or stop dictation; right-click to cancel. Disable Handy's Auto Submit to review text before sending. Set `varro.dictation.handyPath` if detection fails. Requires Handy's CLI remote-control support and a local desktop host, not SSH, WSL, or containers.
+Install and configure [Handy](https://github.com/cjpais/Handy) or [Hex](https://github.com/anomalyco/hex) to enable the microphone button. Start the app yourself, then click the mic to start or finish dictation; right-click to cancel. The app inserts the text into the focused composer. Varro never launches either app or changes its settings.
+
+Varro automatically uses the running app, preferring Hex when both are running. Both apps are detected in standard installation locations and on `PATH`. Handy needs CLI remote-control support; Hex needs `hex status --json` and `hex dictation start|stop|cancel --json`. Disable Handy's Auto Submit to review text before sending. Both integrations require a local desktop extension host, not SSH, WSL, or containers.
 
 ## Permissions
 

@@ -30,7 +30,7 @@ import { asRecord, isBoolean, isNumber, isString } from './type-utils';
 import type { UnknownRecord } from './type-utils';
 
 const KNOWN_TYPES = new Set<string>([
-  'handy/result',
+  'dictation/result',
   'server/status',
   'server/restart-blocked',
   'server/event',
@@ -93,7 +93,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
   if (!isKnownExtensionMessageType(type)) return null;
 
   switch (type) {
-    case 'handy/result': {
+    case 'dictation/result': {
       const payload = asRecord(record.payload);
       if (
         !payload ||
@@ -102,6 +102,9 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         payload.requestId.length > 128 ||
         !isBoolean(payload.available) ||
         !isBoolean(payload.running) ||
+        (payload.provider !== undefined &&
+          payload.provider !== 'handy' &&
+          payload.provider !== 'hex') ||
         (payload.state !== 'idle' &&
           payload.state !== 'recording' &&
           payload.state !== 'processing' &&
@@ -113,13 +116,15 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         (payload.error !== undefined && !isString(payload.error))
       )
         return null;
-      const result: Extract<ExtensionMessage, { type: 'handy/result' }>['payload'] = {
+      const result: Extract<ExtensionMessage, { type: 'dictation/result' }>['payload'] = {
         requestId: payload.requestId,
         available: payload.available,
         running: payload.running,
         state: payload.state,
       };
       if (payload.error !== undefined) result.error = payload.error;
+      if (payload.provider === 'handy' || payload.provider === 'hex')
+        result.provider = payload.provider;
       if (isNumber(payload.revision)) result.revision = payload.revision;
       return { type, payload: result };
     }

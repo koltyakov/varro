@@ -4,7 +4,7 @@ import { isAbsolute, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import type { ContextProvider } from './context-provider';
 import { logger } from './logger';
-import type { HandyIntegration } from './handy-integration';
+import type { DictationIntegration } from './dictation-integration';
 import type { MessageRouterCallbacks } from './message-router';
 import type { RestProxy } from './rest-proxy';
 import type { SessionExportService } from './session-export-service';
@@ -30,7 +30,7 @@ type ConfigPayload = Extract<
 type OpenPathPayload = Parameters<MessageRouterCallbacks['openPath']>[0];
 
 export interface SidebarProviderActionDeps {
-  handyIntegration: HandyIntegration;
+  dictationIntegration: DictationIntegration;
   contextProvider: ContextProvider;
   extensionId: string;
   webviewSession: {
@@ -139,11 +139,15 @@ export function createSidebarProviderActions(
   };
 
   return {
-    requestHandy: async ({ requestId, action }) => {
-      const payload = await deps.handyIntegration.request(action, (status) => {
-        deps.post({ type: 'handy/result', payload: { requestId, ...status } });
-      });
-      deps.post({ type: 'handy/result', payload: { requestId, ...payload } });
+    requestDictation: async ({ requestId, action, provider }) => {
+      const payload = await deps.dictationIntegration.request(
+        action,
+        (status) => {
+          deps.post({ type: 'dictation/result', payload: { requestId, ...status } });
+        },
+        provider
+      );
+      deps.post({ type: 'dictation/result', payload: { requestId, ...payload } });
     },
     ready: (documentId) => deps.handleReadyMessage(documentId),
     updateCommandState: (canAbort, canSwitchSessions, model, sessionId) => {

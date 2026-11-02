@@ -133,7 +133,7 @@ import { SessionHistoryScopeStore } from './session-history-scope-store';
 import { SessionTitleFallback } from './session-title-fallback';
 import { SessionTrashManager } from './session-trash-manager';
 import { createSidebarProviderActions } from './sidebar-provider-actions';
-import { HandyIntegration } from './handy-integration';
+import { DictationIntegration } from './dictation-integration';
 import { LegacySessionImport } from './legacy-session-import';
 import { SidebarProviderBridge } from './sidebar-provider-bridge';
 import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
@@ -236,7 +236,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private openCodeServerProcessId: number | null = null;
   private openCodeUptimeTimer: ReturnType<typeof setInterval> | null = null;
   private readonly extensionVersion: string;
-  private readonly handyIntegration = new HandyIntegration();
+  private readonly dictationIntegration = new DictationIntegration();
   private activeChatModel: ChatModelSelection | null = null;
   private readonly fileSearch: FileSearchService;
   private readonly sessionState: SessionStateManager;
@@ -1070,7 +1070,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const messageRouter = new MessageRouter(
       createSidebarProviderActions({
-        handyIntegration: this.handyIntegration,
+        dictationIntegration: this.dictationIntegration,
         contextProvider: this.contextProvider,
         extensionId: this.extensionId,
         webviewSession,
@@ -3454,7 +3454,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose() {
-    this.handyIntegration.dispose();
+    this.dictationIntegration.dispose();
     await this.commitMessageService.cancel();
     this.macOSTray?.dispose();
     this.notificationUriHandler.dispose();

@@ -5,25 +5,22 @@ import { homedir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
-import type { ExtensionMessage, HandyAction } from '../shared/protocol';
+import type { DictationAction, DictationStatus } from '../shared/protocol';
 import { HandyRecordingStateReader } from './handy-recording-state';
 
 const runFile = promisify(execFile);
 const PROCESS_TIMEOUT_MS = 2_000;
-type HandyStatus = Omit<
-  Extract<ExtensionMessage, { type: 'handy/result' }>['payload'],
-  'requestId'
->;
+type HandyStatus = DictationStatus;
 
 export class HandyIntegration {
   private pending: Promise<HandyStatus> | undefined;
-  private pendingAction: HandyAction | undefined;
+  private pendingAction: DictationAction | undefined;
   private logPath: string | undefined;
   private readonly recording = new HandyRecordingStateReader(() => this.getLogPath());
   private requestedState: 'idle' | 'recording' = 'idle';
   private disposed = false;
 
-  request(action: HandyAction, onState?: (status: HandyStatus) => void): Promise<HandyStatus> {
+  request(action: DictationAction, onState?: (status: HandyStatus) => void): Promise<HandyStatus> {
     if (vscode.env.remoteName || this.disposed)
       return Promise.resolve({ available: false, running: false, state: 'idle' });
     if (this.pending) {
@@ -79,7 +76,7 @@ export class HandyIntegration {
     return result;
   }
 
-  private async performRequest(action: HandyAction): Promise<HandyStatus> {
+  private async performRequest(action: DictationAction): Promise<HandyStatus> {
     let available = false;
     let running = false;
     try {
@@ -177,13 +174,6 @@ export class HandyIntegration {
 
   private async findExecutable(): Promise<string | undefined> {
     const deadline = AbortSignal.timeout(PROCESS_TIMEOUT_MS);
-    const configured = vscode.workspace
-      .getConfiguration('varro')
-      .get<string>('dictation.handyPath', '')
-      .trim();
-    if (configured && !isAbsolute(configured)) {
-      throw new Error('varro.dictation.handyPath must be an absolute executable path.');
-    }
     const name = process.platform === 'win32' ? 'handy.exe' : 'handy';
     const standard =
       process.platform === 'darwin'
@@ -196,15 +186,13 @@ export class HandyIntegration {
               .filter((directory): directory is string => !!directory)
               .map((directory) => join(directory, 'Handy', name))
           : [join(homedir(), '.local/bin/handy'), '/usr/bin/handy', '/usr/local/bin/handy'];
-    const candidates = configured
-      ? [configured]
-      : [
-          ...standard,
-          ...(process.env.PATH ?? '')
-            .split(delimiter)
-            .filter(isAbsolute)
-            .map((directory) => join(directory, name)),
-        ];
+    const candidates = [
+      ...standard,
+      ...(process.env.PATH ?? '')
+        .split(delimiter)
+        .filter(isAbsolute)
+        .map((directory) => join(directory, name)),
+    ];
     for (const candidate of new Set(candidates)) {
       deadline.throwIfAborted();
       try {

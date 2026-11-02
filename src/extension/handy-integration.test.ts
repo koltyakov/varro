@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExecFileOptions } from 'node:child_process';
 import { delimiter, join } from 'node:path';
 import { homedir } from 'node:os';
-import type { HandyRecordingState } from '../shared/protocol';
+import type { DictationRecordingState } from '../shared/protocol';
 import packageJson from '../../package.json';
 
 interface HandyTestEnvironment {
@@ -11,7 +11,7 @@ interface HandyTestEnvironment {
 }
 
 interface RecordingFixture {
-  state: HandyRecordingState;
+  state: DictationRecordingState;
   revision: number;
   observation: number;
 }
@@ -39,9 +39,8 @@ const mocks = vi.hoisted(() => {
       >(),
     stat: vi.fn(),
     access: vi.fn(),
-    get: vi.fn(),
-    read: vi.fn<() => Promise<HandyRecordingState>>(),
-    watch: vi.fn<(listener: (state: HandyRecordingState) => void) => boolean>(),
+    read: vi.fn<() => Promise<DictationRecordingState>>(),
+    watch: vi.fn<(listener: (state: DictationRecordingState) => void) => boolean>(),
     stopWatching: vi.fn(),
     dispose: vi.fn(),
     recording,
@@ -55,7 +54,6 @@ vi.mock('node:child_process', () => ({
 vi.mock('node:fs/promises', () => ({ stat: mocks.stat, access: mocks.access }));
 vi.mock('vscode', () => ({
   env: mocks.env,
-  workspace: { getConfiguration: () => ({ get: mocks.get }) },
 }));
 vi.mock('./handy-recording-state', () => ({
   HandyRecordingStateReader: class {
@@ -75,11 +73,11 @@ vi.mock('./handy-recording-state', () => ({
     watch = mocks.watch;
     stopWatching = mocks.stopWatching;
     dispose = mocks.dispose;
-    assume(state: HandyRecordingState) {
+    assume(state: DictationRecordingState) {
       mocks.recording.state = state;
       mocks.recording.revision++;
     }
-    reset(state: HandyRecordingState) {
+    reset(state: DictationRecordingState) {
       this.assume(state);
       mocks.stopWatching();
     }
@@ -95,7 +93,6 @@ beforeEach(() => {
   Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
   Object.defineProperty(process, 'getuid', { value: () => 501, configurable: true });
   mocks.env.remoteName = undefined;
-  mocks.get.mockReturnValue('');
   mocks.stat.mockResolvedValue({ isFile: () => true, isDirectory: () => false });
   mocks.access.mockResolvedValue(undefined);
   mocks.recording.state = 'unknown';
@@ -185,34 +182,18 @@ describe('HandyIntegration', () => {
     );
   });
 
-  it('uses a configured executable without interpreting shell syntax', async () => {
-    const path = '/custom/Handy with spaces;safe';
-    mocks.get.mockImplementation((key: string) => (key === 'dictation.handyPath' ? path : ''));
-    await new HandyIntegration().request('start');
-    expect(mocks.runFile).toHaveBeenLastCalledWith(
-      path,
-      ['--toggle-transcription'],
-      expect.any(Object)
-    );
-    mocks.get.mockReturnValue('relative/handy');
-    expect(await new HandyIntegration().request('status')).toMatchObject({
-      available: false,
-      running: false,
-      error: expect.stringContaining('absolute'),
-    });
-  });
-
   it('finds Linux executables on PATH but ignores relative entries', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
-    vi.stubEnv('PATH', `.${delimiter}/custom/bin`);
+    const directory = '/custom/bin with spaces;safe';
+    vi.stubEnv('PATH', `.${delimiter}${directory}`);
     mocks.stat.mockImplementation(async (path: string) => {
-      if (path === join('/custom/bin', 'handy')) return { isFile: () => true };
+      if (path === join(directory, 'handy')) return { isFile: () => true };
       throw new Error('missing');
     });
     await new HandyIntegration().request('start');
     expect(mocks.stat).not.toHaveBeenCalledWith('handy');
     expect(mocks.runFile).toHaveBeenLastCalledWith(
-      join('/custom/bin', 'handy'),
+      join(directory, 'handy'),
       ['--toggle-transcription'],
       expect.any(Object)
     );
@@ -366,13 +347,11 @@ describe('HandyIntegration', () => {
   });
 
   it.each(['darwin', 'win32', 'linux'] as const)(
-    'derives %s portable logs from the configured executable',
+    'derives %s portable logs from the automatically discovered executable',
     async (platform) => {
       Object.defineProperty(process, 'platform', { value: platform, configurable: true });
       const executable = join('/portable', platform === 'win32' ? 'handy.exe' : 'handy');
-      mocks.get.mockImplementation((key: string) =>
-        key === 'dictation.handyPath' ? executable : ''
-      );
+      vi.stubEnv('PATH', '/portable');
       mocks.stat.mockImplementation(async (path: string) => {
         if (path === executable || path === join('/portable', 'portable'))
           return { isFile: () => true, isDirectory: () => false };
@@ -391,16 +370,12 @@ describe('HandyIntegration', () => {
         running: true,
       });
       expect(mocks.logPath.get?.()).toBe(join('/portable', 'Data/logs/handy.log'));
-      expect(mocks.get.mock.calls.every(([key]) => key === 'dictation.handyPath')).toBe(true);
       integration.dispose();
     }
   );
 
-  it('uses standard logs for non-portable custom executables even when portable checks fail', async () => {
-    const executable = '/custom/handy';
-    mocks.get.mockImplementation((key: string) =>
-      key === 'dictation.handyPath' ? executable : ''
-    );
+  it('uses standard logs for a non-portable installation even when portable checks fail', async () => {
+    const executable = '/Applications/Handy.app/Contents/MacOS/Handy';
     mocks.stat.mockImplementation(async (path: string) => {
       if (path === executable) return { isFile: () => true, isDirectory: () => false };
       throw new Error('portable directory unavailable');
@@ -413,9 +388,7 @@ describe('HandyIntegration', () => {
 
   it('keeps portable dictation working when its log is missing', async () => {
     const executable = join('/portable', 'handy');
-    mocks.get.mockImplementation((key: string) =>
-      key === 'dictation.handyPath' ? executable : ''
-    );
+    vi.stubEnv('PATH', '/portable');
     mocks.stat.mockImplementation(async (path: string) => ({
       isFile: () => path === executable || path === join('/portable', 'portable'),
       isDirectory: () => path === join('/portable', 'Data'),
@@ -431,11 +404,11 @@ describe('HandyIntegration', () => {
     integration.dispose();
   });
 
-  it('exposes only the executable path setting for dictation', () => {
+  it('does not expose dictation configuration settings', () => {
     expect(
       Object.keys(packageJson.contributes.configuration.properties).filter((key) =>
         key.startsWith('varro.dictation.')
       )
-    ).toEqual(['varro.dictation.handyPath']);
+    ).toEqual([]);
   });
 });

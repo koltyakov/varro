@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type {
   ExtensionMessage,
-  HandyRecordingState,
+  DictationProvider,
+  DictationRecordingState,
   WebviewMessage,
 } from '../../../shared/protocol';
 import { microphoneIcon, microphoneSpeakingSolidIcon } from '../../lib/ui-icons';
@@ -50,10 +51,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function reply(available = true, running = true, error?: string, state?: HandyRecordingState) {
+function reply(
+  available = true,
+  running = true,
+  error?: string,
+  state?: DictationRecordingState,
+  provider?: DictationProvider
+) {
   const message = mocks.post.mock.calls.at(-1)?.[0];
-  if (message?.type !== 'handy/request') throw new Error('Missing Handy request');
-  const payload: Extract<ExtensionMessage, { type: 'handy/result' }>['payload'] = {
+  if (message?.type !== 'dictation/request') throw new Error('Missing dictation request');
+  const payload: Extract<ExtensionMessage, { type: 'dictation/result' }>['payload'] = {
     requestId: message.payload.requestId,
     available,
     running,
@@ -69,7 +76,8 @@ function reply(available = true, running = true, error?: string, state?: HandyRe
             : 'idle'),
   };
   if (error) payload.error = error;
-  mocks.context.handler?.({ type: 'handy/result', payload });
+  if (provider) payload.provider = provider;
+  mocks.context.handler?.({ type: 'dictation/result', payload });
 }
 function button() {
   const result = container.querySelector('button');
@@ -90,6 +98,43 @@ function mount(remote = false) {
 }
 
 describe('DictationButton', () => {
+  it('labels Hex, preserves focus, and routes start, finish, and cancel to Hex', () => {
+    mount();
+    reply(true, true, undefined, 'idle', 'hex');
+    expect(button().getAttribute('aria-label')).toBe('Start Hex dictation');
+    button().click();
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({
+      type: 'dictation/request',
+      payload: { action: 'start' },
+    });
+    reply(true, true, undefined, 'recording', 'hex');
+    expect(button().getAttribute('aria-label')).toBe('Stop Hex dictation');
+    button().click();
+    expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({
+      payload: { action: 'stop', provider: 'hex' },
+    });
+    reply(true, true, undefined, 'processing', 'hex');
+    expect(button().disabled).toBe(false);
+    button().click();
+    reply(true, true, undefined, 'recording', 'hex');
+    button().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({
+      payload: { action: 'cancel', provider: 'hex' },
+    });
+    reply(true, true, undefined, 'idle', 'hex');
+    expect(button().getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('names Hex in the stopped-app tooltip', () => {
+    mount();
+    reply(true, false, undefined, 'idle', 'hex');
+    button().dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(1000);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Open Hex to dictate');
+    expect(button().disabled).toBe(true);
+  });
+
   it('is hidden without Handy and never probes remote hosts', () => {
     mount(true);
     expect(mocks.post).not.toHaveBeenCalled();
@@ -186,7 +231,7 @@ describe('DictationButton', () => {
     button().click();
     reply();
     button().click();
-    vi.advanceTimersByTime(8_000);
+    vi.advanceTimersByTime(25_000);
     expect(activationChange).toHaveBeenLastCalledWith(false);
     button().click();
     reply();
@@ -201,7 +246,7 @@ describe('DictationButton', () => {
     reply();
     button().click();
     mocks.context.handler?.({
-      type: 'handy/result',
+      type: 'dictation/result',
       payload: { requestId: 'other', available: true, running: true, state: 'idle' },
     });
     expect(button().disabled).toBe(true);
@@ -209,7 +254,7 @@ describe('DictationButton', () => {
     expect(mocks.feedback).toHaveBeenCalledWith('CLI failed', 'warning');
     expect(button().getAttribute('aria-pressed')).toBe('false');
     button().click();
-    vi.advanceTimersByTime(8_000);
+    vi.advanceTimersByTime(25_000);
     expect(mocks.feedback).toHaveBeenLastCalledWith(
       expect.stringContaining('Check its recording state'),
       'warning'
@@ -291,7 +336,7 @@ describe('DictationButton', () => {
     reply();
     window.dispatchEvent(new Event('focus'));
     button().click();
-    vi.advanceTimersByTime(8_000);
+    vi.advanceTimersByTime(25_000);
     expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { action: 'start' } });
     reply();
     expect(button().getAttribute('aria-pressed')).toBe('true');
@@ -303,13 +348,13 @@ describe('DictationButton', () => {
     reply();
     button().click();
     const start = mocks.post.mock.calls.at(-1)?.[0];
-    if (start?.type !== 'handy/request') throw new Error('Missing start command');
+    if (start?.type !== 'dictation/request') throw new Error('Missing start command');
     reply();
     window.dispatchEvent(new Event('focus'));
     const status = mocks.post.mock.calls.at(-1)?.[0];
-    if (status?.type !== 'handy/request') throw new Error('Missing status request');
+    if (status?.type !== 'dictation/request') throw new Error('Missing status request');
     mocks.context.handler?.({
-      type: 'handy/result',
+      type: 'dictation/result',
       payload: {
         requestId: start.payload.requestId,
         available: true,
@@ -320,7 +365,7 @@ describe('DictationButton', () => {
     });
     expect(button().getAttribute('aria-pressed')).toBe('false');
     mocks.context.handler?.({
-      type: 'handy/result',
+      type: 'dictation/result',
       payload: {
         requestId: status.payload.requestId,
         available: true,

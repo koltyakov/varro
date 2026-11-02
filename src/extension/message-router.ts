@@ -53,8 +53,8 @@ type RalphMessage = Extract<
 >;
 
 export interface MessageRouterCallbacks {
-  requestHandy(
-    payload: Extract<WebviewMessage, { type: 'handy/request' }>['payload']
+  requestDictation(
+    payload: Extract<WebviewMessage, { type: 'dictation/request' }>['payload']
   ): Promise<void>;
   ready(documentId?: number): Promise<void>;
   updateCommandState(
@@ -152,8 +152,8 @@ export class MessageRouter {
   async handleMessage(msg: WebviewMessage) {
     try {
       switch (msg.type) {
-        case 'handy/request':
-          await this.callbacks.requestHandy(msg.payload);
+        case 'dictation/request':
+          await this.callbacks.requestDictation(msg.payload);
           break;
         case 'ready':
           await this.handleReadyMessage(msg);

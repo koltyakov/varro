@@ -90,12 +90,12 @@ describe('composer dictation integration', () => {
     const sent: WebviewMessage[] = [];
     defaultBridgeSend = (message) => {
       sent.push(message);
-      if (message.type !== 'handy/request') return;
+      if (message.type !== 'dictation/request') return;
       queueMicrotask(() =>
         window.dispatchEvent(
           new MessageEvent('message', {
             data: {
-              type: 'handy/result',
+              type: 'dictation/result',
               payload: {
                 requestId: message.payload.requestId,
                 available: true,
@@ -132,7 +132,7 @@ describe('composer dictation integration', () => {
     window.getSelection()?.addRange(range);
     mic?.click();
     expect(document.activeElement).toBe(editor);
-    expect(sent.at(-1)).toMatchObject({ type: 'handy/request', payload: { action: 'start' } });
+    expect(sent.at(-1)).toMatchObject({ type: 'dictation/request', payload: { action: 'start' } });
     await Promise.resolve();
     expect(
       container?.querySelector('.chat-input-container[data-dictation-requested="true"]')

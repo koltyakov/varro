@@ -6724,9 +6724,9 @@ function installBridge(state: ScenarioState) {
     const webviewMessage = message as WebviewMessage;
 
     switch (webviewMessage.type) {
-      case 'handy/request':
+      case 'dictation/request':
         dispatchToWebview({
-          type: 'handy/result',
+          type: 'dictation/result',
           payload: {
             requestId: webviewMessage.payload.requestId,
             available: false,

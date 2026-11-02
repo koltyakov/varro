@@ -60,10 +60,14 @@ function createRalphRun() {
 }
 
 describe('webview message validation', () => {
-  it('accepts only bounded Handy requests with fixed actions', () => {
+  it('accepts only bounded dictation requests with fixed actions and providers', () => {
     for (const action of ['status', 'start', 'stop', 'cancel']) {
-      const message = { type: 'handy/request', payload: { requestId: 'handy-1', action } };
+      const message = { type: 'dictation/request', payload: { requestId: 'dictation-1', action } };
       expect(parseWebviewMessage(message)).toEqual(message);
+      for (const provider of ['handy', 'hex']) {
+        const withProvider = { ...message, payload: { ...message.payload, provider } };
+        expect(parseWebviewMessage(withProvider)).toEqual(withProvider);
+      }
     }
     for (const payload of [
       {},
@@ -71,8 +75,10 @@ describe('webview message validation', () => {
       { requestId: 'x'.repeat(129), action: 'start' },
       { requestId: '1', action: 'toggle' },
       { requestId: '1', action: '--anything' },
+      { requestId: '1', action: 'start', provider: 'other' },
+      { requestId: '1', action: 'start', provider: null },
     ]) {
-      expect(parseWebviewMessage({ type: 'handy/request', payload })).toBeNull();
+      expect(parseWebviewMessage({ type: 'dictation/request', payload })).toBeNull();
     }
   });
   it('allows only read-only session-scoped background process inspection with valid byte cursors', () => {

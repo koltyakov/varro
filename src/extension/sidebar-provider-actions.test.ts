@@ -41,7 +41,7 @@ vi.mock('./logger', () => ({ logger: mocks.logger }));
 
 import type { SidebarProviderActionDeps } from './sidebar-provider-actions';
 import { createSidebarProviderActions } from './sidebar-provider-actions';
-import { HandyIntegration } from './handy-integration';
+import { DictationIntegration } from './dictation-integration';
 
 type SessionDiffProvider = Pick<SidebarProviderActionDeps['sessionDiffProvider'], 'open'>;
 type ToolOutputProvider = Pick<SidebarProviderActionDeps['toolOutputProvider'], 'open'>;
@@ -129,7 +129,7 @@ function createActionFixture() {
   };
 
   const deps = {
-    handyIntegration: new HandyIntegration(),
+    dictationIntegration: new DictationIntegration(),
     contextProvider: contextProvider as unknown as SidebarProviderActionDeps['contextProvider'],
     extensionId: 'koltyakov.varro',
     webviewSession,
@@ -290,17 +290,21 @@ const nestedSessionActionCases: Array<{
 ];
 
 describe('createSidebarProviderActions', () => {
-  it('posts correlated Handy status and command results to the requesting view', async () => {
+  it('posts correlated dictation results to the requesting view and routes the provider', async () => {
     const request = vi
-      .spyOn(HandyIntegration.prototype, 'request')
+      .spyOn(DictationIntegration.prototype, 'request')
       .mockResolvedValue({ available: true, running: true, state: 'recording' });
     try {
       const { actions, deps } = createActionFixture();
-      await actions.requestHandy({ requestId: 'handy-1', action: 'start' });
-      expect(request).toHaveBeenCalledWith('start', expect.any(Function));
+      await actions.requestDictation({
+        requestId: 'dictation-1',
+        action: 'start',
+        provider: 'hex',
+      });
+      expect(request).toHaveBeenCalledWith('start', expect.any(Function), 'hex');
       expect(deps.post).toHaveBeenCalledWith({
-        type: 'handy/result',
-        payload: { requestId: 'handy-1', available: true, running: true, state: 'recording' },
+        type: 'dictation/result',
+        payload: { requestId: 'dictation-1', available: true, running: true, state: 'recording' },
       });
     } finally {
       request.mockRestore();
