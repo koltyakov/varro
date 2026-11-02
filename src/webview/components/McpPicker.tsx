@@ -113,6 +113,9 @@ export function McpPicker(props: {
   }
 
   onMount(() => {
+    // Best effort: the settings screen falls back to its own load if this fails.
+    void import('./McpSettingsPanel').catch(() => undefined);
+
     const reposition = () => {
       if (anchorRef && menuRef) {
         const editBanner = anchorRef

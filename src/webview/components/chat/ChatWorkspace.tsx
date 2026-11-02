@@ -418,7 +418,17 @@ export function ChatWorkspace(props: {
         </Suspense>
       </Show>
       <Show when={props.showMcpSettings}>
-        <Suspense>
+        <Suspense
+          fallback={
+            <section class="mcp-settings-panel" aria-label="MCP settings">
+              <div class="chat-messages-loading" role="status" aria-label="Loading MCP settings">
+                <span class="chat-messages-loading-dot" />
+                <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
+                <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.6s' }} />
+              </div>
+            </section>
+          }
+        >
           <LazyMcpSettingsPanel />
         </Suspense>
       </Show>

@@ -1611,9 +1611,12 @@ describe('header status badges', () => {
     setInputText('Keep this draft');
     cleanup = render(() => Chat(), container!);
     setShowMcpSettings(true);
+    expect(
+      container?.querySelector('.mcp-settings-panel [aria-label="Loading MCP settings"]')
+    ).not.toBeNull();
     await vi.dynamicImportSettled();
     await Promise.resolve();
-    expect(container?.querySelector('.mcp-settings-panel')).not.toBeNull();
+    expect(container?.querySelector('h1')?.textContent).toBe('MCP settings');
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
     await Promise.resolve();
     expect(showMcpSettings()).toBe(false);

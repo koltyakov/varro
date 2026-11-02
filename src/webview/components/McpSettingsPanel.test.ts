@@ -4,6 +4,7 @@ import type { McpDefaults } from '../../shared/protocol';
 import {
   getSelectedMcpsForSession,
   resetDefaultAppState,
+  setMcpDefaults,
   setShowMcpSettings,
   setState,
   showMcpSettings,
@@ -105,6 +106,25 @@ describe('McpSettingsPanel', () => {
     expect(document.activeElement).toBe(back);
     back.click();
     expect(showMcpSettings()).toBe(false);
+  });
+
+  it('shows a loading indicator until settings arrive', async () => {
+    let completeLoad!: (value: McpDefaults) => void;
+    mocks.defaults.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          completeLoad = resolve;
+        })
+    );
+    cleanup = render(() => McpSettingsPanel(), container);
+    await flush();
+    const indicator = '[role="status"][aria-label="Loading MCP settings"]';
+    expect(container.querySelector(indicator)).not.toBeNull();
+    expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+    completeLoad(structuredClone(defaults));
+    await flush();
+    expect(container.querySelector(indicator)).toBeNull();
+    expect(checkbox('rare').checked).toBe(false);
   });
 
   it('switches tabs with the arrow keys', async () => {
@@ -299,6 +319,191 @@ describe('McpSettingsPanel', () => {
     await flush();
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(checkbox('rare').checked).toBe(false);
+  });
+
+  describe('settings loaded at startup', () => {
+    const startup: McpDefaults = {
+      global: { rare: false, docs: true, removed: true },
+      project: { rare: true },
+      effective: { rare: true, docs: true, removed: true },
+      editable: true,
+    };
+
+    function deferRefresh() {
+      let resolve!: (value: McpDefaults) => void;
+      let reject!: (cause: Error) => void;
+      mocks.defaults.mockImplementation(
+        () =>
+          new Promise((onResolve, onReject) => {
+            resolve = onResolve;
+            reject = onReject;
+          })
+      );
+      return { resolve: (value: McpDefaults) => resolve(value), reject: (e: Error) => reject(e) };
+    }
+
+    function serverNames() {
+      return [...container.querySelectorAll('.mcp-settings-server label span')].map(
+        (element) => element.textContent
+      );
+    }
+
+    beforeEach(() => {
+      setMcpDefaults(structuredClone(startup));
+    });
+
+    it('shows startup values immediately and keeps checkboxes disabled while refreshing', async () => {
+      deferRefresh();
+      cleanup = render(() => McpSettingsPanel(), container);
+      expect(container.querySelector('[aria-label="Loading MCP settings"]')).toBeNull();
+      expect(serverNames()).toEqual(['docs', 'rare', 'removed']);
+      expect(checkbox('docs').checked).toBe(true);
+      expect(checkbox('docs').disabled).toBe(true);
+      expect(container.querySelector('.mcp-settings-saving')?.textContent).toBe('Refreshing...');
+      expect(container.querySelector('.mcp-settings-servers')?.getAttribute('aria-busy')).toBe(
+        'true'
+      );
+      openTab('This project');
+      expect(checkbox('rare').checked).toBe(true);
+      expect(checkbox('rare').disabled).toBe(true);
+      expect(useGlobalButton('rare')?.disabled).toBe(true);
+      toggle('rare');
+      useGlobalButton('rare')?.click();
+      await flush();
+      expect(mocks.setDefault).not.toHaveBeenCalled();
+    });
+
+    it('enables checkboxes after an unchanged refresh without touching connections', async () => {
+      const refresh = deferRefresh();
+      cleanup = render(() => McpSettingsPanel(), container);
+      await flush();
+      refresh.resolve(structuredClone(startup));
+      await flush();
+      expect(checkbox('docs').disabled).toBe(false);
+      expect(checkbox('docs').checked).toBe(true);
+      expect(container.querySelector('.mcp-settings-saving')).toBeNull();
+      expect(container.querySelector('.mcp-settings-servers')?.getAttribute('aria-busy')).toBe(
+        'false'
+      );
+      expect(mocks.refreshSessionMcps).not.toHaveBeenCalled();
+    });
+
+    it('updates values, servers and overrides that changed since startup', async () => {
+      const refresh = deferRefresh();
+      cleanup = render(() => McpSettingsPanel(), container);
+      await flush();
+      openTab('This project');
+      expect(checkbox('docs').checked).toBe(true);
+      expect(useGlobalButton('rare')).not.toBeNull();
+      refresh.resolve({
+        global: { rare: true, docs: false, added: true },
+        project: {},
+        effective: { rare: true, docs: false, added: true },
+        editable: true,
+      });
+      await flush();
+      expect(serverNames()).toEqual(['added', 'docs', 'rare']);
+      expect(checkbox('docs').checked).toBe(false);
+      expect(checkbox('added').checked).toBe(true);
+      expect(checkbox('docs').disabled).toBe(false);
+      expect(useGlobalButton('rare')).toBeNull();
+      openTab('Global');
+      expect(checkbox('rare').checked).toBe(true);
+      expect(checkbox('docs').checked).toBe(false);
+    });
+
+    it('saves against refreshed values rather than startup values', async () => {
+      const refresh = deferRefresh();
+      cleanup = render(() => McpSettingsPanel(), container);
+      await flush();
+      refresh.resolve({
+        global: { docs: false },
+        project: {},
+        effective: { docs: false },
+        editable: true,
+      });
+      await flush();
+      mocks.setDefault.mockResolvedValue({
+        global: { docs: true },
+        project: {},
+        effective: { docs: true },
+        editable: true,
+      });
+      toggle('docs');
+      await flush();
+      expect(mocks.setDefault).toHaveBeenCalledWith('docs', 'global', true);
+      expect(checkbox('docs').checked).toBe(true);
+    });
+
+    it('switches to the read-only list when the refresh reports an attached server', async () => {
+      const refresh = deferRefresh();
+      cleanup = render(() => McpSettingsPanel(), container);
+      await flush();
+      expect(container.querySelector('[role="tablist"]')).not.toBeNull();
+      refresh.resolve({ global: {}, project: {}, effective: { docs: true }, editable: false });
+      await flush();
+      expect(container.querySelector('[role="tablist"]')).toBeNull();
+      expect(serverNames()).toEqual(['docs']);
+      expect(checkbox('docs').checked).toBe(true);
+      expect(checkbox('docs').disabled).toBe(true);
+    });
+
+    it('keeps startup values read-only after a failed refresh until a retry succeeds', async () => {
+      const refresh = deferRefresh();
+      cleanup = render(() => McpSettingsPanel(), container);
+      await flush();
+      refresh.reject(new Error('Server unavailable'));
+      await flush();
+      const alert = container.querySelector('[role="alert"]');
+      expect(alert?.textContent).toContain('Server unavailable');
+      expect(alert?.textContent).toContain('Showing the last loaded settings');
+      expect(serverNames()).toEqual(['docs', 'rare', 'removed']);
+      expect(checkbox('docs').disabled).toBe(true);
+      expect(container.querySelector('.mcp-settings-saving')).toBeNull();
+      const retry = deferRefresh();
+      alert?.querySelector('button')?.click();
+      await flush();
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(checkbox('docs').disabled).toBe(true);
+      expect(container.querySelector('.mcp-settings-saving')?.textContent).toBe('Refreshing...');
+      retry.resolve(structuredClone(startup));
+      await flush();
+      expect(checkbox('docs').disabled).toBe(false);
+    });
+
+    it('does not show one workspace values under another while refreshing', async () => {
+      const first = deferRefresh();
+      cleanup = render(() => McpSettingsPanel(), container);
+      await flush();
+      const next = deferRefresh();
+      setState('editorContext', 'workspacePath', '/next');
+      await flush();
+      expect(container.querySelector('[aria-label="Loading MCP settings"]')).not.toBeNull();
+      expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+      first.resolve(structuredClone(startup));
+      await flush();
+      expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+      next.resolve({
+        global: { next: true },
+        project: {},
+        effective: { next: true },
+        editable: true,
+      });
+      await flush();
+      expect(serverNames()).toEqual(['next']);
+      expect(checkbox('next').disabled).toBe(false);
+    });
+
+    it('ignores a refresh that finishes after the screen closes', async () => {
+      const refresh = deferRefresh();
+      cleanup = render(() => McpSettingsPanel(), container);
+      await flush();
+      cleanup();
+      cleanup = undefined;
+      refresh.resolve({ global: {}, project: {}, effective: {}, editable: true });
+      await flush();
+      expect(state.mcpDefaults?.effective).toEqual(startup.effective);
+    });
   });
 
   it('ignores a pending save after the workspace changes', async () => {

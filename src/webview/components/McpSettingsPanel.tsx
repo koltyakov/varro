@@ -17,6 +17,7 @@ import {
   requestComposerFocus,
   setMcpDefaults,
   setShowMcpSettings,
+  setState,
   state,
 } from '../lib/state';
 import { navArrowLeftIcon } from '../lib/ui-icons';
@@ -54,6 +55,11 @@ export function McpSettingsPanel() {
   let tabList: HTMLDivElement | undefined;
 
   const names = createMemo(getAvailableMcpNames);
+  const hasDefaults = () => Boolean(state.mcpDefaults);
+  const activity = () => {
+    if (saving()) return 'Saving...';
+    return loading() && hasDefaults() ? 'Refreshing...' : '';
+  };
   const sessionsWorking = createMemo(() =>
     Object.values(state.sessionStatus).some(
       (status) => status?.type === 'busy' || status?.type === 'retry'
@@ -164,7 +170,9 @@ export function McpSettingsPanel() {
   createEffect(
     on(
       () => state.editorContext.workspacePath,
-      () => {
+      (workspacePath, previous) => {
+        // Startup values belong to the workspace that loaded them.
+        if (previous !== undefined && previous !== workspacePath) setState('mcpDefaults', null);
         void load();
       }
     )
@@ -194,9 +202,9 @@ export function McpSettingsPanel() {
             <UiIcon source={navArrowLeftIcon} width={16} height={16} />
           </button>
           <h1>MCP settings</h1>
-          <Show when={saving()}>
+          <Show when={activity()}>
             <span class="mcp-settings-saving" role="status">
-              Saving...
+              {activity()}
             </span>
           </Show>
         </div>
@@ -209,7 +217,13 @@ export function McpSettingsPanel() {
           </p>
           <Show when={error()}>
             <div class="mcp-settings-error" role="alert">
-              <span>{error()}</span>
+              <span>
+                {error()}
+                <Show when={!ready() && hasDefaults()}>
+                  {' '}
+                  Showing the last loaded settings. Retry to change them.
+                </Show>
+              </span>
               <Show when={!ready()}>
                 <button type="button" onClick={() => void load()}>
                   Retry
@@ -217,12 +231,14 @@ export function McpSettingsPanel() {
               </Show>
             </div>
           </Show>
-          <Show when={loading()}>
-            <p class="mcp-settings-note" role="status">
-              Loading MCP settings...
-            </p>
+          <Show when={loading() && !hasDefaults()}>
+            <div class="chat-messages-loading" role="status" aria-label="Loading MCP settings">
+              <span class="chat-messages-loading-dot" />
+              <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
+              <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.6s' }} />
+            </div>
           </Show>
-          <Show when={ready()}>
+          <Show when={hasDefaults()}>
             <Show
               when={!state.mcpDefaults?.editable}
               fallback={
@@ -282,7 +298,7 @@ export function McpSettingsPanel() {
                     {MCP_SCOPES.find((item) => item.scope === scope())?.description}
                   </p>
                 </Show>
-                <div class="mcp-settings-servers" aria-busy={saving()}>
+                <div class="mcp-settings-servers" aria-busy={saving() || loading()}>
                   <For each={names()}>
                     {(name) => (
                       <div class="mcp-settings-server">
