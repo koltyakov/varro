@@ -383,6 +383,14 @@ Custom OpenCode commands loaded from your local config also appear in the same c
 
 `/stats` scans the last 30 days of retained OpenCode history across projects and opens an untitled Markdown report. It reads and aggregates the local OpenCode SQLite database in a worker so large transcripts do not block the extension host. It groups token use and total completed assistant duration by provider and model. Use `/stats all` when you need the slower all-time scan, including preserved usage archives. All-time reports have no message-count cap and deduplicate prompt identities in temporary SQLite storage rather than retaining them in JavaScript sets. They can run for up to 10 minutes while rows advance and stop after 60 seconds without row progress. Recent reports keep their 30-second limit, 250,000 qualifying-message aggregation cap, and 1,000,000-message scan cap. Both modes stop above 4,096 provider/model routes. History deleted without a usage archive cannot be recovered.
 
+Both report modes abbreviate token counts with up to one decimal place, such as `1.3K`,
+`35.1M`, or `1B`. Prompt counts remain exact. Cache rate is
+`cache read / (input + cache read + cache write) × 100`; each model and the total row
+use summed token counts rather than averaged percentages. A dash means no input-side
+tokens were recorded. These columns use the existing usage aggregates without extra
+history or timing reads. Generation speed, TTFT, and request logs are not included.
+CSV exports retain exact token counts.
+
 Some commands only appear when they apply. `/ralph` appears before a session exists, `/export` appears after one exists, and `/init` appears when the workspace can be initialized.
 
 `/diagnostics`, `/fork`, `/abort`, `/stop`, `/undo`, `/revert`, and `/redo` can be submitted directly when applicable but are intentionally hidden from slash-command completion. `/undo` or `/revert` undoes the last assistant response, and `/redo` reapplies it. These session-level actions are separate from composer undo and redo.

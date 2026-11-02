@@ -192,6 +192,68 @@ async function fixture(versions: number[]) {
 }
 
 describe('local usage database versions', () => {
+  it.each([false, true])(
+    'matches API compact token counts and weighted cache rates, allTime=%s',
+    async (allTime) => {
+      const { add, database, report, now } = await fixture([1, 2]);
+      const sessions = [
+        { id: 'cached', version: 1, model: 'model-a', input: 0, read: 100, write: 0 },
+        { id: 'uncached', version: 2, model: 'model-a', input: 450, read: 0, write: 0 },
+        { id: 'other-model', version: 1, model: 'model-b', input: 0, read: 800, write: 200 },
+      ];
+      for (const session of sessions) {
+        add(session.version, session.id, now, session.model);
+        const table = session.version === 1 ? 'message' : 'session_message';
+        database
+          .prepare(
+            `UPDATE ${table} SET data = json_set(data, '$.tokens.input', ?, '$.tokens.output', 1000, '$.tokens.reasoning', 10, '$.tokens.cache.read', ?, '$.tokens.cache.write', ?) WHERE session_id = ?`
+          )
+          .run(session.input, session.read, session.write, session.id);
+      }
+      const localContent = await report(allTime);
+      const request = vi.fn(async (_method: string, path: string) => {
+        if (path.startsWith('/experimental/session'))
+          return sessions.map(({ id }) => ({ id, directory: '/project', time: { updated: now } }));
+        const session = sessions.find(({ id }) => path.startsWith(`/session/${id}/message`));
+        if (!session) throw new Error(`Unexpected request ${path}`);
+        return Array.from({ length: session.version === 1 ? 1 : 2 }, (_, index) => ({
+          info: {
+            id: `${session.id}-reply-${index}`,
+            role: 'assistant',
+            parentID: `${session.id}-prompt`,
+            providerID: 'provider',
+            modelID: session.model,
+            time: { created: now - 2000, completed: now },
+            tokens: {
+              input: session.input,
+              output: 1000,
+              reasoning: 10,
+              cache: { read: session.read, write: session.write },
+            },
+          },
+        }));
+      });
+
+      await new UsageReportService({ request, isAttachOnly: true }, vi.fn()).openReport(allTime);
+
+      expect(mocks.content.split('\n').filter((line) => line.startsWith('|'))).toEqual(
+        localContent.split('\n').filter((line) => line.startsWith('|'))
+      );
+      expect(localContent).toContain(
+        '| provider | model-a | 2 | 4K | 6s | 900 | 3K | 30 | 100 | 0 | 10.0% |'
+      );
+      expect(localContent).toContain(
+        '| provider | model-b | 1 | 2K | 2s | 0 | 1K | 10 | 800 | 200 | 80.0% |'
+      );
+      expect(localContent).toContain(
+        '| **Total** |  | 3 | 6K | 8s | 900 | 4K | 40 | 900 | 200 | 45.0% |'
+      );
+      expect(localContent).not.toMatch(/tok\/s|TTFT/i);
+      expect(mocks.content).not.toMatch(/tok\/s|TTFT/i);
+      expect(request).toHaveBeenCalledTimes(4);
+    }
+  );
+
   it('reports over one million assistant messages without the recent-report aggregation or scan caps', async () => {
     const { database, report, now } = await fixture([2]);
     const count = 1_000_001;
@@ -213,7 +275,7 @@ describe('local usage database versions', () => {
     const content = await report(true);
     for (const title of ['Today', 'Last 7 rolling days', 'Last 30 rolling days', 'All time']) {
       expect(content.split(`## ${title}\n`)[1]?.split('\n## ')[0]).toContain(
-        '| provider | model | 1 | 15,000,015 | <1s | 10,000,010 | 5,000,005 |'
+        '| provider | model | 1 | 15M | <1s | 10M | 5M |'
       );
     }
     expect(reportWork).toEqual({
@@ -289,28 +351,31 @@ describe('local usage database versions', () => {
     await expect(report(true)).rejects.toThrow('4,096-route local aggregation limit');
   });
 
-  it('bounds JSON extraction for an all-time report with long assistant runs', async () => {
-    const { database, report, now } = await fixture([2]);
-    const count = 2_001;
-    database.exec(
-      "INSERT INTO session_v2 VALUES ('long-history',1,NULL); INSERT INTO session_message VALUES ('prompt','long-history','user',0,'{}');"
-    );
-    const body = JSON.stringify({
-      model: { providerID: 'provider', id: 'model' },
-      time: { created: now - 1000, completed: now },
-      tokens: { input: 10, output: 5 },
-      content: 'x'.repeat(8 * 1024),
-    });
-    database
-      .prepare(
-        "WITH RECURSIVE n(value) AS (VALUES(1) UNION ALL SELECT value+1 FROM n WHERE value < ?) INSERT INTO session_message SELECT 'reply-'||value,'long-history','assistant',value,? FROM n"
-      )
-      .run(count, body);
-    archiveWork.jsonCalls = 0;
-    const content = await report(true);
-    expect(content).toContain('| provider | model | 1 | 30,015 | 33m 21s |');
-    expect(archiveWork.jsonCalls).toBeLessThanOrEqual(2 * count + 10);
-  }, 30_000);
+  it.each([false, true])(
+    'bounds JSON extraction with long assistant runs, allTime=%s',
+    async (allTime) => {
+      const { database, report, now } = await fixture([2]);
+      const count = 2_001;
+      database.prepare("INSERT INTO session_v2 VALUES ('long-history',?,NULL)").run(now);
+      database.exec("INSERT INTO session_message VALUES ('prompt','long-history','user',0,'{}');");
+      const body = JSON.stringify({
+        model: { providerID: 'provider', id: 'model' },
+        time: { created: now - 1000, completed: now },
+        tokens: { input: 10, output: 5 },
+        content: 'x'.repeat(8 * 1024),
+      });
+      database
+        .prepare(
+          "WITH RECURSIVE n(value) AS (VALUES(1) UNION ALL SELECT value+1 FROM n WHERE value < ?) INSERT INTO session_message SELECT 'reply-'||value,'long-history','assistant',value,? FROM n"
+        )
+        .run(count, body);
+      archiveWork.jsonCalls = 0;
+      const content = await report(allTime);
+      expect(content).toContain('| provider | model | 1 | 30K | 33m 21s |');
+      expect(archiveWork.jsonCalls).toBeLessThanOrEqual(2 * count + 10);
+    },
+    30_000
+  );
 
   it('cancels a real CSV scan without changing the source history', async () => {
     const { database } = await fixture([2]);

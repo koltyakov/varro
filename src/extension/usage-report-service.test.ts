@@ -590,7 +590,132 @@ describe('UsageReportService', () => {
     expect(request).not.toHaveBeenCalled();
     expect(reportContent()).toContain('from 2,209 sessions scanned');
     expect(reportSection(reportContent(), 'Today')).toContain(
-      '| openai | gpt-5.6-sol | 9 | 35,101,345 | 9s |'
+      '| openai | gpt-5.6-sol | 9 | 35.1M | 9s | 1.7M | 61K | 136.6K | 33.2M | 0 | 95.0% |'
+    );
+  });
+
+  it.each([
+    [0, '0'],
+    [999, '999'],
+    [1_000, '1K'],
+    [1_250, '1.3K'],
+    [12_345, '12.3K'],
+    [999_949, '999.9K'],
+    [999_950, '1M'],
+    [1_000_000, '1M'],
+    [1_234_567, '1.2M'],
+    [1_000_000_000, '1B'],
+  ])('formats %s tokens as %s in every token column', async (count, formatted) => {
+    const request = vi.fn<Request>(async (_method, path) =>
+      path.startsWith('/experimental/session')
+        ? [session('session-1', '/repo', 10)]
+        : [
+            assistant('reply', NOW.getTime(), {
+              tokens: {
+                total: Math.max(count, 1),
+                input: count,
+                output: count,
+                reasoning: count,
+                cache: { read: count, write: count },
+              },
+            }),
+          ]
+    );
+    const { service } = createService(request);
+
+    await service.openReport();
+
+    expect(reportSection(reportContent(), 'Today')).toContain(
+      `| provider-a | model-a | 1 | ${count === 0 ? '1' : formatted} | 3s | ${formatted} | ${formatted} | ${formatted} | ${formatted} | ${formatted} | ${count === 0 ? '-' : '33.3%'} |`
+    );
+  });
+
+  it.each([false, true])(
+    'uses summed token counts for cache rates within models and totals, allTime=%s',
+    async (allTime) => {
+      const request = vi.fn<Request>(async (_method, path) =>
+        path.startsWith('/experimental/session')
+          ? [session('session-1', '/repo', 10)]
+          : [
+              assistant('cached', NOW.getTime(), {
+                tokens: { input: 0, output: 1, cache: { read: 100, write: 0 } },
+              }),
+              assistant('uncached', NOW.getTime(), {
+                tokens: { input: 900, output: 1, cache: { read: 0, write: 0 } },
+              }),
+              assistant('other-model', NOW.getTime(), {
+                modelID: 'model-b',
+                tokens: { input: 0, output: 1, cache: { read: 800, write: 200 } },
+              }),
+            ]
+      );
+      const { service } = createService(request);
+
+      await service.openReport(allTime);
+
+      const titles = ['Today', 'Last 7 rolling days', 'Last 30 rolling days'];
+      if (allTime) titles.push('All time');
+      for (const title of titles) {
+        const section = reportSection(reportContent(), title);
+        expect(section).toContain(
+          '| provider-a | model-a | 2 | 1K | 5s | 900 | 2 | 0 | 100 | 0 | 10.0% |'
+        );
+        expect(section).toContain(
+          '| provider-a | model-b | 1 | 1K | 3s | 0 | 1 | 0 | 800 | 200 | 80.0% |'
+        );
+        expect(section).toContain(
+          '| **Total** |  | 3 | 2K | 8s | 900 | 3 | 0 | 900 | 200 | 45.0% |'
+        );
+      }
+      expect(reportContent()).not.toMatch(/tok\/s|TTFT/i);
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(request.mock.calls[1]?.[3]).toMatchObject({ stripMessageParts: true });
+    }
+  );
+
+  it.each([
+    { input: 0, read: 0, write: 0, expected: '-' },
+    { input: 100, read: 0, write: 0, expected: '0.0%' },
+    { input: 0, read: 100, write: 0, expected: '100.0%' },
+    { input: 0, read: 0, write: 100, expected: '0.0%' },
+    { input: 100, read: 100, write: 200, expected: '25.0%' },
+  ])(
+    'renders cache rate $expected for $input/$read/$write',
+    async ({ input, read, write, expected }) => {
+      const request = vi.fn<Request>(async (_method, path) =>
+        path.startsWith('/experimental/session')
+          ? [session('session-1', '/repo', 10)]
+          : [
+              assistant('reply', NOW.getTime(), {
+                tokens: { input, output: 1, cache: { read, write } },
+              }),
+            ]
+      );
+      const { service } = createService(request);
+
+      await service.openReport();
+
+      const row = reportSection(reportContent(), 'Today')
+        .split('\n')
+        .find((line) => line.startsWith('| provider-a | model-a |'));
+      expect(row?.endsWith(`| ${expected} |`)).toBe(true);
+    }
+  );
+
+  it('keeps large prompt counts exact instead of compacting them', async () => {
+    const request = vi.fn<Request>(async (_method, path) =>
+      path.startsWith('/experimental/session')
+        ? [session('session-1', '/repo', 10)]
+        : Array.from({ length: 1_001 }, (_, index) =>
+            assistant(`reply-${index}`, NOW.getTime(), { tokens: tokenDetails(1) })
+          )
+    );
+    const { service } = createService(request);
+
+    await service.openReport();
+
+    expect(reportSection(reportContent(), 'Today')).toContain(
+      '| provider-a | model-a | 1,001 | 1K |'
     );
   });
 

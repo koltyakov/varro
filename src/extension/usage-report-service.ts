@@ -320,6 +320,10 @@ const LOCAL_USAGE_MAX_MESSAGE_DATA_BYTES = 1024 * 1024;
 const LOCAL_USAGE_MAX_CSV_ROWS = 100_000;
 const LOCAL_USAGE_MAX_CSV_BYTES = 64 * 1024 * 1024;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const TOKEN_NUMBER_FORMAT = new Intl.NumberFormat('en-US', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
 
 export class UsageReportService {
   private readonly sessionUsageCache = new Map<string, CachedSessionUsage>();
@@ -1638,6 +1642,8 @@ function renderAggregatedReport(
     '# OpenCode Usage Report',
     '',
     `Generated ${new Date(now).toLocaleString()} from ${sessionCount.toLocaleString()} sessions scanned.`,
+    '',
+    'Token counts use compact notation. Cache rate is cache read / (input + cache read + cache write), calculated from summed token counts. A dash in Cache rate means no recorded input tokens.',
   ];
 
   for (const aggregate of aggregates) {
@@ -1663,8 +1669,8 @@ function renderAggregateTable(
   totalPromptCount?: number
 ): void {
   lines.push(
-    '| Provider | Model | Prompts | Total | Duration | Input | Output | Reasoning | Cache read | Cache write |',
-    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
+    '| Provider | Model | Prompts | Total | Duration | Input | Output | Reasoning | Cache read | Cache write | Cache rate |',
+    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
   );
   for (const [route, aggregate] of [...groups].toSorted(
     ([leftRoute, left], [rightRoute, right]) =>
@@ -1714,7 +1720,16 @@ function addTokens(target: Tokens, tokens: Tokens): void {
 }
 
 function renderAggregateRow(providerID: string, modelID: string, aggregate: Aggregate): string {
-  return `| ${escapeMarkdown(providerID)} | ${escapeMarkdown(modelID)} | ${integer(aggregatePromptCount(aggregate))} | ${integer(aggregate.total)} | ${formatAggregateDuration(aggregate)} | ${integer(aggregate.input)} | ${integer(aggregate.output)} | ${integer(aggregate.reasoning)} | ${integer(aggregate.cacheRead)} | ${integer(aggregate.cacheWrite)} |`;
+  return `| ${escapeMarkdown(providerID)} | ${escapeMarkdown(modelID)} | ${integer(aggregatePromptCount(aggregate))} | ${formatTokenCount(aggregate.total)} | ${formatAggregateDuration(aggregate)} | ${formatTokenCount(aggregate.input)} | ${formatTokenCount(aggregate.output)} | ${formatTokenCount(aggregate.reasoning)} | ${formatTokenCount(aggregate.cacheRead)} | ${formatTokenCount(aggregate.cacheWrite)} | ${formatCacheRate(aggregate)} |`;
+}
+
+function formatTokenCount(value: number): string {
+  return TOKEN_NUMBER_FORMAT.format(Math.round(value));
+}
+
+function formatCacheRate(aggregate: Aggregate): string {
+  const input = aggregate.input + aggregate.cacheRead + aggregate.cacheWrite;
+  return input > 0 ? `${((aggregate.cacheRead / input) * 100).toFixed(1)}%` : '-';
 }
 
 function aggregatePromptCount(aggregate: Aggregate): number {
