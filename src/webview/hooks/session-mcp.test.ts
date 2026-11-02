@@ -400,7 +400,7 @@ describe('session MCP helpers', () => {
     expect(syncSessionMcps).toHaveBeenCalledWith(null);
   });
 
-  it('lets an explicit draft selection override MCPs required by background sessions', async () => {
+  it('preserves background connections even when explicitly removed from a draft', async () => {
     const disconnectMcp = vi.fn(async () => {});
     let draftSelection = ['browser-bridge'];
     const operations = new SessionMcpOperations({
@@ -422,7 +422,7 @@ describe('session MCP helpers', () => {
 
     await operations.applySessionMcps([], null);
 
-    expect(disconnectMcp).toHaveBeenCalledWith('browser-bridge');
+    expect(disconnectMcp).not.toHaveBeenCalled();
   });
 
   it('disconnects an MCP removed from a draft unless a background session requires it', async () => {

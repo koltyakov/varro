@@ -2316,7 +2316,7 @@ describe('ChatInput', () => {
     );
   });
 
-  it('shows configured MCPs and toggles the picker', async () => {
+  it('shows configured MCP selections independently of connection status and toggles the picker', async () => {
     cleanup = render(() => ChatInput(), container!);
 
     expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
@@ -2326,6 +2326,12 @@ describe('ChatInput', () => {
       beta: { status: 'disabled' },
       gamma: { status: 'connected' },
       delta: { status: 'failed' },
+    });
+    setState('mcpDefaults', {
+      global: { alpha: true, beta: false, gamma: true, delta: false },
+      project: {},
+      effective: { alpha: true, beta: false, gamma: true, delta: false },
+      editable: true,
     });
 
     const mcpCount = container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count');
@@ -2355,7 +2361,7 @@ describe('ChatInput', () => {
       gamma: { status: 'failed' },
       delta: { status: 'disabled' },
     });
-    expect(container?.querySelector('.toolbar-mcp-count')?.textContent).toContain('0/4');
+    expect(container?.querySelector('.toolbar-mcp-count')?.textContent).toContain('2/4');
 
     setState('mcpStatus', {
       alpha: { status: 'disabled' },
@@ -2363,6 +2369,7 @@ describe('ChatInput', () => {
       gamma: { status: 'disabled' },
       delta: { status: 'disabled' },
     });
+    setState('mcpDefaults', 'effective', { alpha: false, beta: false, gamma: false, delta: false });
     const disconnectedCount = container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count');
     expect(disconnectedCount?.textContent).toContain('0/4');
   });

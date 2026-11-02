@@ -19,6 +19,9 @@ import {
   setShowModels,
   showPermissionSettings,
   setShowPermissionSettings,
+  showMcpSettings,
+  setShowMcpSettings,
+  requestComposerFocus,
 } from '../lib/state';
 import { Show, createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
 import { selectSession, deleteSessionImmediately } from '../hooks/useOpenCode';
@@ -728,6 +731,11 @@ export function Chat() {
         ) {
           return;
         }
+        if (showMcpSettings()) {
+          setShowMcpSettings(false);
+          requestComposerFocus();
+          return;
+        }
         if (showPermissionSettings()) {
           setShowPermissionSettings(false);
           return;
@@ -925,6 +933,7 @@ export function Chat() {
         showSessionPicker={isEditorSurface ? false : showSessionPicker()}
         showModels={showModels()}
         showPermissionSettings={showPermissionSettings()}
+        showMcpSettings={showMcpSettings()}
         showReconnectBanner={showReconnectBanner()}
         slowApiRequests={slowApiRequests()}
         sessionFilter={sessionFilter()}

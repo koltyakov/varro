@@ -3,6 +3,7 @@ import type { McpStatus } from '../../../shared/protocol';
 type SessionMcpDependencies = {
   getSelectedMcpsForSession(sessionId: string | null): string[] | null | undefined;
   getRequiredMcpSessionIds?(targetSessionId: string | null): string[];
+  getSharedMcpNames?(): string[];
   getMcpStatus(): Record<string, McpStatus>;
   loadMcps(options?: { fresh?: boolean }): Promise<void | boolean | object>;
   getAvailableMcpNames(): string[];
@@ -36,10 +37,7 @@ export class SessionMcpOperations {
     }
   };
 
-  private reconcileSessionMcps = (
-    sessionId: string | null,
-    preserveBackgroundMcps: boolean
-  ): Promise<void | boolean | object> => {
+  private reconcileSessionMcps = (sessionId: string | null): Promise<void | boolean | object> => {
     const generation = ++this.reconciliationGeneration;
     const reconciliation = this.reconciliationQueue.then(async () => {
       if (generation !== this.reconciliationGeneration) return;
@@ -51,6 +49,7 @@ export class SessionMcpOperations {
         {
           getSelectedMcpsForSession: this.deps.getSelectedMcpsForSession,
           getRequiredMcpSessionIds: this.deps.getRequiredMcpSessionIds,
+          getSharedMcpNames: this.deps.getSharedMcpNames,
           getMcpStatus: this.deps.getMcpStatus,
           loadMcps: this.loadMcps,
           getAvailableMcpNames: this.deps.getAvailableMcpNames,
@@ -60,8 +59,7 @@ export class SessionMcpOperations {
           logError: this.deps.logError,
         },
         sessionId,
-        () => generation === this.reconciliationGeneration,
-        preserveBackgroundMcps
+        () => generation === this.reconciliationGeneration
       );
     });
     this.reconciliationQueue = reconciliation.catch(() => {});
@@ -69,7 +67,7 @@ export class SessionMcpOperations {
   };
 
   readonly syncSessionMcps = (sessionId: string | null): Promise<void | boolean | object> => {
-    return this.reconcileSessionMcps(sessionId, true);
+    return this.reconcileSessionMcps(sessionId);
   };
 
   readonly applySessionMcps = async (names: string[], sessionId: string | null | undefined) => {
@@ -77,7 +75,7 @@ export class SessionMcpOperations {
       {
         setSelectedMcpsForSession: this.deps.setSelectedMcpsForSession,
         setDraftSelectedMcps: this.deps.setDraftSelectedMcps,
-        syncSessionMcps: (targetSessionId) => this.reconcileSessionMcps(targetSessionId, false),
+        syncSessionMcps: this.reconcileSessionMcps,
       },
       names,
       sessionId
@@ -89,6 +87,7 @@ export async function syncSessionMcpsWithDependencies(
   deps: {
     getSelectedMcpsForSession(sessionId: string | null): string[] | null | undefined;
     getRequiredMcpSessionIds?(targetSessionId: string | null): string[];
+    getSharedMcpNames?(): string[];
     getMcpStatus(): Record<string, McpStatus>;
     loadMcps(options?: { fresh?: boolean }): Promise<void | boolean | object>;
     getAvailableMcpNames(): string[];
@@ -98,8 +97,7 @@ export async function syncSessionMcpsWithDependencies(
     logError(context: string, cause: unknown): void;
   },
   sessionId: string | null,
-  isCurrent: () => boolean = () => true,
-  preserveBackgroundMcps = true
+  isCurrent: () => boolean = () => true
 ) {
   if (!deps.getSelectedMcpsForSession(sessionId) || Object.keys(deps.getMcpStatus()).length === 0) {
     const refreshed = await deps.loadMcps();
@@ -110,12 +108,11 @@ export async function syncSessionMcpsWithDependencies(
   const available = new Set(deps.getAvailableMcpNames());
   const selectedTargetMcps = deps.getSelectedMcpsForSession(sessionId);
   if (!selectedTargetMcps) return;
-  const requiredSessionIds = new Set(
-    preserveBackgroundMcps ? deps.getRequiredMcpSessionIds?.(sessionId) || [] : []
-  );
+  const requiredSessionIds = new Set(deps.getRequiredMcpSessionIds?.(sessionId) || []);
   if (sessionId) requiredSessionIds.add(sessionId);
   const desiredSet = new Set([
     ...selectedTargetMcps.filter((name) => available.has(name)),
+    ...(deps.getSharedMcpNames?.() ?? []),
     ...[...requiredSessionIds].flatMap(
       (id) => deps.getSelectedMcpsForSession(id)?.filter((name) => available.has(name)) || []
     ),

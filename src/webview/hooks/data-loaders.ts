@@ -7,7 +7,12 @@ import { captureSessionStatusSnapshotTime, sessionStore } from '../lib/stores/se
 import type { SessionStatusSnapshotOptions } from '../lib/stores/session-store';
 import { clearQueuedMessagesForSession } from '../lib/state-queued-messages';
 import { getEffectiveComposerSessionId } from '../lib/state-view-persistence';
-import type { McpStatus, ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
+import type {
+  McpDefaults,
+  McpStatus,
+  ProviderLimitStatus,
+  RecycleBinEntry,
+} from '../../shared/protocol';
 import { getRelativePathWithinWorkspace } from '../../shared/workspace-path';
 import type {
   Agent,
@@ -58,6 +63,8 @@ export function createStateBoundDataLoaderOperations(deps: {
 }) {
   return createDataLoaderOperations({
     listMcpStatus: () => client.mcp.status(),
+    listMcpDefaults: () => client.mcp.defaults(),
+    setMcpDefaults: routingStore.setMcpDefaults,
     setMcpStatus: routingStore.setMcpStatus,
     getActiveSessionId: () => appStore.state.activeSessionId,
     getComposerSessionId: getEffectiveComposerSessionId,
@@ -111,6 +118,8 @@ export function createStateBoundDataLoaderOperations(deps: {
 
 export function createDataLoaderOperations(deps: {
   listMcpStatus(): Promise<Record<string, McpStatus> | null | undefined>;
+  listMcpDefaults(): Promise<McpDefaults>;
+  setMcpDefaults(defaults: McpDefaults): void;
   setMcpStatus(status: Record<string, McpStatus>): void;
   getActiveSessionId(): string | null;
   getComposerSessionId(): string | null;
@@ -238,10 +247,9 @@ export function createDataLoaderOperations(deps: {
     const request = loadMcpsWithDependencies(
       {
         listMcpStatus: deps.listMcpStatus,
+        listMcpDefaults: deps.listMcpDefaults,
+        setMcpDefaults: deps.setMcpDefaults,
         setMcpStatus: deps.setMcpStatus,
-        getActiveSessionId: deps.getActiveSessionId,
-        getSelectedMcpsForSession: deps.getSelectedMcpsForSession,
-        setSelectedMcpsForSession: deps.setSelectedMcpsForSession,
       },
       deps.logError,
       () => workspace === workspaceGeneration && generation === mcpLoadGeneration
@@ -718,32 +726,18 @@ export async function loadWorkspaceStatusesWithDependencies(
 export async function loadMcpsWithDependencies(
   deps: {
     listMcpStatus(): Promise<Record<string, McpStatus> | null | undefined>;
+    listMcpDefaults(): Promise<McpDefaults>;
+    setMcpDefaults(defaults: McpDefaults): void;
     setMcpStatus(status: Record<string, McpStatus>): void;
-    getActiveSessionId(): string | null;
-    getSelectedMcpsForSession(sessionId: string): string[] | null | undefined;
-    setSelectedMcpsForSession(sessionId: string, names: string[]): void;
   },
   logError: Logger,
   isCurrent: () => boolean = () => true
 ) {
-  const activeSessionId = deps.getActiveSessionId();
   try {
-    const status = await deps.listMcpStatus();
+    const [status, defaults] = await Promise.all([deps.listMcpStatus(), deps.listMcpDefaults()]);
     if (!isCurrent()) return false;
-    const nextStatus = status || {};
-    deps.setMcpStatus(nextStatus);
-    if (
-      activeSessionId &&
-      deps.getActiveSessionId() === activeSessionId &&
-      deps.getSelectedMcpsForSession(activeSessionId) === null
-    ) {
-      deps.setSelectedMcpsForSession(
-        activeSessionId,
-        Object.entries(nextStatus)
-          .filter(([, value]) => value?.status === 'connected')
-          .map(([name]) => name)
-      );
-    }
+    deps.setMcpDefaults(defaults);
+    deps.setMcpStatus(status || {});
     return true;
   } catch (err) {
     if (isCurrent()) logError('loadMcps', err);

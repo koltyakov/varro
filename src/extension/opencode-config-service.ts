@@ -3,6 +3,7 @@
 import * as vscode from 'vscode';
 import { existsSync, realpathSync } from 'fs';
 import { posix, win32 } from 'path';
+import { isDeepStrictEqual } from 'util';
 import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import type {
   OpenCodePermissionConfig,
@@ -12,7 +13,7 @@ import type {
   PermissionRule,
 } from '../shared/opencode-types';
 import { isScalarConfigPermission } from '../shared/permission-rules';
-import type { OpenCodeModelRouting } from '../shared/protocol';
+import type { McpDefaults, OpenCodeModelRouting } from '../shared/protocol';
 import { VARRO_VISION_AGENT_DESCRIPTION, VARRO_VISION_AGENT_PROMPT } from '../shared/vision-agent';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
@@ -158,6 +159,193 @@ export class OpenCodeConfigService {
     const followupModel = parseModelRoute(readFollowupModel(extensionConfig));
     if (followupModel) routing.followupModel = followupModel;
     return routing;
+  }
+
+  private mcpServers(config: Record<string, unknown>) {
+    const mcp = asRecord(config.mcp) ?? {};
+    if (this.callbacks.server.apiVersion === 1) return mcp;
+    return Object.fromEntries(
+      Object.entries(asRecord(mcp.servers) ?? mcp).filter(([, value]) => {
+        const server = asRecord(value);
+        return (
+          server?.type === 'local' ||
+          server?.type === 'remote' ||
+          typeof server?.enabled === 'boolean' ||
+          typeof server?.disabled === 'boolean'
+        );
+      })
+    );
+  }
+
+  private mcpDefaultsFromFiles(files: OpenCodeConfigFile[]): McpDefaults {
+    const globalPaths = getOpenCodeConfigPaths();
+    const global = new Map<string, boolean>();
+    const project = new Map<string, boolean>();
+    const effective = new Map<string, boolean>();
+    const inheritedServers = new Map<string, Record<string, unknown>>();
+    for (const file of files) {
+      const scope = globalPaths.includes(file.path) ? global : project;
+      for (const [name, value] of Object.entries(this.mcpServers(file.config))) {
+        let server = asRecord(value);
+        if (!server) continue;
+        if (this.callbacks.server.apiVersion === 1)
+          server = { ...inheritedServers.get(name), ...server };
+        inheritedServers.set(name, server);
+        const enabled = server.disabled !== true && server.enabled !== false;
+        scope.set(name, enabled);
+        effective.set(name, enabled);
+      }
+    }
+    return {
+      global: Object.fromEntries(global),
+      project: Object.fromEntries(project),
+      effective: Object.fromEntries(effective),
+      editable: true,
+    };
+  }
+
+  private mcpServer(config: Record<string, unknown>, name: string) {
+    const servers = this.mcpServers(config);
+    return Object.hasOwn(servers, name) ? asRecord(servers[name]) : null;
+  }
+
+  // A project entry can only be dropped when it adds nothing but the enabled flag.
+  private isInheritedMcpCopy(server: Record<string, unknown>, inherited: Record<string, unknown>) {
+    const { enabled: _enabled, disabled: _disabled, ...settings } = server;
+    const { enabled: _globalEnabled, disabled: _globalDisabled, ...globalSettings } = inherited;
+    return isDeepStrictEqual(
+      this.callbacks.server.apiVersion === 2 ? settings : { ...globalSettings, ...settings },
+      globalSettings
+    );
+  }
+
+  async readMcpDefaults(): Promise<McpDefaults> {
+    if (this.callbacks.server.isAttachOnly) {
+      const config = asRecord(await this.requestServer('GET', '/config'));
+      if (!config) throw new Error('OpenCode returned an invalid MCP configuration');
+      const defaults = this.mcpDefaultsFromFiles([
+        { path: '', uri: vscode.Uri.file('/'), raw: '', config },
+      ]);
+      return { ...defaults, global: {}, project: {}, editable: false };
+    }
+    return this.mcpDefaultsFromFiles((await this.readOpenCodeConfigObject(true)).files);
+  }
+
+  async updateMcpDefault(
+    name: string,
+    scope: 'global' | 'project',
+    enabled: boolean | null
+  ): Promise<McpDefaults> {
+    if (enabled === null && scope !== 'project')
+      throw new Error('Only a project MCP override can be cleared');
+    let snapshot = await this.readOpenCodeConfigObject(true);
+    const globalPaths = getOpenCodeConfigPaths();
+    const selectTarget = (current: OpenCodeConfigSnapshot): OpenCodeConfigFile => {
+      if (scope === 'project') return current.target;
+      const candidates = current.files.filter((file) => globalPaths.includes(file.path));
+      const configured = candidates.toReversed().find((file) => this.mcpServer(file.config, name));
+      if (!configured)
+        throw new Error(
+          'This MCP is only configured in the project. Add it globally before changing its global default.'
+        );
+      return configured;
+    };
+    while (true) {
+      const lockPath = getCanonicalOpenCodeConfigPath(selectTarget(snapshot).path);
+      const result = await withOpenCodeConfigUpdateLock(lockPath, async () => {
+        const current = await this.readOpenCodeConfigObject(true);
+        const target = selectTarget(current);
+        if (getCanonicalOpenCodeConfigPath(target.path) !== lockPath) return current;
+        if (
+          vscode.workspace.textDocuments.some(
+            (document) => document.isDirty && isSameWorkspacePath(document.uri.fsPath, target.path)
+          )
+        ) {
+          throw new Error(`${target.path} has unsaved changes; save before changing MCP defaults`);
+        }
+        const native = this.callbacks.server.apiVersion === 2;
+        const resolveServer = (files: OpenCodeConfigFile[]) => {
+          let resolved: Record<string, unknown> | null = null;
+          for (const file of files) {
+            const server = this.mcpServer(file.config, name);
+            if (server) resolved = native ? server : Object.assign({}, resolved, server);
+          }
+          return resolved;
+        };
+        const globalServer = resolveServer(
+          current.files.filter((file) => globalPaths.includes(file.path))
+        );
+        const inherited = scope === 'global' ? globalServer : resolveServer(current.files);
+        if (!inherited) throw new Error(`MCP server ${name} is no longer configured`);
+        const projectFiles = current.files.filter((file) => !globalPaths.includes(file.path));
+        const projectFile = projectFiles.find((file) => file.path === target.path);
+        const projectServer = projectFile ? this.mcpServer(projectFile.config, name) : null;
+        const otherProjectFile = projectFiles.find(
+          (file) => file.path !== target.path && this.mcpServer(file.config, name)
+        );
+        if (enabled === null) {
+          if (!globalServer)
+            throw new Error(`MCP server ${name} has no global configuration to fall back to`);
+          if (otherProjectFile)
+            throw new Error(`MCP server ${name} is also configured in ${otherProjectFile.path}`);
+          if (projectServer && !this.isInheritedMcpCopy(projectServer, globalServer))
+            throw new Error(
+              `${target.path} has its own connection settings for ${name}; edit that file to use the global MCP`
+            );
+        }
+        // Choosing the global value needs no project entry, so later global changes still apply.
+        const canInherit =
+          scope === 'project' &&
+          !otherProjectFile &&
+          globalServer !== null &&
+          enabled === (globalServer.disabled !== true && globalServer.enabled !== false) &&
+          (!projectServer || this.isInheritedMcpCopy(projectServer, globalServer));
+        const removeOverride = enabled === null || canInherit;
+        if (removeOverride && !projectServer) return undefined;
+        const existingMcp = asRecord(target.config.mcp);
+        const path =
+          native && (asRecord(existingMcp?.servers) || !this.mcpServer(target.config, name))
+            ? ['mcp', 'servers', name]
+            : ['mcp', name];
+        const server = { ...inherited };
+        // V2 replaces the entire server entry. Copy its connection fields into a
+        // project override rather than writing a disabled-only, invalid server.
+        if (native && path.length === 3) {
+          server.disabled = enabled === false;
+          delete server.enabled;
+        } else {
+          server.enabled = enabled !== false;
+          delete server.disabled;
+        }
+        const initialStat = await this.readConfigStat(target.uri);
+        let raw = target.raw.trim() ? target.raw : '{}\n';
+        if (!target.config.$schema && !removeOverride)
+          raw = applyJsoncChange(raw, ['$schema'], 'https://opencode.ai/config.json');
+        const configuredServer = this.mcpServer(target.config, name);
+        if (removeOverride) raw = applyJsoncChange(raw, path, undefined);
+        else if (configuredServer) {
+          const key = native && path.length === 3 ? 'disabled' : 'enabled';
+          raw = applyJsoncChange(raw, [...path, key], key === 'disabled' ? !enabled : enabled);
+          const legacyKey = key === 'disabled' ? 'enabled' : 'disabled';
+          if (Object.hasOwn(configuredServer, legacyKey))
+            raw = applyJsoncChange(raw, [...path, legacyKey], undefined);
+        } else raw = applyJsoncChange(raw, path, server);
+        if (!this.areConfigStatsEqual(initialStat, await this.readConfigStat(target.uri))) {
+          throw new Error(`${target.path} changed while updating MCP defaults; please retry`);
+        }
+        if (!initialStat)
+          await vscode.workspace.fs.createDirectory(
+            vscode.Uri.file(getOpenCodePathApi(target.path).dirname(target.path))
+          );
+        await vscode.workspace.fs.writeFile(target.uri, new TextEncoder().encode(raw));
+        if (scope === 'global') await this.callbacks.refreshOpenCodeGlobalConfig?.();
+        else
+          await this.callbacks.refreshOpenCodeConfig?.(undefined, undefined, current.workspacePath);
+        return undefined;
+      });
+      if (!result) return this.readMcpDefaults();
+      snapshot = result;
+    }
   }
 
   async readOpenCodeModelRouting(): Promise<OpenCodeModelRouting> {

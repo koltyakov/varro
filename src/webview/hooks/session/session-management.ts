@@ -41,7 +41,7 @@ type SessionManagementDependencies = {
     agent: string | null,
     options?: { sessionId?: string | null; persistGlobal?: boolean }
   ): void;
-  getInitialMcpNames(): string[];
+  getInitialMcpNames(): string[] | null;
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
   resetDraftSelectedMcps(): void;
   setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
@@ -280,7 +280,7 @@ export async function createSessionWithDependencies(
       agent: string | null,
       options?: { sessionId?: string | null; persistGlobal?: boolean }
     ): void;
-    getInitialMcpNames(): string[];
+    getInitialMcpNames(): string[] | null;
     setSelectedMcpsForSession(sessionId: string, names: string[]): void;
     resetDraftSelectedMcps(): void;
     setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
@@ -310,7 +310,8 @@ export async function createSessionWithDependencies(
   try {
     const defaultModel = deps.getDefaultSelectedModel();
     const defaultAgent = deps.resolveDefaultAgent();
-    const initialMcpNames = [...deps.getInitialMcpNames()];
+    const selectedMcps = deps.getInitialMcpNames();
+    const initialMcpNames = selectedMcps ? [...selectedMcps] : null;
     const permission = deps.buildCreatePermission(initialPermissionMode);
     const body = {
       title: title || undefined,
@@ -334,7 +335,7 @@ export async function createSessionWithDependencies(
     deps.upsertSession(session);
     deps.setSessionStatusEntry(session.id, { type: 'idle' });
     deps.setSessionUsageLimit(session.id, null);
-    deps.setSelectedMcpsForSession(session.id, initialMcpNames);
+    if (initialMcpNames) deps.setSelectedMcpsForSession(session.id, initialMcpNames);
     if (initialPermissionMode !== 'default') {
       const pendingGeneration = deps.setPendingSessionPermissionMode?.(
         session.id,

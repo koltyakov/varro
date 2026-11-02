@@ -10,6 +10,7 @@ import type {
   DecisionProviderStatus,
   DroppedFile,
   LspStatus,
+  McpDefaults,
   McpStatus,
   ModelPricing,
   PermissionMode,
@@ -1017,6 +1018,18 @@ export const client = {
   },
 
   mcp: {
+    async defaults(): Promise<McpDefaults> {
+      return parseMcpDefaults(await apiCall('GET', VARRO_API_ENDPOINTS.mcpDefaults));
+    },
+    async setDefault(
+      name: string,
+      scope: 'global' | 'project',
+      enabled: boolean | null
+    ): Promise<McpDefaults> {
+      return parseMcpDefaults(
+        await apiCall('POST', VARRO_API_ENDPOINTS.mcpDefaults, { name, scope, enabled })
+      );
+    },
     async status(): Promise<Record<string, McpStatus>> {
       // SAFETY: The surrounding shape or discriminator check establishes the Record<string, McpStatus> contract used below.
       return requireRecord(await apiCall('GET', '/mcp'), '/mcp') as Record<string, McpStatus>;
@@ -1114,6 +1127,26 @@ function requireArray<T, V = unknown>(value: V, path: string): T[] {
   // SAFETY: The surrounding shape or discriminator check establishes the T contract used below.
   return value as T[];
 }
+
+/* oxlint-disable anti-slop/no-unknown-parameters -- Validate the untrusted MCP defaults REST response at the client boundary. */
+function parseMcpDefaults(value: unknown): McpDefaults {
+  const path = VARRO_API_ENDPOINTS.mcpDefaults;
+  const record = requireRecord(value, path);
+  const parseDefaults = (candidate: unknown): Record<string, boolean> => {
+    const entries = Object.entries(requireRecord(candidate, path));
+    if (entries.some(([, enabled]) => !isBoolean(enabled)))
+      throw malformedResponse(path, 'MCP defaults');
+    return Object.fromEntries(entries.map(([name, enabled]) => [name, enabled === true]));
+  };
+  if (!isBoolean(record.editable)) throw malformedResponse(path, 'MCP defaults');
+  return {
+    global: parseDefaults(record.global),
+    project: parseDefaults(record.project),
+    effective: parseDefaults(record.effective),
+    editable: record.editable,
+  };
+}
+/* oxlint-enable anti-slop/no-unknown-parameters */
 
 function requireRecord<T>(value: T, path: string): UnknownRecord {
   if (!value || !isObject(value) || Array.isArray(value)) {

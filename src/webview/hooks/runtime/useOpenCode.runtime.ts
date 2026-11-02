@@ -53,6 +53,10 @@ export async function applySessionMcps(names: string[], sessionId?: string | nul
   await getCurrentOpenCodeRuntime().applySessionMcps(names, sessionId);
 }
 
+export async function refreshSessionMcps(sessionId?: string | null) {
+  await getCurrentOpenCodeRuntime().refreshSessionMcps(sessionId);
+}
+
 export async function selectSession(id: string, options?: SessionSelectionOptions) {
   await getCurrentOpenCodeRuntime().selectSession(id, options);
 }

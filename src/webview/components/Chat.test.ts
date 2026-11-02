@@ -47,12 +47,15 @@ import {
   state,
   setSessionFailed,
   setShowModels,
+  setShowMcpSettings,
+  showMcpSettings,
   setShowSessionPicker,
   setSessionUsageLimit,
   setMessagesIncremental,
   removeResolvedQuestion,
   setConnectionInitialized,
   setInputText,
+  inputText,
   setState,
   skipPlanSession,
 } from '../lib/state';
@@ -173,6 +176,7 @@ afterEach(() => {
   setDesktopSessionPaneSide('left');
   setShowSessionPicker(false);
   setShowModels(false);
+  setShowMcpSettings(false);
   setConnectionInitialized(false);
   stopLoading();
   clearDirectSessionReturn();
@@ -1593,6 +1597,32 @@ describe('header status badges', () => {
     expect(
       container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
     ).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('opens MCP settings as a separate screen and returns to the same chat with Escape', async () => {
+    vi.spyOn(client.mcp, 'defaults').mockResolvedValue({
+      global: { docs: false },
+      project: {},
+      effective: { docs: false },
+      editable: true,
+    });
+    setState('sessions', [session('active', 500)]);
+    setState('activeSessionId', 'active');
+    setInputText('Keep this draft');
+    cleanup = render(() => Chat(), container!);
+    setShowMcpSettings(true);
+    await vi.dynamicImportSettled();
+    await Promise.resolve();
+    expect(container?.querySelector('.mcp-settings-panel')).not.toBeNull();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+    await Promise.resolve();
+    expect(showMcpSettings()).toBe(false);
+    expect(container?.querySelector('.mcp-settings-panel')).toBeNull();
+    expect(state.activeSessionId).toBe('active');
+    expect(
+      container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
+    ).toBeNull();
+    expect(inputText()).toBe('Keep this draft');
   });
 
   it('leaves Escape to nested chat controls that consume it', async () => {

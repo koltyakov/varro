@@ -1,7 +1,12 @@
 import { produce, reconcile } from 'solid-js/store';
 import type { Command, Provider } from '../types';
 import type { SelectedModel } from './app-state-types';
-import type { McpStatus, ModelPreferences, ProviderLimitStatus } from '../../shared/protocol';
+import type {
+  McpDefaults,
+  McpStatus,
+  ModelPreferences,
+  ProviderLimitStatus,
+} from '../../shared/protocol';
 import { JEV_DECISION_PROVIDER_ID } from '../../shared/protocol';
 import type { ProviderAuthMethodsByProvider } from '../../shared/opencode-types';
 import { setState, showSessionPicker, state } from './app-state';
@@ -65,16 +70,13 @@ export function getSelectedAgentForSession(sessionId: string | null | undefined)
 }
 
 export function getSelectedMcpsForSession(sessionId: string | null | undefined): string[] | null {
-  if (!sessionId) {
-    return (
-      state.draftSelectedMcps ??
-      Object.entries(state.mcpStatus)
-        .filter(([, value]) => value?.status === 'connected')
-        .map(([name]) => name)
-        .toSorted((a, b) => a.localeCompare(b))
-    );
-  }
-  return state.sessionSelectedMcps[sessionId] || null;
+  const selected = sessionId ? state.sessionSelectedMcps[sessionId] : state.draftSelectedMcps;
+  if (selected) return selected;
+  if (!state.mcpDefaults) return null;
+  return Object.entries(state.mcpDefaults.effective)
+    .filter(([, enabled]) => enabled)
+    .map(([name]) => name)
+    .toSorted((a, b) => a.localeCompare(b));
 }
 
 export function setSelectedModel(
@@ -206,8 +208,17 @@ export function setMcpStatus(status: Record<string, McpStatus>) {
   setState('mcpStatus', status);
 }
 
+export function setMcpDefaults(defaults: McpDefaults) {
+  setState('mcpDefaults', reconcile(defaults));
+}
+
 export function getAvailableMcpNames() {
-  return Object.keys(state.mcpStatus).toSorted((a, b) => a.localeCompare(b));
+  return [
+    ...new Set([
+      ...Object.keys(state.mcpStatus),
+      ...Object.keys(state.mcpDefaults?.effective ?? {}),
+    ]),
+  ].toSorted((a, b) => a.localeCompare(b));
 }
 
 export function setSelectedMcpsForSession(sessionId: string, names: string[]) {

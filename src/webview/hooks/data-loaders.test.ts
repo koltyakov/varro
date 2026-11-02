@@ -45,6 +45,8 @@ const clientMocks = getClientMocks();
 function createLoaderDeps(overrides: Partial<DataLoaderDependencies> = {}): DataLoaderDependencies {
   return {
     listMcpStatus: async () => ({}),
+    listMcpDefaults: async () => ({ global: {}, project: {}, effective: {}, editable: true }),
+    setMcpDefaults: vi.fn(),
     setMcpStatus: vi.fn(),
     getActiveSessionId: () => null,
     getComposerSessionId: () => null,
@@ -200,9 +202,15 @@ describe('data loaders', () => {
     expect(setSelectedAgent).toHaveBeenCalledWith(expected, { persistGlobal: false });
   });
 
-  it('hydrates connected mcps into the active session when none are selected', async () => {
+  it('loads configured defaults independently of shared connection status', async () => {
     const setMcpStatus = vi.fn();
-    const setSelectedMcpsForSession = vi.fn();
+    const setMcpDefaults = vi.fn();
+    const defaults = {
+      global: { alpha: true, gamma: false },
+      project: { beta: true },
+      effective: { alpha: true, beta: true, gamma: false },
+      editable: true,
+    };
     const logError = vi.fn();
 
     await loadMcpsWithDependencies(
@@ -213,9 +221,8 @@ describe('data loaders', () => {
           gamma: { status: 'connected' },
         }),
         setMcpStatus,
-        getActiveSessionId: () => 'session-1',
-        getSelectedMcpsForSession: () => null,
-        setSelectedMcpsForSession,
+        listMcpDefaults: async () => defaults,
+        setMcpDefaults,
       },
       logError
     );
@@ -225,27 +232,32 @@ describe('data loaders', () => {
       beta: { status: 'disabled' },
       gamma: { status: 'connected' },
     });
-    expect(setSelectedMcpsForSession).toHaveBeenCalledWith('session-1', ['alpha', 'gamma']);
+    expect(setMcpDefaults).toHaveBeenCalledWith(defaults);
     expect(logError).not.toHaveBeenCalled();
   });
 
-  it('does not overwrite an explicitly empty MCP selection during status hydration', async () => {
-    const setSelectedMcpsForSession = vi.fn();
+  it('does not apply status when configured defaults cannot be loaded', async () => {
+    const setMcpStatus = vi.fn();
+    const setMcpDefaults = vi.fn();
+    const logError = vi.fn();
 
     await loadMcpsWithDependencies(
       {
         listMcpStatus: async () => ({
           alpha: { status: 'connected' },
         }),
-        setMcpStatus: vi.fn(),
-        getActiveSessionId: () => 'session-1',
-        getSelectedMcpsForSession: () => [],
-        setSelectedMcpsForSession,
+        setMcpStatus,
+        listMcpDefaults: async () => {
+          throw new Error('Config unavailable');
+        },
+        setMcpDefaults,
       },
-      vi.fn()
+      logError
     );
 
-    expect(setSelectedMcpsForSession).not.toHaveBeenCalled();
+    expect(setMcpStatus).not.toHaveBeenCalled();
+    expect(setMcpDefaults).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith('loadMcps', new Error('Config unavailable'));
   });
 
   it('applies only the latest overlapping MCP status response', async () => {
@@ -327,26 +339,26 @@ describe('data loaders', () => {
     expect(setMcpStatus).toHaveBeenCalledWith({ beta: { status: 'connected' } });
   });
 
-  it('does not initialize MCP selection for a session activated while status was loading', async () => {
+  it('does not apply MCP defaults after workspace invalidation', async () => {
     const response = deferred<Record<string, { status: 'connected' }>>();
-    const activeSession = { value: 'session-a' };
-    const setSelectedMcpsForSession = vi.fn();
+    let current = true;
+    const setMcpDefaults = vi.fn();
 
     const load = loadMcpsWithDependencies(
       {
         listMcpStatus: () => response.promise,
         setMcpStatus: vi.fn(),
-        getActiveSessionId: () => activeSession.value,
-        getSelectedMcpsForSession: () => null,
-        setSelectedMcpsForSession,
+        listMcpDefaults: async () => ({ global: {}, project: {}, effective: {}, editable: true }),
+        setMcpDefaults,
       },
-      vi.fn()
+      vi.fn(),
+      () => current
     );
-    activeSession.value = 'session-b';
+    current = false;
     response.resolve({ alpha: { status: 'connected' } });
     await load;
 
-    expect(setSelectedMcpsForSession).not.toHaveBeenCalled();
+    expect(setMcpDefaults).not.toHaveBeenCalled();
   });
 
   it('preserves unavailable selected models when providers load', async () => {

@@ -4,9 +4,16 @@ import type { McpStatus } from '../../shared/protocol';
 import { postMessage } from '../lib/bridge';
 import { client } from '../lib/client';
 import { trapModalFocus } from '../lib/modal-focus';
-import { getSelectedMcpsForSession, setMcpStatus, state } from '../lib/state';
+import {
+  getAvailableMcpNames,
+  getSelectedMcpsForSession,
+  setShowMcpSettings,
+  setMcpStatus,
+  state,
+} from '../lib/state';
 import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
 import { checkIcon, xmarkIcon } from '../lib/ui-icons';
+import { PickerManageIcon } from './PickerManageIcon';
 import { UiIcon } from './UiIcon';
 
 export function McpPicker(props: {
@@ -28,11 +35,11 @@ export function McpPicker(props: {
   const normalizedQuery = () => query().trim().toLocaleLowerCase();
 
   const allItems = createMemo(() =>
-    Object.entries(state.mcpStatus)
-      .map(([name, status]) => ({
+    getAvailableMcpNames()
+      .map((name) => ({
         name,
-        status: status.status,
-        error: status.error,
+        status: state.mcpStatus[name]?.status ?? 'disabled',
+        error: state.mcpStatus[name]?.error,
       }))
       .toSorted((a, b) => a.name.localeCompare(b.name))
   );
@@ -72,6 +79,12 @@ export function McpPicker(props: {
   }
 
   function handleKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      props.onClose();
+      return;
+    }
+    if (e.target instanceof Element && e.target.closest('.dropdown-footer')) return;
     const items = filteredItems();
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
@@ -96,11 +109,6 @@ export function McpPicker(props: {
       const item = items[focusIndex()];
       if (item) activate(item);
       return;
-    }
-
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      props.onClose();
     }
   }
 
@@ -209,6 +217,21 @@ export function McpPicker(props: {
               </For>
             </Show>
           </Show>
+        </div>
+        <div class="dropdown-footer">
+          <button
+            type="button"
+            class="dropdown-item"
+            onClick={() => {
+              setShowMcpSettings(true);
+              props.onClose();
+            }}
+          >
+            <span class="dropdown-footer-icon">
+              <PickerManageIcon />
+            </span>
+            <span class="dropdown-footer-label text-vscode-muted">Manage MCPs</span>
+          </button>
         </div>
       </div>
       <Show when={authServer()}>

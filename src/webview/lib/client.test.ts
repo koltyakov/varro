@@ -1766,6 +1766,36 @@ describe('client', () => {
     ]);
   });
 
+  it('reads and updates MCP defaults without connecting a server', async () => {
+    const { client } = await loadClient();
+    const defaults = {
+      global: { rare: false },
+      project: {},
+      effective: { rare: false },
+      editable: true,
+    };
+    bridgeMocks.apiCall.mockResolvedValue(defaults);
+    expect(await client.mcp.defaults()).toEqual(defaults);
+    expect(await client.mcp.setDefault('rare', 'project', true)).toEqual(defaults);
+    expect(await client.mcp.setDefault('rare', 'project', null)).toEqual(defaults);
+    expect(bridgeMocks.apiCall.mock.calls).toEqual([
+      ['GET', '/varro/mcp-defaults'],
+      ['POST', '/varro/mcp-defaults', { name: 'rare', scope: 'project', enabled: true }],
+      ['POST', '/varro/mcp-defaults', { name: 'rare', scope: 'project', enabled: null }],
+    ]);
+  });
+
+  it.each([
+    { global: { rare: 'false' }, project: {}, effective: {}, editable: true },
+    { global: {}, project: null, effective: {}, editable: true },
+    { global: {}, project: {}, effective: { rare: 1 }, editable: true },
+    { global: {}, project: {}, effective: {}, editable: 'true' },
+  ])('rejects malformed MCP defaults %#', async (defaults) => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(defaults);
+    await expect(client.mcp.defaults()).rejects.toThrow('/varro/mcp-defaults');
+  });
+
   it('forwards varro.session.deleteImmediately call', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue(true);

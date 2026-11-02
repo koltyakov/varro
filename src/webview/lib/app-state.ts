@@ -32,6 +32,7 @@ import type {
   InlineProblemAttachment,
   DroppedFile,
   LspStatus,
+  McpDefaults,
   McpStatus,
   PermissionMode,
   ProviderLimitStatus,
@@ -171,6 +172,7 @@ export interface AppState {
   providers: Provider[];
   providerLimits: Record<string, ProviderLimitStatus | null>;
   mcpStatus: Record<string, McpStatus>;
+  mcpDefaults: McpDefaults | null;
   lspStatus: LspStatus[];
   providerDefaults: Record<string, string>;
   sessionPermissionModes: Record<string, PermissionMode>;
@@ -272,6 +274,8 @@ export interface AppStateInstance {
   setShowModels: Setter<boolean>;
   showPermissionSettings: Accessor<boolean>;
   setShowPermissionSettings: Setter<boolean>;
+  showMcpSettings: Accessor<boolean>;
+  setShowMcpSettings: Setter<boolean>;
   composerFocusKey: Accessor<number>;
   setComposerFocusKey: Setter<number>;
   openAttentionSessionsKey: Accessor<number>;
@@ -449,6 +453,7 @@ export function createAppState(): AppStateInstance {
     providers: [],
     providerLimits: {},
     mcpStatus: {},
+    mcpDefaults: null,
     lspStatus: [],
     providerDefaults: {},
     sessionPermissionModes: initialWebviewState.sessionPermissionModes ?? {},
@@ -569,6 +574,7 @@ export function createAppState(): AppStateInstance {
   const [showModelPicker, setShowModelPicker] = createSignal(false);
   const [showModels, setShowModels] = createSignal(false);
   const [showPermissionSettings, setShowPermissionSettings] = createSignal(false);
+  const [showMcpSettings, setShowMcpSettings] = createSignal(false);
   const [composerFocusKey, setComposerFocusKey] = createSignal(0);
   const [openAttentionSessionsKey, setOpenAttentionSessionsKey] = createSignal(0);
   const [openCompletedSessionsKey, setOpenCompletedSessionsKey] = createSignal(0);
@@ -657,6 +663,8 @@ export function createAppState(): AppStateInstance {
     setShowModels,
     showPermissionSettings,
     setShowPermissionSettings,
+    showMcpSettings,
+    setShowMcpSettings,
     composerFocusKey,
     setComposerFocusKey,
     openAttentionSessionsKey,
@@ -753,6 +761,8 @@ export const showModels = defaultAppState.showModels;
 export const setShowModels = defaultAppState.setShowModels;
 export const showPermissionSettings = defaultAppState.showPermissionSettings;
 export const setShowPermissionSettings = defaultAppState.setShowPermissionSettings;
+export const showMcpSettings = defaultAppState.showMcpSettings;
+export const setShowMcpSettings = defaultAppState.setShowMcpSettings;
 export const composerFocusKey = defaultAppState.composerFocusKey;
 export const setComposerFocusKey = defaultAppState.setComposerFocusKey;
 export const openAttentionSessionsKey = defaultAppState.openAttentionSessionsKey;
@@ -808,6 +818,7 @@ export function resetDefaultAppState() {
   setShowModelPicker(next.showModelPicker());
   setShowModels(next.showModels());
   setShowPermissionSettings(next.showPermissionSettings());
+  setShowMcpSettings(next.showMcpSettings());
   setComposerFocusKey(next.composerFocusKey());
   setOpenAttentionSessionsKey(next.openAttentionSessionsKey());
   setOpenCompletedSessionsKey(next.openCompletedSessionsKey());

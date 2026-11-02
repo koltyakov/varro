@@ -1,0 +1,216 @@
+.mcp-settings-panel {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  color: var(--color-vscode-fg);
+  background: var(--color-vscode-sidebar);
+}
+
+.interactive-session-showing-mcp-settings > :not(.mcp-settings-panel) {
+  visibility: hidden;
+}
+
+.interactive-session-showing-mcp-settings > .mcp-settings-panel {
+  visibility: visible;
+}
+
+.mcp-settings-header {
+  flex: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 15%, transparent);
+}
+
+.mcp-settings-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: min(100%, var(--chat-content-max-width));
+  height: 36px;
+  margin-inline: auto;
+  padding-inline: 6px var(--chat-horizontal-padding);
+}
+
+.mcp-settings-header h1 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mcp-settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.mcp-settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(100%, var(--chat-content-max-width));
+  margin-inline: auto;
+  padding: 16px var(--chat-horizontal-padding) 32px;
+}
+
+.mcp-settings-content p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.mcp-settings-description {
+  font-size: 12px;
+}
+
+.mcp-settings-note {
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+}
+
+.mcp-settings-notice {
+  padding: 10px 12px;
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-card);
+  font-size: 11px;
+}
+
+.mcp-settings-header-inner .mcp-settings-saving {
+  margin-left: auto;
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+}
+
+.mcp-settings-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-card);
+}
+
+.mcp-settings-content .mcp-settings-tabs button {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-inset);
+  color: var(--color-vscode-muted);
+  background: transparent;
+}
+
+.mcp-settings-content .mcp-settings-tabs button:hover {
+  color: var(--color-vscode-fg);
+}
+
+.mcp-settings-content .mcp-settings-tabs button[aria-selected='true'] {
+  color: var(--color-vscode-fg);
+  background: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
+  font-weight: 600;
+}
+
+.mcp-settings-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mcp-settings-servers {
+  overflow: hidden;
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 42%, transparent);
+}
+
+.mcp-settings-server {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  padding-inline: 10px;
+}
+
+.mcp-settings-server + .mcp-settings-server {
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
+}
+
+.mcp-settings-server-toggle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding-block: 8px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mcp-settings-server-toggle input {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--color-vscode-accent);
+  cursor: inherit;
+}
+
+.mcp-settings-server-toggle:has(input:disabled) {
+  cursor: default;
+}
+
+.mcp-settings-server-toggle:has(input:disabled) span {
+  color: var(--color-vscode-muted);
+}
+
+.mcp-settings-server-toggle input:focus-visible,
+.mcp-settings-content button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+.mcp-settings-content .mcp-settings-server-detail {
+  grid-column: 1 / -1;
+  margin-top: -4px;
+  padding: 0 0 8px 22px;
+  overflow-wrap: anywhere;
+}
+
+.mcp-settings-content .mcp-settings-server-error {
+  color: var(--color-vscode-error);
+  font-size: 11px;
+}
+
+.mcp-settings-content .mcp-settings-reset {
+  padding: 2px 6px;
+  border: 0;
+  color: var(--color-vscode-link, var(--color-vscode-accent));
+  background: transparent;
+}
+
+.mcp-settings-content .mcp-settings-reset:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.mcp-settings-content button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.mcp-settings-content button {
+  flex: none;
+  padding: 5px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: var(--radius-chip);
+  color: var(--vscode-button-secondaryForeground, var(--color-vscode-fg));
+  background: var(--vscode-button-secondaryBackground, var(--color-vscode-widget-bg));
+  font-size: 11px;
+}
+
+.mcp-settings-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--vscode-inputValidation-errorBorder, var(--color-vscode-error));
+  border-radius: var(--radius-card);
+  font-size: 11px;
+}

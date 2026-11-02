@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { McpPicker } from './McpPicker';
-import { resetDefaultAppState, setState } from '../lib/state';
+import { resetDefaultAppState, setState, showMcpSettings } from '../lib/state';
 import type { McpStatus } from '../../shared/protocol';
 
 const mocks = vi.hoisted(() => ({
@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   completeAuth: vi.fn(),
   removeAuth: vi.fn(),
   status: vi.fn(),
+  setDefault: vi.fn(),
 }));
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise MCP picker integration with bridge and client modules. */
@@ -17,6 +18,7 @@ vi.mock('../lib/bridge', () => ({ postMessage: mocks.postMessage }));
 vi.mock('../lib/client', () => ({
   client: {
     mcp: {
+      setDefault: mocks.setDefault,
       startAuth: mocks.startAuth,
       completeAuth: mocks.completeAuth,
       removeAuth: mocks.removeAuth,
@@ -49,6 +51,7 @@ beforeEach(() => {
   mocks.completeAuth.mockReset();
   mocks.removeAuth.mockReset();
   mocks.status.mockReset();
+  mocks.setDefault.mockReset();
   mocks.postMessage.mockReset();
   mocks.startAuth.mockResolvedValue({
     authorizationUrl: 'https://mcp.example.com/authorize',
@@ -278,6 +281,12 @@ describe('McpPicker', () => {
 
   it('toggles MCPs against the connected defaults in a new chat draft', async () => {
     const onChange = vi.fn();
+    setState('mcpDefaults', {
+      global: { alpha: true, 'browser-bridge': false },
+      project: {},
+      effective: { alpha: true, 'browser-bridge': false },
+      editable: true,
+    });
     setMcpStatuses({
       alpha: { status: 'connected' },
       'browser-bridge': { status: 'failed', error: 'Connection closed' },
@@ -299,6 +308,73 @@ describe('McpPicker', () => {
     browserBridge?.click();
 
     expect(onChange).toHaveBeenCalledWith(['alpha', 'browser-bridge']);
+  });
+
+  it('keeps on-demand MCPs visible without adopting shared connections as session selections', () => {
+    const onChange = vi.fn();
+    setState('mcpDefaults', {
+      global: { rare: false, offline: false },
+      project: {},
+      effective: { rare: false, offline: false },
+      editable: true,
+    });
+    setMcpStatuses({ rare: { status: 'connected' } });
+    cleanup = render(
+      () => McpPicker({ sessionId: 'fresh', onChange, onClose: vi.fn() }),
+      container!
+    );
+    const items = Array.from(
+      container!.querySelectorAll<HTMLButtonElement>('.dropdown-item[aria-pressed]')
+    );
+    expect(items).toHaveLength(2);
+    expect(items.every((item) => item.getAttribute('aria-pressed') === 'false')).toBe(true);
+    items.find((item) => item.textContent?.includes('offline'))?.click();
+    expect(onChange).toHaveBeenCalledWith(['offline']);
+    expect(mocks.setDefault).not.toHaveBeenCalled();
+  });
+
+  it('offers just one settings button beyond the session toggles', () => {
+    const onChange = vi.fn();
+    const onClose = vi.fn();
+    setState('mcpDefaults', {
+      global: { rare: false },
+      project: {},
+      effective: { rare: false },
+      editable: true,
+    });
+    setState('sessionSelectedMcps', { current: [] });
+    cleanup = render(() => McpPicker({ sessionId: 'current', onChange, onClose }), container!);
+    expect(container!.querySelectorAll('button')).toHaveLength(2);
+    expect(container!.querySelector('select')).toBeNull();
+    expect(container!.textContent).not.toContain('Use defaults');
+    expect(container!.textContent).not.toContain('Connections are shared');
+    const settings = container!.querySelector<HTMLButtonElement>('.dropdown-footer button')!;
+    expect(settings.textContent).toBe('Manage MCPs');
+    const icon = settings.querySelector('svg');
+    expect(icon?.getAttribute('viewBox')).toBe('0 0 32 32');
+    expect(icon?.classList.contains('h-[18px]')).toBe(true);
+    expect(icon?.classList.contains('w-[18px]')).toBe(true);
+    settings.click();
+    expect(showMcpSettings()).toBe(true);
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.setDefault).not.toHaveBeenCalled();
+  });
+
+  it('leaves Enter on the settings button to its native action rather than toggling an MCP', () => {
+    const onChange = vi.fn();
+    const onClose = vi.fn();
+    setMcpStatuses({ alpha: { status: 'connected' } });
+    cleanup = render(() => McpPicker({ sessionId: null, onChange, onClose }), container!);
+    const settings = container!.querySelector<HTMLButtonElement>('.dropdown-footer button')!;
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    settings.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+    settings.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    );
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('selects needs_auth MCPs and completes the explicit OAuth lifecycle', async () => {

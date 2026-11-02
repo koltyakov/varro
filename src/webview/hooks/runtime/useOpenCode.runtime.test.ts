@@ -13,6 +13,7 @@ function createRuntimeMock(label: string) {
     continueInterruptedSession: vi.fn().mockResolvedValue(undefined),
     resumeSteering: vi.fn().mockResolvedValue(true),
     applySessionMcps: vi.fn().mockResolvedValue(undefined),
+    refreshSessionMcps: vi.fn().mockResolvedValue(undefined),
     selectSession: vi.fn().mockResolvedValue(undefined),
     loadFullSessionHistory: vi.fn().mockResolvedValue(undefined),
     loadOlderSessionHistoryPage: vi.fn().mockResolvedValue(true),

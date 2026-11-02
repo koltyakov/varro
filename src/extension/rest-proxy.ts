@@ -1346,6 +1346,27 @@ export class RestProxy {
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
+      if (requestPathname === VARRO_API_ENDPOINTS.mcpDefaults) {
+        let data;
+        if (method === 'GET') data = await this.openCodeConfig.readMcpDefaults();
+        else {
+          const body = asRecord(payload.body);
+          if (
+            method !== 'POST' ||
+            typeof body?.name !== 'string' ||
+            !body.name ||
+            body.name.length > 512 ||
+            (body.scope !== 'global' && body.scope !== 'project') ||
+            (typeof body.enabled !== 'boolean' &&
+              (body.enabled !== null || body.scope !== 'project'))
+          ) {
+            throw new Error('Invalid MCP default update');
+          }
+          data = await this.openCodeConfig.updateMcpDefault(body.name, body.scope, body.enabled);
+        }
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
       if (openCodeConfigRequest) {
         if (
           openCodeConfigRequest.kind === 'update' &&

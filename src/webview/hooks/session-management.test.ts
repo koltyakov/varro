@@ -93,63 +93,67 @@ describe('session management helpers', () => {
     expect(forkRemoteSession).toHaveBeenCalledTimes(4);
   });
 
-  it('creates a session and restores draft routing selections', async () => {
-    const setSelectedModel = vi.fn();
-    const publishSessionModel = vi.fn();
-    const setSelectedAgent = vi.fn();
-    const setSelectedMcpsForSession = vi.fn();
-    const resetDraftSelectedMcps = vi.fn();
+  it.each([{ names: ['browser-bridge'] }, { names: [] }, { names: null }])(
+    'creates a session and preserves the draft MCP override $names',
+    async ({ names }) => {
+      const setSelectedModel = vi.fn();
+      const publishSessionModel = vi.fn();
+      const setSelectedAgent = vi.fn();
+      const setSelectedMcpsForSession = vi.fn();
+      const resetDraftSelectedMcps = vi.fn();
 
-    const result = await createSessionWithDependencies(
-      {
-        getActiveSessionId: () => null,
-        getNewChatDraftGeneration: () => 0,
-        createRemoteSession: vi.fn(async () => session('session-2')),
-        buildCreatePermission: () => [{ permission: 'read', pattern: '*', action: 'allow' }],
-        upsertSession: vi.fn(),
-        resetToolCallExpansionState: vi.fn(),
-        setActiveSessionId: vi.fn(),
-        clearDraftCurrentDocumentState: vi.fn(),
-        adoptDraftCurrentDocumentState: vi.fn(),
-        setSessionStatusEntry: vi.fn(),
-        setSessionUsageLimit: vi.fn(),
-        persistActiveSessionId: vi.fn(),
-        markSessionSeen: vi.fn(),
-        getDefaultSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-5' }),
-        setSelectedModel,
-        publishSessionModel,
-        resolveDefaultAgent: () => 'build',
-        setSelectedAgent,
-        getInitialMcpNames: () => ['browser-bridge'],
-        setSelectedMcpsForSession,
-        resetDraftSelectedMcps,
-        setPermissionModeForSession: vi.fn(),
-        resetDraftPermissionMode: vi.fn(),
-        resetTodoSync: vi.fn(),
-        clearMessages: vi.fn(),
-        stopLoading: vi.fn(),
-        setError: vi.fn(),
-      },
-      undefined,
-      'default'
-    );
+      const result = await createSessionWithDependencies(
+        {
+          getActiveSessionId: () => null,
+          getNewChatDraftGeneration: () => 0,
+          createRemoteSession: vi.fn(async () => session('session-2')),
+          buildCreatePermission: () => [{ permission: 'read', pattern: '*', action: 'allow' }],
+          upsertSession: vi.fn(),
+          resetToolCallExpansionState: vi.fn(),
+          setActiveSessionId: vi.fn(),
+          clearDraftCurrentDocumentState: vi.fn(),
+          adoptDraftCurrentDocumentState: vi.fn(),
+          setSessionStatusEntry: vi.fn(),
+          setSessionUsageLimit: vi.fn(),
+          persistActiveSessionId: vi.fn(),
+          markSessionSeen: vi.fn(),
+          getDefaultSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-5' }),
+          setSelectedModel,
+          publishSessionModel,
+          resolveDefaultAgent: () => 'build',
+          setSelectedAgent,
+          getInitialMcpNames: () => names,
+          setSelectedMcpsForSession,
+          resetDraftSelectedMcps,
+          setPermissionModeForSession: vi.fn(),
+          resetDraftPermissionMode: vi.fn(),
+          resetTodoSync: vi.fn(),
+          clearMessages: vi.fn(),
+          stopLoading: vi.fn(),
+          setError: vi.fn(),
+        },
+        undefined,
+        'default'
+      );
 
-    expect(result).toBe('session-2');
-    expect(setSelectedModel).toHaveBeenCalledWith(
-      { providerID: 'openai', modelID: 'gpt-5' },
-      { sessionId: 'session-2', persistGlobal: false }
-    );
-    expect(publishSessionModel).toHaveBeenCalledWith('session-2', {
-      providerID: 'openai',
-      modelID: 'gpt-5',
-    });
-    expect(setSelectedAgent).toHaveBeenCalledWith('build', {
-      sessionId: 'session-2',
-      persistGlobal: false,
-    });
-    expect(setSelectedMcpsForSession).toHaveBeenCalledWith('session-2', ['browser-bridge']);
-    expect(resetDraftSelectedMcps).toHaveBeenCalledTimes(1);
-  });
+      expect(result).toBe('session-2');
+      expect(setSelectedModel).toHaveBeenCalledWith(
+        { providerID: 'openai', modelID: 'gpt-5' },
+        { sessionId: 'session-2', persistGlobal: false }
+      );
+      expect(publishSessionModel).toHaveBeenCalledWith('session-2', {
+        providerID: 'openai',
+        modelID: 'gpt-5',
+      });
+      expect(setSelectedAgent).toHaveBeenCalledWith('build', {
+        sessionId: 'session-2',
+        persistGlobal: false,
+      });
+      if (names) expect(setSelectedMcpsForSession).toHaveBeenCalledWith('session-2', names);
+      else expect(setSelectedMcpsForSession).not.toHaveBeenCalled();
+      expect(resetDraftSelectedMcps).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it('publishes a new session mode as pending until the host confirms it', async () => {
     const setPermissionModeForSession = vi.fn();

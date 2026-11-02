@@ -5887,7 +5887,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const currentProviderLimitBadges = createMemo(() =>
     showCurrentProviderLimit() ? getProviderLimitCompactBadges(currentCompactProviderLimit()) : []
   );
-  const availableMcpNames = createMemo(() => Object.keys(state.mcpStatus));
+  const availableMcpNames = createMemo(() => [
+    ...new Set([
+      ...Object.keys(state.mcpStatus),
+      ...Object.keys(state.mcpDefaults?.effective ?? {}),
+    ]),
+  ]);
   const enabledMcpCount = createMemo(() => {
     const available = new Set(availableMcpNames());
     return (getSelectedMcpsForSession(composerSessionId()) ?? []).filter((name) =>

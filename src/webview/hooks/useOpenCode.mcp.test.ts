@@ -64,8 +64,9 @@ describe('useOpenCode mcp flows', () => {
       await Promise.resolve();
 
       expect(stateModule.state.mcpStatus).toEqual({ beta: { status: 'connected' } });
-      expect(stateModule.getSelectedMcpsForSession('session-a')).toBeNull();
-      expect(stateModule.getSelectedMcpsForSession('session-b')).toEqual(['beta']);
+      expect(stateModule.getSelectedMcpsForSession('session-a')).toEqual([]);
+      expect(stateModule.getSelectedMcpsForSession('session-b')).toEqual([]);
+      expect(stateModule.state.sessionSelectedMcps).toEqual({});
     } finally {
       dispose();
     }
@@ -129,7 +130,7 @@ describe('useOpenCode mcp flows', () => {
     expect(stateModule.getSelectedMcpsForSession('session-1')).toEqual(['beta']);
   });
 
-  it('lets an explicit selection disconnect an MCP used by a background session', async () => {
+  it('keeps an MCP used by a running background session after an explicit toggle', async () => {
     clientMocks.mcpStatus.mockResolvedValue({
       alpha: { status: 'connected' },
       beta: { status: 'connected' },
@@ -151,9 +152,67 @@ describe('useOpenCode mcp flows', () => {
     await hookModule.applySessionMcps(['beta'], 'session-b');
 
     expect(clientMocks.mcpConnect).toHaveBeenCalledWith('beta');
-    expect(clientMocks.mcpDisconnect).toHaveBeenCalledWith('alpha');
+    expect(clientMocks.mcpDisconnect).not.toHaveBeenCalledWith('alpha');
     expect(stateModule.getSelectedMcpsForSession('session-a')).toEqual(['alpha']);
     expect(stateModule.getSelectedMcpsForSession('session-b')).toEqual(['beta']);
+  });
+
+  it('retains a root session MCP while its child is running', async () => {
+    clientMocks.mcpStatus.mockResolvedValue({ rare: { status: 'connected' } });
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [
+      session('root'),
+      { ...session('child'), parentID: 'root' },
+      session('foreground'),
+    ]);
+    stateModule.setState('sessionStatus', { child: { type: 'busy' } });
+    stateModule.setSelectedMcpsForSession('root', ['rare']);
+    stateModule.setState('mcpStatus', { rare: { status: 'connected' } });
+    await hookModule.applySessionMcps([], 'foreground');
+    expect(clientMocks.mcpDisconnect).not.toHaveBeenCalled();
+  });
+
+  it('conservatively retains shared connections used by an unknown running view', async () => {
+    clientMocks.mcpStatus.mockResolvedValue({ rare: { status: 'connected' } });
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessionStatus', { unknown: { type: 'busy' } });
+    stateModule.setState('mcpStatus', { rare: { status: 'connected' } });
+    await hookModule.applySessionMcps([], 'foreground');
+    expect(clientMocks.mcpDisconnect).not.toHaveBeenCalled();
+    stateModule.setState('sessionStatus', { unknown: { type: 'idle' } });
+    await hookModule.applySessionMcps([], 'foreground');
+    expect(clientMocks.mcpDisconnect).toHaveBeenCalledWith('rare');
+  });
+
+  it('does not connect MCPs selected only by an idle child of a running session', async () => {
+    clientMocks.mcpStatus.mockResolvedValue({ rare: { status: 'disabled' } });
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [session('root'), { ...session('child'), parentID: 'root' }]);
+    stateModule.setState('sessionStatus', { root: { type: 'busy' }, child: { type: 'idle' } });
+    stateModule.setSelectedMcpsForSession('root', []);
+    stateModule.setSelectedMcpsForSession('child', ['rare']);
+    stateModule.setState('mcpStatus', { rare: { status: 'disabled' } });
+    await hookModule.applySessionMcps([], 'foreground');
+    expect(clientMocks.mcpConnect).not.toHaveBeenCalled();
+  });
+
+  it('does not adopt a rare shared connection when refreshing a new session', async () => {
+    clientMocks.mcpStatus.mockResolvedValue({
+      rare: { status: 'connected' },
+      docs: { status: 'disabled' },
+    });
+    clientMocks.mcpDefaults.mockResolvedValue({
+      global: { rare: false, docs: true },
+      project: {},
+      effective: { rare: false, docs: true },
+      editable: true,
+    });
+    const { stateModule, hookModule } = await loadModules();
+    await hookModule.refreshSessionMcps('new');
+    expect(stateModule.getSelectedMcpsForSession('new')).toEqual(['docs']);
+    expect(stateModule.state.sessionSelectedMcps.new).toBeUndefined();
+    expect(clientMocks.mcpConnect).toHaveBeenCalledWith('docs');
+    expect(clientMocks.mcpDisconnect).toHaveBeenCalledWith('rare');
   });
 
   it('disconnects an MCP retained only by a background session after it becomes idle', async () => {

@@ -1,4 +1,4 @@
-import { batch, createSignal, onCleanup, onMount } from 'solid-js';
+import { batch, createEffect, createSignal, on, onCleanup, onMount } from 'solid-js';
 import type {
   QuestionAnswer,
   AutoApproveJudgeReference,
@@ -83,6 +83,7 @@ import {
   takeCachedSessionHistoryPage,
 } from '../../lib/message-window';
 import { getNewChatDraftGeneration, startNewChatDraft } from '../../lib/new-chat-draft';
+import { getEffectiveComposerSessionId } from '../../lib/state-view-persistence';
 import { readInitialWebviewState, readWebviewInstanceContext } from '../../lib/state-stored-values';
 import { STORAGE_KEYS, writeStored } from '../../lib/state-storage';
 import {
@@ -167,6 +168,7 @@ export interface OpenCodeRuntime {
   continueInterruptedSession(sessionId: string): Promise<void>;
   resumeSteering(sessionId: string): Promise<boolean>;
   applySessionMcps(names: string[], sessionId?: string | null): Promise<void>;
+  refreshSessionMcps(sessionId?: string | null): Promise<void>;
   selectSession(id: string, options?: SessionSelectionOptions): Promise<boolean>;
   loadFullSessionHistory(sessionId: string): Promise<void>;
   loadOlderSessionHistoryPage(
@@ -1092,6 +1094,8 @@ export function resetWorkspaceDerivedState(options?: {
     appStore.setState('commandsLoaded', false);
     appStore.setState('commands', []);
     appStore.setState('lspStatus', []);
+    appStore.setState('mcpDefaults', null);
+    routingStore.resetDraftSelectedMcps();
     appStore.setState('sessionAutoPermissionCounts', reconcile({}));
     appStore.setState('sessionAutoPermissionActivity', reconcile({}));
     appStore.setState('autoPermissionCountsSince', Date.now());
@@ -1215,7 +1219,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     isActiveSession: (sessionId) => appStore.state.activeSessionId === sessionId,
     getMessages: () => appStore.state.messages,
     onSessionSettled: () => {
-      void syncSessionMcps(appStore.state.activeSessionId).catch((err) =>
+      void syncSessionMcps(getEffectiveComposerSessionId()).catch((err) =>
         logError('syncSessionMcpsAfterSessionSettled', err)
       );
     },
@@ -1336,6 +1340,17 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   function useOpenCode() {
     hideAutomaticallyHandledRestoredPermissions();
+    createEffect(
+      on(
+        getEffectiveComposerSessionId,
+        (sessionId) => {
+          if (initialized && sessionId === null) {
+            void syncSessionMcps(null).catch((error) => logError('syncDraftMcps', error));
+          }
+        },
+        { defer: true }
+      )
+    );
 
     onMount(() => {
       const initialTheme = syncWindowChatTheme({
@@ -2231,15 +2246,40 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     for (const result of results) {
       if (result.status === 'rejected') logError('reconcileServerState', result.reason);
     }
+    if (
+      connection === connectionGeneration &&
+      workspace === workspaceGeneration &&
+      appStore.state.mcpDefaults
+    ) {
+      await syncSessionMcps(getEffectiveComposerSessionId());
+    }
   }
 
   const sessionMcpOperations = new SessionMcpOperations({
     getSelectedMcpsForSession: routingStore.getSelectedMcpsForSession,
+    getSharedMcpNames: () => {
+      // A different project/view can be using this server without sharing its
+      // selections with us. Never disconnect its live connections speculatively.
+      const unknownRunningSession = Object.entries(appStore.state.sessionStatus).some(
+        ([id, status]) => {
+          if (status?.type !== 'busy' && status?.type !== 'retry') return false;
+          const root = getSessionTreeRootId(id) || id;
+          if (appStore.state.sessionSelectedMcps[id] || appStore.state.sessionSelectedMcps[root])
+            return false;
+          const session = appStore.state.sessions.find((candidate) => candidate.id === root);
+          return (
+            !session ||
+            !isSameWorkspacePath(session.directory, appStore.state.editorContext.workspacePath)
+          );
+        }
+      );
+      return unknownRunningSession ? routingStore.getConnectedMcpNames() : [];
+    },
     getRequiredMcpSessionIds: (targetSessionId) => [
       ...(targetSessionId ? [targetSessionId] : []),
       ...Object.entries(appStore.state.sessionStatus)
         .filter(([, status]) => status?.type === 'busy' || status?.type === 'retry')
-        .map(([sessionId]) => sessionId),
+        .flatMap(([sessionId]) => [sessionId, getSessionTreeRootId(sessionId) || sessionId]),
     ],
     getMcpStatus: () => appStore.state.mcpStatus,
     loadMcps,
@@ -2352,6 +2392,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await sessionMcpOperations.applySessionMcps(names, sessionId);
   }
 
+  async function refreshSessionMcps(sessionId = appStore.state.activeSessionId) {
+    if ((await loadMcps({ fresh: true })) === false)
+      throw new Error('Could not refresh MCP configuration');
+    await syncSessionMcps(sessionId);
+  }
+
   const connectionBootstrapOperations = createConnectionBootstrapOperations({
     health: client.health,
     loadInitialData: async () => {
@@ -2371,7 +2417,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         startupStatusSnapshot = { workspace, snapshot: statuses };
     },
     loadBackgroundData: async () => {
+      const workspace = workspaceGeneration;
       await Promise.all([loadCompatibilityState(), loadMcps(), loadLsps(), loadRecycleBin()]);
+      if (workspace === workspaceGeneration && appStore.state.mcpDefaults)
+        await syncSessionMcps(getEffectiveComposerSessionId());
     },
     hydrateSessionStatuses,
     getActiveSessionId: () => appStore.state.activeSessionId,
@@ -2893,7 +2942,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     resolveDefaultAgent: () =>
       getDefaultPrimaryAgentName(appStore.state.agents, routingStore.getPersistedSelectedAgent()),
     setSelectedAgent: routingStore.setSelectedAgent,
-    getInitialMcpNames: () => routingStore.getSelectedMcpsForSession(null) || [],
+    getInitialMcpNames: () => appStore.state.draftSelectedMcps,
     setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
     resetDraftSelectedMcps: routingStore.resetDraftSelectedMcps,
     setPermissionModeForSession: permissionsStore.setPermissionModeForSession,
@@ -3485,6 +3534,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     refreshProviderLimit,
     continueInterruptedSession,
     applySessionMcps,
+    refreshSessionMcps,
     resumeSteering,
     selectSession,
     loadFullSessionHistory,

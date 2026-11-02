@@ -1836,6 +1836,7 @@ const API_ROUTES: ApiRoute[] = [
   route('/auth/:id', methodsNoQuery('PUT', 'DELETE')),
   route('/command', methodsNoQuery('GET')),
   route('/mcp', methodsNoQuery('GET')),
+  route(VARRO_API_ENDPOINTS.mcpDefaults, methodsNoQuery('GET', 'POST')),
   route('/lsp', methodsNoQuery('GET')),
   route('/vcs/status', methodsNoQuery('GET')),
   route('/agent', methodsNoQuery('GET')),

@@ -26,6 +26,7 @@ export {
   renameSession,
   refreshProviderLimit,
   refreshRoutingState,
+  refreshSessionMcps,
   rejectQuestion,
   reloadSessions,
   respondPermission,

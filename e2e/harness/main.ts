@@ -3,13 +3,14 @@
 import type {
   EditorContext,
   InitialWebviewState,
+  McpDefaults,
   PermissionMode,
   RecycleBinEntry,
   ServerStatus,
   WebviewMessage,
   WebviewThemeKind,
 } from '../../src/shared/protocol';
-import { isPermissionMode } from '../../src/shared/protocol';
+import { isPermissionMode, VARRO_API_ENDPOINTS } from '../../src/shared/protocol';
 import { BACKGROUND_OUTPUT_CHUNK_BYTES } from '../../src/shared/background-process';
 import type { BackgroundProcess } from '../../src/shared/background-process';
 import { getSessionPermissionRulesForMode } from '../../src/shared/permission-rules';
@@ -168,6 +169,7 @@ type ScenarioState = {
       error?: string;
     }
   >;
+  mcpDefaults?: McpDefaults;
   storedState: {
     sessionSelectedAgents?: Record<string, string>;
     sessionSelectedMcps?: Record<string, string[]>;
@@ -6017,6 +6019,36 @@ async function handleApiRequest(
 
   if (method === 'GET' && path === '/mcp') {
     return state.mcpStatus;
+  }
+
+  if (path === VARRO_API_ENDPOINTS.mcpDefaults) {
+    if (!state.mcpDefaults) {
+      const global = Object.fromEntries(
+        Object.entries(state.mcpStatus).map(([name, status]) => [
+          name,
+          status.status === 'connected',
+        ])
+      );
+      state.mcpDefaults = { global, project: {}, effective: { ...global }, editable: true };
+    }
+    if (method === 'POST') {
+      const update = asRecord(body);
+      if (
+        typeof update?.name !== 'string' ||
+        !Object.hasOwn(state.mcpStatus, update.name) ||
+        (update.scope !== 'global' && update.scope !== 'project') ||
+        (typeof update.enabled !== 'boolean' && update.enabled !== null)
+      )
+        throw new Error('Invalid MCP default update');
+      if (
+        update.enabled === null ||
+        (update.scope === 'project' && state.mcpDefaults.global[update.name] === update.enabled)
+      )
+        delete state.mcpDefaults.project[update.name];
+      else state.mcpDefaults[update.scope][update.name] = update.enabled;
+      state.mcpDefaults.effective = { ...state.mcpDefaults.global, ...state.mcpDefaults.project };
+    }
+    return structuredClone(state.mcpDefaults);
   }
 
   if (method === 'GET' && path === '/question') {

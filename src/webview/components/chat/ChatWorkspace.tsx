@@ -24,6 +24,9 @@ const LazyPermissionSettingsPanel = lazy(() =>
     default: module.PermissionSettingsPanel,
   }))
 );
+const LazyMcpSettingsPanel = lazy(() =>
+  import('../McpSettingsPanel').then((module) => ({ default: module.McpSettingsPanel }))
+);
 
 function activeRalphSessionId() {
   const id = state.activeSessionId;
@@ -78,6 +81,7 @@ export function ChatWorkspace(props: {
   showSessionPicker: boolean;
   showModels: boolean;
   showPermissionSettings: boolean;
+  showMcpSettings: boolean;
   showReconnectBanner: boolean;
   slowApiRequests: readonly SlowApiRequest[];
   sessionFilter: SessionListFilter | null;
@@ -339,7 +343,7 @@ export function ChatWorkspace(props: {
 
   return (
     <div
-      class={`interactive-session${props.showModels ? ' interactive-session-showing-models' : ''}`}
+      class={`interactive-session${props.showModels ? ' interactive-session-showing-models' : ''}${props.showMcpSettings ? ' interactive-session-showing-mcp-settings' : ''}`}
     >
       <WindowChatThemeToggle />
       <Show when={props.showSessionHeader}>
@@ -411,6 +415,11 @@ export function ChatWorkspace(props: {
       <Show when={props.showPermissionSettings}>
         <Suspense>
           <LazyPermissionSettingsPanel />
+        </Suspense>
+      </Show>
+      <Show when={props.showMcpSettings}>
+        <Suspense>
+          <LazyMcpSettingsPanel />
         </Suspense>
       </Show>
 
