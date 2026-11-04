@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import type {
   FollowupAction,
   FollowupSource,
@@ -12,14 +13,16 @@ import {
 import { client } from '../../lib/client';
 import type { ChatModelSelection } from '../../../shared/protocol';
 import { logWarn } from '../../lib/log';
-import { getSelectedModelForSession, state } from '../../lib/state';
+import { enqueueMessage, getSelectedModelForSession, state } from '../../lib/state';
 import { deriveSelectedModelFromSession } from '../../hooks/routing-state';
 import { prepareForMessageBlockRemoval } from '../../lib/message-list-layout';
+import { writeClipboard } from '../../lib/write-clipboard';
 import { sendMessage } from '../../hooks/useOpenCode';
 import { xmarkIcon } from '../../lib/ui-icons';
 import { InlineCodeText } from '../InlineCodeText';
 import { UiIcon } from '../UiIcon';
 import { Tooltip } from '../Tooltip';
+import { FollowupActionsMenu } from './FollowupActionsMenu';
 
 type ReadyFollowups = FollowupSuggestionSet & {
   key: string;
@@ -38,6 +41,11 @@ export function FollowupSuggestions(props: {
   const [ready, setReady] = createSignal<ReadyFollowups | null>(null);
   const [sending, setSending] = createSignal(false);
   const [error, setError] = createSignal('');
+  const [menu, setMenu] = createSignal<{
+    action: FollowupAction;
+    x: number;
+    y: number;
+  } | null>(null);
   // oxlint-disable-next-line no-unassigned-vars -- Assigned by Solid's ref binding.
   let element: HTMLDivElement | undefined;
   let previousScope = '';
@@ -119,6 +127,7 @@ export function FollowupSuggestions(props: {
   function clear() {
     if (element?.isConnected) prepareForMessageBlockRemoval(element);
     setError('');
+    setMenu(null);
     setReady(null);
   }
 
@@ -134,10 +143,11 @@ export function FollowupSuggestions(props: {
     clear();
   }
 
-  async function send(action: FollowupAction) {
+  async function send(action: FollowupAction, queue = false) {
     const value = current();
     if (sendPending || !value || !value.actions.includes(action)) return;
     sendPending = true;
+    setMenu(null);
     setSending(true);
     setError('');
     const sendScope = scope();
@@ -146,7 +156,9 @@ export function FollowupSuggestions(props: {
       if (scope() !== sendScope || sourceKey() !== value.key) return;
       if (optimisticPublished && !ready()) setReady(value);
       if (ready() === value)
-        setError('Could not send this follow-up. Your main draft has not changed.');
+        setError(
+          `Could not ${queue ? 'queue' : 'send'} this follow-up. Your main draft has not changed.`
+        );
     };
     const validateBeforeSend = async () => {
       const latest = await client.varro.followups(value.sessionId, value.source, {
@@ -166,6 +178,17 @@ export function FollowupSuggestions(props: {
     };
     try {
       if (!(await validateBeforeSend())) return;
+      if (queue) {
+        enqueueMessage({
+          id: crypto.randomUUID(),
+          sessionId: value.sessionId,
+          text: action.prompt,
+          followupTitle: action.title,
+          agent: 'build',
+          paused: true,
+        });
+        return;
+      }
       const accepted = await sendMessage(action.prompt, {
         targetSessionId: value.sessionId,
         preserveComposer: true,
@@ -330,6 +353,17 @@ export function FollowupSuggestions(props: {
                       type="button"
                       disabled={sending() || !current()}
                       onClick={() => void send(action)}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (sending() || !current()) return;
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        setMenu({
+                          action,
+                          x: event.clientX || rect.left,
+                          y: event.clientY || rect.bottom,
+                        });
+                      }}
                     >
                       <InlineCodeText text={action.title} />
                     </button>
@@ -343,6 +377,25 @@ export function FollowupSuggestions(props: {
               </p>
             </Show>
           </div>
+        )}
+      </Show>
+      <Show when={menu()} keyed>
+        {(value) => (
+          <Portal>
+            <FollowupActionsMenu
+              x={value.x}
+              y={value.y}
+              onClose={() => setMenu(null)}
+              onCopy={() => {
+                void writeClipboard(value.action.prompt);
+                setMenu(null);
+              }}
+              onQueue={() => {
+                setMenu(null);
+                void send(value.action, true);
+              }}
+            />
+          </Portal>
         )}
       </Show>
     </>

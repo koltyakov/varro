@@ -10687,7 +10687,9 @@ export function MessageList() {
               hasActivePermission() ||
               isSessionCompacting() ||
               isLoading() ||
-              state.queuedMessages.some((item) => item.sessionId === state.activeSessionId)
+              state.queuedMessages.some(
+                (item) => item.sessionId === state.activeSessionId && !item.paused
+              )
             }
           />
           <Show when={appendBottomReserve() > 0.5}>

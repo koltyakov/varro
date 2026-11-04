@@ -1,4 +1,5 @@
 import { MAX_PASTED_TEXT_BYTES, pastedTextBytes } from '../../shared/pasted-text';
+import { parseFollowupTitle } from '../../shared/followups';
 import type {
   QueuedMessage,
   SelectedModel,
@@ -327,6 +328,7 @@ function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
     messageId: messageId || undefined,
     sessionId,
     text: record.text,
+    followupTitle: parseFollowupTitle(record.followupTitle) ?? undefined,
     agent: agent || undefined,
     paused: record.paused === true ? true : undefined,
     droppedFiles,

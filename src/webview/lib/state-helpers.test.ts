@@ -266,6 +266,8 @@ describe('state helpers', () => {
       sessionId: 'session-1',
       text: 'second',
       agent: 'build',
+      followupTitle: 'Inspect parser failures',
+      paused: true,
     });
 
     stateModule.reorderQueuedMessage('q2', 'q1');
@@ -283,6 +285,8 @@ describe('state helpers', () => {
 
     expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['q2', 'other']);
     expect(stateModule.state.queuedMessages[0]?.agent).toBe('build');
+    expect(stateModule.state.queuedMessages[0]?.followupTitle).toBe('Inspect parser failures');
+    expect(stateModule.state.queuedMessages[0]?.paused).toBe(true);
 
     stateModule.removeQueuedMessage('q2');
     stateModule.clearQueuedMessagesForSession('session-1');

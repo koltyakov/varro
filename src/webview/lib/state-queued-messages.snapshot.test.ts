@@ -63,3 +63,19 @@ it('accepts an authoritative lifecycle snapshot without a persistence acknowledg
   ]);
   expect(state.queuedMessages.map((message) => message.id)).toEqual(['transferred']);
 });
+
+it('includes paused follow-up descriptions and titles in host persistence updates', async () => {
+  const queue = await import('./state-queued-messages');
+  const message: QueuedMessage = {
+    id: 'followup',
+    sessionId: 'session-1',
+    text: 'Investigate only the reported parser failures.',
+    followupTitle: 'Inspect parser failures',
+    paused: true,
+  };
+  queue.enqueueMessage(message);
+  const update = bridge.postMessage.mock.calls.at(-1)?.[0];
+  expect(update?.type).toBe('queued-messages/update');
+  if (update?.type !== 'queued-messages/update') throw new Error('Queue update missing');
+  expect(update.payload.messages).toMatchObject([message]);
+});

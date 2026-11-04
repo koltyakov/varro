@@ -3889,6 +3889,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           workspaceDirectory,
           queuedMessageDispatch: { itemId: item.id, lease: dispatchLease! },
         };
+        if (item.followupTitle) {
+          options.followupTitle = item.followupTitle;
+          options.omitContext = true;
+        }
         if (selectedModel) options.selectedModel = selectedModel;
         return sendMessage(item.text, options);
       });

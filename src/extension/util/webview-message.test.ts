@@ -920,6 +920,12 @@ describe('webview message validation', () => {
     expect(parseQueuedMessageUpdate([{ ...valid, agent: 'x'.repeat(513) }])).toBeNull();
     expect(parseQueuedMessageUpdate([{ ...valid, paused: 'false' }])).toBeNull();
     expect(
+      parseQueuedMessageUpdate([{ ...valid, followupTitle: 'Inspect parser failures' }])
+    ).not.toBeNull();
+    for (const followupTitle of ['', 'x'.repeat(49), 123, 'one\ntwo']) {
+      expect(parseQueuedMessageUpdate([{ ...valid, followupTitle }])).toBeNull();
+    }
+    expect(
       parseQueuedMessageUpdate([{ ...valid, queuedContext: { visionDelegationAvailable: 'yes' } }])
     ).toBeNull();
     expect(

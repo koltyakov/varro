@@ -5436,55 +5436,61 @@ describe('ChatInput', () => {
     ]);
   });
 
-  it('dispatches a queued message on authoritative idle without waiting for a timer', async () => {
-    vi.useFakeTimers();
-    setIsLoading(true);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', 'session-1', { type: 'busy' });
-    setState('selectedAgent', 'plan');
-    setState('queuedMessages', [
-      {
-        id: 'q1',
-        sessionId: 'session-1',
-        text: 'Implement the plan',
+  it.each([undefined, 'Implement plan'])(
+    'dispatches a queued message on authoritative idle, followupTitle=%s',
+    async (followupTitle) => {
+      vi.useFakeTimers();
+      setIsLoading(true);
+      setState('activeSessionId', 'session-1');
+      setState('sessionStatus', 'session-1', { type: 'busy' });
+      setState('selectedAgent', 'plan');
+      setState('queuedMessages', [
+        {
+          id: 'q1',
+          sessionId: 'session-1',
+          text: 'Implement the plan',
+          followupTitle,
+          agent: 'build',
+        },
+      ]);
+
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      setIsLoading(false);
+      await flushAsyncWork();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      for (const handler of serverEventHandlers.get('session.status') ?? []) {
+        handler({
+          type: 'session.status',
+          properties: { sessionID: 'session-1', status: { type: 'idle' } },
+        });
+      }
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      await flushAsyncWork();
+
+      const expectedOptions = {
+        messageId: expect.stringMatching(/^msg_/),
         agent: 'build',
-      },
-    ]);
-
-    cleanup = render(() => ChatInput(), container!);
-    await flushAsyncWork();
-    expect(sendMessageMock).not.toHaveBeenCalled();
-
-    setIsLoading(false);
-    await flushAsyncWork();
-    expect(sendMessageMock).not.toHaveBeenCalled();
-
-    for (const handler of serverEventHandlers.get('session.status') ?? []) {
-      handler({
-        type: 'session.status',
-        properties: { sessionID: 'session-1', status: { type: 'idle' } },
-      });
+        queuedAttachments: {
+          droppedFiles: undefined,
+          clipboardImages: undefined,
+          nativePdfs: undefined,
+          terminalSelection: undefined,
+          attachedDiagnostics: undefined,
+        },
+        queuedContext: expect.any(Object),
+        preserveComposer: true,
+        targetSessionId: 'session-1',
+        queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
+      };
+      if (followupTitle) Object.assign(expectedOptions, { followupTitle, omitContext: true });
+      expect(sendMessageMock).toHaveBeenCalledWith('Implement the plan', expectedOptions);
+      expect(client.session.messages).not.toHaveBeenCalled();
     }
-    setState('sessionStatus', 'session-1', { type: 'idle' });
-    await flushAsyncWork();
-
-    expect(sendMessageMock).toHaveBeenCalledWith('Implement the plan', {
-      messageId: expect.stringMatching(/^msg_/),
-      agent: 'build',
-      queuedAttachments: {
-        droppedFiles: undefined,
-        clipboardImages: undefined,
-        nativePdfs: undefined,
-        terminalSelection: undefined,
-        attachedDiagnostics: undefined,
-      },
-      queuedContext: expect.any(Object),
-      preserveComposer: true,
-      targetSessionId: 'session-1',
-      queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
-    });
-    expect(client.session.messages).not.toHaveBeenCalled();
-  });
+  );
 
   it('does not dispatch queued messages after an API failure', async () => {
     vi.useFakeTimers();
@@ -7163,50 +7169,56 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('');
   });
 
-  it('sends queued rows as steers and removes them on success', async () => {
-    setupMatchingActiveTurn();
-    setIsLoading(true);
-    setState('activeSessionId', 'session-1');
-    setState('queuedMessages', [
-      {
-        id: 'q1',
-        sessionId: 'session-1',
-        text: 'test 2',
-        droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
-        clipboardImages: [
-          { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
-        ],
-        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
-      },
-      { id: 'q2', sessionId: 'session-1', text: 'test 3' },
-    ]);
+  it.each([undefined, 'Inspect failures'])(
+    'sends queued rows as steers and removes them on success, followupTitle=%s',
+    async (followupTitle) => {
+      setupMatchingActiveTurn();
+      setIsLoading(true);
+      setState('activeSessionId', 'session-1');
+      setState('queuedMessages', [
+        {
+          id: 'q1',
+          sessionId: 'session-1',
+          text: 'test 2',
+          followupTitle,
+          droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+          clipboardImages: [
+            { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+          ],
+          terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+        },
+        { id: 'q2', sessionId: 'session-1', text: 'test 3' },
+      ]);
 
-    cleanup = render(() => ChatInput(), container!);
+      cleanup = render(() => ChatInput(), container!);
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await flushAsyncWork();
+      container
+        ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await flushAsyncWork();
 
-    expect(sendMessageMock).toHaveBeenCalledWith('test 2', {
-      agent: undefined,
-      delivery: 'steer',
-      messageId: expect.stringMatching(/^msg_/),
-      queuedAttachments: {
-        droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
-        clipboardImages: [
-          { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
-        ],
-        nativePdfs: undefined,
-        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
-        attachedDiagnostics: undefined,
-      },
-      preserveComposer: true,
-      targetSessionId: 'session-1',
-      queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
-    });
-    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
-  });
+      const expectedOptions = {
+        agent: undefined,
+        delivery: 'steer',
+        messageId: expect.stringMatching(/^msg_/),
+        queuedAttachments: {
+          droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+          clipboardImages: [
+            { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+          ],
+          nativePdfs: undefined,
+          terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+          attachedDiagnostics: undefined,
+        },
+        preserveComposer: true,
+        targetSessionId: 'session-1',
+        queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
+      };
+      if (followupTitle) Object.assign(expectedOptions, { followupTitle, omitContext: true });
+      expect(sendMessageMock).toHaveBeenCalledWith('test 2', expectedOptions);
+      expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
+    }
+  );
 
   it('shows inbox steers above the queue until the same message lands in the transcript', async () => {
     setIsLoading(true);

@@ -33,6 +33,7 @@ export interface QueuedMessage {
   messageId?: string;
   sessionId: string;
   text: string;
+  followupTitle?: string;
   agent?: string;
   paused?: boolean;
   droppedFiles?: DroppedFile[];

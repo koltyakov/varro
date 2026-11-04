@@ -7,6 +7,7 @@ import {
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
 } from '../../shared/dropped-content-policy';
 import { OPENCODE_TERMINAL_COMMANDS } from '../../shared/opencode-install';
+import { parseFollowupTitle } from '../../shared/followups';
 import { isInlineProblemAttachment } from '../../shared/extension-message';
 import {
   isPermissionMode,
@@ -1476,6 +1477,7 @@ function isValidQueuedMessageRouting(record: UnknownRecord) {
   if (record.agent !== undefined && !getBoundedString(record.agent, MAX_RALPH_ID_LENGTH))
     return false;
   if (record.paused !== undefined && typeof record.paused !== 'boolean') return false;
+  if (record.followupTitle !== undefined && !parseFollowupTitle(record.followupTitle)) return false;
   if (!Array.isArray(record.droppedFiles) || !Array.isArray(record.clipboardImages)) return false;
   if (record.attachedDiagnostics !== undefined && !asRecord(record.attachedDiagnostics))
     return false;

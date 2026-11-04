@@ -301,6 +301,34 @@ for (const width of [480, 1280]) {
       await composer.hover();
       await expect(page.getByRole('tooltip')).not.toBeVisible();
       await page.screenshot({ path: testInfo.outputPath('followup-summary.png') });
+      if (position === 'followed') {
+        for (const [index, title] of [
+          'Inspect parser failures',
+          'Add regression coverage',
+        ].entries()) {
+          await suggestions
+            .getByRole('button', { name: title, exact: true })
+            .click({ button: 'right' });
+          const menu = page.getByRole('menu', { name: 'Follow-up actions' });
+          await expect(menu.getByRole('menuitem', { name: 'Copy description' })).toBeVisible();
+          const bounds = await menu.boundingBox();
+          expect(bounds).not.toBeNull();
+          expect(bounds!.x).toBeGreaterThanOrEqual(8);
+          expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width - 8);
+          expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(850 - 8);
+          await menu.getByRole('menuitem', { name: 'Add to queue (paused)', exact: true }).click();
+          const queue = page.getByRole('list', { name: 'Queued messages', exact: true });
+          await expect(queue.locator('.chat-queue-item.is-paused')).toHaveCount(index + 1);
+          await expect(
+            queue.getByRole('button', { name: 'Play queued message', exact: true })
+          ).toHaveCount(index + 1);
+          await expect(suggestions).toBeVisible();
+          await expect(composer).toHaveText('Keep this unrelated draft');
+          await expect(page.locator('html')).not.toHaveAttribute('data-followup-sent-body');
+          await expect(page.locator('html')).not.toHaveAttribute('data-followup-dismissed');
+        }
+        await page.screenshot({ path: testInfo.outputPath('followup-paused-queue.png') });
+      }
       if (position === 'near-bottom') {
         await list.hover();
         await page.mouse.wheel(0, 1600);

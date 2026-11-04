@@ -4,7 +4,8 @@ import { createSignal } from 'solid-js';
 import { reconcile } from 'solid-js/store';
 import { render } from 'solid-js/web';
 import { client } from '../../lib/client';
-import { replaceMessages, setState } from '../../lib/state';
+import { replaceMessages, setState, state } from '../../lib/state';
+import * as clipboard from '../../lib/write-clipboard';
 import { assistantMessage, session, textPart, userMessage } from '../MessageList.test-utils';
 import { FollowupSuggestions } from './FollowupSuggestions';
 
@@ -44,6 +45,7 @@ beforeEach(() => {
   setState('messagesLoading', false);
   setState('followupOpening', null);
   setState('sessions', [session('session-1')]);
+  setState('queuedMessages', []);
   replaceMessages([
     { info: userMessage('user'), parts: [textPart('u', 'Fix the parser')] },
     {
@@ -61,6 +63,7 @@ beforeEach(() => {
     options.allowGenerate ? suggestions : { summary: '', actions: [] }
   );
   vi.spyOn(client.varro, 'dismissFollowups').mockResolvedValue(true);
+  vi.spyOn(clipboard, 'writeClipboard').mockResolvedValue(true);
 });
 afterEach(() => {
   dispose?.();
@@ -71,6 +74,7 @@ afterEach(() => {
   setState('selectedModel', null);
   setState('sessionSelectedModels', reconcile({}));
   setState('messages', []);
+  setState('queuedMessages', []);
   vi.restoreAllMocks();
 });
 
@@ -113,7 +117,122 @@ function mount(initialWorking = true, agent = 'build') {
   };
 }
 
+function openActionMenu(index = 0) {
+  const button = container.querySelectorAll<HTMLButtonElement>(
+    '.followup-suggestions-actions button'
+  )[index]!;
+  button.focus();
+  button.dispatchEvent(
+    new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 })
+  );
+  return button;
+}
+
+function menuItem(text: string) {
+  const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
+    (button) => button.textContent?.trim() === text
+  );
+  if (!item) throw new Error(`Missing follow-up menu item: ${text}`);
+  return item;
+}
+
 describe('FollowupSuggestions', () => {
+  it('copies the full action description from the context menu without sending or dismissing', async () => {
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    const button = openActionMenu();
+    menuItem('Copy description').click();
+    expect(clipboard.writeClipboard).toHaveBeenCalledExactlyOnceWith(actions[0]!.prompt);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(button);
+    expect(container.querySelector('.followup-suggestions')).not.toBeNull();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(client.varro.dismissFollowups).not.toHaveBeenCalled();
+  });
+
+  it('queues multiple actions paused while keeping the remaining suggestions available', async () => {
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
+    for (const index of [0, 1]) {
+      openActionMenu(index);
+      menuItem('Add to queue (paused)').click();
+      await flush();
+    }
+    expect(state.queuedMessages).toEqual(
+      actions.slice(0, 2).map((action) => ({
+        id: expect.any(String),
+        sessionId: 'session-1',
+        text: action.prompt,
+        followupTitle: action.title,
+        agent: 'build',
+        paused: true,
+      }))
+    );
+    expect(new Set(state.queuedMessages.map((item) => item.id)).size).toBe(2);
+    expect(JSON.parse(localStorage.getItem('varro.queuedMessages') ?? '[]')).toMatchObject([
+      { text: actions[0]!.prompt, followupTitle: actions[0]!.title, paused: true },
+      { text: actions[1]!.prompt, followupTitle: actions[1]!.title, paused: true },
+    ]);
+    expect(container.querySelectorAll('.followup-suggestions-actions button')).toHaveLength(3);
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(client.varro.dismissFollowups).not.toHaveBeenCalled();
+  });
+
+  it('does not queue an action dismissed in another window', async () => {
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    openActionMenu();
+    menuItem('Add to queue (paused)').click();
+    await flush();
+    expect(state.queuedMessages).toHaveLength(0);
+    expect(container.querySelector('.followup-suggestions')).toBeNull();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('ignores a queue validation result after switching sessions', async () => {
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    let finish!: (value: typeof suggestions) => void;
+    vi.mocked(client.varro.followups).mockImplementationOnce(
+      () => new Promise((resolve) => (finish = resolve))
+    );
+    openActionMenu();
+    menuItem('Add to queue (paused)').click();
+    setState('activeSessionId', 'session-2');
+    finish(suggestions);
+    await flush();
+    expect(state.queuedMessages).toHaveLength(0);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('supports menu keyboard navigation, Escape, and outside dismissal', async () => {
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    const button = openActionMenu();
+    expect(document.activeElement).toBe(menuItem('Copy description'));
+    menuItem('Copy description').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
+    );
+    expect(document.activeElement).toBe(menuItem('Add to queue (paused)'));
+    menuItem('Add to queue (paused)').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(button);
+    openActionMenu();
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    openActionMenu();
+    setWorking(true);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
   it('renders backticked text in the summary and actions as inline code', async () => {
     vi.mocked(client.varro.followups).mockResolvedValue({
       summary: 'The `parseToken` helper still fails.',
