@@ -81,6 +81,7 @@ const TARGET_PATH_KEYS = [
 const OPERATION_KEYS = ['operation', 'action', 'changeType', 'change_type', 'status', 'type'];
 const MAX_LAYOUT_CONTENT_SCAN_CHARS = 256 * 1024;
 const MAX_PATCH_FILE_CHANGES = 64;
+const FILE_EDITS_OMITTED_MESSAGE = `Additional file edits were omitted after ${MAX_PATCH_FILE_CHANGES} files`;
 const MAX_MODEL_PATCH_BYTES = 1024 * 1024;
 const MAX_MODEL_PATCH_LINES = 10_000;
 const MAX_PATCH_SECTION_BYTES = 256 * 1024;
@@ -438,9 +439,7 @@ function fileChangesFromMetadataFiles(
   if (files.length > MAX_PATCH_FILE_CHANGES) {
     changes.push({
       fallbackKind: false,
-      change: createTruncatedSummary(
-        `Additional metadata files were omitted after ${MAX_PATCH_FILE_CHANGES} files.`
-      ),
+      change: createTruncatedSummary(FILE_EDITS_OMITTED_MESSAGE),
     });
   }
   return changes;
@@ -509,7 +508,7 @@ function fileChangesFromPatchInput(input: UnknownRecord): FileChange[] {
     if (header) {
       finishSection();
       if (fileCount >= MAX_PATCH_FILE_CHANGES) {
-        stopMessage = `Additional patch files were omitted after ${MAX_PATCH_FILE_CHANGES} files.`;
+        stopMessage = FILE_EDITS_OMITTED_MESSAGE;
         return 'limit';
       }
       const path = stripPathWrapping(header[2] || '');
@@ -672,7 +671,7 @@ function limitFileChanges(changes: readonly FileChange[]): FileChange[] {
     .filter((change) => change.isSummary && change.previewMessage)
     .map((change) => change.previewMessage!);
   if (files.length > MAX_PATCH_FILE_CHANGES) {
-    messages.push(`Additional patch files were omitted after ${MAX_PATCH_FILE_CHANGES} files.`);
+    messages.push(FILE_EDITS_OMITTED_MESSAGE);
   }
   const result = files.slice(0, MAX_PATCH_FILE_CHANGES);
   if (messages.length > 0) result.push(createTruncatedSummary([...new Set(messages)].join(' ')));

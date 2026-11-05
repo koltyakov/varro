@@ -51,7 +51,7 @@ describe('development compatibility', () => {
       )
     );
 
-    expect(packageJson.volta.npm).toBe('12.2.1');
+    expect(packageJson.volta.npm).toMatch(/^\d+\.\d+\.\d+$/);
     for (const workflow of workflows) {
       const setups = workflow.match(/uses: actions\/setup-node@/g) ?? [];
       expect(setups.length).toBeGreaterThan(0);

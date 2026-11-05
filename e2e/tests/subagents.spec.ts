@@ -134,7 +134,9 @@ test('keeps a completed background launch running until its child is idle', asyn
   await expect(header.locator('.tool-status-completed')).toHaveCount(0);
   await expect(page.locator('.chat-subagent-waiting')).toHaveCount(0);
   await header.click();
-  await expect(page.locator('.tool-invocation-running-label')).toHaveText('Subagent is working');
+  await expect(page.locator('.tool-invocation-running-label')).toHaveText(
+    'General subagent is working'
+  );
   await expect(page.locator('.structured-tool-card')).toContainText(
     'The subagent is working in the background.'
   );
@@ -159,7 +161,9 @@ test('keeps a completed background launch running until its child is idle', asyn
     });
   });
   await expect(header.locator('.tool-call-spinner')).toBeVisible();
-  await expect(page.locator('.tool-invocation-running-label')).toHaveText('Subagent is retrying');
+  await expect(page.locator('.tool-invocation-running-label')).toHaveText(
+    'General subagent is retrying'
+  );
   await expect(page.locator('.tool-invocation-running-detail')).toHaveText(
     'Attempt 2 · Rate limited'
   );

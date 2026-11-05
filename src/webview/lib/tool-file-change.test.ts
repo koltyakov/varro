@@ -662,6 +662,48 @@ describe('tool file change helpers', () => {
     expect(merged[0]?.previewMessage).toContain('file patch section exceeds');
   });
 
+  it.each([
+    { source: 'metadata', metadataCount: 65, patchCount: 0, patchStart: 0 },
+    { source: 'patch input', metadataCount: 0, patchCount: 65, patchStart: 0 },
+    { source: 'both sources', metadataCount: 65, patchCount: 65, patchStart: 0 },
+    { source: 'merged file count', metadataCount: 40, patchCount: 40, patchStart: 40 },
+  ])(
+    'shows one file-edit omission warning for $source',
+    ({ metadataCount, patchCount, patchStart }) => {
+      const changes = getToolFileChanges(
+        'apply_patch',
+        completedState(
+          {
+            patchText: [
+              '*** Begin Patch',
+              ...Array.from(
+                { length: patchCount },
+                (_, index) => `*** Add File: src/file-${patchStart + index}.ts\n+line ${index}`
+              ),
+              '*** End Patch',
+            ].join('\n'),
+          },
+          {
+            metadata: {
+              files: Array.from({ length: metadataCount }, (_, index) => ({
+                type: 'add',
+                relativePath: `src/file-${index}.ts`,
+              })),
+            },
+          }
+        )
+      );
+
+      expect(changes.filter((change) => !change.isSummary)).toHaveLength(64);
+      expect(changes.filter((change) => change.isSummary)).toEqual([
+        expect.objectContaining({
+          previewStatus: 'truncated',
+          previewMessage: 'Additional file edits were omitted after 64 files',
+        }),
+      ]);
+    }
+  );
+
   it('caps file count and total stored section work', () => {
     const manyFilesPatch = [
       '*** Begin Patch',

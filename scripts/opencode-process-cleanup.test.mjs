@@ -130,7 +130,7 @@ for (const mode of ['success', 'failure', 'timeout', 'interrupt', 'output-limit'
       await symlink(process.execPath, executable);
       const cleanup = new AdapterProcessCleanup(root);
       context.after(() => cleanup.cleanup());
-      const source = `
+      let source = `
       const { spawn } = require('node:child_process');
       const child = spawn(${JSON.stringify(executable)}, ['-e',
         'process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000)',
@@ -141,6 +141,23 @@ for (const mode of ['success', 'failure', 'timeout', 'interrupt', 'output-limit'
         ${mode === 'success' ? 'process.exit(0)' : mode === 'failure' ? 'process.exit(7)' : mode === 'output-limit' ? 'console.log("x".repeat(2048)); setInterval(() => {}, 1000)' : 'setInterval(() => {}, 1000)'};
       });
     `;
+      if (mode === 'timeout' || mode === 'interrupt') {
+        // Establish the owned server before starting the runner's timeout or abort deadline.
+        const server = spawn(
+          executable,
+          [
+            '-e',
+            'process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000)',
+            '--',
+            'serve',
+          ],
+          { detached: true, stdio: ['ignore', 'pipe', 'ignore'] }
+        );
+        await once(server.stdout, 'data');
+        server.stdout.destroy();
+        server.unref();
+        source = 'setInterval(() => {}, 1000)';
+      }
       const result = await cleanup.run(process.execPath, ['-e', source], {
         timeout: mode === 'timeout' ? 500 : 10000,
         maxBuffer: mode === 'output-limit' ? 1024 : 1024 * 1024,
@@ -149,7 +166,11 @@ for (const mode of ['success', 'failure', 'timeout', 'interrupt', 'output-limit'
       assert.equal(result.recoveredProcesses.length, 1);
       if (mode === 'success') assert.equal(result.status, 0);
       else if (mode === 'failure') assert.equal(result.status, 7);
-      else assert.ok(result.error);
+      else if (mode === 'timeout') {
+        assert.match(result.error?.message ?? '', /Adapter runner exceeded its timeout/);
+      } else if (mode === 'interrupt') {
+        assert.equal(result.error?.name, 'TimeoutError');
+      } else assert.ok(result.error);
       assert.deepEqual(await cleanup.cleanup(), []);
     }
   );

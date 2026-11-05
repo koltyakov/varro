@@ -34,13 +34,25 @@ function orderNodeArguments(args) {
 }
 
 export function partitionTestArguments(args, scriptTests) {
+  if (args[0] === '--scripts') {
+    const scriptArgs = args.slice(1);
+    const hasExplicitTests = scriptArgs.some((argument) => TEST_FILE_PATTERN.test(argument));
+    return {
+      vitestArgs: [],
+      nodeArgs: orderNodeArguments(hasExplicitTests ? scriptArgs : [...scriptTests, ...scriptArgs]),
+      runVitest: false,
+      runNode: true,
+    };
+  }
+
   const scriptTestSet = new Set(scriptTests.map(normalizeTestPath));
   const explicitScriptTests = new Set(
     args.filter((argument) => scriptTestSet.has(normalizeTestPath(argument)))
   );
   const explicitVitestTests = new Set(
     args.filter(
-      (argument) => TEST_FILE_PATTERN.test(argument) && !scriptTestSet.has(normalizeTestPath(argument))
+      (argument) =>
+        TEST_FILE_PATTERN.test(argument) && !scriptTestSet.has(normalizeTestPath(argument))
     )
   );
 
@@ -77,7 +89,14 @@ function run(args) {
     child.once('error', reject);
     child.once('exit', (code, signal) => {
       if (code === 0) resolve();
-      else reject(new Error(signal ? `test process exited with ${signal}` : `test process exited with code ${String(code)}`));
+      else
+        reject(
+          new Error(
+            signal
+              ? `test process exited with ${signal}`
+              : `test process exited with code ${String(code)}`
+          )
+        );
     });
   });
 }
@@ -95,7 +114,10 @@ async function main() {
       ...partition.vitestArgs,
     ]);
   }
-  if (partition.runNode) await run(['--test', '--test-timeout=60000', ...partition.nodeArgs]);
+  if (partition.runNode) {
+    // Script fixtures spawn more processes; CPU-count concurrency can starve their startup deadlines.
+    await run(['--test', '--test-concurrency=4', '--test-timeout=60000', ...partition.nodeArgs]);
+  }
 }
 
 if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {

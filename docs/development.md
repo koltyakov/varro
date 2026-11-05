@@ -61,6 +61,9 @@ Both CI jobs keep all tests, and Linux keeps the full-project coverage threshold
 Unit, script, coverage, and E2E commands execute tests on every invocation; successful test results
 are not cached. `npm test` runs unit and Node script tests, `npm run test:scripts:browser` runs browser
 script tests, and `npm run test:coverage` runs the full unit suite with coverage thresholds.
+`npm test` and `npm run test:scripts` share a four-file concurrency limit for Node script tests,
+whose fixtures spawn additional processes. This leaves startup headroom without relaxing test
+timeouts. On a busy machine, lower it with `npm run test:scripts -- --test-concurrency=2`.
 Linux CI runners are pinned to `ubuntu-24.04` to avoid automatic `ubuntu-latest` image migrations.
 CI runs these suites fresh and caches only npm dependency downloads. E2E duration history is saved
 as an artifact, not as cached test results. Its pinned Playwright container
