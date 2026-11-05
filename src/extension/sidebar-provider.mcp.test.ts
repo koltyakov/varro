@@ -24,6 +24,44 @@ function mockConfigFiles(files: Map<string, string>) {
 }
 
 describe('MCP defaults configuration', () => {
+  it.each([1, 2] as const)(
+    'identifies OAuth servers without exposing local or header-only credentials on API %s',
+    async (apiVersion) => {
+      const servers = {
+        oauth: { type: 'remote', url: 'https://example.com/mcp' },
+        disabled: { type: 'remote', url: 'https://disabled.example/mcp', disabled: true },
+        header: {
+          type: 'remote',
+          url: 'https://header.example/mcp',
+          oauth: false,
+          headers: { Authorization: 'secret' },
+        },
+        local: { type: 'local', command: ['browser'] },
+      };
+      mockConfigFiles(
+        new Map([
+          [
+            '/repo/opencode.json',
+            JSON.stringify({ mcp: apiVersion === 2 ? { servers } : servers }),
+          ],
+        ])
+      );
+      const { provider } = await createSidebarProviderInstance({
+        server: createServer({ apiVersion }),
+      });
+      const { posted } = attachTestView(provider);
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: { id: 90, method: 'GET', path: endpoint },
+      });
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: { id: 90, data: expect.objectContaining({ oauthServers: ['oauth', 'disabled'] }) },
+      });
+      expect(JSON.stringify(posted)).not.toContain('secret');
+    }
+  );
+
   it('reads global and project defaults without using runtime connection state', async () => {
     const globalPath = getOpenCodeConfigPaths()[1]!;
     mockConfigFiles(
@@ -63,6 +101,7 @@ describe('MCP defaults configuration', () => {
         id: 1,
         data: {
           global: { docs: false, browser: true },
+          oauthServers: ['docs'],
           project: { docs: true },
           effective: { docs: true, browser: true },
           editable: true,
@@ -113,6 +152,7 @@ describe('MCP defaults configuration', () => {
           project: { docs: true },
           effective: { docs: true },
           editable: true,
+          oauthServers: ['docs'],
         },
       },
     });
@@ -484,7 +524,13 @@ describe('MCP defaults configuration', () => {
       type: 'api/response',
       payload: {
         id: 6,
-        data: { global: {}, project: {}, effective: { docs: false }, editable: false },
+        data: {
+          global: {},
+          project: {},
+          effective: { docs: false },
+          editable: false,
+          oauthServers: ['docs'],
+        },
       },
     });
     await provider.handleMessage({
@@ -563,6 +609,7 @@ describe('MCP configuration import and editor access', () => {
             project: { docs: false },
             effective: { docs: false },
             editable: true,
+            oauthServers: ['docs'],
           },
         },
       });

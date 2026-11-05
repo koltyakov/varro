@@ -4,6 +4,9 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.34.x - November 2026
 
+- Added a dedicated MCP management screen with global and project defaults, OpenCode config-file access, and JSON import that detects common nesting while preserving existing servers, comments, and unrelated settings.
+- Restored `/mcp` and `/mcps`, opening management when no servers are configured. Rows toggle session selection; separate inline controls handle sign-in, sign-out, and switching accounts or customer tenants for OAuth-enabled MCPs.
+- Made MCP OAuth dialogs detect successful browser sign-in automatically, with manual-code fallback, account-switch guidance, and visible credential-removal or connection errors.
 - Added actions to copy follow-up suggestions or queue them paused without changing composer drafts.
 - Added pinnable, rotating provider quota summaries to the VS Code status bar, with custom names and background refresh.
 - Fixed chat scroll restoration, follow-up positioning, and excess bottom spacing.

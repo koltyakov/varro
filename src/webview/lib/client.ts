@@ -1155,12 +1155,18 @@ function parseMcpDefaults(value: unknown): McpDefaults {
     return Object.fromEntries(entries.map(([name, enabled]) => [name, enabled === true]));
   };
   if (!isBoolean(record.editable)) throw malformedResponse(path, 'MCP defaults');
-  return {
+  const defaults: McpDefaults = {
     global: parseDefaults(record.global),
     project: parseDefaults(record.project),
     effective: parseDefaults(record.effective),
     editable: record.editable,
   };
+  if (record.oauthServers !== undefined) {
+    if (!Array.isArray(record.oauthServers) || !record.oauthServers.every(isString))
+      throw malformedResponse(path, 'MCP OAuth server names');
+    defaults.oauthServers = record.oauthServers;
+  }
+  return defaults;
 }
 /* oxlint-enable anti-slop/no-unknown-parameters */
 

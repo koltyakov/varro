@@ -254,6 +254,7 @@ const NO_PROJECT = new URLSearchParams(window.location.search).get('noProject') 
 const WORKSPACE_PATH = NO_PROJECT ? '/varro/scratch' : '/workspace/varro';
 const TMP_WORKSPACE_PATH = '/workspace/varro/tmp/e2e-workspace';
 const BASE_TIME = Date.now();
+const loggedOutMcpNames = new Set<string>();
 const THEME = getThemeKind();
 const deferredHistoryRequestResolves: Array<() => void> = [];
 const PERSISTED_MESSAGE_STATE_KEY = 'varro.e2ePersistedMessageState';
@@ -2347,9 +2348,17 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       };
     }
     if (new URLSearchParams(window.location.search).has('mcpEmpty')) state.mcpStatus = {};
+    if (new URLSearchParams(window.location.search).has('mcpAccount')) {
+      state.mcpStatus = {
+        atlassian: { status: 'connected' },
+        'browser-bridge': { status: 'connected' },
+      };
+    }
     state.storedState = {
       sessionSelectedMcps: {
-        [session.id]: ['chrome'],
+        [session.id]: new URLSearchParams(window.location.search).has('mcpAccount')
+          ? ['atlassian', 'browser-bridge']
+          : ['chrome'],
       },
     };
     state.nextSequence = 110;
@@ -6060,11 +6069,18 @@ async function handleApiRequest(
   }
 
   const mcpAuth = path.match(/^\/mcp\/([^/]+)\/auth(?:\/(callback))?$/);
+  if (mcpAuth && method === 'DELETE') {
+    const name = decodeURIComponent(mcpAuth[1]!);
+    loggedOutMcpNames.add(name);
+    state.mcpStatus[name] = { status: 'needs_auth' };
+    return { success: true };
+  }
   if (mcpAuth && method === 'POST') {
     const name = decodeURIComponent(mcpAuth[1]!);
     if (mcpAuth[2] === 'callback') {
       if (asRecord(body)?.code !== 'test-oauth-code') throw new Error('Invalid test OAuth code');
       state.mcpStatus[name] = { status: 'connected' };
+      loggedOutMcpNames.delete(name);
       return state.mcpStatus[name];
     }
     return { authorizationUrl: 'https://mcp.example.com/authorize', oauthState: 'test-state' };
@@ -6102,6 +6118,10 @@ async function handleApiRequest(
         ])
       );
       state.mcpDefaults = { global, project: {}, effective: { ...global }, editable: true };
+      const oauthServers = Object.keys(state.mcpStatus).filter(
+        (name) => name === 'atlassian' || name === 'figma'
+      );
+      if (oauthServers.length) state.mcpDefaults.oauthServers = oauthServers;
     }
     if (method === 'POST') {
       const update = asRecord(body);
@@ -6147,7 +6167,12 @@ async function handleApiRequest(
     const action = match?.[2];
     if (name && state.mcpStatus[name]) {
       if (action === 'connect') {
-        state.mcpStatus[name] = { status: 'connected' };
+        state.mcpStatus[name] = {
+          status:
+            loggedOutMcpNames.has(name) || state.mcpStatus[name]?.status === 'needs_auth'
+              ? 'needs_auth'
+              : 'connected',
+        };
       } else {
         state.mcpStatus[name] = { status: 'disabled' };
       }
@@ -7119,6 +7144,7 @@ function setUpHarness() {
     },
     updateMcpStatus: (name, status) => {
       scenarioState.mcpStatus[name] = status;
+      if (status.status === 'connected') loggedOutMcpNames.delete(name);
     },
     replayServerEvent: (event, projectedMessage) =>
       replayServerEvent(scenarioState, event, projectedMessage),

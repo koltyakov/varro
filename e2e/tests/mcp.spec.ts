@@ -2,6 +2,126 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
+for (const action of ['Sign out', 'Switch account'] as const) {
+  test(`${action} clears a connected MCP login without changing its configuration`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 850 });
+    await page.goto('/e2e/harness/index.html?scenario=mcp-pickers&mcpAccount=1');
+    await page.getByRole('button', { name: /MCPs? enabled/i }).click();
+    const picker = page.locator('.dropdown-menu');
+    await expect(
+      picker.getByRole('button', { name: 'atlassian connected', exact: true })
+    ).toBeVisible();
+    await expect(
+      picker.getByRole('button', { name: 'Sign out of browser-bridge', exact: true })
+    ).toHaveCount(0);
+    const selection = await page.evaluate(() => localStorage.getItem('varro.sessionSelectedMcps'));
+    const line = picker.locator('.mcp-picker-server-line').filter({ hasText: 'atlassian' });
+    const positions = await line.evaluate((element) => {
+      const selectors = [
+        '.dropdown-name',
+        '[aria-label="Switch account for atlassian"]',
+        '[aria-label="Sign out of atlassian"]',
+        '.mcp-status-tag',
+      ];
+      return selectors.map((selector) => {
+        const bounds = element.querySelector(selector)!.getBoundingClientRect();
+        return {
+          left: bounds.left,
+          right: bounds.right,
+          center: bounds.top + bounds.height / 2,
+          width: bounds.width,
+        };
+      });
+    });
+    expect(positions[0]!.width).toBeGreaterThan(40);
+    for (let index = 1; index < positions.length; index += 1) {
+      expect(Math.abs(positions[index]!.center - positions[0]!.center)).toBeLessThan(1);
+      expect(positions[index - 1]!.right).toBeLessThanOrEqual(positions[index]!.left);
+    }
+    expect(await picker.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+      true
+    );
+    await page.screenshot({ path: testInfo.outputPath('mcp-account-actions.png') });
+    const control = picker.getByRole('button', {
+      name: action === 'Sign out' ? 'Sign out of atlassian' : 'Switch account for atlassian',
+      exact: true,
+    });
+    if (action === 'Sign out') await control.press('Enter');
+    else await control.click();
+    await expect(picker).toBeVisible();
+    if (action === 'Sign out') {
+      await expect(picker).toContainText('Signed out of atlassian');
+      await expect(
+        picker.getByRole('button', { name: 'Sign in to atlassian', exact: true })
+      ).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+    } else {
+      const dialog = page.getByRole('dialog', { name: 'Authorize MCP server' });
+      await expect(dialog).toContainText('Choose the other account or customer tenant');
+      await expect(dialog).toContainText('does not sign you out of that website');
+      await expect
+        .poll(() =>
+          getE2EState(
+            page,
+            () =>
+              (
+                window as Window & {
+                  __varroE2E?: { externalUrls: string[] };
+                }
+              ).__varroE2E?.externalUrls.length ?? 0
+          )
+        )
+        .toBe(1);
+      await page.evaluate(() => {
+        const update = (
+          window as Window & {
+            __varroE2E?: {
+              updateMcpStatus?: (name: string, status: { status: 'connected' }) => void;
+            };
+          }
+        ).__varroE2E?.updateMcpStatus;
+        if (!update) throw new Error('MCP account-switch fixture is unavailable');
+        update('atlassian', { status: 'connected' });
+      });
+      await expect(dialog).toContainText('Authorization successful');
+      await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+      await expect(
+        picker.getByRole('button', { name: 'Switch account for atlassian', exact: true })
+      ).toBeVisible();
+    }
+    expect(await page.evaluate(() => localStorage.getItem('varro.sessionSelectedMcps'))).toBe(
+      selection
+    );
+    await expect(
+      picker.getByRole('button', { name: 'browser-bridge connected', exact: true })
+    ).toBeVisible();
+    const writes = await getE2EState(
+      page,
+      () =>
+        (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string }> };
+          }
+        ).__varroE2E?.requests
+          .filter(
+            (request) => request.path.startsWith('/mcp/atlassian/') && request.method !== 'GET'
+          )
+          .map((request) => `${request.method} ${request.path}`) ?? []
+    );
+    expect(writes).toEqual(
+      action === 'Sign out'
+        ? ['POST /mcp/atlassian/disconnect', 'DELETE /mcp/atlassian/auth']
+        : [
+            'POST /mcp/atlassian/disconnect',
+            'DELETE /mcp/atlassian/auth',
+            'POST /mcp/atlassian/auth',
+          ]
+    );
+  });
+}
+
 for (const scope of ['Global', 'This project'] as const) {
   test(`adds MCP JSON to ${scope} from the empty-state management screen`, async ({
     page,
@@ -85,7 +205,21 @@ for (const [width, command] of [
     await expect(composer).toBeEmpty();
     await expect(picker.getByRole('textbox', { name: 'Search MCPs' })).toHaveValue('at');
     await expect(picker.locator('.dropdown-name')).toHaveText('atlassian');
-    const server = picker.getByRole('button', { name: 'atlassian Sign in', exact: true });
+    const server = picker.locator('.mcp-picker-server').filter({ hasText: 'atlassian' });
+    const toggle = server.getByRole('button', { name: 'atlassian', exact: true });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await toggle.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(
+      await getE2EState(
+        page,
+        () =>
+          (window as Window & { __varroE2E?: { externalUrls: string[] } }).__varroE2E
+            ?.externalUrls ?? []
+      )
+    ).toEqual([]);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(server.locator('.mcp-picker-action')).toHaveText('Sign in');
     await expect(server.locator('.mcp-status-tag')).toHaveCount(0);
     await expect(server.locator('.mcp-picker-error')).toHaveCount(0);
@@ -103,7 +237,7 @@ for (const [width, command] of [
     expect(geometry.nameWidth).toBeGreaterThan(40);
     expect(geometry.nameInside).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('mcp-sign-in-picker.png') });
-    await server.click();
+    await server.getByRole('button', { name: 'Sign in to atlassian', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Authorize MCP server' });
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText('updates automatically');
@@ -115,7 +249,7 @@ for (const [width, command] of [
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(picker).toBeVisible();
-    await server.click();
+    await server.getByRole('button', { name: 'Sign in to atlassian', exact: true }).click();
     await dialog.locator('summary').click();
     await code.fill('test-oauth-code');
     await dialog.getByRole('button', { name: 'Complete authorization', exact: true }).click();
@@ -138,7 +272,7 @@ test('opens the MCP picker and syncs connection requests', async ({ page }) => {
   await page.getByRole('button', { name: /MCPs? enabled/i }).click();
 
   await expect(page.getByText('chrome', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'figma Sign in', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in to figma', exact: true })).toBeVisible();
   await expect(page.getByText('cli not authenticated', { exact: false })).toBeVisible();
   const mcpList = page.locator('.model-picker-list');
   await expect(mcpList.locator('.dropdown-item').first()).toHaveCSS('border-radius', '0px');
@@ -178,7 +312,7 @@ test('recognizes a completed browser callback without asking for an authorizatio
   const composer = page.getByRole('textbox', { name: 'Message composer' }).first();
   await composer.fill('/mcps at');
   await composer.press('Enter');
-  await page.getByRole('button', { name: 'atlassian Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Sign in to atlassian', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Authorize MCP server' });
   await expect(dialog).toContainText('updates automatically');
   await expect(dialog.getByRole('textbox', { name: 'Authorization code' })).not.toBeVisible();
@@ -248,7 +382,7 @@ for (const width of [390, 1050]) {
     await mcpButton.click();
     const popup = page.locator('.dropdown-menu');
     await expect(popup.locator('select')).toHaveCount(0);
-    await expect(popup.getByRole('button')).toHaveCount(5);
+    await expect(popup.getByRole('button')).toHaveCount(6);
     await popup.getByRole('button', { name: 'Manage MCPs', exact: true }).click();
     const settings = page.getByRole('region', { name: 'MCP settings', exact: true });
     await expect(settings).toBeVisible();

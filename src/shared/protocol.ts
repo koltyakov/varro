@@ -501,6 +501,7 @@ export interface McpDefaults {
   project: Record<string, boolean>;
   effective: Record<string, boolean>;
   editable: boolean;
+  oauthServers?: string[];
 }
 
 export interface ModelPricing {

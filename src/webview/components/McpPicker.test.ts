@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { McpPicker } from './McpPicker';
-import { resetDefaultAppState, setState, showMcpSettings } from '../lib/state';
+import { resetDefaultAppState, setState, showMcpSettings, state } from '../lib/state';
 import type { McpStatus } from '../../shared/protocol';
 
 const mocks = vi.hoisted(() => ({
@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   startAuth: vi.fn(),
   completeAuth: vi.fn(),
   removeAuth: vi.fn(),
+  disconnect: vi.fn(),
   status: vi.fn(),
   setDefault: vi.fn(),
 }));
@@ -22,6 +23,7 @@ vi.mock('../lib/client', () => ({
       startAuth: mocks.startAuth,
       completeAuth: mocks.completeAuth,
       removeAuth: mocks.removeAuth,
+      disconnect: mocks.disconnect,
       status: mocks.status,
     },
   },
@@ -50,6 +52,7 @@ beforeEach(() => {
   mocks.startAuth.mockReset();
   mocks.completeAuth.mockReset();
   mocks.removeAuth.mockReset();
+  mocks.disconnect.mockReset().mockResolvedValue(true);
   mocks.status.mockReset();
   mocks.setDefault.mockReset();
   mocks.postMessage.mockReset();
@@ -75,6 +78,229 @@ afterEach(() => {
 });
 
 describe('McpPicker', () => {
+  function renderConnectedOAuth() {
+    setMcpStatuses({ oauth: { status: 'connected' }, local: { status: 'connected' } });
+    setState('mcpDefaults', {
+      global: { oauth: true, local: true },
+      project: {},
+      effective: { oauth: true, local: true },
+      editable: true,
+      oauthServers: ['oauth'],
+    });
+    setState('sessionSelectedMcps', { 'session-1': ['oauth', 'local'] });
+    const onChange = vi.fn();
+    cleanup = render(
+      () => McpPicker({ sessionId: 'session-1', onChange, onClose: vi.fn() }),
+      container!
+    );
+    return onChange;
+  }
+
+  function accountButton(label: 'Sign out of oauth' | 'Switch account for oauth') {
+    return container!.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
+  }
+
+  it('offers account actions only for connected OAuth-enabled servers', () => {
+    renderConnectedOAuth();
+    expect(accountButton('Sign out of oauth')).not.toBeNull();
+    expect(accountButton('Switch account for oauth')).not.toBeNull();
+    expect(container!.querySelector('[aria-label="Sign out of local"]')).toBeNull();
+    setMcpStatuses({ oauth: { status: 'disabled' } });
+    expect(container!.querySelector('.mcp-picker-account-actions')).toBeNull();
+  });
+
+  it.each(['needs_auth', 'needs_client_registration'] as const)(
+    'only toggles selection on a %s row; authentication requires its own button',
+    async (status) => {
+      setMcpStatuses({ oauth: { status } });
+      setState('sessionSelectedMcps', { 'session-1': ['oauth'] });
+      const onChange = vi.fn((names: string[]) =>
+        setState('sessionSelectedMcps', 'session-1', names)
+      );
+      cleanup = render(
+        () => McpPicker({ sessionId: 'session-1', onChange, onClose: vi.fn() }),
+        container!
+      );
+      container!.querySelector<HTMLButtonElement>('.dropdown-item')!.click();
+      expect(onChange).toHaveBeenLastCalledWith([]);
+      expect(mocks.startAuth).not.toHaveBeenCalled();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      container!
+        .querySelector('.dropdown-menu')!
+        .dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      expect(onChange).toHaveBeenLastCalledWith(['oauth']);
+      expect(mocks.startAuth).not.toHaveBeenCalled();
+      const action = container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!;
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      action.dispatchEvent(enter);
+      expect(enter.defaultPrevented).toBe(false);
+      const selectionChanges = onChange.mock.calls.length;
+      action.click();
+      await flushMicrotasks(6);
+      expect(onChange).toHaveBeenCalledTimes(selectionChanges);
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(mocks.startAuth).toHaveBeenCalledTimes(status === 'needs_auth' ? 1 : 0);
+    }
+  );
+
+  it('disconnects and removes credentials without opening a browser or changing session selections', async () => {
+    const onChange = renderConnectedOAuth();
+    mocks.status.mockResolvedValue({
+      oauth: { status: 'disabled' },
+      local: { status: 'connected' },
+    });
+    accountButton('Sign out of oauth').click();
+    await flushMicrotasks(6);
+    expect(mocks.disconnect).toHaveBeenCalledExactlyOnceWith('oauth');
+    expect(mocks.removeAuth).toHaveBeenCalledExactlyOnceWith('oauth');
+    expect(mocks.disconnect.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.removeAuth.mock.invocationCallOrder[0]!
+    );
+    expect(mocks.removeAuth.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.status.mock.invocationCallOrder[0]!
+    );
+    expect(container!.textContent).toContain('Signed out of oauth');
+    expect(state.mcpStatus.oauth?.status).toBe('disabled');
+    expect(state.mcpStatus.local?.status).toBe('connected');
+    expect(state.sessionSelectedMcps['session-1']).toEqual(['oauth', 'local']);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.startAuth).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(container!.querySelector('.dropdown-menu'));
+  });
+
+  it('starts a fresh authorization only after Switch account clears the old credentials', async () => {
+    const onChange = renderConnectedOAuth();
+    mocks.status.mockResolvedValue({
+      oauth: { status: 'disabled' },
+      local: { status: 'connected' },
+    });
+    accountButton('Switch account for oauth').click();
+    await flushMicrotasks(8);
+    expect(mocks.removeAuth).toHaveBeenCalledExactlyOnceWith('oauth');
+    expect(mocks.startAuth).toHaveBeenCalledExactlyOnceWith('oauth');
+    expect(mocks.removeAuth.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.startAuth.mock.invocationCallOrder[0]!
+    );
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+      'Choose the other account or customer tenant'
+    );
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+      'does not sign you out of that website'
+    );
+    expect(mocks.postMessage).toHaveBeenCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: 'https://mcp.example.com/authorize' },
+    });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it.each(['disconnect', 'removeAuth'] as const)(
+    'does not start new authorization when %s fails',
+    async (operation) => {
+      renderConnectedOAuth();
+      mocks[operation].mockRejectedValue(new Error('Credential service unavailable'));
+      mocks.status.mockResolvedValue({
+        oauth: { status: operation === 'disconnect' ? 'connected' : 'disabled' },
+        local: { status: 'connected' },
+      });
+      accountButton('Switch account for oauth').click();
+      await flushMicrotasks(8);
+      expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
+        'Could not switch accounts for oauth'
+      );
+      expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
+        'Credential service unavailable'
+      );
+      expect(mocks.startAuth).not.toHaveBeenCalled();
+      expect(mocks.postMessage).not.toHaveBeenCalled();
+      if (operation === 'disconnect') expect(mocks.removeAuth).not.toHaveBeenCalled();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    }
+  );
+
+  it('reports a status refresh failure after credentials are removed without claiming the old login remains', async () => {
+    renderConnectedOAuth();
+    mocks.status.mockRejectedValue(new Error('Status unavailable'));
+    accountButton('Switch account for oauth').click();
+    await flushMicrotasks(8);
+    expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
+      'Credentials for oauth were removed'
+    );
+    expect(mocks.startAuth).not.toHaveBeenCalled();
+  });
+
+  it('does not claim sign-out succeeded if the server still reports an active connection', async () => {
+    renderConnectedOAuth();
+    accountButton('Sign out of oauth').click();
+    await flushMicrotasks(8);
+    expect(container!.querySelector('[role="alert"]')?.textContent).toContain('still connected');
+    expect(container!.textContent).not.toContain('Signed out of oauth');
+    expect(mocks.startAuth).not.toHaveBeenCalled();
+  });
+
+  it('leaves Enter on account buttons to their native action and prevents duplicate submissions', async () => {
+    renderConnectedOAuth();
+    let finishRemoval!: () => void;
+    mocks.removeAuth.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRemoval = resolve;
+        })
+    );
+    const button = accountButton('Sign out of oauth');
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    button.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    button.click();
+    await flushMicrotasks(4);
+    expect(button.disabled).toBe(true);
+    accountButton('Switch account for oauth').click();
+    expect(mocks.disconnect).toHaveBeenCalledTimes(1);
+    finishRemoval();
+    await flushMicrotasks(6);
+  });
+
+  it('finishes clearing credentials but does not open authorization after the picker closes', async () => {
+    renderConnectedOAuth();
+    let finishRemoval!: () => void;
+    mocks.removeAuth.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRemoval = resolve;
+        })
+    );
+    accountButton('Switch account for oauth').click();
+    await flushMicrotasks(4);
+    cleanup?.();
+    cleanup = undefined;
+    finishRemoval();
+    await flushMicrotasks(8);
+    expect(mocks.removeAuth).toHaveBeenCalledTimes(1);
+    expect(mocks.startAuth).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not start credential removal in a new view after closing during disconnect', async () => {
+    renderConnectedOAuth();
+    let finishDisconnect!: () => void;
+    mocks.disconnect.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDisconnect = resolve;
+        })
+    );
+    accountButton('Switch account for oauth').click();
+    cleanup?.();
+    cleanup = undefined;
+    finishDisconnect();
+    await flushMicrotasks(6);
+    expect(mocks.removeAuth).not.toHaveBeenCalled();
+    expect(mocks.startAuth).not.toHaveBeenCalled();
+  });
+
   it('filters a small server list by the command argument and keeps search editable', () => {
     setMcpStatuses({
       atlassian: {
@@ -424,7 +650,7 @@ describe('McpPicker', () => {
     );
     await flushMicrotasks();
 
-    container?.querySelector<HTMLButtonElement>('.dropdown-item')?.click();
+    container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
     await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledWith('oauth'));
 
     expect(onChange).toHaveBeenCalledWith(['oauth']);
@@ -456,7 +682,7 @@ describe('McpPicker', () => {
       () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
       container!
     );
-    container!.querySelector<HTMLButtonElement>('.dropdown-item')!.click();
+    container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
     await flushMicrotasks(4);
     const dialog = document.querySelector('[role="dialog"]')!;
     expect(dialog.textContent).toContain('updates automatically');
@@ -485,7 +711,7 @@ describe('McpPicker', () => {
       () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
       container!
     );
-    container!.querySelector<HTMLButtonElement>('.dropdown-item')!.click();
+    container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
     await flushMicrotasks(4);
     setMcpStatuses({ oauth: { status: 'connected' } });
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
@@ -510,7 +736,7 @@ describe('McpPicker', () => {
       () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
       container!
     );
-    container!.querySelector<HTMLButtonElement>('.dropdown-item')!.click();
+    container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
     await flushMicrotasks(4);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(mocks.status).toHaveBeenCalledTimes(1);
@@ -532,7 +758,7 @@ describe('McpPicker', () => {
       () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
       container!
     );
-    container!.querySelector<HTMLButtonElement>('.dropdown-item')!.click();
+    container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
     await flushMicrotasks(4);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(document.querySelector('[role="alert"]')?.textContent).toContain(
@@ -578,7 +804,7 @@ describe('McpPicker', () => {
       container!
     );
 
-    container?.querySelector<HTMLButtonElement>('.dropdown-item')?.click();
+    container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
     await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledWith('oauth'));
     document.querySelector<HTMLButtonElement>('.provider-connect-close')?.click();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -611,7 +837,7 @@ describe('McpPicker', () => {
       container!
     );
 
-    container?.querySelector<HTMLButtonElement>('.dropdown-item')?.click();
+    container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
 
     await vi.waitFor(() =>
       expect(document.querySelector('[role="alert"]')?.textContent).toContain('Only HTTPS')
@@ -637,7 +863,7 @@ describe('McpPicker', () => {
       container!
     );
 
-    container?.querySelector<HTMLButtonElement>('.dropdown-item')?.click();
+    container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
     await flushMicrotasks();
 
     expect(onChange).toHaveBeenCalledWith(['registered']);
@@ -661,7 +887,7 @@ describe('McpPicker', () => {
         }),
       container!
     );
-    container?.querySelector<HTMLButtonElement>('.dropdown-item')?.click();
+    container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
     await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledTimes(1));
 
     const removeButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(

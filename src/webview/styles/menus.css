@@ -288,6 +288,65 @@
   overflow-wrap: anywhere;
 }
 
+.mcp-picker-account-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.mcp-picker-server-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: var(--space-5);
+}
+
+.mcp-picker-server-line:hover,
+.mcp-picker-server-line.keyboard-focus {
+  background: var(--color-vscode-hover);
+}
+
+.mcp-picker-server-line .mcp-picker-item {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.mcp-picker-controls {
+  gap: 10px;
+}
+
+.mcp-picker-account-action {
+  padding: 0;
+  border: 0;
+  color: var(--color-vscode-accent);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.mcp-picker-account-action:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.mcp-picker-account-action:disabled,
+.mcp-picker-item:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mcp-picker-feedback {
+  padding: 6px var(--space-5);
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.mcp-picker-feedback-error {
+  color: var(--color-vscode-error);
+}
+
 .mcp-status-tag.status-disabled {
   color: var(--color-vscode-muted);
 }

@@ -198,12 +198,17 @@ export class OpenCodeConfigService {
         effective.set(name, enabled);
       }
     }
-    return {
+    const defaults: McpDefaults = {
       global: Object.fromEntries(global),
       project: Object.fromEntries(project),
       effective: Object.fromEntries(effective),
       editable: true,
     };
+    const oauthServers = [...inheritedServers]
+      .filter(([, server]) => server.type === 'remote' && server.oauth !== false)
+      .map(([name]) => name);
+    if (oauthServers.length) defaults.oauthServers = oauthServers;
+    return defaults;
   }
 
   private mcpServer(config: Record<string, unknown>, name: string) {

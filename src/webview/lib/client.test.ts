@@ -1802,6 +1802,21 @@ describe('client', () => {
     ]);
   });
 
+  it('preserves OAuth capability names without requiring them from older snapshots', async () => {
+    const { client } = await loadClient();
+    const defaults = {
+      global: { oauth: true },
+      project: {},
+      effective: { oauth: true },
+      editable: true,
+      oauthServers: ['oauth'],
+    };
+    bridgeMocks.apiCall.mockResolvedValue(defaults);
+    expect(await client.mcp.defaults()).toEqual(defaults);
+    bridgeMocks.apiCall.mockResolvedValue({ ...defaults, oauthServers: [42] });
+    await expect(client.mcp.defaults()).rejects.toThrow('MCP OAuth server names');
+  });
+
   it('opens scoped configuration and submits MCP JSON through extension-owned endpoints', async () => {
     const { client } = await loadClient();
     const defaults = {
