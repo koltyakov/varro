@@ -136,18 +136,29 @@ describe('FollowupCache', () => {
       const cache = new FollowupCache();
       await cache.claim(hash('turn'), digest, sessionKey);
       await cache.complete(hash('turn'), digest, suggestions);
+      const startedAt = Date.now();
       const child = spawn(
         'powershell.exe',
         [
           '-NoProfile',
           '-NonInteractive',
-          '-Command',
-          `
+          // Keep the script in one argument, independent of Windows command-line quoting.
+          '-EncodedCommand',
+          Buffer.from(
+            `
       $ErrorActionPreference = 'Stop'
+      [Console]::WriteLine('starting')
+      [Console]::Out.Flush()
       $file = [System.IO.File]::Open($env:VARRO_FOLLOWUP_TEST_FILE, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-      try { [Console]::WriteLine('locked'); [Console]::ReadLine() | Out-Null }
+      try {
+        [Console]::WriteLine('locked')
+        [Console]::Out.Flush()
+        [Console]::ReadLine() | Out-Null
+      }
       finally { $file.Dispose() }
     `,
+            'utf16le'
+          ).toString('base64'),
         ],
         {
           env: { ...process.env, VARRO_FOLLOWUP_TEST_FILE: path },
@@ -163,14 +174,25 @@ describe('FollowupCache', () => {
         stderr += chunk.toString();
       });
       let stdout = '';
+      const diagnostics = () =>
+        JSON.stringify({
+          elapsedMs: Date.now() - startedAt,
+          pid: child.pid,
+          exitCode: child.exitCode,
+          signal: child.signalCode,
+          killed: child.killed,
+          stdout,
+          stderr,
+        });
       const acquired = new Promise<void>((done, reject) => {
         child.once('error', reject);
         child.stdout.on('data', (chunk: Buffer) => {
           stdout += chunk.toString();
-          if (stdout.includes('locked')) done();
+          if (stdout.split(/\r?\n/).includes('locked')) done();
         });
-        child.once('exit', () =>
-          reject(new Error(`Windows handle fixture exited before acquisition: ${stderr}`))
+        // close follows stdout/stderr drainage, so early-exit diagnostics include all output.
+        child.once('close', () =>
+          reject(new Error(`Windows handle fixture closed before acquisition: ${diagnostics()}`))
         );
       });
       const exited = new Promise<number | null>((done) => {
@@ -194,7 +216,8 @@ describe('FollowupCache', () => {
           }
         });
         await cache.dismiss(hash('turn'), digest);
-        expect(await exited, `Windows handle fixture failed: ${stderr}`).toBe(0);
+        const exitCode = await exited;
+        expect(exitCode, `Windows handle fixture failed: ${diagnostics()}`).toBe(0);
         expect(sharingFailures).toBeGreaterThan(0);
         expect(await new FollowupCache().get(hash('turn'), digest)).toEqual(
           EMPTY_FOLLOWUP_SUGGESTIONS
