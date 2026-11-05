@@ -111,6 +111,13 @@ function openSessionActions(row: HTMLElement, x = 40, y = 50) {
   );
 }
 
+function restoreRealTimers() {
+  // Unmounting a focused input queues jsdom's focus fixup on its rendering interval.
+  // Finish that frame before discarding fake timers, or later frames can stall.
+  vi.advanceTimersToNextFrame();
+  vi.useRealTimers();
+}
+
 function createDragDataTransfer() {
   const values = new Map<string, string>();
   const types: string[] = [];
@@ -361,7 +368,7 @@ describe('SessionListView keyboard recovery', () => {
       } finally {
         cleanup?.();
         cleanup = undefined;
-        vi.useRealTimers();
+        restoreRealTimers();
       }
     }
   );
@@ -392,7 +399,7 @@ describe('SessionListView keyboard recovery', () => {
     } finally {
       cleanup?.();
       cleanup = undefined;
-      vi.useRealTimers();
+      restoreRealTimers();
     }
   });
   it.each(['idle', 'busy'] as const)('mounts a visible %s session with its clocks', (type) => {
@@ -1621,7 +1628,7 @@ describe('SessionListView diff summaries', () => {
     } finally {
       cleanup?.();
       cleanup = undefined;
-      vi.useRealTimers();
+      restoreRealTimers();
     }
   });
 
@@ -2258,7 +2265,7 @@ describe('SessionListView ordering', () => {
     } finally {
       cleanup?.();
       cleanup = undefined;
-      vi.useRealTimers();
+      restoreRealTimers();
     }
   });
 
@@ -3086,7 +3093,7 @@ describe('SessionListView load errors', () => {
     } finally {
       cleanup?.();
       cleanup = undefined;
-      vi.useRealTimers();
+      restoreRealTimers();
     }
   });
 

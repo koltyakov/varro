@@ -186,12 +186,17 @@ describe('popup-position', () => {
     scroller.append(host);
     host.append(trigger, anchor);
     anchor.append(menu);
+    document.body.append(scroller);
 
-    const availableHeight = placeTriggerDropdownAnchor(anchor, menu, trigger, 6);
+    try {
+      const availableHeight = placeTriggerDropdownAnchor(anchor, menu, trigger, 6);
 
-    expect(anchor.style.top).toBe('auto');
-    expect(anchor.style.bottom).toBe('86px');
-    expect(availableHeight).toBe(156);
+      expect(anchor.style.top).toBe('auto');
+      expect(anchor.style.bottom).toBe('86px');
+      expect(availableHeight).toBe(156);
+    } finally {
+      scroller.remove();
+    }
   });
 
   it('keeps upward popups in place when they are not clipped', () => {
