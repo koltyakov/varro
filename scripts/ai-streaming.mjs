@@ -470,6 +470,7 @@ export function installObserver() {
     maxGapMs: 0,
     gapsOver50Ms: 0,
     gaps: [],
+    lifecycle: [],
     longtasks: [],
     duplicateSamples: [],
     maxMountedRows: 0,
@@ -479,9 +480,34 @@ export function installObserver() {
   let previous;
   let raf;
   let active = false;
+  let heartbeat;
+  let heartbeats = 0;
+  let messages = 0;
+  let heartbeatsAtFrame = 0;
+  let messagesAtFrame = 0;
+  let lastBeatAt = 0;
+  let maxBeatSpacing = 0;
   const record = (array, value) => {
     if (array.length < 2_000) array.push(value);
     else metrics.droppedSamples++;
+  };
+  // rAF rarely runs while hidden, so hiddenFrames alone cannot reveal a hidden interval.
+  const onLifecycle = (event) => {
+    record(metrics.lifecycle, {
+      at: performance.now(),
+      type: event.type,
+      visibility: document.visibilityState,
+      focused: document.hasFocus?.() ?? null,
+    });
+  };
+  const onMessage = (event) => {
+    if (event.data?.type === 'server/event') messages++;
+  };
+  const onBeat = () => {
+    const at = performance.now();
+    heartbeats++;
+    maxBeatSpacing = Math.max(maxBeatSpacing, at - lastBeatAt);
+    lastBeatAt = at;
   };
   const tick = (now) => {
     if (active) {
@@ -492,10 +518,22 @@ export function installObserver() {
         metrics.maxGapMs = Math.max(metrics.maxGapMs, gap);
         if (gap > 50) {
           metrics.gapsOver50Ms++;
-          record(metrics.gaps, { at: now, duration: gap });
+          // Beat spacing bounds any main-thread block inside the gap; counts alone can hide a block
+          // followed by catch-up. Spacing also grows when the browser throttles timers.
+          record(metrics.gaps, {
+            at: now,
+            duration: gap,
+            heartbeats: heartbeats - heartbeatsAtFrame,
+            messages: messages - messagesAtFrame,
+            maxHeartbeatSpacingMs: Math.max(maxBeatSpacing, performance.now() - lastBeatAt),
+          });
         }
       }
       previous = now;
+      heartbeatsAtFrame = heartbeats;
+      messagesAtFrame = messages;
+      lastBeatAt = performance.now();
+      maxBeatSpacing = 0;
       const counts = new Map();
       const rows = document.querySelectorAll('[data-msg-id]');
       metrics.maxMountedRows = Math.max(metrics.maxMountedRows, rows.length);
@@ -524,10 +562,24 @@ export function installObserver() {
       if (active) throw new Error('Observer already running');
       active = true;
       metrics.startedAt = performance.now();
+      lastBeatAt = metrics.startedAt;
+      // Baseline: a view already hidden here fires no event until it becomes visible.
+      onLifecycle({ type: 'observer-start' });
+      // Diagnostic overhead: one 50 ms timer and these listeners exist only between start and stop.
+      document.addEventListener?.('visibilitychange', onLifecycle);
+      globalThis.addEventListener?.('focus', onLifecycle);
+      globalThis.addEventListener?.('blur', onLifecycle);
+      globalThis.addEventListener?.('message', onMessage);
+      heartbeat = globalThis.setInterval?.(onBeat, 50);
     },
     stop() {
       active = false;
       cancelAnimationFrame(raf);
+      globalThis.clearInterval?.(heartbeat);
+      document.removeEventListener?.('visibilitychange', onLifecycle);
+      globalThis.removeEventListener?.('focus', onLifecycle);
+      globalThis.removeEventListener?.('blur', onLifecycle);
+      globalThis.removeEventListener?.('message', onMessage);
       for (const entry of observer?.takeRecords() ?? [])
         record(metrics.longtasks, { at: entry.startTime, duration: entry.duration });
       observer?.disconnect();

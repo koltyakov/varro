@@ -1,4 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MessageEntry } from '../types';
+import {
+  applyMessagePartDelta,
+  clearMessages,
+  clearStreamingState,
+  finishMessageStreaming,
+  state,
+  streamingDeltaQueue,
+  upsertMessage,
+} from './state';
 import { createStreamingDeltaQueue, shouldUseStreamingText } from './streaming-deltas';
 
 function captureSchedule() {
@@ -154,6 +164,80 @@ describe('createStreamingDeltaQueue', () => {
     q.scheduleFlush();
     drain();
     expect(flush).toHaveBeenCalledTimes(2);
+  });
+});
+
+// The AI-08 live capture handled eight deltas during a 1,008 ms frame gap. Withholding frames must
+// delay delivery without losing, reordering, or duplicating text, and must not poll for a frame.
+describe('streaming deltas while frames are withheld', () => {
+  const frames: FrameRequestCallback[] = [];
+
+  beforeEach(() => {
+    frames.length = 0;
+    clearMessages();
+    clearStreamingState();
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    // SAFETY: The fixture provides the MessageEntry fields read by these streaming helpers.
+    upsertMessage({
+      info: { id: 'm1', sessionID: 's1', role: 'user', time: { created: 0 } },
+      parts: [{ id: 'p1', messageID: 'm1', sessionID: 's1', type: 'text', text: '' }],
+    } as MessageEntry);
+  });
+
+  afterEach(() => {
+    streamingDeltaQueue.reset();
+    clearMessages();
+    clearStreamingState();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('coalesces every delta into one request and applies them in order on the next frame', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval'] });
+    for (const chunk of ['one ', 'two ', 'three ', 'four']) {
+      applyMessagePartDelta('m1', 'p1', chunk, 's1');
+      vi.advanceTimersByTime(125);
+    }
+
+    // No timer or extra frame request runs while the host withholds frames.
+    expect(frames).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(state.streamingText).toBe('');
+
+    frames.splice(0).forEach((frame) => frame(0));
+
+    expect(state.streamingPartId).toBe('p1');
+    expect(state.streamingText).toBe('one two three four');
+    expect(frames).toHaveLength(0);
+  });
+
+  it('applies withheld deltas exactly once when a later event flushes them first', () => {
+    applyMessagePartDelta('m1', 'p1', 'partial ', 's1');
+    applyMessagePartDelta('m1', 'p1', 'answer', 's1');
+
+    finishMessageStreaming('m1');
+
+    const part = state.messages[0]?.parts[0];
+    expect(part?.type === 'text' ? part.text : null).toBe('partial answer');
+
+    frames.splice(0).forEach((frame) => frame(0));
+
+    const after = state.messages[0]?.parts[0];
+    expect(after?.type === 'text' ? after.text : null).toBe('partial answer');
+  });
+
+  it('drops withheld deltas when the stream is cleared before a frame arrives', () => {
+    applyMessagePartDelta('m1', 'p1', 'discarded', 's1');
+
+    clearStreamingState();
+    frames.splice(0).forEach((frame) => frame(0));
+
+    expect(state.streamingText).toBe('');
+    const part = state.messages[0]?.parts[0];
+    expect(part?.type === 'text' ? part.text : null).toBe('');
   });
 });
 

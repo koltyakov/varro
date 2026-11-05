@@ -731,6 +731,136 @@ test('read-only observer arms, bounds samples, records gaps/duplicates/longtasks
   assert.ok(cancelled && disconnected);
 });
 
+test('observer attributes a frame gap and records a hidden interval rAF cannot see', () => {
+  let tick;
+  let beat;
+  let clock = 0;
+  let cleared = false;
+  const listeners = { document: new Map(), window: new Map() };
+  const target = (name) => ({
+    addEventListener: (type, fn) => listeners[name].set(type, fn),
+    removeEventListener: (type) => listeners[name].delete(type),
+  });
+  const context = vm.createContext({
+    document: {
+      ...target('document'),
+      hidden: false,
+      visibilityState: 'visible',
+      hasFocus: () => true,
+      querySelectorAll: () => [],
+    },
+    ...target('window'),
+    performance: { now: () => clock },
+    requestAnimationFrame: (fn) => {
+      tick = fn;
+      return 1;
+    },
+    cancelAnimationFrame() {},
+    setInterval: (fn) => {
+      beat = fn;
+      return 7;
+    },
+    clearInterval: (id) => {
+      cleared = id === 7;
+    },
+  });
+  vm.runInContext(`(${installObserver.toString()})()`, context);
+  tick(0);
+  // Armed but not started: no diagnostic timer or listeners add overhead yet.
+  assert.equal(beat, undefined);
+  assert.equal(listeners.document.size + listeners.window.size, 0);
+  context.varroAiStreamingObserver.start();
+  clock = 8;
+  tick(8);
+
+  // Main thread stays live for a one-second rendering pause.
+  for (let i = 0; i < 19; i++) {
+    clock += 50;
+    beat();
+    if (i === 9) {
+      listeners.window.get('message')({ data: { type: 'server/event', payload: {} } });
+      listeners.window.get('message')({ data: { type: 'server/event', payload: {} } });
+      listeners.window.get('message')({ data: { type: 'unrelated' } });
+      // rAF does not run while hidden, so only the lifecycle event reveals this interval.
+      context.document.hidden = true;
+      context.document.visibilityState = 'hidden';
+      listeners.document.get('visibilitychange')({ type: 'visibilitychange' });
+    }
+    if (i === 11) {
+      context.document.hidden = false;
+      context.document.visibilityState = 'visible';
+      listeners.document.get('visibilitychange')({ type: 'visibilitychange' });
+    }
+  }
+  clock = 1_008;
+  tick(1008);
+
+  // Beat spacing exposes a block independently of the total counts.
+  clock = 1_058;
+  beat();
+  clock = 1_108;
+  tick(1108);
+  clock = 1_908;
+  beat();
+  clock = 1_958;
+  beat();
+  clock = 2_008;
+  tick(2008);
+
+  const result = context.varroAiStreamingObserver.stop();
+  assert.equal(result.hiddenFrames, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.gaps)), [
+    { at: 1008, duration: 1000, heartbeats: 19, messages: 2, maxHeartbeatSpacingMs: 50 },
+    { at: 1108, duration: 100, heartbeats: 1, messages: 0, maxHeartbeatSpacingMs: 50 },
+    { at: 2008, duration: 900, heartbeats: 2, messages: 0, maxHeartbeatSpacingMs: 800 },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.lifecycle)), [
+    { at: 0, type: 'observer-start', visibility: 'visible', focused: true },
+    { at: 508, type: 'visibilitychange', visibility: 'hidden', focused: true },
+    { at: 608, type: 'visibilitychange', visibility: 'visible', focused: true },
+  ]);
+  assert.equal(cleared, true);
+  assert.equal(listeners.document.size, 0);
+  assert.equal(listeners.window.size, 0);
+});
+
+test('observer records a view that is already hidden when observation starts', () => {
+  let tick;
+  let visibilityListener;
+  const context = vm.createContext({
+    document: {
+      hidden: true,
+      visibilityState: 'hidden',
+      hasFocus: () => false,
+      querySelectorAll: () => [],
+      addEventListener: (_type, fn) => {
+        visibilityListener = fn;
+      },
+      removeEventListener() {},
+    },
+    performance: { now: () => 5 },
+    requestAnimationFrame: (fn) => {
+      tick = fn;
+      return 1;
+    },
+    cancelAnimationFrame() {},
+  });
+  vm.runInContext(`(${installObserver.toString()})()`, context);
+  context.varroAiStreamingObserver.start();
+
+  context.document.hidden = false;
+  context.document.visibilityState = 'visible';
+  visibilityListener({ type: 'visibilitychange' });
+  tick(1_000);
+
+  const result = context.varroAiStreamingObserver.stop();
+  assert.equal(result.hiddenFrames, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.lifecycle)), [
+    { at: 5, type: 'observer-start', visibility: 'hidden', focused: false },
+    { at: 5, type: 'visibilitychange', visibility: 'visible', focused: false },
+  ]);
+});
+
 test('observer reports unavailable longtask instrumentation instead of a pass', () => {
   const context = vm.createContext({
     document: {},

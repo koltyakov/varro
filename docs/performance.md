@@ -24,6 +24,26 @@ any saving described here.
   produced trailing-summary churn that a busy stream (`multi-agent-large-streaming`) never shows.
 - A frame gap with no long task, while CDP evaluations keep answering, is a rendering pause in the
   host, not main-thread work. Replay the same capture before attributing it to Varro.
+- Observer gaps record `heartbeats`, `server/event` `messages`, and `maxHeartbeatSpacingMs` from a
+  50 ms timer running between observer start and stop. Spacing near 50 ms bounds any main-thread
+  block inside that gap to about that length; it does not name the cause. Counts alone can hide a
+  block followed by catch-up, and large spacing can also mean timer throttling. Blocks shorter than
+  the timer interval stay invisible. This timer changes the instrumentation, so compare runs only
+  with the same observer version, and use `--observer off` for work counts.
+- Check `lifecycle` for a hidden interval: `hiddenFrames` cannot show one, because rAF rarely runs
+  while hidden. `focused` is not reliable window-focus evidence in a CDP-driven host, where two
+  stacked hosts both reported focus. Live captures share the observer's frame clock, offset by the
+  controller round trips between starting the capture and the observer.
+- The webview cannot see every hide. In VS Code 1.145, hiding the webview overlay stopped its rAF for
+  the hide plus about 4 to 22 ms, while `visibilityState` stayed `visible`, timers and messages kept
+  running, there were no long tasks, and workbench rAF continued. Probe the workbench's frames and the
+  overlay's style before attributing such a gap to rendering below the workbench.
+- Chromium's Viz can withhold BeginFrames for up to one second from a client with more than three
+  undrawn frames or ten unacknowledged BeginFrames. To test that for a gap near 1,000 ms, record a
+  browser-level trace with the `viz` category and read the `reason` of `SendBeginFrameDecision`.
+- Chromium commits DOM changes on the same main frames that run rAF, so a timer around the streaming
+  delta flush is not expected to paint any sooner, and it would add work while a hidden view could
+  otherwise stay idle. Do not add one without painted-frame evidence that it helps.
 
 ## Animations and idle cost
 
