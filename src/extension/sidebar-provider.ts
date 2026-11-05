@@ -115,6 +115,7 @@ import {
 } from './provider-file-refresh-controller';
 import type { ProviderSignatureFileSystem } from './provider-file-refresh-controller';
 import { ProviderLimitService } from './provider-limit-service';
+import { ProviderLimitStatusBar } from './provider-limit-status-bar';
 import { PinnedSessionManager } from './pinned-session-manager';
 import { QueuedMessageStore } from './queued-message-store';
 import { RalphHost } from './ralph-host';
@@ -270,6 +271,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly bridge: SidebarProviderBridge;
   private readonly runtime: SidebarProviderRuntime;
   private readonly providerLimitService: ProviderLimitService;
+  private readonly providerLimitStatusBar: ProviderLimitStatusBar;
   private readonly webviewSession: WebviewSession;
   private readonly serverEventBridge: ServerEventBridge;
   private readonly streamingText: StreamingTextCache;
@@ -377,8 +379,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const globalPersistence = new HostPersistence(globalState);
     this.droppedFilesService = new DroppedFilesService(contextProvider);
     this.fileSearch = new FileSearchService();
-    this.providerLimitService = new ProviderLimitService(server, undefined, undefined, (payload) =>
-      this.post({ type: 'provider-limit/updated', payload })
+    this.providerLimitService = new ProviderLimitService(
+      server,
+      undefined,
+      undefined,
+      (payload) => {
+        this.providerLimitStatusBar.acceptUpdate(payload);
+        this.post({ type: 'provider-limit/updated', payload });
+      }
     );
     const isOpenAIPro = async () => {
       const status = await this.providerLimitService.get('openai', null);
@@ -395,6 +403,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionPlanState = new SessionPlanStateStore(persistence);
     this.sessionHistoryScopes = new SessionHistoryScopeStore(persistence);
     this.modelPreferences = new ModelPreferencesStore(globalPersistence, persistence);
+    this.providerLimitStatusBar = new ProviderLimitStatusBar(
+      server,
+      this.providerLimitService,
+      () => this.modelPreferences.get()
+    );
     this.sessionReadState = new SessionReadStateStore(globalPersistence);
     this.draftImages = new DraftImageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
@@ -616,12 +629,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         server,
         persistence,
         clearProviderLimitCache: () => this.providerLimitService.clearCache(),
-        postRefresh: (options) =>
+        postRefresh: (options) => {
+          void this.providerLimitStatusBar.refresh();
           this.post(
             options?.revalidateAuth
               ? { type: 'providers/refresh', payload: { revalidateAuth: true } }
               : { type: 'providers/refresh' }
-          ),
+          );
+        },
         postPendingStatus: (pending) =>
           this.post({ type: 'providers/status', payload: { pending } }),
         getWorkspaceDirectories: () => {
@@ -1376,10 +1391,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         },
         updateModelPreferences: async ({ base, preferences }) => {
           const updated = await this.modelPreferences.update(base, preferences);
+          this.providerLimitStatusBar.preferencesChanged();
           this.post({ type: 'model-preferences/sync', payload: updated });
         },
         migrateModelPreferences: async (preferences) => {
           const migrated = await this.modelPreferences.migrateLegacy(preferences);
+          this.providerLimitStatusBar.preferencesChanged();
           this.post({ type: 'model-preferences/sync', payload: migrated });
         },
         updateDraftImages: ({ images }) => this.draftImages.update(images, webviewContext.viewId),
@@ -3459,6 +3476,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.macOSTray?.dispose();
     this.notificationUriHandler.dispose();
     this.attentionNotifications.dispose();
+    this.providerLimitStatusBar.dispose();
     this.providerLimitService.dispose();
     this.disposing = true;
     if (this.openCodeUptimeTimer) {
@@ -3894,6 +3912,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private updateStatusBarItem() {
+    this.providerLimitStatusBar.updateConnection(
+      this.contextProvider.context.workspacePath || undefined
+    );
     this.macOSTray?.update();
     this.postSiblingWorkspaceAlerts();
     this.updateSessionReconcileTimer();

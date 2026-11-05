@@ -31,6 +31,22 @@ function createMemoryPersistence() {
 }
 
 describe('ModelPreferencesStore', () => {
+  it('persists status-bar pins, merges stale edits, and isolates returned pin maps', async () => {
+    const { persistence } = createMemoryPersistence();
+    const store = new ModelPreferencesStore(persistence);
+    await store.migrateLegacy(preferences);
+    const base = store.get();
+    await store.update(base, { ...base, providerLimitPins: { openai: 'Work' } });
+    await store.update(base, { ...base, providerLimitPins: { anthropic: '' } });
+    const pinned = store.get();
+    expect(pinned.providerLimitPins).toEqual({ openai: 'Work', anthropic: '' });
+    await store.update(pinned, { ...pinned, providerLimitPins: { anthropic: '' } });
+    const restored = new ModelPreferencesStore(persistence);
+    expect(restored.get().providerLimitPins).toEqual({ anthropic: '' });
+    const snapshot = restored.get();
+    if (snapshot.providerLimitPins) snapshot.providerLimitPins.anthropic = 'Changed';
+    expect(restored.get().providerLimitPins).toEqual({ anthropic: '' });
+  });
   it('shares the last model with new instances and preserves it through unrelated stale updates', async () => {
     const { persistence } = createMemoryPersistence();
     const store = new ModelPreferencesStore(persistence);

@@ -139,6 +139,13 @@ function mergeModelPreferences(
       next.modelDisplayNames
     ),
   };
+  if (current.providerLimitPins || base.providerLimitPins || next.providerLimitPins) {
+    merged.providerLimitPins = mergeRecord(
+      current.providerLimitPins ?? {},
+      base.providerLimitPins ?? {},
+      next.providerLimitPins ?? {}
+    );
+  }
   if (lastSelectedModel) merged.lastSelectedModel = { ...lastSelectedModel };
   return merged;
 }
@@ -191,6 +198,8 @@ function cloneModelPreferences(preferences: ModelPreferences): ModelPreferences 
     pinnedModels: [...preferences.pinnedModels],
     modelDisplayNames: { ...preferences.modelDisplayNames },
   };
+  if (preferences.providerLimitPins)
+    cloned.providerLimitPins = { ...preferences.providerLimitPins };
   if (preferences.lastSelectedModel)
     cloned.lastSelectedModel = { ...preferences.lastSelectedModel };
   return cloned;

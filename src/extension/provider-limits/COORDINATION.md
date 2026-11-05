@@ -100,6 +100,12 @@ known session uses the selected provider, including while the sidebar is hidden,
 or every 120 seconds while visible and idle. A completion refresh follows after
 31 seconds to allow the successful cache TTL to expire.
 
+Pinned status-bar providers also poll every 120 seconds from the extension host,
+even with no open webview or running session. Missing limits stay hidden without
+unpinning the provider or stopping retries. Claude Agent can use the quota-only
+OAuth endpoint while idle, provided its Claude Code login is valid; quota polling
+does not run a model request or renew Claude Code-owned credentials.
+
 One host timer reconciles recently requested shared snapshots every two seconds
 without fetching providers. A bounded set of observations expires after five idle
 minutes and is cleared on invalidation/disposal. Narrow `provider-limit/updated`

@@ -6,6 +6,7 @@ import type { PromptCompletionAvailability } from '../../shared/prompt-completio
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 import {
   isModelPinned,
+  isProviderLimitPinned,
   getListedProviderModels,
   getModelDisplayName,
   hasManagedModelCatalog,
@@ -19,6 +20,7 @@ import {
   setModelVisible,
   setModelsVisible,
   setProviderOrder,
+  setProviderLimitPin,
   setProviderVisible,
   setShowModels,
   setState,
@@ -33,7 +35,8 @@ import {
   modelSupportsVideo,
   modelSupportsVision,
 } from '../lib/model-capabilities';
-import { compareProviders, sortProviderModels } from '../lib/model-ordering';
+import { sortProviderModels } from '../lib/model-ordering';
+import { compareProviderOrder } from '../../shared/provider-order';
 import { isRunningSessionStatus } from '../lib/session-event-reducer';
 import { openProviderLogout, openProviderSetup } from '../lib/provider-setup';
 import {
@@ -79,7 +82,7 @@ type ProviderContextMenuState = {
 };
 type ModelRenameState = {
   providerID: string;
-  modelID: string;
+  modelID?: string;
   originalName: string;
   displayName: string;
 };
@@ -109,15 +112,6 @@ function shouldSortProviderLast(provider: ModelProvider, models: readonly Provid
     !isProviderVisible(provider.id) ||
     models.every((model) => state.hiddenModels.includes(modelVisibilityKey(provider.id, model.id)))
   );
-}
-
-function compareProviderOrder(a: ModelProvider, b: ModelProvider) {
-  const aIndex = state.providerOrder.indexOf(a.id);
-  const bIndex = state.providerOrder.indexOf(b.id);
-  if (aIndex < 0 && bIndex < 0) return compareProviders(a, b);
-  if (aIndex < 0) return 1;
-  if (bIndex < 0) return -1;
-  return aIndex - bIndex;
 }
 
 function getOrderedProviderModels(provider: ModelProvider) {
@@ -270,7 +264,9 @@ export function ModelsPanel() {
         const availabilityOrder =
           Number(shouldSortProviderLast(a.provider, a.models)) -
           Number(shouldSortProviderLast(b.provider, b.models));
-        return availabilityOrder || compareProviderOrder(a.provider, b.provider);
+        return (
+          availabilityOrder || compareProviderOrder(a.provider, b.provider, state.providerOrder)
+        );
       });
   });
   const filteredProviderEntries = createMemo(
@@ -494,14 +490,24 @@ export function ModelsPanel() {
     closeContextMenu();
   }
 
-  function saveModelName() {
+  function renameProviderLimits(providerID: string) {
+    const provider = state.providers.find((item) => item.id === providerID);
+    if (!provider) return;
+    setRenameDialog({
+      providerID,
+      originalName: provider.name,
+      displayName: state.providerLimitPins[providerID] || provider.name,
+    });
+    setProviderContextMenu(null);
+  }
+
+  function saveDisplayName() {
     const rename = renameDialog();
     if (!rename) return;
-    setModelDisplayName(
-      rename.providerID,
-      rename.modelID,
-      renameInputRef?.value.trim() === rename.originalName ? '' : renameInputRef?.value || ''
-    );
+    const name =
+      renameInputRef?.value.trim() === rename.originalName ? '' : renameInputRef?.value || '';
+    if (rename.modelID) setModelDisplayName(rename.providerID, rename.modelID, name);
+    else setProviderLimitPin(rename.providerID, name);
     setRenameDialog(null);
   }
 
@@ -1165,6 +1171,30 @@ export function ModelsPanel() {
                 type="button"
                 class="models-context-menu-item"
                 onClick={() => {
+                  if (isProviderLimitPinned(menu.providerID)) {
+                    setProviderLimitPin(menu.providerID, null);
+                    setProviderContextMenu(null);
+                  } else renameProviderLimits(menu.providerID);
+                }}
+              >
+                {isProviderLimitPinned(menu.providerID)
+                  ? 'Unpin limits from status bar'
+                  : 'Pin limits to status bar'}
+              </button>
+              <Show when={isProviderLimitPinned(menu.providerID)}>
+                <button
+                  type="button"
+                  class="models-context-menu-item"
+                  onClick={() => renameProviderLimits(menu.providerID)}
+                >
+                  Rename status-bar provider
+                </button>
+              </Show>
+              <div class="models-context-menu-separator" role="separator" />
+              <button
+                type="button"
+                class="models-context-menu-item"
+                onClick={() => {
                   setProviderVisible(menu.providerID, !isProviderVisible(menu.providerID));
                   setProviderContextMenu(null);
                 }}
@@ -1216,13 +1246,13 @@ export function ModelsPanel() {
                 aria-labelledby="models-model-rename-title"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  saveModelName();
+                  saveDisplayName();
                 }}
               >
                 <div class="provider-connect-header">
                   <div>
                     <div id="models-model-rename-title" class="provider-connect-title">
-                      Rename model
+                      {rename().modelID ? 'Rename model' : 'Status-bar provider limits'}
                     </div>
                     <div class="provider-connect-subtitle">{rename().originalName}</div>
                   </div>
@@ -1249,14 +1279,18 @@ export function ModelsPanel() {
                         onKeyDown={(event) => {
                           if (event.key !== 'Enter') return;
                           event.preventDefault();
-                          saveModelName();
+                          saveDisplayName();
                         }}
-                        aria-label="Model display name"
+                        aria-label={
+                          rename().modelID ? 'Model display name' : 'Status-bar provider name'
+                        }
                         autocomplete="off"
                       />
                     </label>
                     <div class="models-model-rename-hint">
-                      Leave blank to restore the original model name.
+                      {rename().modelID
+                        ? 'Leave blank to restore the original model name.'
+                        : 'Only changes the status-bar name. Leave blank to use the provider name. Limits show the percentage remaining.'}
                     </div>
                     <div class="provider-connect-actions">
                       <button
@@ -1269,7 +1303,7 @@ export function ModelsPanel() {
                       <button
                         type="button"
                         class="provider-connect-primary"
-                        onClick={saveModelName}
+                        onClick={saveDisplayName}
                       >
                         Save
                       </button>

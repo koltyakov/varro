@@ -21,6 +21,8 @@ export function parseModelPreferences(value: unknown): ModelPreferences {
     pinnedModels: parseStringArray(record?.pinnedModels),
     modelDisplayNames: parseStringRecord(record?.modelDisplayNames),
   };
+  if (record?.providerLimitPins !== undefined)
+    preferences.providerLimitPins = parseStringRecord(record.providerLimitPins);
   if (lastSelectedModel) preferences.lastSelectedModel = lastSelectedModel;
   return preferences;
 }
@@ -32,6 +34,7 @@ export function parseRequiredModelPreferences(value: unknown): ModelPreferences 
     (record.lastSelectedModel !== undefined && !parseSelectedModel(record.lastSelectedModel)) ||
     !isNullableStringRecord(record.modelVariantSelections) ||
     !isStringArray(record.providerOrder) ||
+    (record.providerLimitPins !== undefined && !isStringRecord(record.providerLimitPins)) ||
     !isStringArray(record.modelOrder) ||
     !isStringArray(record.hiddenProviders) ||
     !isStringArray(record.hiddenModels) ||

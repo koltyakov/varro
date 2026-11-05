@@ -5458,6 +5458,7 @@ export function MessageList() {
   const bottomFollowMotion = new BottomFollowMotion();
 
   function performScroll(options?: { force?: boolean; immediate?: boolean; elapsedMs?: number }) {
+    releaseSuspendedBottomReserve();
     if (
       pointerScrollOwnershipActive ||
       stickyNavigationOwnsScroll() ||
@@ -5623,7 +5624,7 @@ export function MessageList() {
     setPreservedScrollTop(previousBottomTarget);
   }
 
-  function releaseBottomReserveForHostResize() {
+  function releaseBottomReserveForViewportReset() {
     if (!containerRef) return;
 
     const reserve = untrack(appendBottomReserve);
@@ -5634,6 +5635,36 @@ export function MessageList() {
 
     setPreservedScrollTop(nextBottom);
     lastAutoScrolledBottomScrollTop = nextBottom;
+  }
+
+  function releaseSuspendedBottomReserve() {
+    if (
+      !bottomFollowResumePending ||
+      document.hidden ||
+      !containerRef ||
+      !autoScroll() ||
+      editingMessage() ||
+      diffFocusPauseActive ||
+      pointerScrollOwnershipActive ||
+      stickyNavigationOwnsScroll()
+    ) {
+      return false;
+    }
+    if (
+      activityExitBottomTarget === null &&
+      !activityExitSummaryAnchor &&
+      untrack(activityExitBottomReserve) <= 0.5 &&
+      untrack(appendBottomReserve) <= 0.5
+    ) {
+      return false;
+    }
+
+    // Collapse targets preserve an already-painted position, not space accumulated while hidden.
+    // Retire the old owner before following; otherwise it can block restore or pin an empty bottom.
+    // Keep doing this through late restore measurements until the resumed follower settles.
+    clearActivityExitReserve();
+    releaseBottomReserveForViewportReset();
+    return true;
   }
 
   function consumeBottomReserve(amount: number) {
@@ -5989,6 +6020,7 @@ export function MessageList() {
         bottomFollowResumePending = true;
         bottomFollowMotion.reset();
       }
+      const releasedSuspendedReserve = releaseSuspendedBottomReserve();
 
       ignoreScrollUntil = Math.max(
         ignoreScrollUntil,
@@ -6007,7 +6039,11 @@ export function MessageList() {
         !trackGrew &&
         currentBottomScrollTop <= lastAutoScrolledBottomScrollTop + 1 &&
         distanceFromBottom() <= 2;
-      if ((belowBottomTarget && !preservesNearBottomOffset) || trackGrew) {
+      if (
+        (belowBottomTarget && !preservesNearBottomOffset) ||
+        trackGrew ||
+        releasedSuspendedReserve
+      ) {
         bottomFollowPreservesNearBottomOffset = false;
         performScroll({ force: true, elapsedMs });
       }
@@ -7629,7 +7665,7 @@ export function MessageList() {
       lastContainerClientHeight = currentContainerClientHeight;
       if (hostViewportResizing) {
         clearActivityExitReserve();
-        releaseBottomReserveForHostResize();
+        releaseBottomReserveForViewportReset();
       } else if (containerHeightDelta > 0.5) {
         const reserve = untrack(appendBottomReserve);
         if (containerRef.scrollHeight - reserve <= currentContainerClientHeight + 0.5) {

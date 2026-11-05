@@ -190,6 +190,7 @@ export interface AppState {
   sessionSelectedModels: SessionSelectedModels;
   modelVariantSelections: ModelVariantSelections;
   providerOrder: string[];
+  providerLimitPins: Record<string, string>;
   modelOrder: string[];
   sessionSelectedMcps: SessionSelectedMcps;
   draftSelectedMcps: string[] | null;
@@ -481,6 +482,9 @@ export function createAppState(): AppStateInstance {
       readStoredNullableStringRecord(STORAGE_KEYS.modelVariantSelections),
     providerOrder:
       modelPreferences?.providerOrder ?? readStoredStringArray(STORAGE_KEYS.providerOrder),
+    providerLimitPins: modelPreferences
+      ? (modelPreferences.providerLimitPins ?? {})
+      : readStoredStringRecord(STORAGE_KEYS.providerLimitPins),
     modelOrder: modelPreferences?.modelOrder ?? readStoredStringArray(STORAGE_KEYS.modelOrder),
     sessionSelectedMcps: readStoredStringArrayRecord(STORAGE_KEYS.sessionSelectedMcps),
     draftSelectedMcps: null,

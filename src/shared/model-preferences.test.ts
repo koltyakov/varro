@@ -2,6 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { parseModelPreferences, parseRequiredModelPreferences } from './model-preferences';
 
 describe('model preference parsing bounds', () => {
+  it('accepts status-bar pins and rejects malformed pin names', () => {
+    const preferences = parseModelPreferences({
+      providerLimitPins: { openai: 'Work', anthropic: '' },
+    });
+    expect(parseRequiredModelPreferences(preferences)?.providerLimitPins).toEqual({
+      openai: 'Work',
+      anthropic: '',
+    });
+    for (const providerLimitPins of [[], { openai: 42 }, { openai: 'x'.repeat(4097) }]) {
+      expect(parseRequiredModelPreferences({ ...preferences, providerLimitPins })).toBeNull();
+    }
+    expect(
+      parseModelPreferences({ providerLimitPins: { openai: 42, anthropic: '' } }).providerLimitPins
+    ).toEqual({ anthropic: '' });
+  });
   it('round-trips a last model and rejects malformed or oversized selections', () => {
     const lastSelectedModel = { providerID: 'openai', modelID: 'sol', variant: 'high' };
     const preferences = parseModelPreferences({ lastSelectedModel });

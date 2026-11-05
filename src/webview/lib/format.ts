@@ -1,5 +1,9 @@
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../shared/protocol';
 import { formatRelativeReset } from './time-format';
+import {
+  getProviderLimitWindowPeriodLabel,
+  getProviderLimitWindowUsedPercent as getWindowPercent,
+} from '../../shared/provider-limit-summary';
 
 export function formatVariantLabel(variant: string) {
   return variant
@@ -304,40 +308,6 @@ function getWindowPriority(window: ProviderLimitWindow) {
   if (window.unit === 'usd') return 3;
   if (window.unit === 'tokens') return 4;
   return 5;
-}
-
-function getWindowPercent(window: ProviderLimitWindow) {
-  if (window.percent != null && Number.isFinite(window.percent)) return window.percent;
-  if (window.limit == null || window.limit <= 0) return null;
-  return (1 - window.remaining / window.limit) * 100;
-}
-
-function getProviderLimitWindowPeriodLabel(window: ProviderLimitWindow) {
-  const id = window.id.toLowerCase();
-  const label = window.label.toLowerCase();
-
-  if (id.includes('month') || label.includes('month')) return 'M';
-  if (id.includes('week') || id.includes('seven_day') || label.includes('week')) return 'W';
-  if (
-    id.includes('five_hour') ||
-    id === 'current-session' ||
-    label.includes('5-hour') ||
-    label.includes('5 hour') ||
-    label === 'current session'
-  ) {
-    return '5h';
-  }
-  if (
-    id.includes('day') ||
-    id.includes('daily') ||
-    label.includes('day') ||
-    label.includes('daily') ||
-    id === 'requests'
-  ) {
-    return 'D';
-  }
-
-  return '';
 }
 
 function formatWindowValue(window: ProviderLimitWindow, value: number) {

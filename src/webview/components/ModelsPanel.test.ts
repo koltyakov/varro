@@ -279,6 +279,8 @@ beforeEach(() => {
   setState('hiddenModels', []);
   setState('removedModels', []);
   setState('providerOrder', []);
+  setState('providerLimitPins', reconcile({}));
+  window.localStorage.removeItem(STORAGE_KEYS.providerLimitPins);
   setState('modelOrder', []);
   setState('addedModels', []);
   setState('pinnedModels', []);
@@ -316,6 +318,8 @@ afterEach(() => {
   setState('hiddenModels', []);
   setState('removedModels', []);
   setState('providerOrder', []);
+  setState('providerLimitPins', reconcile({}));
+  window.localStorage.removeItem(STORAGE_KEYS.providerLimitPins);
   setState('modelOrder', []);
   setState('addedModels', []);
   setState('pinnedModels', []);
@@ -337,6 +341,63 @@ afterEach(() => {
 });
 
 describe('ModelsPanel', () => {
+  it('pins provider limits with a status-bar-only name, renames, and unpins', async () => {
+    const post = vi.fn();
+    window.__sendToExtension = post;
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+    const header = container?.querySelector<HTMLElement>('.models-provider-header');
+    expect(header).toBeTruthy();
+    const originalHeaderMarkup = header?.innerHTML;
+    expect(header?.querySelector('.models-provider-limit-pin, .chat-header-btn')).toBeNull();
+    header?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document, 'Pin limits to status bar')?.click();
+    await Promise.resolve();
+    let input = document.querySelector<HTMLInputElement>('[aria-label="Status-bar provider name"]');
+    expect(input?.value).toBe('OpenAI');
+    if (input) input.value = ' Work ';
+    findButton(document.querySelector('[role="dialog"]'), 'Save')?.click();
+    expect(state.providerLimitPins).toEqual({ openai: 'Work' });
+    expect(header?.innerHTML).toBe(originalHeaderMarkup);
+    expect(container?.querySelector('.models-provider-name')?.textContent).toBe('OpenAI');
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.providerLimitPins)!)).toEqual({
+      openai: 'Work',
+    });
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'model-preferences/update',
+        payload: expect.objectContaining({
+          preferences: expect.objectContaining({ providerLimitPins: { openai: 'Work' } }),
+        }),
+      })
+    );
+
+    header?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document, 'Rename status-bar provider')?.click();
+    await Promise.resolve();
+    input = document.querySelector<HTMLInputElement>('[aria-label="Status-bar provider name"]');
+    expect(input?.value).toBe('Work');
+    if (input) input.value = '';
+    findButton(document.querySelector('[role="dialog"]'), 'Save')?.click();
+    expect(state.providerLimitPins).toEqual({ openai: '' });
+
+    header?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document, 'Unpin limits from status bar')?.click();
+    expect(state.providerLimitPins).toEqual({});
+    expect(header?.innerHTML).toBe(originalHeaderMarkup);
+  });
+
+  it('does not pin limits when the name dialog is cancelled', async () => {
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+    container
+      ?.querySelector<HTMLElement>('.models-provider-header')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document, 'Pin limits to status bar')?.click();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    findButton(document.querySelector('[role="dialog"]'), 'Cancel')?.click();
+    expect(state.providerLimitPins).toEqual({});
+  });
   it('reports unexpected completion test transport failures', async () => {
     clientMocks.testPromptCompletion.mockRejectedValueOnce(new Error('API call timed out'));
     cleanup = render(() => [ModelsPanel(), SessionActionFeedback()], container!);

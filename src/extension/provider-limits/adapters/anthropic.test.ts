@@ -153,6 +153,47 @@ describe('createAnthropicAdapter', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('polls provider-wide Claude Agent quotas after its idle statusline becomes stale', async () => {
+    const checkedAt = Date.now();
+    vi.mocked(stat).mockResolvedValue({
+      isFile: () => true,
+      mtimeMs: checkedAt - 10 * 60_000,
+    } as Awaited<ReturnType<typeof stat>>);
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ claudeAiOauth: { accessToken: 'idle-claude-token' } })
+    );
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({ five_hour: { utilization: 20 }, seven_day: { utilization: 30 } })
+    );
+
+    const status = await adapter.fetch({
+      provider: { id: 'claude-agent', models: {} },
+      authStore: {},
+      modelID: null,
+      checkedAt,
+    });
+
+    expect(status).toMatchObject({
+      providerID: 'claude-agent',
+      modelID: null,
+      status: 'available',
+      checkedAt,
+      windows: [
+        { id: 'five_hour', remaining: 80 },
+        { id: 'seven_day', remaining: 70 },
+      ],
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.anthropic.com/api/oauth/usage',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer idle-claude-token' }),
+      })
+    );
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
+  });
+
   it('uses an explicit Claude Code OAuth token before saved credentials', async () => {
     vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'explicit-token');
     vi.mocked(fetch).mockResolvedValue(Response.json({ five_hour: { utilization: 10 } }));

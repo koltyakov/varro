@@ -817,6 +817,8 @@ export type ModelPreferences = {
   lastSelectedModel?: ChatModelSelection;
   modelVariantSelections: Record<string, string | null>;
   providerOrder: string[];
+  /** Pinned provider IDs mapped to optional status-bar display names. */
+  providerLimitPins?: Record<string, string>;
   modelOrder: string[];
   hiddenProviders: string[];
   hiddenModels: string[];

@@ -8,6 +8,7 @@ import type {
   ProviderLimitStatus,
 } from '../../shared/protocol';
 import { JEV_DECISION_PROVIDER_ID } from '../../shared/protocol';
+import { LARGE_MODEL_CATALOG_THRESHOLD } from '../../shared/provider-order';
 import type { ProviderAuthMethodsByProvider } from '../../shared/opencode-types';
 import { setState, showSessionPicker, state } from './app-state';
 import { postMessage } from './bridge';
@@ -16,7 +17,7 @@ import { STORAGE_KEYS, writeStored } from './state-storage';
 import { writeStoredSelectedModelForWorkspace } from './state-stored-values';
 import { isActiveSessionWorking, isSessionTreeStatusWorking } from './state-session-lifecycle';
 
-export const LARGE_MODEL_CATALOG_THRESHOLD = 50;
+export { LARGE_MODEL_CATALOG_THRESHOLD } from '../../shared/provider-order';
 const MANAGED_MODEL_CATALOG_MARKER = '*';
 const pendingAgentSelections = new Map<string, string>();
 const pendingModelSelections = new Map<string, string>();
@@ -460,6 +461,20 @@ export function setProviderOrder(providerIDs: readonly string[]) {
   publishModelPreferences(base);
 }
 
+export function isProviderLimitPinned(providerID: string) {
+  return state.providerLimitPins[providerID] !== undefined;
+}
+
+export function setProviderLimitPin(providerID: string, displayName: string | null) {
+  const base = getModelPreferencesSnapshot();
+  const next = { ...state.providerLimitPins };
+  if (displayName === null) delete next[providerID];
+  else next[providerID] = displayName.trim();
+  setState('providerLimitPins', reconcile(next));
+  writeStored(STORAGE_KEYS.providerLimitPins, next);
+  publishModelPreferences(base);
+}
+
 export function setModelOrder(providerID: string, modelIDs: readonly string[]) {
   const base = getModelPreferencesSnapshot();
   const prefix = `${providerID}:`;
@@ -670,6 +685,7 @@ export function getModelPreferencesSnapshot(): ModelPreferences {
   const preferences: ModelPreferences = {
     modelVariantSelections: { ...state.modelVariantSelections },
     providerOrder: [...state.providerOrder],
+    providerLimitPins: { ...state.providerLimitPins },
     modelOrder: [...state.modelOrder],
     hiddenProviders: [...state.hiddenProviders],
     hiddenModels: [...state.hiddenModels],
@@ -690,6 +706,7 @@ export function applyModelPreferencesSnapshot(preferences: ModelPreferences) {
   writeStored(STORAGE_KEYS.lastSelectedModel, preferences.lastSelectedModel ?? null);
   setState('modelVariantSelections', reconcile(preferences.modelVariantSelections));
   setState('providerOrder', reconcile(preferences.providerOrder));
+  setState('providerLimitPins', reconcile(preferences.providerLimitPins ?? {}));
   setState('modelOrder', reconcile(preferences.modelOrder));
   setState('hiddenProviders', reconcile(preferences.hiddenProviders));
   setState('hiddenModels', reconcile(preferences.hiddenModels));
@@ -699,6 +716,7 @@ export function applyModelPreferencesSnapshot(preferences: ModelPreferences) {
   setState('modelDisplayNames', reconcile(preferences.modelDisplayNames));
   writeStored(STORAGE_KEYS.modelVariantSelections, preferences.modelVariantSelections);
   writeStored(STORAGE_KEYS.providerOrder, preferences.providerOrder);
+  writeStored(STORAGE_KEYS.providerLimitPins, preferences.providerLimitPins ?? {});
   writeStored(STORAGE_KEYS.modelOrder, preferences.modelOrder);
   writeStored(STORAGE_KEYS.hiddenProviders, preferences.hiddenProviders);
   writeStored(STORAGE_KEYS.hiddenModels, preferences.hiddenModels);
