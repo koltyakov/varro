@@ -2,24 +2,28 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.34.x - November 2026
+
+- Added actions to copy follow-up suggestions or queue them paused without changing composer drafts.
+- Added pinnable, rotating provider quota summaries to the VS Code status bar, with custom names and background refresh.
+- Fixed chat scroll restoration, follow-up positioning, and excess bottom spacing.
+- Kept background subagent cards active until child sessions finish and grouped results under Explored.
+- Added retry controls for settings panels that fail to load and more detailed streaming diagnostics.
+
 ## 0.33.x - October 2026
 
-- Added preservation of original migration completion timestamps in the statistics sidecar, with guarded usage-reader support that keeps live V2 token totals and current pause boundaries. Confirmed session cleanup now includes eligible dormant V1 records through offline, transactional maintenance; no history is deleted at startup.
-
-- Added OpenCode database location, size, oldest remaining history age, reusable space, and global project and session counts to About, loaded without blocking the page. Added separately confirmed offline database compaction with server restart and disk-space safeguards.
-- Added global session cleanup by retention months, with durable usage-statistics archives, optional parent-only transcript archives in a separate database, and session-owned artifact cleanup. Progress uses stable stages with detailed diagnostics available on request.
-- Added all-time usage CSV export, grouped by UTC day, provider, model, and recorded reasoning setting, including archived usage and token/cache breakdowns, with cancellable large-history scans.
-- Added offline LaTeX rendering for inline and display math in chat, including streamed formulas.
-- Added Handy dictation detection and a composer mic button with toggle and cancellation controls.
-- Added Hex dictation through the same composer mic, automatically preferring Hex when both Hex and Handy are running.
-- Added opt-in inline prompt completion with configurable models. Requires OpenCode v2 and a supported API-key connection.
-- Added live background-process logs and non-blocking services with wait and stop controls.
-- Preserved conversations and drafts across folder transfers, with read-only history for unavailable destinations.
-- Added unread interruption markers, persistent workspace chat views, and full-resolution image copying.
-- Remembered the last selected agent for new chats, including custom primary agents.
-- Improved startup and server recovery; isolated managed v2 servers from OpenCode Desktop.
-- Fixed steering queues, model selection, failed edits, image sends, scrolling, and composer behavior.
-- Fixed symlinked workspaces on macOS and Linux showing different session history in Varro and a terminal-launched OpenCode TUI. Varro-managed servers now receive the resolved workspace path; Windows and attach-only servers keep the editor's exact path.
+- Added session cleanup by retention period, preserving usage statistics and optionally archiving transcripts before deletion. Cleanup includes older V1 history and runs only after confirmation.
+- Added database size, location, history age, reusable space, and project and session counts to About. Added confirmed database compaction to reclaim disk space.
+- Added all-time usage CSV export by day, provider, model, and reasoning setting, including archived usage and token/cache breakdowns. Preserved original migration dates for more accurate historical reports.
+- Added Handy and Hex voice dictation through the composer mic, with recording and cancellation controls. Hex takes priority when both apps are running.
+- Added offline LaTeX rendering for inline and display math, including formulas as responses stream.
+- Added opt-in inline prompt completion with configurable models, available with OpenCode v2 and supported API-key connections.
+- Added live logs for background processes and non-blocking services, with controls to wait for completion or stop them.
+- Preserved conversations and drafts when transferring chats between folders, with read-only history when the destination is unavailable.
+- Added persistent workspace chat views and remembered the last selected agent for new chats, including custom primary agents.
+- Added unread interruption markers and full-resolution image copying.
+- Improved startup and server recovery, keeping Varro-managed v2 servers separate from OpenCode Desktop. Fixed mismatched session history between Varro and the OpenCode TUI in symlinked macOS and Linux workspaces.
+- Fixed steering queues, model selection, failed message edits, image sends, scrolling, and composer behavior.
 
 ## 0.32.x - October 2026
 
