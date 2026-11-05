@@ -1709,6 +1709,23 @@ describe('client', () => {
       { signal, timeoutMs: 35_000, retries: 0 }
     );
   });
+  it('forwards cache-only opening probes without enabling generation', async () => {
+    const { client } = await loadClient();
+    const signal = new AbortController().signal;
+    const source = {
+      assistantMessageId: 'answer',
+      userMessageId: 'user',
+      userPrompt: 'Review',
+      answer: 'One bug remains.',
+    };
+    await client.varro.followups('s', source, { signal, cacheOnly: true });
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/varro/session/s/followups',
+      { ...source, cacheOnly: true, allowGenerate: false, model: undefined },
+      { signal, timeoutMs: 35_000, retries: 0 }
+    );
+  });
   it('persists follow-up dismissal through the scoped host route without retries', async () => {
     const { client } = await loadClient();
     const source = {

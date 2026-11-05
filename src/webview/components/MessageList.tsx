@@ -718,6 +718,9 @@ export function MessageList() {
   const [initialPositioningSessionId, setInitialPositioningSessionId] = createSignal<string | null>(
     editingMessage() ? null : state.activeSessionId
   );
+  const [initialFollowupRestore, setInitialFollowupRestore] = createSignal<{
+    sessionId: string;
+  } | null>(null);
   let initialScrollRafId = 0;
   let appendScrollRafId = 0;
   let appendScrollSessionId: string | null = null;
@@ -5491,6 +5494,7 @@ export function MessageList() {
       !editingMessage() &&
       !diffFocusPauseActive &&
       !pendingNewTurnMessageId &&
+      initialPositioningSessionId() !== state.activeSessionId &&
       !pendingInitialScrollSessionId &&
       !pendingInitialHistoryFillSessionId;
     if (smooth && options?.elapsedMs === undefined) {
@@ -6074,7 +6078,10 @@ export function MessageList() {
         isWorking
           ? BOTTOM_FOLLOW_SETTLE_FRAME_COUNT
           : 1;
-      if (bottomFollowSettleFrames >= settleFrameCount) {
+      if (
+        bottomFollowSettleFrames >= settleFrameCount &&
+        initialFollowupRestore()?.sessionId !== sessionId
+      ) {
         // The final cold-range rounding can add one pixel inside the normal follow tolerance.
         // Finish initial positioning at the physical bottom before revealing the transcript.
         if (
@@ -8005,6 +8012,7 @@ export function MessageList() {
     setMeasurementVersion((version) => version + 1);
     pendingInitialScrollSessionId = editingAtSessionStart ? null : sessionId;
     pendingInitialHistoryFillSessionId = editingAtSessionStart ? null : sessionId;
+    setInitialFollowupRestore(null);
     setInitialPositioningSessionId(
       !editingAtSessionStart && untrack(() => state.messagesLoading || messages().length > 0)
         ? sessionId
@@ -10710,6 +10718,18 @@ export function MessageList() {
             )}
           </Show>
           <FollowupSuggestions
+            onRestoreStart={() => {
+              const sessionId = state.activeSessionId;
+              if (!sessionId || initialPositioningSessionId() !== sessionId || !autoScroll())
+                return;
+              // Keep the existing loading cover until the cache lookup and final geometry settle.
+              // Do not hide an already-open transcript or hold it while generating new suggestions.
+              const restore = { sessionId };
+              setInitialFollowupRestore(restore);
+              return () => {
+                if (initialFollowupRestore() === restore) setInitialFollowupRestore(null);
+              };
+            }}
             finalMessageId={
               !activeSessionWorking() && !waitingForBackground() && !subagentsWorking()
                 ? trailingFinalResponseMessageId()

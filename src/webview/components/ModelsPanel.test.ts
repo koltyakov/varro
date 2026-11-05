@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import type { Agent, Provider, Session } from '../types';
+import type { ProviderLimitStatus } from '../../shared/protocol';
 import {
   markProviderAuthFailure,
   resetProviderConnectionState,
 } from '../lib/provider-connection-state';
-import { setState, state } from '../lib/state';
+import { setProviderLimit, setProviderLimitPin, setState, state } from '../lib/state';
 import { STORAGE_KEYS } from '../lib/state-storage';
 import { fixture } from '../test-fixtures';
 import { ModelsPanel } from './ModelsPanel';
@@ -45,6 +46,8 @@ const clientMocks = vi.hoisted(() => ({
   saveModelRouting: vi.fn(),
   providers: vi.fn(),
   providerAuth: vi.fn(),
+  providerLimit:
+    vi.fn<(providerID: string, modelID?: string | null) => Promise<ProviderLimitStatus>>(),
   providerCatalog: vi.fn(),
   authorizeProvider: vi.fn(),
   completeProviderAuth: vi.fn(),
@@ -76,6 +79,7 @@ vi.mock('../lib/client', () => ({
     config: {
       providers: clientMocks.providers,
       providerAuth: clientMocks.providerAuth,
+      providerLimit: clientMocks.providerLimit,
       providerCatalog: clientMocks.providerCatalog,
       authorizeProvider: clientMocks.authorizeProvider,
       completeProviderAuth: clientMocks.completeProviderAuth,
@@ -98,6 +102,29 @@ vi.mock('../hooks/useOpenCode', () => ({
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
+
+function availableLimit(
+  providerID = 'openai'
+): Extract<ProviderLimitStatus, { status: 'available' }> {
+  return {
+    providerID,
+    modelID: null,
+    status: 'available',
+    source: 'provider',
+    checkedAt: 1,
+    windows: [
+      {
+        id: 'weekly',
+        label: 'Weekly',
+        unit: 'messages',
+        remaining: 50,
+        limit: 100,
+        resetAt: null,
+        percent: 50,
+      },
+    ],
+  };
+}
 
 function session(id: string, parentID?: string): Session {
   const value: Session = {
@@ -188,6 +215,8 @@ beforeEach(() => {
   clientMocks.providerAuth.mockResolvedValue({
     openai: [{ type: 'api', label: 'API key' }],
   });
+  clientMocks.providerLimit.mockReset();
+  clientMocks.providerLimit.mockImplementation(async (providerID) => availableLimit(providerID));
   clientMocks.providers.mockImplementation(async () => ({
     providers: state.providers.map((provider): Provider => ({
       ...provider,
@@ -280,6 +309,7 @@ beforeEach(() => {
   setState('removedModels', []);
   setState('providerOrder', []);
   setState('providerLimitPins', reconcile({}));
+  setState('providerLimits', reconcile({}));
   window.localStorage.removeItem(STORAGE_KEYS.providerLimitPins);
   setState('modelOrder', []);
   setState('addedModels', []);
@@ -319,6 +349,7 @@ afterEach(() => {
   setState('removedModels', []);
   setState('providerOrder', []);
   setState('providerLimitPins', reconcile({}));
+  setState('providerLimits', reconcile({}));
   window.localStorage.removeItem(STORAGE_KEYS.providerLimitPins);
   setState('modelOrder', []);
   setState('addedModels', []);
@@ -351,6 +382,9 @@ describe('ModelsPanel', () => {
     const originalHeaderMarkup = header?.innerHTML;
     expect(header?.querySelector('.models-provider-limit-pin, .chat-header-btn')).toBeNull();
     header?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(false)
+    );
     findButton(document, 'Pin limits to status bar')?.click();
     await Promise.resolve();
     let input = document.querySelector<HTMLInputElement>('[aria-label="Status-bar provider name"]');
@@ -393,10 +427,154 @@ describe('ModelsPanel', () => {
     container
       ?.querySelector<HTMLElement>('.models-provider-header')
       ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(false)
+    );
     findButton(document, 'Pin limits to status bar')?.click();
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     findButton(document.querySelector('[role="dialog"]'), 'Cancel')?.click();
     expect(state.providerLimitPins).toEqual({});
+  });
+
+  it.each(['unsupported', 'error', 'empty'] as const)(
+    'does not allow pinning providers with %s limits',
+    async (status) => {
+      clientMocks.providerLimit.mockResolvedValue(
+        status === 'empty'
+          ? { ...availableLimit(), status: 'available', windows: [] }
+          : { providerID: 'openai', status, source: 'provider', checkedAt: 1, note: 'No quotas' }
+      );
+      cleanup = render(() => ModelsPanel(), container!);
+      container
+        ?.querySelector<HTMLElement>('.models-provider-header')
+        ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      expect(clientMocks.providerLimit).toHaveBeenCalledWith('openai', null);
+      const pin = findButton(document, 'Pin limits to status bar');
+      expect(pin).toBeInstanceOf(HTMLButtonElement);
+      expect(pin?.disabled).toBe(true);
+      pin?.click();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      setProviderLimitPin('openai', 'Work');
+      expect(state.providerLimitPins).toEqual({});
+      expect(window.localStorage.getItem(STORAGE_KEYS.providerLimitPins)).toBeNull();
+    }
+  );
+
+  it('requires provider-wide limits rather than model-only quotas before enabling pinning', async () => {
+    let resolve: (limit: ProviderLimitStatus) => void = () => {};
+    clientMocks.providerLimit.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      })
+    );
+    setProviderLimit('openai', 'gpt-5', { ...availableLimit(), modelID: 'gpt-5' });
+    cleanup = render(() => ModelsPanel(), container!);
+    container
+      ?.querySelector<HTMLElement>('.models-provider-header')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(true);
+    setProviderLimitPin('openai', 'Work');
+    expect(state.providerLimitPins).toEqual({});
+    resolve(availableLimit());
+    await vi.waitFor(() =>
+      expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(false)
+    );
+    findButton(document, 'Pin limits to status bar')?.click();
+    findButton(document.querySelector('[role="dialog"]'), 'Save')?.click();
+    expect(state.providerLimitPins).toEqual({ openai: '' });
+  });
+
+  it('allows renaming and removing existing pins when limits become unavailable', async () => {
+    setState('providerLimitPins', reconcile({ openai: 'Work' }));
+    setProviderLimit('openai', null, {
+      providerID: 'openai',
+      status: 'unsupported',
+      source: 'provider',
+      checkedAt: 1,
+      note: 'No quotas',
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+    const header = container?.querySelector<HTMLElement>('.models-provider-header');
+    header?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(findButton(document, 'Unpin limits from status bar')?.disabled).toBe(false);
+    findButton(document, 'Rename status-bar provider')?.click();
+    const input = document.querySelector<HTMLInputElement>(
+      '[aria-label="Status-bar provider name"]'
+    );
+    if (input) input.value = 'Personal';
+    findButton(document.querySelector('[role="dialog"]'), 'Save')?.click();
+    expect(state.providerLimitPins).toEqual({ openai: 'Personal' });
+    header?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document, 'Unpin limits from status bar')?.click();
+    expect(state.providerLimitPins).toEqual({});
+    expect(clientMocks.providerLimit).not.toHaveBeenCalled();
+  });
+
+  it('does not save a new pin if limits become unavailable while its name dialog is open', async () => {
+    cleanup = render(() => ModelsPanel(), container!);
+    container
+      ?.querySelector<HTMLElement>('.models-provider-header')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(false)
+    );
+    findButton(document, 'Pin limits to status bar')?.click();
+    setProviderLimit('openai', null, {
+      providerID: 'openai',
+      status: 'error',
+      source: 'provider',
+      checkedAt: 2,
+      note: 'Quota lookup failed',
+    });
+    expect(findButton(document.querySelector('[role="dialog"]'), 'Save')?.disabled).toBe(true);
+    document
+      .querySelector('[role="dialog"]')
+      ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    expect(state.providerLimitPins).toEqual({});
+  });
+
+  it('ignores a quota check after switching to another provider context menu', async () => {
+    let resolve: (limit: ProviderLimitStatus) => void = () => {};
+    clientMocks.providerLimit.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      })
+    );
+    clientMocks.providerLimit.mockResolvedValueOnce({
+      providerID: 'unsupported',
+      status: 'unsupported',
+      source: 'provider',
+      checkedAt: 1,
+      note: 'No quotas',
+    });
+    setState('providers', (providers) => [
+      ...providers,
+      { ...providers[0]!, id: 'unsupported', name: 'Unsupported' },
+    ]);
+    cleanup = render(() => ModelsPanel(), container!);
+    const headers = container?.querySelectorAll<HTMLElement>('.models-provider-header');
+    headers?.[0]?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    headers?.[1]?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    resolve(availableLimit());
+    await Promise.resolve();
+    expect(state.providerLimits['openai:']).toBeUndefined();
+    expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(true);
+  });
+
+  it('reports quota-check failures without enabling pinning', async () => {
+    clientMocks.providerLimit.mockRejectedValueOnce(new Error('API call timed out'));
+    cleanup = render(() => [ModelsPanel(), SessionActionFeedback()], container!);
+    container
+      ?.querySelector<HTMLElement>('.models-provider-header')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(document.querySelector('.session-action-feedback.is-warning')?.textContent).toContain(
+        'Could not check provider limits: API call timed out'
+      )
+    );
+    expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(true);
   });
   it('reports unexpected completion test transport failures', async () => {
     clientMocks.testPromptCompletion.mockRejectedValueOnce(new Error('API call timed out'));

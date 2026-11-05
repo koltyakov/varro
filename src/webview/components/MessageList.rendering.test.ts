@@ -68,6 +68,69 @@ describe('message entrance detection', () => {
   });
 });
 
+describe.each(['history', 'live'] as const)('subagent result notifications (%s)', (delivery) => {
+  it.each(['completed', 'error', 'cancelled'] as const)(
+    'groups %s notifications into Explored without duplicating the subagent card',
+    async (resultState) => {
+      setState('activeSessionId', 'session-1');
+      setSessions([session('session-1'), session('child-1', { parentID: 'session-1' })]);
+      const task: ToolPart = {
+        ...toolPart('task-part', 'task-message'),
+        tool: 'task',
+        state: {
+          status: 'completed',
+          input: { description: 'Audit auth', background: true },
+          output: 'Working in the background.',
+          title: 'Audit auth',
+          metadata: { sessionID: 'child-1' },
+          time: { start: 1, end: 2 },
+        },
+      };
+      const result: TextPart = {
+        id: 'native-result-part',
+        messageID: 'native-result',
+        sessionID: 'session-1',
+        type: 'text',
+        text: '<subagent sessionID="child-1">\nAudit result\n</subagent>',
+        synthetic: true,
+        subagentResult: { sessionID: 'child-1', state: resultState, description: 'Audit auth' },
+      };
+      replaceMessages([
+        { info: assistantMessage('task-message'), parts: [task] },
+        ...(delivery === 'history'
+          ? [{ info: userMessage('native-result'), parts: [result] }]
+          : []),
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      await Promise.resolve();
+      const originalCard = container!.querySelector('.tool-invocation-task');
+      if (delivery === 'live') {
+        upsertMessageInfo(userMessage('native-result'));
+        upsertPart(result);
+        await Promise.resolve();
+      }
+
+      expect(container!.querySelectorAll('.tool-invocation-task')).toHaveLength(1);
+      expect(container!.querySelector('.tool-invocation-task')).toBe(originalCard);
+      expect(container!.querySelectorAll('.chat-tool-invocation-part')).toHaveLength(1);
+      const summary = container!.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+      expect(summary?.textContent).toContain(
+        resultState === 'cancelled' ? 'Explored: 1 tool aborted' : 'Explored: 1 action'
+      );
+      summary!.click();
+      const notification = container!.querySelector('[data-msg-id="native-result"]');
+      expect(notification?.querySelector('.tool-invocation-title')?.textContent).toContain(
+        `Subagent ${resultState === 'error' ? 'failed' : resultState}: Audit auth`
+      );
+      expect(notification?.querySelector('.tool-invocation-task')).toBeNull();
+      notification?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      expect(notification?.textContent).toContain('Audit result');
+      expect(notification?.querySelector('.user-message-card-editable')).toBeNull();
+      expect(state.messages[1]?.parts[0]).toMatchObject(result);
+    }
+  );
+});
+
 describe('manual compaction actions', () => {
   it('keeps the completed turn summary before the manual compaction action', async () => {
     setState('activeSessionId', 'session-1');

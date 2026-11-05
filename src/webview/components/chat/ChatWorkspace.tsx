@@ -10,8 +10,14 @@ import type { SlowApiRequest } from '../../lib/bridge';
 import { onMessage, postMessage } from '../../lib/bridge';
 import { editingMessage, inlineEditMount } from '../../lib/message-edit-state';
 import { ralphStore } from '../../lib/stores/ralph-store';
-import { state } from '../../lib/state';
+import {
+  setShowMcpSettings,
+  setShowModels,
+  setShowPermissionSettings,
+  state,
+} from '../../lib/state';
 import { ManagedSubagentFooter } from './ManagedSubagentFooter';
+import { SettingsPanelBoundary } from './SettingsPanelBoundary';
 
 const LazyRalphDashboard = lazy(() =>
   import('../ralph/RalphDashboard').then((module) => ({ default: module.RalphDashboard }))
@@ -398,39 +404,57 @@ export function ChatWorkspace(props: {
       </Show>
 
       <Show when={props.showModels}>
-        <Suspense
-          fallback={
-            <div class="models-panel">
-              <div class="chat-messages-loading" role="status" aria-label="Loading models">
-                <span class="chat-messages-loading-dot" />
-                <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
-                <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.6s' }} />
-              </div>
-            </div>
-          }
+        <SettingsPanelBoundary
+          name="Models"
+          panelClass="models-panel"
+          onClose={() => setShowModels(false)}
         >
-          <LazyModelsPanel />
-        </Suspense>
+          <Suspense
+            fallback={
+              <div class="models-panel">
+                <div class="chat-messages-loading" role="status" aria-label="Loading models">
+                  <span class="chat-messages-loading-dot" />
+                  <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
+                  <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.6s' }} />
+                </div>
+              </div>
+            }
+          >
+            <LazyModelsPanel />
+          </Suspense>
+        </SettingsPanelBoundary>
       </Show>
       <Show when={props.showPermissionSettings}>
-        <Suspense>
-          <LazyPermissionSettingsPanel />
-        </Suspense>
+        <SettingsPanelBoundary
+          name="Permission settings"
+          panelClass="permission-settings-panel"
+          onClose={() => setShowPermissionSettings(false)}
+        >
+          <Suspense>
+            <LazyPermissionSettingsPanel />
+          </Suspense>
+        </SettingsPanelBoundary>
       </Show>
       <Show when={props.showMcpSettings}>
-        <Suspense
-          fallback={
-            <section class="mcp-settings-panel" aria-label="MCP settings">
-              <div class="chat-messages-loading" role="status" aria-label="Loading MCP settings">
-                <span class="chat-messages-loading-dot" />
-                <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
-                <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.6s' }} />
-              </div>
-            </section>
-          }
+        <SettingsPanelBoundary
+          name="MCP settings"
+          panelClass="mcp-settings-panel"
+          onClose={() => setShowMcpSettings(false)}
         >
-          <LazyMcpSettingsPanel />
-        </Suspense>
+          <Suspense
+            fallback={
+              <section class="mcp-settings-panel" aria-label="MCP settings">
+                <div class="chat-messages-loading" role="status" aria-label="Loading MCP settings">
+                  <span class="chat-messages-loading-dot" />
+                  <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
+                  <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.6s' }} />
+                </div>
+              </section>
+            }
+          >
+            <LazyMcpSettingsPanel />
+          </Suspense>
+        </SettingsPanelBoundary>
       </Show>
 
       <Show

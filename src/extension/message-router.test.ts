@@ -171,7 +171,7 @@ describe('MessageRouter', () => {
       payload: { canAbort: true, canSwitchSessions: false, model },
     });
 
-    expect(cb.updateCommandState).toHaveBeenCalledWith(true, false, model, undefined);
+    expect(cb.updateCommandState).toHaveBeenCalledWith(true, false, model, undefined, undefined);
   });
 
   it('dispatches session read acknowledgements', async () => {
@@ -505,7 +505,13 @@ const DISPATCH_EXPECTATIONS = {
   'commands/state': [
     {
       callback: 'updateCommandState',
-      args: [true, false, { providerID: 'anthropic', modelID: 'claude-opus-5' }, 'session-1'],
+      args: [
+        true,
+        false,
+        { providerID: 'anthropic', modelID: 'claude-opus-5' },
+        'session-1',
+        undefined,
+      ],
     },
   ],
   'session/seen': [{ callback: 'acknowledgeSessionSeen', args: ['session-1'] }],

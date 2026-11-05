@@ -1603,6 +1603,24 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it('validates and preserves selected-model visibility in command state', () => {
+    for (const model of [null, { providerID: 'openai', modelID: 'gpt' }]) {
+      for (const modelVisible of [false, true]) {
+        const message = {
+          type: 'commands/state',
+          payload: { canAbort: false, canSwitchSessions: false, model, modelVisible },
+        };
+        expect(parseWebviewMessage(message)).toEqual(message);
+      }
+      expect(
+        parseWebviewMessage({
+          type: 'commands/state',
+          payload: { canAbort: false, canSwitchSessions: false, model, modelVisible: 'yes' },
+        })
+      ).toBeNull();
+    }
+  });
+
   it('validates editor panel actions and routes', () => {
     expect(parseWebviewMessage({ type: 'chat/new-editor' })).toEqual({ type: 'chat/new-editor' });
     expect(

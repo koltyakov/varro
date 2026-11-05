@@ -74,24 +74,27 @@ export class FollowupService {
     directory?: string;
     signal?: AbortSignal;
     allowGenerate?: boolean;
+    cacheOnly?: boolean;
     isModelCurrent: () => boolean;
   }): Promise<FollowupSuggestionSet> {
     if (this.server.apiVersion !== 2 || !input.isModelCurrent()) return EMPTY_FOLLOWUP_SUGGESTIONS;
     input.signal?.throwIfAborted();
     const { key, digest, sessionKey } = this.identity(input);
-    let attempt = this.attempts.get(key);
+    let attempt = input.cacheOnly ? undefined : this.attempts.get(key);
     if (attempt && attempt.digest !== digest) return EMPTY_FOLLOWUP_SUGGESTIONS;
     if (!attempt) {
       let cached: FollowupSuggestionSet | undefined;
       try {
-        cached = await this.readCached(key, digest, input.signal);
+        cached = input.cacheOnly
+          ? await this.cache.get(key, digest)
+          : await this.readCached(key, digest, input.signal);
       } catch {
         logger.info('Follow-ups skipped', { reason: 'cache-unavailable' });
         return EMPTY_FOLLOWUP_SUGGESTIONS;
       }
       input.signal?.throwIfAborted();
       // Disk reads yield. Another view can publish the shared attempt while this one is reading.
-      attempt = this.attempts.get(key);
+      attempt = input.cacheOnly ? undefined : this.attempts.get(key);
       if (attempt && attempt.digest !== digest) return EMPTY_FOLLOWUP_SUGGESTIONS;
       if (!attempt && cached) {
         if (!cached.actions.length) return cached;
@@ -100,7 +103,7 @@ export class FollowupService {
           : EMPTY_FOLLOWUP_SUGGESTIONS;
       }
       if (!attempt) {
-        if (!input.allowGenerate) return EMPTY_FOLLOWUP_SUGGESTIONS;
+        if (input.cacheOnly || !input.allowGenerate) return EMPTY_FOLLOWUP_SUGGESTIONS;
         while (this.attempts.size >= 32) {
           const oldest = this.attempts.keys().next().value;
           if (!oldest) break;

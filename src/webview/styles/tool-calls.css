@@ -1824,21 +1824,26 @@ kbd {
 
 .chat-tool-invocation-part .child-task-control-actions {
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 8px;
   padding-right: 10px;
 }
 
 .chat-tool-invocation-part .child-task-control-actions > button {
-  height: 20px;
-  padding: 0 6px;
-  border: 1px solid var(--color-vscode-border-default);
-  border-radius: var(--radius-chip);
-  background: var(--color-vscode-input-surface);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   color: var(--color-vscode-fg);
   font: inherit;
+  font-family: var(--font-sans);
   line-height: 1.45;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.chat-tool-invocation-part .child-task-control-actions > button:not(:disabled):hover,
+.chat-tool-invocation-part .child-task-control-actions > button:focus-visible {
+  text-decoration: underline;
 }
 
 .chat-tool-invocation-part .child-task-control-actions > button:disabled {

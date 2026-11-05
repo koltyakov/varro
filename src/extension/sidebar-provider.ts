@@ -187,6 +187,7 @@ interface WebviewEndpoint {
   siblingAlertsKey: string;
   ready: boolean;
   focused: boolean;
+  selectedProviderID?: string;
 }
 
 interface EditorEndpoint extends WebviewEndpoint {
@@ -668,6 +669,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('varro.notifications')) this.attentionNotifications.update();
+      if (event.affectsConfiguration('varro.providerLimits.statusBarDisplay')) {
+        this.providerLimitStatusBar.configurationChanged();
+      }
       // VS Code can announce the theme kind before it updates the configured theme name.
       // Also refresh the per-view counterpart after the name changes, including same-kind switches.
       if (
@@ -805,10 +809,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         cancelApiRequestsBeforeGeneration: (generation) =>
           endpointRef.restProxy?.cancelRequestsBeforeGeneration(generation),
         handleDisposedSideEffects: () => {
-          if (endpointRef.endpoint) this.setEndpointReady(endpointRef.endpoint, false);
+          if (endpointRef.endpoint) {
+            endpointRef.endpoint.selectedProviderID = undefined;
+            this.setEndpointReady(endpointRef.endpoint, false);
+          }
+          this.updateProviderLimitExclusions();
         },
         handleUnavailableSideEffects: () => {
-          if (endpointRef.endpoint) this.setEndpointReady(endpointRef.endpoint, false);
+          if (endpointRef.endpoint) {
+            endpointRef.endpoint.selectedProviderID = undefined;
+            this.setEndpointReady(endpointRef.endpoint, false);
+          }
+          this.updateProviderLimitExclusions();
         },
         editorContext: getEndpointContext,
       },
@@ -1090,8 +1102,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         extensionId: this.extensionId,
         webviewSession,
         setProviderWatchActive: (active) => this.setProviderWatchActive(active),
-        setActiveChatModel: (model) => {
+        setActiveChatModel: (model, modelVisible) => {
           if (webviewContext.surface === 'sidebar') this.activeChatModel = model;
+          if (endpointRef.endpoint) {
+            endpointRef.endpoint.selectedProviderID = modelVisible ? model?.providerID : undefined;
+          }
+          this.updateProviderLimitExclusions();
         },
         acknowledgeSessionSeen: (sessionId) => {
           // Legacy seen events have no turn timestamp and may arrive after a newer completion.
@@ -1780,6 +1796,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
       if (removed) this.postEditorTabsState();
       this.endpoints.delete(endpoint);
+      this.updateProviderLimitExclusions();
       this.setEndpointReady(endpoint, false);
       endpoint.contextFilesState.clearContextFiles();
       endpoint.fileSearch.dispose();
@@ -3911,7 +3928,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return readExtensionConfigState();
   }
 
+  private updateProviderLimitExclusions() {
+    this.providerLimitStatusBar.setVisibleChatProviders(
+      [...this.endpoints].flatMap((endpoint) =>
+        endpoint.bridge.getView()?.visible && endpoint.selectedProviderID
+          ? [endpoint.selectedProviderID]
+          : []
+      )
+    );
+  }
+
   private updateStatusBarItem() {
+    this.updateProviderLimitExclusions();
     this.providerLimitStatusBar.updateConnection(
       this.contextProvider.context.workspacePath || undefined
     );

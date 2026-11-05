@@ -93,6 +93,71 @@ function createPanel() {
 }
 
 describe('SidebarProvider editor panels', () => {
+  it('excludes selected providers only from visible chats in this window', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const { ProviderLimitStatusBar } = await import('./provider-limit-status-bar');
+    const excluded = vi.spyOn(ProviderLimitStatusBar.prototype, 'setVisibleChatProviders');
+    const sidebar = createPanel();
+    const editor = createPanel();
+    try {
+      await provider.resolveWebviewView(sidebar.panel as never, {} as never, {} as never);
+      await vi.waitFor(() => expect(sidebar.panel.webview.html).toContain('documentId'));
+      sidebar.ready();
+      sidebar.receive({
+        type: 'commands/state',
+        payload: {
+          canAbort: false,
+          canSwitchSessions: false,
+          model: { providerID: 'openai', modelID: 'gpt' },
+        },
+      });
+      await vi.waitFor(() => expect(excluded).toHaveBeenLastCalledWith(['openai']));
+
+      getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+      await provider.openNewEditor();
+      await vi.waitFor(() => expect(editor.panel.webview.html).toContain('documentId'));
+      editor.ready();
+      editor.receive({
+        type: 'commands/state',
+        payload: {
+          canAbort: false,
+          canSwitchSessions: false,
+          model: { providerID: 'anthropic', modelID: 'claude' },
+        },
+      });
+      await vi.waitFor(() => expect(excluded).toHaveBeenLastCalledWith(['openai', 'anthropic']));
+      editor.setVisible(false);
+      expect(excluded).toHaveBeenLastCalledWith(['openai']);
+      editor.setVisible(true);
+      expect(excluded).toHaveBeenLastCalledWith(['openai', 'anthropic']);
+      sidebar.setVisible(false);
+      expect(excluded).toHaveBeenLastCalledWith(['anthropic']);
+      sidebar.setVisible(true);
+      expect(excluded).toHaveBeenLastCalledWith(['openai', 'anthropic']);
+
+      await provider.handleMessage({
+        type: 'commands/state',
+        payload: {
+          canAbort: false,
+          canSwitchSessions: false,
+          model: { providerID: 'openai', modelID: 'gpt' },
+          modelVisible: false,
+        },
+      });
+      expect(excluded).toHaveBeenLastCalledWith(['anthropic']);
+      await provider.handleMessage({
+        type: 'commands/state',
+        payload: { canAbort: false, canSwitchSessions: false, model: null },
+      });
+      expect(excluded).toHaveBeenLastCalledWith(['anthropic']);
+      editor.panel.dispose();
+      expect(excluded).toHaveBeenLastCalledWith([]);
+    } finally {
+      excluded.mockRestore();
+      await provider.dispose();
+    }
+  });
+
   it('persists hiding a moved link and invalidates lists without changing the conversation', async () => {
     const workspaceState = createWorkspaceState();
     const moved = {

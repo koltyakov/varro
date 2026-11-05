@@ -14,6 +14,8 @@ import type { OpenCodeServer } from './server';
 
 type ProviderEntry = { id: string; name: string; modelIDs: string[] };
 
+const ROTATION_INTERVAL_MS = 15_000;
+
 export class ProviderLimitStatusBar {
   private readonly item = vscode.window.createStatusBarItem(
     'varro.provider-limits',
@@ -21,8 +23,13 @@ export class ProviderLimitStatusBar {
     1001
   );
   private readonly limits = new Map<string, ProviderLimitStatus>();
+  private visibleChatProviders = new Set<string>();
   private providers: ProviderEntry[] = [];
   private timer: ReturnType<typeof setInterval> | undefined;
+  private rotationTimer: ReturnType<typeof setTimeout> | undefined;
+  private rotationProviderID: string | undefined;
+  private rotationProviderIDs: string[] = [];
+  private rotationDeadline = 0;
   private generation = 0;
   private connectionKey = '';
   private preferencesKey = '';
@@ -79,6 +86,7 @@ export class ProviderLimitStatusBar {
     for (const providerID of this.limits.keys()) {
       if (!Object.hasOwn(pins, providerID)) this.limits.delete(providerID);
     }
+    this.rotationProviderID = undefined;
     this.render();
     if (!this.running || Object.keys(pins).length === 0) return;
     void this.refresh();
@@ -98,10 +106,30 @@ export class ProviderLimitStatusBar {
     this.render();
   }
 
+  configurationChanged() {
+    if (this.disposed) return;
+    this.rotationProviderID = undefined;
+    this.render();
+  }
+
+  setVisibleChatProviders(providerIDs: Iterable<string>) {
+    if (this.disposed) return;
+    const providers = new Set(providerIDs);
+    if (
+      providers.size === this.visibleChatProviders.size &&
+      [...providers].every((providerID) => this.visibleChatProviders.has(providerID))
+    ) {
+      return;
+    }
+    this.visibleChatProviders = providers;
+    this.render();
+  }
+
   dispose() {
     this.disposed = true;
     this.generation += 1;
     if (this.timer) clearInterval(this.timer);
+    if (this.rotationTimer) clearTimeout(this.rotationTimer);
     this.item.dispose();
   }
 
@@ -164,7 +192,8 @@ export class ProviderLimitStatusBar {
     };
     const providers = this.providers
       .flatMap((provider) => {
-        if (!Object.hasOwn(pins, provider.id)) return [];
+        if (!Object.hasOwn(pins, provider.id) || this.visibleChatProviders.has(provider.id))
+          return [];
         const limit = this.limits.get(provider.id);
         const summary = limit ? formatProviderLimitStatusBar(limit) : '';
         return summary ? [{ ...provider, summary }] : [];
@@ -174,13 +203,47 @@ export class ProviderLimitStatusBar {
           Number(sortedLast(a)) - Number(sortedLast(b)) ||
           compareProviderOrder(a, b, preferences.providerOrder)
       );
+    const rotating =
+      vscode.workspace.getConfiguration('varro').get<string>('providerLimits.statusBarDisplay') !==
+      'all';
+    this.rotationProviderIDs =
+      this.running && rotating ? providers.map((provider) => provider.id) : [];
+    const providerID = this.rotationProviderIDs.includes(this.rotationProviderID ?? '')
+      ? this.rotationProviderID
+      : this.rotationProviderIDs[0];
+    if (providerID !== this.rotationProviderID) {
+      this.rotationProviderID = providerID;
+      this.rotationDeadline = Date.now() + ROTATION_INTERVAL_MS;
+      if (this.rotationTimer) clearTimeout(this.rotationTimer);
+      this.rotationTimer = undefined;
+    }
+    if (this.rotationProviderIDs.length < 2) {
+      if (this.rotationTimer) clearTimeout(this.rotationTimer);
+      this.rotationTimer = undefined;
+    } else if (!this.rotationTimer) {
+      const remaining = this.rotationDeadline - Date.now();
+      this.rotationTimer = setTimeout(
+        () => {
+          this.rotationTimer = undefined;
+          const index = this.rotationProviderIDs.indexOf(this.rotationProviderID ?? '');
+          this.rotationProviderID =
+            this.rotationProviderIDs[(index + 1) % this.rotationProviderIDs.length];
+          this.rotationDeadline = Date.now() + ROTATION_INTERVAL_MS;
+          this.render();
+        },
+        remaining > 0 ? remaining : ROTATION_INTERVAL_MS
+      );
+    }
     if (!this.running || !providers.length) {
       this.item.text = '';
       this.item.tooltip = '';
       this.item.hide();
       return;
     }
-    this.item.text = providers
+    const visibleProviders = rotating
+      ? providers.filter((provider) => provider.id === this.rotationProviderID)
+      : providers;
+    this.item.text = visibleProviders
       .map((provider) => {
         const name = (pins[provider.id]?.trim() || provider.name).replace(/\$\(/g, '\\$(');
         return `${name}: ${provider.summary}`;

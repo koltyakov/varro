@@ -31,12 +31,15 @@ type ReadyFollowups = FollowupSuggestionSet & {
   directory?: string;
 };
 
+const INITIAL_CACHE_LOOKUP_TIMEOUT_MS = 2_000;
+
 /** One observer for the latest live turn, outside virtualized message rows. */
 export function FollowupSuggestions(props: {
   finalMessageId: string | null;
   turnId: string | null;
   working: boolean;
   blocked: boolean;
+  onRestoreStart?: () => (() => void) | undefined;
 }) {
   const [ready, setReady] = createSignal<ReadyFollowups | null>(null);
   const [sending, setSending] = createSignal(false);
@@ -276,11 +279,11 @@ export function FollowupSuggestions(props: {
     });
     const unreadOpening =
       opening?.sessionId === sessionId && !!completedAt && completedAt > opening.seenAt;
-    const allowGenerate =
+    const liveTurn =
       !!source &&
-      ((source.userMessageId === armedTurn &&
-        !historicalAssistantIds.has(source.assistantMessageId)) ||
-        unreadOpening);
+      source.userMessageId === armedTurn &&
+      !historicalAssistantIds.has(source.assistantMessageId);
+    const allowGenerate = liveTurn || unreadOpening;
     const attemptKey = `${currentScope}:${source?.userMessageId ?? ''}:${allowGenerate}`;
     if (!source || !sessionId || attempted.has(attemptKey)) return;
     attempted.add(attemptKey);
@@ -290,24 +293,64 @@ export function FollowupSuggestions(props: {
     const directory = untrack(
       () => state.sessions.find((session) => session.id === sessionId)?.directory
     );
-    void client.varro
-      .followups(sessionId, source, {
+    const model = untrack(sessionModel);
+    let finishRestore = !liveTurn ? untrack(() => props.onRestoreStart?.()) : undefined;
+    const releaseRestore = () => {
+      const finish = finishRestore;
+      finishRestore = undefined;
+      finish?.();
+    };
+    const publish = (suggestions: FollowupSuggestionSet) => {
+      if (controller.signal.aborted || scope() !== currentScope || sourceKey() !== key)
+        return false;
+      // Treat bridge output as inert plain text and enforce the same bounds as the host.
+      const validated = parseFollowupSuggestions(JSON.stringify(suggestions));
+      if (!validated.actions.length) return false;
+      setReady({ key, source, sessionId, directory, ...validated });
+      return true;
+    };
+    const load = async () => {
+      if (finishRestore) {
+        const cacheController = new AbortController();
+        const timer = setTimeout(() => {
+          cacheController.abort();
+          releaseRestore();
+        }, INITIAL_CACHE_LOOKUP_TIMEOUT_MS);
+        onCleanup(() => {
+          clearTimeout(timer);
+          cacheController.abort();
+          releaseRestore();
+        });
+        try {
+          const cached = await client.varro.followups(sessionId, source, {
+            signal: AbortSignal.any([controller.signal, cacheController.signal]),
+            directory,
+            allowGenerate: false,
+            cacheOnly: true,
+            model,
+          });
+          if (!cacheController.signal.aborted && publish(cached)) return;
+        } catch {
+          // A failed or slow cache probe falls back to normal suggestions without holding reveal.
+        } finally {
+          clearTimeout(timer);
+          releaseRestore();
+        }
+      }
+      if (controller.signal.aborted) return;
+      const suggestions = await client.varro.followups(sessionId, source, {
         signal: controller.signal,
         directory,
         allowGenerate,
-        model: untrack(sessionModel),
-      })
-      .then((suggestions) => {
-        if (controller.signal.aborted || scope() !== currentScope || sourceKey() !== key) return;
-        // Treat bridge output as inert plain text and enforce the same bounds as the host.
-        const validated = parseFollowupSuggestions(JSON.stringify(suggestions));
-        if (validated.actions.length) setReady({ key, source, sessionId, directory, ...validated });
-      })
-      .catch(() => {
-        // Optional inference must not change chat completion or log conversation text.
-        if (!controller.signal.aborted)
-          logWarn('Follow-ups request failed; check Varro output for generation diagnostics');
+        model,
       });
+      publish(suggestions);
+    };
+    void load().catch(() => {
+      // Optional inference must not change chat completion or log conversation text.
+      if (!controller.signal.aborted)
+        logWarn('Follow-ups request failed; check Varro output for generation diagnostics');
+    });
   });
 
   const current = () => {

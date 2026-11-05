@@ -13,6 +13,7 @@ import type {
 import { isPermissionMode, VARRO_API_ENDPOINTS } from '../../src/shared/protocol';
 import { BACKGROUND_OUTPUT_CHUNK_BYTES } from '../../src/shared/background-process';
 import type { BackgroundProcess } from '../../src/shared/background-process';
+import type { FollowupSuggestionSet } from '../../src/shared/followups';
 import { getSessionPermissionRulesForMode } from '../../src/shared/permission-rules';
 import { normalizeWorkspaceIdentity } from '../../src/shared/workspace-path';
 import { isAbsolutePath, normalizePath } from '../../src/shared/path-display';
@@ -190,6 +191,12 @@ type ScenarioState = {
   nextSequence: number;
   healthFailuresRemaining: number;
   showFileDiffs?: boolean;
+  followups?: {
+    cached: FollowupSuggestionSet;
+    cacheDelayMs: number;
+    generated?: FollowupSuggestionSet;
+    generationDelayMs?: number;
+  };
 };
 
 export type HarnessComposerState = {
@@ -213,6 +220,7 @@ type HarnessWindow = Window & {
   varroPlaybackCapture?: {
     session: Session;
     initialMessages: MessageEntry[];
+    followups?: ScenarioState['followups'];
   };
   __varroE2E?: {
     requests: RequestLog[];
@@ -850,6 +858,10 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[capture.session.id] = structuredClone(capture.initialMessages);
     state.sessionStatuses[capture.session.id] = { type: 'idle' };
     state.persistedActiveSessionId = capture.session.id;
+    if (capture.followups) {
+      state.followups = capture.followups;
+      state.readyStatus = { state: 'running', url: 'mock://opencode', apiVersion: 2 };
+    }
     state.nextSequence = 300;
     return state;
   }
@@ -3443,7 +3455,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         parent.id,
         'native-result',
         ['<subagent sessionID="session-child-b">\nAudit result\n</subagent>'],
-        BASE_TIME - 200
+        BASE_TIME + 10
       );
       result.parts = result.parts.map((part) =>
         part.type === 'text'
@@ -3519,7 +3531,11 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       };
       assistant.parts = [task];
       if (childTaskState === 'running') markAssistantInProgress(assistant);
-      state.messagesBySessionId[parent.id] = [user, assistant];
+      state.messagesBySessionId[parent.id] = [
+        user,
+        assistant,
+        ...(state.messagesBySessionId[parent.id] ?? []),
+      ];
       state.sessionStatuses[parent.id] = { type: childTaskState === 'running' ? 'busy' : 'idle' };
       state.sessionStatuses[childA.id] = { type: childTaskState === 'running' ? 'busy' : 'idle' };
       if (new URLSearchParams(window.location.search).has('nestedChildTask')) {
@@ -5508,6 +5524,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     droppedFiles: [],
     emptyStateLogoUri: '/assets/icon.png',
     showFileDiffs: state.showFileDiffs,
+    followupModel: state.followups ? 'test/small' : undefined,
     showEmptyStateHistogram:
       new URLSearchParams(window.location.search).get('showEmptyStateHistogram') === 'true',
     defaultPermissionMode: 'default',
@@ -5740,6 +5757,14 @@ async function handleApiRequest(
 ) {
   const url = new URL(rawPath, 'http://varro.test');
   const path = url.pathname;
+
+  if (method === 'POST' && /^\/varro\/session\/[^/]+\/followups$/.test(path) && state.followups) {
+    const fixture = state.followups;
+    const cacheOnly = asRecord(body).cacheOnly === true;
+    const delayMs = cacheOnly ? fixture.cacheDelayMs : (fixture.generationDelayMs ?? 0);
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return cacheOnly ? fixture.cached : (fixture.generated ?? fixture.cached);
+  }
 
   if (method === 'POST' && path === '/varro/citation-symbols') {
     const request = asRecord(body);

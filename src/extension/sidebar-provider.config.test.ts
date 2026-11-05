@@ -605,6 +605,22 @@ describe('SidebarProvider local config routing', () => {
     });
   });
 
+  it('updates the pinned limit display when its setting changes', async () => {
+    await createSidebarProviderInstance();
+    const { ProviderLimitStatusBar } = await import('./provider-limit-status-bar');
+    const changed = vi.spyOn(ProviderLimitStatusBar.prototype, 'configurationChanged');
+    const listener = vscodeMock.workspace.onDidChangeConfiguration.mock.calls.at(-1)?.[0];
+    expect(listener).toBeTypeOf('function');
+    await vscodeMock.workspace
+      .getConfiguration('varro')
+      .update('providerLimits.statusBarDisplay', 'all');
+    listener?.({
+      affectsConfiguration: (key: string) => key === 'varro.providerLimits.statusBarDisplay',
+    });
+    expect(changed).toHaveBeenCalledOnce();
+    changed.mockRestore();
+  });
+
   it('broadcasts turn-timer configuration changes', async () => {
     const { provider } = await createSidebarProviderInstance();
     const { posted } = attachTestView(provider);

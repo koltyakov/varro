@@ -1,10 +1,20 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  untrack,
+} from 'solid-js';
 import { setHostDragImage } from '../host/extensions';
 import { Portal } from 'solid-js/web';
 import { asRecord } from '../../shared/type-utils';
 import type { PromptCompletionAvailability } from '../../shared/prompt-completion';
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 import {
+  canPinProviderLimits,
   isModelPinned,
   isProviderLimitPinned,
   getListedProviderModels,
@@ -21,6 +31,7 @@ import {
   setModelsVisible,
   setProviderOrder,
   setProviderLimitPin,
+  setProviderLimit,
   setProviderVisible,
   setShowModels,
   setState,
@@ -150,6 +161,29 @@ export function ModelsPanel() {
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [providerContextMenu, setProviderContextMenu] =
     createSignal<ProviderContextMenuState | null>(null);
+  createEffect(() => {
+    const menu = providerContextMenu();
+    const workspacePath = state.editorContext.workspacePath;
+    if (!menu || untrack(() => isProviderLimitPinned(menu.providerID))) return;
+    let current = true;
+    onCleanup(() => {
+      current = false;
+    });
+    void client.config.providerLimit(menu.providerID, null).then(
+      (limit) => {
+        if (current && workspacePath === state.editorContext.workspacePath)
+          setProviderLimit(menu.providerID, null, limit);
+      },
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Quota lookup rejections are narrowed before showing feedback.
+      (error: unknown) => {
+        if (!current) return;
+        showSessionActionFeedback(
+          `Could not check provider limits: ${error instanceof Error ? error.message : String(error)}`,
+          'warning'
+        );
+      }
+    );
+  });
   const [draggedProviderID, setDraggedProviderID] = createSignal<string | null>(null);
   const [dragOverProviderID, setDragOverProviderID] = createSignal<string | null>(null);
   const [renameDialog, setRenameDialog] = createSignal<ModelRenameState | null>(null);
@@ -491,6 +525,7 @@ export function ModelsPanel() {
   }
 
   function renameProviderLimits(providerID: string) {
+    if (!isProviderLimitPinned(providerID) && !canPinProviderLimits(providerID)) return;
     const provider = state.providers.find((item) => item.id === providerID);
     if (!provider) return;
     setRenameDialog({
@@ -504,6 +539,13 @@ export function ModelsPanel() {
   function saveDisplayName() {
     const rename = renameDialog();
     if (!rename) return;
+    if (
+      !rename.modelID &&
+      !isProviderLimitPinned(rename.providerID) &&
+      !canPinProviderLimits(rename.providerID)
+    ) {
+      return;
+    }
     const name =
       renameInputRef?.value.trim() === rename.originalName ? '' : renameInputRef?.value || '';
     if (rename.modelID) setModelDisplayName(rename.providerID, rename.modelID, name);
@@ -1170,6 +1212,14 @@ export function ModelsPanel() {
               <button
                 type="button"
                 class="models-context-menu-item"
+                disabled={
+                  !isProviderLimitPinned(menu.providerID) && !canPinProviderLimits(menu.providerID)
+                }
+                title={
+                  !isProviderLimitPinned(menu.providerID) && !canPinProviderLimits(menu.providerID)
+                    ? 'Pinning requires available provider limits.'
+                    : undefined
+                }
                 onClick={() => {
                   if (isProviderLimitPinned(menu.providerID)) {
                     setProviderLimitPin(menu.providerID, null);
@@ -1303,6 +1353,11 @@ export function ModelsPanel() {
                       <button
                         type="button"
                         class="provider-connect-primary"
+                        disabled={
+                          !rename().modelID &&
+                          !isProviderLimitPinned(rename().providerID) &&
+                          !canPinProviderLimits(rename().providerID)
+                        }
                         onClick={saveDisplayName}
                       >
                         Save

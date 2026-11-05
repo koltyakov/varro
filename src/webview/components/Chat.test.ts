@@ -4088,6 +4088,35 @@ describe('header status badges', () => {
     expect(container?.querySelector('[aria-label="Loading models"]')).toBeNull();
   });
 
+  it('reports the selected provider as visible only while the chat workspace is shown', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    const model = { providerID: 'openai', modelID: 'test-model' };
+    setState('selectedModel', model);
+    try {
+      cleanup = render(() => Chat(), container!);
+      expect(sent.findLast((message) => message.type === 'commands/state')).toMatchObject({
+        payload: { model, modelVisible: true },
+      });
+      setShowModels(true);
+      expect(sent.findLast((message) => message.type === 'commands/state')).toMatchObject({
+        payload: { model, modelVisible: false },
+      });
+      setShowModels(false);
+      expect(sent.findLast((message) => message.type === 'commands/state')).toMatchObject({
+        payload: { model, modelVisible: true },
+      });
+    } finally {
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
   it.each(['session', 'directory', 'server'] as const)(
     'closes a side-question dialog when its %s changes',
     async (change) => {

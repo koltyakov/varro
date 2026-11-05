@@ -435,7 +435,8 @@ function automaticActionPart(part: TextPart, title: string): ToolPart {
       messageID: part.messageID,
       sessionID: part.sessionID,
       type: 'tool',
-      tool: 'task',
+      // A result is a notification, not another subagent invocation.
+      tool: 'automatic_action',
       callID: `automatic:${part.id}`,
       state:
         result.state === 'completed'

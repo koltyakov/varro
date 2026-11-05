@@ -38,7 +38,7 @@ export interface SidebarProviderActionDeps {
     reload(): Promise<void>;
   };
   setProviderWatchActive(active: boolean): void;
-  setActiveChatModel(model: ChatModelSelection | null): void;
+  setActiveChatModel(model: ChatModelSelection | null, modelVisible: boolean): void;
   setActiveRoute(sessionId: string | null | undefined): void;
   acknowledgeSessionSeen(sessionId: string): void;
   updateSessionReadState(sessionId: string, seenAt: number): Promise<void>;
@@ -150,9 +150,9 @@ export function createSidebarProviderActions(
       deps.post({ type: 'dictation/result', payload: { requestId, ...payload } });
     },
     ready: (documentId) => deps.handleReadyMessage(documentId),
-    updateCommandState: (canAbort, canSwitchSessions, model, sessionId) => {
+    updateCommandState: (canAbort, canSwitchSessions, model, sessionId, modelVisible) => {
       deps.webviewSession.updateCommandState(canAbort, canSwitchSessions);
-      deps.setActiveChatModel(model);
+      deps.setActiveChatModel(model, modelVisible !== false);
       deps.setActiveRoute(sessionId);
     },
     acknowledgeSessionSeen: (sessionId) => deps.acknowledgeSessionSeen(sessionId),

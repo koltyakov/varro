@@ -28,6 +28,7 @@ import {
   getPermissionGroupMembers,
   getSessionTreeIds,
   getSessionTreeRootId,
+  isSessionStatusWorking,
   showFileDiffs,
 } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
@@ -1473,8 +1474,9 @@ function GenericToolCall(props: {
   const isBash = () => toolName() === 'bash';
   const isTask = () => toolName() === 'task';
   const isSearchTool = () => getToolKind(toolName()) === 'search';
+  const taskAgent = () => props.state.input?.agent ?? props.state.input?.subagent_type;
   const taskAgentLabel = () => {
-    const type = props.state.input?.subagent_type;
+    const type = taskAgent();
     if (!isString(type) || !type.trim()) return 'Subagent';
     const label = type.trim();
     return `${label.charAt(0).toUpperCase()}${label.slice(1)} subagent`;
@@ -1493,6 +1495,14 @@ function GenericToolCall(props: {
     const parent = getMessageLookup().byId.get(props.tool.messageID);
     return resolveTaskSessionId(props.tool, parent ? [parent] : [], appState.sessions);
   };
+  const isRunning = createMemo(() => {
+    if (props.state.status === 'running') return true;
+    if (!isTask() || props.state.status !== 'completed') return false;
+    // A background launch completes before its child does, including native
+    // foreground calls handed off to the background after launch.
+    const sessionId = taskSessionId();
+    return !!sessionId && isSessionStatusWorking(appState.sessionStatus[sessionId]);
+  });
   const taskExecutionEntries = createMemo<Array<[string, unknown]>>(() => {
     const sessionId = taskSessionId();
     let latest: AssistantMessage | null = null;
@@ -1510,7 +1520,7 @@ function GenericToolCall(props: {
       }
     }
 
-    const type = props.state.input?.subagent_type;
+    const type = taskAgent();
     const agent =
       isString(type) && type.trim()
         ? appState.allAgents.find((candidate) => candidate.name === type.trim())
@@ -1606,14 +1616,14 @@ function GenericToolCall(props: {
     return entries;
   });
   const taskRetryStatus = () => {
-    if (props.state.status !== 'running') return null;
+    if (!isRunning()) return null;
     const sessionId = taskSessionId();
     if (!sessionId) return null;
     const status = appState.sessionStatus[sessionId];
     return status?.type === 'retry' ? status : null;
   };
   const taskPermissionPending = createMemo(() => {
-    if (props.state.status !== 'running') return false;
+    if (!isRunning()) return false;
     const sessionId = taskSessionId();
     if (!sessionId) return false;
     const sessionIds = new Set(getSessionTreeIds(sessionId));
@@ -1621,6 +1631,12 @@ function GenericToolCall(props: {
     return appState.permissions.some((permission) => sessionIds.has(permission.sessionID));
   });
   const waitingForPermission = () => props.waitingForPermission || taskPermissionPending();
+  const statusClass = () =>
+    waitingForPermission()
+      ? 'tool-status-pending'
+      : isRunning()
+        ? 'tool-status-running'
+        : props.statusClass;
   const openTaskSession = () => {
     const sessionId = taskSessionId();
     if (!sessionId) return;
@@ -1669,7 +1685,7 @@ function GenericToolCall(props: {
   };
   const completedDurationMs = () => {
     const state = props.state;
-    if (state.status !== 'completed') return null;
+    if (state.status !== 'completed' || isRunning()) return null;
     return Math.max(0, state.time.end - state.time.start);
   };
   const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
@@ -1678,7 +1694,8 @@ function GenericToolCall(props: {
   const hasRunningDuration = () => isTask() || isBash() || isApplyPatchTool(props.tool.tool);
   const durationStartedAt = () => {
     if (!hasRunningDuration()) return null;
-    if (props.state.status === 'running') return props.state.time.start;
+    if (props.state.status === 'running' || (props.state.status === 'completed' && isRunning()))
+      return props.state.time.start;
     if (props.state.status === 'pending' && isApplyPatchTool(props.tool.tool)) {
       return pendingStartedAt;
     }
@@ -1694,7 +1711,7 @@ function GenericToolCall(props: {
     return formatDuration(Math.max(0, now() - startedAt)) || '0ms';
   };
   const taskActivityAgeDuration = () => {
-    if (!taskActivityAltPressed() || !isTask() || props.state.status !== 'running') return null;
+    if (!taskActivityAltPressed() || !isTask() || !isRunning()) return null;
     const sessionId = taskSessionId();
     if (!sessionId) return null;
     const updated = appState.sessions.find((session) => session.id === sessionId)?.time.updated;
@@ -1736,9 +1753,7 @@ function GenericToolCall(props: {
 
   const bodyId = createUniqueId();
   let taskHeader: HTMLButtonElement | undefined;
-  const observedTaskSessionId = createMemo(() =>
-    props.state.status === 'running' ? taskSessionId() : null
-  );
+  const observedTaskSessionId = createMemo(() => (isRunning() ? taskSessionId() : null));
   createEffect(() => {
     const sessionId = observedTaskSessionId();
     if (sessionId && taskHeader) onCleanup(observeSubagentCard(taskHeader, sessionId));
@@ -1761,12 +1776,12 @@ function GenericToolCall(props: {
         >
           <ToolCallIcon
             toolName={props.tool.tool}
-            statusClass={props.statusClass}
+            statusClass={statusClass()}
             statusLabel={waitingForPermission() ? 'Waiting for permission' : undefined}
             waiting={waitingForPermission()}
           />
           <span
-            class={`tool-invocation-title${props.statusClass === 'tool-status-running' && !isTask() ? ' shimmer-progress' : ''}`}
+            class={`tool-invocation-title${statusClass() === 'tool-status-running' && !isTask() ? ' shimmer-progress' : ''}`}
           >
             {props.title}
           </span>
@@ -1919,7 +1934,7 @@ function GenericToolCall(props: {
                 </Show>
               </div>
             </Show>
-            <Show when={props.state.status === 'running' && !isBash()}>
+            <Show when={isRunning() && !isBash()}>
               <Show when={isTask()} fallback={<div class="tool-invocation-running">Running…</div>}>
                 <button
                   type="button"
@@ -1954,7 +1969,7 @@ function GenericToolCall(props: {
                 </button>
               </Show>
             </Show>
-            <Show when={taskSessionId() && props.state.status !== 'running'}>
+            <Show when={taskSessionId() && !isRunning()}>
               <button
                 type="button"
                 class="tool-invocation-running tool-invocation-subagent-running tool-invocation-subagent-link"

@@ -842,26 +842,33 @@ export const client = {
         signal: AbortSignal;
         directory?: string;
         allowGenerate?: boolean;
+        cacheOnly?: boolean;
         model?: ChatModelSelection | null;
       }
     ): Promise<FollowupSuggestionSet> {
+      const body: FollowupSource & {
+        allowGenerate: boolean;
+        cacheOnly?: boolean;
+        model?: ChatModelSelection;
+      } = {
+        ...source,
+        allowGenerate: options.allowGenerate === true,
+        model: options.model
+          ? {
+              providerID: options.model.providerID,
+              modelID: options.model.modelID,
+              variant: options.model.variant,
+            }
+          : undefined,
+      };
+      if (options.cacheOnly) body.cacheOnly = true;
       return apiCall(
         'POST',
         withDirectory(
           `${VARRO_API_ENDPOINTS.session}/${encodeURIComponent(sessionId)}/followups`,
           options.directory
         ),
-        {
-          ...source,
-          allowGenerate: options.allowGenerate === true,
-          model: options.model
-            ? {
-                providerID: options.model.providerID,
-                modelID: options.model.modelID,
-                variant: options.model.variant,
-              }
-            : undefined,
-        },
+        body,
         { signal: options.signal, timeoutMs: FOLLOWUP_REQUEST_TIMEOUT_MS, retries: 0 }
       );
     },

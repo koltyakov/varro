@@ -552,6 +552,19 @@
           "default": true,
           "description": "Automatically install updates within the installed OpenCode CLI family: @opencode/cli for v2 on Windows, macOS, and Linux; opencode-ai for v1 on macOS and Linux. Does not migrate v1 to v2. Native Windows v1 uses an update prompt."
         },
+        "varro.providerLimits.statusBarDisplay": {
+          "type": "string",
+          "enum": [
+            "rotating",
+            "all"
+          ],
+          "enumDescriptions": [
+            "Show one pinned provider at a time, rotating every 15 seconds.",
+            "Show all pinned providers at once."
+          ],
+          "default": "rotating",
+          "description": "Choose how pinned provider limits appear in the status bar. Providers selected in visible chats in this window are excluded. The tooltip shows available limits for the remaining pinned providers."
+        },
         "varro.chat.showFileDiffs": {
           "type": "boolean",
           "default": false,

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { createComponent, createSignal } from 'solid-js';
+import { reconcile } from 'solid-js/store';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import { setShowFileDiffs, setState } from '../lib/state';
 import type { AssistantMessage, Permission, QuestionRequest, Session, ToolPart } from '../types';
@@ -70,7 +71,7 @@ afterEach(() => {
   setShowFileDiffs(false);
   setState('permissions', []);
   setState('questions', []);
-  setState('sessionStatus', {});
+  setState('sessionStatus', reconcile({}));
   setState('messages', []);
   setState('sessions', []);
   setState('allAgents', []);
@@ -1385,6 +1386,130 @@ describe('ToolCall', () => {
     ]);
   });
 
+  it.each([false, true])(
+    'shows the native continuation child model with child messages loaded=%s',
+    (messagesLoaded) => {
+      setState('allAgents', [
+        {
+          name: 'opus',
+          mode: 'all',
+          permission: [],
+          model: { providerID: 'claude-agent', modelID: 'agent-default' },
+          variant: 'medium',
+        },
+      ]);
+      setState('sessions', [
+        session('subagent-session-1', {
+          parentID: 'session-1',
+          title: 'Original review',
+          time: { created: 500, updated: 500 },
+          model: { providerID: 'claude-agent', id: 'opus', variant: 'high' },
+        }),
+      ]);
+      const part: ToolPart = {
+        id: 'tool-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool: 'task',
+        state: {
+          status: 'running',
+          input: {
+            agent: 'opus',
+            sessionID: 'subagent-session-1',
+            description: 'Investigate frame-gap root cause',
+          },
+          metadata: {},
+          time: { start: 1_100 },
+        },
+      };
+      setState('messages', [
+        {
+          info: assistantMessage('message-1', {
+            providerID: 'openai',
+            modelID: 'gpt-6.1-sol-fast',
+            variant: 'low',
+            time: { created: 1_000 },
+          }),
+          parts: [part],
+        },
+        ...(messagesLoaded
+          ? [
+              {
+                info: assistantMessage('child-message', {
+                  sessionID: 'subagent-session-1',
+                  providerID: 'claude-agent',
+                  modelID: 'opus',
+                  variant: 'high',
+                  time: { created: 1_200 },
+                }),
+                parts: [],
+              },
+            ]
+          : []),
+      ]);
+
+      cleanup = render(() => ToolCall({ part }), container!);
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+      const detail = container?.querySelector('.structured-tool-card')?.textContent || '';
+      expect(detail).toContain('modelclaude-agent/opus');
+      expect(detail).toContain('reasoninghigh');
+      expect(detail).not.toContain('gpt-6.1-sol-fast');
+      expect(detail).not.toContain('agent-default');
+      expect(container?.querySelector('.tool-invocation-running-label')?.textContent).toBe(
+        'Opus subagent is working'
+      );
+      expect(
+        container?.querySelector<HTMLButtonElement>('.tool-invocation-subagent-running')?.disabled
+      ).toBe(false);
+    }
+  );
+
+  it('uses the native agent model before child session details arrive', () => {
+    setState('allAgents', [
+      {
+        name: 'opus',
+        mode: 'all',
+        permission: [],
+        model: { providerID: 'claude-agent', modelID: 'opus', variant: 'high' },
+      },
+    ]);
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: { agent: 'opus', sessionID: 'subagent-session-1' },
+        metadata: {},
+        time: { start: 1_100 },
+      },
+    };
+    setState('messages', [
+      {
+        info: assistantMessage('message-1', {
+          providerID: 'openai',
+          modelID: 'gpt-6.1-sol-fast',
+          variant: 'low',
+        }),
+        parts: [part],
+      },
+    ]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const detail = container?.querySelector('.structured-tool-card')?.textContent || '';
+    expect(detail).toContain('modelclaude-agent/opus');
+    expect(detail).toContain('reasoninghigh');
+    expect(detail).not.toContain('gpt-6.1-sol-fast');
+  });
+
   it('uses the resolved task metadata model before stale agent or parent state', () => {
     setState('sessions', [
       session('subagent-session-1', {
@@ -1632,51 +1757,171 @@ describe('ToolCall', () => {
     expect(runningStatus?.textContent).toContain('Results will appear here when ready.');
   });
 
-  it('shows a wait icon when the subagent is blocked on permission', () => {
-    setState('sessions', [
-      session('session-1'),
-      session('subagent-session-1', { parentID: 'session-1' }),
-    ]);
-    setState('permissions', [
-      {
-        id: 'permission-1',
-        type: 'bash',
-        sessionID: 'subagent-session-1',
-        messageID: 'subagent-message-1',
-        callID: 'subagent-call-1',
-        title: 'Run tests',
-        metadata: {},
-        time: { created: 1 },
-      },
-    ]);
-    const part: ToolPart = {
-      id: 'tool-1',
-      sessionID: 'session-1',
-      messageID: 'message-1',
-      type: 'tool',
-      callID: 'call-1',
-      tool: 'task',
-      state: {
-        status: 'running',
-        input: { prompt: 'Review the implementation' },
-        title: 'Review implementation',
-        metadata: { sessionId: 'subagent-session-1' },
-        time: { start: 0 },
-      },
-    };
+  it.each(['running', 'completed'] as const)(
+    'shows a wait icon when a %s launch has a subagent blocked on permission',
+    (status) => {
+      setState('sessions', [
+        session('session-1'),
+        session('subagent-session-1', { parentID: 'session-1' }),
+      ]);
+      setState('permissions', [
+        {
+          id: 'permission-1',
+          type: 'bash',
+          sessionID: 'subagent-session-1',
+          messageID: 'subagent-message-1',
+          callID: 'subagent-call-1',
+          title: 'Run tests',
+          metadata: {},
+          time: { created: 1 },
+        },
+      ]);
+      setState('sessionStatus', { 'subagent-session-1': { type: 'busy' } });
+      const part: ToolPart = {
+        id: 'tool-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool: 'task',
+        state:
+          status === 'completed'
+            ? {
+                ...completedState({ background: true }, 'Review implementation', 'Working'),
+                metadata: { sessionId: 'subagent-session-1' },
+              }
+            : {
+                status,
+                input: { prompt: 'Review the implementation' },
+                title: 'Review implementation',
+                metadata: { sessionId: 'subagent-session-1' },
+                time: { start: 0 },
+              },
+      };
 
-    cleanup = render(() => ToolCall({ part }), container!);
+      cleanup = render(() => ToolCall({ part }), container!);
 
-    const icon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
-    expect(icon).toBeInstanceOf(HTMLSpanElement);
-    expect(icon?.classList).toContain('tool-call-wait-icon');
-    expect(icon?.classList).not.toContain('tool-call-spinner');
-    expect(icon?.getAttribute('aria-label')).toBe('Waiting for permission');
-    expect(icon?.getAttribute('role')).toBe('status');
-    expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('16px');
-    expect(icon?.style.getPropertyValue('--ui-icon-height')).toBe('16px');
-    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(hourglassIcon));
-  });
+      const icon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
+      expect(icon).toBeInstanceOf(HTMLSpanElement);
+      expect(icon?.classList).toContain('tool-call-wait-icon');
+      expect(icon?.classList).not.toContain('tool-call-spinner');
+      expect(icon?.getAttribute('aria-label')).toBe('Waiting for permission');
+      expect(icon?.getAttribute('role')).toBe('status');
+      expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('16px');
+      expect(icon?.style.getPropertyValue('--ui-icon-height')).toBe('16px');
+      expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(hourglassIcon));
+    }
+  );
+
+  it.each([true, false])(
+    'tracks child status after a completed launch with background input %s',
+    (background) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(10_000);
+      const part: ToolPart = {
+        id: 'tool-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool: 'task',
+        state: {
+          ...completedState(
+            { background, subagent_type: 'general', description: 'Audit gap attribution evidence' },
+            'Audit gap attribution evidence',
+            'The subagent is working in the background.'
+          ),
+          metadata: { sessionID: 'subagent-session-1' },
+          time: { start: 1_000, end: 3_000 },
+        },
+      };
+      cleanup = render(() => ToolCall({ part }), container!);
+      const icon = () => container?.querySelector('.tool-call-icon-task');
+      expect(icon()?.classList).toContain('tool-status-completed');
+
+      // The status can arrive after history, without changing the completed tool part.
+      setState('sessionStatus', { 'subagent-session-1': { type: 'busy' } });
+      expect(icon()?.classList).toContain('tool-call-spinner');
+      expect(icon()?.classList).not.toContain('tool-status-completed');
+      const elapsed = container?.querySelector('.tool-invocation-duration');
+      expect(elapsed?.textContent).toBe('9s');
+      expect(elapsed?.getAttribute('title')).toBe('Elapsed time');
+
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      const working = () => container?.querySelector('.tool-invocation-subagent-running');
+      expect(working()?.textContent).toContain('General subagent is working');
+      expect(container?.querySelector('.tool-invocation-subagent-link')).toBeNull();
+      expect(container?.querySelector('.structured-tool-card')?.textContent).toContain(
+        'The subagent is working in the background.'
+      );
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-subagent-running')?.click();
+      expect(selectSessionMock).toHaveBeenCalledWith('subagent-session-1');
+
+      setState('sessionStatus', 'subagent-session-1', {
+        type: 'retry',
+        attempt: 2,
+        message: 'rate limit exceeded',
+        next: 15_000,
+      });
+      expect(icon()?.classList).toContain('tool-call-spinner');
+      expect(working()?.textContent).toContain('General subagent is retrying');
+      expect(working()?.textContent).toContain('Attempt 2 · rate limit exceeded');
+      expect(container?.querySelector('.tool-invocation-retry-label')?.textContent).toBe(
+        'retrying #2'
+      );
+
+      setState('sessionStatus', 'subagent-session-1', { type: 'idle' });
+      expect(icon()?.classList).toContain('tool-status-completed');
+      expect(icon()?.classList).not.toContain('tool-call-spinner');
+      expect(container?.querySelector('.tool-invocation-subagent-link')?.textContent).toBe(
+        'Open subagent session'
+      );
+      expect(container?.querySelector('.tool-invocation-retry-label')).toBeNull();
+      expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('2s');
+      expect(part.state.status).toBe('completed');
+    }
+  );
+
+  it.each(['completed', 'error'] as const)(
+    'does not mark a %s task running because another child is busy',
+    (status) => {
+      setState('sessionStatus', { 'other-child': { type: 'busy' } });
+      const part: ToolPart = {
+        id: 'tool-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool: 'task',
+        state:
+          status === 'completed'
+            ? {
+                ...completedState({ background: true }, 'Audit', 'Done'),
+                metadata: { sessionID: 'subagent-session-1' },
+              }
+            : {
+                status,
+                input: { background: true },
+                metadata: { sessionID: 'subagent-session-1' },
+                error: 'Launch failed',
+                time: { start: 0, end: 1 },
+              },
+      };
+      cleanup = render(() => ToolCall({ part }), container!);
+      expect(container?.querySelector('.tool-call-spinner')).toBeNull();
+      expect(container?.querySelector('.tool-call-icon-task')?.classList).toContain(
+        `tool-status-${status}`
+      );
+
+      if (status === 'error') {
+        setState('sessionStatus', 'subagent-session-1', { type: 'busy' });
+        expect(container?.querySelector('.tool-call-spinner')).toBeNull();
+        expect(container?.querySelector('.tool-call-icon-task')?.classList).toContain(
+          'tool-status-error'
+        );
+      }
+    }
+  );
 
   it('opens the running subagent session from its status card', () => {
     setState('activeSessionId', 'session-1');

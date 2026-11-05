@@ -1116,6 +1116,7 @@ export type WebviewMessage =
         canAbort: boolean;
         canSwitchSessions: boolean;
         model: ChatModelSelection | null;
+        modelVisible?: boolean;
         sessionId?: string | null;
       };
     }

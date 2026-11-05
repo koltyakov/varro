@@ -465,7 +465,18 @@ export function isProviderLimitPinned(providerID: string) {
   return state.providerLimitPins[providerID] !== undefined;
 }
 
+export function canPinProviderLimits(providerID: string) {
+  const limit = getProviderLimit(providerID, null);
+  return limit?.status === 'available' && limit.windows.length > 0;
+}
+
 export function setProviderLimitPin(providerID: string, displayName: string | null) {
+  if (
+    displayName !== null &&
+    !isProviderLimitPinned(providerID) &&
+    !canPinProviderLimits(providerID)
+  )
+    return;
   const base = getModelPreferencesSnapshot();
   const next = { ...state.providerLimitPins };
   if (displayName === null) delete next[providerID];

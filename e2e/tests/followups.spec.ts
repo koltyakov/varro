@@ -5,6 +5,11 @@ import type { ServerEvent, WebviewMessage } from '../../src/shared/protocol';
 
 const sessionId = 'followups-fixture';
 const created = 1_780_000_000_000;
+const openingSuggestions = {
+  summary:
+    'The parser issue remains unresolved. A focused investigation would identify the next fix.',
+  actions: [{ title: 'Inspect parser failures', prompt: 'Investigate the reported parser issue.' }],
+};
 function assistant(id: string, parentID: string): AssistantMessage {
   return {
     id,
@@ -69,6 +74,143 @@ function history(): MessageEntry[] {
     };
     return [user, answer];
   }).flat();
+}
+
+for (const width of [480, 1280]) {
+  for (const turns of [8, 31]) {
+    for (const { cacheDelayMs, cacheHit } of [
+      { cacheDelayMs: 0, cacheHit: true },
+      { cacheDelayMs: 350, cacheHit: true },
+      { cacheDelayMs: 0, cacheHit: false },
+    ]) {
+      test(`follow-up first reveal at ${width}px with ${turns} turns, cache hit=${cacheHit}, delay=${cacheDelayMs}ms`, async ({
+        page,
+      }, testInfo) => {
+        await page.setViewportSize({ width, height: 850 });
+        const messages = history().slice(-turns * 2);
+        messages[messages.length - 1]!.info = assistant('answer', 'prompt');
+        await page.addInitScript(
+          (capture) => {
+            // SAFETY: Only the isolated playback harness consumes this generated fixture.
+            (
+              window as typeof window & { varroPlaybackCapture: typeof capture }
+            ).varroPlaybackCapture = capture;
+            const frames: Array<{
+              visible: boolean;
+              card: boolean;
+              bottomGap: number;
+              answerTop: number | null;
+            }> = [];
+            const sample = () => {
+              const list = document.querySelector<HTMLElement>('.interactive-list');
+              if (list?.querySelector('[data-msg-id]')) {
+                const answer = list.querySelector('[data-msg-id="answer"]');
+                frames.push({
+                  visible: getComputedStyle(list).visibility !== 'hidden',
+                  card: !!list.querySelector('.followup-suggestions'),
+                  bottomGap: list.scrollHeight - list.scrollTop - list.clientHeight,
+                  answerTop: answer?.getBoundingClientRect().top ?? null,
+                });
+              }
+              if (document.documentElement.dataset.stopFollowupFrames === 'true') {
+                document.documentElement.dataset.followupOpeningFrames = JSON.stringify(frames);
+              } else requestAnimationFrame(sample);
+            };
+            window.addEventListener('varro-test-followup-frames-start', () => {
+              frames.length = 0;
+              document.documentElement.dataset.stopFollowupFrames = 'false';
+              delete document.documentElement.dataset.followupOpeningFrames;
+              requestAnimationFrame(sample);
+            });
+            requestAnimationFrame(sample);
+          },
+          {
+            session: {
+              id: sessionId,
+              projectID: 'test',
+              directory: '/workspace',
+              title: 'Cached follow-ups fixture',
+              version: '1',
+              time: { created, updated: created },
+            },
+            initialMessages: messages,
+            followups: {
+              cacheDelayMs,
+              cached: cacheHit ? openingSuggestions : { summary: '', actions: [] },
+              generated: openingSuggestions,
+              generationDelayMs: 700,
+            },
+          }
+        );
+        await page.goto('/e2e/harness/index.html?scenario=session-playback');
+        const list = page.locator('.interactive-list');
+        for (const visit of cacheHit ? ['cold', 'warm'] : ['cold']) {
+          if (visit === 'warm') {
+            await page.getByLabel('Back to sessions').click();
+            await expect(list).toHaveCount(0);
+            await page.evaluate(() => {
+              window.dispatchEvent(new Event('varro-test-followup-frames-start'));
+            });
+            await page
+              .locator('.session-item')
+              .filter({ hasText: 'Cached follow-ups fixture' })
+              .click();
+          }
+          await expect(
+            page.getByRole('button', { name: 'Inspect parser failures', exact: true })
+          ).toBeVisible();
+          await expect(list).not.toHaveClass(/is-session-hydrating/);
+          await expect(page.locator('[data-msg-id="answer"]')).toBeVisible();
+          await expect
+            .poll(() =>
+              list.evaluate(
+                (element) => element.scrollHeight - element.scrollTop - element.clientHeight
+              )
+            )
+            .toBeLessThanOrEqual(1);
+          await page.waitForTimeout(300);
+          await page.evaluate(() => {
+            document.documentElement.dataset.stopFollowupFrames = 'true';
+          });
+          await expect(page.locator('html')).toHaveAttribute('data-followup-opening-frames', /./);
+          const frames: Array<{
+            visible: boolean;
+            card: boolean;
+            bottomGap: number;
+            answerTop: number | null;
+          }> = JSON.parse(
+            (await page.locator('html').getAttribute('data-followup-opening-frames'))!
+          );
+          await writeFile(
+            testInfo.outputPath(`cached-followup-first-reveal-${visit}.json`),
+            JSON.stringify(frames, null, 2)
+          );
+          const visible = frames.filter((frame) => frame.visible);
+          expect(visible.length).toBeGreaterThan(5);
+          expect(visible.every((frame) => frame.answerTop !== null)).toBe(true);
+          if (cacheHit) {
+            expect(visible.every((frame) => frame.card)).toBe(true);
+            expect(Math.max(...visible.map((frame) => frame.bottomGap))).toBeLessThanOrEqual(1);
+            const tops = visible.map((frame) => frame.answerTop!);
+            expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(1);
+          } else {
+            expect(visible[0]!.card).toBe(false);
+            const arriving = visible.filter((frame) => frame.card);
+            // A miss must reveal history before inference completes, then follow its growth smoothly.
+            expect(arriving.some((frame) => frame.bottomGap > 2)).toBe(true);
+            expect(
+              arriving.some(
+                (frame, index) => index > 0 && frame.bottomGap < arriving[index - 1]!.bottomGap - 1
+              )
+            ).toBe(true);
+            expect(arriving.at(-1)!.bottomGap).toBeLessThanOrEqual(1);
+          }
+          if (cacheDelayMs)
+            expect(frames.some((frame) => !frame.visible && !frame.card)).toBe(true);
+        }
+      });
+    }
+  }
 }
 
 for (const width of [480, 1280]) {
@@ -224,7 +366,7 @@ for (const width of [480, 1280]) {
         );
         return { id: row?.dataset.msgId, top: row?.getBoundingClientRect().top };
       });
-      await page.evaluate(() => {
+      const arrivalFrames = await page.evaluate(async () => {
         const suggestions = {
           summary:
             'The empty-token parser issue is still unresolved, and focused regression coverage is missing. Investigating the failure and adding a test would address the reported gaps.',
@@ -257,7 +399,33 @@ for (const width of [480, 1280]) {
             },
           })
         );
+        const transcript = document.querySelector<HTMLElement>('.interactive-list');
+        if (!transcript) throw new Error('Missing transcript before live follow-up arrival');
+        const frames: Array<{ visible: boolean; card: boolean; bottomGap: number }> = [];
+        for (let frame = 0; frame < 30; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          frames.push({
+            visible: getComputedStyle(transcript).visibility !== 'hidden',
+            card: !!transcript.querySelector('.followup-suggestions'),
+            bottomGap: transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight,
+          });
+        }
+        return frames;
       });
+      await writeFile(
+        testInfo.outputPath('live-followup-arrival.json'),
+        JSON.stringify(arrivalFrames, null, 2)
+      );
+      expect(arrivalFrames.every((frame) => frame.visible)).toBe(true);
+      if (!detached) {
+        const arriving = arrivalFrames.filter((frame) => frame.card);
+        expect(arriving.some((frame) => frame.bottomGap > 2)).toBe(true);
+        expect(
+          arriving.some(
+            (frame, index) => index > 0 && frame.bottomGap < arriving[index - 1]!.bottomGap - 1
+          )
+        ).toBe(true);
+      }
       const suggestions = page.getByRole('group', { name: 'Suggested next actions' });
       await expect(suggestions).toBeVisible();
       await expect(suggestions.locator('.followup-suggestions-actions button')).toHaveCount(3);

@@ -1301,6 +1301,7 @@ export class RestProxy {
                 directory: scopedWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
                 signal: requestSignal,
                 allowGenerate: asRecord(payload.body)?.allowGenerate === true,
+                cacheOnly: asRecord(payload.body)?.cacheOnly === true,
                 isModelCurrent: () => readFollowupsEnabled() && readFollowupModel() === modelRef,
               })
             : EMPTY_FOLLOWUP_SUGGESTIONS;

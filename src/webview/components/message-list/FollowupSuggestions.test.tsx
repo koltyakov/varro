@@ -76,12 +76,17 @@ afterEach(() => {
   setState('messages', []);
   setState('queuedMessages', []);
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 async function flush() {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 }
-function mount(initialWorking = true, agent = 'build') {
+function mount(
+  initialWorking = true,
+  agent = 'build',
+  onRestoreStart?: () => (() => void) | undefined
+) {
   const complete = () =>
     setState(
       'messages',
@@ -104,6 +109,7 @@ function mount(initialWorking = true, agent = 'build') {
         turnId="user"
         working={working()}
         blocked={blocked()}
+        onRestoreStart={onRestoreStart}
       />
     ),
     container
@@ -284,10 +290,13 @@ describe('FollowupSuggestions', () => {
   it.each([0, 2, 3])(
     'admits an unread opening only when the answer completed after the prior seen marker %s',
     async (seenAt) => {
+      const onRestoreStart = vi.fn<() => (() => void) | undefined>();
+      vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
       setState('followupOpening', { sessionId: 'session-1', seenAt });
-      mount(false);
+      mount(false, 'build', onRestoreStart);
       await flush();
       expect(vi.mocked(client.varro.followups).mock.calls[0]?.[2].allowGenerate).toBe(seenAt < 2);
+      expect(onRestoreStart).toHaveBeenCalledOnce();
     }
   );
 
@@ -306,11 +315,114 @@ describe('FollowupSuggestions', () => {
   });
 
   it('restores a cached card on a read-history visit without allowing inference', async () => {
+    const finishRestore = vi.fn(() => {
+      expect(container.querySelector('.followup-suggestions')).not.toBeNull();
+    });
+    const onRestoreStart = vi.fn(() => {
+      expect(container.querySelector('.followup-suggestions')).toBeNull();
+      return finishRestore;
+    });
     vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
-    mount(false);
+    mount(false, 'build', onRestoreStart);
     await flush();
+    expect(onRestoreStart).toHaveBeenCalledOnce();
+    expect(finishRestore).toHaveBeenCalledOnce();
+    expect(client.varro.followups).toHaveBeenCalledOnce();
     expect(container.querySelector('.followup-suggestions')).not.toBeNull();
     expect(vi.mocked(client.varro.followups).mock.calls[0]?.[2].allowGenerate).toBe(false);
+    expect(vi.mocked(client.varro.followups).mock.calls[0]?.[2].cacheOnly).toBe(true);
+  });
+
+  it('does not hold or cache-probe fresh live-turn suggestions', async () => {
+    const onRestoreStart = vi.fn<() => (() => void) | undefined>();
+    const { setWorking } = mount(true, 'build', onRestoreStart);
+    setWorking(false);
+    await flush();
+    expect(container.querySelector('.followup-suggestions')).not.toBeNull();
+    expect(onRestoreStart).not.toHaveBeenCalled();
+    expect(client.varro.followups).toHaveBeenCalledOnce();
+    expect(vi.mocked(client.varro.followups).mock.calls[0]?.[2].cacheOnly).toBeUndefined();
+  });
+
+  it('holds initial reveal until a delayed cached card has mounted', async () => {
+    let finish!: (value: typeof suggestions) => void;
+    vi.mocked(client.varro.followups).mockImplementationOnce(
+      () => new Promise((resolve) => (finish = resolve))
+    );
+    const finishRestore = vi.fn();
+    mount(false, 'build', () => finishRestore);
+    await flush();
+    expect(finishRestore).not.toHaveBeenCalled();
+    expect(container.querySelector('.followup-suggestions')).toBeNull();
+    finish(suggestions);
+    await flush();
+    expect(container.querySelector('.followup-suggestions')).not.toBeNull();
+    expect(finishRestore).toHaveBeenCalledOnce();
+  });
+
+  it.each(['miss', 'error'])(
+    'releases initial reveal after a cache %s without waiting for generation',
+    async (result) => {
+      if (result === 'miss')
+        vi.mocked(client.varro.followups).mockResolvedValueOnce({ summary: '', actions: [] });
+      else vi.mocked(client.varro.followups).mockRejectedValueOnce(new Error('Cache unavailable'));
+      let finish!: (value: typeof suggestions) => void;
+      vi.mocked(client.varro.followups).mockImplementationOnce(
+        () => new Promise((resolve) => (finish = resolve))
+      );
+      const finishRestore = vi.fn();
+      setState('followupOpening', { sessionId: 'session-1', seenAt: 0 });
+      mount(false, 'build', () => finishRestore);
+      await flush();
+      expect(finishRestore).toHaveBeenCalledOnce();
+      expect(container.querySelector('.followup-suggestions')).toBeNull();
+      expect(
+        vi.mocked(client.varro.followups).mock.calls.map(([, , options]) => ({
+          cacheOnly: options.cacheOnly === true,
+          allowGenerate: options.allowGenerate,
+        }))
+      ).toEqual([
+        { cacheOnly: true, allowGenerate: false },
+        { cacheOnly: false, allowGenerate: true },
+      ]);
+      finish(suggestions);
+      await flush();
+      expect(container.querySelector('.followup-suggestions')).not.toBeNull();
+    }
+  );
+
+  it('bounds the initial cache hold and ignores a cache result arriving after its deadline', async () => {
+    vi.useFakeTimers();
+    let finish!: (value: typeof suggestions) => void;
+    vi.mocked(client.varro.followups).mockImplementationOnce(
+      () => new Promise((resolve) => (finish = resolve))
+    );
+    const finishRestore = vi.fn();
+    mount(false, 'build', () => finishRestore);
+    const signal = vi.mocked(client.varro.followups).mock.calls[0]![2].signal;
+    await vi.advanceTimersByTimeAsync(2_001);
+    expect(signal.aborted).toBe(true);
+    expect(finishRestore).toHaveBeenCalledOnce();
+    finish(suggestions);
+    await flush();
+    expect(container.querySelector('.followup-suggestions')).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('releases an obsolete cache hold on session replacement and ignores its late result', async () => {
+    let finish!: (value: typeof suggestions) => void;
+    vi.mocked(client.varro.followups).mockImplementationOnce(
+      () => new Promise((resolve) => (finish = resolve))
+    );
+    const finishRestore = vi.fn();
+    mount(false, 'build', () => finishRestore);
+    const signal = vi.mocked(client.varro.followups).mock.calls[0]![2].signal;
+    setState('activeSessionId', 'session-2');
+    expect(signal.aborted).toBe(true);
+    expect(finishRestore).toHaveBeenCalledOnce();
+    finish(suggestions);
+    await flush();
+    expect(container.querySelector('.followup-suggestions')).toBeNull();
   });
 
   it('persists explicit dismissal without sending a prompt', async () => {

@@ -29,6 +29,7 @@ function getTaskSessionIdFromMetadata(metadata: UnknownRecord | undefined) {
 }
 
 function getTaskSessionIdFromInput(input: UnknownRecord | undefined) {
+  if (isString(input?.sessionID)) return input.sessionID;
   return isString(input?.task_id) ? input.task_id : null;
 }
 

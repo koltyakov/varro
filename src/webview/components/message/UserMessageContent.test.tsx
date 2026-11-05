@@ -26,6 +26,7 @@ import { formatInlineProblem, problemReferenceMarker } from '../../lib/editor-pr
 import { pastedTextDataUrl } from '../../../shared/pasted-text';
 import { createChatAnnotation } from '../../../shared/chat-annotation';
 import { citationPathChecks } from '../../lib/citation-path-checks';
+import { isAssistantActivityPart } from '../../lib/assistant-activity';
 
 const selectSessionMock = vi.hoisted(() => vi.fn());
 const retryMessageMock = vi.hoisted(() => vi.fn());
@@ -116,13 +117,14 @@ describe('native subagent results', () => {
         id: part.id,
         messageID: part.messageID,
         sessionID: part.sessionID,
-        tool: 'task',
+        tool: 'automatic_action',
         state: {
           status: resultState === 'completed' ? 'completed' : 'error',
           metadata: { sessionID: 'native-child' },
         },
       });
       const action = parsed.automaticParts[0]!;
+      expect(isAssistantActivityPart(action)).toBe(true);
       if (action.state.status === 'completed') expect(action.state.output).toBe('Audit result');
       expect(getUserMessagePreviewText([part])).toBe('(no content)');
       expect(hasUserMessageEditableContent([part])).toBe(false);

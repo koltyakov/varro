@@ -87,6 +87,38 @@ test('opens manage models from the picker and filters the model catalog', async 
   await expect(page.getByText('GitHub Copilot', { exact: true })).toHaveCount(0);
 });
 
+test('returns to the same draft when the Models module cannot load', async ({ page }) => {
+  let failedImports = 0;
+  await page.route('**/src/webview/components/ModelsPanel.tsx*', (route) => {
+    failedImports += 1;
+    return route.abort('failed');
+  });
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('Keep my unsent draft');
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
+  expect(failedImports).toBe(0);
+  await page.getByRole('button', { name: 'Manage models', exact: true }).click();
+
+  const errorPanel = page.getByRole('region', { name: 'Models', exact: true });
+  await expect(errorPanel.getByRole('alert')).toContainText('Models could not load');
+  await expect(errorPanel).toContainText('updated or reinstalled');
+  await expect(errorPanel.getByRole('button', { name: 'Reload sidebar' })).toBeVisible();
+  expect(failedImports).toBe(1);
+  await expect(page.getByText('Something went wrong', { exact: true })).toHaveCount(0);
+  await errorPanel.getByRole('button', { name: 'Back to chat' }).click();
+
+  await expect(composer).toBeVisible();
+  await expect(composer).toHaveText('Keep my unsent draft');
+  await composer.fill('I can still edit this draft');
+
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
+  await page.getByRole('button', { name: 'Manage models', exact: true }).click();
+  await expect(errorPanel.getByRole('alert')).toContainText('Models could not load');
+  await errorPanel.getByRole('button', { name: 'Back to chat' }).click();
+  await expect(composer).toHaveText('I can still edit this draft');
+});
+
 test('refreshes global vision tags and offers the same vision menu without a project agent', async ({
   page,
 }) => {

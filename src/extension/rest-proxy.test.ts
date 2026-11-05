@@ -921,9 +921,13 @@ describe('RestProxy handleRequest', () => {
     proxy.dispose();
   });
 
-  it.each([false, true])(
-    'forwards explicit follow-up admission %s to the host service',
-    async (allowGenerate) => {
+  it.each([
+    { allowGenerate: false, cacheOnly: false },
+    { allowGenerate: true, cacheOnly: false },
+    { allowGenerate: false, cacheOnly: true },
+  ])(
+    'forwards explicit follow-up admission $allowGenerate and cache-only $cacheOnly to the host service',
+    async ({ allowGenerate, cacheOnly }) => {
       const { proxy, callbacks } = createProxy();
       const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
         get: vi.fn(() => 'openai/small'),
@@ -940,10 +944,11 @@ describe('RestProxy handleRequest', () => {
             userPrompt: 'Review',
             answer: 'One bug remains',
             allowGenerate,
+            cacheOnly,
           })
         );
         expect(suggest).toHaveBeenCalledWith(
-          expect.objectContaining({ sessionId: 'session-1', allowGenerate })
+          expect.objectContaining({ sessionId: 'session-1', allowGenerate, cacheOnly })
         );
       } finally {
         suggest.mockRestore();

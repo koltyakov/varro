@@ -61,7 +61,8 @@ export interface MessageRouterCallbacks {
     canAbort: boolean,
     canSwitchSessions: boolean,
     model: CommandStatePayload['model'],
-    sessionId?: string | null
+    sessionId?: string | null,
+    modelVisible?: boolean
   ): void;
   acknowledgeSessionSeen(sessionId: string): void;
   updateSessionReadState(sessionId: string, seenAt: number): Promise<void>;
@@ -202,7 +203,8 @@ export class MessageRouter {
             msg.payload.canAbort,
             msg.payload.canSwitchSessions,
             msg.payload.model,
-            msg.payload.sessionId
+            msg.payload.sessionId,
+            msg.payload.modelVisible
           );
           break;
         case 'session/seen':

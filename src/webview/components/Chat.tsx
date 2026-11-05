@@ -343,6 +343,7 @@ export function Chat() {
       canAbort: Boolean(activeSessionId) && isActiveSessionWorking(),
       canSwitchSessions,
       model: modelPayload,
+      modelVisible: shouldRenderWorkspace() && !showModels(),
       sessionId: activeSessionId,
     };
     const key = JSON.stringify(payload);

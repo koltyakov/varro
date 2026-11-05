@@ -108,6 +108,53 @@ function setup() {
 }
 
 describe('FollowupService', () => {
+  it('returns cached suggestions without admitting generation for an opening cache probe', async () => {
+    const { server, request, input } = setup();
+    const service = new FollowupService(server);
+    expect(await service.suggest(input)).toEqual(suggestions);
+    request.mockClear();
+    expect(await service.suggest({ ...input, cacheOnly: true, allowGenerate: false })).toEqual(
+      suggestions
+    );
+    expect(request.mock.calls.some(([, path]) => path === '/api/experimental/generate')).toBe(
+      false
+    );
+  });
+
+  it('returns an opening cache miss without generating even when generation is allowed', async () => {
+    const { server, request, input } = setup();
+    expect(await new FollowupService(server).suggest({ ...input, cacheOnly: true })).toEqual(
+      EMPTY_FOLLOWUP_SUGGESTIONS
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('does not wait for pending same-host or other-host generation during an opening cache probe', async () => {
+    const { server, request, input } = setup();
+    const original = request.getMockImplementation()!;
+    let finish!: (value: { data: { text: string } }) => void;
+    request.mockImplementation((...args) =>
+      args[1] === '/api/experimental/generate'
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : original(...args)
+    );
+    const service = new FollowupService(server);
+    const pending = service.suggest(input);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    for (const reader of [service, new FollowupService(server)]) {
+      expect(await reader.suggest({ ...input, cacheOnly: true })).toEqual(
+        EMPTY_FOLLOWUP_SUGGESTIONS
+      );
+    }
+    finish({ data: { text: JSON.stringify(suggestions) } });
+    expect(await pending).toEqual(suggestions);
+    expect(
+      request.mock.calls.filter(([, path]) => path === '/api/experimental/generate')
+    ).toHaveLength(1);
+  });
+
   it('waits for another host to complete a pending admission without generating twice', async () => {
     const { server, request, input } = setup();
     const original = request.getMockImplementation()!;

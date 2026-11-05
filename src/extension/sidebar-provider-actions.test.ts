@@ -561,7 +561,9 @@ describe('createSidebarProviderActions', () => {
     actions.updateCommandState(true, false, model);
 
     expect(webviewSession.updateCommandState).toHaveBeenCalledWith(true, false);
-    expect(deps.setActiveChatModel).toHaveBeenCalledWith(model);
+    expect(deps.setActiveChatModel).toHaveBeenCalledWith(model, true);
+    actions.updateCommandState(true, false, model, undefined, false);
+    expect(deps.setActiveChatModel).toHaveBeenLastCalledWith(model, false);
   });
 
   it('forwards session read acknowledgements', () => {

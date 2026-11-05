@@ -613,7 +613,8 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message?.payload);
       if (
         typeof payload?.canAbort !== 'boolean' ||
-        typeof payload.canSwitchSessions !== 'boolean'
+        typeof payload.canSwitchSessions !== 'boolean' ||
+        (payload.modelVisible !== undefined && typeof payload.modelVisible !== 'boolean')
       ) {
         return null;
       }
@@ -626,6 +627,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
           model: null,
         };
         if (sessionId.value !== undefined) commandState.sessionId = sessionId.value;
+        if (payload.modelVisible !== undefined) commandState.modelVisible = payload.modelVisible;
         return { type, payload: commandState };
       }
       const model = asRecord(payload.model);
@@ -649,6 +651,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         model: selectedModel,
       };
       if (sessionId.value !== undefined) commandState.sessionId = sessionId.value;
+      if (payload.modelVisible !== undefined) commandState.modelVisible = payload.modelVisible;
       return { type, payload: commandState };
     }
 
