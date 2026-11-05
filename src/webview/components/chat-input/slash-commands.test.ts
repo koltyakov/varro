@@ -15,6 +15,30 @@ vi.mock('../../hooks/useOpenCode', () => ({
 describe('getSlashCommands', () => {
   beforeEach(() => resetDefaultAppState());
 
+  it('registers both MCP command names and passes a server search to the picker', () => {
+    const onOpenMcps = vi.fn();
+    const commands = getSlashCommands({
+      hasCurrentSession: false,
+      canInit: false,
+      onConnectProvider: () => {},
+      onOpenMcps,
+      onOpenSettings: () => {},
+      onExportSession: () => {},
+      onPauseSession: vi.fn(async () => {}),
+      onGenerateStats: () => {},
+      customCommands: [
+        { name: 'mcp', template: 'Do not send' },
+        { name: 'mcps', template: 'Do not send' },
+      ],
+    });
+    const mcp = commands.find((command) => command.name === 'mcp');
+    expect(mcp?.aliases).toEqual(['mcps']);
+    expect(mcp?.acceptsArguments).toBe(true);
+    expect(commands.filter((command) => ['mcp', 'mcps'].includes(command.name))).toHaveLength(1);
+    void mcp?.action(' at ');
+    expect(onOpenMcps).toHaveBeenCalledWith('at');
+  });
+
   it.each([1, 2] as const)(
     'reserves /btw and offers it only for an existing V2 conversation on API %s',
     (apiVersion) => {
@@ -24,6 +48,7 @@ describe('getSlashCommands', () => {
         hasCurrentSession: true,
         canInit: false,
         onConnectProvider: () => {},
+        onOpenMcps: () => {},
         onOpenSettings: () => {},
         onExportSession: () => {},
         onPauseSession: vi.fn(async () => {}),
@@ -47,6 +72,7 @@ describe('getSlashCommands', () => {
       hasCurrentSession: false,
       canInit: true,
       onConnectProvider: () => {},
+      onOpenMcps: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
       onPauseSession: vi.fn(async () => {}),
@@ -69,6 +95,7 @@ describe('getSlashCommands', () => {
       'compact',
       'connect',
       'init',
+      'mcp',
       'problems',
       'ralph',
       'review',
@@ -84,7 +111,7 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.name === 'redo')).toBe(false);
     expect(commands.some((command) => command.name === 'diagnostics')).toBe(false);
     expect(commands.some((command) => command.name === 'attach')).toBe(false);
-    expect(commands.some((command) => command.name === 'mcp')).toBe(false);
+    expect(commands.some((command) => command.name === 'mcp')).toBe(true);
     expect(commands.some((command) => command.name === 'models')).toBe(false);
     expect(commands.some((command) => command.name === 'new')).toBe(false);
     expect(commands.some((command) => command.name === 'sessions')).toBe(false);
@@ -104,6 +131,7 @@ describe('getSlashCommands', () => {
       hasCurrentSession: true,
       canInit: false,
       onConnectProvider: () => {},
+      onOpenMcps: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
       onPauseSession: vi.fn(async () => {}),
@@ -124,6 +152,7 @@ describe('getSlashCommands', () => {
       hasCurrentSession: true,
       canInit: false,
       onConnectProvider: () => {},
+      onOpenMcps: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
       onPauseSession: vi.fn(async () => {}),
@@ -156,6 +185,7 @@ describe('getSlashCommands', () => {
       hasCurrentSession: true,
       canInit: false,
       onConnectProvider: () => {},
+      onOpenMcps: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
       onPauseSession: vi.fn(async () => {}),
@@ -185,6 +215,7 @@ describe('getSlashCommands', () => {
         hasCurrentSession,
         canInit: false,
         onConnectProvider: () => {},
+        onOpenMcps: () => {},
         onOpenSettings: () => {},
         onExportSession: () => {},
         onPauseSession: vi.fn(async () => {}),

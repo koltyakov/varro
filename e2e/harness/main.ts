@@ -11,6 +11,7 @@ import type {
   WebviewThemeKind,
 } from '../../src/shared/protocol';
 import { isPermissionMode, VARRO_API_ENDPOINTS } from '../../src/shared/protocol';
+import { parseMcpConfigSnippet } from '../../src/shared/mcp-config';
 import { BACKGROUND_OUTPUT_CHUNK_BYTES } from '../../src/shared/background-process';
 import type { BackgroundProcess } from '../../src/shared/background-process';
 import type { FollowupSuggestionSet } from '../../src/shared/followups';
@@ -237,6 +238,7 @@ type HarnessWindow = Window & {
     updateMessageInfo?: (info: Message) => void;
     updateMessagePart?: (part: Part) => void;
     updateSessionStatus?: (sessionId: string, status: SessionStatus) => void;
+    updateMcpStatus?: (name: string, status: ScenarioState['mcpStatus'][string]) => void;
     releaseHistoryRequests?: () => void;
     releaseNextHistoryRequest?: () => boolean;
     pendingHistoryRequestCount?: () => number;
@@ -2334,6 +2336,17 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       playwright: { status: 'disabled' },
       github: { status: 'failed', error: 'CLI not authenticated' },
     };
+    if (new URLSearchParams(window.location.search).has('mcpAuth')) {
+      state.mcpStatus = {
+        atlassian: {
+          status: 'needs_auth',
+          error: 'MCP server "https://mcp.atlassian.com/v2/mcp" requires a login',
+        },
+        'browser-bridge': { status: 'disabled' },
+        lightpanda: { status: 'disabled' },
+      };
+    }
+    if (new URLSearchParams(window.location.search).has('mcpEmpty')) state.mcpStatus = {};
     state.storedState = {
       sessionSelectedMcps: {
         [session.id]: ['chrome'],
@@ -6046,6 +6059,40 @@ async function handleApiRequest(
     return state.mcpStatus;
   }
 
+  const mcpAuth = path.match(/^\/mcp\/([^/]+)\/auth(?:\/(callback))?$/);
+  if (mcpAuth && method === 'POST') {
+    const name = decodeURIComponent(mcpAuth[1]!);
+    if (mcpAuth[2] === 'callback') {
+      if (asRecord(body)?.code !== 'test-oauth-code') throw new Error('Invalid test OAuth code');
+      state.mcpStatus[name] = { status: 'connected' };
+      return state.mcpStatus[name];
+    }
+    return { authorizationUrl: 'https://mcp.example.com/authorize', oauthState: 'test-state' };
+  }
+
+  if (path === VARRO_API_ENDPOINTS.mcpConfigOpen && method === 'POST') return true;
+  if (path === VARRO_API_ENDPOINTS.mcpConfig && method === 'POST') {
+    const bodyRecord = asRecord(body);
+    if (
+      !state.mcpDefaults ||
+      typeof bodyRecord?.json !== 'string' ||
+      (bodyRecord.scope !== 'global' && bodyRecord.scope !== 'project')
+    )
+      throw new Error('Invalid MCP import fixture request');
+    const { servers } = parseMcpConfigSnippet(
+      bodyRecord.json,
+      typeof bodyRecord.name === 'string' ? bodyRecord.name : undefined
+    );
+    const target = state.mcpDefaults[bodyRecord.scope];
+    if (Object.keys(servers).some((name) => Object.hasOwn(target, name)))
+      throw new Error('MCP server is already configured in this scope');
+    for (const [name, server] of Object.entries(servers)) {
+      target[name] = server.disabled !== true && server.enabled !== false;
+      state.mcpStatus[name] = { status: 'disabled' };
+    }
+    state.mcpDefaults.effective = { ...state.mcpDefaults.global, ...state.mcpDefaults.project };
+    return structuredClone(state.mcpDefaults);
+  }
   if (path === VARRO_API_ENDPOINTS.mcpDefaults) {
     if (!state.mcpDefaults) {
       const global = Object.fromEntries(
@@ -7069,6 +7116,9 @@ function setUpHarness() {
     },
     updateSessionStatus: (sessionId, status) => {
       scenarioState.sessionStatuses[sessionId] = status;
+    },
+    updateMcpStatus: (name, status) => {
+      scenarioState.mcpStatus[name] = status;
     },
     replayServerEvent: (event, projectedMessage) =>
       replayServerEvent(scenarioState, event, projectedMessage),

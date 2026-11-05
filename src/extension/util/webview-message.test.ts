@@ -269,6 +269,11 @@ describe('webview message validation', () => {
     );
     expect(isAllowedApiRequest('GET', '/varro/workspace-file/pick')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/opencode-config')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/mcp-config')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/mcp-config/open')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/mcp-config')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/varro/mcp-config/open')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/varro/mcp-config?path=/etc/other.json')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/opencode-config/model-routing')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/opencode-config/permissions')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/opencode-config/permissions')).toBe(true);

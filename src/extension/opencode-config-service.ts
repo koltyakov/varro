@@ -14,6 +14,8 @@ import type {
 } from '../shared/opencode-types';
 import { isScalarConfigPermission } from '../shared/permission-rules';
 import type { McpDefaults, OpenCodeModelRouting } from '../shared/protocol';
+import { parseMcpConfigSnippet } from '../shared/mcp-config';
+import type { McpConfigScope } from '../shared/mcp-config';
 import { VARRO_VISION_AGENT_DESCRIPTION, VARRO_VISION_AGENT_PROMPT } from '../shared/vision-agent';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
@@ -229,6 +231,144 @@ export class OpenCodeConfigService {
       return { ...defaults, global: {}, project: {}, editable: false };
     }
     return this.mcpDefaultsFromFiles((await this.readOpenCodeConfigObject(true)).files);
+  }
+
+  async openMcpConfig(scope: McpConfigScope): Promise<void> {
+    if (this.callbacks.server.isAttachOnly)
+      throw new Error(
+        'Open the OpenCode configuration on the server host. This connection is managed elsewhere.'
+      );
+    const workspacePath = scope === 'project' ? this.getOpenCodeWorkspacePath() : undefined;
+    const candidates = workspacePath
+      ? resolveOpenCodeProjectConfigPaths(
+          workspacePath,
+          (candidate) =>
+            getOpenCodePathApi(candidate).basename(candidate) === '.git'
+              ? existsSync(candidate)
+              : true,
+          this.callbacks.server.apiVersion
+        )
+      : getOpenCodeConfigPaths();
+    let path: string | undefined;
+    for (const candidate of candidates.toReversed()) {
+      if (await this.readConfigStat(vscode.Uri.file(candidate))) {
+        path = candidate;
+        break;
+      }
+    }
+    path ??= workspacePath
+      ? getOpenCodePathApi(workspacePath).join(workspacePath, 'opencode.json')
+      : getOpenCodeConfigPaths()[1]!;
+    const uri = vscode.Uri.file(path);
+    await withOpenCodeConfigUpdateLock(getCanonicalOpenCodeConfigPath(path), async () => {
+      if (await this.readConfigStat(uri)) return;
+      if (
+        vscode.workspace.textDocuments.some((document) =>
+          isSameWorkspacePath(document.uri.fsPath, path)
+        )
+      )
+        return;
+      await vscode.workspace.fs.createDirectory(
+        vscode.Uri.file(getOpenCodePathApi(path).dirname(path))
+      );
+      await vscode.workspace.fs.writeFile(
+        uri,
+        new TextEncoder().encode('{\n  "$schema": "https://opencode.ai/config.json"\n}\n')
+      );
+    });
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), {
+      preview: false,
+    });
+  }
+
+  private mcpConfigTarget(
+    snapshot: OpenCodeConfigSnapshot,
+    scope: McpConfigScope
+  ): OpenCodeConfigFile {
+    if (scope === 'project') return snapshot.target;
+    const paths = getOpenCodeConfigPaths();
+    const existing = snapshot.files.filter((file) => paths.includes(file.path)).at(-1);
+    if (existing) return existing;
+    const path = paths[1]!;
+    return { path, uri: vscode.Uri.file(path), raw: '{}\n', config: {} };
+  }
+
+  async addMcpConfig(scope: McpConfigScope, json: string, name?: string): Promise<McpDefaults> {
+    const { servers, requiresName } = parseMcpConfigSnippet(json, name);
+    if (requiresName && !Object.keys(servers).length)
+      throw new Error('Enter a name for this MCP server.');
+    let snapshot = await this.readOpenCodeConfigObject(true);
+    while (true) {
+      const lockPath = getCanonicalOpenCodeConfigPath(this.mcpConfigTarget(snapshot, scope).path);
+      const retry = await withOpenCodeConfigUpdateLock(lockPath, async () => {
+        const current = await this.readOpenCodeConfigObject(true);
+        const target = this.mcpConfigTarget(current, scope);
+        if (getCanonicalOpenCodeConfigPath(target.path) !== lockPath) return current;
+        if (
+          vscode.workspace.textDocuments.some(
+            (document) => document.isDirty && isSameWorkspacePath(document.uri.fsPath, target.path)
+          )
+        )
+          throw new Error(`${target.path} has unsaved changes; save before adding MCP servers.`);
+        const globalPaths = getOpenCodeConfigPaths();
+        const scopeFiles = current.files.filter(
+          (file) => globalPaths.includes(file.path) === (scope === 'global')
+        );
+        const duplicate = Object.keys(servers).find((key) =>
+          scopeFiles.some((file) => this.mcpServer(file.config, key))
+        );
+        if (duplicate)
+          throw new Error(
+            `MCP server ${duplicate} is already configured in this scope. Open the config file to edit it.`
+          );
+        const initialStat = await this.readConfigStat(target.uri);
+        const mcp = asRecord(target.config.mcp);
+        if (
+          (target.config.mcp !== undefined && !mcp) ||
+          (mcp?.servers !== undefined && !asRecord(mcp.servers))
+        )
+          throw new Error(
+            'The existing MCP configuration is invalid. Open the config file to fix it before adding servers.'
+          );
+        const native =
+          this.callbacks.server.apiVersion === 2 &&
+          (!!asRecord(mcp?.servers) || !Object.keys(this.mcpServers(target.config)).length);
+        let raw = target.raw.trim() ? target.raw : '{}\n';
+        if (!target.config.$schema)
+          raw = applyJsoncChange(raw, ['$schema'], 'https://opencode.ai/config.json');
+        for (const [key, value] of Object.entries(servers)) {
+          const server = { ...value };
+          if (native) {
+            if (typeof server.enabled === 'boolean') server.disabled = !server.enabled;
+            delete server.enabled;
+          } else {
+            if (typeof server.disabled === 'boolean') server.enabled = !server.disabled;
+            delete server.disabled;
+          }
+          raw = applyJsoncChange(raw, native ? ['mcp', 'servers', key] : ['mcp', key], server);
+        }
+        if (!this.areConfigStatsEqual(initialStat, await this.readConfigStat(target.uri)))
+          throw new Error(`${target.path} changed while adding MCP servers; please retry.`);
+        if (initialStat) {
+          const latest = new TextDecoder().decode(await vscode.workspace.fs.readFile(target.uri));
+          if (latest !== target.raw)
+            throw new Error(`${target.path} changed while adding MCP servers; please retry.`);
+        } else
+          await vscode.workspace.fs.createDirectory(
+            vscode.Uri.file(getOpenCodePathApi(target.path).dirname(target.path))
+          );
+        await vscode.workspace.fs.writeFile(
+          target.uri,
+          new TextEncoder().encode(raw.endsWith('\n') ? raw : `${raw}\n`)
+        );
+        if (scope === 'global') await this.callbacks.refreshOpenCodeGlobalConfig?.();
+        else
+          await this.callbacks.refreshOpenCodeConfig?.(undefined, undefined, current.workspacePath);
+        return undefined;
+      });
+      if (!retry) return this.readMcpDefaults();
+      snapshot = retry;
+    }
   }
 
   async updateMcpDefault(

@@ -503,3 +503,202 @@ describe('MCP defaults configuration', () => {
     });
   });
 });
+
+describe('MCP configuration import and editor access', () => {
+  const remote = { type: 'remote', url: 'https://example.com/mcp' };
+
+  function mockFiles(files: Map<string, string>) {
+    mockConfigFiles(files);
+    vscodeMock.workspace.fs.stat.mockImplementation(async (uri: { fsPath: string }) => {
+      const raw = files.get(uri.fsPath);
+      if (raw === undefined) throw { code: 'FileNotFound' };
+      return { type: 1, ctime: 0, mtime: 1, size: raw.length };
+    });
+  }
+
+  async function request(
+    body: { scope: string; json?: string; name?: string },
+    apiVersion: 1 | 2 = 2,
+    open = false,
+    attached = false
+  ) {
+    const server = createServer({ apiVersion, isAttachOnly: attached });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 40,
+        method: 'POST',
+        path: open ? '/varro/mcp-config/open' : '/varro/mcp-config',
+        body,
+      },
+    });
+    return posted;
+  }
+
+  it.each([1, 2] as const)(
+    'writes a project import using API %s configuration nesting',
+    async (version) => {
+      const files = new Map<string, string>();
+      mockFiles(files);
+      const posted = await request(
+        {
+          scope: 'project',
+          json: JSON.stringify({ mcpServers: { docs: { ...remote, disabled: true } } }),
+        },
+        version
+      );
+      const docs = version === 2 ? { ...remote, disabled: true } : { ...remote, enabled: false };
+      expect(JSON.parse(files.get('/repo/opencode.json')!)).toEqual({
+        $schema: 'https://opencode.ai/config.json',
+        mcp: version === 2 ? { servers: { docs } } : { docs },
+      });
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: {
+          id: 40,
+          data: {
+            global: {},
+            project: { docs: false },
+            effective: { docs: false },
+            editable: true,
+          },
+        },
+      });
+    }
+  );
+
+  it('preserves comments, existing servers, project overrides, and unrelated settings', async () => {
+    const globalPath = getOpenCodeConfigPaths()[2]!;
+    const files = new Map([
+      [
+        globalPath,
+        '{ // preserve me\n "model": "keep/model", "mcp": { "servers": { "old": { "type": "local", "command": ["old"] } } } }',
+      ],
+      ['/repo/opencode.json', '{"mcp":{"servers":{"old":{"type":"local","command":["project"]}}}}'],
+    ]);
+    const projectRaw = files.get('/repo/opencode.json');
+    mockFiles(files);
+    const posted = await request({
+      scope: 'global',
+      json: JSON.stringify({ mcp: { servers: { docs: remote } }, model: 'do/not/import' }),
+    });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 40, data: expect.objectContaining({ global: { old: true, docs: true } }) },
+    });
+    expect(files.get(globalPath)).toContain('// preserve me');
+    expect(files.get(globalPath)).toContain('keep/model');
+    expect(files.get(globalPath)).not.toContain('do/not/import');
+    expect(files.get(globalPath)).toContain('"old"');
+    expect(files.get('/repo/opencode.json')).toBe(projectRaw);
+  });
+
+  it('keeps an existing legacy file in its original format on API 2', async () => {
+    const files = new Map([
+      ['/repo/opencode.json', '{"mcp":{"old":{"type":"local","command":["old"]}}}'],
+    ]);
+    mockFiles(files);
+    await request({
+      scope: 'project',
+      json: JSON.stringify({ docs: { ...remote, disabled: true } }),
+    });
+    expect(JSON.parse(files.get('/repo/opencode.json')!).mcp).toEqual({
+      old: { type: 'local', command: ['old'] },
+      docs: { ...remote, enabled: false },
+    });
+  });
+
+  it('requires a name for a bare server and accepts it when supplied', async () => {
+    const files = new Map<string, string>();
+    mockFiles(files);
+    expect(await request({ scope: 'project', json: JSON.stringify(remote) })).toContainEqual({
+      type: 'api/response',
+      payload: { id: 40, error: expect.stringContaining('Enter a name') },
+    });
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+    await request({ scope: 'project', json: JSON.stringify(remote), name: 'docs' });
+    expect(files.get('/repo/opencode.json')).toContain('"docs"');
+  });
+
+  it('rejects an entire batch if a name is already configured', async () => {
+    const raw = JSON.stringify({ mcp: { servers: { docs: remote } } });
+    const files = new Map([['/repo/opencode.json', raw]]);
+    mockFiles(files);
+    expect(
+      await request({ scope: 'project', json: JSON.stringify({ new: remote, docs: remote }) })
+    ).toContainEqual({
+      type: 'api/response',
+      payload: { id: 40, error: expect.stringContaining('already configured') },
+    });
+    expect(files.get('/repo/opencode.json')).toBe(raw);
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite unsaved or concurrently changed configuration', async () => {
+    const files = new Map([['/repo/opencode.json', '{}']]);
+    mockFiles(files);
+    vscodeMock.workspace.textDocuments = [
+      {
+        isDirty: true,
+        uri: { fsPath: '/repo/opencode.json', toString: () => '/repo/opencode.json' },
+      },
+    ];
+    expect(
+      await request({ scope: 'project', json: JSON.stringify({ docs: remote }) })
+    ).toContainEqual({
+      type: 'api/response',
+      payload: { id: 40, error: expect.stringContaining('unsaved changes') },
+    });
+    vscodeMock.workspace.textDocuments = [];
+    vscodeMock.workspace.fs.stat
+      .mockResolvedValueOnce({ mtime: 1, size: 2 })
+      .mockResolvedValueOnce({ mtime: 2, size: 5 });
+    expect(
+      await request({ scope: 'project', json: JSON.stringify({ docs: remote }) })
+    ).toContainEqual({
+      type: 'api/response',
+      payload: { id: 40, error: expect.stringContaining('changed while adding') },
+    });
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('opens existing invalid JSON in the editor without attempting to parse or overwrite it', async () => {
+    const path = getOpenCodeConfigPaths()[2]!;
+    const files = new Map([[path, '{ broken JSON']]);
+    mockFiles(files);
+    expect(await request({ scope: 'global' }, 2, true)).toContainEqual({
+      type: 'api/response',
+      payload: { id: 40, data: true },
+    });
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ fsPath: path })
+    );
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('creates a schema-only project config when opening it for the first time', async () => {
+    const files = new Map<string, string>();
+    mockFiles(files);
+    await request({ scope: 'project' }, 2, true);
+    expect(JSON.parse(files.get('/repo/opencode.json')!)).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+    });
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ fsPath: '/repo/opencode.json' })
+    );
+  });
+
+  it.each([false, true])(
+    'does not edit or open local config for an attached server, open=%s',
+    async (open) => {
+      mockFiles(new Map());
+      expect(
+        await request({ scope: 'global', json: JSON.stringify({ docs: remote }) }, 2, open, true)
+      ).toContainEqual({ type: 'api/response', payload: { id: 40, error: expect.any(String) } });
+      expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    }
+  );
+});

@@ -80,7 +80,6 @@ test('hides disabled slash commands', async ({ page }) => {
     ['/attach', 'Pick files or folders to attach'],
     ['/abort', 'Stop the current run'],
     ['/models', 'Open the model picker'],
-    ['/mcp', 'Open the MCP picker for this session'],
   ] as const) {
     await composer.fill(command);
     await expect(page.getByText(description, { exact: true })).not.toBeVisible();

@@ -24,6 +24,7 @@ export function getSlashCommands(props: {
   hasCurrentSession: boolean;
   canInit: boolean;
   onConnectProvider: () => void;
+  onOpenMcps: (query: string) => void;
   onOpenSettings: () => void;
   onExportSession: () => void;
   onPauseSession: () => Promise<void>;
@@ -105,8 +106,8 @@ export function getSlashCommands(props: {
      * },
      */
     /*
-     * Keep these registrations handy, but do not expose `/models`, `/mcp`, or
-     * `/mcps` in slash-command completion for now.
+     * Keep this registration handy, but do not expose `/models` in
+     * slash-command completion for now.
      *
      * {
      *   name: 'models',
@@ -114,13 +115,14 @@ export function getSlashCommands(props: {
      *   description: 'Open the model picker',
      *   action: () => props.onOpenModels(),
      * },
-     * {
-     *   name: 'mcp',
-     *   aliases: ['mcps'],
-     *   description: 'Open the MCP picker for this session',
-     *   action: () => props.onOpenMcps(),
-     * },
      */
+    {
+      name: 'mcp',
+      aliases: ['mcps'],
+      description: 'Select MCP servers or sign in',
+      acceptsArguments: true,
+      action: (args) => props.onOpenMcps(args.trim()),
+    },
     {
       name: 'connect',
       aliases: [],

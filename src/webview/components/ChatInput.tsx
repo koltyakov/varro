@@ -83,6 +83,7 @@ import {
   showModelPicker,
   setShowModelPicker,
   setShowPermissionSettings,
+  setShowMcpSettings,
   composerFocusKey,
   removeClipboardImage,
   removeNativePdf,
@@ -106,6 +107,7 @@ import {
   getProviderLimit,
   getModelDisplayName,
   getSelectedMcpsForSession,
+  getAvailableMcpNames,
   toggleCurrentDocumentEnabled,
   getActiveUsageLimitNotice,
   isActiveSessionWorking,
@@ -867,6 +869,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let modelPopoverRef: HTMLDivElement | undefined;
   let mcpPickerRef: HTMLButtonElement | undefined;
   let mcpPopoverRef: HTMLDivElement | undefined;
+  let mcpAuthDialogRef: HTMLDivElement | undefined;
   let lspPickerRef: HTMLButtonElement | undefined;
   let lspPopoverRef: HTMLDivElement | undefined;
   let toolbarRef: HTMLDivElement | undefined;
@@ -895,6 +898,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   } | null>(null);
   const [showProviderLimitPopup, setShowProviderLimitPopup] = createSignal(false);
   const [showMcpPicker, setShowMcpPicker] = createSignal(false);
+  const [mcpPickerQuery, setMcpPickerQuery] = createSignal('');
   const [showLspPicker, setShowLspPicker] = createSignal(false);
   const [editSelectedModel, setEditSelectedModel] = createSignal<RalphSelectedModel | null>(null);
   const [workspaceSendPending, setWorkspaceSendPending] = createSignal(false);
@@ -2447,6 +2451,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       onPauseSession: requestPauseSession,
       onSideQuestion: requestSideQuestion,
       onConnectProvider: () => requestProviderConnection(),
+      onOpenMcps: (query) => {
+        if (getAvailableMcpNames().length === 0) {
+          closePopups();
+          setShowMcpSettings(true);
+          return;
+        }
+        closePopups('mcp');
+        setMcpPickerQuery(query);
+        setShowMcpPicker(true);
+      },
       onOpenSettings: () =>
         postMessage({ type: 'vscode/open-settings', payload: { query: 'Varro >' } }),
       onExportSession: () => {
@@ -3010,6 +3024,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       e.metaKey ||
       e.shiftKey ||
       e.isComposing ||
+      mcpAuthDialogRef ||
       !anyComposerPopupOpen()
     ) {
       return;
@@ -3299,6 +3314,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setComposerValue(`/${SKILLS_COMMAND_NAME} `);
       return true;
     }
+    if (name === 'mcp' || name === 'mcps') {
+      setHistoryIndex(null);
+      setHistoryDraft('');
+      setInputText('');
+      setCompletionIndex(0);
+      await slashCommands()
+        .find((item) => item.name === 'mcp')
+        ?.action(args);
+      return true;
+    }
     if ((name === 'abort' || name === 'stop') && !args) {
       requestAbortSession();
       return true;
@@ -3412,6 +3437,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
     if (editReconciliationPending()) return;
     const text = inputText();
+    const command = getLeadingSlashCommand(text);
+    if (!composerEditingMessage() && (command?.name === 'mcp' || command?.name === 'mcps')) {
+      await runSlashCommand(text);
+      return;
+    }
     const sideQuestion = getSideQuestionText(text);
     if (sideQuestion !== null) {
       requestSideQuestion(sideQuestion);
@@ -5213,6 +5243,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const handleWindowClick = (e: MouseEvent) => {
       // SAFETY: The surrounding shape or discriminator check establishes the Node contract used below.
       const target = e.target as Node | null;
+      if (target && mcpAuthDialogRef?.contains(target)) return;
       attachmentRowOwnsPaste =
         !!target && !!inputFrameRef?.querySelector('.chat-attachments-container')?.contains(target);
       const clickedInsideInteractiveArea =
@@ -6528,6 +6559,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
         <Show when={showMcpPicker()}>
           <McpPicker
+            initialQuery={mcpPickerQuery()}
+            authDialogRef={(element) => (mcpAuthDialogRef = element)}
             sessionId={composerSessionId()}
             onChange={(names) => void applySessionMcps(names, composerSessionId())}
             onClose={() => setShowMcpPicker(false)}
@@ -7108,6 +7141,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           onToggleMcps={() => {
             const next = !showMcpPicker();
             closePopups(next ? 'mcp' : undefined);
+            setMcpPickerQuery('');
             setShowMcpPicker(next);
           }}
           showPermissionControl={!composerEditingMessage()}

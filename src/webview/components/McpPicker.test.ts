@@ -71,9 +71,41 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
   resetDefaultAppState();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('McpPicker', () => {
+  it('filters a small server list by the command argument and keeps search editable', () => {
+    setMcpStatuses({
+      atlassian: {
+        status: 'needs_auth',
+        error: 'MCP server "https://mcp.atlassian.com/v2/mcp" requires a login',
+      },
+      'browser-bridge': { status: 'disabled' },
+      lightpanda: { status: 'disabled' },
+    });
+    cleanup = render(
+      () => McpPicker({ sessionId: null, initialQuery: 'at', onChange: vi.fn(), onClose: vi.fn() }),
+      container!
+    );
+    const search = container!.querySelector<HTMLInputElement>('[aria-label="Search MCPs"]')!;
+    expect(search.value).toBe('at');
+    expect(document.activeElement).toBe(search);
+    expect(container!.querySelectorAll('.dropdown-name')).toHaveLength(1);
+    expect(container!.querySelector('.dropdown-name')?.textContent).toBe('atlassian');
+    expect(container!.querySelector('.mcp-status-tag')).toBeNull();
+    expect(container!.querySelector('.mcp-picker-error')).toBeNull();
+    expect(container!.textContent).not.toContain('requires a login');
+    expect(container!.querySelector('.mcp-picker-action')?.textContent).toBe('Sign in');
+    search.value = '';
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(container!.querySelectorAll('.dropdown-name')).toHaveLength(3);
+    expect(container!.querySelector('[aria-label="Search MCPs"]')).toBe(search);
+    search.value = 'sign in';
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(container!.querySelectorAll('.dropdown-name')).toHaveLength(1);
+  });
+
   it('shows search only when more than eight MCPs exist and filters by name or status', async () => {
     setMcpStatuses({
       alpha: { status: 'connected' },
@@ -105,7 +137,7 @@ describe('McpPicker', () => {
     expect(container?.textContent).toContain('Timed out');
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    (searchInput as HTMLInputElement).value = 'needs auth';
+    (searchInput as HTMLInputElement).value = 'auth';
     searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
     await flushMicrotasks();
 
@@ -412,6 +444,117 @@ describe('McpPicker', () => {
 
     await vi.waitFor(() => expect(mocks.completeAuth).toHaveBeenCalledWith('oauth', 'oauth-code'));
     expect(mocks.status).toHaveBeenCalled();
+  });
+
+  it('detects browser authorization without requiring a code and stops checking after connection', async () => {
+    vi.useFakeTimers();
+    mocks.status
+      .mockResolvedValueOnce({ oauth: { status: 'needs_auth' } })
+      .mockResolvedValueOnce({ oauth: { status: 'connected' } });
+    setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    cleanup = render(
+      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
+      container!
+    );
+    container!.querySelector<HTMLButtonElement>('.dropdown-item')!.click();
+    await flushMicrotasks(4);
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('updates automatically');
+    expect(dialog.querySelector('details')?.open).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(mocks.status).toHaveBeenCalledTimes(1);
+    expect(dialog.textContent).not.toContain('Authorization successful');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(dialog.textContent).toContain('Authorization successful');
+    expect(dialog.textContent).toContain('oauth is connected');
+    expect(dialog.querySelector('input')).toBeNull();
+    expect(container!.querySelector('.mcp-status-tag')?.textContent).toBe('connected');
+    expect(mocks.completeAuth).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(mocks.status).toHaveBeenCalledTimes(2);
+    Array.from(dialog.querySelectorAll('button'))
+      .find((button) => button.textContent === 'Done')!
+      .click();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('reflects a server status event immediately without waiting for the next check', async () => {
+    vi.useFakeTimers();
+    setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    cleanup = render(
+      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
+      container!
+    );
+    container!.querySelector<HTMLButtonElement>('.dropdown-item')!.click();
+    await flushMicrotasks(4);
+    setMcpStatuses({ oauth: { status: 'connected' } });
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+      'Authorization successful'
+    );
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mocks.status).not.toHaveBeenCalled();
+    expect(mocks.completeAuth).not.toHaveBeenCalled();
+  });
+
+  it('ignores an in-flight status check after the dialog closes', async () => {
+    vi.useFakeTimers();
+    let resolveStatus: ((statuses: Record<string, McpStatus>) => void) | undefined;
+    mocks.status.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve;
+        })
+    );
+    setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    cleanup = render(
+      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
+      container!
+    );
+    container!.querySelector<HTMLButtonElement>('.dropdown-item')!.click();
+    await flushMicrotasks(4);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(mocks.status).toHaveBeenCalledTimes(1);
+    document.querySelector<HTMLButtonElement>('.provider-connect-close')!.click();
+    resolveStatus?.({ oauth: { status: 'connected' } });
+    await flushMicrotasks(4);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(mocks.status).toHaveBeenCalledTimes(1);
+    expect(container!.querySelector('.mcp-picker-action')?.textContent).toBe('Sign in');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('retries failed checks, bounds automatic refresh, and offers an explicit refresh afterward', async () => {
+    vi.useFakeTimers();
+    mocks.status.mockRejectedValueOnce(new Error('Status temporarily unavailable'));
+    mocks.status.mockResolvedValue({ oauth: { status: 'needs_auth' } });
+    setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    cleanup = render(
+      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
+      container!
+    );
+    container!.querySelector<HTMLButtonElement>('.dropdown-item')!.click();
+    await flushMicrotasks(4);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+      'Status temporarily unavailable'
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+      'Still waiting for sign-in'
+    );
+    const checks = mocks.status.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(mocks.status).toHaveBeenCalledTimes(checks);
+    mocks.status.mockResolvedValue({ oauth: { status: 'connected' } });
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+      .find((button) => button.textContent === 'Refresh status')!
+      .click();
+    await flushMicrotasks(4);
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+      'Authorization successful'
+    );
   });
 
   it('does not open OAuth after the authorization dialog is closed', async () => {

@@ -18,12 +18,22 @@ const mocks = vi.hoisted(() => ({
     vi.fn<
       (name: string, scope: 'global' | 'project', enabled: boolean | null) => Promise<McpDefaults>
     >(),
+  openConfig: vi.fn<(scope: 'global' | 'project') => Promise<void>>(),
+  addConfig:
+    vi.fn<(scope: 'global' | 'project', json: string, name?: string) => Promise<McpDefaults>>(),
   refreshSessionMcps: vi.fn<(sessionId?: string | null) => Promise<void>>(),
 }));
 
 /* oxlint-disable anti-slop/no-module-mocking -- Exercise settings against the client and connection reconciliation boundaries. */
 vi.mock('../lib/client', () => ({
-  client: { mcp: { defaults: mocks.defaults, setDefault: mocks.setDefault } },
+  client: {
+    mcp: {
+      defaults: mocks.defaults,
+      setDefault: mocks.setDefault,
+      openConfig: mocks.openConfig,
+      addConfig: mocks.addConfig,
+    },
+  },
 }));
 vi.mock('../hooks/useOpenCode', () => ({ refreshSessionMcps: mocks.refreshSessionMcps }));
 
@@ -77,6 +87,8 @@ beforeEach(() => {
   setState('activeSessionId', 'current');
   mocks.defaults.mockReset().mockImplementation(async () => structuredClone(defaults));
   mocks.setDefault.mockReset();
+  mocks.openConfig.mockReset().mockResolvedValue(undefined);
+  mocks.addConfig.mockReset();
   mocks.refreshSessionMcps.mockReset().mockResolvedValue(undefined);
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -91,6 +103,125 @@ afterEach(() => {
 });
 
 describe('McpSettingsPanel', () => {
+  it('shows a prettified Browser Bridge example without prefilling the import', async () => {
+    cleanup = render(() => McpSettingsPanel(), container);
+    await flush();
+    const textarea = container.querySelector('textarea')!;
+    expect(textarea.value).toBe('');
+    expect(textarea.placeholder).toContain('\n  "browser-bridge": {\n');
+    expect(JSON.parse(textarea.placeholder)).toEqual({
+      'browser-bridge': { type: 'local', command: ['bbx', 'mcp', 'serve'] },
+    });
+    expect(textarea.placeholder).not.toContain('atlassian');
+  });
+
+  function button(label: string) {
+    const element = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (item) => item.textContent === label
+    );
+    if (!element) throw new Error(`Missing button ${label}`);
+    return element;
+  }
+
+  function pasteJson(json: string) {
+    const textarea = container.querySelector('textarea')!;
+    textarea.value = json;
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  it('opens the OpenCode config for the selected scope, including after a load error', async () => {
+    cleanup = render(() => McpSettingsPanel(), container);
+    await flush();
+    button('Open OpenCode config').click();
+    await flush();
+    expect(mocks.openConfig).toHaveBeenLastCalledWith('global');
+    openTab('This project');
+    button('Open OpenCode config').click();
+    await flush();
+    expect(mocks.openConfig).toHaveBeenLastCalledWith('project');
+    mocks.defaults.mockRejectedValue(new Error('Invalid configuration JSON'));
+    setState('editorContext', 'workspacePath', '/next');
+    await flush();
+    expect(button('Open OpenCode config').disabled).toBe(false);
+  });
+
+  it('imports detected server nesting into an empty configuration in the selected scope', async () => {
+    mocks.defaults.mockResolvedValue({ global: {}, project: {}, effective: {}, editable: true });
+    mocks.addConfig.mockResolvedValue({
+      global: {},
+      project: { docs: true },
+      effective: { docs: true },
+      editable: true,
+    });
+    cleanup = render(() => McpSettingsPanel(), container);
+    await flush();
+    expect(container.textContent).toContain('No MCP servers configured');
+    openTab('This project');
+    const json = JSON.stringify({ mcp: { servers: { docs: { url: 'https://example.com/mcp' } } } });
+    pasteJson(json);
+    expect(container.textContent).toContain('Detected servers: docs. Add to This project.');
+    button('Add MCP servers').click();
+    await flush();
+    expect(mocks.addConfig).toHaveBeenCalledWith('project', json, undefined);
+    expect(mocks.refreshSessionMcps).toHaveBeenCalledWith('current');
+    expect(checkbox('docs').checked).toBe(true);
+    expect(container.querySelector('textarea')?.value).toBe('');
+    expect(container.textContent).toContain('Added docs to This project.');
+  });
+
+  it('asks for a name for a bare server and preserves the pasted JSON on failure', async () => {
+    mocks.addConfig.mockRejectedValue(new Error('MCP server docs is already configured'));
+    cleanup = render(() => McpSettingsPanel(), container);
+    await flush();
+    const json = '{"url":"https://example.com/mcp"}';
+    pasteJson(json);
+    expect(button('Add MCP servers').disabled).toBe(true);
+    const input = container.querySelector<HTMLInputElement>('.mcp-settings-import input')!;
+    input.value = 'docs';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    button('Add MCP servers').click();
+    await flush();
+    expect(mocks.addConfig).toHaveBeenCalledWith('global', json, 'docs');
+    expect(container.querySelector('textarea')?.value).toBe(json);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('already configured');
+  });
+
+  it('does not submit invalid JSON or import while a session is working', async () => {
+    cleanup = render(() => McpSettingsPanel(), container);
+    await flush();
+    pasteJson('{oops');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Invalid MCP JSON');
+    expect(button('Add MCP servers').disabled).toBe(true);
+    pasteJson('{"docs":{"url":"https://example.com"}}');
+    setState('sessionStatus', 'current', { type: 'busy' });
+    expect(button('Add MCP servers').disabled).toBe(true);
+    button('Add MCP servers').click();
+    expect(mocks.addConfig).not.toHaveBeenCalled();
+  });
+
+  it('discards a pending import result and pasted JSON when the workspace changes', async () => {
+    let completeImport!: (value: McpDefaults) => void;
+    mocks.addConfig.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          completeImport = resolve;
+        })
+    );
+    cleanup = render(() => McpSettingsPanel(), container);
+    await flush();
+    pasteJson('{"docs-new":{"url":"https://example.com"}}');
+    button('Add MCP servers').click();
+    mocks.defaults.mockResolvedValue({ global: {}, project: {}, effective: {}, editable: true });
+    setState('editorContext', 'workspacePath', '/next');
+    await flush();
+    completeImport({ ...defaults, global: { 'docs-new': true }, effective: { 'docs-new': true } });
+    await flush();
+    expect(state.mcpDefaults?.effective).toEqual({});
+    expect(container.querySelector('textarea')?.value).toBe('');
+    expect(container.textContent).not.toContain('Added docs-new');
+    expect(mocks.refreshSessionMcps).not.toHaveBeenCalled();
+  });
+
   it('shows one scope at a time on a separate screen with a back button', async () => {
     cleanup = render(() => McpSettingsPanel(), container);
     await flush();

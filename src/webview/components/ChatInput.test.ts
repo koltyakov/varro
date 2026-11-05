@@ -31,6 +31,8 @@ import {
   setShowTurnTimer,
   showModelPicker,
   setShowModelPicker,
+  showMcpSettings,
+  setShowMcpSettings,
   setState,
   setSelectedModel,
   applySessionSelectedModelsSnapshot,
@@ -2373,6 +2375,29 @@ describe('ChatInput', () => {
     const disconnectedCount = container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count');
     expect(disconnectedCount?.textContent).toContain('0/4');
   });
+
+  it.each(['/mcp', '/mcps'])(
+    'opens Manage MCPs for %s when no servers are configured',
+    async (command) => {
+      setShowMcpSettings(false);
+      setState('mcpStatus', reconcile({}));
+      setState(
+        'mcpDefaults',
+        reconcile({ global: {}, project: {}, effective: {}, editable: true })
+      );
+      setInputText(command);
+      cleanup = render(() => ChatInput(), container!);
+      container
+        ?.querySelector('.rich-composer')
+        ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flushAsyncWork();
+      expect(showMcpSettings()).toBe(true);
+      expect(container?.querySelector('.dropdown-menu')).toBeNull();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(inputText()).toBe('');
+      setShowMcpSettings(false);
+    }
+  );
 
   it('shows cumulative active-turn duration only while the turn is working', async () => {
     vi.useFakeTimers();
@@ -10304,6 +10329,55 @@ describe('ChatInput', () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('');
   });
+
+  it.each([
+    ['/mcp', 'enter', false],
+    ['/mcps', 'send', false],
+    ['/mcps at', 'enter', true],
+    ['/mcp at', 'send', true],
+  ] as const)(
+    'opens %s with %s while busy=%s without sending attachments',
+    async (draft, action, busy) => {
+      setState('activeSessionId', 'session-1');
+      setState('sessions', [session('session-1', 1)]);
+      setState('sessionStatus', 'session-1', { type: busy ? 'busy' : 'idle' });
+      setIsLoading(busy);
+      setState('mcpStatus', {
+        atlassian: { status: 'needs_auth', error: 'Login required' },
+        'browser-bridge': { status: 'disabled' },
+      });
+      setState('droppedFiles', [{ path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' }]);
+      setInputText(draft);
+      cleanup = render(() => ChatInput(), container!);
+      if (action === 'enter') {
+        container
+          ?.querySelector('.rich-composer')
+          ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      } else {
+        const send = container!.querySelector<HTMLButtonElement>(
+          '[aria-label="Send (Enter)"], [aria-label="Add to queue (Enter)"]'
+        );
+        expect(send).not.toBeNull();
+        send!.click();
+      }
+      await flushAsyncWork();
+      expect(container?.querySelector('.dropdown-header')?.textContent).toBe('MCPs');
+      expect(container?.querySelector('.dropdown-menu')?.textContent).toContain('atlassian');
+      if (draft.endsWith(' at')) {
+        expect(
+          container?.querySelector<HTMLInputElement>('[aria-label="Search MCPs"]')?.value
+        ).toBe('at');
+        expect(container?.querySelector('.dropdown-menu')?.textContent).not.toContain(
+          'browser-bridge'
+        );
+      }
+      expect(inputText()).toBe('');
+      expect(state.droppedFiles).toHaveLength(1);
+      expect(state.queuedMessages).toEqual([]);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    }
+  );
 
   it('runs a typed slash command with args from the send button', async () => {
     setState('commands', [

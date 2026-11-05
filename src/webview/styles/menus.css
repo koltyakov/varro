@@ -266,6 +266,28 @@
   color: color-mix(in srgb, var(--color-vscode-muted) 70%, var(--color-vscode-success));
 }
 
+.mcp-picker-item {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.mcp-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mcp-picker-action {
+  color: var(--color-vscode-accent);
+  font-size: 11px;
+}
+
+.mcp-picker-error {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .mcp-status-tag.status-disabled {
   color: var(--color-vscode-muted);
 }

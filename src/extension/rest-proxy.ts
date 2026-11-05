@@ -1347,6 +1347,28 @@ export class RestProxy {
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
+      if (
+        requestPathname === VARRO_API_ENDPOINTS.mcpConfig ||
+        requestPathname === VARRO_API_ENDPOINTS.mcpConfigOpen
+      ) {
+        const body = asRecord(payload.body);
+        if (method !== 'POST' || (body?.scope !== 'global' && body?.scope !== 'project'))
+          throw new Error('Choose Global or This project for the MCP configuration.');
+        let data;
+        if (requestPathname === VARRO_API_ENDPOINTS.mcpConfigOpen) {
+          await this.openCodeConfig.openMcpConfig(body.scope);
+          data = true;
+        } else {
+          if (
+            typeof body.json !== 'string' ||
+            (body.name !== undefined && typeof body.name !== 'string')
+          )
+            throw new Error('MCP configuration must contain JSON and an optional server name.');
+          data = await this.openCodeConfig.addMcpConfig(body.scope, body.json, body.name);
+        }
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
       if (requestPathname === VARRO_API_ENDPOINTS.mcpDefaults) {
         let data;
         if (method === 'GET') data = await this.openCodeConfig.readMcpDefaults();

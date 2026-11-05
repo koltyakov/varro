@@ -61,6 +61,7 @@ import {
 import { parseHealthResponse, type HealthResponse } from '../../shared/health';
 import { normalizeRecycleBinEntries } from '../../shared/recycle-bin';
 import { asRecord, type UnknownRecord } from '../../shared/type-utils';
+import type { McpConfigScope } from '../../shared/mcp-config';
 import { applySessionShareOverride } from './session-share-overrides';
 import type {
   ProviderAuthAuthorization,
@@ -1025,6 +1026,14 @@ export const client = {
   },
 
   mcp: {
+    async openConfig(scope: McpConfigScope): Promise<void> {
+      await apiCall('POST', VARRO_API_ENDPOINTS.mcpConfigOpen, { scope });
+    },
+    async addConfig(scope: McpConfigScope, json: string, name?: string): Promise<McpDefaults> {
+      return parseMcpDefaults(
+        await apiCall('POST', VARRO_API_ENDPOINTS.mcpConfig, { scope, json, name })
+      );
+    },
     async defaults(): Promise<McpDefaults> {
       return parseMcpDefaults(await apiCall('GET', VARRO_API_ENDPOINTS.mcpDefaults));
     },

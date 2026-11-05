@@ -1802,6 +1802,24 @@ describe('client', () => {
     ]);
   });
 
+  it('opens scoped configuration and submits MCP JSON through extension-owned endpoints', async () => {
+    const { client } = await loadClient();
+    const defaults = {
+      global: { docs: true },
+      project: {},
+      effective: { docs: true },
+      editable: true,
+    };
+    bridgeMocks.apiCall.mockResolvedValue(defaults);
+    await client.mcp.openConfig('global');
+    const json = '{"url":"https://example.com/mcp"}';
+    expect(await client.mcp.addConfig('project', json, 'docs')).toEqual(defaults);
+    expect(bridgeMocks.apiCall.mock.calls).toEqual([
+      ['POST', '/varro/mcp-config/open', { scope: 'global' }],
+      ['POST', '/varro/mcp-config', { scope: 'project', json, name: 'docs' }],
+    ]);
+  });
+
   it.each([
     { global: { rare: 'false' }, project: {}, effective: {}, editable: true },
     { global: {}, project: null, effective: {}, editable: true },
