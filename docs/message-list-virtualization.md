@@ -483,6 +483,12 @@ Direct input acquires ownership only when it can affect the transcript:
   frames agree, then restore normal easing. A follow-frame gap of at least 1,000 ms also catches up
   immediately because host occlusion can suspend frames without a visibility event. This must not
   reattach detached readers or override editing, navigation, diff, or pointer ownership.
+- Resumed bottom-follow retires pre-suspension activity-collapse targets and trailing reserves before
+  choosing its destination, including late restore measurements until the follower settles. A completed
+  turn can otherwise remain at the physical bottom with every real row above the viewport. Check the
+  final answer's visible bounds, not only bottom distance. `scroll-hidden-completion.spec.ts` completes
+  a turn with suspended frames and checks short and virtualized histories, with and without visibility
+  events, while retaining detached reading positions.
 - Keep the transcript hidden behind its loading indicator through initial positioning and any initial
   viewport-filling history fetch. Reaching the end of the first page is not a ready-to-paint state when
   compact tool rows leave that page shorter than the viewport. Reveal only after the final bottom
