@@ -2,6 +2,53 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
+for (const width of [480, 1100]) {
+  for (const scenario of ['question-prompt', 'native-question-prompt', 'native-question-inputs']) {
+    test(`keeps answer typography and layout stable when selecting ${scenario} at ${width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.goto(`/e2e/harness/index.html?scenario=${scenario}`);
+      const choices = page
+        .locator('.question-option')
+        .filter({ has: page.locator('.question-option-label') });
+      const first = choices.first();
+      const second = choices.nth(1);
+      await expect(first).toBeVisible();
+      const measure = () =>
+        choices.evaluateAll((elements) =>
+          elements.map((element) => {
+            const row = element.getBoundingClientRect();
+            return {
+              height: row.height,
+              width: row.width,
+              text: Array.from(
+                element.querySelectorAll('.question-option-label, .question-option-desc')
+              ).map((text) => ({
+                weight: getComputedStyle(text).fontWeight,
+                rects: Array.from(text.getClientRects()).map((rect) => ({
+                  x: rect.x - row.x,
+                  y: rect.y - row.y,
+                  width: rect.width,
+                  height: rect.height,
+                })),
+              })),
+            };
+          })
+        );
+      const before = await measure();
+      await first.click();
+      await expect(first).toHaveClass(/selected/);
+      expect(await measure()).toEqual(before);
+      await second.click();
+      if (scenario === 'native-question-inputs') await first.click();
+      await expect(first).not.toHaveClass(/selected/);
+      await expect(second).toHaveClass(/selected/);
+      expect(await measure()).toEqual(before);
+    });
+  }
+}
+
 test('answers a standalone question prompt', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=question-prompt');
 

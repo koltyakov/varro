@@ -507,7 +507,7 @@ test('shows native question choices, descriptions and custom input without openi
 test.describe('question answer hairlines', () => {
   test.use({ deviceScaleFactor: 2 });
 
-  test('keeps faint half-pixel strokes and transparent backgrounds in every answer state', async ({
+  test('keeps half-pixel strokes and subtly highlights selected answers', async ({
     page,
   }, testInfo) => {
     await page.setViewportSize({ width: 480, height: 900 });
@@ -529,8 +529,13 @@ test.describe('question answer hairlines', () => {
     await expect(choices.first()).toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');
     await page.getByRole('radio', { name: 'Use separate Codex login', exact: true }).check();
     await expect(choices.first()).toHaveClass(/selected/);
-    await expect(choices.first()).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    await expect(choices.first()).toHaveCSS('box-shadow', stroke);
+    await expect(choices.first()).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    const selectedStroke = await choices
+      .first()
+      .evaluate((element) => getComputedStyle(element).boxShadow);
+    expect(selectedStroke).toContain('inset');
+    expect(selectedStroke).toContain('0.5px');
+    expect(selectedStroke).not.toBe(stroke);
     await expect(choices.first()).toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');
     const custom = page.getByRole('textbox', {
       name: 'Restore actual limits: custom answer',
@@ -538,9 +543,11 @@ test.describe('question answer hairlines', () => {
     });
     await custom.fill('Keep the existing account');
     await expect(choices.last()).toHaveClass(/selected/);
-    await expect(choices.last()).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    await expect(choices.last()).toHaveCSS('box-shadow', stroke);
+    await expect(choices.last()).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(choices.last()).toHaveCSS('box-shadow', selectedStroke);
     await expect(choices.last()).toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');
+    await expect(choices.first()).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(choices.first()).toHaveCSS('box-shadow', stroke);
     await page.screenshot({ path: testInfo.outputPath('question-answer-hairlines.png') });
   });
 });
