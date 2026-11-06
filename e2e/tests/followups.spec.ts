@@ -479,12 +479,28 @@ for (const width of [480, 1280]) {
             .click({ button: 'right' });
           const menu = page.getByRole('menu', { name: 'Follow-up actions' });
           await expect(menu.getByRole('menuitem', { name: 'Copy description' })).toBeVisible();
+          await expect(menu.getByRole('menuitem', { name: 'Copy description' })).toBeFocused();
           const bounds = await menu.boundingBox();
           expect(bounds).not.toBeNull();
           expect(bounds!.x).toBeGreaterThanOrEqual(8);
           expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width - 8);
           expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(850 - 8);
-          await menu.getByRole('menuitem', { name: 'Add to queue (paused)', exact: true }).click();
+          const queueAction = menu.getByRole('menuitem', {
+            name: 'Add to queue (paused)',
+            exact: true,
+          });
+          const queueBounds = await queueAction.boundingBox();
+          expect(queueBounds).not.toBeNull();
+          await page.mouse.move(
+            queueBounds!.x + queueBounds!.width / 2,
+            queueBounds!.y + queueBounds!.height / 2
+          );
+          await page.mouse.down();
+          await expect(menu).toBeVisible();
+          await expect(queueAction).toBeFocused();
+          await expect(page.locator('html')).not.toHaveAttribute('data-followup-sent-body');
+          await page.mouse.up();
+          await expect(menu).toHaveCount(0);
           const queue = page.getByRole('list', { name: 'Queued messages', exact: true });
           await expect(queue.locator('.chat-queue-item.is-paused')).toHaveCount(index + 1);
           await expect(

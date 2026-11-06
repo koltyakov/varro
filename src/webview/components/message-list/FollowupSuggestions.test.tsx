@@ -123,7 +123,7 @@ function mount(
   };
 }
 
-function openActionMenu(index = 0) {
+async function openActionMenu(index = 0) {
   const button = container.querySelectorAll<HTMLButtonElement>(
     '.followup-suggestions-actions button'
   )[index]!;
@@ -131,6 +131,7 @@ function openActionMenu(index = 0) {
   button.dispatchEvent(
     new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 })
   );
+  await flush();
   return button;
 }
 
@@ -147,7 +148,7 @@ describe('FollowupSuggestions', () => {
     const { setWorking } = mount();
     setWorking(false);
     await flush();
-    const button = openActionMenu();
+    const button = await openActionMenu();
     menuItem('Copy description').click();
     expect(clipboard.writeClipboard).toHaveBeenCalledExactlyOnceWith(actions[0]!.prompt);
     expect(document.querySelector('[role="menu"]')).toBeNull();
@@ -163,7 +164,7 @@ describe('FollowupSuggestions', () => {
     await flush();
     vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
     for (const index of [0, 1]) {
-      openActionMenu(index);
+      await openActionMenu(index);
       menuItem('Add to queue (paused)').click();
       await flush();
     }
@@ -187,11 +188,42 @@ describe('FollowupSuggestions', () => {
     expect(client.varro.dismissFollowups).not.toHaveBeenCalled();
   });
 
+  it('keeps queue pointer input inside the menu until the click activates it', async () => {
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
+    const button = await openActionMenu();
+    const item = menuItem('Add to queue (paused)');
+    const outsidePointerDown = vi.fn();
+    const outsideClick = vi.fn();
+    window.addEventListener('pointerdown', outsidePointerDown);
+    window.addEventListener('click', outsideClick);
+    try {
+      item.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      item.focus();
+      expect(document.querySelector('[role="menu"]')).not.toBeNull();
+      expect(document.activeElement).toBe(item);
+      expect(state.queuedMessages).toHaveLength(0);
+      item.click();
+      await flush();
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      expect(document.activeElement).toBe(button);
+      expect(state.queuedMessages).toMatchObject([{ text: actions[0]!.prompt, paused: true }]);
+      expect(outsidePointerDown).not.toHaveBeenCalled();
+      expect(outsideClick).not.toHaveBeenCalled();
+      expect(mocks.send).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('pointerdown', outsidePointerDown);
+      window.removeEventListener('click', outsideClick);
+    }
+  });
+
   it('does not queue an action dismissed in another window', async () => {
     const { setWorking } = mount();
     setWorking(false);
     await flush();
-    openActionMenu();
+    await openActionMenu();
     menuItem('Add to queue (paused)').click();
     await flush();
     expect(state.queuedMessages).toHaveLength(0);
@@ -207,7 +239,7 @@ describe('FollowupSuggestions', () => {
     vi.mocked(client.varro.followups).mockImplementationOnce(
       () => new Promise((resolve) => (finish = resolve))
     );
-    openActionMenu();
+    await openActionMenu();
     menuItem('Add to queue (paused)').click();
     setState('activeSessionId', 'session-2');
     finish(suggestions);
@@ -220,7 +252,7 @@ describe('FollowupSuggestions', () => {
     const { setWorking } = mount();
     setWorking(false);
     await flush();
-    const button = openActionMenu();
+    const button = await openActionMenu();
     expect(document.activeElement).toBe(menuItem('Copy description'));
     menuItem('Copy description').dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
@@ -231,10 +263,10 @@ describe('FollowupSuggestions', () => {
     );
     expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(document.activeElement).toBe(button);
-    openActionMenu();
+    await openActionMenu();
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     expect(document.querySelector('[role="menu"]')).toBeNull();
-    openActionMenu();
+    await openActionMenu();
     setWorking(true);
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });

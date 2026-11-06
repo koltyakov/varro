@@ -18,7 +18,11 @@ export function FollowupActionsMenu(props: {
         menu.style.top = `${Math.max(8, Math.min(props.y, window.innerHeight - rect.height - 8))}px`;
       })
     );
-    menu.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+    // Positioning reveals the menu in a microtask. Hidden menu items cannot receive focus.
+    queueMicrotask(() => {
+      if (menu.isConnected)
+        menu.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+    });
     const outside = (event: Event) => {
       if (event.target instanceof Node && menu.contains(event.target)) return;
       props.onClose();
@@ -44,6 +48,7 @@ export function FollowupActionsMenu(props: {
       aria-label="Follow-up actions"
       data-popup-position-pending
       style={{ left: `${props.x}px`, top: `${props.y}px` }}
+      onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         if (event.key === 'Escape' || event.key === 'Tab') {
@@ -65,10 +70,24 @@ export function FollowupActionsMenu(props: {
         }
       }}
     >
-      <button type="button" role="menuitem" onClick={props.onCopy}>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={(event) => {
+          event.stopPropagation();
+          props.onCopy();
+        }}
+      >
         Copy description
       </button>
-      <button type="button" role="menuitem" onClick={props.onQueue}>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={(event) => {
+          event.stopPropagation();
+          props.onQueue();
+        }}
+      >
         Add to queue (paused)
       </button>
     </div>
