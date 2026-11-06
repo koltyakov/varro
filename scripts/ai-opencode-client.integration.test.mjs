@@ -505,6 +505,17 @@ test(
               expected,
               'Pending values and custom text must survive editor reload'
             );
+            // Restoring typed custom text does not select its multiselect checkbox.
+            const customSelection = '[aria-label="Selections: select custom value 1"]';
+            assert.equal(
+              await cdp.evaluate(`document.querySelector('${customSelection}').checked`),
+              false
+            );
+            assert.ok(await cdp.click(customSelection));
+            assert.equal(
+              await cdp.evaluate(`document.querySelector('${customSelection}').checked`),
+              true
+            );
             assert.ok(await cdp.click('form.native-form button[type="submit"]'));
             let resolved;
             const replyDeadline = Date.now() + 10000;

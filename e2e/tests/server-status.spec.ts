@@ -129,13 +129,19 @@ test('opens provider management and add dialog directly when no providers are co
 });
 
 test('recovers when the webview reloads while startup is still in progress', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=dispose-during-start');
+  await page.goto('/e2e/harness/index.html?scenario=dispose-during-start&holdStartup');
 
   await expect(page.getByText('Connecting to OpenCode...', { exact: true })).toBeVisible();
 
   await page.reload();
 
   await expect(page.getByText('Connecting to OpenCode...', { exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    const harness = (window as Window & { __varroE2E?: { releaseStartup?: () => void } })
+      .__varroE2E;
+    if (!harness?.releaseStartup) throw new Error('Startup release gate was not installed');
+    harness.releaseStartup();
+  });
   await expect(
     page.getByLabel('Back to sessions').locator('..').getByText('Startup handoff')
   ).toBeVisible();

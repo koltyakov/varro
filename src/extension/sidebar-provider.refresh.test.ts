@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These refresh tests inspect controlled provider internals and model opaque server and filesystem results. */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenCodeModelRouting } from '../shared/opencode-types';
 import type { ProviderLimitUpdate } from '../shared/protocol';
 import {
@@ -9,6 +9,7 @@ import {
   getLoggerMock,
   getProviderSignatureFileSystemMock,
   getVscodeMock,
+  loadSidebarProvider,
 } from './sidebar-provider.test-support';
 
 const vscodeMock = getVscodeMock();
@@ -42,6 +43,11 @@ afterEach(() => {
 });
 
 describe('SidebarProvider provider refresh', () => {
+  beforeEach(async () => {
+    // The shared hook resets modules; keep cold imports outside each test's deadline.
+    await loadSidebarProvider();
+  }, 30_000);
+
   it('posts narrow quota snapshots to the webview and disposes observation with the provider', async () => {
     const { provider } = await createSidebarProviderInstance();
     const { posted } = attachTestView(provider);

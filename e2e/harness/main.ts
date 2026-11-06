@@ -240,6 +240,7 @@ type HarnessWindow = Window & {
     updateSessionStatus?: (sessionId: string, status: SessionStatus) => void;
     updateMcpStatus?: (name: string, status: ScenarioState['mcpStatus'][string]) => void;
     releaseHistoryRequests?: () => void;
+    releaseStartup?: () => void;
     releaseNextHistoryRequest?: () => boolean;
     pendingHistoryRequestCount?: () => number;
     getSessionMessages?: (sessionId: string) => MessageEntry[];
@@ -6859,8 +6860,18 @@ function installBridge(state: ScenarioState) {
           payload: buildInitialState(state).editorContext,
         });
         queueMicrotask(() => {
-          for (const msg of state.postReadyMessages) {
-            dispatchPostReadyMessage(msg);
+          const dispatch = () => {
+            for (const msg of state.postReadyMessages) {
+              dispatchPostReadyMessage(msg);
+            }
+          };
+          if (
+            state.scenarioName === 'dispose-during-start' &&
+            new URLSearchParams(window.location.search).has('holdStartup')
+          ) {
+            harnessWindow.__varroE2E!.releaseStartup = dispatch;
+          } else {
+            dispatch();
           }
         });
         return;
