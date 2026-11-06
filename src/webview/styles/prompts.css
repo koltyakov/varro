@@ -575,6 +575,96 @@ body.vscode-light .question-custom-input {
   transform: translateY(1px);
 }
 
+.settings-panel-error-surface {
+  text-align: left;
+}
+
+.settings-panel-error-card {
+  display: flex;
+  width: 100%;
+  max-width: 360px;
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: clamp(16px, 5vw, 24px);
+  border: 1px solid var(--color-vscode-border-default);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--color-vscode-fg) 3%, var(--color-vscode-sidebar));
+}
+
+.settings-panel-error-icon {
+  flex: 0 0 auto;
+  color: var(--color-vscode-warning);
+}
+
+.settings-panel-error-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--color-vscode-fg);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.settings-panel-error-description {
+  margin: 8px 0 0;
+  color: var(--color-vscode-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.settings-panel-error-details {
+  width: 100%;
+  min-width: 0;
+  margin-top: 16px;
+  color: var(--color-vscode-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-panel-error-details summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.settings-panel-error-details summary:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 3px;
+}
+
+.settings-panel-error-details pre {
+  max-height: 160px;
+  margin: 8px 0 0;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--color-vscode-border-default);
+  border-radius: var(--radius-inset);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.settings-panel-error-actions {
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.settings-panel-error-actions > button {
+  min-height: 34px;
+  flex: 1 1 auto;
+}
+
+.settings-panel-error-actions > button > span {
+  /* Trim font leading so both button labels are visually centered. */
+  text-box: trim-both cap alphabetic;
+}
+
 .question-btn-primary {
   background: var(--color-vscode-accent);
   color: var(--color-vscode-button-fg);

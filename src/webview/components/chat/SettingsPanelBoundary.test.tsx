@@ -54,6 +54,15 @@ describe('SettingsPanelBoundary', () => {
     expect(document.body.querySelector('.models-panel')?.textContent).toContain(
       'updated or reinstalled'
     );
+    expect(document.body.querySelector('h2')?.textContent).toBe('Models could not load');
+    const icon = document.body.querySelector('.settings-panel-error-icon');
+    expect(icon?.parentElement?.tagName).toBe('H2');
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect(document.body.querySelector('details')).toBeNull();
+    const actions = document.body.querySelector('.settings-panel-error-actions');
+    expect(actions?.firstElementChild?.textContent).toBe('Reload sidebar');
+    expect(actions?.lastElementChild?.className).toBe('server-status-secondary-button');
+    expect(actions?.querySelectorAll('button > span')).toHaveLength(2);
     expect(outerFallback).not.toHaveBeenCalled();
     expect(document.body.querySelector('input')).toBe(draft);
     expect(draft?.value).toBe('Keep this draft');
@@ -88,6 +97,13 @@ describe('SettingsPanelBoundary', () => {
     );
     expect(document.body.textContent).toContain('Invalid model catalog');
     expect(document.body.textContent).not.toContain('updated or reinstalled');
+    expect(document.body.querySelector('.settings-panel-error-description')?.textContent).toContain(
+      'Reload the sidebar to try again'
+    );
+    const details = document.body.querySelector('details');
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector('summary')?.textContent).toBe('Error details');
+    expect(details?.querySelector('pre')?.textContent).toBe('Invalid model catalog');
     expect(postMessage).toHaveBeenCalledWith({
       type: 'log',
       payload: {

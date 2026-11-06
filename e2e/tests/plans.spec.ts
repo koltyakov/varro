@@ -14,7 +14,8 @@ for (const theme of ['dark', 'light', 'high-contrast', 'high-contrast-light']) {
     const implement = page.getByRole('button', { name: 'Implement the plan' });
     const skip = page.getByRole('button', { name: 'Skip for now' });
     await expect(implement).toHaveClass(/assistant-dialog-summary-action-implement/);
-    await expect(actions).toHaveCSS('justify-content', 'flex-end');
+    // Chromium can serialize flex-end as flow-end; verify the rendered alignment below too.
+    await expect(actions).toHaveCSS('justify-content', /^(flex|flow)-end$/);
     await expect(actions).toHaveCSS('flex-wrap', 'wrap');
     const borders = await actions
       .locator('button')
@@ -41,6 +42,16 @@ for (const theme of ['dark', 'light', 'high-contrast', 'high-contrast-light']) {
 
     for (const width of [480, 280]) {
       await page.setViewportSize({ width, height: 800 });
+      await expect
+        .poll(() =>
+          skip.evaluate((element) =>
+            Math.abs(
+              element.getBoundingClientRect().right -
+                element.parentElement!.getBoundingClientRect().right
+            )
+          )
+        )
+        .toBeLessThanOrEqual(1);
       for (const button of [open, implement, skip]) {
         await expect(button).toBeVisible();
         await expect(button).toHaveCSS('min-height', '26px');

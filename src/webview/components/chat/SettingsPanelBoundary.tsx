@@ -1,7 +1,9 @@
-import { ErrorBoundary } from 'solid-js';
+import { ErrorBoundary, Show } from 'solid-js';
 import type { JSX } from 'solid-js';
 import { postMessage } from '../../lib/bridge';
 import { logError } from '../../lib/log';
+import { statusIcons } from '../../lib/status-icons';
+import { UiIcon } from '../UiIcon';
 
 export function SettingsPanelBoundary(props: {
   name: string;
@@ -21,23 +23,39 @@ export function SettingsPanelBoundary(props: {
             );
           return (
             <section class={props.panelClass} aria-label={props.name}>
-              <div class="server-status-surface h-full" role="alert">
-                <div class="server-status-content">
-                  <p class="text-sm text-vscode-error">{props.name} could not load</p>
-                  <p class="text-xs text-vscode-muted">
+              <div class="server-status-surface settings-panel-error-surface" role="alert">
+                <div class="settings-panel-error-card">
+                  <h2 class="settings-panel-error-title">
+                    <UiIcon
+                      source={statusIcons.warningCircle}
+                      class="settings-panel-error-icon"
+                      width={20}
+                      height={20}
+                    />
+                    <span>{props.name} could not load</span>
+                  </h2>
+                  <p class="settings-panel-error-description">
                     {importFailed
-                      ? 'A sidebar file is unavailable. This can happen after Varro is updated or reinstalled. Reload the sidebar to load the current files, or return to chat without reloading.'
-                      : error.message}
+                      ? 'A required sidebar file is unavailable. This can happen after Varro is updated or reinstalled. Reload the sidebar to load the current files.'
+                      : 'This panel ran into a problem. Reload the sidebar to try again, or return to chat without reloading.'}
                   </p>
-                  <button class="server-status-action-button" onClick={props.onClose}>
-                    Back to chat
-                  </button>
-                  <button
-                    class="server-status-action-button"
-                    onClick={() => postMessage({ type: 'webview/reload' })}
-                  >
-                    Reload sidebar
-                  </button>
+                  <Show when={!importFailed}>
+                    <details class="settings-panel-error-details">
+                      <summary>Error details</summary>
+                      <pre>{error.message}</pre>
+                    </details>
+                  </Show>
+                  <div class="settings-panel-error-actions">
+                    <button
+                      class="server-status-action-button"
+                      onClick={() => postMessage({ type: 'webview/reload' })}
+                    >
+                      <span>Reload sidebar</span>
+                    </button>
+                    <button class="server-status-secondary-button" onClick={props.onClose}>
+                      <span>Back to chat</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>

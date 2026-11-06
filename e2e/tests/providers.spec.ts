@@ -87,7 +87,7 @@ test('opens manage models from the picker and filters the model catalog', async 
   await expect(page.getByText('GitHub Copilot', { exact: true })).toHaveCount(0);
 });
 
-test('returns to the same draft when the Models module cannot load', async ({ page }) => {
+test('returns to the same draft when the Models module cannot load', async ({ page }, testInfo) => {
   let failedImports = 0;
   await page.route('**/src/webview/components/ModelsPanel.tsx*', (route) => {
     failedImports += 1;
@@ -104,6 +104,41 @@ test('returns to the same draft when the Models module cannot load', async ({ pa
   await expect(errorPanel.getByRole('alert')).toContainText('Models could not load');
   await expect(errorPanel).toContainText('updated or reinstalled');
   await expect(errorPanel.getByRole('button', { name: 'Reload sidebar' })).toBeVisible();
+  await expect(errorPanel.getByRole('heading', { name: 'Models could not load' })).toBeVisible();
+  const actions = errorPanel.locator('.settings-panel-error-actions');
+  await expect(actions.getByRole('button').first()).toHaveText('Reload sidebar');
+  for (const viewport of [
+    { width: 496, height: 981 },
+    { width: 320, height: 640 },
+    { width: 240, height: 360 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expect(actions.getByRole('button', { name: 'Back to chat' })).toBeInViewport();
+    await expect(actions.getByRole('button', { name: 'Reload sidebar' })).toBeInViewport();
+    const labelOffsets = await actions.getByRole('button').evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const bounds = button.getBoundingClientRect();
+        const label = button.querySelector('span')!.getBoundingClientRect();
+        return Math.abs(label.y + label.height / 2 - (bounds.y + bounds.height / 2));
+      })
+    );
+    for (const offset of labelOffsets) expect(offset).toBeLessThanOrEqual(0.5);
+    const heading = errorPanel.getByRole('heading', { name: 'Models could not load' });
+    const icon = await heading.locator('.settings-panel-error-icon').boundingBox();
+    const title = await heading.locator('span:not(.ui-icon)').boundingBox();
+    expect(icon).not.toBeNull();
+    expect(title).not.toBeNull();
+    expect(icon!.x + icon!.width).toBeLessThan(title!.x);
+    expect(
+      Math.abs(icon!.y + icon!.height / 2 - (title!.y + title!.height / 2))
+    ).toBeLessThanOrEqual(0.5);
+    const card = errorPanel.locator('.settings-panel-error-card');
+    const bounds = await card.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+    await page.screenshot({ path: testInfo.outputPath(`models-error-${viewport.width}.png`) });
+  }
   expect(failedImports).toBe(1);
   await expect(page.getByText('Something went wrong', { exact: true })).toHaveCount(0);
   await errorPanel.getByRole('button', { name: 'Back to chat' }).click();
