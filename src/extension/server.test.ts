@@ -2514,6 +2514,38 @@ describe('OpenCodeServer maintenance', () => {
     expect(info.workspaceCwd).toBe(getVarroStateDirectory('scratch'));
   });
 
+  it('reads startup metadata without initializing historical session directories', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const api = server as unknown as {
+      readInstalledCliVersion: () => Promise<string | null>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+    };
+    setRunning(server);
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('2.2.5');
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '2.2.5' });
+    const request = vi.spyOn(server, 'request').mockImplementation(async (_method, path) => {
+      if (path === '/experimental/session?limit=100') {
+        return Array.from({ length: 100 }, (_, index) => ({ directory: `/history/${index % 12}` }));
+      }
+      if (path.startsWith('/session/status?directory=')) return {};
+      throw new Error(`Unexpected request: ${path}`);
+    });
+
+    const info = await server.readServerInfo({ includeActiveAgentCount: false });
+
+    expect(info).toMatchObject({
+      cliVersion: '2.2.5',
+      health: { healthy: true, version: '2.2.5' },
+      activeAgentCount: null,
+      activeAgentError: null,
+    });
+    expect(request).not.toHaveBeenCalled();
+
+    // Full diagnostics retain their global activity count when explicitly opened.
+    expect((await server.readServerInfo()).activeAgentCount).toBe(0);
+    expect(request).toHaveBeenCalledTimes(14);
+  });
+
   it('reports the current status when health collection outlives a startup transition', async () => {
     const server = new OpenCodeServer(4096, true);
     const health = deferred<{ healthy: boolean; version?: string }>();

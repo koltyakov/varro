@@ -3738,7 +3738,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
-    const serverInfo = await this.server.readServerInfo().catch(() => null);
+    const serverInfo = await this.server
+      .readServerInfo({ includeActiveAgentCount: false })
+      .catch(() => null);
     const version = serverInfo?.health?.version ?? serverInfo?.cliVersion ?? '';
     if (openCodeApiVersion(version) === 2) {
       this.providerLimitService.clearCache();
@@ -3986,7 +3988,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.openCodeVersionCheck = 'checking';
     const generation = this.openCodeVersionGeneration;
     void this.server
-      .readServerInfo()
+      .readServerInfo({ includeActiveAgentCount: false })
       .then((info) => {
         if (
           this.disposing ||

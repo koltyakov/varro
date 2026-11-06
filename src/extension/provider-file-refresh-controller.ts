@@ -550,7 +550,9 @@ export class ProviderFileRefreshController {
 
   private async readManagedServerState(): Promise<boolean | null> {
     try {
-      const info = await this.dependencies.server.readServerInfo();
+      const info = await this.dependencies.server.readServerInfo({
+        includeActiveAgentCount: false,
+      });
       return typeof info.managedProcess === 'boolean' ? info.managedProcess : null;
     } catch {
       return null;

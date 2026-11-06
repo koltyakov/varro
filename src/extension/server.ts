@@ -1884,7 +1884,9 @@ export class OpenCodeServer extends EventEmitter {
     return this._status.state === 'running' ? result : { state: 'inactive', directory };
   }
 
-  async readServerInfo(): Promise<OpenCodeServerInfo> {
+  async readServerInfo(options?: {
+    includeActiveAgentCount?: boolean;
+  }): Promise<OpenCodeServerInfo> {
     // About/diagnostics must not report a verified lease as unmanaged while its
     // asynchronous ownership observation or handoff is still being prepared.
     if (this.existingServerPreparationOperation) await this.existingServerPreparationOperation;
@@ -1899,7 +1901,9 @@ export class OpenCodeServer extends EventEmitter {
     } catch (err) {
       cliVersionError = err instanceof Error ? err.message : String(err);
     }
-    if (this._status.state === 'running') {
+    // Status-bar and ownership reads do not need activity. Enumerating historical
+    // directories for it can boot unrelated V2 locations while chat is starting.
+    if (this._status.state === 'running' && options?.includeActiveAgentCount !== false) {
       try {
         activeAgentCount = await this.readActiveAgentCount();
       } catch (err) {

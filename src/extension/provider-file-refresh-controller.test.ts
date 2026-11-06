@@ -366,6 +366,7 @@ describe('ProviderFileRefreshController', () => {
 
       expect(h.postRefresh).toHaveBeenCalledTimes(1);
       expect(h.server.readServerInfo).toHaveBeenCalledOnce();
+      expect(h.server.readServerInfo).toHaveBeenCalledWith({ includeActiveAgentCount: false });
       expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.persistence.set).not.toHaveBeenCalled();
     });

@@ -148,6 +148,7 @@ describe('SidebarProvider server uptime', () => {
       await vi.advanceTimersByTimeAsync(MINUTE);
       expect(item.tooltip).toContain('Server uptime: 2 hrs');
       expect(server.readServerInfo).toHaveBeenCalledTimes(1);
+      expect(server.readServerInfo).toHaveBeenCalledWith({ includeActiveAgentCount: false });
 
       statusHandler?.({ state: 'stopped' });
       expect(item.tooltip).not.toContain('Server uptime:');

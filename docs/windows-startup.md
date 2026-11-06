@@ -285,6 +285,14 @@ are logged separately using the renderer's clock. Renderer performance entries
 `varro.transcript.hydration` observe the existing transcript-positioning hold. They
 do not shorten that hold or prove OS-displayed paint; retain native visual checks.
 
+Status-bar version and provider ownership checks request server info with
+`includeActiveAgentCount: false`. Full diagnostics enumerate recent session directories
+to count active agents; V2's directory-scoped shell lookup can boot an idle historical
+location, including its watchers, plugins, and MCP connections. The November 2026
+investigation found eight unrelated locations booting during a slow editor reload.
+Keep that inventory out of startup metadata reads. Explicit About/diagnostic commands
+still request the full count, and restart safety checks remain independent.
+
 For real-editor/AI verification follow [AI test workflow](ai-test-workflow.md) and use
 isolated editor/database fixtures. Never restart the user's production server, mutate
 existing sessions, or change security settings to benchmark startup. Host-only unit
