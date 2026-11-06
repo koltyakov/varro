@@ -962,6 +962,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 32px;
   padding: var(--space-3) var(--space-5);
   background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
 }
@@ -1051,14 +1052,10 @@
 }
 
 .models-provider-models-button {
-  display: inline-flex;
-  align-items: center;
   flex-shrink: 0;
-  height: 16px;
-  padding: 0 7px;
+  padding: 2px 7px;
   color: var(--color-vscode-fg);
   font-size: 10px;
-  line-height: 1;
   background: var(--vscode-button-secondaryBackground);
   border: 1px solid var(--color-vscode-border);
   border-radius: var(--radius-control);

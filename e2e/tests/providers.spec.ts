@@ -229,7 +229,7 @@ test('keeps a running chat out of the model dialog backdrop', async ({ page }) =
   await expect(workspace).toContainText(streamedText);
 });
 
-test('keeps provider headers equally compact with and without Add models', async ({ page }) => {
+test('keeps provider headers equal without shrinking Add models', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
   await page.evaluate(() => {
     localStorage.setItem('varro.addedModels', JSON.stringify(['openai:*']));
@@ -253,8 +253,12 @@ test('keeps provider headers equally compact with and without Add models', async
 
   for (const width of [480, 1280]) {
     await page.setViewportSize({ width, height: 800 });
-    await expect(catalogHeader).toHaveCSS('height', '28px');
-    await expect(hiddenHeader).toHaveCSS('height', '28px');
+    await expect(catalogHeader).toHaveCSS('height', '32px');
+    await expect(hiddenHeader).toHaveCSS('height', '32px');
+    await expect(catalogHeader.getByRole('button', { name: 'Add models' })).toHaveCSS(
+      'height',
+      '20px'
+    );
   }
 });
 
