@@ -24,6 +24,66 @@ test('shows the drop overlay when a drag enters and hides on dragleave', async (
   await expect(page.getByText('Drop to add to context')).toHaveCount(0);
 });
 
+test('does not show the drop overlay while dragging a chat link out of the webview', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  await expect(page.locator('.rich-composer').first()).toBeVisible();
+
+  await page.evaluate(() => {
+    const source = document.createElement('a');
+    source.id = 'outgoing-chat-link';
+    source.href = 'https://example.com/chat-link';
+    source.textContent = 'Drag chat link';
+    source.style.cssText = 'position:fixed;top:20px;left:20px;z-index:9999';
+    document.body.append(source);
+
+    const outside = document.createElement('iframe');
+    outside.id = 'outside-chat';
+    outside.style.cssText =
+      'position:fixed;top:80px;left:20px;width:200px;height:100px;z-index:9999';
+    document.body.append(outside);
+    const target = outside.contentDocument!.body;
+    target.textContent = 'Drop outside chat';
+    target.addEventListener('dragover', (event) => event.preventDefault());
+    target.addEventListener('drop', (event) => {
+      event.preventDefault();
+      target.textContent = event.dataTransfer!.getData('text/uri-list');
+    });
+    // Observe transient overlays as well as the final state after the drag.
+    document.body.dataset.dropOverlayShown = 'false';
+    new MutationObserver((records) => {
+      for (const record of records) {
+        if (
+          Array.from(record.addedNodes).some(
+            (node) => node instanceof Element && node.matches('.chat-drop-overlay')
+          )
+        ) {
+          document.body.dataset.dropOverlayShown = 'true';
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+
+  const source = await page.locator('#outgoing-chat-link').boundingBox();
+  const target = await page.locator('#outside-chat').boundingBox();
+  if (!source || !target) throw new Error('Expected outgoing drag source and target');
+  await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(source.x + source.width / 2 + 15, source.y + source.height / 2, {
+    steps: 5,
+  });
+  await expect(page.locator('.chat-drop-overlay')).toHaveCount(0);
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 10 });
+  await page.mouse.up();
+
+  await expect(page.frameLocator('#outside-chat').locator('body')).toHaveText(
+    'https://example.com/chat-link'
+  );
+  await expect(page.locator('body')).toHaveAttribute('data-drop-overlay-shown', 'false');
+  await expect(page.locator('.chat-drop-overlay')).toHaveCount(0);
+});
+
 test('delivers a Shift file drop when the drag source only permits move', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
   const composer = page.locator('.rich-composer').first();
@@ -42,7 +102,14 @@ test('delivers a Shift file drop when the drag source only permits move', async 
       }
       return send(message);
     };
-    const source = document.createElement('div');
+    // An iframe keeps the native source outside the chat document, as in VS Code's explorer.
+    const outside = document.createElement('iframe');
+    outside.id = 'outside-file-source';
+    outside.style.cssText =
+      'position:fixed;top:20px;left:20px;width:200px;height:80px;z-index:9999';
+    document.body.append(outside);
+    const sourceDocument = outside.contentDocument!;
+    const source = sourceDocument.createElement('div');
     source.id = 'windows-file-drag';
     source.draggable = true;
     source.textContent = 'Drag Windows file';
@@ -51,12 +118,24 @@ test('delivers a Shift file drop when the drag source only permits move', async 
       event.dataTransfer!.effectAllowed = 'move';
       event.dataTransfer!.setData('CodeFiles', JSON.stringify(['C:\\repo\\src\\example.ts']));
     });
-    document.body.append(source);
+    sourceDocument.body.append(source);
   });
 
+  const source = await page
+    .frameLocator('#outside-file-source')
+    .locator('#windows-file-drag')
+    .boundingBox();
+  const target = await composer.boundingBox();
+  if (!source || !target) throw new Error('Expected incoming file drag source and target');
   await page.keyboard.down('Shift');
   try {
-    await page.locator('#windows-file-drag').dragTo(composer);
+    await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(source.x + source.width / 2 + 15, source.y + source.height / 2, {
+      steps: 5,
+    });
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 10 });
+    await page.mouse.up();
   } finally {
     await page.keyboard.up('Shift');
   }

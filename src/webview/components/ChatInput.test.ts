@@ -6347,6 +6347,73 @@ describe('ChatInput', () => {
     }
   });
 
+  it.each(['text/plain', 'text/uri-list', 'text/html', 'Files'])(
+    'ignores %s drags started in the chat even after leaving and re-entering',
+    (dragType) => {
+      cleanup = render(() => ChatInput(), container!);
+      const source = document.createElement('div');
+      container!.append(source);
+      const composer = container!.querySelector('.chat-input-container')!;
+      const dataTransfer = createDragDataTransfer();
+      dataTransfer.setData(dragType, '/repo/src/a.ts');
+
+      const start = dispatchDragEvent(source, 'dragstart', dataTransfer);
+      expect(start.defaultPrevented).toBe(false);
+
+      for (const target of [source, composer]) {
+        for (const type of ['dragenter', 'dragover', 'dragleave', 'dragenter', 'dragover']) {
+          const event = dispatchDragEvent(target, type, dataTransfer);
+          expect(event.defaultPrevented).toBe(false);
+          expect(dataTransfer.dropEffect).toBe('none');
+          expect(document.querySelector('.chat-drop-overlay')).toBeNull();
+        }
+      }
+
+      const drop = dispatchDragEvent(composer, 'drop', dataTransfer);
+      expect(drop.defaultPrevented).toBe(false);
+      expect(state.droppedFiles).toEqual([]);
+      expect(document.querySelector('.chat-drop-overlay')).toBeNull();
+      dispatchDragEvent(source, 'dragend', dataTransfer);
+
+      const externalDrag = dispatchDragEvent(composer, 'dragenter', createDragDataTransfer());
+      expect(externalDrag.defaultPrevented).toBe(true);
+      expect(document.querySelector('.chat-drop-overlay')).not.toBeNull();
+    }
+  );
+
+  it.each(['dragend', 'blur', 'hidden'])('clears an incoming drop overlay on %s', (type) => {
+    cleanup = render(() => ChatInput(), container!);
+    dispatchDragEvent(container!, 'dragenter', createDragDataTransfer());
+    expect(document.querySelector('.chat-drop-overlay')).not.toBeNull();
+
+    if (type === 'hidden') {
+      const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+      try {
+        document.dispatchEvent(new Event('visibilitychange'));
+      } finally {
+        visibility.mockRestore();
+      }
+    } else if (type === 'blur') {
+      window.dispatchEvent(new Event('blur'));
+    } else {
+      dispatchDragEvent(container!, 'dragend', createDragDataTransfer());
+    }
+
+    expect(document.querySelector('.chat-drop-overlay')).toBeNull();
+  });
+
+  it('keeps an outgoing drag internal after the window loses focus', () => {
+    cleanup = render(() => ChatInput(), container!);
+    const dataTransfer = createDragDataTransfer();
+    dispatchDragEvent(container!, 'dragstart', dataTransfer);
+    window.dispatchEvent(new Event('blur'));
+
+    const event = dispatchDragEvent(container!, 'dragenter', dataTransfer);
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.querySelector('.chat-drop-overlay')).toBeNull();
+    dispatchDragEvent(container!, 'dragend', dataTransfer);
+  });
+
   it('reorders queued rows by dragging the left handle without showing the file-drop overlay', () => {
     setIsLoading(true);
     setState('activeSessionId', 'session-1');

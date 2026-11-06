@@ -493,12 +493,6 @@ function canEditQueuedMessage() {
   );
 }
 
-function isInternalDrag(event: DragEvent) {
-  return Array.from(event.dataTransfer?.types ?? []).some(
-    (type) => type === QUEUED_MESSAGE_DRAG_TYPE || type.startsWith('application/x-varro-')
-  );
-}
-
 function setAttachmentDropEffect(transfer: DataTransfer | null) {
   if (!transfer) return;
   // Chromium suppresses drop when the requested effect is not allowed by the
@@ -883,6 +877,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let providerLimitPopupRef: HTMLDivElement | undefined;
   let busyMenuRef: HTMLDivElement | undefined;
   let busyToggleRef: HTMLButtonElement | undefined;
+  let dragStartedInChat = false;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
   const [showWorkspacePicker, setShowWorkspacePicker] = createSignal(false);
@@ -4513,6 +4508,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return true;
   }
 
+  function isInternalDrag(event: DragEvent) {
+    return (
+      dragStartedInChat ||
+      Array.from(event.dataTransfer?.types ?? []).some(
+        (type) => type === QUEUED_MESSAGE_DRAG_TYPE || type.startsWith('application/x-varro-')
+      )
+    );
+  }
+
   function handleDropEvent(e: DragEvent) {
     void handleDrop(e).catch((err) => logError('Failed to attach dropped content', err));
   }
@@ -5305,6 +5309,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
     };
 
+    const hideDropTarget = () => setIsDraggingOver(false);
+
+    const handleWindowDragStart = () => {
+      // Native text, link, and image drags have no Varro MIME marker.
+      // Keep their origin until dragend, including while they leave the webview.
+      dragStartedInChat = true;
+      hideDropTarget();
+    };
+
+    const handleWindowDragEnd = () => {
+      dragStartedInChat = false;
+      hideDropTarget();
+    };
+
     const beginDropTarget = (e: DragEvent) => {
       if (isInternalDrag(e)) return;
       e.preventDefault();
@@ -5319,9 +5337,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     };
 
     const handleWindowDrop = (e: DragEvent) => {
+      hideDropTarget();
       if (isInternalDrag(e)) return;
       e.preventDefault();
-      setIsDraggingOver(false);
       handleDropEvent(e);
     };
 
@@ -5332,7 +5350,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') cancelQueuedMessageEdit();
+      if (document.visibilityState === 'hidden') {
+        hideDropTarget();
+        cancelQueuedMessageEdit();
+      }
     };
 
     const handleAttachmentPaste = (e: ClipboardEvent) => {
@@ -5353,8 +5374,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     window.addEventListener('keydown', handlePopupEscape, true);
     window.addEventListener('click', handleWindowClick, true);
+    window.addEventListener('blur', hideDropTarget);
     document.addEventListener('paste', handleAttachmentPaste);
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('dragstart', handleWindowDragStart, true);
+    document.addEventListener('dragend', handleWindowDragEnd, true);
     document.addEventListener('dragenter', beginDropTarget, true);
     document.addEventListener('dragover', handleWindowDragOver, true);
     document.addEventListener('drop', handleWindowDrop, true);
@@ -5364,8 +5388,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       disposeBridge();
       window.removeEventListener('keydown', handlePopupEscape, true);
       window.removeEventListener('click', handleWindowClick, true);
+      window.removeEventListener('blur', hideDropTarget);
       document.removeEventListener('paste', handleAttachmentPaste);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('dragstart', handleWindowDragStart, true);
+      document.removeEventListener('dragend', handleWindowDragEnd, true);
       document.removeEventListener('dragenter', beginDropTarget, true);
       document.removeEventListener('dragover', handleWindowDragOver, true);
       document.removeEventListener('drop', handleWindowDrop, true);
