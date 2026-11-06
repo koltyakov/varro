@@ -229,6 +229,35 @@ test('keeps a running chat out of the model dialog backdrop', async ({ page }) =
   await expect(workspace).toContainText(streamedText);
 });
 
+test('keeps provider headers equally compact with and without Add models', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  await page.evaluate(() => {
+    localStorage.setItem('varro.addedModels', JSON.stringify(['openai:*']));
+    localStorage.setItem(
+      'varro.removedModels',
+      JSON.stringify(['openai:gpt-4.1', 'openai:gpt-4.1-mini'])
+    );
+    localStorage.setItem('varro.hiddenProviders', JSON.stringify(['copilot']));
+  });
+  await page.reload();
+  await page.getByLabel('Z.ai / GLM 5.1').click();
+  await page.getByRole('button', { name: 'Manage models', exact: true }).click();
+
+  const catalogHeader = page.locator('.models-provider-header').filter({ hasText: 'OpenAI' });
+  const hiddenHeader = page
+    .locator('.models-provider-header')
+    .filter({ hasText: 'GitHub Copilot' });
+  await expect(catalogHeader.getByRole('button', { name: 'Add models' })).toBeVisible();
+  await expect(hiddenHeader.locator('.models-provider-hidden-marker')).toBeVisible();
+  await expect(hiddenHeader.getByRole('button', { name: 'Add models' })).toHaveCount(0);
+
+  for (const width of [480, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(catalogHeader).toHaveCSS('height', '28px');
+    await expect(hiddenHeader).toHaveCSS('height', '28px');
+  }
+});
+
 test('centers model route tags within their fixed height', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank&commitModel=1');
 

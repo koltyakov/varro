@@ -1051,10 +1051,14 @@
 }
 
 .models-provider-models-button {
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
-  padding: 2px 7px;
+  height: 16px;
+  padding: 0 7px;
   color: var(--color-vscode-fg);
   font-size: 10px;
+  line-height: 1;
   background: var(--vscode-button-secondaryBackground);
   border: 1px solid var(--color-vscode-border);
   border-radius: var(--radius-control);
