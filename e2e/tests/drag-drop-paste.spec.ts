@@ -84,6 +84,74 @@ test('does not show the drop overlay while dragging a chat link out of the webvi
   await expect(page.locator('.chat-drop-overlay')).toHaveCount(0);
 });
 
+for (const { name, value, resource, icon } of [
+  {
+    name: 'README.md',
+    value: '/workspace/varro/README.md',
+    resource: 'file:///workspace/varro/README.md',
+    icon: false,
+  },
+  {
+    name: 'README.md',
+    value: '/workspace/varro/README.md',
+    resource: 'file:///workspace/varro/README.md',
+    icon: true,
+  },
+  { name: 'release notes', value: 'https://example.com/varro/releases', resource: '', icon: false },
+]) {
+  test(`drags ${name}${icon ? ' icon' : ''} into an external text target as its value`, async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=message-rendering');
+    const link = page.getByRole('link', { name, exact: true });
+    await expect(link).toBeVisible();
+    await link.scrollIntoViewIfNeeded();
+
+    await page.evaluate(() => {
+      const outside = document.createElement('iframe');
+      outside.id = 'external-text-target';
+      outside.style.cssText =
+        'position:fixed;top:20px;right:20px;width:240px;height:100px;z-index:9999';
+      document.body.append(outside);
+      const target = outside.contentDocument!.createElement('textarea');
+      target.id = 'drop-value';
+      target.style.cssText = 'width:200px;height:60px';
+      target.addEventListener('drop', (event) => {
+        target.dataset.resource = event.dataTransfer!.getData('ResourceURLs');
+        target.dataset.uri = event.dataTransfer!.getData('text/uri-list');
+      });
+      outside.contentDocument!.body.append(target);
+    });
+
+    const target = page.frameLocator('#external-text-target').locator('#drop-value');
+    const sourceBox = await (icon ? link.locator('.file-path-icon') : link).boundingBox();
+    const targetBox = await target.boundingBox();
+    if (!sourceBox || !targetBox) throw new Error('Expected link drag source and text target');
+    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(
+      sourceBox.x + sourceBox.width / 2 + 15,
+      sourceBox.y + sourceBox.height / 2,
+      {
+        steps: 5,
+      }
+    );
+    await expect(page.locator('.chat-drop-overlay')).toHaveCount(0);
+    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
+      steps: 10,
+    });
+    await page.mouse.up();
+
+    await expect(target).toHaveValue(value);
+    await expect(target).toHaveAttribute('data-uri', resource || value);
+    await expect(target).toHaveAttribute(
+      'data-resource',
+      resource ? JSON.stringify([resource]) : ''
+    );
+    await expect(page.locator('.chat-drop-overlay')).toHaveCount(0);
+  });
+}
+
 test('delivers a Shift file drop when the drag source only permits move', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
   const composer = page.locator('.rich-composer').first();

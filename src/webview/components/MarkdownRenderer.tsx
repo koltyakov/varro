@@ -2979,8 +2979,44 @@ export function MarkdownRenderer(props: MarkdownProps) {
     }
   }
 
+  function handleDragStart(event: DragEvent) {
+    if (!(event.target instanceof Element) || !event.dataTransfer) return;
+    const anchor = event.target.closest<HTMLAnchorElement>('a[data-file]');
+    if (!anchor || anchor.dataset.fileValidated !== 'true') return;
+
+    let path: string;
+    try {
+      path = getString(asRecord(JSON.parse(anchor.dataset.file ?? ''))?.path);
+    } catch {
+      // Malformed file metadata must not export a webview-relative URL.
+      event.preventDefault();
+      return;
+    }
+    if (!path || !isAbsolutePath(path)) {
+      event.preventDefault();
+      return;
+    }
+
+    const encodedPath = normalizePath(path)
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/')
+      .replace(/^([a-z])%3A\//i, '$1:/');
+    const uri = encodedPath.startsWith('//')
+      ? `file:${encodedPath}`
+      : `file://${encodedPath.startsWith('/') ? '' : '/'}${encodedPath}`;
+    const transfer = event.dataTransfer;
+    transfer.clearData();
+    transfer.effectAllowed = 'copy';
+    transfer.setData('text/plain', path);
+    transfer.setData('text/uri-list', uri);
+    // VS Code's terminal and editor drop handlers consume this resource list.
+    transfer.setData('ResourceURLs', JSON.stringify([uri]));
+  }
+
   onMount(() => {
     ref?.addEventListener('click', handleClick);
+    ref?.addEventListener('dragstart', handleDragStart);
     if (ref) onCleanup(markdownCitationSelection.bind(ref));
     hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
     hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
@@ -2989,6 +3025,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   });
   onCleanup(() => {
     ref?.removeEventListener('click', handleClick);
+    ref?.removeEventListener('dragstart', handleDragStart);
   });
 
   const remoteImagesEnabled = createMemo(() => state.remoteImages !== 'off');

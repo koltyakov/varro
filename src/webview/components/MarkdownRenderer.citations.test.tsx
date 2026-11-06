@@ -113,6 +113,61 @@ describe('MarkdownRenderer exact citation validation', () => {
     );
   });
 
+  it.each([
+    ['/repo/src/app.ts', 'file:///repo/src/app.ts'],
+    ['/other/reports/plan #1%?.md', 'file:///other/reports/plan%20%231%25%3F.md'],
+    ['/repo/café.ts', 'file:///repo/caf%C3%A9.ts'],
+    ['C:/repo/src/app.ts', 'file:///C:/repo/src/app.ts'],
+    ['C:\\repo\\my files\\app.ts', 'file:///C:/repo/my%20files/app.ts'],
+    ['\\\\server\\share\\my files\\app.ts', 'file://server/share/my%20files/app.ts'],
+  ])('exports validated file %s as a native file drag', async (path, uri) => {
+    dispose = render(() => <MarkdownRenderer content="[app.ts](src/app.ts#L10-L12)" />, root);
+    await respond([path]);
+    const anchor = root.querySelector<HTMLAnchorElement>('a[data-file]');
+    await vi.waitFor(() => expect(anchor?.dataset.fileValidated).toBe('true'));
+
+    const data = new Map([
+      ['text/plain', 'https://webview.invalid/src/app.ts:10-12'],
+      ['text/uri-list', 'https://webview.invalid/src/app.ts:10-12'],
+      ['text/html', '<a href="https://webview.invalid/src/app.ts:10-12">app.ts</a>'],
+    ]);
+    const transfer = {
+      effectAllowed: 'uninitialized',
+      clearData: () => data.clear(),
+      setData: (type: string, value: string) => data.set(type, value),
+    };
+    const event = new Event('dragstart', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: transfer });
+    // Starting on the icon exercises delegated handling too.
+    (anchor!.querySelector('.file-path-icon') ?? anchor!).dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(transfer.effectAllowed).toBe('copy');
+    expect(Object.fromEntries(data)).toEqual({
+      'text/plain': path,
+      'text/uri-list': uri,
+      ResourceURLs: JSON.stringify([uri]),
+    });
+  });
+
+  it.each(['{', '{}', '{"path":"relative/app.ts"}'])(
+    'cancels file drags with invalid metadata %s',
+    async (payload) => {
+      dispose = render(() => <MarkdownRenderer content="[app.ts](src/app.ts)" />, root);
+      await respond(['/repo/src/app.ts']);
+      const anchor = root.querySelector<HTMLAnchorElement>('a[data-file]')!;
+      anchor.dataset.file = payload;
+      const setData = vi.fn();
+      const event = new Event('dragstart', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'dataTransfer', { value: { setData } });
+
+      anchor.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(setData).not.toHaveBeenCalled();
+    }
+  );
+
   it('opens the validated absolute target and preserves the cited line range', async () => {
     dispose = render(() => <MarkdownRenderer content="[app.ts](src/app.ts#L10-L12)" />, root);
     await respond(['/repo/src/app.ts']);
