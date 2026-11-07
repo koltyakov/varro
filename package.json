@@ -90,7 +90,7 @@
   "dependencies": {
     "@imagemagick/magick-wasm": "0.0.46",
     "@opencode-ai/sdk": "^1.19.5",
-    "@opencode/client": "^2.2.5",
+    "@opencode/client": "^2.2.6",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.17",
     "highlight.js": "11.12.0",
@@ -126,7 +126,7 @@
   },
   "overrides": {
     "@azure/identity": {
-      "@azure/msal-node": "7.2.0"
+      "@azure/msal-node": "7.2.1"
     },
     "@vscode/vsce": {
       "minimatch": "11.0.5"
