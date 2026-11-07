@@ -1534,8 +1534,7 @@ export class OpenCodeProcess {
       return false;
     const retired = [];
     for (const [path, lease] of candidates) {
-      if (normalizeExecutableIdentity(lease.executable) !== normalizeExecutableIdentity(executable))
-        continue;
+      if (!(await this.matchesExecutableIdentity(lease.executable, executable))) continue;
       if (!(await this.isRegisteredProcessRetired(lease))) return false;
       retired.push({ path, lease });
     }
@@ -3260,6 +3259,30 @@ export class OpenCodeProcess {
     return (await this.inspectOwnershipLease(lease)).matches;
   }
 
+  private async matchesExecutableIdentity(recorded: string, observed: string): Promise<boolean> {
+    const recordedPath = normalizeExecutableIdentity(recorded);
+    const observedPath = normalizeExecutableIdentity(observed);
+    if (recordedPath === observedPath) return true;
+    // macOS can report either hard-link path for the same running executable.
+    // Compare fresh file identities, not contents or basenames, without caching.
+    try {
+      const [recordedFile, observedFile] = await Promise.all([
+        readStat(recordedPath, { bigint: true }),
+        readStat(observedPath, { bigint: true }),
+      ]);
+      return (
+        recordedFile.isFile() &&
+        observedFile.isFile() &&
+        recordedFile.ino !== 0n &&
+        recordedFile.dev === observedFile.dev &&
+        recordedFile.ino === observedFile.ino
+      );
+    } catch {
+      // Missing or inaccessible file identity cannot establish path equivalence.
+      return false;
+    }
+  }
+
   private async inspectOwnershipLease(
     lease: ManagedServerOwnershipLease
   ): Promise<{ matches: true } | { matches: false; reason: string; inconclusive?: boolean }> {
@@ -3279,7 +3302,7 @@ export class OpenCodeProcess {
       : await readProcessExecutable(lease.pid, this.linuxProcRoot);
     if (!executable)
       throw new Error(`Cannot verify executable identity for managed OpenCode PID ${lease.pid}`);
-    if (normalizeExecutableIdentity(executable) !== normalizeExecutableIdentity(lease.executable)) {
+    if (!(await this.matchesExecutableIdentity(lease.executable, executable))) {
       return {
         matches: false,
         reason: `Executable identity differs for PID ${lease.pid} on port ${lease.port}: expected ${JSON.stringify(lease.executable)}, observed ${JSON.stringify(executable)}.`,
@@ -3391,8 +3414,7 @@ export class OpenCodeProcess {
       if (owner.port !== undefined) {
         if (
           owner.port === this._port &&
-          normalizeExecutableIdentity(owner.executable!) ===
-            normalizeExecutableIdentity(executable) &&
+          (await this.matchesExecutableIdentity(owner.executable!, executable)) &&
           matchesBirthIdentity(owner.birthIdentity!, birthIdentity, owner.createdAt)
         ) {
           return { ...owner, configPath };
@@ -3420,7 +3442,7 @@ export class OpenCodeProcess {
       !owner ||
       owner.pid !== pid ||
       owner.port !== this._port ||
-      normalizeExecutableIdentity(owner.executable!) !== normalizeExecutableIdentity(executable) ||
+      !(await this.matchesExecutableIdentity(owner.executable!, executable)) ||
       !matchesBirthIdentity(owner.birthIdentity!, birthIdentity, owner.createdAt)
     ) {
       return null;

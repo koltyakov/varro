@@ -4,6 +4,7 @@ import { EventEmitter } from 'events';
 import type * as FsPromises from 'fs/promises';
 import {
   chmod,
+  link as createHardLink,
   mkdir,
   mkdtemp,
   readFile,
@@ -3251,6 +3252,69 @@ describe('OpenCodeProcess server ownership leases', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it.each(['unchanged', 'different-file', 'missing-file', 'changed-birth', 'changed-listener'])(
+    'verifies alternating hard-linked executable paths with %s identity',
+    async (identity) => {
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'ownership-hard-links-'));
+      const path = join(root, 'lease.json');
+      const executable = join(root, 'opencode.exe');
+      const alias = join(root, 'opencode');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: MOCK_LINUX_PID,
+        port: 4096,
+        executable,
+        birthIdentity: 'darwin:Fri Jul 10 12:00:00 2026',
+        owner: 'same-server',
+        host: 'other-window',
+        state: 'active',
+        createdAt: Date.now(),
+      };
+      try {
+        await writeFile(executable, 'executable fixture');
+        await createHardLink(executable, alias);
+        const raw = JSON.stringify(lease);
+        await writeFile(path, raw);
+        const listeners = vi
+          .spyOn(processInspection, 'findListeningPids')
+          .mockResolvedValue([lease.pid]);
+        const birth = vi
+          .spyOn(processInspection, 'readProcessBirthIdentity')
+          .mockResolvedValue(lease.birthIdentity);
+        const observed = vi
+          .spyOn(processInspection, 'readProcessExecutable')
+          .mockResolvedValue(executable);
+        const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+        const manager = new OpenCodeProcess(4096, true, '', false, path);
+        for (const reportedPath of [executable, alias, executable, alias]) {
+          observed.mockResolvedValue(reportedPath);
+          await expect(manager.verifyManagedServerConnection(true)).resolves.toBeUndefined();
+        }
+        expect(birth).toHaveBeenCalledTimes(4);
+
+        if (identity === 'different-file' || identity === 'missing-file') {
+          await rm(alias);
+          if (identity === 'different-file') await writeFile(alias, 'executable fixture');
+        } else if (identity === 'changed-birth') {
+          birth.mockResolvedValue('darwin:replacement-process');
+        } else if (identity === 'changed-listener') {
+          listeners.mockResolvedValue([lease.pid + 1]);
+        }
+        if (identity !== 'unchanged') {
+          await expect(manager.verifyManagedServerConnection(true)).rejects.toMatchObject({
+            name: 'ManagedServerConnectionChangedError',
+          });
+        }
+        expect(await readFile(path, 'utf8')).toBe(raw);
+        expect(manager.managedProcess).toBe(false);
+        expect(kill).not.toHaveBeenCalled();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
 
   it.each(
     (['marker', 'lease'] as const).flatMap((record) =>

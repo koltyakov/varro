@@ -27,6 +27,14 @@
     "**/artifacts/**",
     "**/tmp/**"
   ],
+  "python.analysis.exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*",
+    "artifacts",
+    "dist",
+    "tmp"
+  ],
   "[javascript]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"
   },

@@ -147,6 +147,12 @@ OS can reuse it.
   records can match within the current boot. An executable's ` (deleted)` suffix
   after a binary replacement does not invalidate the running process.
 
+Different executable paths also match when fresh filesystem observations identify
+the same regular file by device and nonzero inode. This handles macOS reporting
+either hard-link name without resetting the connection. Missing or inaccessible
+file evidence does not establish equivalence; PID, listener, and birth checks
+remain required.
+
 A live host's lease is observed by other windows. After disconnect or host exit,
 one contender can claim the server after validating its process identity.
 Explicit restarts coordinate ownership transfer with the same claim file.
