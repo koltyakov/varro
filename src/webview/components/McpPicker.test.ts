@@ -672,6 +672,94 @@ describe('McpPicker', () => {
     expect(mocks.status).toHaveBeenCalled();
   });
 
+  it.each([true, undefined])(
+    'uses capability-specific wording for paste=%s without changing the submitted value',
+    async (paste) => {
+      mocks.startAuth.mockResolvedValue({
+        authorizationUrl: 'https://mcp.example.com/authorize',
+        oauthState: 'state-1',
+        paste,
+      });
+      setMcpStatuses({ oauth: { status: 'needs_auth' } });
+      cleanup = render(
+        () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
+        container!
+      );
+      container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
+      await flushMicrotasks(6);
+      const dialog = document.querySelector('[role="dialog"]')!;
+      expect(dialog.querySelector('summary')?.textContent).toBe(
+        paste ? 'Paste the browser redirect URL instead' : 'Use an authorization code instead'
+      );
+      expect(dialog.querySelector('details')?.open).toBe(paste === true);
+      const input = dialog.querySelector<HTMLInputElement>('.provider-connect-input')!;
+      expect(input.labels?.[0]?.textContent).toContain(
+        paste ? 'Browser redirect URL' : 'Authorization code'
+      );
+      const value = paste
+        ? 'http://localhost/callback?code=a%2Bb&state=opaque%2Fstate'
+        : 'legacy-code';
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      dialog.querySelector<HTMLFormElement>('form')!.requestSubmit();
+      await flushMicrotasks(6);
+      expect(mocks.completeAuth).toHaveBeenCalledExactlyOnceWith('oauth', value);
+    }
+  );
+
+  it('still detects automatic MCP authorization when the redirect URL fallback is open', async () => {
+    vi.useFakeTimers();
+    mocks.startAuth.mockResolvedValue({
+      authorizationUrl: 'https://mcp.example.com/authorize',
+      oauthState: 'state-1',
+      paste: true,
+    });
+    mocks.status.mockResolvedValue({ oauth: { status: 'connected' } });
+    setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    cleanup = render(
+      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
+      container!
+    );
+    container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
+    await flushMicrotasks(6);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+      'Authorization successful'
+    );
+    expect(mocks.completeAuth).not.toHaveBeenCalled();
+  });
+
+  it('does not submit a pasted MCP redirect twice while its request is pending', async () => {
+    mocks.startAuth.mockResolvedValue({
+      authorizationUrl: 'https://mcp.example.com/authorize',
+      oauthState: 'state-1',
+      paste: true,
+    });
+    let resolve!: (value: McpStatus) => void;
+    mocks.completeAuth.mockReturnValue(
+      new Promise<McpStatus>((done) => {
+        resolve = done;
+      })
+    );
+    setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    cleanup = render(
+      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
+      container!
+    );
+    container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
+    await flushMicrotasks(6);
+    const form = document.querySelector<HTMLFormElement>('.provider-connect-form')!;
+    const input = form.querySelector('input')!;
+    input.value = 'http://localhost/callback?code=fixture';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    form.requestSubmit();
+    form.requestSubmit();
+    await flushMicrotasks(6);
+    expect(mocks.completeAuth).toHaveBeenCalledTimes(1);
+    resolve({ status: 'connected' });
+    await flushMicrotasks(6);
+  });
+
   it('detects browser authorization without requiring a code and stops checking after connection', async () => {
     vi.useFakeTimers();
     mocks.status

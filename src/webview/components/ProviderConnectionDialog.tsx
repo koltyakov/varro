@@ -46,11 +46,22 @@ export function ProviderConnectionDialog(props: {
   const [authorizationCode, setAuthorizationCode] = createSignal('');
   const [authorization, setAuthorization] = createSignal<ProviderAuthAuthorization | null>(null);
   const [isSubmitting, setIsSubmitting] = createSignal(false);
+  const [isSubmittingRedirect, setIsSubmittingRedirect] = createSignal(false);
   const [errorMessage, setErrorMessage] = createSignal('');
   let authController: AbortController | undefined;
+  let redirectController: AbortController | undefined;
   let initialProviderApplied = false;
 
-  onCleanup(() => authController?.abort(new Error('Provider authorization cancelled')));
+  function cancelAuthorization() {
+    authController?.abort(new Error('Provider authorization cancelled'));
+    redirectController?.abort(new Error('Provider authorization cancelled'));
+    authController = undefined;
+    redirectController = undefined;
+    setIsSubmitting(false);
+    setIsSubmittingRedirect(false);
+  }
+
+  onCleanup(cancelAuthorization);
 
   const providers = createMemo(() => {
     if (props.isLoadingProviders) return [];
@@ -93,7 +104,7 @@ export function ProviderConnectionDialog(props: {
   });
 
   function close() {
-    authController?.abort(new Error('Provider authorization cancelled'));
+    cancelAuthorization();
     props.onClose();
   }
 
@@ -146,7 +157,7 @@ export function ProviderConnectionDialog(props: {
   }
 
   function chooseMethod(index: number) {
-    authController?.abort(new Error('Provider authorization cancelled'));
+    cancelAuthorization();
     setMethodIndex(index);
     setInputs(
       Object.fromEntries(
@@ -162,8 +173,7 @@ export function ProviderConnectionDialog(props: {
   }
 
   function returnToMethods() {
-    authController?.abort(new Error('Provider authorization cancelled'));
-    setIsSubmitting(false);
+    cancelAuthorization();
     setAuthorization(null);
     setAuthorizationCode('');
     setInputs({});
@@ -289,7 +299,55 @@ export function ProviderConnectionDialog(props: {
     }
   }
 
+  const canPasteRedirect = () =>
+    authorization()?.method === 'auto' && authorization()?.paste === true;
+
+  async function submitRedirect() {
+    const id = providerID();
+    const index = methodIndex();
+    const active = authController;
+    const code = authorizationCode().trim();
+    if (
+      !canPasteRedirect() ||
+      !active ||
+      active.signal.aborted ||
+      isSubmittingRedirect() ||
+      !code ||
+      !id ||
+      index === null
+    )
+      return;
+    const controller = new AbortController();
+    redirectController = controller;
+    setIsSubmittingRedirect(true);
+    setErrorMessage('');
+    try {
+      const accepted = await client.config.completeProviderAuth(
+        {
+          providerID: id,
+          method: index,
+          attemptID: authorization()?.attemptID,
+          code,
+          submitOnly: true,
+        },
+        { signal: controller.signal }
+      );
+      if (controller.signal.aborted || authController !== active) return;
+      if (accepted !== true) throw new Error('Redirect URL was not accepted. Try again.');
+      setAuthorizationCode('');
+    } catch (error) {
+      if (!controller.signal.aborted && authController === active)
+        setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (redirectController === controller) {
+        redirectController = undefined;
+        setIsSubmittingRedirect(false);
+      }
+    }
+  }
+
   function finish() {
+    cancelAuthorization();
     const id = providerID();
     if (id) resolveProviderAuthFailure(id);
     setApiKey('');
@@ -300,7 +358,7 @@ export function ProviderConnectionDialog(props: {
   }
 
   function useTerminal() {
-    authController?.abort(new Error('Provider authorization cancelled'));
+    cancelAuthorization();
     const id = providerID();
     if (id === 'claude-agent') {
       openProviderSetup(id);
@@ -439,7 +497,11 @@ export function ProviderConnectionDialog(props: {
                       class="provider-connect-form"
                       onSubmit={(event) => {
                         event.preventDefault();
-                        void (authorization()?.method === 'code' ? submitCode() : connect());
+                        void (authorization()?.method === 'code'
+                          ? submitCode()
+                          : canPasteRedirect()
+                            ? submitRedirect()
+                            : connect());
                       }}
                     >
                       <button type="button" class="provider-connect-back" onClick={returnToMethods}>
@@ -561,9 +623,26 @@ export function ProviderConnectionDialog(props: {
                                 Open authorization page
                               </button>
                             </Show>
-                            <Show when={auth().method === 'code'}>
+                            <Show when={canPasteRedirect()}>
+                              <div
+                                id="provider-connect-redirect-help"
+                                class="provider-connect-intro"
+                              >
+                                If your browser cannot reach this machine, paste the full URL it
+                                redirected to.
+                                <Show when={isSubmitting()}>
+                                  {' '}
+                                  Automatic sign-in is still active.
+                                </Show>
+                              </div>
+                            </Show>
+                            <Show when={auth().method === 'code' || canPasteRedirect()}>
                               <label class="provider-connect-field">
-                                <span>Authorization code</span>
+                                <span>
+                                  {canPasteRedirect()
+                                    ? 'Browser redirect URL'
+                                    : 'Authorization code'}
+                                </span>
                                 <input
                                   class="provider-connect-input"
                                   type="text"
@@ -571,8 +650,20 @@ export function ProviderConnectionDialog(props: {
                                   onInput={(event) =>
                                     setAuthorizationCode(event.currentTarget.value)
                                   }
-                                  disabled={isSubmitting()}
-                                  required
+                                  disabled={
+                                    canPasteRedirect() ? isSubmittingRedirect() : isSubmitting()
+                                  }
+                                  placeholder={
+                                    canPasteRedirect() ? 'Paste the full redirect URL' : undefined
+                                  }
+                                  aria-describedby={
+                                    canPasteRedirect()
+                                      ? 'provider-connect-redirect-help'
+                                      : undefined
+                                  }
+                                  autocomplete="off"
+                                  spellcheck={false}
+                                  required={!canPasteRedirect()}
                                 />
                               </label>
                             </Show>
@@ -598,21 +689,29 @@ export function ProviderConnectionDialog(props: {
                           type="submit"
                           class="provider-connect-primary"
                           disabled={
-                            !canConnect() ||
-                            Boolean(authorization() && authorization()?.method !== 'code')
+                            canPasteRedirect()
+                              ? !isSubmitting() ||
+                                isSubmittingRedirect() ||
+                                !authorizationCode().trim()
+                              : !canConnect() ||
+                                Boolean(authorization() && authorization()?.method !== 'code')
                           }
                         >
-                          {isSubmitting()
-                            ? authorization()?.method === 'auto'
-                              ? 'Waiting for authorization...'
-                              : 'Connecting...'
-                            : authorization()?.method === 'code'
-                              ? 'Complete connection'
-                              : usesClaudeCodeLogin()
-                                ? "I've signed in"
-                                : method().type === 'oauth'
-                                  ? 'Continue'
-                                  : 'Connect'}
+                          {canPasteRedirect()
+                            ? isSubmittingRedirect()
+                              ? 'Submitting redirect URL...'
+                              : 'Submit redirect URL'
+                            : isSubmitting()
+                              ? authorization()?.method === 'auto'
+                                ? 'Waiting for authorization...'
+                                : 'Connecting...'
+                              : authorization()?.method === 'code'
+                                ? 'Complete connection'
+                                : usesClaudeCodeLogin()
+                                  ? "I've signed in"
+                                  : method().type === 'oauth'
+                                    ? 'Continue'
+                                    : 'Connect'}
                         </button>
                       </div>
                     </form>

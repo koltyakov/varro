@@ -425,6 +425,7 @@ function McpAuthDialog(props: {
 }) {
   const needsConfiguration = () => currentStatus().status === 'needs_client_registration';
   const [authorizationUrl, setAuthorizationUrl] = createSignal('');
+  const [canPasteRedirect, setCanPasteRedirect] = createSignal(false);
   const [authorizationCode, setAuthorizationCode] = createSignal('');
   const [currentStatus, setCurrentStatus] = createSignal<McpStatus>(props.server.status);
   const [isSubmitting, setIsSubmitting] = createSignal(false);
@@ -498,6 +499,7 @@ function McpAuthDialog(props: {
 
   async function startAuth() {
     setIsSubmitting(true);
+    setCanPasteRedirect(false);
     setErrorMessage('');
     setStatusError('');
     try {
@@ -510,6 +512,7 @@ function McpAuthDialog(props: {
         );
       }
       setAuthorizationUrl(url.href);
+      setCanPasteRedirect(authorization.paste === true);
       postMessage({ type: 'vscode/open-external', payload: { url: url.href } });
     } catch (error) {
       if (!disposed) setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -520,7 +523,7 @@ function McpAuthDialog(props: {
 
   async function submitCode() {
     const code = authorizationCode().trim();
-    if (!code) return;
+    if (isSubmitting() || !code) return;
     setIsSubmitting(true);
     setErrorMessage('');
     try {
@@ -696,15 +699,30 @@ function McpAuthDialog(props: {
                       changes the MCP login for all sessions using this connection.
                     </div>
                   </Show>
-                  <details>
-                    <summary>Use an authorization code instead</summary>
+                  <details open={canPasteRedirect()}>
+                    <summary>
+                      {canPasteRedirect()
+                        ? 'Paste the browser redirect URL instead'
+                        : 'Use an authorization code instead'}
+                    </summary>
+                    <Show when={canPasteRedirect()}>
+                      <div id="mcp-auth-redirect-help" class="provider-connect-intro">
+                        If your browser cannot reach this machine, paste the full URL it redirected
+                        to.
+                      </div>
+                    </Show>
                     <label class="provider-connect-field">
-                      Authorization code
+                      <span>
+                        {canPasteRedirect() ? 'Browser redirect URL' : 'Authorization code'}
+                      </span>
                       <input
                         class="provider-connect-input"
                         value={authorizationCode()}
                         onInput={(event) => setAuthorizationCode(event.currentTarget.value)}
                         autocomplete="off"
+                        spellcheck={false}
+                        placeholder={canPasteRedirect() ? 'Paste the full redirect URL' : undefined}
+                        aria-describedby={canPasteRedirect() ? 'mcp-auth-redirect-help' : undefined}
                       />
                     </label>
                     <button
@@ -712,7 +730,11 @@ function McpAuthDialog(props: {
                       class="provider-connect-primary"
                       disabled={isSubmitting() || !authorizationCode().trim()}
                     >
-                      {isSubmitting() ? 'Working...' : 'Complete authorization'}
+                      {isSubmitting()
+                        ? 'Working...'
+                        : canPasteRedirect()
+                          ? 'Submit redirect URL'
+                          : 'Complete authorization'}
                     </button>
                   </details>
                   <div class="provider-connect-intro" aria-live="polite">

@@ -1156,6 +1156,134 @@ describe('v2 authentication fields', () => {
     }
   });
 
+  it.each(['accepted', 'rejected', 'aborted'] as const)(
+    'keeps the automatic OAuth callback alive after a %s submission-only request',
+    async (outcome) => {
+      let finishPoll!: (value: { data: { status: string } }) => void;
+      let didPoll!: () => void;
+      const polled = new Promise<void>((done) => {
+        didPoll = done;
+      });
+      const pending = new Promise<{ data: { status: string } }>((done) => {
+        finishPoll = done;
+      });
+      const submissionController = new AbortController();
+      let submissions = 0;
+      const wire = vi.fn(async (method: string, path: string) => {
+        const route = new URL(path, 'http://localhost').pathname;
+        if (route === '/api/provider/fixture') return { data: {} };
+        if (route === '/api/integration/fixture')
+          return { data: { methods: [{ id: 'browser', type: 'oauth' }] } };
+        if (route.endsWith('/connect/oauth'))
+          return { data: { attemptID: 'attempt-paste', mode: 'auto', paste: true } };
+        if (method === 'GET' && route.endsWith('/attempt-paste')) {
+          didPoll();
+          return pending;
+        }
+        if (method === 'POST' && route.endsWith('/complete')) {
+          submissions++;
+          if (submissions === 1 && outcome === 'rejected') throw new Error('Invalid redirect URL');
+          if (submissions === 1 && outcome === 'aborted') {
+            submissionController.abort(new Error('Paste cancelled'));
+            submissionController.signal.throwIfAborted();
+          }
+          return null;
+        }
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      });
+      const adapter = new OpenCodeV2Adapter(wire);
+      const options = { directory: '/repo' };
+      await adapter.request('POST', '/provider/fixture/oauth/authorize', { method: 0 }, options);
+      let finished = false;
+      const completion = adapter
+        .request(
+          'POST',
+          '/provider/fixture/oauth/callback',
+          {
+            attemptID: 'attempt-paste',
+          },
+          options
+        )
+        .then((result) => {
+          finished = true;
+          return result;
+        });
+      await polled;
+      const redirect =
+        'http://127.0.0.1:1455/oauth/callback?code=a%2Bb&state=opaque%2Fstate#fragment';
+      const body = { attemptID: 'attempt-paste', code: redirect, submitOnly: true };
+      const submission = adapter.request('POST', '/provider/fixture/oauth/callback', body, {
+        ...options,
+        signal: submissionController.signal,
+      });
+      if (outcome === 'accepted') await expect(submission).resolves.toBe(true);
+      else {
+        await expect(submission).rejects.toThrow(
+          outcome === 'rejected' ? 'Invalid redirect URL' : 'Paste cancelled'
+        );
+        await expect(
+          adapter.request('POST', '/provider/fixture/oauth/callback', body, options)
+        ).resolves.toBe(true);
+      }
+      expect(finished).toBe(false);
+      expect(
+        wire.mock.calls.filter(
+          ([method, path]) => method === 'GET' && path.includes('/attempt-paste')
+        )
+      ).toHaveLength(1);
+      expect(wire.mock.calls.some(([method]) => method === 'DELETE')).toBe(false);
+      expect(wire).toHaveBeenCalledWith(
+        'POST',
+        '/api/integration/fixture/connect/oauth/attempt-paste/complete?location[directory]=%2Frepo',
+        { code: redirect },
+        expect.objectContaining({ unscoped: true })
+      );
+      finishPoll({ data: { status: 'complete' } });
+      await expect(completion).resolves.toBe(true);
+      await expect(
+        adapter.request('POST', '/provider/fixture/oauth/callback', body, options)
+      ).rejects.toThrow('attempt was not started');
+    }
+  );
+
+  it.each([
+    { mode: 'auto', paste: true, code: '  ' },
+    { mode: 'auto', paste: true, code: undefined },
+    { mode: 'auto', paste: undefined, code: 'http://localhost/callback?code=fixture' },
+    { mode: 'code', paste: true, code: 'http://localhost/callback?code=fixture' },
+  ])(
+    'rejects unsupported or empty submission-only OAuth input $mode/$paste/$code without deleting the attempt',
+    async ({ mode, paste, code }) => {
+      const wire = vi.fn(async (method: string, path: string) => {
+        if (path === '/api/provider/fixture') return { data: {} };
+        if (path === '/api/integration/fixture')
+          return { data: { methods: [{ id: 'browser', type: 'oauth' }] } };
+        if (path.endsWith('/connect/oauth'))
+          return { data: { attemptID: 'attempt-paste', mode, paste } };
+        if (method === 'GET' && path.endsWith('/attempt-paste'))
+          return { data: { status: 'complete' } };
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      });
+      const adapter = new OpenCodeV2Adapter(wire);
+      await adapter.request('POST', '/provider/fixture/oauth/authorize', { method: 0 });
+      await expect(
+        adapter.request('POST', '/provider/fixture/oauth/callback', {
+          attemptID: 'attempt-paste',
+          code,
+          submitOnly: true,
+        })
+      ).rejects.toThrow('does not accept a pasted redirect URL');
+      await expect(
+        adapter.request('POST', '/provider/fixture/oauth/callback', {
+          attemptID: 'attempt-paste',
+        })
+      ).resolves.toBe(true);
+      expect(
+        wire.mock.calls.some(([method, path]) => method === 'DELETE' || path.endsWith('/complete'))
+      ).toBe(false);
+    }
+  );
+
   it.each(['/repo-a', '/repo-b'])(
     'isolates overlapping OAuth code attempts when the second view uses %s',
     async (secondDirectory) => {

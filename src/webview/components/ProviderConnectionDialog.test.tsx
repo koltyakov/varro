@@ -901,6 +901,198 @@ describe('ProviderConnectionDialog API key flow', () => {
 });
 
 describe('ProviderConnectionDialog OAuth flow', () => {
+  async function startPasteFlow(automatic: Promise<boolean>) {
+    clientMocks.authorizeProvider.mockResolvedValue({
+      url: 'https://auth.example.com/oauth',
+      method: 'auto',
+      instructions: 'Sign in',
+      attemptID: 'attempt-paste',
+      paste: true,
+    });
+    clientMocks.completeProviderAuth.mockReturnValueOnce(automatic);
+    const onClose = renderDialog();
+    chooseProvider('Anthropic');
+    chooseMethod('Claude subscription');
+    primaryButton().click();
+    await flush();
+    return onClose;
+  }
+
+  function redirectInput() {
+    return dialog()!.querySelector<HTMLInputElement>(
+      '[aria-describedby="provider-connect-redirect-help"]'
+    )!;
+  }
+
+  it('offers an editable redirect URL while automatic authorization remains active', async () => {
+    const automatic = deferred<boolean>();
+    const onClose = await startPasteFlow(automatic.promise);
+    const input = redirectInput();
+    expect(input.labels?.[0]?.textContent).toContain('Browser redirect URL');
+    expect(input.disabled).toBe(false);
+    expect(input.required).toBe(false);
+    expect(input.autocomplete).toBe('off');
+    expect(dialog()?.textContent).toContain('Automatic sign-in is still active');
+    expect(primaryButton().textContent).toBe('Submit redirect URL');
+    expect(primaryButton().disabled).toBe(true);
+    dialog()!
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flush();
+    expect(clientMocks.completeProviderAuth).toHaveBeenCalledTimes(1);
+    automatic.resolve(true);
+    await flush();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('submits the full redirect URL once without replacing or aborting the automatic callback', async () => {
+    const automatic = deferred<boolean>();
+    const submitted = deferred<boolean>();
+    const onClose = await startPasteFlow(automatic.promise);
+    clientMocks.completeProviderAuth.mockReturnValueOnce(submitted.promise);
+    const redirect = 'http://127.0.0.1:1455/callback?code=a%2Bb&state=opaque%2Fstate';
+    type(redirectInput(), `  ${redirect}  `);
+    const form = dialog()!.querySelector('form')!;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flush();
+    expect(clientMocks.completeProviderAuth).toHaveBeenCalledTimes(2);
+    expect(clientMocks.completeProviderAuth).toHaveBeenLastCalledWith(
+      {
+        providerID: 'anthropic',
+        method: 0,
+        attemptID: 'attempt-paste',
+        code: redirect,
+        submitOnly: true,
+      },
+      { signal: expect.any(AbortSignal) }
+    );
+    const options: { signal: AbortSignal } = clientMocks.completeProviderAuth.mock.calls[0]![1];
+    expect(options.signal.aborted).toBe(false);
+    expect(redirectInput().disabled).toBe(true);
+    expect(primaryButton().textContent).toBe('Submitting redirect URL...');
+    submitted.resolve(true);
+    await flush();
+    expect(redirectInput().value).toBe('');
+    expect(redirectInput().disabled).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalledWith({ type: 'providers/auth-changed' });
+    automatic.resolve(true);
+    await flush();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it.each(['rejected', 'false'] as const)(
+    'keeps a %s redirect editable for retry without stopping automatic completion',
+    async (failure) => {
+      const automatic = deferred<boolean>();
+      const onClose = await startPasteFlow(automatic.promise);
+      if (failure === 'rejected')
+        clientMocks.completeProviderAuth.mockRejectedValueOnce(new Error('Invalid redirect URL'));
+      else clientMocks.completeProviderAuth.mockResolvedValueOnce(false);
+      type(redirectInput(), 'http://localhost/callback?code=wrong');
+      primaryButton().click();
+      await flush();
+      expect(alertText()).toContain(
+        failure === 'rejected' ? 'Invalid redirect URL' : 'Redirect URL was not accepted'
+      );
+      expect(redirectInput().value).toContain('code=wrong');
+      expect(primaryButton().disabled).toBe(false);
+      const options: { signal: AbortSignal } = clientMocks.completeProviderAuth.mock.calls[0]![1];
+      expect(options.signal.aborted).toBe(false);
+      clientMocks.completeProviderAuth.mockResolvedValueOnce(true);
+      type(redirectInput(), 'http://localhost/callback?code=correct');
+      primaryButton().click();
+      await flush();
+      expect(alertText()).toBe('');
+      expect(onClose).not.toHaveBeenCalled();
+      automatic.resolve(true);
+      await flush();
+      expect(onClose).toHaveBeenCalledOnce();
+    }
+  );
+
+  it('finishes only once if browser authorization completes while URL submission is pending', async () => {
+    const automatic = deferred<boolean>();
+    const submitted = deferred<boolean>();
+    const onClose = await startPasteFlow(automatic.promise);
+    clientMocks.completeProviderAuth.mockReturnValueOnce(submitted.promise);
+    type(redirectInput(), 'http://localhost/callback?code=fixture');
+    primaryButton().click();
+    await flush();
+    const options: { signal: AbortSignal } = clientMocks.completeProviderAuth.mock.calls[1]![1];
+    automatic.resolve(true);
+    await flush();
+    expect(options.signal.aborted).toBe(true);
+    submitted.resolve(true);
+    await flush();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(
+      postMessageMock.mock.calls.filter(([message]) => message.type === 'providers/auth-changed')
+    ).toHaveLength(1);
+  });
+
+  it.each(['close', 'back', 'unmount'] as const)(
+    'cancels both OAuth requests on %s and ignores their late responses',
+    async (action) => {
+      const automatic = deferred<boolean>();
+      const submitted = deferred<boolean>();
+      const onClose = await startPasteFlow(automatic.promise);
+      clientMocks.completeProviderAuth.mockReturnValueOnce(submitted.promise);
+      type(redirectInput(), 'http://localhost/callback?code=fixture');
+      primaryButton().click();
+      await flush();
+      const options: { signal: AbortSignal }[] = clientMocks.completeProviderAuth.mock.calls.map(
+        ([, requestOptions]) => requestOptions
+      );
+      if (action === 'close')
+        dialog()!.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click();
+      else if (action === 'back') findButton('Back to methods')!.click();
+      else {
+        cleanup!();
+        cleanup = undefined;
+      }
+      expect(options.every((option) => option.signal.aborted)).toBe(true);
+      automatic.resolve(true);
+      submitted.resolve(true);
+      await flush();
+      expect(onClose).toHaveBeenCalledTimes(action === 'close' ? 1 : 0);
+      expect(postMessageMock).not.toHaveBeenCalledWith({ type: 'providers/auth-changed' });
+    }
+  );
+
+  it('does not let a cancelled URL submission re-enable controls in a newer attempt', async () => {
+    const oldAutomatic = deferred<boolean>();
+    const oldSubmission = deferred<boolean>();
+    const onClose = await startPasteFlow(oldAutomatic.promise);
+    clientMocks.completeProviderAuth.mockReturnValueOnce(oldSubmission.promise);
+    type(redirectInput(), 'http://localhost/callback?code=old');
+    primaryButton().click();
+    await flush();
+    findButton('Back to methods')!.click();
+    const currentAutomatic = deferred<boolean>();
+    const currentSubmission = deferred<boolean>();
+    clientMocks.completeProviderAuth
+      .mockReturnValueOnce(currentAutomatic.promise)
+      .mockReturnValueOnce(currentSubmission.promise);
+    chooseMethod('Claude subscription');
+    primaryButton().click();
+    await flush();
+    type(redirectInput(), 'http://localhost/callback?code=current');
+    primaryButton().click();
+    await flush();
+    oldAutomatic.resolve(true);
+    oldSubmission.resolve(true);
+    await flush();
+    expect(primaryButton().disabled).toBe(true);
+    expect(primaryButton().textContent).toBe('Submitting redirect URL...');
+    expect(onClose).not.toHaveBeenCalled();
+    currentSubmission.resolve(true);
+    currentAutomatic.resolve(true);
+    await flush();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it.each(['auto', 'code'] as const)(
     'copies the full authorization URL during a pending %s exchange without submitting or cancelling',
     async (method) => {

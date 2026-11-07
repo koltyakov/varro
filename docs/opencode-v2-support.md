@@ -107,9 +107,13 @@ Provider and MCP auth responses preserve the optional native `paste: true`
 capability without changing automatic attempts into code-only attempts. Older servers omit the field
 and keep their existing behavior. A pasted redirect URL travels unchanged through
 the callback's `code` field; the server still validates it and attempt status still
-acknowledges completion. This contract support does not add a paste field to the dialog.
+acknowledges completion. With this capability, the provider dialog exposes a browser redirect-URL
+input alongside automatic completion. Its submission-only callback acknowledges the paste without
+polling or cancelling the native attempt, including after a rejected or aborted submission. The
+original callback still owns completion and cancellation. MCP opens its fallback field with
+redirect-URL wording; older responses retain the authorization-code wording.
 
-OAuth paste verification passed 333 focused adapter, client, provider-dialog,
+The initial OAuth paste contract verification passed 333 focused adapter, client, provider-dialog,
 and MCP-picker tests. All 151 applicable published-server adapter checks passed
 across v1.16.0, v1.19.5, v2.0.5, and v2.2.6, with 53 family/platform skips and no
 recovered processes. The five compatibility-summary tests passed afterward.
@@ -117,6 +121,17 @@ Lint, formatting, both type checks, and the build passed. Evidence uses the
 `artifacts/opencode-oauth-paste-` prefix and
 `artifacts/opencode-adapters/run-hgFPsK/`. Real-account OAuth and visual checks
 were not run.
+
+The dialog paste follow-up passed 354 focused adapter, client, provider-dialog, and MCP-picker
+tests, 22 existing provider/MCP E2E cases, both type checks, formatting, and the build. Isolated Chromium
+checks covered both dialogs in dark/light themes at 800, 360, and 240px widths, provider rejection/retry
+with automatic completion still pending, and MCP submission. Controls remain reachable by scrolling
+in short viewports, with no horizontal overflow. Evidence is in `artifacts/opencode-oauth-paste-ui-WK4Imp/`. Real-account OAuth
+and real VS Code rendering remain unverified. Repository-wide lint exited with an empty JSON-output
+parse error; separate type-aware lint runs for `src/`, `scripts/`, and `e2e/` passed.
+The published-server adapter rerun passed all 151 applicable checks across v1.16.0, v1.19.5,
+v2.0.5, and v2.2.6, with 53 family/platform skips and no recovered processes. Evidence is in
+`artifacts/opencode-adapters/run-s2eIQ5/`.
 
 Hidden provider fields retain their defaults and conditions in the dialog's form definition without
 rendering controls. Visible fields can depend on those defaults, including conditional hidden fields.

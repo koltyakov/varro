@@ -638,17 +638,20 @@ export const client = {
         method: number;
         code?: string;
         attemptID?: string;
+        /** Submit a redirect URL without replacing the callback waiting for completion. */
+        submitOnly?: true;
       },
       options?: { signal?: AbortSignal }
     ): Promise<boolean> {
+      const payload = {
+        method: body.method,
+        code: body.code ? body.code : undefined,
+        attemptID: body.attemptID,
+      };
       return apiCall(
         'POST',
         `/provider/${encodeURIComponent(body.providerID)}/oauth/callback`,
-        {
-          method: body.method,
-          code: body.code ? body.code : undefined,
-          attemptID: body.attemptID,
-        },
+        body.submitOnly ? { ...payload, submitOnly: true } : payload,
         {
           timeoutMs: 315_000,
           retries: 0,

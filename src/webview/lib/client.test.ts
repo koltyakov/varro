@@ -1571,6 +1571,36 @@ describe('client', () => {
     }
   );
 
+  it('forwards redirect submission-only requests with their own cancellation signal', async () => {
+    const { client } = await loadClient();
+    const controller = new AbortController();
+    const code = 'http://localhost/callback?code=a%2Bb&state=opaque%2Fstate';
+    bridgeMocks.apiCall.mockResolvedValue(true);
+    await expect(
+      client.config.completeProviderAuth(
+        {
+          providerID: 'fixture',
+          method: 0,
+          attemptID: 'attempt-1',
+          code,
+          submitOnly: true,
+        },
+        { signal: controller.signal }
+      )
+    ).resolves.toBe(true);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/provider/fixture/oauth/callback',
+      {
+        method: 0,
+        attemptID: 'attempt-1',
+        code,
+        submitOnly: true,
+      },
+      { signal: controller.signal, timeoutMs: 315_000, retries: 0 }
+    );
+  });
+
   it('loads the full provider catalog', async () => {
     const { client } = await loadClient();
     const response = {

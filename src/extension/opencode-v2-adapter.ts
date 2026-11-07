@@ -284,7 +284,13 @@ export class OpenCodeV2Adapter {
   private backgroundJobsAvailable: boolean | undefined;
   private readonly oauth = new Map<
     string,
-    { integrationID: string; attemptID: string; providerID: string; directory?: string }
+    {
+      integrationID: string;
+      attemptID: string;
+      providerID: string;
+      directory?: string;
+      paste: boolean;
+    }
   >();
 
   constructor(
@@ -2177,6 +2183,7 @@ export class OpenCodeV2Adapter {
         attemptID: result.attemptID,
         providerID,
         directory,
+        paste: result.mode === 'auto' && result.paste === true,
       });
       const authorization = {
         attemptID: result.attemptID,
@@ -2197,6 +2204,14 @@ export class OpenCodeV2Adapter {
           : undefined;
       if (!attempt) throw new Error('OpenCode OAuth attempt was not started');
       const attemptPath = `/api/integration/${encodeURIComponent(attempt.integrationID)}/connect/oauth/${encodeURIComponent(attempt.attemptID)}`;
+      if (input.submitOnly === true) {
+        if (!attempt.paste || !isString(input.code) || !input.code.trim())
+          throw new Error('This OAuth attempt does not accept a pasted redirect URL');
+        // The existing callback owns polling and cancellation. A rejected paste must
+        // leave that callback and its native attempt alive so the user can retry.
+        await raw('POST', `${attemptPath}/complete`, { code: input.code });
+        return true;
+      }
       let completed = false;
       try {
         if (input.code) await raw('POST', `${attemptPath}/complete`, { code: input.code });
