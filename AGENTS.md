@@ -11,6 +11,7 @@
 - Run one Vitest case: `npm run test -- src/webview/components/ChatInput.test.ts -t "runs a typed slash command with args on Enter"`.
 - E2E tests: `npm run test:e2e`; run one Playwright spec: `npm run test:e2e -- e2e/tests/layout.spec.ts`.
 - Main code areas: `src/extension`, `src/webview`, and `src/shared`.
+- OpenCode sources are expected in the sibling checkout at `../opencode`, relative to the Varro root.
 - TypeScript is `strict`; prefer explicit types at module boundaries and shared protocol shapes.
 - Avoid `any`; prefer `unknown` in `catch` blocks and narrow before use.
 - Imports: builtins/external first, then local relative imports; keep `import type` separate where practical.

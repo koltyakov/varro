@@ -416,7 +416,7 @@ Windows checks were not run for this bump.
 ### 1.19.5 compatibility review
 
 Reviewed v1.19.4 to v1.19.5, `148842ef7c` through `810c0eba1a`, using a separate
-clean upstream checkout because `tmp/opencode` contains unrelated work. The complete
+clean upstream checkout because the local checkout contained unrelated work. The complete
 diff is retained in `artifacts/opencode-1.19.5-upstream.diff`.
 
 Consumed HTTP routes, `/global/event` SSE names and payloads, SDK/OpenAPI contracts,
@@ -1986,7 +1986,7 @@ required.
 - Default-mode sends preserve session-scoped Always approvals. V2 replaces session permission rules,
   so the previous pre-send empty-rule update erased saved allowances. Explicit mode changes still
   apply their rule updates. The released permission engine does honor session rules; the older
-  `tmp/opencode` checkout did not represent that released behavior.
+  upstream source checkout used at the time did not represent that released behavior.
 - V2's `The user declined this tool call` error uses Varro's permission-rejected presentation and
   remains outside compact completed-work groups.
 - Step-start events use the 2.0.7 `started` timestamp for provider-request timing, with the event
@@ -2035,7 +2035,7 @@ The remaining sections record the original startup investigation and implementat
 - Published `@opencode/cli` and `@opencode/client` report `2.0.6`.
 - Published `opencode-ai` and `@opencode-ai/sdk` still report `1.18.31`.
 - The [migration guide](https://opencode.ai/v2/docs/migrate-v1/) explicitly identifies the server API as a breaking change. Supported v1 configuration remains accepted, but this does not promise v1 HTTP compatibility.
-- `tmp/opencode` was clean and current on upstream `dev`, commit `5a8335857b0ebec44ef6aa1d52b339cf25c329ca`. Its CLI and protocol can differ from the released binary. Treat those sources as architectural references, not the released contract.
+- The upstream source checkout was clean and current on upstream `dev`, commit `5a8335857b0ebec44ef6aa1d52b339cf25c329ca`. The expected checkout location is now `../opencode`, relative to the Varro root. Its CLI and protocol can differ from the released binary. Treat those sources as architectural references, not the released contract.
 - The 2.0.6 API uses `/api/info`; Varro also probes the 2.0.5 `/api/status` endpoint to preserve the supported v2 floor.
 
 ### Reproduced startup failure on v2.0.5

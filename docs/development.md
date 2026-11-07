@@ -14,6 +14,22 @@ npm install -g @opencode/cli
 
 This npm command is for macOS, Linux, or WSL. On native Windows, use the standalone CLI from the v2 install page. For v1 development, use `npm install -g opencode-ai`. Both current packages install `opencode`; use separate installation directories and `varro.server.command` paths when testing both. See [choosing and updating OpenCode](usage.md#choose-and-update-opencode).
 
+## OpenCode source checkout
+
+OpenCode sources are expected at `../opencode`, alongside the Varro repository.
+Paths and commands below are relative to the Varro root.
+
+If the sibling checkout is missing, clone it:
+
+```sh
+git clone https://github.com/anomalyco/opencode.git ../opencode
+```
+
+Use this checkout for upstream source inspection and [version-bump reviews](opencode-version-bumps.md).
+The clean `tmp/opencode` fixture used by AI edit scenarios and native-form validation is separate.
+Follow the [fixture safety contract](ai-fuzzy-verification.md#repository-fixture-safety) for those tests;
+do not use the sibling source checkout as an editable test fixture.
+
 ## Install Dependencies
 
 Volta and CI use the Node and npm versions pinned in `package.json`. npm 12 blocks Git dependencies

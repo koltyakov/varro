@@ -121,6 +121,9 @@ never against the Varro source worktree. The model may inspect, edit, and test O
 real reasoning, tools, patches, changed-file summaries, and command output without risking the code
 under test.
 
+This fixture is separate from the upstream source checkout at `<varro-root>/../opencode`. Keep the
+sibling checkout for source inspection; do not run edit scenarios against it.
+
 1. From the Varro root, prepare the fixture before launching the host:
 
    ```sh

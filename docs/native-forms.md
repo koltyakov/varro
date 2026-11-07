@@ -56,6 +56,7 @@ server's pending form intact. Native replies cannot be sent through a V1 connect
 
 `node --test scripts/opencode-compatibility/native-form.integration.test.mjs` executes the actual pure native
 validator from `tmp/opencode/packages/core/src/form.ts` against Varro-produced answers.
+This validation fixture is separate from the upstream source checkout at `../opencode`.
 It prints the source hash, reproduces the inactive-field rejection, and verifies omission,
 numeric absence/zero, duplicate labels, required defaults, external acknowledgment, and
 cascaded conditions. It does not start a service, read production sessions, or modify the
