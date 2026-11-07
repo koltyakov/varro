@@ -16,6 +16,7 @@ import type {
   SessionsResponse,
   ModelRef,
   ShellInfo,
+  JobInfo,
   SkillInfo,
 } from '@opencode/client';
 import { randomUUID } from 'node:crypto';
@@ -237,6 +238,31 @@ function nextBackgroundReviewAt(startedAt: number, now: number): number {
   return startedAt + nextMinute * 60_000;
 }
 
+function parseBackgroundJobs(value: unknown): JobInfo[] {
+  if (!Array.isArray(value)) throw new Error('Invalid OpenCode v2 background-job list');
+  for (const item of value) {
+    const job = asRecord(item);
+    const time = asRecord(job?.time);
+    if (
+      !job ||
+      !isString(job.id) ||
+      !isString(job.sessionID) ||
+      !isString(job.status) ||
+      !['running', 'completed', 'error', 'cancelled'].includes(String(job.status)) ||
+      !isNumber(time?.started) ||
+      !Number.isFinite(time.started) ||
+      (job.title !== undefined && !isString(job.title)) ||
+      !(job.kind === 'shell'
+        ? isString(job.shellID) && isString(job.command)
+        : job.kind === 'subagent'
+          ? isString(job.childSessionID) && isString(job.agent) && isString(job.description)
+          : job.kind === 'image' && isString(job.path) && isString(job.model))
+    )
+      throw new Error('Invalid OpenCode v2 background job');
+  }
+  return value as JobInfo[];
+}
+
 export class OpenCodeV2Adapter {
   private readonly backgroundWork = new OpenCodeV2BackgroundWork();
   private readonly backgroundServices: OpenCodeV2SessionState;
@@ -255,6 +281,7 @@ export class OpenCodeV2Adapter {
   private taskControlsGeneration = 0;
   private apiCapabilities: Promise<ReturnType<typeof getOpenCodeApiCapabilities>> | undefined;
   private serverVersion: string | undefined;
+  private backgroundJobsAvailable: boolean | undefined;
   private readonly oauth = new Map<
     string,
     { integrationID: string; attemptID: string; providerID: string; directory?: string }
@@ -285,7 +312,10 @@ export class OpenCodeV2Adapter {
     created?: unknown,
     sequence?: unknown
   ): void {
-    if (type === 'server.connected') this.apiCapabilities = undefined;
+    if (type === 'server.connected') {
+      this.apiCapabilities = undefined;
+      this.backgroundJobsAvailable = undefined;
+    }
     this.generationTiming.observe(type, data, created, sequence);
     if ((type === 'shell.exited' || type === 'shell.deleted') && isString(data.id))
       this.cancelBackgroundReview(data.id);
@@ -353,11 +383,14 @@ export class OpenCodeV2Adapter {
   }
 
   setServerVersion(version: string | undefined): void {
-    this.serverVersion = version ? (extractVersion(version) ?? undefined) : undefined;
+    const next = version ? (extractVersion(version) ?? undefined) : undefined;
+    if (next !== this.serverVersion) this.backgroundJobsAvailable = undefined;
+    this.serverVersion = next;
   }
 
   reset(): void {
     this.serverVersion = undefined;
+    this.backgroundJobsAvailable = undefined;
     this.apiCapabilities = undefined;
     for (const controller of this.backgroundJudgments.values()) controller.abort();
     this.backgroundJudgments.clear();
@@ -547,26 +580,39 @@ export class OpenCodeV2Adapter {
     }
     if (route === '/session/status') {
       const version = this.backgroundWork.snapshotVersion();
-      const [active, shells] = await Promise.all([
+      const generation = this.taskControlsGeneration;
+      const [active, shells, jobs] = await Promise.all([
         data<Record<string, SessionActive>>('GET', '/api/session/active'),
         data<ShellInfo[]>('GET', query('/api/shell', true)),
+        this.readBackgroundJobs((target) => data<unknown>('GET', target), directory),
       ]);
-      const choices = await this.readBackgroundServiceChoices(shells);
-      const serviceIDs = new Set(
-        shells
+      const nativeShells = [...(jobs?.values() ?? [])].flat().filter((job) => job.kind === 'shell');
+      const choices = await this.readBackgroundServiceChoices(
+        shells,
+        nativeShells.map((job) => job.sessionID)
+      );
+      options.signal?.throwIfAborted();
+      if (generation !== this.taskControlsGeneration)
+        throw new Error('OpenCode background status was reset');
+      const serviceIDs = new Set([
+        ...shells
           .filter(
             (shell) =>
               isString(shell.metadata.sessionID) &&
               choices.get(shell.metadata.sessionID)?.[shell.id] === true
           )
-          .map((shell) => shell.id)
-      );
+          .map((shell) => shell.id),
+        ...nativeShells
+          .filter((job) => choices.get(job.sessionID)?.[job.shellID] === true)
+          .map((job) => job.shellID),
+      ]);
       const waiting = this.backgroundWork.reconcile(
         shells,
         new Set(Object.keys(active)),
         directory,
         version,
-        serviceIDs
+        serviceIDs,
+        jobs
       );
       for (const shell of shells) {
         const sessionID = shell.metadata.sessionID;
@@ -1567,8 +1613,13 @@ export class OpenCodeV2Adapter {
       );
       if (!isString(authorization?.url))
         throw new Error('OpenCode did not provide an MCP authentication URL');
-      if (mcpAuth[2] !== 'authenticate')
-        return { authorizationUrl: authorization.url, oauthState: authorization.attemptID };
+      if (mcpAuth[2] !== 'authenticate') {
+        const started = {
+          authorizationUrl: authorization.url,
+          oauthState: authorization.attemptID,
+        };
+        return authorization.paste === true ? { ...started, paste: true } : started;
+      }
       if (!(await this.openExternal(authorization.url)))
         throw new Error('Could not open the MCP authentication page');
       await this.authenticate(
@@ -1603,14 +1654,16 @@ export class OpenCodeV2Adapter {
   }
 
   private async readBackgroundServiceChoices(
-    shells: ShellInfo[]
+    shells: ShellInfo[],
+    jobSessionIDs: readonly string[] = []
   ): Promise<ReadonlyMap<string, UnknownRecord>> {
     const sessionIDs = [
-      ...new Set(
-        shells.flatMap((shell) =>
+      ...new Set([
+        ...jobSessionIDs,
+        ...shells.flatMap((shell) =>
           isString(shell.metadata.sessionID) ? [shell.metadata.sessionID] : []
-        )
-      ),
+        ),
+      ]),
     ];
     return new Map(
       await Promise.all(
@@ -1619,6 +1672,83 @@ export class OpenCodeV2Adapter {
         )
       )
     );
+  }
+
+  private async readBackgroundJobs(
+    load: (path: string) => Promise<unknown>,
+    directory?: string
+  ): Promise<ReadonlyMap<string, readonly JobInfo[]> | undefined> {
+    // The experimental route first shipped in 2.2.6. Do not probe older servers or
+    // turn authentication, network, or malformed-response failures into an idle snapshot.
+    if (
+      !this.serverVersion ||
+      compareVersions(this.serverVersion, '2.2.6') < 0 ||
+      this.backgroundJobsAvailable === false
+    )
+      return undefined;
+    const generation = this.taskControlsGeneration;
+    let response: unknown;
+    try {
+      response = await load('/api/experimental/job');
+    } catch (error: unknown) {
+      if (!isNotFoundError(error)) throw error;
+      if (generation === this.taskControlsGeneration) this.backgroundJobsAvailable = false;
+      return undefined;
+    }
+    const jobs = parseBackgroundJobs(response).filter((job) => job.status !== 'cancelled');
+    const sessions = new Map<
+      string,
+      Promise<{ directory: string; parentID?: string } | undefined>
+    >();
+    const session = (id: string) => {
+      let pending = sessions.get(id);
+      if (!pending) {
+        pending = load(`/api/session/${encodeURIComponent(id)}`)
+          .then((value) => {
+            const info = asRecord(value);
+            const location = asRecord(info?.location);
+            if (
+              !info ||
+              info.id !== id ||
+              !isString(location?.directory) ||
+              (info.parentID !== undefined && !isString(info.parentID))
+            )
+              throw new Error('Invalid OpenCode v2 background-job session');
+            return { directory: location.directory, parentID: info.parentID };
+          })
+          .catch((error: unknown) => {
+            // Deletion may race the job snapshot. Other failures must not erase pending work.
+            if (isNotFoundError(error)) return undefined;
+            throw error;
+          });
+        sessions.set(id, pending);
+      }
+      return pending;
+    };
+    const owners = await Promise.all(
+      jobs.map(async (job) => {
+        const included: string[] = [];
+        const seen = new Set<string>();
+        let id: string | undefined = job.sessionID;
+        while (id && !seen.has(id)) {
+          seen.add(id);
+          const info = await session(id);
+          if (!info) break;
+          if (!directory || isSameWorkspacePath(info.directory, directory)) included.push(id);
+          id = info.parentID;
+        }
+        return included;
+      })
+    );
+    const grouped = new Map<string, JobInfo[]>();
+    for (const [index, job] of jobs.entries()) {
+      for (const id of owners[index] ?? []) {
+        const items = grouped.get(id) ?? [];
+        items.push(job);
+        grouped.set(id, items);
+      }
+    }
+    return grouped;
   }
 
   private scheduleBackgroundJudgment(
@@ -2048,12 +2178,13 @@ export class OpenCodeV2Adapter {
         providerID,
         directory,
       });
-      return {
+      const authorization = {
         attemptID: result.attemptID,
         url: result.url,
         method: result.mode === 'code' ? 'code' : 'auto',
         instructions: result.instructions ?? '',
       };
+      return result.paste === true ? { ...authorization, paste: true } : authorization;
     }
     if (action === 'callback') {
       const candidates = [...this.oauth.values()].filter(

@@ -55,6 +55,29 @@ carry an explicit user-cancellation outcome through shell/job removal and suppre
 background notification. Interrupting the entire session or racing to cancel the new
 inbox item is not a safe substitute for cancelling one process.
 
+### Background-job reconciliation
+
+On v2.2.6+, status snapshots use `/api/experimental/job` for shell, subagent,
+and image jobs. The server-wide list includes descendant-owned jobs; Varro loads
+their native ancestry once per snapshot and scopes each owner and ancestor to
+the requested workspace. Running jobs and completed/error results still awaiting
+consumption keep idle sessions waiting. Cancelled jobs and shells marked as
+services do not. Active model execution remains busy, not background-waiting.
+
+Older or unidentified servers retain shell-based tracking. A missing job route
+also falls back until reconnection or a version change; other errors surface
+without clearing pending work. Snapshot ordering, live shell events, interruption,
+reset, and the existing completion-handoff window remain guarded. This changes
+status tracking, not the available cancellation APIs or permission handling.
+
+Verification passed 392 focused tests and all 151 applicable published-server
+adapter checks, with 53 family/platform skips and no recovered processes. The
+matrix covered v1.16.0, v1.19.5, v2.0.5, and v2.2.6. The five compatibility-summary
+tests passed afterward. Lint, formatting, both type checks, and the build passed.
+Evidence uses the `artifacts/opencode-background-jobs-` prefix and
+`artifacts/opencode-adapters/run-kFAZyn/`. These checks do not establish visual
+or live-account action-parity coverage.
+
 ### Configuration discovery and provider connection lifecycle
 
 Project configuration reads now follow v2's documented discovery order through the filesystem
@@ -79,6 +102,21 @@ OAuth authorization responses retain their attempt IDs through the dialog and co
 Pending attempts are checked against their provider and workspace, so overlapping connections in
 separate chat views cannot complete or remove each other's attempts. Legacy callbacks without an
 attempt ID are accepted only when there is one matching pending attempt.
+
+Provider and MCP auth responses preserve the optional native `paste: true`
+capability without changing automatic attempts into code-only attempts. Older servers omit the field
+and keep their existing behavior. A pasted redirect URL travels unchanged through
+the callback's `code` field; the server still validates it and attempt status still
+acknowledges completion. This contract support does not add a paste field to the dialog.
+
+OAuth paste verification passed 333 focused adapter, client, provider-dialog,
+and MCP-picker tests. All 151 applicable published-server adapter checks passed
+across v1.16.0, v1.19.5, v2.0.5, and v2.2.6, with 53 family/platform skips and no
+recovered processes. The five compatibility-summary tests passed afterward.
+Lint, formatting, both type checks, and the build passed. Evidence uses the
+`artifacts/opencode-oauth-paste-` prefix and
+`artifacts/opencode-adapters/run-hgFPsK/`. Real-account OAuth and visual checks
+were not run.
 
 Hidden provider fields retain their defaults and conditions in the dialog's form definition without
 rendering controls. Visible fields can depend on those defaults, including conditional hidden fields.

@@ -1518,22 +1518,58 @@ describe('client', () => {
     });
   });
 
-  it('forwards the OAuth attempt identity on completion', async () => {
+  it.each([true, false, undefined])(
+    'preserves optional paste=%s in MCP OAuth responses',
+    async (paste) => {
+      const { client } = await loadClient();
+      const response = {
+        authorizationUrl: 'https://example.test/login',
+        oauthState: 'attempt-one',
+      };
+      bridgeMocks.apiCall.mockResolvedValue({ ...response, paste });
+      const authorization = await client.mcp.startAuth('fixture');
+      expect(authorization.paste).toBe(paste === true ? true : undefined);
+      expect(authorization).toStrictEqual(paste === true ? { ...response, paste: true } : response);
+    }
+  );
+
+  it('retains the optional OAuth paste capability in authorization responses', async () => {
     const { client } = await loadClient();
-    bridgeMocks.apiCall.mockResolvedValue(true);
-    await client.config.completeProviderAuth({
+    const response = {
+      url: 'https://example.test/login',
+      method: 'auto',
+      instructions: 'Sign in',
+      attemptID: 'attempt-1',
+      paste: true,
+    };
+    bridgeMocks.apiCall.mockResolvedValue(response);
+    const authorization = await client.config.authorizeProvider({
       providerID: 'fixture',
       method: 0,
-      code: 'code',
-      attemptID: 'attempt-1',
     });
-    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
-      'POST',
-      '/provider/fixture/oauth/callback',
-      { method: 0, code: 'code', attemptID: 'attempt-1' },
-      expect.objectContaining({ retries: 0 })
-    );
+    expect(authorization.paste).toBe(true);
+    expect(authorization).toStrictEqual(response);
   });
+
+  it.each(['code', 'http://127.0.0.1:1455/callback?code=a%2Bb&state=opaque%2Fstate'])(
+    'forwards the OAuth attempt identity on completion with %s',
+    async (code) => {
+      const { client } = await loadClient();
+      bridgeMocks.apiCall.mockResolvedValue(true);
+      await client.config.completeProviderAuth({
+        providerID: 'fixture',
+        method: 0,
+        code,
+        attemptID: 'attempt-1',
+      });
+      expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+        'POST',
+        '/provider/fixture/oauth/callback',
+        { method: 0, code, attemptID: 'attempt-1' },
+        expect.objectContaining({ retries: 0 })
+      );
+    }
+  );
 
   it('loads the full provider catalog', async () => {
     const { client } = await loadClient();

@@ -84,7 +84,7 @@ export type SessionListPage = {
   incomplete?: boolean;
   unavailableDirectories?: string[];
 };
-export type McpAuthStart = { authorizationUrl: string; oauthState: string };
+export type McpAuthStart = { authorizationUrl: string; oauthState: string; paste?: true };
 
 export const client = {
   async health(): Promise<HealthResponse> {
@@ -1065,10 +1065,11 @@ export const client = {
       if (!isString(response.authorizationUrl) || !isString(response.oauthState)) {
         throw malformedResponse(path, 'an MCP OAuth authorization response');
       }
-      return {
+      const authorization = {
         authorizationUrl: response.authorizationUrl,
         oauthState: response.oauthState,
       };
+      return response.paste === true ? { ...authorization, paste: true } : authorization;
     },
     async completeAuth(name: string, code: string): Promise<McpStatus> {
       return apiCall('POST', `/mcp/${encodeURIComponent(name)}/auth/callback`, { code });

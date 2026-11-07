@@ -1,8 +1,10 @@
-import type { ShellInfo } from '@opencode/client';
+import type { JobInfo, ShellInfo } from '@opencode/client';
 import { BACKGROUND_COMMAND_SUMMARY_CHARS } from '../shared/background-process';
 import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 
-/** Shell calls settle before their background processes and automatic follow-up turns do. */
+type PendingBackgroundWork = { directory?: string; startedAt?: number; command?: string };
+
+/** Background tools settle before their jobs and automatic follow-up turns do. */
 export class OpenCodeV2BackgroundWork {
   private readonly shells = new Map<
     string,
@@ -21,6 +23,16 @@ export class OpenCodeV2BackgroundWork {
     { directory?: string; endedAt: number | null; command?: string }
   >();
   private readonly stoppedSessions = new Set<string>();
+  private readonly jobs = new Map<
+    string,
+    {
+      directory?: string;
+      version: number;
+      items: readonly JobInfo[];
+      serviceIDs: ReadonlySet<string>;
+    }
+  >();
+  private readonly snapshots = new Map<string | undefined, number>();
   private revision = 0;
 
   observe(type: string, data: UnknownRecord, directory?: string): void {
@@ -62,14 +74,12 @@ export class OpenCodeV2BackgroundWork {
       (type === 'session.step.ended' && data.finish === 'stop') ||
       type === 'session.execution.succeeded'
     ) {
-      const pendingShell = [...this.shells.values()].find(
-        (shell) => shell.sessionID === data.sessionID && !shell.service
-      );
-      if (pendingShell && !this.stoppedSessions.has(data.sessionID))
+      const pending = this.pending(data.sessionID)[0];
+      if (pending && !this.stoppedSessions.has(data.sessionID))
         this.waiting.set(data.sessionID, {
-          directory: pendingShell.directory,
+          directory: pending.directory,
           endedAt: null,
-          command: pendingShell.command,
+          command: pending.command,
         });
     }
     if (type === 'session.execution.started' || type === 'session.step.started')
@@ -104,8 +114,15 @@ export class OpenCodeV2BackgroundWork {
     shell.service = service;
     this.mutations.set(id, ++this.revision);
     this.sessionMutations.set(shell.sessionID, this.revision);
-    if (service && this.shellIDs(shell.sessionID).length === 0)
-      this.waiting.delete(shell.sessionID);
+    for (const [sessionID, jobs] of this.jobs) {
+      if (!jobs.items.some((job) => job.kind === 'shell' && job.shellID === id)) continue;
+      const serviceIDs = new Set(jobs.serviceIDs);
+      if (service) serviceIDs.add(id);
+      else serviceIDs.delete(id);
+      jobs.serviceIDs = serviceIDs;
+      if (this.pending(sessionID).length === 0) this.waiting.delete(sessionID);
+    }
+    if (service && this.pending(shell.sessionID).length === 0) this.waiting.delete(shell.sessionID);
   }
 
   serviceCount(sessionID: string): number {
@@ -123,24 +140,21 @@ export class OpenCodeV2BackgroundWork {
   }
 
   startedAt(sessionID: string): number | undefined {
-    const starts = [...this.shells.values()].flatMap((shell) =>
-      shell.sessionID === sessionID && !shell.service && shell.startedAt !== undefined
-        ? [shell.startedAt]
-        : []
+    const starts = this.pending(sessionID).flatMap((work) =>
+      work.startedAt !== undefined ? [work.startedAt] : []
     );
     return starts.length > 0 ? Math.min(...starts) : undefined;
   }
 
   command(sessionID: string): string | undefined {
     return (
-      [...this.shells.values()].find(
-        (shell) => shell.sessionID === sessionID && !shell.service && shell.command
-      )?.command ?? this.waiting.get(sessionID)?.command
+      this.pending(sessionID).find((work) => work.command)?.command ??
+      this.waiting.get(sessionID)?.command
     );
   }
 
   snapshotVersion(): number {
-    return this.revision;
+    return ++this.revision;
   }
 
   reconcile(
@@ -148,8 +162,11 @@ export class OpenCodeV2BackgroundWork {
     activeSessionIDs: ReadonlySet<string>,
     directory: string | undefined,
     version: number,
-    serviceIDs: ReadonlySet<string> = new Set()
+    serviceIDs: ReadonlySet<string> = new Set(),
+    jobs?: ReadonlyMap<string, readonly JobInfo[]>
   ): string[] {
+    if ((this.snapshots.get(directory) ?? 0) > version) return [...this.waiting.keys()];
+    this.snapshots.set(directory, version);
     const snapshot = new Map(
       shells.flatMap((shell) => {
         const sessionID = shell.metadata.sessionID;
@@ -176,21 +193,39 @@ export class OpenCodeV2BackgroundWork {
       if (shell) this.shells.set(id, shell);
       else this.shells.delete(id);
     }
-    // Session-owned shells notify the model on exit, even after execution succeeds.
-    // Restore that pending work after reload; an idle model is not a finished task.
-    for (const shell of this.shells.values()) {
+    const sessionIDs = new Set([
+      ...[...this.shells.values()]
+        .filter((shell) => shell.directory === directory)
+        .map((shell) => shell.sessionID),
+      ...[...this.jobs].filter(([, value]) => value.directory === directory).map(([id]) => id),
+      ...[...this.waiting].filter(([, value]) => value.directory === directory).map(([id]) => id),
+      ...(jobs?.keys() ?? []),
+    ]);
+    for (const sessionID of sessionIDs) {
+      if (jobs) {
+        this.jobs.set(sessionID, {
+          directory,
+          version,
+          items: jobs.get(sessionID) ?? [],
+          serviceIDs,
+        });
+      } else this.jobs.delete(sessionID);
+    }
+    // A completed but unconsumed native job still has a notification to deliver.
+    // Restore it and descendant work after reload; an idle model is not a finished task.
+    for (const sessionID of sessionIDs) {
+      const pending = this.pending(sessionID)[0];
       if (
-        shell.service ||
-        shell.directory !== directory ||
-        (this.sessionMutations.get(shell.sessionID) ?? 0) > version ||
-        activeSessionIDs.has(shell.sessionID) ||
-        this.stoppedSessions.has(shell.sessionID)
+        !pending ||
+        (this.sessionMutations.get(sessionID) ?? 0) > version ||
+        activeSessionIDs.has(sessionID) ||
+        this.stoppedSessions.has(sessionID)
       )
         continue;
-      this.waiting.set(shell.sessionID, {
+      this.waiting.set(sessionID, {
         directory,
         endedAt: null,
-        command: this.command(shell.sessionID),
+        command: this.command(sessionID),
       });
     }
     for (const [sessionID, waiting] of this.waiting) {
@@ -198,7 +233,7 @@ export class OpenCodeV2BackgroundWork {
       if ((this.sessionMutations.get(sessionID) ?? 0) > version) continue;
       if (activeSessionIDs.has(sessionID)) {
         this.waiting.delete(sessionID);
-      } else if (this.shellIDs(sessionID).length === 0) {
+      } else if (this.pending(sessionID).length === 0) {
         // Recover missed continuation events and server restarts without flashing Worked
         // during the normal shell-exit -> notification -> execution-start handoff.
         if (waiting.endedAt === null) waiting.endedAt = Date.now();
@@ -206,6 +241,44 @@ export class OpenCodeV2BackgroundWork {
       }
     }
     return [...this.waiting.keys()];
+  }
+
+  private pending(sessionID: string): PendingBackgroundWork[] {
+    const native = this.jobs.get(sessionID);
+    const shells = [...this.shells].flatMap(([id, shell]) =>
+      shell.sessionID === sessionID &&
+      !shell.service &&
+      (!native ||
+        ((this.mutations.get(id) ?? 0) > native.version &&
+          !native.items.some((job) => job.kind === 'shell' && job.shellID === id)))
+        ? [shell]
+        : []
+    );
+    if (!native) return shells;
+    return [
+      ...native.items.flatMap<PendingBackgroundWork>((job) => {
+        if (job.status === 'cancelled') return [];
+        if (job.kind === 'shell') {
+          if (native.serviceIDs.has(job.shellID)) return [];
+          if ((this.mutations.get(job.shellID) ?? 0) > native.version) {
+            const shell = this.shells.get(job.shellID);
+            return shell && !shell.service ? [{ ...shell, directory: native.directory }] : [];
+          }
+        }
+        return [
+          {
+            directory: native.directory,
+            startedAt: job.time.started,
+            command: summarizeCommand(
+              job.kind === 'shell'
+                ? job.command
+                : (job.title ?? (job.kind === 'subagent' ? job.description : job.path))
+            ),
+          },
+        ];
+      }),
+      ...shells,
+    ];
   }
 
   clearSession(sessionID: string): void {
@@ -220,6 +293,8 @@ export class OpenCodeV2BackgroundWork {
     this.sessionMutations.clear();
     this.waiting.clear();
     this.stoppedSessions.clear();
+    this.jobs.clear();
+    this.snapshots.clear();
     this.revision = 0;
   }
 }

@@ -869,6 +869,8 @@ export type ProviderAuthAuthorization = {
   method: 'auto' | 'code' | 'complete';
   instructions: string;
   attemptID?: string;
+  /** An automatic attempt also accepts a pasted browser redirect URL as its code. */
+  paste?: true;
 };
 
 type DeferredToolEventDetails = {

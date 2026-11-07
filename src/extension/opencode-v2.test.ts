@@ -1061,6 +1061,101 @@ describe('v2 authentication fields', () => {
     );
   });
 
+  it.each([
+    { mode: 'auto', paste: true },
+    { mode: 'auto', paste: undefined },
+    { mode: 'auto', paste: false },
+    { mode: 'code', paste: undefined },
+  ])('preserves OAuth mode $mode and optional paste=$paste capability', async ({ mode, paste }) => {
+    const wire = vi.fn(async (_method: string, path: string) => {
+      if (path === '/api/provider/fixture') return { data: {} };
+      if (path === '/api/integration/fixture')
+        return { data: { methods: [{ id: 'browser', type: 'oauth' }] } };
+      if (path === '/api/integration/fixture/connect/oauth')
+        return {
+          data: {
+            attemptID: 'attempt-paste',
+            mode,
+            paste,
+            url: 'https://example.test/login',
+            instructions: 'Sign in using your browser',
+          },
+        };
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    adapter.setServerVersion(paste === true ? '2.2.6' : '2.0.5');
+    const expected = {
+      attemptID: 'attempt-paste',
+      url: 'https://example.test/login',
+      method: mode,
+      instructions: 'Sign in using your browser',
+    };
+    expect(
+      await adapter.request('POST', '/provider/fixture/oauth/authorize', { method: 0 })
+    ).toStrictEqual(paste === true ? { ...expected, paste: true } : expected);
+  });
+
+  it('submits a pasted redirect URL unchanged and waits for authoritative OAuth completion', async () => {
+    vi.useFakeTimers();
+    try {
+      let statusReads = 0;
+      let firstPoll!: () => void;
+      const polled = new Promise<void>((done) => {
+        firstPoll = done;
+      });
+      const wire = vi.fn(async (method: string, path: string) => {
+        const route = new URL(path, 'http://localhost').pathname;
+        if (route === '/api/provider/fixture') return { data: {} };
+        if (route === '/api/integration/fixture')
+          return { data: { methods: [{ id: 'browser', type: 'oauth' }] } };
+        if (route.endsWith('/connect/oauth'))
+          return { data: { attemptID: 'attempt-paste', mode: 'auto', paste: true } };
+        if (method === 'POST' && route.endsWith('/complete')) return null;
+        if (method === 'GET' && route.endsWith('/attempt-paste')) {
+          firstPoll();
+          return { data: { status: ++statusReads === 1 ? 'pending' : 'complete' } };
+        }
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      });
+      const adapter = new OpenCodeV2Adapter(wire);
+      await adapter.request(
+        'POST',
+        '/provider/fixture/oauth/authorize',
+        { method: 0 },
+        { directory: '/repo' }
+      );
+      const redirect =
+        'http://127.0.0.1:1455/oauth/callback?code=a%2Bb%2Fc&state=opaque%2Fstate#fragment';
+      let finished = false;
+      const completion = adapter
+        .request(
+          'POST',
+          '/provider/fixture/oauth/callback',
+          { attemptID: 'attempt-paste', code: redirect },
+          { directory: '/repo' }
+        )
+        .then((result) => {
+          finished = true;
+          return result;
+        });
+      await polled;
+      expect(finished).toBe(false);
+      expect(wire).toHaveBeenCalledWith(
+        'POST',
+        '/api/integration/fixture/connect/oauth/attempt-paste/complete?location[directory]=%2Frepo',
+        { code: redirect },
+        expect.objectContaining({ unscoped: true })
+      );
+      await vi.advanceTimersByTimeAsync(500);
+      await expect(completion).resolves.toBe(true);
+      expect(statusReads).toBe(2);
+      expect(wire.mock.calls.some(([method]) => method === 'DELETE')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(['/repo-a', '/repo-b'])(
     'isolates overlapping OAuth code attempts when the second view uses %s',
     async (secondDirectory) => {
@@ -2525,6 +2620,57 @@ describe('v2 transcript and permission projection', () => {
       '/api/session/ses_child/permission/perm_one/reply',
     ]);
   });
+
+  it.each([true, undefined])(
+    'preserves optional paste=%s for MCP OAuth and forwards redirect URLs',
+    async (paste) => {
+      const redirect = 'http://127.0.0.1:1455/callback?code=a%2Bb&state=opaque%2Fstate';
+      const wire = vi.fn(async (method: string, path: string) => {
+        const route = new URL(path, 'http://localhost').pathname;
+        if (route === '/api/mcp')
+          return {
+            data: [
+              {
+                name: 'fixture',
+                integrationID: 'fixture-integration',
+                status: { status: 'connected' },
+              },
+            ],
+          };
+        if (route === '/api/integration/fixture-integration')
+          return { data: { methods: [{ id: 'login', type: 'oauth' }] } };
+        if (route.endsWith('/connect/oauth'))
+          return {
+            data: {
+              attemptID: 'attempt-one',
+              url: 'https://example.test/login',
+              mode: 'auto',
+              paste,
+            },
+          };
+        if (method === 'POST' && route.endsWith('/complete')) return null;
+        if (route.endsWith('/connect/oauth/attempt-one')) return { data: { status: 'complete' } };
+        throw new Error(`Unexpected OAuth request ${method} ${path}`);
+      });
+      const adapter = new OpenCodeV2Adapter(wire);
+      const expected = {
+        authorizationUrl: 'https://example.test/login',
+        oauthState: 'attempt-one',
+      };
+      expect(await adapter.request('POST', '/mcp/fixture/auth', {})).toStrictEqual(
+        paste === true ? { ...expected, paste: true } : expected
+      );
+      expect(
+        await adapter.request('POST', '/mcp/fixture/auth/callback', { code: redirect })
+      ).toEqual({ status: 'connected' });
+      expect(wire).toHaveBeenCalledWith(
+        'POST',
+        '/api/integration/fixture-integration/connect/oauth/attempt-one/complete',
+        { code: redirect },
+        expect.objectContaining({ unscoped: true })
+      );
+    }
+  );
 
   it('uses native OAuth attempts for MCP authentication and waits for completion', async () => {
     const opened = vi.fn(async () => true);
