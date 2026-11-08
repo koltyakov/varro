@@ -82,7 +82,14 @@ export type OpenCodeServerMemoryPermission = {
 };
 
 export type OpenCodeServerMemoryPermissions =
-  | { supported: true; rules: OpenCodeServerMemoryPermission[] }
+  | {
+      supported: true;
+      rules: OpenCodeServerMemoryPermission[];
+      /** Native approvals whose origin this Varro workspace has not observed. */
+      untrackedRules?: OpenCodeServerMemoryPermission[];
+      /** Cached observations only; a fresh native snapshot is required before mutations. */
+      stale?: string;
+    }
   | { supported: false; rules: []; reason: string };
 
 export type ProviderAuthError = {

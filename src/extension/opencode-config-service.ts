@@ -982,6 +982,15 @@ export class OpenCodeConfigService {
       | { kind: 'remove'; id: string }
       | { kind: 'update'; id: string; permission: string; pattern: string }
   ): Promise<OpenCodeServerMemoryPermissions> {
+    const serverURL = this.callbacks.server.url;
+    const apiVersion = this.callbacks.server.apiVersion;
+    const assertServerCurrent = () => {
+      if (
+        this.callbacks.server.url !== serverURL ||
+        this.callbacks.server.apiVersion !== apiVersion
+      )
+        throw new Error('OpenCode server changed. Refresh saved approvals before retrying.');
+    };
     const project = asRecord(
       await this.requestServer(
         'GET',
@@ -1001,12 +1010,19 @@ export class OpenCodeConfigService {
 
     const current = await list();
     if (!mutation) return current;
+    assertServerCurrent();
     if (!current.supported)
       throw new Error('Saved permissions are unavailable on this OpenCode server');
+    if (current.stale)
+      throw new Error('Could not refresh saved permissions. Retry before changing approvals.');
     if (mutation.id.startsWith('legacy:')) {
       throw new Error('Restart OpenCode to clear this server-memory allowance');
     }
-    const savedRule = current.rules.find(
+    const candidates =
+      mutation.kind === 'remove'
+        ? [...current.rules, ...(current.untrackedRules ?? [])]
+        : current.rules;
+    const savedRule = candidates.find(
       (rule) => rule.id === mutation.id && rule.projectID === projectID
     );
     if (!savedRule) {
@@ -1028,6 +1044,7 @@ export class OpenCodeConfigService {
         )
       );
       const updated = asRecord(response?.data);
+      assertServerCurrent();
       if (
         updated?.id !== savedRule.id ||
         updated.projectID !== projectID ||
@@ -1045,7 +1062,17 @@ export class OpenCodeConfigService {
       ]);
     } else {
       await this.requestServer('DELETE', path, undefined, { directory });
+      assertServerCurrent();
+      const next = await list();
+      assertServerCurrent();
+      if (!next.supported || next.stale)
+        throw new Error(
+          'Removal was sent, but could not be verified. Refresh saved approvals to check.'
+        );
+      if ([...next.rules, ...(next.untrackedRules ?? [])].some((rule) => rule.id === savedRule.id))
+        throw new Error('OpenCode still reports this saved approval. Refresh before retrying.');
       await this.callbacks.forgetServerMemoryPermission(savedRule);
+      return apiVersion === 2 ? next : list();
     }
     return list();
   }
@@ -1054,6 +1081,8 @@ export class OpenCodeConfigService {
     projectID: string,
     directory?: string
   ): Promise<OpenCodeServerMemoryPermissions> {
+    const serverURL = this.callbacks.server.url;
+    const apiVersion = this.callbacks.server.apiVersion;
     const legacyRules = [...this.callbacks.getServerMemoryPermissions(projectID)];
     try {
       const response = await this.requestServer(
@@ -1084,17 +1113,20 @@ export class OpenCodeConfigService {
           );
         }
       }
-      const savedRules = values.flatMap((value) => {
+      const savedRules: OpenCodeServerMemoryPermission[] = [];
+      for (const value of values) {
         const saved = asRecord(value);
         if (
           typeof saved?.id !== 'string' ||
           typeof saved.projectID !== 'string' ||
-          saved.projectID !== projectID ||
           typeof saved.action !== 'string' ||
           typeof saved.resource !== 'string'
         ) {
-          return [];
+          throw new Error(
+            'OpenCode returned an invalid saved-permission record. Refresh before retrying.'
+          );
         }
+        if (saved.projectID !== projectID) continue;
         const rule: OpenCodeServerMemoryPermission = {
           id: saved.id,
           projectID: saved.projectID,
@@ -1102,9 +1134,13 @@ export class OpenCodeConfigService {
             this.callbacks.server.apiVersion === 2 ? v1Action(saved.action) : saved.action,
           pattern: saved.resource,
         };
-        if (editable) rule.editable = true;
-        return [rule];
-      });
+        savedRules.push(rule);
+      }
+      if (
+        this.callbacks.server.url !== serverURL ||
+        this.callbacks.server.apiVersion !== apiVersion
+      )
+        throw new Error('OpenCode server changed. Refresh saved approvals before retrying.');
       const observedScopes = new Set(
         legacyRules
           .filter((rule) => rule.id.startsWith('legacy:'))
@@ -1115,6 +1151,9 @@ export class OpenCodeConfigService {
         (rule) =>
           observedIDs.has(rule.id) || observedScopes.has(`${rule.permission}\0${rule.pattern}`)
       );
+      if (editable) {
+        for (const rule of observedSavedRules) rule.editable = true;
+      }
       const savedScopes = new Set(
         observedSavedRules.map((rule) => `${rule.permission}\0${rule.pattern}`)
       );
@@ -1131,7 +1170,7 @@ export class OpenCodeConfigService {
         }
         await this.callbacks.rememberServerMemoryPermissions(observedSavedRules);
       }
-      return {
+      const result: OpenCodeServerMemoryPermissions = {
         supported: true,
         rules: [
           ...observedSavedRules,
@@ -1142,16 +1181,27 @@ export class OpenCodeConfigService {
           ),
         ],
       };
+      if (this.callbacks.server.apiVersion === 2) {
+        const managedIDs = new Set(observedSavedRules.map((rule) => rule.id));
+        const untracked = savedRules.filter((rule) => !managedIDs.has(rule.id));
+        if (untracked.length > 0) result.untrackedRules = untracked;
+      }
+      return result;
     } catch (cause) {
-      if (legacyRules.length > 0)
-        return {
+      if (legacyRules.length > 0) {
+        const fallback: OpenCodeServerMemoryPermissions = {
           supported: true,
           rules: legacyRules.map((rule) => {
-            const fallback = { ...rule };
-            delete fallback.editable;
-            return fallback;
+            const cachedRule = { ...rule };
+            delete cachedRule.editable;
+            return cachedRule;
           }),
         };
+        if (this.callbacks.server.apiVersion === 2)
+          fallback.stale =
+            cause instanceof Error ? cause.message : 'Could not refresh saved permissions';
+        return fallback;
+      }
       return {
         supported: false,
         rules: [],

@@ -3734,7 +3734,7 @@ describe('RestProxy handleRequest', () => {
         } as SavedPermissionApiFixture,
         failure: '',
       };
-      const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+      const request = vi.fn<RestProxyCallbacks['server']['request']>(async (method, path, body) => {
         if (method === 'GET' && path === '/permission')
           return state.pending
             ? [
@@ -3825,10 +3825,14 @@ describe('RestProxy handleRequest', () => {
       const reloaded = createProxy({ server: callbacks.server, ...observers });
       const path = '/varro/permission/server-memory?directory=%2Frepo';
       await reloaded.proxy.handleRequest(makePayload(871, 'GET', path));
+      const untrackedRules = [
+        { id: 'internal-1', projectID: 'project-1', permission: 'bash', pattern: 'internal *' },
+      ];
       expect(reloaded.callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
         id: 871,
         data: {
           supported: true,
+          untrackedRules,
           rules: [
             expect.objectContaining({
               id: 'saved-1',
@@ -3845,6 +3849,7 @@ describe('RestProxy handleRequest', () => {
         id: 872,
         data: {
           supported: true,
+          untrackedRules,
           rules: [
             expect.objectContaining({
               id: 'saved-1',
@@ -3858,7 +3863,7 @@ describe('RestProxy handleRequest', () => {
       await reloaded.proxy.handleRequest(makePayload(873, 'DELETE', path, { id: 'saved-1' }));
       expect(reloaded.callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
         id: 873,
-        data: { supported: true, rules: [] },
+        data: { supported: true, rules: [], untrackedRules },
       });
       expect(new ServerMemoryPermissionStore(persistence).get('server', 'project-1')).toEqual([]);
       expect(state.pending).toBe(true);
@@ -3866,7 +3871,7 @@ describe('RestProxy handleRequest', () => {
       expect(state.saved.map((rule) => rule.id)).toEqual(['internal-1']);
     });
 
-    it('does not adopt an unobserved replacement with the same scope as a removed native ID', async () => {
+    it('shows a replacement as untracked without adopting its removed predecessor scope', async () => {
       const { proxy, callbacks, state } = fixture();
       const path = '/varro/permission/server-memory?directory=%2Frepo';
       await proxy.handleRequest(makePayload(870, 'GET', path));
@@ -3874,7 +3879,18 @@ describe('RestProxy handleRequest', () => {
       await proxy.handleRequest(makePayload(871, 'GET', path));
       expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
         id: 871,
-        data: { supported: true, rules: [] },
+        data: {
+          supported: true,
+          rules: [],
+          untrackedRules: [
+            {
+              id: 'internal-replacement',
+              projectID: 'project-1',
+              permission: 'bash',
+              pattern: 'git status *',
+            },
+          ],
+        },
       });
       expect(callbacks.getServerMemoryPermissions('project-1')).toEqual([]);
     });
@@ -3945,6 +3961,227 @@ describe('RestProxy handleRequest', () => {
       expect(callbacks.getServerMemoryPermissions('project-1')).toEqual([]);
     });
 
+    it('lists and revokes an untracked native approval without adopting it or changing other layers', async () => {
+      const { proxy, callbacks, state, request } = fixture({
+        getServerMemoryPermissions: vi.fn(() => []),
+      });
+      const path = '/varro/permission/server-memory?directory=%2Frepo';
+      await proxy.handleRequest(makePayload(880, 'GET', path));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 880,
+        data: {
+          supported: true,
+          rules: [],
+          untrackedRules: [
+            { id: 'saved-1', projectID: 'project-1', permission: 'bash', pattern: 'git status *' },
+          ],
+        },
+      });
+      expect(callbacks.rememberServerMemoryPermissions).toHaveBeenCalledWith([]);
+      await proxy.handleRequest(makePayload(881, 'DELETE', path, { id: 'saved-1' }));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 881,
+        data: { supported: true, rules: [] },
+      });
+      expect(request).toHaveBeenCalledWith(
+        'DELETE',
+        '/api/permission/saved/saved-1',
+        undefined,
+        expect.objectContaining({ directory: '/repo' })
+      );
+      expect(state.saved).toEqual([]);
+      expect(state.pending).toBe(true);
+      expect(callbacks.updatePermissionRulesForSession).not.toHaveBeenCalled();
+      expect(request.mock.calls.some(([method]) => method === 'POST' || method === 'PATCH')).toBe(
+        false
+      );
+    });
+
+    it.each(['address change', 'failed capture'] as const)(
+      'keeps durable approvals visible as untracked after %s and host recreation',
+      async (scenario) => {
+        let stored: unknown;
+        const persistence = testFixture<Persistence>({
+          get: () => structuredClone(stored),
+          set: (_key: string, value: unknown) => {
+            stored = structuredClone(value);
+          },
+          remove: vi.fn(),
+        });
+        let store = new ServerMemoryPermissionStore(persistence);
+        let identity = 'server-a';
+        const { proxy, callbacks, request } = fixture({
+          rememberServerMemoryPermissions: (rules) => store.remember(identity, rules),
+          forgetServerMemoryPermission: (rule) => store.forget(identity, rule),
+          getServerMemoryPermissions: (projectID) => store.get(identity, projectID),
+        });
+        const original = request.getMockImplementation()!;
+        if (scenario === 'failed capture')
+          request.mockImplementation(async (method, path, body) => {
+            if (path.startsWith('/api/permission/saved?')) throw new Error('capture failed');
+            return original(method, path, body);
+          });
+        await proxy.handleRequest(
+          makePayload(882, 'POST', '/permission/perm-1/reply', { reply: 'always' })
+        );
+        expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 882, data: true });
+        request.mockImplementation(original);
+        if (scenario === 'address change') identity = 'server-b';
+        store = new ServerMemoryPermissionStore(persistence);
+        await proxy.handleRequest(
+          makePayload(883, 'GET', '/varro/permission/server-memory?directory=%2Frepo')
+        );
+        expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+          id: 883,
+          data: {
+            supported: true,
+            rules: [],
+            untrackedRules: [
+              {
+                id: 'saved-1',
+                projectID: 'project-1',
+                permission: 'bash',
+                pattern: 'git status *',
+              },
+            ],
+          },
+        });
+        expect(store.get(identity, 'project-1')).toEqual([]);
+      }
+    );
+
+    it.each(['PATCH', 'DELETE'] as const)(
+      'blocks %s on a stale cached snapshot',
+      async (method) => {
+        const { proxy, callbacks, request } = fixture();
+        const path = '/varro/permission/server-memory?directory=%2Frepo';
+        await proxy.handleRequest(makePayload(884, 'GET', path));
+        const original = request.getMockImplementation()!;
+        request.mockImplementation(async (verb, route, body) => {
+          if (route.startsWith('/api/permission/saved?')) throw new Error('401 Unauthorized');
+          return original(verb, route, body);
+        });
+        await proxy.handleRequest(makePayload(885, 'GET', path));
+        expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+          id: 885,
+          data: {
+            supported: true,
+            rules: [expect.objectContaining({ id: 'saved-1' })],
+            stale: '401 Unauthorized',
+          },
+        });
+        await proxy.handleRequest(
+          makePayload(886, method, path, { id: 'saved-1', permission: 'bash', pattern: '*' })
+        );
+        expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+          id: 886,
+          error: 'Could not refresh saved permissions. Retry before changing approvals.',
+        });
+        expect(request.mock.calls.some(([verb]) => verb === 'PATCH' || verb === 'DELETE')).toBe(
+          false
+        );
+      }
+    );
+
+    it.each(['no-op', 'delete failure', 'verification failure'] as const)(
+      'does not falsely confirm removal after %s',
+      async (failure) => {
+        const { proxy, callbacks, request } = fixture();
+        const path = '/varro/permission/server-memory?directory=%2Frepo';
+        await proxy.handleRequest(makePayload(887, 'GET', path));
+        const original = request.getMockImplementation()!;
+        let deleted = false;
+        request.mockImplementation(async (method, route, body) => {
+          if (method === 'DELETE') {
+            if (failure === 'delete failure') throw new Error('delete failed');
+            deleted = true;
+            if (failure === 'no-op') return true;
+          }
+          if (
+            deleted &&
+            failure === 'verification failure' &&
+            route.startsWith('/api/permission/saved?')
+          )
+            throw new Error('verification failed');
+          return original(method, route, body);
+        });
+        await proxy.handleRequest(makePayload(888, 'DELETE', path, { id: 'saved-1' }));
+        expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+          id: 888,
+          error:
+            failure === 'no-op'
+              ? 'OpenCode still reports this saved approval. Refresh before retrying.'
+              : failure === 'delete failure'
+                ? 'delete failed'
+                : 'Removal was sent, but could not be verified. Refresh saved approvals to check.',
+        });
+        expect(callbacks.getServerMemoryPermissions('project-1')).toEqual([
+          expect.objectContaining({ id: 'saved-1' }),
+        ]);
+      }
+    );
+
+    it('rejects removal outside the current project even if the server returns a foreign saved ID', async () => {
+      const { proxy, callbacks, state, request } = fixture();
+      state.saved.push({ id: 'foreign', projectID: 'project-2', action: 'shell', resource: '*' });
+      await proxy.handleRequest(
+        makePayload(889, 'DELETE', '/varro/permission/server-memory?directory=%2Frepo', {
+          id: 'foreign',
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 889,
+        error: 'Saved permission not found for this project',
+      });
+      expect(request.mock.calls.some(([method]) => method === 'DELETE')).toBe(false);
+    });
+
+    it('does not treat malformed native records as proof that a deleted approval disappeared', async () => {
+      const { proxy, callbacks, request } = fixture();
+      const path = '/varro/permission/server-memory?directory=%2Frepo';
+      await proxy.handleRequest(makePayload(891, 'GET', path));
+      const original = request.getMockImplementation()!;
+      let deleted = false;
+      request.mockImplementation(async (method, route, body) => {
+        if (method === 'DELETE') {
+          deleted = true;
+          return true;
+        }
+        if (deleted && route.startsWith('/api/permission/saved?'))
+          return { data: [{ id: 'saved-1', projectID: 'project-1' }] };
+        return original(method, route, body);
+      });
+      await proxy.handleRequest(makePayload(892, 'DELETE', path, { id: 'saved-1' }));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 892,
+        error: 'Removal was sent, but could not be verified. Refresh saved approvals to check.',
+      });
+      expect(callbacks.getServerMemoryPermissions('project-1')).toEqual([
+        expect.objectContaining({ id: 'saved-1' }),
+      ]);
+    });
+
+    it('rejects removal when the authenticated server changes during its fresh snapshot', async () => {
+      const { proxy, callbacks, request } = fixture();
+      const original = request.getMockImplementation()!;
+      request.mockImplementation(async (method, route, body) => {
+        const result = await original(method, route, body);
+        if (route.startsWith('/api/permission/saved?'))
+          Object.assign(callbacks.server, { url: 'http://other-server' });
+        return result;
+      });
+      await proxy.handleRequest(
+        makePayload(890, 'DELETE', '/varro/permission/server-memory?directory=%2Frepo', {
+          id: 'saved-1',
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 890,
+        error: 'OpenCode server changed. Refresh saved approvals before retrying.',
+      });
+      expect(request.mock.calls.some(([method]) => method === 'DELETE')).toBe(false);
+    });
+
     it('keeps list/remove support but rejects edits when PATCH is absent', async () => {
       const { proxy, callbacks, state, request } = fixture();
       state.spec = { paths: {} };
@@ -3977,7 +4214,7 @@ describe('RestProxy handleRequest', () => {
       );
       expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
         id: 861,
-        error: 'Saved-permission editing is unavailable on this OpenCode server',
+        error: 'Could not refresh saved permissions. Retry before changing approvals.',
       });
       expect(request.mock.calls.some(([method]) => method === 'PATCH')).toBe(false);
     });

@@ -263,15 +263,20 @@ ID and owning session against the server before changing rules.
   `todowrite`, `question`, `webfetch`, `websearch`, and `doom_loop` accept only scalar actions inside
   the permission object; never serialize pattern maps for those names or broaden a non-wildcard
   standing scope to make it fit.
-- Varro shows only server-memory entries linked to a successful `always` reply it observed. Native
-   saved IDs preserve that link when another client edits the action/resource scope. Confirmed native
+- Varro's managed server-memory layer contains only entries linked to a successful `always` reply it
+   observed. V2 also shows other native saved rows separately as `Other saved approvals`, with origin
+   explicitly unknown. Listing them must not adopt them as observed user approvals or enable editing;
+   they may include internal or other-client allowances. Explicit removal requires a confirmation in
+   that separate section. Native saved IDs preserve the observed link when another client edits the
+   action/resource scope. Confirmed native
    IDs are stored in workspace state, scoped by server address, API version, and project, so host reloads
    retain the management link. Capture these IDs after successful approval even when the Permissions
    screen is closed. Reconcile restored IDs against the native list and discard removed entries; a
    new ID with the same scope is not proof of user approval. Legacy process-only observations are not
    persisted. OpenCode's
-  saved-permission endpoint can also return internal allowances that the user did not add; those do not
-  belong in the user-managed layer. Legacy OpenCode permission replies keep `always` rules in an
+   saved-permission endpoint can also return internal allowances that the user did not add; those belong
+   only in the separate origin-unknown section, not the observed user-managed layer. Legacy OpenCode
+   permission replies keep `always` rules in an
   internal instance-local array with no list or removal endpoint. Varro mirrors those replies from
   their authoritative request scopes so the layer remains visible; those entries require an OpenCode
   restart to clear.
@@ -285,6 +290,18 @@ updates; changing mode may replace those rules. Saved server-memory permissions 
 saved-permission list and remove endpoints when the server supports them. Removing one must not alter
 project or session rules. Servers without those endpoints report the layer as unavailable rather than
 blocking the rest of the screen.
+
+V2 labels these database approvals as persistent, not `Until restart`. Host recreation, a changed
+connection address, or a failed native-ID capture must not hide approvals returned by a fresh native
+list; only their observed/untracked classification may change. The panel refreshes on reconnect and
+offers a saved-layer-only Refresh action that preserves unsaved project and session drafts.
+
+All saved-layer mutations require a fresh, validated native list for the selected project and the same
+server connection. Cached observations may be displayed with an explicit stale warning, but must not
+authorize edits or removals. A removal is confirmed only after the native list proves that exact ID is
+absent. A failed or malformed verification keeps the tracking link and reports the uncertainty; an
+empty filtered observed layer alone is not proof of removal. No saved-layer operation changes config,
+session rules, pending permissions, or server credentials, and none requires a server restart.
 
 On servers advertising saved-permission PATCH support, the same layer can edit
 its action/resource patterns. The host validates the owning project and managed

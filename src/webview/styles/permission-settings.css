@@ -32,6 +32,7 @@
 }
 
 .permission-settings-save,
+.permission-memory-refresh,
 .permission-config-add,
 .permission-settings-error button {
   border: 1px solid var(--vscode-button-border, transparent);
@@ -47,6 +48,7 @@
 }
 
 .permission-settings-save:disabled,
+.permission-memory-refresh:disabled,
 .permission-config-add:disabled {
   cursor: default;
   opacity: 0.42;
@@ -155,6 +157,11 @@
   padding-block: 3px;
 }
 
+.permission-memory-refresh {
+  min-height: 25px;
+  padding: 3px 8px;
+}
+
 .permission-config-add {
   display: flex;
   flex: none;
@@ -223,6 +230,32 @@
 
 .permission-memory-list {
   border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
+}
+
+.permission-memory-untracked {
+  padding: 8px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+}
+
+.permission-memory-untracked h3 {
+  margin: 0 0 4px;
+  color: var(--color-vscode-fg);
+  font-size: 10px;
+}
+
+.permission-memory-untracked p {
+  margin: 0;
+}
+
+.permission-memory-confirm {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-inset);
 }
 
 .permission-memory-rule {

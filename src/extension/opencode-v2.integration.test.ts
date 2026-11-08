@@ -25,6 +25,12 @@ import { readLocalSessionSummary } from './local-session-summary';
 import { sessionSummary } from './session-summary';
 import { formatSkillAttachment, parseSkillAttachment } from '../shared/skill-reference';
 import { completeTestCleanup, IsolatedProcessTree } from './isolated-process.test-support';
+import { OpenCodeConfigService } from './opencode-config-service';
+import { ServerMemoryPermissionStore } from './server-memory-permission-store';
+import type { RestProxyCallbacks } from './rest-proxy';
+import type { Persistence } from '../shared/persistence';
+import type { OpenCodeServerMemoryPermission } from '../shared/opencode-types';
+import { fixture } from '../webview/test-fixtures';
 
 const exportEditor = vi.hoisted(() => ({
   openTextDocument: vi.fn(async (options: { content: string; language: string }) => options),
@@ -1135,6 +1141,110 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
         await transport.request('POST', `/session/${id}/abort`, {}, options);
         await transport.request('DELETE', `/session/${id}`, undefined, options);
       }
+    }
+  }, 30000);
+
+  it('displays and revokes untracked saved approvals through the authenticated Varro host path', async (context) => {
+    if (transport.version !== 2) return context.skip();
+    expect(authorization).toBeTruthy();
+    expect((await fetch(`${url}/api/permission/saved`)).status).toBe(401);
+    const created = asRecord(
+      await transport.request('POST', '/session', {
+        title: 'Untracked saved approval fixture',
+        permission: [{ permission: '*', pattern: '*', action: 'ask' }],
+      })
+    );
+    if (!isString(created?.id)) throw new Error('Missing isolated saved-approval session');
+    const id = created.id;
+    const directory = join(root, 'workspace');
+    const resource = 'printf varro-untracked-approval *';
+    const ask = () =>
+      transport.request('POST', `/api/session/${id}/permission`, {
+        action: 'shell',
+        resources: [resource],
+        save: [resource],
+      });
+    const values = new Map<string, unknown>();
+    const persistence = fixture<Persistence>({
+      get: (key: string) => structuredClone(values.get(key)),
+      set: (
+        key: string,
+        value: Array<{ server: string; rule: OpenCodeServerMemoryPermission }>
+      ) => {
+        values.set(key, structuredClone(value));
+      },
+      remove: (key: string) => {
+        values.delete(key);
+      },
+    });
+    let store = new ServerMemoryPermissionStore(persistence);
+    const identity = `2:${url}`;
+    const service = new OpenCodeConfigService(
+      fixture<RestProxyCallbacks>({
+        server: { apiVersion: 2, url },
+        getServerMemoryPermissions: (projectID: string) => store.get(identity, projectID),
+        rememberServerMemoryPermissions: (
+          rules: Parameters<ServerMemoryPermissionStore['remember']>[1]
+        ) => store.remember(identity, rules),
+        forgetServerMemoryPermission: (
+          rule: Parameters<ServerMemoryPermissionStore['forget']>[1]
+        ) => store.forget(identity, rule),
+      }),
+      transport.request.bind(transport),
+      () => directory
+    );
+    let savedID: string | undefined;
+    try {
+      const requested = asRecord(asRecord(await ask())?.data);
+      expect(requested?.effect).toBe('ask');
+      await transport.request('POST', `/permission/${requested?.id}/reply`, { reply: 'always' });
+      const list = asRecord(await transport.request('GET', '/api/permission/saved'))?.data;
+      if (!Array.isArray(list)) throw new Error('Missing isolated saved-approval list');
+      const saved = list.map(asRecord).find((rule) => rule?.resource === resource);
+      if (!isString(saved?.id) || !isString(saved.projectID))
+        throw new Error('Missing isolated native approval');
+      savedID = saved.id;
+      expect(asRecord(asRecord(await ask())?.data)?.effect).toBe('allow');
+      // Recreate the host with observations from a different connection identity.
+      await store.remember('2:http://prior-connection', [
+        { id: savedID, projectID: saved.projectID, permission: 'bash', pattern: resource },
+      ]);
+      store = new ServerMemoryPermissionStore(persistence);
+      const panel = await service.readServerMemoryPermissions(id, directory);
+      expect(panel).toMatchObject({
+        supported: true,
+        rules: [],
+        untrackedRules: [expect.objectContaining({ id: savedID, pattern: resource })],
+      });
+      expect(store.get(identity, saved.projectID)).toEqual([]);
+      const sessionBefore = asRecord(await transport.request('GET', `/session/${id}`));
+      const configBefore = await readFile(join(directory, 'opencode.json'), 'utf8');
+      const removed = await service.readServerMemoryPermissions(id, directory, {
+        kind: 'remove',
+        id: savedID,
+      });
+      expect(removed).toEqual({ supported: true, rules: [] });
+      const native = asRecord(await transport.request('GET', '/api/permission/saved'))?.data;
+      if (!Array.isArray(native)) throw new Error('Missing post-removal native snapshot');
+      expect(native.map(asRecord).some((rule) => rule?.id === savedID)).toBe(false);
+      expect(asRecord(await transport.request('GET', `/session/${id}`))?.permission).toEqual(
+        sessionBefore?.permission
+      );
+      expect(await readFile(join(directory, 'opencode.json'), 'utf8')).toBe(configBefore);
+      const afterRemoval = asRecord(asRecord(await ask())?.data);
+      expect(afterRemoval?.effect).toBe('ask');
+      await transport.request('POST', `/permission/${afterRemoval?.id}/reply`, { reply: 'once' });
+      await writeFile(
+        join(root, 'saved-approval-management.json'),
+        JSON.stringify(
+          { panel, removed, authenticationRequired: true, asksAfterRemoval: true },
+          null,
+          2
+        )
+      );
+    } finally {
+      if (savedID) await transport.request('DELETE', `/api/permission/saved/${savedID}`);
+      await transport.request('DELETE', `/session/${id}`);
     }
   }, 30000);
 

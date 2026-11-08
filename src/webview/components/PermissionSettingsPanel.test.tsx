@@ -71,6 +71,7 @@ beforeEach(() => {
   setState('sessions', []);
   setState('activeSessionId', null);
   setState('sessionPermissionModes', {});
+  setState('serverStatus', { state: 'running', apiVersion: 1, url: 'http://localhost:4096' });
 });
 
 afterEach(() => {
@@ -177,6 +178,157 @@ describe('PermissionSettingsPanel', () => {
     expect(container.textContent).toContain('Restart to clear');
     expect(container.querySelector('[aria-label="Retract server allowance"]')).toBeNull();
     expect(container.querySelector('[aria-label="Edit server allowance"]')).toBeNull();
+  });
+
+  it('shows V2 approvals as durable and requires confirmation to revoke an untracked rule', async () => {
+    setState('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' });
+    mocks.loadServerMemory.mockResolvedValue({
+      supported: true,
+      rules: [],
+      untrackedRules: [
+        { id: 'untracked-1', projectID: 'project-1', permission: 'bash', pattern: 'printf *' },
+      ],
+    });
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+    expect(container.textContent).toContain('Saved project approvals');
+    expect(container.textContent).toContain('Persistent');
+    expect(container.textContent).not.toContain('Until restart');
+    expect(container.textContent).not.toContain('No saved project approvals.');
+    expect(container.textContent).toContain('Other saved approvals');
+    expect(container.textContent).toContain('Origin unknown');
+    expect(container.textContent).toContain('printf *');
+    expect(container.querySelector('[aria-label="Edit server allowance"]')).toBeNull();
+    container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')!.click();
+    expect(mocks.removeServerMemory).not.toHaveBeenCalled();
+    const confirmation = container.querySelector('.permission-memory-confirm')!;
+    expect(confirmation.textContent).toContain('Its origin is unknown');
+    confirmation.querySelectorAll<HTMLButtonElement>('button')[1]!.click();
+    expect(container.querySelector('.permission-memory-confirm')).toBeNull();
+    expect(mocks.removeServerMemory).not.toHaveBeenCalled();
+    container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')!.click();
+    container.querySelector<HTMLButtonElement>('.permission-memory-confirm button')!.click();
+    await flush();
+    expect(mocks.removeServerMemory).toHaveBeenCalledExactlyOnceWith(null, 'untracked-1', {
+      directory: undefined,
+    });
+    expect(container.textContent).toContain('No saved project approvals.');
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.saveSessionRules).not.toHaveBeenCalled();
+  });
+
+  it('labels cached V2 data stale, disables mutation, and refreshes without clearing a project draft', async () => {
+    setState('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' });
+    const rule = {
+      id: 'saved-1',
+      projectID: 'project-1',
+      permission: 'bash',
+      pattern: 'echo *',
+      editable: true,
+    };
+    mocks.loadServerMemory.mockResolvedValue({
+      supported: true,
+      rules: [rule],
+      stale: '401 Unauthorized',
+    });
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+    expect(container.textContent).toContain('Cached approvals only');
+    expect(container.textContent).toContain('401 Unauthorized');
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="Edit server allowance"]')!.disabled
+    ).toBe(true);
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')!
+        .disabled
+    ).toBe(true);
+    const draft = container.querySelector<HTMLInputElement>('[aria-label="Pattern"]')!;
+    draft.value = 'git diff *';
+    draft.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    mocks.loadServerMemory.mockResolvedValue({ supported: true, rules: [rule] });
+    container.querySelector<HTMLButtonElement>('[aria-label="Refresh saved approvals"]')!.click();
+    await flush();
+    expect(container.textContent).not.toContain('Cached approvals only');
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')!
+        .disabled
+    ).toBe(false);
+    expect(container.querySelector<HTMLInputElement>('[aria-label="Pattern"]')!.value).toBe(
+      'git diff *'
+    );
+    expect(mocks.load).toHaveBeenCalledOnce();
+  });
+
+  it('keeps visible rows marked stale if a refresh fails instead of claiming there are no approvals', async () => {
+    const rule = { id: 'saved-1', projectID: 'project-1', permission: 'bash', pattern: 'echo *' };
+    mocks.loadServerMemory.mockResolvedValue({ supported: true, rules: [rule] });
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+    mocks.loadServerMemory.mockRejectedValue(new Error('Refresh failed'));
+    container.querySelector<HTMLButtonElement>('[aria-label="Refresh saved approvals"]')!.click();
+    await flush();
+    expect(container.textContent).toContain('echo *');
+    expect(container.textContent).toContain('Cached approvals only');
+    expect(container.textContent).toContain('Refresh failed');
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')!
+        .disabled
+    ).toBe(true);
+  });
+
+  it('keeps a failed untracked removal visible and actionable for retry', async () => {
+    mocks.loadServerMemory.mockResolvedValue({
+      supported: true,
+      rules: [],
+      untrackedRules: [
+        { id: 'untracked-1', projectID: 'project-1', permission: 'bash', pattern: 'printf *' },
+      ],
+    });
+    mocks.removeServerMemory.mockRejectedValueOnce(
+      new Error('Removal was sent, but could not be verified.')
+    );
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+    container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')!.click();
+    container.querySelector<HTMLButtonElement>('.permission-memory-confirm button')!.click();
+    await flush();
+    expect(container.textContent).toContain('printf *');
+    expect(container.textContent).toContain('could not be verified');
+    expect(
+      container.querySelector<HTMLButtonElement>('.permission-memory-confirm button')!.disabled
+    ).toBe(false);
+  });
+
+  it('refreshes after reconnect and ignores an earlier in-flight snapshot', async () => {
+    setState('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' });
+    let resolveOld!: (value: { supported: true; rules: [] }) => void;
+    mocks.loadServerMemory.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOld = resolve;
+      })
+    );
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+    mocks.loadServerMemory.mockResolvedValue({
+      supported: true,
+      rules: [],
+      untrackedRules: [
+        {
+          id: 'reconnected',
+          projectID: 'project-1',
+          permission: 'bash',
+          pattern: 'echo recovered *',
+        },
+      ],
+    });
+    setState('serverStatus', { state: 'starting' });
+    setState('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4097' });
+    await flush();
+    expect(container.textContent).toContain('echo recovered *');
+    resolveOld({ supported: true, rules: [] });
+    await flush();
+    expect(container.textContent).toContain('echo recovered *');
+    expect(mocks.loadServerMemory).toHaveBeenCalledTimes(2);
   });
 
   it('hides saved-rule editing on servers without that capability', async () => {
