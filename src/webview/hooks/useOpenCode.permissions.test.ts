@@ -84,6 +84,52 @@ function configureReconciliationMocks() {
 }
 
 describe('useOpenCode permission and config flows', () => {
+  it('saves reviewed global patterns before replying once and keeps grouped peers pending', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('serverStatus', { state: 'running', apiVersion: 2 });
+    stateModule.setState('sessions', [session()]);
+    stateModule.addPermission(permission());
+    stateModule.addPermission(permission('perm-2'));
+    const persisted = deferred<void>();
+    clientMocks.sessionPersistGlobalPermissionAllow.mockReturnValue(persisted.promise);
+    const approval = hookModule.alwaysAllowPermissionForGlobal('session-1', 'perm-1', [
+      'git diff *',
+    ]);
+    expect(clientMocks.sessionPersistGlobalPermissionAllow).toHaveBeenCalledExactlyOnceWith(
+      'session-1',
+      'perm-1',
+      { directory: '/repo', patterns: ['git diff *'] }
+    );
+    expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+    persisted.resolve();
+    await approval;
+    expect(clientMocks.sessionRespondPermission).toHaveBeenCalledExactlyOnceWith(
+      'session-1',
+      'perm-1',
+      'once'
+    );
+    expect(stateModule.state.permissions).toEqual([expect.objectContaining({ id: 'perm-2' })]);
+  });
+
+  it('keeps global approval pending after config or reply failures', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('serverStatus', { state: 'running', apiVersion: 2 });
+    stateModule.addPermission(permission());
+    clientMocks.sessionPersistGlobalPermissionAllow.mockRejectedValueOnce(
+      new Error('Write failed')
+    );
+    await expect(
+      hookModule.alwaysAllowPermissionForGlobal('session-1', 'perm-1', ['git *'])
+    ).rejects.toThrow('Write failed');
+    expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+    expect(stateModule.state.permissions).toHaveLength(1);
+    clientMocks.sessionRespondPermission.mockRejectedValueOnce(new Error('Reply failed'));
+    await expect(
+      hookModule.alwaysAllowPermissionForGlobal('session-1', 'perm-1', ['git *'])
+    ).rejects.toThrow('Reply failed');
+    expect(stateModule.state.permissions).toHaveLength(1);
+  });
+
   it.each([1, 2] as const)(
     'persists project approval before replying with the V%s lifetime',
     async (apiVersion) => {

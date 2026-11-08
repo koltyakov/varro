@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   loadServerMemory: vi.fn(),
   removeServerMemory: vi.fn(),
   updateServerMemory: vi.fn(),
+  loadGlobal: vi.fn(),
+  saveGlobal: vi.fn(),
 }));
 
 /* oxlint-disable anti-slop/no-module-mocking -- This test exercises the panel against the typed client boundary. */
@@ -31,6 +33,8 @@ vi.mock('../lib/client', () => ({
       serverMemoryPermissions: mocks.loadServerMemory,
       removeServerMemoryPermission: mocks.removeServerMemory,
       updateServerMemoryPermission: mocks.updateServerMemory,
+      openCodeGlobalPermissionConfig: mocks.loadGlobal,
+      saveOpenCodeGlobalPermissionConfig: mocks.saveGlobal,
     },
   },
 }));
@@ -63,6 +67,11 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   mocks.load.mockResolvedValue(config);
+  mocks.loadGlobal.mockResolvedValue({
+    targetPath: '/isolated/global/opencode.json',
+    supportsPatterns: true,
+    rules: [{ permission: 'webfetch', pattern: '*', action: 'ask' }],
+  });
   mocks.save.mockResolvedValue(config);
   mocks.loadSessionRules.mockResolvedValue([]);
   mocks.saveSessionRules.mockResolvedValue([]);
@@ -84,6 +93,48 @@ afterEach(() => {
 });
 
 describe('PermissionSettingsPanel', () => {
+  it('edits native WebFetch patterns in project and global config independently', async () => {
+    setState('serverStatus', { state: 'running', apiVersion: 2 });
+    mocks.load.mockResolvedValue({
+      ...config,
+      supportsPatterns: true,
+      projectRules: [{ permission: 'webfetch', pattern: '*', action: 'ask' }],
+    });
+    mocks.saveGlobal.mockRejectedValueOnce(new Error('Global write failed'));
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+    const global = container.querySelector('.permission-global-section')!;
+    const pattern = global.querySelector<HTMLInputElement>('[aria-label="Pattern"]')!;
+    expect(pattern.disabled).toBe(false);
+    pattern.value = 'https://example.com/*';
+    pattern.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    const save = global.querySelector<HTMLButtonElement>('.permission-settings-save')!;
+    save.click();
+    await flush();
+    expect(global.textContent).toContain('Global write failed');
+    expect(pattern.value).toBe('https://example.com/*');
+    expect(mocks.saveGlobal).toHaveBeenCalledWith([
+      { permission: 'webfetch', pattern: 'https://example.com/*', action: 'ask' },
+    ]);
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.saveSessionRules).not.toHaveBeenCalled();
+    const projectPattern = [
+      ...container.querySelectorAll<HTMLInputElement>('[aria-label="Pattern"]'),
+    ].find((input) => !global.contains(input))!;
+    expect(projectPattern.disabled).toBe(false);
+    expect(projectPattern.value).toBe('*');
+    mocks.saveGlobal.mockResolvedValue({
+      targetPath: '/isolated/global/opencode.json',
+      supportsPatterns: true,
+      rules: [],
+    });
+    global.querySelector<HTMLButtonElement>('[aria-label="Remove rule"]')!.click();
+    save.click();
+    await flush();
+    expect(mocks.saveGlobal).toHaveBeenLastCalledWith([]);
+    expect(global.textContent).toContain('No rules in this global config file');
+  });
+
   it('shows editable, inherited, and effective rules', async () => {
     cleanup = render(() => <PermissionSettingsPanel />, container);
     await flush();

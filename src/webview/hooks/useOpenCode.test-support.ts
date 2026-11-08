@@ -47,6 +47,7 @@ const mocks = vi.hoisted(() => ({
     sessionCompact: vi.fn(),
     sessionRespondPermission: vi.fn(),
     sessionPersistProjectPermissionAllow: vi.fn(),
+    sessionPersistGlobalPermissionAllow: vi.fn(),
     questionReply: vi.fn(),
     questionReject: vi.fn(),
     serverEventsOn: vi.fn(() => () => {}),
@@ -100,6 +101,7 @@ vi.mock('../lib/client', () => ({
       compact: clientMocks.sessionCompact,
       respondPermission: clientMocks.sessionRespondPermission,
       persistProjectPermissionAllow: clientMocks.sessionPersistProjectPermissionAllow,
+      persistGlobalPermissionAllow: clientMocks.sessionPersistGlobalPermissionAllow,
     },
     agent: {
       list: clientMocks.agentList,
@@ -275,6 +277,7 @@ beforeEach(() => {
   clientMocks.sessionCompact.mockReset();
   clientMocks.sessionRespondPermission.mockReset();
   clientMocks.sessionPersistProjectPermissionAllow.mockReset();
+  clientMocks.sessionPersistGlobalPermissionAllow.mockReset();
   clientMocks.questionReply.mockReset();
   clientMocks.questionReject.mockReset();
   clientMocks.serverEventsOn.mockReset();

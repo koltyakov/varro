@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   respondPermission: vi.fn(async () => {}),
   alwaysAllowPermissionForProject: vi.fn(async () => {}),
   alwaysAllowPermissionForSession: vi.fn(async () => {}),
+  alwaysAllowPermissionForGlobal: vi.fn(async () => {}),
   permissionMode: 'default' as 'default' | 'auto' | 'full',
 }));
 
@@ -16,6 +17,7 @@ vi.mock('../hooks/useOpenCode', () => ({
   respondPermission: mocks.respondPermission,
   alwaysAllowPermissionForProject: mocks.alwaysAllowPermissionForProject,
   alwaysAllowPermissionForSession: mocks.alwaysAllowPermissionForSession,
+  alwaysAllowPermissionForGlobal: mocks.alwaysAllowPermissionForGlobal,
 }));
 
 vi.mock('../lib/state-permission-modes', () => ({
@@ -50,6 +52,7 @@ beforeEach(() => {
   mocks.alwaysAllowPermissionForSession.mockReset();
   mocks.alwaysAllowPermissionForSession.mockResolvedValue(undefined);
   mocks.permissionMode = 'default';
+  mocks.alwaysAllowPermissionForGlobal.mockReset();
   setState('serverStatus', { state: 'running', apiVersion: 1 });
   setState('sessions', []);
   setState('messages', []);
@@ -371,9 +374,12 @@ describe('PermissionPrompt', () => {
     }
   );
 
-  it('offers only session and config-backed project approvals on V2', async () => {
+  it('reviews config-backed project approvals on V2 before submitting', async () => {
     setState('serverStatus', { state: 'running', apiVersion: 2 });
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+    cleanup = render(
+      () => PermissionPrompt({ permission: createPermission({ always: ['git diff --stat'] }) }),
+      container!
+    );
     container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')?.click();
     await Promise.resolve();
 
@@ -383,15 +389,144 @@ describe('PermissionPrompt', () => {
     expect(choices.map((choice) => choice.querySelector('span')?.textContent)).toEqual([
       'For this session',
       'For this project',
+      'Global',
     ]);
     choices[1]?.click();
     await Promise.resolve();
+    expect(container!.querySelectorAll('.permission-prompt-actions')).toHaveLength(1);
+    expect(
+      [...container!.querySelectorAll('.permission-prompt-actions button')].map(
+        (button) => button.textContent
+      )
+    ).toEqual(['Cancel', 'Save & allow']);
+    expect(container!.querySelector('[aria-label="Allow once"]')).toBeNull();
+    expect(container!.querySelector('[aria-label="Reject"]')).toBeNull();
+    expect(container!.querySelector('.permission-approval-scope')?.textContent).toBe(
+      'Project config'
+    );
+    expect(mocks.alwaysAllowPermissionForProject).not.toHaveBeenCalled();
+    const patterns = container!.querySelector<HTMLTextAreaElement>('textarea')!;
+    expect(document.activeElement).toBe(patterns);
+    expect(patterns.value).toBe('git diff --stat');
+    patterns.value = 'git diff *';
+    patterns.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    container!
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await Promise.resolve();
     expect(mocks.alwaysAllowPermissionForProject).toHaveBeenCalledExactlyOnceWith(
       'session-1',
-      'permission-1'
+      'permission-1',
+      ['git diff *']
     );
     expect(mocks.respondPermission).not.toHaveBeenCalled();
   });
+
+  it('cancels the review with Escape and restores the original actions and keyboard focus', async () => {
+    setState('serverStatus', { state: 'running', apiVersion: 2 });
+    cleanup = render(
+      () => PermissionPrompt({ permission: createPermission({ always: ['git *'] }) }),
+      container!
+    );
+    container!.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')!.click();
+    await Promise.resolve();
+    document.body.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    await Promise.resolve();
+    const textarea = container!.querySelector<HTMLTextAreaElement>('textarea')!;
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    textarea.dispatchEvent(event);
+    await Promise.resolve();
+    expect(event.defaultPrevented).toBe(true);
+    expect(container!.querySelector('form')).toBeNull();
+    expect(container!.querySelectorAll('.permission-prompt-actions')).toHaveLength(1);
+    expect(document.activeElement).toBe(container!.querySelector('[aria-label="Allow always"]'));
+    expect(mocks.respondPermission).not.toHaveBeenCalled();
+    expect(mocks.alwaysAllowPermissionForSession).not.toHaveBeenCalled();
+    container!.querySelector<HTMLButtonElement>('[aria-label="Allow once"]')!.click();
+    await Promise.resolve();
+    expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'once');
+  });
+
+  it('expands and collapses the full child command without changing its copy value', async () => {
+    const command = `git diff ${'some/long/path '.repeat(60)}\n--stat`;
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    cleanup = render(
+      () => PermissionPrompt({ permission: createPermission({ metadata: { command } }) }),
+      container!
+    );
+    const toggle = container!.querySelector<HTMLButtonElement>('.permission-command-toggle')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(
+      container!.querySelector('.permission-command-expanded .permission-meta-value')?.textContent
+    ).toBe(command);
+    container!.querySelector<HTMLButtonElement>('[aria-label^="Copy command:"]')!.click();
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalledWith(command);
+    toggle.click();
+    expect(container!.querySelector('.permission-command-expanded')).toBeNull();
+  });
+
+  it.each(['session', 'global'] as const)(
+    'retains a failed reviewed %s draft and supports cancellation',
+    async (scope) => {
+      setState('serverStatus', { state: 'running', apiVersion: 2 });
+      const approve =
+        scope === 'session'
+          ? mocks.alwaysAllowPermissionForSession
+          : mocks.alwaysAllowPermissionForGlobal;
+      approve.mockRejectedValueOnce(new Error('Save failed'));
+      cleanup = render(
+        () =>
+          PermissionPrompt({
+            permission: createPermission({
+              always: ['git *'],
+              metadata: { command: 'git diff --stat' },
+            }),
+          }),
+        container!
+      );
+      container!.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')!.click();
+      await Promise.resolve();
+      document.body
+        .querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+        .item(scope === 'session' ? 0 : 2)
+        .click();
+      const textarea = container!.querySelector<HTMLTextAreaElement>('textarea')!;
+      textarea.value = '';
+      textarea.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      expect(container!.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(true);
+      expect(textarea.getAttribute('aria-invalid')).toBe('true');
+      expect(container!.querySelector('.permission-approval-hint')?.textContent).toBe(
+        'Enter at least one resource pattern.'
+      );
+      textarea.value = 'git diff *\ngit status *';
+      textarea.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      container!
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(container!.textContent).toContain('Save failed'));
+      expect(approve).toHaveBeenCalledWith('session-1', 'permission-1', [
+        'git diff *',
+        'git status *',
+      ]);
+      expect(textarea.value).toBe('git diff *\ngit status *');
+      expect(container!.querySelector('.permission-meta-value')?.textContent).toBe(
+        'git diff --stat'
+      );
+      [...container!.querySelectorAll<HTMLButtonElement>('form button')]
+        .find((button) => button.textContent === 'Cancel')!
+        .click();
+      expect(container!.querySelector('form')).toBeNull();
+      expect(container!.querySelectorAll('.permission-prompt-actions')).toHaveLength(1);
+      expect(
+        container!.querySelector<HTMLButtonElement>('[aria-label="Allow once"]')!.disabled
+      ).toBe(false);
+      expect(mocks.respondPermission).not.toHaveBeenCalled();
+    }
+  );
 
   it.each(['session', 'project'] as const)(
     'shows failed %s approval feedback and keeps Allow once usable',

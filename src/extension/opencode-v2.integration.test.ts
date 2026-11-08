@@ -1144,6 +1144,90 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     }
   }, 30000);
 
+  it('loads and revokes URL-specific global config rules across projects without database grants', async (context) => {
+    if (transport.version !== 2) return context.skip();
+    const globalPath = join(root, 'config/opencode/opencode.json');
+    const original = await readFile(globalPath, 'utf8');
+    const config = asRecord(JSON.parse(original));
+    const savedBefore = await transport.request('GET', '/api/permission/saved');
+    const sessions: string[] = [];
+    const askInProject = async (name: string, resource: string) => {
+      const directory = join(root, 'workspace', `global-rule-${name}`);
+      await mkdir(directory, { recursive: true });
+      const git = spawnSync('git', ['init', '--quiet'], { cwd: directory });
+      expect(git.status).toBe(0);
+      const options = { directory };
+      const session = asRecord(
+        await transport.request(
+          'POST',
+          '/session',
+          { title: `Global config ${name}`, agent: 'build' },
+          options
+        )
+      );
+      if (!isString(session?.id)) throw new Error('Missing global config fixture session');
+      const id = session.id;
+      sessions.push(id);
+      await writeFile(
+        join(root, `global-rule-${name}.json`),
+        JSON.stringify(
+          {
+            session,
+            config: await transport.request('GET', '/config', undefined, options),
+            agents: await transport.request('GET', '/agent', undefined, options),
+          },
+          null,
+          2
+        )
+      );
+      const result = asRecord(
+        asRecord(
+          await transport.request(
+            'POST',
+            `/api/session/${id}/permission`,
+            { action: 'webfetch', resources: [resource], save: [resource] },
+            options
+          )
+        )?.data
+      );
+      if (result?.effect === 'ask')
+        await transport.request(
+          'POST',
+          `/permission/${result.id}/reply`,
+          { reply: 'once' },
+          options
+        );
+      return result?.effect;
+    };
+    try {
+      await writeFile(
+        globalPath,
+        JSON.stringify({
+          ...config,
+          permissions: [
+            { action: 'webfetch', resource: '*', effect: 'ask' },
+            { action: 'webfetch', resource: 'https://trusted.example/*', effect: 'allow' },
+          ],
+        })
+      );
+      expect(await askInProject('one', 'https://trusted.example/one')).toBe('allow');
+      expect(await askInProject('two', 'https://trusted.example/two')).toBe('allow');
+      expect(await askInProject('other', 'https://other.example/')).toBe('ask');
+      await writeFile(
+        globalPath,
+        JSON.stringify({
+          ...config,
+          permissions: [{ action: 'webfetch', resource: '*', effect: 'ask' }],
+        })
+      );
+      expect(await askInProject('revoked', 'https://trusted.example/revoked')).toBe('ask');
+      expect(await transport.request('GET', '/api/permission/saved')).toEqual(savedBefore);
+    } finally {
+      await writeFile(globalPath, original);
+      for (const id of sessions) await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 30000);
+
   it('displays and revokes untracked saved approvals through the authenticated Varro host path', async (context) => {
     if (transport.version !== 2) return context.skip();
     expect(authorization).toBeTruthy();

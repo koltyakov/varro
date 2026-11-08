@@ -2,6 +2,12 @@ import { apiCall, onMessage, postMessage } from './bridge';
 import type { FollowupSuggestionSet, FollowupSource } from '../../shared/followups';
 import { FOLLOWUP_REQUEST_TIMEOUT_MS } from '../../shared/followups';
 import type {
+  PermissionApprovalRequest,
+  ProviderAuthAuthorization,
+  ProviderAuthMethodsByProvider,
+  WorkspaceStatusEntry,
+} from '../../shared/opencode-types';
+import type {
   QuestionAnswer,
   AutoApproveJudgeRequest,
   AutoApproveJudgeResponse,
@@ -25,6 +31,7 @@ import type {
   WorkspaceFilePick,
   WorkspaceProblemsSnapshot,
   OpenCodePermissionConfig,
+  OpenCodeGlobalPermissionConfig,
   OpenCodeServerMemoryPermissions,
 } from '../../shared/protocol';
 import {
@@ -63,11 +70,6 @@ import { normalizeRecycleBinEntries } from '../../shared/recycle-bin';
 import { asRecord, type UnknownRecord } from '../../shared/type-utils';
 import type { McpConfigScope } from '../../shared/mcp-config';
 import { applySessionShareOverride } from './session-share-overrides';
-import type {
-  ProviderAuthAuthorization,
-  ProviderAuthMethodsByProvider,
-  WorkspaceStatusEntry,
-} from '../../shared/opencode-types';
 import { CURRENT_OPENCODE_ENDPOINTS } from '../../shared/opencode-endpoints';
 import { STARTUP_DEFAULT_MODEL_TIMEOUT_MS, withStartupDeadline } from '../../shared/startup';
 import { isBoolean, isNumber, isString, isObject } from './runtime-values';
@@ -469,23 +471,44 @@ export const client = {
     async persistProjectPermissionAllow(
       sessionId: string,
       permissionId: string,
-      options?: { directory?: string }
+      options?: { directory?: string; patterns?: string[] }
     ): Promise<void> {
+      const body: PermissionApprovalRequest = {
+        sessionId,
+        permissionId,
+      };
+      if (options?.patterns) body.patterns = options.patterns;
       await apiCall(
         'POST',
         withDirectory(VARRO_API_ENDPOINTS.permissionProjectAllow, options?.directory),
-        { sessionId, permissionId }
+        body
       );
     },
     async allowPermissionForSession(
       sessionId: string,
       permissionId: string,
-      options?: { directory?: string }
+      options?: { directory?: string; patterns?: string[] }
     ): Promise<void> {
+      const body: PermissionApprovalRequest = {
+        sessionId,
+        permissionId,
+      };
+      if (options?.patterns) body.patterns = options.patterns;
       await apiCall(
         'POST',
         withDirectory(VARRO_API_ENDPOINTS.permissionSessionAllow, options?.directory),
-        { sessionId, permissionId }
+        body
+      );
+    },
+    async persistGlobalPermissionAllow(
+      sessionId: string,
+      permissionId: string,
+      options: { directory?: string; patterns: string[] }
+    ): Promise<void> {
+      await apiCall(
+        'POST',
+        withDirectory(VARRO_API_ENDPOINTS.permissionGlobalAllow, options.directory),
+        { sessionId, permissionId, patterns: options.patterns }
       );
     },
     async getPermissionRulesForSession(
@@ -920,6 +943,14 @@ export const client = {
     },
     async openCodePermissionConfig(): Promise<OpenCodePermissionConfig> {
       return apiCall('GET', VARRO_API_ENDPOINTS.openCodeConfigPermissions);
+    },
+    async openCodeGlobalPermissionConfig(): Promise<OpenCodeGlobalPermissionConfig> {
+      return apiCall('GET', VARRO_API_ENDPOINTS.openCodeGlobalPermissions);
+    },
+    async saveOpenCodeGlobalPermissionConfig(
+      rules: PermissionRule[]
+    ): Promise<OpenCodeGlobalPermissionConfig> {
+      return apiCall('POST', VARRO_API_ENDPOINTS.openCodeGlobalPermissions, { rules });
     },
     async saveOpenCodePermissionConfig(rules: PermissionRule[]): Promise<OpenCodePermissionConfig> {
       return apiCall('POST', VARRO_API_ENDPOINTS.openCodeConfigPermissions, { rules });

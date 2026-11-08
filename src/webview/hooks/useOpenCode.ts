@@ -1,5 +1,6 @@
 export {
   alwaysAllowPermissionForProject,
+  alwaysAllowPermissionForGlobal,
   alwaysAllowPermissionForSession,
   abortSession,
   manageChildTask,

@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from 'util';
 import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import type {
   OpenCodePermissionConfig,
+  OpenCodeGlobalPermissionConfig,
   OpenCodePermissionConfigSource,
   OpenCodeServerMemoryPermission,
   OpenCodeServerMemoryPermissions,
@@ -821,12 +822,46 @@ export class OpenCodeConfigService {
     );
   }
 
-  async updateOpenCodeProjectPermission(permission: string, patterns: string[]) {
-    let snapshot = await this.readOpenCodeConfigObject();
+  private async readPermissionConfigSnapshot(
+    scope: 'project' | 'global'
+  ): Promise<OpenCodeConfigSnapshot> {
+    const snapshot = await this.readOpenCodeConfigObject(scope === 'global');
+    if (scope === 'project') return snapshot;
+    if (this.callbacks.server.apiVersion !== 2)
+      throw new Error('Global permission management requires OpenCode V2');
+    const paths = getOpenCodeConfigPaths();
+    const globalFiles = snapshot.files.filter((file) => paths.includes(file.path));
+    const target = globalFiles.at(-1);
+    if (target)
+      return {
+        ...snapshot,
+        target,
+        config: globalFiles.reduce<Record<string, unknown>>(
+          (merged, file) => mergeOpenCodeConfig(merged, file.config),
+          {}
+        ),
+      };
+    const path = paths.find(
+      (candidate) => getOpenCodePathApi(candidate).basename(candidate) === 'opencode.json'
+    );
+    if (!path) throw new Error('Could not resolve the global OpenCode config');
+    return {
+      ...snapshot,
+      target: { path, uri: vscode.Uri.file(path), raw: '{}\n', config: {} },
+      config: {},
+    };
+  }
+
+  async allowOpenCodeConfigPermission(
+    permission: string,
+    patterns: string[],
+    scope: 'project' | 'global' = 'project'
+  ) {
+    let snapshot = await this.readPermissionConfigSnapshot(scope);
     while (true) {
       const lockPath = getCanonicalOpenCodeConfigPath(snapshot.target.path);
       const result = await withOpenCodeConfigUpdateLock(lockPath, async () => {
-        const currentSnapshot = await this.readOpenCodeConfigObject();
+        const currentSnapshot = await this.readPermissionConfigSnapshot(scope);
         const { target } = currentSnapshot;
         if (getCanonicalOpenCodeConfigPath(target.path) !== lockPath) {
           return { kind: 'retry' as const, snapshot: currentSnapshot };
@@ -840,7 +875,7 @@ export class OpenCodeConfigService {
         );
         if (dirtyDocument) {
           throw new Error(
-            `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} has unsaved changes; save or revert the document before updating permissions`
+            `${target.path} has unsaved changes; save or revert the document before updating permissions`
           );
         }
 
@@ -1290,7 +1325,7 @@ export class OpenCodeConfigService {
     const targetPath = getCanonicalOpenCodeConfigPath(snapshot.target.path);
     const globalConfig = await this.readGlobalOpenCodePermissionConfig();
     const effectiveConfig = mergeOpenCodeConfig(globalConfig.config, snapshot.config);
-    return {
+    const result: OpenCodePermissionConfig = {
       targetPath: snapshot.target.path,
       projectRules: this.normalizeOpenCodePermissionRules(
         snapshot.target.config.permissions ?? snapshot.target.config.permission
@@ -1317,6 +1352,19 @@ export class OpenCodeConfigService {
       effectiveRules: this.normalizeOpenCodePermissionRules(
         effectiveConfig.permissions ?? effectiveConfig.permission
       ),
+    };
+    if (this.usesNativePermissionConfig(snapshot.target.config)) result.supportsPatterns = true;
+    return result;
+  }
+
+  async readOpenCodeGlobalPermissionConfig(): Promise<OpenCodeGlobalPermissionConfig> {
+    const { target } = await this.readPermissionConfigSnapshot('global');
+    return {
+      targetPath: target.path,
+      rules: this.normalizeOpenCodePermissionRules(
+        target.config.permissions ?? target.config.permission
+      ),
+      supportsPatterns: this.usesNativePermissionConfig(target.config),
     };
   }
 
@@ -1348,11 +1396,26 @@ export class OpenCodeConfigService {
   }
 
   async updateOpenCodePermissionConfig(rules: PermissionRule[]): Promise<OpenCodePermissionConfig> {
-    let snapshot = await this.readOpenCodeConfigObject();
+    await this.writeOpenCodePermissionConfig(rules, 'project');
+    return this.readOpenCodePermissionConfig();
+  }
+
+  async updateOpenCodeGlobalPermissionConfig(
+    rules: PermissionRule[]
+  ): Promise<OpenCodeGlobalPermissionConfig> {
+    await this.writeOpenCodePermissionConfig(rules, 'global');
+    return this.readOpenCodeGlobalPermissionConfig();
+  }
+
+  private async writeOpenCodePermissionConfig(
+    rules: PermissionRule[],
+    scope: 'project' | 'global'
+  ): Promise<void> {
+    let snapshot = await this.readPermissionConfigSnapshot(scope);
     while (true) {
       const lockPath = getCanonicalOpenCodeConfigPath(snapshot.target.path);
       const result = await withOpenCodeConfigUpdateLock(lockPath, async () => {
-        const currentSnapshot = await this.readOpenCodeConfigObject();
+        const currentSnapshot = await this.readPermissionConfigSnapshot(scope);
         const { target } = currentSnapshot;
         if (getCanonicalOpenCodeConfigPath(target.path) !== lockPath) {
           return { kind: 'retry' as const, snapshot: currentSnapshot };
@@ -1423,7 +1486,7 @@ export class OpenCodeConfigService {
         await vscode.workspace.fs.writeFile(target.uri, encoded);
         return { kind: 'complete' as const };
       });
-      if (result.kind === 'complete') return this.readOpenCodePermissionConfig();
+      if (result.kind === 'complete') return;
       snapshot = result.snapshot;
     }
   }

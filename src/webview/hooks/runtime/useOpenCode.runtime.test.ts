@@ -44,6 +44,7 @@ function createRuntimeMock(label: string) {
     respondPermission: vi.fn().mockResolvedValue(undefined),
     alwaysAllowPermissionForProject: vi.fn().mockResolvedValue(undefined),
     alwaysAllowPermissionForSession: vi.fn().mockResolvedValue(undefined),
+    alwaysAllowPermissionForGlobal: vi.fn().mockResolvedValue(undefined),
     respondQuestion: vi.fn().mockResolvedValue(undefined),
     updatePermissionModeForSession: vi.fn().mockResolvedValue(undefined),
     rejectQuestion: vi.fn().mockResolvedValue(undefined),
@@ -124,7 +125,8 @@ describe('useOpenCode.runtime', () => {
     ).resolves.toBeUndefined();
     expect(installed.runtime.alwaysAllowPermissionForSession).toHaveBeenCalledWith(
       'session-1',
-      'permission-1'
+      'permission-1',
+      undefined
     );
   });
 

@@ -290,6 +290,12 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('PATCH', '/api/permission/saved/saved-1')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/permission/server-memory')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/permission/judge')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/permission/global-allow?directory=%2Frepo-a')).toBe(
+      true
+    );
+    expect(isAllowedApiRequest('GET', '/varro/opencode-config/global-permissions')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/opencode-config/global-permissions')).toBe(true);
+    expect(isAllowedApiRequest('DELETE', '/varro/opencode-config/global-permissions')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/permission/project-allow?directory=%2Frepo-a')).toBe(
       true
     );

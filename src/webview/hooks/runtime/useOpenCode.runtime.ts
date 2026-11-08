@@ -215,12 +215,40 @@ export async function respondPermission(
   await getCurrentOpenCodeRuntime().respondPermission(sessionId, permissionId, response, options);
 }
 
-export async function alwaysAllowPermissionForProject(sessionId: string, permissionId: string) {
-  await getCurrentOpenCodeRuntime().alwaysAllowPermissionForProject(sessionId, permissionId);
+export async function alwaysAllowPermissionForProject(
+  sessionId: string,
+  permissionId: string,
+  patterns?: string[]
+) {
+  await getCurrentOpenCodeRuntime().alwaysAllowPermissionForProject(
+    sessionId,
+    permissionId,
+    patterns
+  );
 }
 
-export async function alwaysAllowPermissionForSession(sessionId: string, permissionId: string) {
-  await getCurrentOpenCodeRuntime().alwaysAllowPermissionForSession(sessionId, permissionId);
+export async function alwaysAllowPermissionForSession(
+  sessionId: string,
+  permissionId: string,
+  patterns?: string[]
+) {
+  await getCurrentOpenCodeRuntime().alwaysAllowPermissionForSession(
+    sessionId,
+    permissionId,
+    patterns
+  );
+}
+
+export async function alwaysAllowPermissionForGlobal(
+  sessionId: string,
+  permissionId: string,
+  patterns: string[]
+) {
+  await getCurrentOpenCodeRuntime().alwaysAllowPermissionForGlobal(
+    sessionId,
+    permissionId,
+    patterns
+  );
 }
 
 export async function respondQuestion(

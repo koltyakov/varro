@@ -1,9 +1,18 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import {
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  createUniqueId,
+  on,
+  onCleanup,
+} from 'solid-js';
 import { Portal } from 'solid-js/web';
 import type { Permission } from '../types';
 import {
   alwaysAllowPermissionForProject,
   alwaysAllowPermissionForSession,
+  alwaysAllowPermissionForGlobal,
   respondPermission,
 } from '../hooks/useOpenCode';
 import { getPermissionModeForSession } from '../lib/state-permission-modes';
@@ -52,10 +61,52 @@ export function PermissionPrompt(props: {
     return messageAgent?.trim() || session?.agent?.trim() || taskAgent || 'subagent';
   });
   const [alwaysMenuOpen, setAlwaysMenuOpen] = createSignal(false);
+  const [commandExpanded, setCommandExpanded] = createSignal(false);
+  const [reviewScope, setReviewScope] = createSignal<'session' | 'project' | 'global'>();
+  const [patternDraft, setPatternDraft] = createSignal('');
+  const patternHintId = createUniqueId();
+  const nativeServer = () =>
+    state.serverStatus.state === 'running' && state.serverStatus.apiVersion === 2;
+  const reviewedPatterns = () => [
+    ...new Set(
+      patternDraft()
+        .split('\n')
+        .map((pattern) => pattern.trim())
+        .filter(Boolean)
+    ),
+  ];
+  const validPatterns = () =>
+    reviewedPatterns().length > 0 &&
+    reviewedPatterns().length <= 50 &&
+    reviewedPatterns().every((pattern) => pattern.length <= 2000);
+  const patternHint = () => {
+    if (reviewedPatterns().length === 0) return 'Enter at least one resource pattern.';
+    if (reviewedPatterns().length > 50) return 'Use at most 50 resource patterns.';
+    if (reviewedPatterns().some((pattern) => pattern.length > 2000))
+      return 'Each pattern must be 2000 characters or fewer.';
+    return 'One pattern per line. * matches any text.';
+  };
+  createEffect(
+    on(
+      () => props.permission.id,
+      () => {
+        setCommandExpanded(false);
+        setReviewScope(undefined);
+        setAlwaysMenuOpen(false);
+        setResponseError(undefined);
+      }
+    )
+  );
   const [responseError, setResponseError] = createSignal<string>();
   const [alwaysMenuPosition, setAlwaysMenuPosition] = createSignal({ left: 0, top: 0 });
   let alwaysMenuButton: HTMLButtonElement | undefined;
   let alwaysMenu: HTMLDivElement | undefined;
+  const cancelReview = () => {
+    if (responding()) return;
+    setReviewScope(undefined);
+    setResponseError(undefined);
+    queueMicrotask(() => alwaysMenuButton?.focus());
+  };
   const isAutoApproveMode = () => getPermissionModeForSession(sessionId()) === 'auto';
   const responding = () => {
     respondingPermissionVersion();
@@ -79,7 +130,20 @@ export function PermissionPrompt(props: {
       setRespondingPermissionVersion((version) => version + 1);
     }
   };
-  const handleAlways = async (scope: 'session' | 'server' | 'project') => {
+  const chooseScope = (scope: 'session' | 'server' | 'project' | 'global') => {
+    setAlwaysMenuOpen(false);
+    if (nativeServer() && scope !== 'server') {
+      setPatternDraft((props.permission.always ?? []).join('\n'));
+      setResponseError(undefined);
+      setReviewScope(scope);
+    } else {
+      void handleAlways(scope);
+    }
+  };
+  const handleAlways = async (
+    scope: 'session' | 'server' | 'project' | 'global',
+    patterns?: string[]
+  ) => {
     const permissionId = props.permission.id;
     if (respondingPermissionIds.has(permissionId)) return;
     setResponseError(undefined);
@@ -88,12 +152,17 @@ export function PermissionPrompt(props: {
     setRespondingPermissionVersion((version) => version + 1);
     try {
       if (scope === 'session') {
-        await alwaysAllowPermissionForSession(sessionId(), permissionId);
+        if (patterns) await alwaysAllowPermissionForSession(sessionId(), permissionId, patterns);
+        else await alwaysAllowPermissionForSession(sessionId(), permissionId);
       } else if (scope === 'project') {
-        await alwaysAllowPermissionForProject(sessionId(), permissionId);
+        if (patterns) await alwaysAllowPermissionForProject(sessionId(), permissionId, patterns);
+        else await alwaysAllowPermissionForProject(sessionId(), permissionId);
+      } else if (scope === 'global' && patterns) {
+        await alwaysAllowPermissionForGlobal(sessionId(), permissionId, patterns);
       } else {
         await respondPermission(sessionId(), permissionId, 'always');
       }
+      setReviewScope(undefined);
     } catch (error) {
       setResponseError(
         error instanceof Error ? error.message : 'Failed to save permission approval'
@@ -189,12 +258,27 @@ export function PermissionPrompt(props: {
                 {metadataEntries().map(([key, value]) => {
                   const text = formatMetadataValue(value);
                   return (
-                    <div class="permission-meta-entry">
+                    <div
+                      class="permission-meta-entry"
+                      classList={{
+                        'permission-command-expanded': key === 'command' && commandExpanded(),
+                      }}
+                    >
                       <span class="permission-meta-key">{key}</span>
                       <div class="permission-meta-value-shell">
                         <span class="permission-meta-value">{text}</span>
                         <CopyIconButton text={text} label={key} />
                       </div>
+                      <Show when={key === 'command'}>
+                        <button
+                          type="button"
+                          class="permission-command-toggle"
+                          aria-expanded={commandExpanded()}
+                          onClick={() => setCommandExpanded((expanded) => !expanded)}
+                        >
+                          {commandExpanded() ? 'Collapse command' : 'Expand command'}
+                        </button>
+                      </Show>
                     </div>
                   );
                 })}
@@ -241,71 +325,151 @@ export function PermissionPrompt(props: {
         )}
       </Show>
 
-      <div class="permission-prompt-actions">
-        <button
-          class="question-btn question-btn-primary"
-          aria-label="Allow once"
-          disabled={responding() || props.permission.recoveredIncomplete}
-          onClick={() => void handleRespond('once')}
-        >
-          <span class="permission-action-label permission-action-label-full" aria-hidden="true">
-            Allow once
-          </span>
-          <span class="permission-action-label permission-action-label-short" aria-hidden="true">
-            Once
-          </span>
-        </button>
-        <button
-          ref={(element) => (alwaysMenuButton = element)}
-          class="question-btn question-btn-secondary permission-always-main"
-          type="button"
-          aria-label="Allow always"
-          aria-haspopup="menu"
-          aria-expanded={alwaysMenuOpen()}
-          title="Choose where to allow matching requests"
-          disabled={responding() || props.permission.recoveredIncomplete}
-          onClick={() => {
-            if (!alwaysMenuOpen() && alwaysMenuButton) {
-              const rect = alwaysMenuButton.getBoundingClientRect();
-              setAlwaysMenuPosition({ left: rect.right, top: rect.top - 4 });
-            }
-            setAlwaysMenuOpen((open) => !open);
-          }}
-        >
-          <span class="permission-always-label" aria-hidden="true">
-            <span class="permission-action-label permission-action-label-full">Allow always</span>
-            <span class="permission-action-label permission-action-label-short">Always</span>
-          </span>
-          <svg
-            class="permission-always-chevron"
-            width="12"
-            height="12"
-            viewBox="0 0 15 15"
-            fill="none"
-            aria-hidden="true"
+      <Show when={reviewScope()}>
+        {(scope) => (
+          <form
+            class="permission-approval-review"
+            aria-label="Review standing approval"
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape' || responding()) return;
+              event.preventDefault();
+              event.stopPropagation();
+              cancelReview();
+            }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (validPatterns() && !responding()) void handleAlways(scope(), reviewedPatterns());
+            }}
           >
-            <path
-              d="m4 6 3.5 3.5L11 6"
-              stroke="currentColor"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </button>
-        <button
-          class="question-btn question-btn-danger"
-          aria-label="Reject"
-          disabled={responding()}
-          onClick={() => void handleRespond('reject')}
-        >
-          <span class="permission-action-label permission-action-label-full" aria-hidden="true">
-            Reject
-          </span>
-          <span class="permission-action-label permission-action-label-short" aria-hidden="true">
-            Reject
-          </span>
-        </button>
-      </div>
+            <div class="permission-approval-fields">
+              <div class="permission-approval-heading">
+                <span>Always allow</span>
+                <span
+                  class="permission-approval-scope"
+                  title={
+                    scope() === 'global'
+                      ? 'Global OpenCode config, across all projects. Unavailable in attach-only mode.'
+                      : undefined
+                  }
+                >
+                  {scope() === 'session'
+                    ? 'This session'
+                    : scope() === 'project'
+                      ? 'Project config'
+                      : 'Global config'}
+                </span>
+              </div>
+              <label>
+                Resource patterns
+                <textarea
+                  ref={(element) => queueMicrotask(() => element.focus())}
+                  aria-label="Approval resource patterns"
+                  aria-describedby={patternHintId}
+                  aria-invalid={!validPatterns()}
+                  rows={2}
+                  value={patternDraft()}
+                  disabled={responding()}
+                  spellcheck={false}
+                  onInput={(event) => setPatternDraft(event.currentTarget.value)}
+                />
+              </label>
+              <div
+                id={patternHintId}
+                class="permission-approval-hint"
+                classList={{ 'is-invalid': !validPatterns() }}
+              >
+                {patternHint()}
+              </div>
+            </div>
+            <div class="permission-prompt-actions permission-approval-actions">
+              <button
+                class="question-btn question-btn-secondary"
+                type="button"
+                disabled={responding()}
+                onClick={cancelReview}
+              >
+                Cancel
+              </button>
+              <button
+                class="question-btn question-btn-primary"
+                type="submit"
+                title="Save the rule and allow the current request. The requested command stays unchanged."
+                disabled={responding() || !validPatterns() || props.permission.recoveredIncomplete}
+              >
+                {responding() ? 'Saving...' : 'Save & allow'}
+              </button>
+            </div>
+          </form>
+        )}
+      </Show>
+
+      <Show when={!reviewScope()}>
+        <div class="permission-prompt-actions">
+          <button
+            class="question-btn question-btn-primary"
+            aria-label="Allow once"
+            disabled={responding() || props.permission.recoveredIncomplete}
+            onClick={() => void handleRespond('once')}
+          >
+            <span class="permission-action-label permission-action-label-full" aria-hidden="true">
+              Allow once
+            </span>
+            <span class="permission-action-label permission-action-label-short" aria-hidden="true">
+              Once
+            </span>
+          </button>
+          <button
+            ref={(element) => (alwaysMenuButton = element)}
+            class="question-btn question-btn-secondary permission-always-main"
+            type="button"
+            aria-label="Allow always"
+            aria-haspopup="menu"
+            aria-expanded={alwaysMenuOpen()}
+            title="Choose where to allow matching requests"
+            disabled={responding() || props.permission.recoveredIncomplete}
+            onClick={() => {
+              if (!alwaysMenuOpen() && alwaysMenuButton) {
+                const rect = alwaysMenuButton.getBoundingClientRect();
+                setAlwaysMenuPosition({ left: rect.right, top: rect.top - 4 });
+              }
+              setAlwaysMenuOpen((open) => !open);
+            }}
+          >
+            <span class="permission-always-label" aria-hidden="true">
+              <span class="permission-action-label permission-action-label-full">Allow always</span>
+              <span class="permission-action-label permission-action-label-short">Always</span>
+            </span>
+            <svg
+              class="permission-always-chevron"
+              width="12"
+              height="12"
+              viewBox="0 0 15 15"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="m4 6 3.5 3.5L11 6"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            class="question-btn question-btn-danger"
+            aria-label="Reject"
+            disabled={responding()}
+            onClick={() => void handleRespond('reject')}
+          >
+            <span class="permission-action-label permission-action-label-full" aria-hidden="true">
+              Reject
+            </span>
+            <span class="permission-action-label permission-action-label-short" aria-hidden="true">
+              Reject
+            </span>
+          </button>
+        </div>
+      </Show>
       <Show when={alwaysMenuOpen()}>
         <Portal>
           <div
@@ -332,22 +496,28 @@ export function PermissionPrompt(props: {
               top: `${alwaysMenuPosition().top}px`,
             }}
           >
-            <button type="button" role="menuitem" onClick={() => void handleAlways('session')}>
+            <button type="button" role="menuitem" onClick={() => chooseScope('session')}>
               <span>For this session</span>
               <small>Matching requests in this session</small>
             </button>
             <Show
               when={state.serverStatus.state === 'running' && state.serverStatus.apiVersion === 1}
             >
-              <button type="button" role="menuitem" onClick={() => void handleAlways('server')}>
+              <button type="button" role="menuitem" onClick={() => chooseScope('server')}>
                 <span>Until server restart</span>
                 <small>Matching requests across sessions</small>
               </button>
             </Show>
-            <button type="button" role="menuitem" onClick={() => void handleAlways('project')}>
+            <button type="button" role="menuitem" onClick={() => chooseScope('project')}>
               <span>For this project</span>
               <small>Saved in the project OpenCode config</small>
             </button>
+            <Show when={nativeServer()}>
+              <button type="button" role="menuitem" onClick={() => chooseScope('global')}>
+                <span>Global</span>
+                <small>Saved in the global OpenCode config</small>
+              </button>
+            </Show>
           </div>
         </Portal>
       </Show>

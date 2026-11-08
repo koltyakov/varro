@@ -493,6 +493,8 @@ export const VARRO_API_ENDPOINTS = {
   permissionSessionRules: `${VARRO_API_NAMESPACE}/permission/session-rules`,
   permissionServerMemory: `${VARRO_API_NAMESPACE}/permission/server-memory`,
   permissionProjectAllow: `${VARRO_API_NAMESPACE}/permission/project-allow`,
+  permissionGlobalAllow: `${VARRO_API_NAMESPACE}/permission/global-allow`,
+  openCodeGlobalPermissions: `${VARRO_API_NAMESPACE}/opencode-config/global-permissions`,
   decisionProviders: `${VARRO_API_NAMESPACE}/decision-providers`,
 } as const;
 
@@ -531,6 +533,7 @@ export type {
   OpenCodeModelRoute,
   OpenCodeModelRouting,
   OpenCodePermissionConfig,
+  OpenCodeGlobalPermissionConfig,
   OpenCodePermissionConfigSource,
   OpenCodeServerMemoryPermission,
   OpenCodeServerMemoryPermissions,

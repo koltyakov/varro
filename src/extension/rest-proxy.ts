@@ -6,6 +6,7 @@ import type {
   OpenCodeServerMemoryPermission,
   PermissionRule,
   Session,
+  PermissionApprovalRequest,
 } from '../shared/opencode-types';
 import { parseSessionPromptEndpoint } from '../shared/opencode-endpoints';
 import { getSelectionRangesFromEditorContext } from '../shared/context-files';
@@ -263,8 +264,8 @@ export class InternalHelperCleanupCoordinator {
 }
 
 type OpenCodePermissionConfigRequest =
-  | { kind: 'get' }
-  | { kind: 'update'; rules: PermissionRule[] };
+  | { kind: 'get'; scope: 'project' | 'global' }
+  | { kind: 'update'; rules: PermissionRule[]; scope: 'project' | 'global' };
 
 type SessionPermissionRulesRequest =
   | { kind: 'get'; sessionID: string }
@@ -832,6 +833,12 @@ export class RestProxy {
         payload.path,
         payload.body
       );
+      const globalPermissionAllowRequest = this.parsePermissionAllowRequest(
+        VARRO_API_ENDPOINTS.permissionGlobalAllow,
+        method,
+        payload.path,
+        payload.body
+      );
       // Scoped approvals carry their owning session in the body, not the route.
       const nativeFormReply =
         attentionReplyRequestID &&
@@ -846,6 +853,7 @@ export class RestProxy {
         parseDirectSessionID(payload.path) ??
         sessionPermissionAllowRequest?.sessionId ??
         projectPermissionAllowRequest?.sessionId ??
+        globalPermissionAllowRequest?.sessionId ??
         nativeFormSessionID;
       const transfer = directSessionID
         ? this.callbacks
@@ -1425,6 +1433,16 @@ export class RestProxy {
         payload.body
       );
       if (permissionConfigRequest) {
+        if (permissionConfigRequest.scope === 'global') {
+          const data =
+            permissionConfigRequest.kind === 'get'
+              ? await this.openCodeConfig.readOpenCodeGlobalPermissionConfig()
+              : await this.openCodeConfig.updateOpenCodeGlobalPermissionConfig(
+                  permissionConfigRequest.rules
+                );
+          this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+          return;
+        }
         const data =
           permissionConfigRequest.kind === 'get'
             ? await this.openCodeConfig.readOpenCodePermissionConfig()
@@ -1682,6 +1700,18 @@ export class RestProxy {
           projectPermissionAllowRequest,
           directory ?? undefined,
           requestSignal
+        );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      if (globalPermissionAllowRequest) {
+        const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
+        const data = await this.persistProjectPermissionAllow(
+          globalPermissionAllowRequest,
+          directory ?? undefined,
+          requestSignal,
+          'global'
         );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
@@ -3294,7 +3324,7 @@ export class RestProxy {
     method: string,
     path: string,
     body: unknown
-  ): { sessionId: string; permissionId: string } | null {
+  ): PermissionApprovalRequest | null {
     if (method !== 'POST') return null;
     const url = new URL(path, 'http://localhost');
     if (url.pathname !== endpoint) return null;
@@ -3302,25 +3332,44 @@ export class RestProxy {
     const sessionId = typeof record?.sessionId === 'string' ? record.sessionId.trim() : '';
     const permissionId = typeof record?.permissionId === 'string' ? record.permissionId.trim() : '';
     if (!sessionId || !permissionId) throw new Error('Invalid permission scope request');
-    return { sessionId, permissionId };
+    if (record?.patterns === undefined) return { sessionId, permissionId };
+    if (this.callbacks.server.apiVersion !== 2)
+      throw new Error('Custom approval patterns require OpenCode V2');
+    if (
+      !Array.isArray(record.patterns) ||
+      record.patterns.length === 0 ||
+      record.patterns.length > 50 ||
+      record.patterns.some(
+        (pattern) => typeof pattern !== 'string' || !pattern.trim() || pattern.length > 2000
+      )
+    )
+      throw new Error(
+        'Approval patterns must contain 1 to 50 non-empty patterns of at most 2000 characters'
+      );
+    return {
+      sessionId,
+      permissionId,
+      patterns: [...new Set(record.patterns.map((pattern: string) => pattern.trim()))],
+    };
   }
 
   private async persistProjectPermissionAllow(
-    request: { sessionId: string; permissionId: string },
+    request: PermissionApprovalRequest,
     directory: string | undefined,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    scope: 'project' | 'global' = 'project'
   ) {
     const { permission, patterns } = await this.getPendingPermissionAllowScope(
       request,
       directory,
       signal
     );
-    await this.openCodeConfig.updateOpenCodeProjectPermission(permission, patterns);
+    await this.openCodeConfig.allowOpenCodeConfigPermission(permission, patterns, scope);
     return { permission, patterns };
   }
 
   private async getPendingPermissionAllowScope(
-    request: { sessionId: string; permissionId: string },
+    request: PermissionApprovalRequest,
     directory: string | undefined,
     signal?: AbortSignal
   ) {
@@ -3350,7 +3399,9 @@ export class RestProxy {
       throw new Error('Standing approval scope is unavailable for this request');
     }
 
-    return { permission, patterns };
+    // The action and owning request remain server-authoritative. Only an explicit
+    // manual review may replace the suggested standing patterns.
+    return { permission, patterns: request.patterns ?? patterns };
   }
 
   private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {
@@ -4596,11 +4647,17 @@ export class RestProxy {
     path: string,
     body: unknown
   ): OpenCodePermissionConfigRequest | null {
-    if (path !== VARRO_API_ENDPOINTS.openCodeConfigPermissions) return null;
-    if (method === 'GET') return { kind: 'get' };
+    const scope =
+      path === VARRO_API_ENDPOINTS.openCodeConfigPermissions
+        ? 'project'
+        : path === VARRO_API_ENDPOINTS.openCodeGlobalPermissions
+          ? 'global'
+          : null;
+    if (!scope) return null;
+    if (method === 'GET') return { kind: 'get', scope };
     if (method !== 'POST') return null;
 
-    return { kind: 'update', rules: this.parsePermissionRules(asRecord(body)?.rules) };
+    return { kind: 'update', rules: this.parsePermissionRules(asRecord(body)?.rules), scope };
   }
 
   private parseSessionPermissionRulesRequest(

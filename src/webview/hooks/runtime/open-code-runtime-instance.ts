@@ -10,6 +10,7 @@ import type {
 } from '../../../shared/protocol';
 import { syncWindowChatTheme } from '../../lib/window-chat-theme';
 import { reconcile } from 'solid-js/store';
+import type { PermissionApprovalOptions } from '../../../shared/opencode-types';
 import {
   AUTO_APPROVE_JUDGE_TIMEOUT_MS,
   createSessionWorkspaceMetadata,
@@ -236,8 +237,21 @@ export interface OpenCodeRuntime {
     response: 'once' | 'always' | 'reject',
     options?: { rethrow?: boolean }
   ): Promise<void>;
-  alwaysAllowPermissionForProject(sessionId: string, permissionId: string): Promise<void>;
-  alwaysAllowPermissionForSession(sessionId: string, permissionId: string): Promise<void>;
+  alwaysAllowPermissionForProject(
+    sessionId: string,
+    permissionId: string,
+    patterns?: string[]
+  ): Promise<void>;
+  alwaysAllowPermissionForSession(
+    sessionId: string,
+    permissionId: string,
+    patterns?: string[]
+  ): Promise<void>;
+  alwaysAllowPermissionForGlobal(
+    sessionId: string,
+    permissionId: string,
+    patterns: string[]
+  ): Promise<void>;
   respondQuestion(
     requestID: string,
     answers: QuestionAnswer,
@@ -3473,19 +3487,43 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     }
   }
 
-  async function alwaysAllowPermissionForProject(sessionId: string, permissionId: string) {
+  async function alwaysAllowPermissionForProject(
+    sessionId: string,
+    permissionId: string,
+    patterns?: string[]
+  ) {
     const status = appStore.state.serverStatus;
     // V2's always reply saves a second, durable database grant outside the config.
     const response = status.state === 'running' && status.apiVersion === 1 ? 'always' : 'once';
-    await client.session.persistProjectPermissionAllow(sessionId, permissionId, {
+    const options: PermissionApprovalOptions = {
       directory: getSessionDirectory(sessionId),
-    });
+    };
+    if (patterns) options.patterns = patterns;
+    await client.session.persistProjectPermissionAllow(sessionId, permissionId, options);
     await respondPermission(sessionId, permissionId, response, { rethrow: true });
   }
 
-  async function alwaysAllowPermissionForSession(sessionId: string, permissionId: string) {
-    await client.session.allowPermissionForSession(sessionId, permissionId, {
+  async function alwaysAllowPermissionForSession(
+    sessionId: string,
+    permissionId: string,
+    patterns?: string[]
+  ) {
+    const options: PermissionApprovalOptions = {
       directory: getSessionDirectory(sessionId),
+    };
+    if (patterns) options.patterns = patterns;
+    await client.session.allowPermissionForSession(sessionId, permissionId, options);
+    await respondPermission(sessionId, permissionId, 'once', { rethrow: true });
+  }
+
+  async function alwaysAllowPermissionForGlobal(
+    sessionId: string,
+    permissionId: string,
+    patterns: string[]
+  ) {
+    await client.session.persistGlobalPermissionAllow(sessionId, permissionId, {
+      directory: getSessionDirectory(sessionId),
+      patterns,
     });
     await respondPermission(sessionId, permissionId, 'once', { rethrow: true });
   }
@@ -3569,6 +3607,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     respondPermission,
     alwaysAllowPermissionForProject,
     alwaysAllowPermissionForSession,
+    alwaysAllowPermissionForGlobal,
     respondQuestion,
     updatePermissionModeForSession,
     rejectQuestion,

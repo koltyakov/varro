@@ -1918,6 +1918,7 @@ const API_ROUTES: ApiRoute[] = [
   route(VARRO_API_ENDPOINTS.promptCompletionTest, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.openCodeConfigDisableProvider, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.openCodeConfigPermissions, methodsNoQuery('GET', 'POST')),
+  route(VARRO_API_ENDPOINTS.openCodeGlobalPermissions, methodsNoQuery('GET', 'POST')),
   route(VARRO_API_ENDPOINTS.permissionJudge, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.decisionProviders, methodsNoQuery('GET', 'POST')),
   route(
@@ -1926,6 +1927,10 @@ const API_ROUTES: ApiRoute[] = [
   ),
   route(
     VARRO_API_ENDPOINTS.permissionSessionAllow,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(
+    VARRO_API_ENDPOINTS.permissionGlobalAllow,
     ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
   ),
   route(VARRO_API_ENDPOINTS.permissionSessionRules, ({ method, url }) =>

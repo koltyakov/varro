@@ -43,6 +43,41 @@ async function loadClient() {
 
 type ClientApi = Awaited<ReturnType<typeof loadClient>>['client'];
 
+it('sends reviewed patterns and keeps global config routes separate from saved approvals', async () => {
+  const { client } = await loadClient();
+  const patterns = ['git diff *'];
+  await client.session.persistProjectPermissionAllow('session-1', 'perm-1', {
+    directory: '/repo',
+    patterns,
+  });
+  await client.session.allowPermissionForSession('session-1', 'perm-1', {
+    directory: '/repo',
+    patterns,
+  });
+  await client.session.persistGlobalPermissionAllow('session-1', 'perm-1', {
+    directory: '/repo',
+    patterns,
+  });
+  for (const scope of ['project', 'session', 'global']) {
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      `/varro/permission/${scope}-allow?directory=%2Frepo`,
+      { sessionId: 'session-1', permissionId: 'perm-1', patterns }
+    );
+  }
+  await client.varro.openCodeGlobalPermissionConfig();
+  await client.varro.saveOpenCodeGlobalPermissionConfig([]);
+  expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+    'GET',
+    '/varro/opencode-config/global-permissions'
+  );
+  expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+    'POST',
+    '/varro/opencode-config/global-permissions',
+    { rules: [] }
+  );
+});
+
 it('sends native form replies without a positional answers wrapper', async () => {
   const { client } = await loadClient();
   const reply = {

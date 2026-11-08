@@ -12,6 +12,7 @@ import {
 } from 'solid-js';
 import type {
   OpenCodePermissionConfig,
+  OpenCodeGlobalPermissionConfig,
   OpenCodeServerMemoryPermissions,
   PermissionMode,
 } from '../../shared/protocol';
@@ -487,11 +488,13 @@ function PermissionActionSelect(props: {
 function PermissionRuleRow(props: {
   rule: PermissionRule;
   projectConfig?: boolean;
+  supportsPatterns?: boolean;
   onChange: (rule: PermissionRule) => void;
   onRemove: () => void;
 }) {
   const scalarConfigPermission = () =>
     props.projectConfig === true &&
+    !props.supportsPatterns &&
     props.rule.pattern === '*' &&
     isScalarConfigPermission(props.rule.permission);
   return (
@@ -503,7 +506,9 @@ function PermissionRuleRow(props: {
             ...props.rule,
             permission,
             pattern:
-              props.projectConfig === true && isScalarConfigPermission(permission)
+              props.projectConfig === true &&
+              !props.supportsPatterns &&
+              isScalarConfigPermission(permission)
                 ? '*'
                 : props.rule.pattern,
           })
@@ -533,6 +538,139 @@ function PermissionRuleRow(props: {
         </Tooltip>
       </span>
     </div>
+  );
+}
+
+function GlobalPermissionRules(props: { onSaved: () => void }) {
+  const [config, setConfig] = createSignal<OpenCodeGlobalPermissionConfig>();
+  const [rules, setRules] = createSignal<PermissionRule[]>([]);
+  const [loading, setLoading] = createSignal(true);
+  const [saving, setSaving] = createSignal(false);
+  const [error, setError] = createSignal<string>();
+  const dirty = () => JSON.stringify(rules()) !== JSON.stringify(config()?.rules ?? []);
+  const load = async () => {
+    setLoading(true);
+    setError(undefined);
+    try {
+      const next = await client.varro.openCodeGlobalPermissionConfig();
+      setConfig(next);
+      setRules(next.rules.map((rule) => ({ ...rule })));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not load global rules');
+    } finally {
+      setLoading(false);
+    }
+  };
+  const save = async () => {
+    const normalized = rules().map((rule) => ({
+      ...rule,
+      permission: rule.permission.trim(),
+      pattern: rule.pattern.trim(),
+    }));
+    if (normalized.some((rule) => !rule.permission || !rule.pattern)) {
+      setError('Every rule needs a permission name and pattern.');
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    try {
+      const next = await client.varro.saveOpenCodeGlobalPermissionConfig(normalized);
+      setConfig(next);
+      setRules(next.rules.map((rule) => ({ ...rule })));
+      props.onSaved();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not save global rules');
+    } finally {
+      setSaving(false);
+    }
+  };
+  onMount(() => void load());
+  return (
+    <section class="permission-config-section permission-global-section">
+      <div class="permission-config-heading">
+        <div>
+          <h2>Global config rules</h2>
+          <p>
+            Applies across projects. Project, agent, and session rules can override these
+            permissions. Config changes apply when OpenCode next loads the config; saving does not
+            restart the server.
+          </p>
+        </div>
+        <div class="permission-config-actions">
+          <button
+            type="button"
+            class="permission-settings-save"
+            disabled={!dirty() || saving() || loading() || !config()}
+            onClick={() => void save()}
+          >
+            {saving() ? 'Saving...' : 'Save'}
+          </button>
+          <button
+            type="button"
+            class="permission-config-add"
+            disabled={saving() || loading() || !config()}
+            onClick={() =>
+              setRules((current) => [...current, { permission: '', pattern: '*', action: 'ask' }])
+            }
+          >
+            <UiIcon source={plusIcon} width={14} height={14} />
+            Add rule
+          </button>
+        </div>
+      </div>
+      <Show when={error()}>
+        <div class="permission-layer-error" role="alert">
+          {error()}{' '}
+          <Show when={!config()}>
+            <button type="button" disabled={loading()} onClick={() => void load()}>
+              Retry
+            </button>
+          </Show>
+        </div>
+      </Show>
+      <Show when={config()}>
+        {(value) => (
+          <>
+            <div class="permission-config-source">
+              <span>Global config</span>
+              <code title={value().targetPath}>{value().targetPath}</code>
+            </div>
+            <div class="permission-config-column-labels" aria-hidden="true">
+              <span>Permission</span>
+              <span>Pattern</span>
+              <span>Action</span>
+            </div>
+            <Show
+              when={rules().length > 0}
+              fallback={
+                <div class="permission-config-empty">No rules in this global config file.</div>
+              }
+            >
+              <Index each={rules()}>
+                {(rule, index) => (
+                  <PermissionRuleRow
+                    rule={rule()}
+                    projectConfig
+                    supportsPatterns={value().supportsPatterns}
+                    onChange={(next) =>
+                      setRules((current) =>
+                        current.map((item, itemIndex) => (itemIndex === index ? next : item))
+                      )
+                    }
+                    onRemove={() =>
+                      setRules((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                    }
+                  />
+                )}
+              </Index>
+            </Show>
+          </>
+        )}
+      </Show>
+      <Show when={loading()}>
+        <div class="permission-config-empty">Loading global rules...</div>
+      </Show>
+    </section>
   );
 }
 
@@ -1294,6 +1432,7 @@ export function PermissionSettingsPanel() {
                     <PermissionRuleRow
                       rule={rule()}
                       projectConfig
+                      supportsPatterns={config().supportsPatterns}
                       onChange={(next) => updateRule(index, next)}
                       onRemove={() =>
                         setRules((current) => current.filter((_, itemIndex) => itemIndex !== index))
@@ -1304,6 +1443,23 @@ export function PermissionSettingsPanel() {
               </Show>
             </Show>
           </section>
+
+          <Show when={!legacyServer() && serverConnection()} keyed>
+            <GlobalPermissionRules
+              onSaved={() => {
+                void client.varro
+                  .openCodePermissionConfig()
+                  .then(setConfig)
+                  .catch((cause: unknown) => {
+                    setError(
+                      cause instanceof Error
+                        ? `Global rules saved, but the policy overview could not refresh: ${cause.message}`
+                        : 'Global rules saved, but the policy overview could not refresh.'
+                    );
+                  });
+              }}
+            />
+          </Show>
 
           <For each={visibleInheritedSources()}>
             {(source) => (

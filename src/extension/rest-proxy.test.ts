@@ -3557,6 +3557,72 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('uses reviewed session patterns while retaining the server action and request ownership', async () => {
+    const serverRequest = vi.fn(async (_method: string, path: string) =>
+      path === '/permission'
+        ? [
+            {
+              id: 'perm-1',
+              sessionID: 'session-1',
+              permission: 'bash',
+              always: ['git diff --stat'],
+            },
+          ]
+        : undefined
+    );
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2, request: serverRequest } as never,
+    });
+    await proxy.handleRequest(
+      makePayload(985, 'POST', '/varro/permission/session-allow?directory=%2Frepo', {
+        sessionId: 'session-1',
+        permissionId: 'perm-1',
+        permission: '*',
+        patterns: [' git diff * ', 'git diff *'],
+      })
+    );
+    expect(callbacks.allowPermissionForSession).toHaveBeenCalledWith(
+      'session-1',
+      'bash',
+      ['git diff *'],
+      '/repo'
+    );
+    await proxy.handleRequest(
+      makePayload(986, 'POST', '/varro/permission/session-allow?directory=%2Frepo', {
+        sessionId: 'session-1',
+        permissionId: 'not-pending',
+        patterns: ['*'],
+      })
+    );
+    expect(callbacks.allowPermissionForSession).toHaveBeenCalledTimes(1);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 986,
+      error: '404 permission request not found',
+    });
+  });
+
+  it.each(
+    [[], [''], ['x'.repeat(2001)], Array.from({ length: 51 }, () => '*'), [4]].map((patterns) => ({
+      patterns,
+    }))
+  )('rejects invalid reviewed patterns %j before mutating permissions', async ({ patterns }) => {
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2 } as never,
+    });
+    await proxy.handleRequest(
+      makePayload(987, 'POST', '/varro/permission/session-allow', {
+        sessionId: 'session-1',
+        permissionId: 'perm-1',
+        patterns,
+      })
+    );
+    expect(callbacks.allowPermissionForSession).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 987,
+      error: expect.stringContaining('Approval patterns'),
+    });
+  });
+
   it('updates current-session permission rules without changing project rules', async () => {
     const rules = [
       { permission: '*', pattern: '*', action: 'ask' as const },

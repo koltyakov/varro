@@ -70,6 +70,24 @@ export type OpenCodePermissionConfig = {
   projectRules: PermissionRule[];
   inheritedSources: OpenCodePermissionConfigSource[];
   effectiveRules: PermissionRule[];
+  supportsPatterns?: boolean;
+};
+
+export type OpenCodeGlobalPermissionConfig = {
+  targetPath: string;
+  rules: PermissionRule[];
+  supportsPatterns: boolean;
+};
+
+export type PermissionApprovalRequest = {
+  sessionId: string;
+  permissionId: string;
+  patterns?: string[];
+};
+
+export type PermissionApprovalOptions = {
+  directory?: string;
+  patterns?: string[];
 };
 
 export type OpenCodeServerMemoryPermission = {

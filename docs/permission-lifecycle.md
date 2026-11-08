@@ -234,8 +234,15 @@ automatic retry rather than exposing a manual approval that contradicts full acc
 
 Default mode presents `Reject`, `Once`, and an `Always` scope menu.
 The `Allow always` button only opens the menu; it has no default or remembered scope.
-Choosing a scope immediately submits that approval. Dismissing the menu leaves the request pending.
-V2 offers only session and project scopes; its native standing approval is durable, not temporary.
+On V1, choosing a scope immediately submits that approval. On V2, session, project, and global
+choices open a resource-pattern review prefilled from the request's `always` suggestions. The user may
+edit those patterns, keep them unchanged, or cancel without resolving the request. Saving requires
+explicit confirmation. The review replaces the ordinary action row with Cancel and Save & allow;
+cancelling restores the original actions without sending a permission reply.
+Patterns are bounded to 1-50 nonempty strings of at most 2000 characters each.
+The server still verifies the pending request ID, owning session, directory, and action. Only the
+patterns may come from manual review; execution input and the displayed command never change.
+Dismissing the menu leaves the request pending. V2's native standing approval is durable, not temporary.
 
 Session and project approval routes authorize the permission-owning session's directory before
 applying workspace guards. They may target another open root or an authorized catalog directory
@@ -254,7 +261,15 @@ ID and owning session against the server before changing rules.
   project OpenCode configuration, then replies `once` on V2. The config is the only standing grant;
   deleting it must not leave a database approval behind. V1 still sends `always` for the current
   runtime. The config write must not call OpenCode's config-update route, dispose an instance, or
-  restart the server. Never derive or broaden project rules from webview display metadata.
+   restart the server. Never derive or broaden project rules from webview display metadata.
+- V2 manual review may replace the suggested session/project patterns explicitly. Global approval
+  writes the reviewed patterns to global OpenCode config and replies `once`, never `always` or a
+  saved-permission PATCH. It requires V2 and a locally managed connection. Attach-only connections
+  cannot edit host files. Global config edits preserve unrelated settings and comments, serialize by
+  canonical file path across windows, and reject dirty documents and concurrent file changes.
+  The Permissions screen edits/removes global config rules independently of project, session, and
+  database approvals. Config changes take effect when OpenCode next loads the configuration; saving
+  must not restart or dispose the active instance.
 - New V2 permission settings use the native `permissions` array with `action`, `resource`, and `effect`
   fields, including writes from the Permissions screen. Preserve existing legacy `permission` settings
   rather than implicitly migrating them. Legacy project config follows OpenCode's `PermissionConfig`
@@ -262,7 +277,9 @@ ID and owning session against the server before changing rules.
   the `*` permission and `*` pattern and must remain effective when adding a narrower rule.
   `todowrite`, `question`, `webfetch`, `websearch`, and `doom_loop` accept only scalar actions inside
   the permission object; never serialize pattern maps for those names or broaden a non-wildcard
-  standing scope to make it fit.
+   standing scope to make it fit.
+  These scalar-only restrictions apply only to legacy config syntax. Native V2 permission arrays
+  support resource patterns for these actions, including URL-specific WebFetch rules.
 - Varro's managed server-memory layer contains only entries linked to a successful `always` reply it
    observed. V2 also shows other native saved rows separately as `Other saved approvals`, with origin
    explicitly unknown. Listing them must not adopt them as observed user approvals or enable editing;
