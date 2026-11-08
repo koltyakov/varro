@@ -36,7 +36,20 @@ for (const width of [480, 1100]) {
             };
           })
         );
-      const before = await measure();
+      // DOMRect subtraction can introduce floating-point noise below Chromium's layout precision.
+      const before = (await measure()).map((row) => ({
+        height: expect.closeTo(row.height, 2),
+        width: expect.closeTo(row.width, 2),
+        text: row.text.map((text) => ({
+          weight: text.weight,
+          rects: text.rects.map((rect) => ({
+            x: expect.closeTo(rect.x, 2),
+            y: expect.closeTo(rect.y, 2),
+            width: expect.closeTo(rect.width, 2),
+            height: expect.closeTo(rect.height, 2),
+          })),
+        })),
+      }));
       await first.click();
       await expect(first).toHaveClass(/selected/);
       expect(await measure()).toEqual(before);

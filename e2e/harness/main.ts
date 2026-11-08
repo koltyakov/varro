@@ -849,7 +849,13 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     messageCursorTokensByBoundary: new Map(),
     nextMessageCursorSequence: 0,
     latestMessageRequestCounts: {},
-    readyStatus: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
+    // Fixtures use the V1 API unless a scenario explicitly selects V2.
+    readyStatus: {
+      state: 'running',
+      url: 'mock://opencode',
+      apiVersion: 1,
+      eventStream: 'healthy',
+    },
     nextSequence: 0,
     healthFailuresRemaining: 0,
   };
