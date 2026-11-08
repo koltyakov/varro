@@ -6,6 +6,7 @@ import { BackgroundProcessDialog } from './BackgroundProcessDialog';
 import { recheckSessionStatus, sendMessage } from '../hooks/useOpenCode';
 import { resetDefaultAppState } from '../lib/state';
 import { sessionStore } from '../lib/stores/session-store';
+import * as clipboard from '../lib/write-clipboard';
 
 /* oxlint-disable anti-slop/no-module-mocking -- Dialog action tests isolate the status-refresh orchestration while exercising the real controls. */
 vi.mock('../hooks/useOpenCode', () => ({
@@ -76,6 +77,78 @@ afterEach(() => {
 });
 
 describe('BackgroundProcessDialog', () => {
+  it('collapses the command by default and allows expanding and collapsing it', async () => {
+    const command = "python3 - <<'PY'\nimport subprocess\nprint('done')\nPY";
+    vi.mocked(client.session.backgroundProcesses).mockResolvedValue([{ ...process, command }]);
+    mount();
+    await settle();
+    const toggle = dialog().querySelector<HTMLButtonElement>('.background-process-command-toggle')!;
+    const preview = dialog().querySelector('.background-process-detail-command')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-label')).toBe('Expand command');
+    expect(dialog().querySelector('[aria-label="Full command"]')).toBeNull();
+    expect(preview.textContent).toBe(command);
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-label')).toBe('Collapse command');
+    expect(dialog().querySelector('[aria-label="Full command"]')?.textContent).toBe(command);
+    expect(dialog().querySelector('[aria-label="Full command"]')?.closest('[id]')?.id).toBe(
+      toggle.getAttribute('aria-controls')
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(dialog().querySelector('[aria-label="Full command"]')).toBeNull();
+  });
+
+  it('copies the full command while collapsed or expanded without toggling the card', async () => {
+    const writeClipboard = vi.spyOn(clipboard, 'writeClipboard').mockResolvedValue(true);
+    const command = "python3 - <<'PY'\nprint('full command')\nPY";
+    vi.mocked(client.session.backgroundProcesses).mockResolvedValue([
+      { ...process, command },
+      { ...process, id: 'shell-2', command: 'npm run build' },
+    ]);
+    mount();
+    await settle();
+    const toggle = dialog().querySelector<HTMLButtonElement>('.background-process-command-toggle')!;
+    const copy = dialog().querySelector<HTMLButtonElement>('.tool-copy-button')!;
+    expect(toggle.contains(copy)).toBe(false);
+    copy.click();
+    await settle();
+    expect(writeClipboard).toHaveBeenLastCalledWith(command);
+    expect(copy.getAttribute('aria-label')).toBe('Copied');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(copy.getAttribute('aria-label')).toBe(`Copy command: ${command}`);
+    toggle.click();
+    copy.click();
+    await settle();
+    expect(writeClipboard).toHaveBeenLastCalledWith(command);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    dialog().querySelectorAll<HTMLButtonElement>('.background-process-list-item')[1]!.click();
+    dialog().querySelector<HTMLButtonElement>('.tool-copy-button')!.click();
+    await settle();
+    expect(writeClipboard).toHaveBeenLastCalledWith('npm run build');
+  });
+
+  it('collapses the command when switching processes', async () => {
+    vi.mocked(client.session.backgroundProcesses).mockResolvedValue([
+      process,
+      { ...process, id: 'shell-2', command: 'npm run build' },
+    ]);
+    mount();
+    await settle();
+    dialog().querySelector<HTMLButtonElement>('.background-process-command-toggle')!.click();
+    dialog().querySelectorAll<HTMLButtonElement>('.background-process-list-item')[1]!.click();
+    expect(
+      dialog().querySelector('.background-process-command-toggle')?.getAttribute('aria-expanded')
+    ).toBe('false');
+    expect(dialog().querySelector('.background-process-detail-command')?.textContent).toBe(
+      'npm run build'
+    );
+  });
+
   it('opens the clicked process with only the direct stop action', async () => {
     vi.mocked(client.session.backgroundProcesses).mockResolvedValue([
       process,

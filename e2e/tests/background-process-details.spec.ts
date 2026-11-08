@@ -36,7 +36,10 @@ for (const width of [486, 1100]) {
       id: `shell-${port}`,
       status: 'running',
       service: true,
-      command: `python3 tools/serve.py ${port}`,
+      command:
+        port === 8767
+          ? `python3 tools/serve.py ${port}`
+          : `python3 - <<'PY'\n${'print("background work")\n'.repeat(12)}PY`,
       cwd: '/workspace',
       pid: port,
       time: { started: created + port },
@@ -92,6 +95,12 @@ for (const width of [486, 1100]) {
     await expect(button).toHaveCSS('align-items', 'center');
     await expect(button).toHaveCSS('justify-content', 'center');
     await expect(button).toHaveCSS('line-height', '11px');
+    const controls = dialog.locator('.background-process-controls');
+    const controlsBounds = (await controls.boundingBox())!;
+    const buttonBounds = (await button.boundingBox())!;
+    expect(
+      Math.abs(buttonBounds.x + buttonBounds.width - controlsBounds.x - controlsBounds.width)
+    ).toBeLessThanOrEqual(1);
     const centerOffset = await button.evaluate((element) => {
       const range = document.createRange();
       range.selectNodeContents(element);
@@ -130,6 +139,48 @@ for (const width of [486, 1100]) {
     const afterDuration = (await duration.boundingBox())!;
     expect(afterMetadata).toEqual(beforeMetadata);
     expect(afterDuration).toEqual(beforeDuration);
+    await page.setViewportSize({ width, height: 794 });
+    if (width <= 600) {
+      await dialog.getByRole('button', { name: 'Close background process details' }).click();
+      await page
+        .getByRole('button', { name: /Inspect background service: python3 -/ })
+        .first()
+        .click();
+    } else {
+      await list
+        .getByRole('button', { name: /python3 -/ })
+        .first()
+        .click();
+    }
+    const command = dialog.locator('.background-process-detail-command');
+    const expand = dialog.getByRole('button', { name: 'Expand command', exact: true });
+    await expect(expand).toHaveAttribute('aria-expanded', 'false');
+    const card = dialog.locator('.background-process-command-card');
+    await expect(card).toHaveClass(/chat-tool-invocation-part/);
+    await expect(card).toHaveCSS('border-top-width', '1px');
+    const copy = card.getByRole('button', { name: /^Copy command:/ });
+    await expect(copy).toBeVisible();
+    await expect(copy).toHaveCSS('opacity', '1');
+    const copyBounds = (await copy.boundingBox())!;
+    const previewBounds = (await command.boundingBox())!;
+    const chevronBounds = (await card.locator('.tool-invocation-chevron').boundingBox())!;
+    expect(copyBounds.x).toBeGreaterThanOrEqual(previewBounds.x + previewBounds.width);
+    expect(copyBounds.x + copyBounds.width).toBeLessThanOrEqual(chevronBounds.x);
+    await expect(command).toHaveCSS('white-space', 'nowrap');
+    await expect(command).toHaveCSS('text-overflow', 'ellipsis');
+    const collapsedHeight = (await command.boundingBox())!.height;
+    expect(collapsedHeight).toBeLessThan(20);
+    await expand.focus();
+    await page.keyboard.press('Enter');
+    const collapse = dialog.getByRole('button', { name: 'Collapse command', exact: true });
+    await expect(collapse).toHaveAttribute('aria-expanded', 'true');
+    const fullCommand = dialog.getByLabel('Full command', { exact: true });
+    await expect(fullCommand).toHaveCSS('white-space', 'pre-wrap');
+    expect((await fullCommand.boundingBox())!.height).toBeGreaterThan(collapsedHeight * 10);
+    await page.keyboard.press('Space');
+    await expect(expand).toHaveAttribute('aria-expanded', 'false');
+    await expect(fullCommand).toHaveCount(0);
+    expect((await command.boundingBox())!.height).toBe(collapsedHeight);
   });
 
   test(`a persistent server can stop waiting and stay inspectable at ${width}px`, async ({
@@ -585,7 +636,7 @@ for (const width of [486, 1100]) {
     );
     await expect(dialog.locator('.background-process-detail-command')).toHaveCSS(
       'font-size',
-      '12px'
+      '12.5px'
     );
     expect(
       await dialog
@@ -656,9 +707,15 @@ for (const width of [486, 1100]) {
         'All tests passed\n';
     });
     await expect(dialog.getByLabel('Process output')).toContainText('All tests passed');
-    await dialog.getByRole('button', { name: /npm run build/ }).click();
+    await dialog
+      .getByRole('navigation')
+      .getByRole('button', { name: /npm run build/ })
+      .click();
     await expect(dialog.getByLabel('Process output')).toHaveText('Build started\n');
-    await dialog.getByRole('button', { name: /npm test/ }).click();
+    await dialog
+      .getByRole('navigation')
+      .getByRole('button', { name: /npm test/ })
+      .click();
     await expect(dialog.getByLabel('Process output')).toContainText('All tests passed');
     await page.evaluate(() => {
       // SAFETY: Only this page's synthetic process fixture and status are changed.
@@ -676,7 +733,9 @@ for (const width of [486, 1100]) {
       });
     });
     await expect(dialog).toContainText('Exited (0)');
-    await expect(dialog.getByRole('button', { name: /npm test/ })).toBeFocused();
+    await expect(
+      dialog.getByRole('navigation').getByRole('button', { name: /npm test/ })
+    ).toBeFocused();
     await expect(dialog.getByLabel('Process output')).toContainText('All tests passed');
     await page.evaluate(() => {
       // SAFETY: Only this page's synthetic process fixture is changed.

@@ -5,6 +5,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  createUniqueId,
   onCleanup,
   untrack,
 } from 'solid-js';
@@ -13,8 +14,9 @@ import type { BackgroundProcess } from '../../shared/background-process';
 import { client } from '../lib/client';
 import { useSecondClock } from '../lib/clock';
 import { trapModalFocus } from '../lib/modal-focus';
-import { xmarkIcon } from '../lib/ui-icons';
+import { navArrowRightIcon, terminalIcon, xmarkIcon } from '../lib/ui-icons';
 import { UiIcon } from './UiIcon';
+import { CopyIconButton } from './CopyIconButton';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
 import { captureSessionStatusSnapshotTime, sessionStore } from '../lib/stores/session-store';
 
@@ -43,6 +45,8 @@ export function BackgroundProcessDialog(props: {
   let actionRevision = 0;
   const [wrapOutput, setWrapOutput] = createSignal(false);
   const [followOutput, setFollowOutput] = createSignal(true);
+  const [commandExpanded, setCommandExpanded] = createSignal(false);
+  const commandBodyID = createUniqueId();
   // oxlint-disable-next-line no-unassigned-vars
   let outputElement: HTMLPreElement | undefined;
   let dialogElement: HTMLElement | undefined;
@@ -62,6 +66,7 @@ export function BackgroundProcessDialog(props: {
   createEffect(() => {
     selectedID();
     setFollowOutput(true);
+    setCommandExpanded(false);
   });
   createEffect(() => {
     selectedLog();
@@ -356,14 +361,47 @@ export function BackgroundProcessDialog(props: {
               <Show when={selectedProcess()}>
                 {(process) => (
                   <div class="background-process-detail">
-                    <div class="background-process-detail-heading">
-                      <div class="background-process-detail-command">{process().command}</div>
-                      <Show
-                        when={
-                          availableIDs().has(process().id) || process().time.completed !== undefined
-                        }
-                      >
-                        <span class="background-process-duration">{elapsed(process())}</span>
+                    <div class="background-process-command-card chat-tool-invocation-part">
+                      <div class="tool-invocation-header-shell has-command-copy">
+                        <button
+                          type="button"
+                          class="background-process-command-toggle tool-invocation-header"
+                          aria-label={commandExpanded() ? 'Collapse command' : 'Expand command'}
+                          aria-expanded={commandExpanded()}
+                          aria-controls={commandBodyID}
+                          onClick={() => setCommandExpanded((value) => !value)}
+                        >
+                          <UiIcon source={terminalIcon} class="tool-call-icon" aria-hidden="true" />
+                          <span class="background-process-detail-command tool-invocation-title">
+                            {process().command}
+                          </span>
+                          <Show
+                            when={
+                              availableIDs().has(process().id) ||
+                              process().time.completed !== undefined
+                            }
+                          >
+                            <span class="background-process-duration">{elapsed(process())}</span>
+                          </Show>
+                          <UiIcon
+                            source={navArrowRightIcon}
+                            class="tool-invocation-chevron"
+                            classList={{ expanded: commandExpanded() }}
+                            aria-hidden="true"
+                          />
+                        </button>
+                        <CopyIconButton text={process().command} label="command" />
+                      </div>
+                      <Show when={commandExpanded()}>
+                        <div id={commandBodyID} class="tool-invocation-detail">
+                          <div class="terminal-command-card">
+                            <div class="terminal-command-row terminal-command-row-output">
+                              <pre class="terminal-command-text" aria-label="Full command">
+                                {process().command}
+                              </pre>
+                            </div>
+                          </div>
+                        </div>
                       </Show>
                     </div>
                     <div class="background-process-meta background-process-detail-meta">

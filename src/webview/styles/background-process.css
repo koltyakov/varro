@@ -102,22 +102,15 @@
   gap: 6px;
   overflow: auto;
 }
-.background-process-detail-heading {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
+.background-process-command-card {
   flex-shrink: 0;
-}
-.background-process-detail-command {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--vscode-editor-font-family, monospace);
   font-size: 12px;
-  font-weight: 400;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  flex-shrink: 0;
+}
+.background-process-command-card .tool-invocation-chevron {
+  margin-left: 24px;
+}
+.background-process-command-card .tool-copy-button {
+  opacity: 1;
 }
 .background-process-duration {
   display: none;
@@ -148,8 +141,8 @@
   accent-color: var(--vscode-focusBorder);
 }
 .background-process-actions {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  display: flex;
+  margin-left: auto;
   gap: 6px;
   flex-shrink: 0;
 }
