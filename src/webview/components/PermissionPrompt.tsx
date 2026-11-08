@@ -336,10 +336,14 @@ export function PermissionPrompt(props: {
               <span>For this session</span>
               <small>Matching requests in this session</small>
             </button>
-            <button type="button" role="menuitem" onClick={() => void handleAlways('server')}>
-              <span>Until server restart</span>
-              <small>Matching requests across sessions</small>
-            </button>
+            <Show
+              when={state.serverStatus.state === 'running' && state.serverStatus.apiVersion === 1}
+            >
+              <button type="button" role="menuitem" onClick={() => void handleAlways('server')}>
+                <span>Until server restart</span>
+                <small>Matching requests across sessions</small>
+              </button>
+            </Show>
             <button type="button" role="menuitem" onClick={() => void handleAlways('project')}>
               <span>For this project</span>
               <small>Saved in the project OpenCode config</small>

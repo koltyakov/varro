@@ -84,6 +84,71 @@ function configureReconciliationMocks() {
 }
 
 describe('useOpenCode permission and config flows', () => {
+  it.each([1, 2] as const)(
+    'persists project approval before replying with the V%s lifetime',
+    async (apiVersion) => {
+      const { stateModule, hookModule } = await loadModules();
+      stateModule.setState('serverStatus', { state: 'running', apiVersion });
+      stateModule.setState('sessions', [session()]);
+      stateModule.addPermission(permission());
+      stateModule.addPermission(permission('perm-2'));
+      const persisted = deferred<void>();
+      clientMocks.sessionPersistProjectPermissionAllow.mockReturnValue(persisted.promise);
+      const approval = hookModule.alwaysAllowPermissionForProject('session-1', 'perm-1');
+
+      expect(clientMocks.sessionPersistProjectPermissionAllow).toHaveBeenCalledExactlyOnceWith(
+        'session-1',
+        'perm-1',
+        { directory: '/repo' }
+      );
+      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+      expect(stateModule.state.permissions).toHaveLength(1);
+      expect(stateModule.state.permissions[0]?.groupMembers).toHaveLength(2);
+      persisted.resolve();
+      await approval;
+
+      expect(clientMocks.sessionRespondPermission).toHaveBeenCalledExactlyOnceWith(
+        'session-1',
+        'perm-1',
+        apiVersion === 2 ? 'once' : 'always'
+      );
+      expect(clientMocks.sessionUpdate).not.toHaveBeenCalled();
+      expect(stateModule.state.permissions).toEqual(
+        apiVersion === 2 ? [expect.objectContaining({ id: 'perm-2' })] : []
+      );
+    }
+  );
+
+  it('does not reply or remove the V2 prompt when project persistence fails', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('serverStatus', { state: 'running', apiVersion: 2 });
+    stateModule.addPermission(permission());
+    clientMocks.sessionPersistProjectPermissionAllow.mockRejectedValue(new Error('Write failed'));
+
+    await expect(hookModule.alwaysAllowPermissionForProject('session-1', 'perm-1')).rejects.toThrow(
+      'Write failed'
+    );
+    expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+    expect(stateModule.state.permissions).toHaveLength(1);
+  });
+
+  it('keeps the V2 project prompt actionable when its once reply fails', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('serverStatus', { state: 'running', apiVersion: 2 });
+    stateModule.addPermission(permission());
+    clientMocks.sessionRespondPermission.mockRejectedValue(new Error('Reply failed'));
+
+    await expect(hookModule.alwaysAllowPermissionForProject('session-1', 'perm-1')).rejects.toThrow(
+      'Reply failed'
+    );
+    expect(clientMocks.sessionRespondPermission).toHaveBeenCalledExactlyOnceWith(
+      'session-1',
+      'perm-1',
+      'once'
+    );
+    expect(stateModule.state.permissions).toHaveLength(1);
+  });
+
   it('clears restored prompts after a successful empty permission list', async () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();

@@ -3474,10 +3474,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   async function alwaysAllowPermissionForProject(sessionId: string, permissionId: string) {
+    const status = appStore.state.serverStatus;
+    // V2's always reply saves a second, durable database grant outside the config.
+    const response = status.state === 'running' && status.apiVersion === 1 ? 'always' : 'once';
     await client.session.persistProjectPermissionAllow(sessionId, permissionId, {
       directory: getSessionDirectory(sessionId),
     });
-    await respondPermission(sessionId, permissionId, 'always', { rethrow: true });
+    await respondPermission(sessionId, permissionId, response, { rethrow: true });
   }
 
   async function alwaysAllowPermissionForSession(sessionId: string, permissionId: string) {

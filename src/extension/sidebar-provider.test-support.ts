@@ -88,7 +88,7 @@ const mocks = vi.hoisted(() => ({
       fs: {
         readFile: vi.fn(),
         stat: vi.fn(),
-        writeFile: vi.fn(() => Promise.resolve()),
+        writeFile: vi.fn((_uri: { fsPath: string }, _bytes: Uint8Array) => Promise.resolve()),
         createDirectory: vi.fn(() => Promise.resolve()),
       },
       openTextDocument: vi.fn(() => Promise.resolve({})),

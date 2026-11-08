@@ -814,6 +814,13 @@ export class OpenCodeConfigService {
     }
   }
 
+  private usesNativePermissionConfig(config: Record<string, unknown>): boolean {
+    return (
+      Array.isArray(config.permissions) ||
+      (this.callbacks.server.apiVersion === 2 && config.permission === undefined)
+    );
+  }
+
   async updateOpenCodeProjectPermission(permission: string, patterns: string[]) {
     let snapshot = await this.readOpenCodeConfigObject();
     while (true) {
@@ -846,11 +853,8 @@ export class OpenCodeConfigService {
         const targetPermissionConfig = target.config.permission;
         const effectivePermissionConfig = currentSnapshot.config.permission;
         const scalarConfigPermission = isScalarConfigPermission(permission);
-        if (
-          !Array.isArray(target.config.permissions) &&
-          scalarConfigPermission &&
-          patterns.some((pattern) => pattern !== '*')
-        ) {
+        const native = this.usesNativePermissionConfig(target.config);
+        if (!native && scalarConfigPermission && patterns.some((pattern) => pattern !== '*')) {
           throw new Error(
             `Project permission ${permission} only supports the wildcard pattern in OpenCode config`
           );
@@ -860,12 +864,12 @@ export class OpenCodeConfigService {
           : isPermissionAction(effectivePermissionConfig)
             ? effectivePermissionConfig
             : null;
-        if (Array.isArray(target.config.permissions)) {
+        if (native) {
           nextRaw = applyJsoncChange(
             nextRaw,
             ['permissions'],
             [
-              ...target.config.permissions,
+              ...(Array.isArray(target.config.permissions) ? target.config.permissions : []),
               ...patterns.map((resource) => ({
                 action: v2Action(permission),
                 resource,
@@ -1324,7 +1328,7 @@ export class OpenCodeConfigService {
           string,
           PermissionRule['action'] | Record<string, PermissionRule['action']>
         > = {};
-        const native = Array.isArray(target.config.permissions);
+        const native = this.usesNativePermissionConfig(target.config);
         for (const rule of rules) {
           if (!native && isScalarConfigPermission(rule.permission)) {
             if (rule.pattern !== '*') {

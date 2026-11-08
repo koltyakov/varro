@@ -13,6 +13,157 @@ import { getOpenCodeConfigPaths } from './open-code-process';
 const vscodeMock = getVscodeMock();
 
 describe('SidebarProvider local config routing', () => {
+  describe.each([1, 2] as const)('permission config syntax on V%s', (apiVersion) => {
+    it.each(['missing', 'empty', 'unrelated', 'legacy', 'native'] as const)(
+      'uses the expected syntax for project approval with %s config',
+      async (kind) => {
+        const existing =
+          kind === 'missing'
+            ? undefined
+            : JSON.stringify(
+                kind === 'empty'
+                  ? {}
+                  : kind === 'legacy'
+                    ? { permission: { bash: { '*': 'ask' } } }
+                    : kind === 'native'
+                      ? { permissions: [{ action: 'shell', resource: '*', effect: 'ask' }] }
+                      : { model: 'openai/existing' }
+              );
+        vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+          if (uri.fsPath !== '/repo/opencode.json' || existing === undefined)
+            throw { code: 'FileNotFound' };
+          return new TextEncoder().encode(existing);
+        });
+        vscodeMock.workspace.fs.stat.mockRejectedValue({ code: 'FileNotFound' });
+        const { provider } = await createSidebarProviderInstance({
+          server: createServer({
+            apiVersion,
+            request: vi.fn(async (_method: string, path: string) => {
+              if (path.startsWith('/session/session-1'))
+                return { id: 'session-1', projectID: 'project-1', directory: '/repo' };
+              if (path === '/permission')
+                return [
+                  { id: 'perm-1', sessionID: 'session-1', permission: 'bash', always: ['echo *'] },
+                ];
+              return undefined;
+            }),
+          }),
+        });
+        const { posted } = attachTestView(provider);
+        await provider.handleMessage({
+          type: 'api/request',
+          payload: {
+            id: 960,
+            method: 'POST',
+            path: '/varro/permission/project-allow',
+            body: { sessionId: 'session-1', permissionId: 'perm-1' },
+          },
+        });
+
+        expect(posted).toContainEqual({
+          type: 'api/response',
+          payload: { id: 960, data: { permission: 'bash', patterns: ['echo *'] } },
+        });
+        const [uri, bytes] = vscodeMock.workspace.fs.writeFile.mock.lastCall as unknown as [
+          { fsPath: string },
+          Uint8Array,
+        ];
+        expect(uri.fsPath).toBe('/repo/opencode.json');
+        const native = kind === 'native' || (apiVersion === 2 && kind !== 'legacy');
+        expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({
+          ...JSON.parse(existing ?? '{}'),
+          $schema: 'https://opencode.ai/config.json',
+          ...(native
+            ? {
+                permissions: [
+                  ...(kind === 'native' ? [{ action: 'shell', resource: '*', effect: 'ask' }] : []),
+                  { action: 'shell', resource: 'echo *', effect: 'allow' },
+                ],
+              }
+            : {
+                permission: {
+                  bash:
+                    kind === 'legacy' ? { '*': 'ask', 'echo *': 'allow' } : { 'echo *': 'allow' },
+                },
+              }),
+        });
+      }
+    );
+
+    it.each(['missing', 'empty', 'unrelated', 'legacy', 'native'] as const)(
+      'uses the expected syntax for panel writes with %s config',
+      async (kind) => {
+        const existing =
+          kind === 'missing'
+            ? undefined
+            : JSON.stringify(
+                kind === 'empty'
+                  ? {}
+                  : kind === 'legacy'
+                    ? { permission: { bash: 'ask' } }
+                    : kind === 'native'
+                      ? { permissions: [] }
+                      : { model: 'openai/existing' }
+              );
+        let raw = existing;
+        vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+          if (uri.fsPath !== '/repo/opencode.json' || raw === undefined)
+            throw { code: 'FileNotFound' };
+          return new TextEncoder().encode(raw);
+        });
+        vscodeMock.workspace.fs.writeFile.mockImplementation(async (_uri, bytes) => {
+          raw = new TextDecoder().decode(bytes);
+        });
+        vscodeMock.workspace.fs.stat.mockRejectedValue({ code: 'FileNotFound' });
+        const { provider } = await createSidebarProviderInstance({
+          server: createServer({ apiVersion }),
+        });
+        const { posted } = attachTestView(provider);
+        const rules = [
+          { permission: 'bash', pattern: '*', action: 'ask' },
+          { permission: 'bash', pattern: 'echo *', action: 'allow' },
+          { permission: 'task', pattern: 'explore', action: 'deny' },
+          { permission: 'webfetch', pattern: '*', action: 'allow' },
+        ];
+        await provider.handleMessage({
+          type: 'api/request',
+          payload: {
+            id: 961,
+            method: 'POST',
+            path: '/varro/opencode-config/permissions',
+            body: { rules },
+          },
+        });
+
+        const native = kind === 'native' || (apiVersion === 2 && kind !== 'legacy');
+        expect(JSON.parse(raw!)).toEqual({
+          ...JSON.parse(existing ?? '{}'),
+          $schema: 'https://opencode.ai/config.json',
+          ...(native
+            ? {
+                permissions: [
+                  { action: 'shell', resource: '*', effect: 'ask' },
+                  { action: 'shell', resource: 'echo *', effect: 'allow' },
+                  { action: 'subagent', resource: 'explore', effect: 'deny' },
+                  { action: 'webfetch', resource: '*', effect: 'allow' },
+                ],
+              }
+            : {
+                permission: {
+                  bash: { '*': 'ask', 'echo *': 'allow' },
+                  task: { explore: 'deny' },
+                  webfetch: 'allow',
+                },
+              }),
+        });
+        expect(posted).toContainEqual({
+          type: 'api/response',
+          payload: { id: 961, data: expect.objectContaining({ projectRules: rules }) },
+        });
+      }
+    );
+  });
+
   it('creates a global vision agent when no OpenCode configuration exists', async () => {
     const globalPath = getOpenCodeConfigPaths()[1]!;
     vscodeMock.workspace.fs.readFile.mockRejectedValue({ code: 'FileNotFound' });

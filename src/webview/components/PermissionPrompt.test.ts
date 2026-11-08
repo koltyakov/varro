@@ -50,6 +50,7 @@ beforeEach(() => {
   mocks.alwaysAllowPermissionForSession.mockReset();
   mocks.alwaysAllowPermissionForSession.mockResolvedValue(undefined);
   mocks.permissionMode = 'default';
+  setState('serverStatus', { state: 'running', apiVersion: 1 });
   setState('sessions', []);
   setState('messages', []);
 });
@@ -369,6 +370,28 @@ describe('PermissionPrompt', () => {
       expect(document.body.querySelector('[role="menu"]')).not.toBeNull();
     }
   );
+
+  it('offers only session and config-backed project approvals on V2', async () => {
+    setState('serverStatus', { state: 'running', apiVersion: 2 });
+    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+    container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')?.click();
+    await Promise.resolve();
+
+    const menu = document.body.querySelector('[aria-label="Always allow scope"]');
+    expect(menu?.textContent).not.toContain('Until server restart');
+    const choices = [...(menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])];
+    expect(choices.map((choice) => choice.querySelector('span')?.textContent)).toEqual([
+      'For this session',
+      'For this project',
+    ]);
+    choices[1]?.click();
+    await Promise.resolve();
+    expect(mocks.alwaysAllowPermissionForProject).toHaveBeenCalledExactlyOnceWith(
+      'session-1',
+      'permission-1'
+    );
+    expect(mocks.respondPermission).not.toHaveBeenCalled();
+  });
 
   it.each(['session', 'project'] as const)(
     'shows failed %s approval feedback and keeps Allow once usable',

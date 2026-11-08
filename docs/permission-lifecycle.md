@@ -235,6 +235,7 @@ automatic retry rather than exposing a manual approval that contradicts full acc
 Default mode presents `Reject`, `Once`, and an `Always` scope menu.
 The `Allow always` button only opens the menu; it has no default or remembered scope.
 Choosing a scope immediately submits that approval. Dismissing the menu leaves the request pending.
+V2 offers only session and project scopes; its native standing approval is durable, not temporary.
 
 Session and project approval routes authorize the permission-owning session's directory before
 applying workspace guards. They may target another open root or an authorized catalog directory
@@ -245,13 +246,19 @@ ID and owning session against the server before changing rules.
 - `Always allow for this session` adds the request's server-provided `always` patterns to that
   session's permission rules, then replies `once` to the pending request so the approval does not
   enter server-wide memory.
-- `Always allow in server memory` sends OpenCode's `always` response. The resulting rules apply to
-  matching requests across sessions in that server instance until OpenCode restarts.
+- `Until server restart` is available only on V1 and sends OpenCode's `always` response. The resulting
+  rules apply to matching requests across sessions in that server instance until OpenCode restarts.
+  V2's `always` response instead creates durable project-scoped database approvals, so V2 must not
+  offer this temporary scope.
 - `Always allow for this project` first persists the request's server-provided `always` patterns in
-  project OpenCode configuration, then sends the same OpenCode standing response for the current
+  project OpenCode configuration, then replies `once` on V2. The config is the only standing grant;
+  deleting it must not leave a database approval behind. V1 still sends `always` for the current
   runtime. The config write must not call OpenCode's config-update route, dispose an instance, or
   restart the server. Never derive or broaden project rules from webview display metadata.
-- Project config follows OpenCode's `PermissionConfig` shape. A top-level scalar action represents
+- New V2 permission settings use the native `permissions` array with `action`, `resource`, and `effect`
+  fields, including writes from the Permissions screen. Preserve existing legacy `permission` settings
+  rather than implicitly migrating them. Legacy project config follows OpenCode's `PermissionConfig`
+  shape. A top-level scalar action represents
   the `*` permission and `*` pattern and must remain effective when adding a narrower rule.
   `todowrite`, `question`, `webfetch`, `websearch`, and `doom_loop` accept only scalar actions inside
   the permission object; never serialize pattern maps for those names or broaden a non-wildcard
@@ -295,8 +302,10 @@ session ID, title, and metadata, so requests from different sessions are not gro
 
 - `Once` removes only the answered group member and leaves later members actionable.
 - `Reject` explicitly responds to every member represented by the grouped prompt.
-- `Always` sends `always` for the displayed group leader, then removes the matching group after
-  OpenCode accepts the standing response. It does not explicitly reply to every represented ID.
+- Server-memory and V1 project scopes send `always` for the displayed group leader, then remove the
+  matching group after OpenCode accepts the standing response. They do not explicitly reply to every
+  represented ID. V2 project approval replies `once` after persisting config and removes only that
+  answered member; other already-pending requests remain actionable until acknowledged.
 - Reconciliation and reply events must preserve every underlying request ID, not only the displayed
   leader ID.
 

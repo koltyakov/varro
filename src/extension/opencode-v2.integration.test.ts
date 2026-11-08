@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { spawnSync, type ChildProcess } from 'node:child_process';
 import crossSpawn from 'cross-spawn';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -996,6 +996,145 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       );
     } finally {
       await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 30000);
+
+  it('keeps config-backed once approvals out of saved permissions and asks after config deletion', async (context) => {
+    if (transport.version !== 2) return context.skip();
+    const directory = join(root, 'workspace/permission-lifetime');
+    const configDirectory = join(directory, '.opencode');
+    const configPath = join(configDirectory, 'opencode.json');
+    const options = { directory };
+    await mkdir(configDirectory, { recursive: true });
+    await writeFile(
+      join(directory, 'opencode.json'),
+      JSON.stringify({ permissions: [{ action: 'read', resource: '*', effect: 'ask' }] })
+    );
+    const sessions: string[] = [];
+    const createSession = async () => {
+      const session = asRecord(
+        await transport.request(
+          'POST',
+          '/session',
+          { title: 'Project approval lifetime', agent: 'build' },
+          options
+        )
+      );
+      if (!isString(session?.id)) throw new Error('Missing isolated permission lifetime session');
+      sessions.push(session.id);
+      return session.id;
+    };
+    const runRead = (id: string) =>
+      transport.request(
+        'POST',
+        `/session/${id}/prompt_async`,
+        {
+          agent: 'build',
+          model: { providerID: 'fixture', modelID: 'fixture' },
+          parts: [{ type: 'text', text: 'RUN_READ_FIXTURE project approval lifetime' }],
+        },
+        options
+      );
+    const pendingRead = async (id: string) => {
+      let request: UnknownRecord | undefined;
+      await vi.waitFor(
+        async () => {
+          request = (
+            (await transport.request('GET', '/permission', undefined, options)) as UnknownRecord[]
+          ).find((entry) => entry.sessionID === id);
+          expect(request?.permission).toBe('read');
+        },
+        { timeout: 10000 }
+      );
+      return request!;
+    };
+    const completedRead = (id: string) =>
+      vi.waitFor(
+        async () => {
+          const messages = (await transport.request(
+            'GET',
+            `/session/${id}/message`,
+            undefined,
+            options
+          )) as Array<{
+            info: UnknownRecord;
+            parts: UnknownRecord[];
+          }>;
+          expect(
+            messages.some((message) =>
+              message.parts.some(
+                (part) =>
+                  part.type === 'tool' &&
+                  part.tool === 'read' &&
+                  asRecord(part.state)?.status === 'completed'
+              )
+            )
+          ).toBe(true);
+          const status = asRecord(
+            await transport.request('GET', '/session/status', undefined, options)
+          )?.[id];
+          expect(status === undefined || asRecord(status)?.type === 'idle').toBe(true);
+        },
+        { timeout: 10000 }
+      );
+    const saved = async () => {
+      const values = asRecord(
+        await transport.request('GET', '/api/permission/saved', undefined, options)
+      )?.data;
+      if (!Array.isArray(values)) throw new Error('Missing isolated saved-permission list');
+      return values;
+    };
+    try {
+      const first = await createSession();
+      const savedBefore = await saved();
+      await runRead(first);
+      const pending = await pendingRead(first);
+      if (!Array.isArray(pending.always) || pending.always.length === 0)
+        throw new Error('Missing project approval patterns');
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          permissions: pending.always.map((resource) => ({
+            action: 'read',
+            resource,
+            effect: 'allow',
+          })),
+        })
+      );
+      await transport.request(
+        'POST',
+        `/permission/${pending.id}/reply`,
+        { reply: 'once' },
+        options
+      );
+      await completedRead(first);
+      expect(await saved()).toEqual(savedBefore);
+
+      // Reload only the isolated location to prove the standing grant comes from config.
+      await transport.request('POST', '/instance/dispose', undefined, options);
+      const second = await createSession();
+      await runRead(second);
+      await completedRead(second);
+      expect(await saved()).toEqual(savedBefore);
+
+      await unlink(configPath);
+      await transport.request('POST', '/instance/dispose', undefined, options);
+      const third = await createSession();
+      await runRead(third);
+      const afterDeletion = await pendingRead(third);
+      await transport.request(
+        'POST',
+        `/permission/${afterDeletion.id}/reply`,
+        { reply: 'once' },
+        options
+      );
+      await completedRead(third);
+      expect(await saved()).toEqual(savedBefore);
+    } finally {
+      for (const id of sessions) {
+        await transport.request('POST', `/session/${id}/abort`, {}, options);
+        await transport.request('DELETE', `/session/${id}`, undefined, options);
+      }
     }
   }, 30000);
 
