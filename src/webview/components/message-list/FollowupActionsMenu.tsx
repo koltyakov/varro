@@ -7,6 +7,7 @@ export function FollowupActionsMenu(props: {
   onClose: () => void;
   onCopy: () => void;
   onQueue: () => void;
+  onRunInNewSession: () => void;
 }) {
   let menu!: HTMLDivElement;
   const previousFocus = document.activeElement;
@@ -89,6 +90,16 @@ export function FollowupActionsMenu(props: {
         }}
       >
         Add to queue (paused)
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={(event) => {
+          event.stopPropagation();
+          props.onRunInNewSession();
+        }}
+      >
+        Run in new session
       </button>
     </div>
   );

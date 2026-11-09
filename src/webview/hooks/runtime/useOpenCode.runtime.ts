@@ -87,8 +87,8 @@ export async function renameSession(id: string, title: string) {
   return getCurrentOpenCodeRuntime().renameSession(id, title);
 }
 
-export async function forkSession(id: string, messageID?: string) {
-  return getCurrentOpenCodeRuntime().forkSession(id, messageID);
+export async function forkSession(id: string, messageID?: string, options?: { select?: boolean }) {
+  return getCurrentOpenCodeRuntime().forkSession(id, messageID, options);
 }
 
 export async function deleteSession(id: string) {

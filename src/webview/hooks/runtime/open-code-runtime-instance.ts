@@ -179,7 +179,11 @@ export interface OpenCodeRuntime {
   loadOlderSessionPrompts(sessionId: string, isOwnerCurrent?: () => boolean): Promise<boolean>;
   createSession(title?: string, initialPermissionMode?: PermissionMode): Promise<string | null>;
   renameSession(id: string, title: string): Promise<boolean>;
-  forkSession(id: string, messageID?: string): Promise<string | null>;
+  forkSession(
+    id: string,
+    messageID?: string,
+    options?: { select?: boolean }
+  ): Promise<string | null>;
   deleteSession(id: string): Promise<void>;
   deleteSessionImmediately(id: string, options?: { directory?: string }): Promise<void>;
   restoreSession(rootID: string): Promise<void>;
@@ -3238,8 +3242,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     return load;
   }
 
-  async function forkSession(id: string, messageID?: string): Promise<string | null> {
-    return sessionManagementOperations.forkSession(id, messageID);
+  async function forkSession(
+    id: string,
+    messageID?: string,
+    options?: { select?: boolean }
+  ): Promise<string | null> {
+    return sessionManagementOperations.forkSession(id, messageID, options);
   }
 
   async function renameSession(id: string, title: string): Promise<boolean> {

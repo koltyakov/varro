@@ -130,6 +130,19 @@ describe('useOpenCode.runtime', () => {
     );
   });
 
+  it('forwards the background fork option to the installed runtime', async () => {
+    const installed = createRuntimeMock('installed');
+    const { module } = await loadModule();
+    module.installOpenCodeRuntime(installed.runtime);
+    await expect(module.forkSession('session-1', undefined, { select: false })).resolves.toBe(
+      'installed-fork'
+    );
+    expect(installed.runtime.forkSession).toHaveBeenCalledExactlyOnceWith('session-1', undefined, {
+      select: false,
+    });
+    expect(installed.runtime.selectSession).not.toHaveBeenCalled();
+  });
+
   it('forwards session pagination to the installed runtime', async () => {
     const installed = createRuntimeMock('installed');
     const { module } = await loadModule();

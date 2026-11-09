@@ -134,8 +134,17 @@ export class SessionManagementOperations {
     );
   };
 
-  readonly forkSession = (id: string, messageID?: string): Promise<string | null> => {
-    const key = JSON.stringify([this.deps.getWorkspaceGeneration?.() ?? 0, id, messageID]);
+  readonly forkSession = (
+    id: string,
+    messageID?: string,
+    options?: { select?: boolean }
+  ): Promise<string | null> => {
+    const key = JSON.stringify([
+      this.deps.getWorkspaceGeneration?.() ?? 0,
+      id,
+      messageID,
+      options?.select !== false,
+    ]);
     const pending = this.pendingForks.get(key);
     if (pending) return pending;
 
@@ -160,7 +169,8 @@ export class SessionManagementOperations {
         setError: this.deps.setError,
       },
       id,
-      messageID
+      messageID,
+      options
     ).finally(() => {
       this.pendingForks.delete(key);
     });
@@ -445,7 +455,8 @@ export async function forkSessionWithDependencies(
     setError(message: string): void;
   },
   id: string,
-  messageID?: string
+  messageID?: string,
+  options?: { select?: boolean }
 ): Promise<string | null> {
   const previousActiveSessionId = deps.getActiveSessionId();
   const workspaceGeneration = deps.getWorkspaceGeneration?.() ?? 0;
@@ -503,6 +514,7 @@ export async function forkSessionWithDependencies(
     }
     deps.publishSessionModel(session.id, sourceModel);
     if (
+      options?.select !== false &&
       deps.getActiveSessionId() === previousActiveSessionId &&
       (deps.getSessionSelectionGeneration?.() ?? 0) === selectionGeneration &&
       deps.getNewChatDraftGeneration() === draftGeneration

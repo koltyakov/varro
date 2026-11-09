@@ -13,12 +13,18 @@ import {
 import { client } from '../../lib/client';
 import type { ChatModelSelection } from '../../../shared/protocol';
 import { logWarn } from '../../lib/log';
-import { enqueueMessage, getSelectedModelForSession, state } from '../../lib/state';
+import {
+  enqueueMessage,
+  getSelectedModelForSession,
+  isSessionStatusWorking,
+  state,
+} from '../../lib/state';
 import { deriveSelectedModelFromSession } from '../../hooks/routing-state';
 import { prepareForMessageBlockRemoval } from '../../lib/message-list-layout';
 import { writeClipboard } from '../../lib/write-clipboard';
-import { sendMessage } from '../../hooks/useOpenCode';
-import { xmarkIcon } from '../../lib/ui-icons';
+import { rememberDirectSessionReturn } from '../../lib/session-navigation';
+import { forkSession, selectSession, sendMessage } from '../../hooks/useOpenCode';
+import { openNewWindowIcon, xmarkIcon } from '../../lib/ui-icons';
 import { InlineCodeText } from '../InlineCodeText';
 import { UiIcon } from '../UiIcon';
 import { Tooltip } from '../Tooltip';
@@ -44,6 +50,7 @@ export function FollowupSuggestions(props: {
   const [ready, setReady] = createSignal<ReadyFollowups | null>(null);
   const [sending, setSending] = createSignal(false);
   const [error, setError] = createSignal('');
+  const [forkedActions, setForkedActions] = createSignal<ReadonlyMap<string, string>>(new Map());
   const [menu, setMenu] = createSignal<{
     action: FollowupAction;
     x: number;
@@ -146,21 +153,34 @@ export function FollowupSuggestions(props: {
     clear();
   }
 
-  async function send(action: FollowupAction, queue = false) {
+  function actionKey(value: ReadyFollowups, action: FollowupAction) {
+    return JSON.stringify([value.sessionId, value.key, action.title, action.prompt]);
+  }
+
+  function linkedSession(action: FollowupAction) {
+    const value = ready();
+    return value ? forkedActions().get(actionKey(value, action)) : undefined;
+  }
+
+  async function send(
+    action: FollowupAction,
+    destination: 'current' | 'queue' | 'new-session' = 'current'
+  ) {
     const value = current();
-    if (sendPending || !value || !value.actions.includes(action)) return;
+    if (sendPending || !value || !value.actions.includes(action) || linkedSession(action)) return;
     sendPending = true;
     setMenu(null);
     setSending(true);
     setError('');
     const sendScope = scope();
+    const model = untrack(sessionModel);
     let optimisticPublished = false;
     const showSendError = () => {
       if (scope() !== sendScope || sourceKey() !== value.key) return;
       if (optimisticPublished && !ready()) setReady(value);
       if (ready() === value)
         setError(
-          `Could not ${queue ? 'queue' : 'send'} this follow-up. Your main draft has not changed.`
+          `Could not ${destination === 'queue' ? 'queue' : destination === 'new-session' ? 'run' : 'send'} this follow-up. Your main draft has not changed.`
         );
     };
     const validateBeforeSend = async () => {
@@ -168,7 +188,7 @@ export function FollowupSuggestions(props: {
         signal: AbortSignal.timeout(5_000),
         directory: value.directory,
         allowGenerate: false,
-        model: untrack(sessionModel),
+        model,
       });
       if (
         current() !== value ||
@@ -181,7 +201,7 @@ export function FollowupSuggestions(props: {
     };
     try {
       if (!(await validateBeforeSend())) return;
-      if (queue) {
+      if (destination === 'queue') {
         enqueueMessage({
           id: crypto.randomUUID(),
           sessionId: value.sessionId,
@@ -190,6 +210,32 @@ export function FollowupSuggestions(props: {
           agent: 'build',
           paused: true,
         });
+        return;
+      }
+      if (destination === 'new-session') {
+        const forkedSessionId = await forkSession(value.sessionId, undefined, { select: false });
+        if (!forkedSessionId) {
+          showSendError();
+          return;
+        }
+        if (scope() !== sendScope || current() !== value) return;
+        const accepted = await sendMessage(action.prompt, {
+          targetSessionId: forkedSessionId,
+          agent: 'build',
+          preserveComposer: true,
+          omitContext: true,
+          followupTitle: action.title,
+          validateBeforeSend,
+        });
+        if (accepted === false) showSendError();
+        else {
+          setForkedActions((previous) => {
+            const next = new Map(previous);
+            next.set(actionKey(value, action), forkedSessionId);
+            if (next.size > 64) next.delete(next.keys().next().value!);
+            return next;
+          });
+        }
         return;
       }
       const accepted = await sendMessage(action.prompt, {
@@ -391,26 +437,39 @@ export function FollowupSuggestions(props: {
             <div class="followup-suggestions-actions">
               <For each={value().actions}>
                 {(action) => (
-                  <Tooltip content={action.prompt}>
-                    <button
-                      type="button"
-                      disabled={sending() || !current()}
-                      onClick={() => void send(action)}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        if (sending() || !current()) return;
-                        const rect = event.currentTarget.getBoundingClientRect();
-                        setMenu({
-                          action,
-                          x: event.clientX || rect.left,
-                          y: event.clientY || rect.bottom,
-                        });
-                      }}
-                    >
-                      <InlineCodeText text={action.title} />
-                    </button>
-                  </Tooltip>
+                  <Show
+                    when={linkedSession(action)}
+                    fallback={
+                      <Tooltip content={action.prompt}>
+                        <button
+                          type="button"
+                          disabled={sending() || !current()}
+                          onClick={() => void send(action)}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            if (sending() || !current()) return;
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            setMenu({
+                              action,
+                              x: event.clientX || rect.left,
+                              y: event.clientY || rect.bottom,
+                            });
+                          }}
+                        >
+                          <InlineCodeText text={action.title} />
+                        </button>
+                      </Tooltip>
+                    }
+                  >
+                    {(sessionId) => (
+                      <FollowupSessionLink
+                        sessionId={sessionId()}
+                        title={action.title}
+                        directory={value().directory}
+                      />
+                    )}
+                  </Show>
                 )}
               </For>
             </div>
@@ -435,12 +494,46 @@ export function FollowupSuggestions(props: {
               }}
               onQueue={() => {
                 setMenu(null);
-                void send(value.action, true);
+                void send(value.action, 'queue');
+              }}
+              onRunInNewSession={() => {
+                setMenu(null);
+                void send(value.action, 'new-session');
               }}
             />
           </Portal>
         )}
       </Show>
     </>
+  );
+}
+
+function FollowupSessionLink(props: { sessionId: string; title: string; directory?: string }) {
+  const working = createMemo(() => isSessionStatusWorking(state.sessionStatus[props.sessionId]));
+  const status = () =>
+    working() ? 'Running' : state.failedSessionIds.includes(props.sessionId) ? 'Failed' : 'Idle';
+  return (
+    <Tooltip content={`Open session: ${props.title} · ${status()}`}>
+      <a
+        class="followup-session-link"
+        href={`#session/${encodeURIComponent(props.sessionId)}`}
+        data-session-id={props.sessionId}
+        aria-label={`${props.title} · ${status()}`}
+        onClick={(event) => {
+          event.preventDefault();
+          if (state.activeSessionId)
+            rememberDirectSessionReturn(props.sessionId, state.activeSessionId);
+          void selectSession(props.sessionId, { directory: props.directory });
+        }}
+      >
+        <Show
+          when={working()}
+          fallback={<UiIcon source={openNewWindowIcon} width={12} height={12} aria-hidden="true" />}
+        >
+          <span class="session-status-indicator is-running" aria-hidden="true" />
+        </Show>
+        <InlineCodeText text={props.title} />
+      </a>
+    </Tooltip>
   );
 }
