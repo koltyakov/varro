@@ -5304,6 +5304,238 @@ describe('ChatInput', () => {
     });
   });
 
+  describe('save draft shortcut', () => {
+    function pressSave(options: KeyboardEventInit = {}) {
+      const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+      editor.focus();
+      const event = new KeyboardEvent('keydown', {
+        key: 's',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+        ...options,
+      });
+      editor.dispatchEvent(event);
+      return event;
+    }
+
+    it.each([
+      ['Cmd+S', false, true],
+      ['Cmd+S', true, true],
+      ['Ctrl+S', false, false],
+      ['Ctrl+S', true, false],
+    ] as const)('saves with %s when busy is %s', async (_shortcut, busy, metaKey) => {
+      vi.useFakeTimers();
+      setupModelState();
+      setState('activeSessionId', 'session-1');
+      setIsLoading(busy);
+      setState('sessionStatus', 'session-1', { type: busy ? 'busy' : 'idle' });
+      setInputText('Keep this draft');
+      setState('droppedFiles', [
+        { path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
+      ]);
+      setState('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
+      const sendToExtension = vi.fn(defaultBridgeSend);
+      fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+        sendToExtension;
+      cleanup = render(() => ChatInput(), container!);
+
+      expect(pressSave({ metaKey, ctrlKey: !metaKey }).defaultPrevented).toBe(true);
+
+      expect(inputText()).toBe('');
+      expect(state.droppedFiles).toEqual([]);
+      expect(state.terminalSelection).toBeNull();
+      expect(state.queuedMessages).toHaveLength(1);
+      expect(state.queuedMessages[0]).toMatchObject({
+        sessionId: 'session-1',
+        text: 'Keep this draft',
+        paused: true,
+        droppedFiles: [{ path: '/repo/src/a.ts' }],
+        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+        queuedContext: {
+          editorContext: {
+            queuedModel: { selection: { providerID: 'openai', modelID: 'gpt-4o' } },
+          },
+        },
+      });
+      expect(sendToExtension).toHaveBeenCalledWith({
+        type: 'queued-messages/update',
+        payload: {
+          messages: [expect.objectContaining({ sessionId: 'session-1', paused: true })],
+          mutationId: expect.any(String),
+        },
+      });
+      expect(container?.querySelector('.chat-queue-item.is-paused')).not.toBeNull();
+      expect(
+        container?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')?.disabled
+      ).toBe(false);
+
+      setIsLoading(false);
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(state.queuedMessages[0]?.paused).toBe(true);
+    });
+
+    it('keeps a saved draft paused through edits and session switches until explicitly played', async () => {
+      vi.useFakeTimers();
+      setState('activeSessionId', 'session-1');
+      setInputText('Draft for later');
+      sendMessageMock.mockResolvedValue(true);
+      cleanup = render(() => ChatInput(), container!);
+      pressSave();
+
+      container!.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')!.click();
+      expect(inputText()).toBe('Draft for later');
+      setInputText('Revised draft');
+      container!
+        .querySelector<HTMLDivElement>('.rich-composer')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flushAsyncWork();
+      expect(inputText()).toBe('');
+      expect(state.queuedMessages).toHaveLength(1);
+      expect(state.queuedMessages[0]).toMatchObject({ text: 'Revised draft', paused: true });
+
+      setState('activeSessionId', 'session-2');
+      await vi.advanceTimersByTimeAsync(1_000);
+      setState('activeSessionId', 'session-1');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      container!.querySelector<HTMLButtonElement>('[aria-label="Play queued message"]')!.click();
+      await vi.advanceTimersByTimeAsync(300);
+      await flushAsyncWork();
+      expect(sendMessageMock).toHaveBeenCalledExactlyOnceWith(
+        'Revised draft',
+        expect.objectContaining({ targetSessionId: 'session-1' })
+      );
+      expect(state.queuedMessages).toEqual([]);
+    });
+
+    it('pauses an existing queue row when saving its edit without duplicating it', async () => {
+      vi.useFakeTimers();
+      setState('activeSessionId', 'session-1');
+      setIsLoading(true);
+      setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Original' }]);
+      cleanup = render(() => ChatInput(), container!);
+      container!.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')!.click();
+      setInputText('Saved revision');
+      pressSave();
+      setIsLoading(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(inputText()).toBe('');
+      expect(state.queuedMessages).toHaveLength(1);
+      expect(state.queuedMessages[0]).toMatchObject({ text: 'Saved revision', paused: true });
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['/pause', '/stop', '/mcp', '/btw later', '/compact', '/problems'])(
+      'saves %s as draft text without executing it',
+      async (text) => {
+        vi.useFakeTimers();
+        setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+        setState('activeSessionId', 'session-1');
+        setInputText(text);
+        cleanup = render(() => ChatInput(), container!);
+        pressSave();
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(inputText()).toBe('');
+        expect(state.queuedMessages).toHaveLength(1);
+        expect(state.queuedMessages[0]).toMatchObject({ text, paused: true });
+        expect(sendMessageMock).not.toHaveBeenCalled();
+        expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+        expect(abortSessionMock).not.toHaveBeenCalled();
+        expect(sideQuestionView()).toBeNull();
+      }
+    );
+
+    it.each<KeyboardEventInit>([
+      { metaKey: false },
+      { shiftKey: true },
+      { altKey: true },
+      { isComposing: true },
+      { repeat: true },
+    ])('does not save with unsupported key state %j', (options) => {
+      setState('activeSessionId', 'session-1');
+      setInputText('Unfinished draft');
+      cleanup = render(() => ChatInput(), container!);
+      pressSave(options);
+
+      expect(inputText()).toBe('Unfinished draft');
+      expect(state.queuedMessages).toEqual([]);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('does not save an empty draft or handle the shortcut outside the input', () => {
+      setState('activeSessionId', 'session-1');
+      setInputText('   ');
+      cleanup = render(() => ChatInput(), container!);
+      pressSave();
+      expect(state.queuedMessages).toEqual([]);
+
+      setInputText('Keep typing');
+      const event = new KeyboardEvent('keydown', {
+        key: 's',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      container!.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(inputText()).toBe('Keep typing');
+      expect(state.queuedMessages).toEqual([]);
+    });
+
+    it.each([false, true])(
+      'preserves a draft without a current session, newSession=%s',
+      (newSession) => {
+        if (newSession) setState('activeSessionId', 'session-1');
+        setInputText('No session yet');
+        cleanup = render(() => ChatInput({ newSession }), container!);
+        pressSave();
+
+        expect(inputText()).toBe('No session yet');
+        expect(state.queuedMessages).toEqual([]);
+        expect(sendMessageMock).not.toHaveBeenCalled();
+        expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+          'Open a conversation',
+          'warning'
+        );
+      }
+    );
+
+    it('preserves the draft while messages are still loading', () => {
+      setState('activeSessionId', 'session-1');
+      setState('messagesLoading', true);
+      setInputText('Wait for the session');
+      cleanup = render(() => ChatInput(), container!);
+      pressSave();
+
+      expect(inputText()).toBe('Wait for the session');
+      expect(state.queuedMessages).toEqual([]);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+        'Messages are still loading',
+        'warning'
+      );
+    });
+
+    it('does not submit an inline message edit', () => {
+      setState('activeSessionId', 'session-1');
+      startEditingMessage('user-1', 'session-1', 'Original prompt');
+      cleanup = render(() => ChatInput(), container!);
+      setInputText('Edited prompt');
+      pressSave();
+
+      expect(inputText()).toBe('Edited prompt');
+      expect(state.queuedMessages).toEqual([]);
+      expect(editMessageMock).not.toHaveBeenCalled();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('queues busy composer attachments and clears them from the input', async () => {
     setupModelState();
     setInputText('Follow up with context');

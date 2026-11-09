@@ -2849,6 +2849,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   function handleKeydown(e: KeyboardEvent) {
+    if (e.key.toLowerCase() === 's' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.isComposing || e.repeat) return;
+      if (getSendBlockedReason()) {
+        reportBlockedSend();
+        return;
+      }
+      sendFromUi('queue-paused');
+      return;
+    }
+
     const historyAction = getComposerHistoryAction(e);
     if (historyAction) {
       // Always swallow the shortcut so native contenteditable undo never
@@ -3425,33 +3437,52 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     };
   }
 
-  function sendFromUi(mode?: 'queue' | 'steer') {
+  function sendFromUi(mode?: 'queue' | 'queue-paused' | 'steer') {
     void handleSend(mode).catch((err) => logError('Failed to send message', err));
   }
 
-  async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
+  async function handleSend(mode?: 'queue' | 'queue-paused' | 'steer' | 'after-stop') {
     if (editReconciliationPending()) return;
+    const savePaused = mode === 'queue-paused';
+    if (savePaused) {
+      if (!composerSessionId()) {
+        showSessionActionFeedback('Open a conversation', 'warning');
+        return;
+      }
+      if (composerEditingMessage()) {
+        showSessionActionFeedback('Finish editing first', 'warning');
+        return;
+      }
+    }
     const text = inputText();
     const command = getLeadingSlashCommand(text);
-    if (!composerEditingMessage() && (command?.name === 'mcp' || command?.name === 'mcps')) {
+    if (
+      !savePaused &&
+      !composerEditingMessage() &&
+      (command?.name === 'mcp' || command?.name === 'mcps')
+    ) {
       await runSlashCommand(text);
       return;
     }
     const sideQuestion = getSideQuestionText(text);
-    if (sideQuestion !== null) {
+    if (!savePaused && sideQuestion !== null) {
       requestSideQuestion(sideQuestion);
       return;
     }
-    if (isPauseSlashCommand(text)) {
+    if (!savePaused && isPauseSlashCommand(text)) {
       await requestPauseSession();
       return;
     }
-    if (isAbortSlashCommand(text)) {
+    if (!savePaused && isAbortSlashCommand(text)) {
       requestAbortSession();
       return;
     }
-    if (pendingProblems() || problemsPickerScope()) return;
-    if (/^\/(?:problems|promlems)(?:\s|$)/i.test(text.trim()) && state.autoAttachProblems) {
+    if (pendingProblems() || (!savePaused && problemsPickerScope())) return;
+    if (
+      !savePaused &&
+      /^\/(?:problems|promlems)(?:\s|$)/i.test(text.trim()) &&
+      state.autoAttachProblems
+    ) {
       await runSlashCommand(text);
       return;
     }
@@ -3477,7 +3508,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     ) {
       return;
     }
-    const shouldQueue = mode === 'queue' || pendingApproval;
+    const shouldQueue = savePaused || mode === 'queue' || pendingApproval;
     const sendableText = getSendableInputText(text);
     const hasImagePreviewErrors = state.clipboardImages.some((image) => imageError(image.id));
     const hasSendableImages = hasSendableClipboardImages();
@@ -3699,7 +3730,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         sessionId,
         text: sendableText,
         agent: state.selectedAgent ? state.selectedAgent : undefined,
-        paused: queuedMessagePaused ? true : undefined,
+        paused: savePaused || queuedMessagePaused ? true : undefined,
         droppedFiles: queuedDroppedFiles,
         clipboardImages: queuedAttachments.clipboardImages,
         nativePdfs: queuedAttachments.nativePdfs,
