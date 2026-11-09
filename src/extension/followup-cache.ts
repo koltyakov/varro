@@ -4,7 +4,7 @@ import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Persistence } from '../shared/persistence';
-import type { FollowupSuggestionSet } from '../shared/followups';
+import type { FollowupAction, FollowupSuggestionSet } from '../shared/followups';
 import { EMPTY_FOLLOWUP_SUGGESTIONS, parseFollowupSuggestions } from '../shared/followups';
 import { asRecord, isNumber, isString } from '../shared/type-utils';
 import { acquireFileLock } from './file-lock';
@@ -91,6 +91,28 @@ export class FollowupCache {
       entry.suggestions = EMPTY_FOLLOWUP_SUGGESTIONS;
       return true;
     });
+  }
+
+  async linkSession(
+    key: string,
+    digest: string,
+    action: FollowupAction & { sessionId: string }
+  ): Promise<boolean> {
+    if (!/^[\w-]{1,200}$/.test(action.sessionId)) throw new Error('Invalid follow-up session ID');
+    let linked = false;
+    await this.change((entries) => {
+      const entry = entries[key];
+      if (!entry || entry.digest !== digest || entry.dismissed) return false;
+      const stored = entry.suggestions.actions.find(
+        (item) => item.title === action.title && item.prompt === action.prompt
+      );
+      if (!stored || (stored.sessionId && stored.sessionId !== action.sessionId)) return false;
+      linked = true;
+      if (stored.sessionId === action.sessionId) return false;
+      stored.sessionId = action.sessionId;
+      return true;
+    });
+    return linked;
   }
 
   clearSession(sessionKey: string, exceptKey?: string): Promise<void> {
@@ -236,7 +258,9 @@ function parseEntries(storedValue: unknown) {
     )
       throw new Error('Invalid follow-up admission record');
     try {
-      const suggestions = parseFollowupSuggestions(JSON.stringify(entry.suggestions));
+      const suggestions = parseFollowupSuggestions(JSON.stringify(entry.suggestions), {
+        allowSessionId: true,
+      });
       entries[key] = {
         sessionKey: entry.sessionKey,
         digest: entry.digest,

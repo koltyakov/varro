@@ -24,7 +24,7 @@ import { prepareForMessageBlockRemoval } from '../../lib/message-list-layout';
 import { writeClipboard } from '../../lib/write-clipboard';
 import { rememberDirectSessionReturn } from '../../lib/session-navigation';
 import { forkSession, selectSession, sendMessage } from '../../hooks/useOpenCode';
-import { openNewWindowIcon, xmarkIcon } from '../../lib/ui-icons';
+import { checkIcon, xmarkIcon } from '../../lib/ui-icons';
 import { InlineCodeText } from '../InlineCodeText';
 import { UiIcon } from '../UiIcon';
 import { Tooltip } from '../Tooltip';
@@ -50,7 +50,6 @@ export function FollowupSuggestions(props: {
   const [ready, setReady] = createSignal<ReadyFollowups | null>(null);
   const [sending, setSending] = createSignal(false);
   const [error, setError] = createSignal('');
-  const [forkedActions, setForkedActions] = createSignal<ReadonlyMap<string, string>>(new Map());
   const [menu, setMenu] = createSignal<{
     action: FollowupAction;
     x: number;
@@ -153,21 +152,12 @@ export function FollowupSuggestions(props: {
     clear();
   }
 
-  function actionKey(value: ReadyFollowups, action: FollowupAction) {
-    return JSON.stringify([value.sessionId, value.key, action.title, action.prompt]);
-  }
-
-  function linkedSession(action: FollowupAction) {
-    const value = ready();
-    return value ? forkedActions().get(actionKey(value, action)) : undefined;
-  }
-
   async function send(
     action: FollowupAction,
     destination: 'current' | 'queue' | 'new-session' = 'current'
   ) {
     const value = current();
-    if (sendPending || !value || !value.actions.includes(action) || linkedSession(action)) return;
+    if (sendPending || !value || !value.actions.includes(action) || action.sessionId) return;
     sendPending = true;
     setMenu(null);
     setSending(true);
@@ -190,11 +180,15 @@ export function FollowupSuggestions(props: {
         allowGenerate: false,
         model,
       });
-      if (
-        current() !== value ||
-        !latest.actions.some((item) => item.title === action.title && item.prompt === action.prompt)
-      ) {
+      const latestAction = latest.actions.find(
+        (item) => item.title === action.title && item.prompt === action.prompt
+      );
+      if (current() !== value || !latestAction) {
         if (ready() === value) clear();
+        return false;
+      }
+      if (latestAction.sessionId) {
+        setReady({ ...value, ...latest });
         return false;
       }
       return true;
@@ -229,12 +223,28 @@ export function FollowupSuggestions(props: {
         });
         if (accepted === false) showSendError();
         else {
-          setForkedActions((previous) => {
-            const next = new Map(previous);
-            next.set(actionKey(value, action), forkedSessionId);
-            if (next.size > 64) next.delete(next.keys().next().value!);
-            return next;
-          });
+          const linkedAction = { ...action, sessionId: forkedSessionId };
+          if (ready() === value)
+            setReady({
+              ...value,
+              actions: value.actions.map((item) => (item === action ? linkedAction : item)),
+            });
+          try {
+            if (
+              !(await client.varro.linkFollowupSession(
+                value.sessionId,
+                value.source,
+                linkedAction,
+                value.directory
+              ))
+            )
+              throw new Error('Follow-up session link was not saved');
+          } catch {
+            if (scope() === sendScope && sourceKey() === value.key)
+              setError(
+                'Follow-up started, but its session link could not be saved. Reloading may remove the link.'
+              );
+          }
         }
         return;
       }
@@ -259,7 +269,8 @@ export function FollowupSuggestions(props: {
     } finally {
       sendPending = false;
       setSending(false);
-      if (ready() === value && !current()) clear();
+      if (ready()?.key === value.key && ready()?.sessionId === value.sessionId && !current())
+        clear();
     }
   }
 
@@ -350,7 +361,9 @@ export function FollowupSuggestions(props: {
       if (controller.signal.aborted || scope() !== currentScope || sourceKey() !== key)
         return false;
       // Treat bridge output as inert plain text and enforce the same bounds as the host.
-      const validated = parseFollowupSuggestions(JSON.stringify(suggestions));
+      const validated = parseFollowupSuggestions(JSON.stringify(suggestions), {
+        allowSessionId: true,
+      });
       if (!validated.actions.length) return false;
       setReady({ key, source, sessionId, directory, ...validated });
       return true;
@@ -438,7 +451,7 @@ export function FollowupSuggestions(props: {
               <For each={value().actions}>
                 {(action) => (
                   <Show
-                    when={linkedSession(action)}
+                    when={action.sessionId}
                     fallback={
                       <Tooltip content={action.prompt}>
                         <button
@@ -510,8 +523,8 @@ export function FollowupSuggestions(props: {
 
 function FollowupSessionLink(props: { sessionId: string; title: string; directory?: string }) {
   const working = createMemo(() => isSessionStatusWorking(state.sessionStatus[props.sessionId]));
-  const status = () =>
-    working() ? 'Running' : state.failedSessionIds.includes(props.sessionId) ? 'Failed' : 'Idle';
+  const failed = () => state.failedSessionIds.includes(props.sessionId);
+  const status = () => (working() ? 'Running' : failed() ? 'Failed' : 'Completed');
   return (
     <Tooltip content={`Open session: ${props.title} · ${status()}`}>
       <a
@@ -528,7 +541,14 @@ function FollowupSessionLink(props: { sessionId: string; title: string; director
       >
         <Show
           when={working()}
-          fallback={<UiIcon source={openNewWindowIcon} width={12} height={12} aria-hidden="true" />}
+          fallback={
+            <UiIcon
+              source={failed() ? xmarkIcon : checkIcon}
+              width={12}
+              height={12}
+              aria-hidden="true"
+            />
+          }
         >
           <span class="session-status-indicator is-running" aria-hidden="true" />
         </Show>

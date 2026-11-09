@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { FollowupSuggestionSet, FollowupSource } from '../shared/followups';
+import type { FollowupAction, FollowupSuggestionSet, FollowupSource } from '../shared/followups';
 import {
   FOLLOWUP_GENERATION_TIMEOUT_MS,
   EMPTY_FOLLOWUP_SUGGESTIONS,
@@ -182,6 +182,21 @@ export class FollowupService {
   }): Promise<void> {
     const { key, digest } = this.identity(input);
     await this.cache.dismiss(key, digest);
+  }
+
+  async linkSession(input: {
+    sessionId: string;
+    directory?: string;
+    source: FollowupSource;
+    action: FollowupAction & { sessionId: string };
+  }): Promise<boolean> {
+    if (
+      this.server.apiVersion !== 2 ||
+      !(await this.sourceIsCurrent(input, AbortSignal.timeout(3_000)))
+    )
+      return false;
+    const { key, digest } = this.identity(input);
+    return this.cache.linkSession(key, digest, input.action);
   }
 
   private async readCached(key: string, digest: string, signal?: AbortSignal) {

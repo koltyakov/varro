@@ -4,6 +4,8 @@ import { createSignal } from 'solid-js';
 import { reconcile } from 'solid-js/store';
 import { render } from 'solid-js/web';
 import { client } from '../../lib/client';
+import type { FollowupSuggestionSet } from '../../../shared/followups';
+import { checkIcon, xmarkIcon } from '../../lib/ui-icons';
 import { error, replaceMessages, setError, setState, state } from '../../lib/state';
 import * as clipboard from '../../lib/write-clipboard';
 import { assistantMessage, session, textPart, userMessage } from '../MessageList.test-utils';
@@ -77,6 +79,7 @@ beforeEach(() => {
     options.allowGenerate ? suggestions : { summary: '', actions: [] }
   );
   vi.spyOn(client.varro, 'dismissFollowups').mockResolvedValue(true);
+  vi.spyOn(client.varro, 'linkFollowupSession').mockResolvedValue(true);
   vi.spyOn(clipboard, 'writeClipboard').mockResolvedValue(true);
 });
 afterEach(() => {
@@ -184,6 +187,12 @@ describe('FollowupSuggestions', () => {
       followupTitle: actions[1]!.title,
       validateBeforeSend: expect.any(Function),
     });
+    expect(client.varro.linkFollowupSession).toHaveBeenCalledExactlyOnceWith(
+      'session-1',
+      expect.objectContaining({ assistantMessageId: 'answer', userMessageId: 'user' }),
+      { ...actions[1]!, sessionId: 'fork-1' },
+      '/workspace'
+    );
     expect(state.activeSessionId).toBe('session-1');
     expect(mocks.select).not.toHaveBeenCalled();
     expect(state.messages.map((entry) => entry.info.id)).toEqual(['user', 'answer']);
@@ -220,11 +229,109 @@ describe('FollowupSuggestions', () => {
     expect(link.querySelector('.session-status-indicator.is-running')).not.toBeNull();
     setState('sessionStatus', 'fork-1', { type: 'idle' });
     expect(link.querySelector('.session-status-indicator.is-running')).toBeNull();
-    expect(link.getAttribute('aria-label')).toContain('Idle');
+    expect(link.getAttribute('aria-label')).toContain('Completed');
+    expect(
+      link.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+    ).toContain(checkIcon);
     setState('failedSessionIds', ['fork-1']);
     expect(link.getAttribute('aria-label')).toContain('Failed');
+    expect(
+      link.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+    ).toContain(xmarkIcon);
     expect(mocks.send).toHaveBeenCalledOnce();
     expect(mocks.select).not.toHaveBeenCalled();
+  });
+
+  it.each(['busy', 'idle'] as const)(
+    'restores the linked action after a webview reload, status=%s',
+    async (type) => {
+      const { setWorking } = mount();
+      setWorking(false);
+      await flush();
+      let stored: FollowupSuggestionSet = suggestions;
+      vi.mocked(client.varro.followups).mockImplementation(async () => stored);
+      vi.mocked(client.varro.linkFollowupSession).mockImplementationOnce(
+        async (_id, _source, action) => {
+          stored = {
+            ...suggestions,
+            actions: suggestions.actions.map((item) =>
+              item.title === action.title ? action : item
+            ),
+          };
+          return true;
+        }
+      );
+      await openActionMenu();
+      menuItem('Run in new session').click();
+      await flush();
+      dispose?.();
+      dispose = undefined;
+      setState('sessionStatus', 'fork-1', { type });
+      mount(false);
+      await flush();
+      const link = container.querySelector<HTMLAnchorElement>('.followup-session-link')!;
+      expect(link.getAttribute('href')).toBe('#session/fork-1');
+      expect(link.textContent).toBe(actions[0]!.title);
+      expect(link.getAttribute('aria-label')).toContain(type === 'busy' ? 'Running' : 'Completed');
+      expect(!!link.querySelector('.session-status-indicator.is-running')).toBe(type === 'busy');
+      expect(mocks.fork).toHaveBeenCalledOnce();
+      expect(mocks.send).toHaveBeenCalledOnce();
+    }
+  );
+
+  it('restores a session linked in another window instead of forking it again', async () => {
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    vi.mocked(client.varro.followups).mockResolvedValue({
+      ...suggestions,
+      actions: [{ ...actions[0]!, sessionId: 'other-fork' }, ...actions.slice(1)],
+    });
+    await openActionMenu();
+    menuItem('Run in new session').click();
+    await flush();
+    expect(mocks.fork).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(container.querySelector('.followup-session-link')?.getAttribute('href')).toBe(
+      '#session/other-fork'
+    );
+  });
+
+  it('clears the linked action on a new prompt even while its persistence is pending', async () => {
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
+    let finish!: (saved: boolean) => void;
+    vi.mocked(client.varro.linkFollowupSession).mockImplementationOnce(
+      () => new Promise((resolve) => (finish = resolve))
+    );
+    await openActionMenu();
+    menuItem('Run in new session').click();
+    await flush();
+    expect(container.querySelector('.followup-session-link')).not.toBeNull();
+    setWorking(true);
+    finish(false);
+    await flush();
+    expect(container.querySelector('.followup-suggestions')).toBeNull();
+  });
+
+  it('keeps the live link and reports a save failure without rerunning the action', async () => {
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
+    vi.mocked(client.varro.linkFollowupSession).mockRejectedValueOnce(
+      new Error('Storage unavailable')
+    );
+    await openActionMenu();
+    menuItem('Run in new session').click();
+    await flush();
+    expect(container.querySelector('.followup-session-link')).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'session link could not be saved'
+    );
+    expect(mocks.send).toHaveBeenCalledOnce();
   });
 
   it('keeps other suggestions runnable after a background fork', async () => {

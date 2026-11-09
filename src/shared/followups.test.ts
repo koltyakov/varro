@@ -28,6 +28,30 @@ describe('follow-ups validation', () => {
     title: 'Inspect failing tests',
     prompt: 'Investigate the reported parser failures without unrelated edits.',
   };
+  it('round-trips stored action session IDs without accepting them from generated output', () => {
+    const stored = {
+      summary: 'A parser fix is running.',
+      actions: [{ ...action, sessionId: 'ses_fork-1' }],
+    };
+    expect(parseFollowupSuggestions(JSON.stringify(stored), { allowSessionId: true })).toEqual(
+      stored
+    );
+    expect(() => parseFollowupSuggestions(JSON.stringify(stored))).toThrow();
+  });
+  it.each(['', '../session', 'x'.repeat(201), null, 42])(
+    'rejects an invalid stored session ID %j',
+    (sessionId) => {
+      expect(() =>
+        parseFollowupSuggestions(
+          JSON.stringify({
+            summary: 'A parser fix is running.',
+            actions: [{ ...action, sessionId }],
+          }),
+          { allowSessionId: true }
+        )
+      ).toThrow();
+    }
+  );
   it.each([0, 1, 2, 3])('accepts %s grounded action shapes without padding', (count) => {
     const actions = Array.from({ length: count }, (_, i) => ({
       title: `${action.title} ${i}`,

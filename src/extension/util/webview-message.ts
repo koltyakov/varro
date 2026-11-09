@@ -1961,6 +1961,10 @@ const API_ROUTES: ApiRoute[] = [
     ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
   ),
   route(
+    `${VARRO_API_ENDPOINTS.session}/:id/followups/session`,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(
     `${VARRO_API_ENDPOINTS.session}/:id/pin`,
     ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
   ),

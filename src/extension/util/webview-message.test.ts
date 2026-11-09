@@ -223,6 +223,13 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/varro/prompt-completion/test')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/s/followups')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/s/followups/dismiss')).toBe(true);
+    expect(
+      isAllowedApiRequest('POST', '/varro/session/s/followups/session?directory=%2Frepo')
+    ).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/session/s/followups/session')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/varro/session/s/followups/session?model=other')).toBe(
+      false
+    );
     expect(isAllowedApiRequest('GET', '/varro/session/s/followups/dismiss')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/session/s/followups?directory=%2Frepo')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session/s/followups')).toBe(false);

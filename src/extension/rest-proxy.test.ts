@@ -984,6 +984,70 @@ describe('RestProxy handleRequest', () => {
     }
   });
 
+  it('persists a follow-up action session ID through the host service', async () => {
+    const { proxy, callbacks } = createProxy();
+    const link = vi
+      .spyOn(FollowupService.forServer(callbacks.server), 'linkSession')
+      .mockResolvedValue(true);
+    const source = {
+      assistantMessageId: 'a',
+      userMessageId: 'u',
+      userPrompt: 'Review',
+      answer: 'One bug remains',
+    };
+    const action = {
+      title: 'Fix the bug',
+      prompt: 'Fix the reported bug.',
+      sessionId: 'ses_fork-1',
+    };
+    try {
+      await proxy.handleRequest(
+        makePayload(513, 'POST', '/varro/session/session-1/followups/session', {
+          ...source,
+          action,
+        })
+      );
+      expect(link).toHaveBeenCalledExactlyOnceWith({
+        sessionId: 'session-1',
+        directory: '/repo',
+        source,
+        action,
+      });
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 513, data: true });
+      expect(callbacks.server.request).not.toHaveBeenCalled();
+    } finally {
+      link.mockRestore();
+    }
+  });
+
+  it.each(['', '../other', 'session-1'])(
+    'rejects invalid follow-up session links %j',
+    async (sessionId) => {
+      const { proxy, callbacks } = createProxy();
+      const link = vi
+        .spyOn(FollowupService.forServer(callbacks.server), 'linkSession')
+        .mockResolvedValue(true);
+      try {
+        await proxy.handleRequest(
+          makePayload(514, 'POST', '/varro/session/session-1/followups/session', {
+            assistantMessageId: 'a',
+            userMessageId: 'u',
+            userPrompt: 'Review',
+            answer: 'One bug remains',
+            action: { title: 'Fix the bug', prompt: 'Fix the reported bug.', sessionId },
+          })
+        );
+        expect(link).not.toHaveBeenCalled();
+        expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+          id: 514,
+          error: 'Invalid follow-up session link',
+        });
+      } finally {
+        link.mockRestore();
+      }
+    }
+  );
+
   it.each([false, true])(
     'clears the prior follow-up cache only after accepted prompts, rejected=%s',
     async (rejected) => {

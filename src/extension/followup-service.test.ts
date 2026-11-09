@@ -108,6 +108,42 @@ function setup() {
 }
 
 describe('FollowupService', () => {
+  it('restores linked actions after restart without generating and retires them on a new prompt', async () => {
+    const { server, request, input } = setup();
+    const service = new FollowupService(server);
+    await service.suggest(input);
+    const action = { ...actions[0]!, sessionId: 'ses_fork-1' };
+    expect(await service.linkSession({ ...input, action })).toBe(true);
+    request.mockClear();
+    const restarted = new FollowupService(server);
+    expect(await restarted.suggest({ ...input, allowGenerate: false, cacheOnly: true })).toEqual({
+      summary,
+      actions: [action],
+    });
+    expect(request.mock.calls.some(([, path]) => path === '/api/experimental/generate')).toBe(
+      false
+    );
+    await restarted.clearPreviousTurn({
+      sessionId: input.sessionId,
+      directory: input.directory,
+      userMessageId: 'next-user',
+    });
+    expect(await new FollowupService(server).suggest({ ...input, allowGenerate: false })).toEqual(
+      EMPTY_FOLLOWUP_SUGGESTIONS
+    );
+    expect(await service.linkSession({ ...input, action })).toBe(false);
+  });
+
+  it('does not attach a session ID to a stale source', async () => {
+    const { server, input, setAnswer } = setup();
+    const service = new FollowupService(server);
+    await service.suggest(input);
+    setAnswer('The source answer has changed.');
+    expect(
+      await service.linkSession({ ...input, action: { ...actions[0]!, sessionId: 'ses_fork-1' } })
+    ).toBe(false);
+  });
+
   it('returns cached suggestions without admitting generation for an opening cache probe', async () => {
     const { server, request, input } = setup();
     const service = new FollowupService(server);

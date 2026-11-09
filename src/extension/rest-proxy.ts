@@ -1274,7 +1274,7 @@ export class RestProxy {
       );
       if (
         method === 'POST' &&
-        /^\/varro\/session\/[^/]+\/followups(?:\/dismiss)?$/.test(requestPathname)
+        /^\/varro\/session\/[^/]+\/followups(?:\/(?:dismiss|session))?$/.test(requestPathname)
       ) {
         const modelRef = readFollowupModel();
         const model = modelRef
@@ -1286,6 +1286,30 @@ export class RestProxy {
           this.callbacks.server,
           this.callbacks.legacyFollowupPersistence
         );
+        if (requestPathname.endsWith('/session')) {
+          const action = asRecord(asRecord(payload.body)?.action);
+          if (
+            !directSessionID ||
+            this.isHiddenSession(directSessionID) ||
+            !isSafePersistedSessionId(action?.sessionId) ||
+            !/^[\w-]{1,200}$/.test(action.sessionId) ||
+            action.sessionId === directSessionID ||
+            this.isHiddenSession(action.sessionId) ||
+            typeof action.title !== 'string' ||
+            typeof action.prompt !== 'string'
+          )
+            throw new Error('Invalid follow-up session link');
+          const directory = scopedWorkspaceDirectory ?? this.getCurrentWorkspacePath();
+          await this.assertSessionInWorkspace(action.sessionId, directory, directory);
+          const data = await service.linkSession({
+            sessionId: directSessionID,
+            source,
+            directory,
+            action: { title: action.title, prompt: action.prompt, sessionId: action.sessionId },
+          });
+          this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+          return;
+        }
         if (requestPathname.endsWith('/dismiss')) {
           if (!directSessionID || this.isHiddenSession(directSessionID))
             throw new Error('404 Session not found');

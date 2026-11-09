@@ -70,6 +70,59 @@ afterEach(async () => {
 });
 
 describe('FollowupCache', () => {
+  it('stores action session IDs in the existing JSON and restores them across cache instances', async () => {
+    const cache = new FollowupCache();
+    const key = hash('linked-turn');
+    await cache.claim(key, digest, sessionKey);
+    await cache.complete(key, digest, suggestions);
+    const action = { ...suggestions.actions[0]!, sessionId: 'ses_fork-1' };
+    expect(await cache.linkSession(key, digest, action)).toBe(true);
+    const linked = { ...suggestions, actions: [action] };
+    expect(await new FollowupCache().get(key, digest)).toEqual(linked);
+    expect(JSON.parse(await readFile(path, 'utf8')).entries[key].suggestions).toEqual(linked);
+    expect(await new FollowupCache().linkSession(key, digest, action)).toBe(true);
+    expect(await cache.linkSession(key, digest, { ...action, sessionId: 'ses_other' })).toBe(false);
+    expect(await new FollowupCache().get(key, digest)).toEqual(linked);
+  });
+
+  it('merges concurrent links on different actions without losing either session ID', async () => {
+    const key = hash('parallel-links');
+    const second = { title: 'Inspect parser', prompt: 'Inspect the reported parser issue.' };
+    const cache = new FollowupCache();
+    await cache.claim(key, digest, sessionKey);
+    await cache.complete(key, digest, {
+      ...suggestions,
+      actions: [...suggestions.actions, second],
+    });
+    const linked = [
+      { ...suggestions.actions[0]!, sessionId: 'ses_first' },
+      { ...second, sessionId: 'ses_second' },
+    ];
+    expect(
+      await Promise.all(
+        linked.map((action) => new FollowupCache().linkSession(key, digest, action))
+      )
+    ).toEqual([true, true]);
+    expect(await new FollowupCache().get(key, digest)).toEqual({ ...suggestions, actions: linked });
+  });
+
+  it('does not revive linked follow-ups retired by a new prompt', async () => {
+    const cache = new FollowupCache();
+    const key = hash('old-linked-turn');
+    const action = { ...suggestions.actions[0]!, sessionId: 'ses_fork-1' };
+    await cache.claim(key, digest, sessionKey);
+    await cache.complete(key, digest, suggestions);
+    expect(await cache.linkSession(key, hash('different-digest'), action)).toBe(false);
+    expect(await cache.linkSession(key, digest, { ...action, prompt: 'Different action' })).toBe(
+      false
+    );
+    expect(await cache.linkSession(key, digest, action)).toBe(true);
+    await cache.clearSession(sessionKey);
+    expect(await new FollowupCache().linkSession(key, digest, action)).toBe(false);
+    expect(await new FollowupCache().get(key, digest)).toEqual(EMPTY_FOLLOWUP_SUGGESTIONS);
+    expect(await readFile(path, 'utf8')).not.toContain('ses_fork-1');
+  });
+
   it('distinguishes a pending admission from a completed empty result across cache instances', async () => {
     const writer = new FollowupCache();
     const reader = new FollowupCache();

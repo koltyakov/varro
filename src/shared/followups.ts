@@ -1,7 +1,7 @@
 import { asRecord, isString } from './type-utils';
 import type { Message, Part } from './opencode-types';
 
-export type FollowupAction = { title: string; prompt: string };
+export type FollowupAction = { title: string; prompt: string; sessionId?: string };
 export type FollowupSuggestionSet = { summary: string; actions: FollowupAction[] };
 export const EMPTY_FOLLOWUP_SUGGESTIONS: FollowupSuggestionSet = { summary: '', actions: [] };
 
@@ -80,7 +80,10 @@ export function parseFollowupSource<T>(value: T): FollowupSource | null {
 }
 
 /** Fail closed. JSON instructions are not schema-constrained decoding. */
-export function parseFollowupSuggestions(text: string): FollowupSuggestionSet {
+export function parseFollowupSuggestions(
+  text: string,
+  options?: { allowSessionId?: boolean }
+): FollowupSuggestionSet {
   if (text.length > 4_096) throw new Error('Follow-ups output is too large');
   const record = asRecord(JSON.parse(text));
   if (
@@ -100,9 +103,16 @@ export function parseFollowupSuggestions(text: string): FollowupSuggestionSet {
     const action = asRecord(value);
     if (
       !action ||
-      Object.keys(action).length !== 2 ||
+      Object.keys(action).some(
+        (key) =>
+          key !== 'title' && key !== 'prompt' && !(options?.allowSessionId && key === 'sessionId')
+      ) ||
       !isString(action.title) ||
-      !isString(action.prompt)
+      !isString(action.prompt) ||
+      ('sessionId' in action &&
+        (!options?.allowSessionId ||
+          !isString(action.sessionId) ||
+          !/^[\w-]{1,200}$/.test(action.sessionId)))
     )
       throw new Error('Invalid follow-up action');
     const title = action.title.trim();
@@ -124,7 +134,9 @@ export function parseFollowupSuggestions(text: string): FollowupSuggestionSet {
       throw new Error('Invalid follow-up action text');
     titles.add(titleKey);
     prompts.add(promptKey);
-    return { title, prompt };
+    return isString(action.sessionId)
+      ? { title, prompt, sessionId: action.sessionId }
+      : { title, prompt };
   });
   return { summary: record.summary.trim(), actions };
 }

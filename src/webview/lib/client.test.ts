@@ -1843,6 +1843,27 @@ describe('client', () => {
       { retries: 0 }
     );
   });
+  it('stores the follow-up action session ID through the scoped host route', async () => {
+    const { client } = await loadClient();
+    const source = {
+      assistantMessageId: 'a',
+      userMessageId: 'u',
+      userPrompt: 'Review',
+      answer: 'One bug remains',
+    };
+    const action = {
+      title: 'Fix the bug',
+      prompt: 'Fix the reported bug.',
+      sessionId: 'ses_fork-1',
+    };
+    await client.varro.linkFollowupSession('s', source, action, '/fixture');
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/varro/session/s/followups/session?directory=%2Ffixture',
+      { ...source, action },
+      { retries: 0 }
+    );
+  });
   it('queries prompt completion eligibility without sending any credentials', async () => {
     const { client } = await loadClient();
     const availability = { 'meta/fast': { available: true } };

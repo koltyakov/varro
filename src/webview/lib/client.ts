@@ -1,5 +1,5 @@
 import { apiCall, onMessage, postMessage } from './bridge';
-import type { FollowupSuggestionSet, FollowupSource } from '../../shared/followups';
+import type { FollowupAction, FollowupSuggestionSet, FollowupSource } from '../../shared/followups';
 import { FOLLOWUP_REQUEST_TIMEOUT_MS } from '../../shared/followups';
 import type {
   PermissionApprovalRequest,
@@ -911,6 +911,22 @@ export const client = {
           directory
         ),
         source,
+        { retries: 0 }
+      );
+    },
+    async linkFollowupSession(
+      sessionId: string,
+      source: FollowupSource,
+      action: FollowupAction & { sessionId: string },
+      directory?: string
+    ): Promise<boolean> {
+      return apiCall(
+        'POST',
+        withDirectory(
+          `${VARRO_API_ENDPOINTS.session}/${encodeURIComponent(sessionId)}/followups/session`,
+          directory
+        ),
+        { ...source, action },
         { retries: 0 }
       );
     },
