@@ -697,17 +697,36 @@ describe('V2 generated transcript records', () => {
     ).toEqual([expect.objectContaining({ type: 'session.next.synthetic', seq: 6 })]);
   });
 
-  it.each(['command.updated', 'skill.updated'])('refreshes discovery after native %s', (type) => {
-    expect(
-      projectV2Event({
-        id: 'evt_catalog',
-        created: 10,
-        type,
-        data: {},
-        location: { directory: '/repo' },
-      })
-    ).toEqual([expect.objectContaining({ type: 'catalog.updated', workspaceDirectory: '/repo' })]);
-  });
+  it.each(['agent.updated', 'integration.updated', 'command.updated', 'skill.updated'])(
+    'refreshes discovery after native %s',
+    (type) => {
+      expect(
+        projectV2Event({
+          id: 'evt_catalog',
+          created: 10,
+          type,
+          data: {},
+          location: { directory: '/repo' },
+        })
+      ).toEqual([
+        expect.objectContaining({ type: 'catalog.updated', workspaceDirectory: '/repo' }),
+      ]);
+    }
+  );
+
+  it.each([{}, { integrationID: 'github-copilot', credentialID: 'cred_one' }])(
+    'refreshes discovery for legacy and 2.2.7 credential updates: %j',
+    (data) => {
+      expect(
+        projectV2Event({ id: 'evt_credential', created: 10, type: 'credential.updated', data })
+      ).toEqual([
+        expect.objectContaining({
+          type: 'catalog.updated',
+          properties: expect.objectContaining(data),
+        }),
+      ]);
+    }
+  );
 
   it('refreshes failed compaction before reporting the failure, consuming its sequence once', () => {
     const events = projectV2Event({

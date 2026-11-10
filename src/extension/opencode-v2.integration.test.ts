@@ -29,7 +29,7 @@ import { OpenCodeConfigService } from './opencode-config-service';
 import { ServerMemoryPermissionStore } from './server-memory-permission-store';
 import type { RestProxyCallbacks } from './rest-proxy';
 import type { Persistence } from '../shared/persistence';
-import type { OpenCodeServerMemoryPermission } from '../shared/opencode-types';
+import type { OpenCodeServerMemoryPermission, PermissionRule } from '../shared/opencode-types';
 import { fixture } from '../webview/test-fixtures';
 
 const exportEditor = vi.hoisted(() => ({
@@ -1151,6 +1151,10 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     const config = asRecord(JSON.parse(original));
     const savedBefore = await transport.request('GET', '/api/permission/saved');
     const sessions: string[] = [];
+    let expectedRules: PermissionRule[] = [
+      { permission: 'webfetch', pattern: '*', action: 'ask' },
+      { permission: 'webfetch', pattern: 'https://trusted.example/*', action: 'allow' },
+    ];
     const askInProject = async (name: string, resource: string) => {
       const directory = join(root, 'workspace', `global-rule-${name}`);
       await mkdir(directory, { recursive: true });
@@ -1168,6 +1172,21 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       if (!isString(session?.id)) throw new Error('Missing global config fixture session');
       const id = session.id;
       sessions.push(id);
+      // Catalogs can return before config plugins activate, including on the V2 floor.
+      // Wait for the effective agent rules, then issue exactly one permission check.
+      await expect
+        .poll(
+          async () => {
+            const agents = await transport.request('GET', '/agent', undefined, options);
+            if (!Array.isArray(agents)) throw new Error('Missing isolated agent catalog');
+            const build = agents.map(asRecord).find((agent) => agent?.name === 'build');
+            return Array.isArray(build?.permission)
+              ? build.permission.map(asRecord).filter((rule) => rule?.permission === 'webfetch')
+              : [];
+          },
+          { timeout: 5000 }
+        )
+        .toEqual(expectedRules);
       await writeFile(
         join(root, `global-rule-${name}.json`),
         JSON.stringify(
@@ -1204,20 +1223,26 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
         globalPath,
         JSON.stringify({
           ...config,
-          permissions: [
-            { action: 'webfetch', resource: '*', effect: 'ask' },
-            { action: 'webfetch', resource: 'https://trusted.example/*', effect: 'allow' },
-          ],
+          permissions: expectedRules.map((rule) => ({
+            action: rule.permission,
+            resource: rule.pattern,
+            effect: rule.action,
+          })),
         })
       );
       expect(await askInProject('one', 'https://trusted.example/one')).toBe('allow');
       expect(await askInProject('two', 'https://trusted.example/two')).toBe('allow');
       expect(await askInProject('other', 'https://other.example/')).toBe('ask');
+      expectedRules = [{ permission: 'webfetch', pattern: '*', action: 'ask' }];
       await writeFile(
         globalPath,
         JSON.stringify({
           ...config,
-          permissions: [{ action: 'webfetch', resource: '*', effect: 'ask' }],
+          permissions: expectedRules.map((rule) => ({
+            action: rule.permission,
+            resource: rule.pattern,
+            effect: rule.action,
+          })),
         })
       );
       expect(await askInProject('revoked', 'https://trusted.example/revoked')).toBe('ask');

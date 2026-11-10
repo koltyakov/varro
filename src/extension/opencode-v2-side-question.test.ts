@@ -1,4 +1,5 @@
 /* oxlint-disable anti-slop/no-module-mocking -- The native adapter imports the VS Code logger. */
+import type { SessionGenerateResponse } from '@opencode/client';
 import { describe, expect, it, vi } from 'vitest';
 import {
   MAX_SIDE_QUESTION_ANSWER_LENGTH,
@@ -12,6 +13,7 @@ vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.f
 
 type FixtureValue =
   | { text: string }
+  | SessionGenerateResponse['data']
   | { ses_side: { type: string } }
   | { id: string; location: { directory: string } }
   | Array<{ id: string }>
@@ -33,6 +35,24 @@ function fixtureWire(overrides: Record<string, FixtureValue> = {}) {
 }
 
 describe('native V2 side questions', () => {
+  it('accepts 2.2.7 generation usage without exposing it as answer text or adding history', async () => {
+    const generated: SessionGenerateResponse['data'] = {
+      text: '  The default was missing.  ',
+      tokens: { input: 12, output: 6, reasoning: 2, cache: { read: 10, write: 0 } },
+      cost: 0.001,
+    };
+    const wire = fixtureWire({ '/api/session/ses_side/generate': generated });
+    await expect(
+      new OpenCodeV2Adapter(wire).request('POST', '/session/ses_side/side-question', {
+        question: 'Why?',
+      })
+    ).resolves.toEqual({ text: 'The default was missing.' });
+    expect(wire.mock.calls.map(([method, route]) => [method, route])).toEqual([
+      ['GET', '/api/session/ses_side'],
+      ['POST', '/api/session/ses_side/generate'],
+    ]);
+  });
+
   it('includes local side-conversation context in follow-ups without appending it to native history', async () => {
     const wire = fixtureWire();
     const history = [{ question: 'Choose a name', answer: 'Maple 29' }];

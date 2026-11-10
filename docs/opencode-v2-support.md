@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.5` and v2 `2.2.6`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.5` and v2 `2.2.7`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -150,6 +150,131 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.2.7 compatibility review
+
+Reviewed v2.2.6 to v2.2.7, `dc2ffcf8bf` through `fedc6f208a`, including the
+complete upstream diff retained in `artifacts/opencode-2.2.7-upstream.diff`.
+All 139 HTTP paths and 98 published event names remain available. The only event
+schema changes are `credential.updated` and `session.usage.recorded`, described
+below. Session/message/part shapes, permissions/forms, and `serve`/upgrade arguments
+remain compatible. V1 `1.19.5` is still current, and both support floors remain
+unchanged.
+
+Some catalogs no longer wait for plugin activation. Varro subscribes before
+bootstrap and refreshes routing catalogs on native `agent.updated`,
+`integration.updated`, `command.updated`, and `skill.updated` events. Model and
+provider endpoints still wait where managed policy applies. The expanded
+`credential.updated` payload retains the existing catalog-refresh behavior.
+Session generation adds `tokens` and `cost` beside `text`; existing side-question
+and helper readers accept those fields. Regression tests cover the released
+generation response and both credential-update shapes. No production adapter
+changes are required by these contracts.
+
+The first published-server matrix passed 155 checks, failed two, and skipped 59
+family/platform cases, with no leaked or recovered processes. Both failures were
+in the URL-specific global-config permission fixture, on v2.0.5 and v2.2.7. The
+fixture read a changed config document, then called the raw permission endpoint
+before the configuration plugin had applied its rules to the Build agent. Retained
+snapshots show the file's `webfetch` rules present while the agent still had its
+default rules. An isolated v2.0.5 rerun reproduced the readiness race.
+
+The fixture now waits up to five seconds for the exact effective agent rules,
+then issues one permission check per project. It never retries a permission
+decision or replaces it with a local answer. Both released binaries pass the
+focused corrected case. Keep this readiness precondition for raw permission API
+tests; config-file visibility alone does not establish effective policy. No
+production permission handling changed. This investigation does not establish
+that the raw endpoint is safe to call before plugin activation.
+
+Original evidence remains in `artifacts/opencode-2.2.7-adapters.log`,
+`artifacts/opencode-adapters/run-ihh9rf/`, and
+`artifacts/opencode-2.2.7-floor-recheck.log`. Corrected focused checks are in
+`artifacts/opencode-2.2.7-floor-readiness-recheck.log` and
+`artifacts/opencode-2.2.7-current-readiness-recheck.log`.
+
+Functionality review:
+
+- Copilot Auto is a server-provided chat-model catalog entry. Varro's existing
+  picker and model submission can use it without a special routing UI; the server
+  owns routing, fallback, and the discount. Signed-in Copilot Auto is not verified
+  by fixture-only compatibility checks.
+- Session generation, including side questions and cache-warming pings, now records
+  `session.usage.recorded` with `source: "generate"` and updates native session
+  totals. Varro's usage reports and CSV aggregate assistant-message records, not
+  these auxiliary usage events. Recommended follow-up: account for title,
+  compaction, and generation usage without inventing assistant messages or
+  attributing events to an unrecorded model. This is a reporting gap, not a send
+  or transcript compatibility failure.
+- Console event watches can wake sessions for external changes, but require the
+  `console_watches` flag and Console workspace support. They are opt-in backend
+  behavior, not something this dependency bump enables. A dedicated watch manager
+  would be separate UI work.
+- Predicate decision questions add optional true/false criteria. Existing native
+  reviewer requests remain valid; revising judge criteria is optional policy work.
+- Manual read/unread controls and side-panel tab shortcuts are app/TUI parity
+  choices. ACP steering and direct `@opencode/ai` embedding/image API changes do
+  not affect Varro's HTTP integration.
+
+Server-owned fixes cover MCP OAuth refresh locking and transient failures,
+Copilot billing and endpoint refresh, Claude Agent compaction/tool continuity,
+legacy configuration/model capabilities, file tail reads, shell exit/timeout
+messages, and cache-warming timing. These do not require local reimplementation.
+
+The lockfile also synchronizes the pre-existing manifest edits for Varro's version,
+marked, oxfmt, oxlint, Vite, and the minimatch override. `npm install` reports zero
+vulnerabilities.
+
+All 576 focused adapter, transcript, side-question, inbox, background-job,
+transport, usage, local-summary, native-decision, catalog-loader, mount-bridge,
+authentication-store, and one-shot generation tests pass. `npm run lint`, `npm run fmt`,
+`npm run lint:check`, `npm run typecheck`, `npm run typecheck:suggestions`, and
+`npm run build` pass, with zero suggestion diagnostics. Evidence uses the
+`artifacts/opencode-2.2.7-` prefix.
+
+The full `npm run test` run also passes: 12,166 Vitest tests passed with 57 skipped,
+and 284 script tests passed with three skipped. Evidence is
+`artifacts/opencode-2.2.7-all-tests.log`.
+
+The full corrected published-server matrix is **not clean**. All API contract
+cases passed, including the corrected global-config permission fixture, but three
+managed-startup cases failed. The run passed 154 checks, failed three, and skipped
+59 family/platform cases, with no leaked or recovered processes.
+
+| Published server | Passed | Skipped | Issues found | All cases complete |
+| --- | ---: | ---: | --- | --- |
+| v1.16.0 | 30 | 24 | None in tested cases | Yes, applicable automated cases |
+| v1.19.5 | 31 | 23 | None in tested cases | Yes, applicable automated cases |
+| v2.0.5 | 44 | 9 | Marker-reload health timeout; focused rerun also failed | Yes, applicable automated cases attempted; one failed |
+| v2.2.7 | 49 | 3 | Configured and marker-reload startup failures; both passed one focused rerun | Yes, applicable automated cases attempted; two failed |
+
+The v2.2.7 failures timed out while detecting the CLI version, then reached
+authenticated health without the expected private `service.json` registration.
+Both startup modes passed a focused rerun after the concurrent full unit run
+finished. This is not proof that the underlying failure is fixed or caused solely
+by load. Recommended diagnostics: retain CLI-version subprocess duration and
+launch-family selection, then distinguish a failed registration assertion from
+failed server startup before changing production recovery or its deadlines.
+
+The v2.0.5 marker-reload timeout recurred in the focused rerun without the full
+unit run. The original timeline shows successful initial attachment and two
+marker handoffs before a CLI-version timeout, a new launch on a different port,
+and unsuccessful health recovery. Recommended next investigation: trace the
+selected endpoint, private registration, and generation through marker handoff
+and version-unknown fallback. Do not relax ownership checks, extend deadlines, or
+raise the support floor based on this run alone.
+
+Retained evidence is `artifacts/opencode-2.2.7-adapters-final.log`,
+`artifacts/opencode-adapters/run-upxeno/`,
+`artifacts/opencode-2.2.7-startup-recheck.log`, and
+`artifacts/opencode-2.2.7-floor-startup-recheck.log`. The five compatibility-summary
+tests passed after the matrix finished, in
+`artifacts/opencode-2.2.7-summary-tests-final.log`. The generated adapter summary
+still records the failed matrix; focused reruns do not overwrite it.
+
+The v1 dependency is unchanged, so the Docker v1 support-range matrix was not
+rerun. Real-editor rendering, live-account action parity, signed-in Copilot Auto,
+native Windows, and Docker-image checks were not run for this bump.
 
 ### 2.2.6 compatibility review
 
