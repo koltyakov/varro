@@ -6,7 +6,9 @@ import { mkdir, mkdtemp, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import type { Duplex } from 'node:stream';
+import type { ProgressOptions, Uri } from 'vscode';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, isString, type UnknownRecord } from '../shared/type-utils';
 import { parseServerEvent } from '../shared/protocol';
@@ -31,6 +33,7 @@ import type { RestProxyCallbacks } from './rest-proxy';
 import type { Persistence } from '../shared/persistence';
 import type { OpenCodeServerMemoryPermission, PermissionRule } from '../shared/opencode-types';
 import { fixture } from '../webview/test-fixtures';
+import { readAllTimeUsageCsv, UsageReportService } from './usage-report-service';
 
 const exportEditor = vi.hoisted(() => ({
   openTextDocument: vi.fn(async (options: { content: string; language: string }) => options),
@@ -38,10 +41,13 @@ const exportEditor = vi.hoisted(() => ({
   showErrorMessage: vi.fn(),
 }));
 vi.mock('vscode', () => ({
+  ProgressLocation: { Notification: 15 },
+  commands: { executeCommand: vi.fn() },
   workspace: { openTextDocument: exportEditor.openTextDocument },
   window: {
     showTextDocument: exportEditor.showTextDocument,
     showErrorMessage: exportEditor.showErrorMessage,
+    withProgress: async (_options: ProgressOptions, task: () => Promise<string>) => task(),
   },
 }));
 
@@ -348,6 +354,90 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       },
     ]);
   });
+
+  it('reports native side-question and warming usage without adding assistant messages', async (context) => {
+    const health = await transport.readHealthInfo();
+    if (transport.version !== 2 || compareVersions(health.version ?? '0', '2.2.7') < 0)
+      return context.skip();
+    const created = asRecord(
+      await transport.request('POST', '/session', {
+        title: 'Auxiliary usage fixture',
+        model: { providerID: 'fixture', modelID: 'fixture' },
+      })
+    );
+    if (!isString(created?.id)) throw new Error('Missing isolated auxiliary usage session');
+    const id = created.id;
+    try {
+      vi.stubEnv('OPENCODE_DB', join(root, 'data/probe.db'));
+      vi.stubEnv('VARRO_TEST_STATE_ROOT', join(root, 'usage-state'));
+      expect(
+        await transport.request('POST', `/session/${id}/side-question`, { question: 'Why?' })
+      ).toEqual({ text: 'Adapter stream verified.' });
+      await transport.request('POST', `/api/session/${id}/generate`, {
+        prompt: 'This is a keep-alive request. Reply with exactly: OK',
+      });
+      expect(await transport.request('GET', `/session/${id}/message`)).toEqual([]);
+      const csv = await readAllTimeUsageCsv();
+      const database = new DatabaseSync(join(root, 'data/probe.db'), { readOnly: true });
+      try {
+        await writeFile(
+          join(root, 'auxiliary-events.json'),
+          JSON.stringify(
+            database.prepare('SELECT type,data FROM event WHERE aggregate_id=?').all(id),
+            null,
+            2
+          )
+        );
+      } finally {
+        database.close();
+      }
+      await writeFile(join(root, 'auxiliary-usage.csv'), csv.csv);
+      await writeFile(
+        join(root, 'auxiliary-usage.log'),
+        String(
+          await transport.request('GET', `/api/experimental/session/${id}/log?follow=false&after=0`)
+        )
+      );
+      const generation = csv.csv.split('\r\n').find((row) => row.includes(',unrecorded,'));
+      expect(generation?.split(',')).toEqual([
+        'unknown',
+        'unknown',
+        'unknown',
+        'unknown',
+        '0',
+        '20',
+        '6',
+        '0',
+        '0',
+        '0',
+        '26',
+        '0.000088',
+        '0',
+        'unrecorded',
+        '',
+        '',
+      ]);
+      let report = '';
+      const request = async (...args: Parameters<OpenCodeTransport['request']>) =>
+        args[1].startsWith('/experimental/session')
+          ? [await transport.request('GET', `/session/${id}`)]
+          : transport.request(...args);
+      await new UsageReportService(
+        { request, apiVersion: 2, isAttachOnly: true },
+        async () => undefined,
+        null,
+        async (content) => {
+          report = content;
+          return fixture<Uri>({ scheme: 'untitled', path: '/usage' });
+        }
+      ).openReport();
+      expect(report).toContain('| Unattributed | Other session usage | 0 | 26 | - |');
+      expect(report).not.toContain('## Warnings');
+    } finally {
+      vi.unstubAllEnvs();
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 30000);
 
   it('bounds silent provider WebSockets after reloading an old runtime timeout policy', async (context) => {
     const health = await transport.readHealthInfo();

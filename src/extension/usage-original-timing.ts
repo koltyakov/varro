@@ -17,6 +17,7 @@ const USAGE_ARCHIVE_SCHEMA =
   'CREATE TABLE IF NOT EXISTS usage_session (id TEXT PRIMARY KEY, identity TEXT NOT NULL UNIQUE, time_updated INTEGER NOT NULL, version INTEGER NOT NULL); ' +
   'CREATE TABLE IF NOT EXISTS usage_message (id TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES usage_session(id) ON DELETE CASCADE, data TEXT NOT NULL, PRIMARY KEY (session_id, id)); ' +
   'CREATE INDEX IF NOT EXISTS usage_message_session_idx ON usage_message(session_id); ' +
+  'CREATE TABLE IF NOT EXISTS usage_auxiliary (id TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES usage_session(id) ON DELETE CASCADE, data TEXT NOT NULL, PRIMARY KEY (session_id, id)); ' +
   'CREATE TABLE IF NOT EXISTS usage_cleanup (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL); ' +
   'CREATE TABLE IF NOT EXISTS usage_cleanup_directory (session_id TEXT NOT NULL, directory TEXT NOT NULL, PRIMARY KEY(session_id,directory)); ' +
   'CREATE TABLE IF NOT EXISTS usage_artifact (session_id TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY (session_id, path));';

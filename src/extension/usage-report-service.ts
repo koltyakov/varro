@@ -242,6 +242,7 @@ type Session = {
   identity?: string;
   originalTimings?: Map<string, OriginalUsageTiming>;
   timingRevision?: string;
+  nativeTokens?: Tokens;
 };
 
 type Tokens = {
@@ -257,10 +258,13 @@ type Usage = {
   providerID: string;
   modelID: string;
   promptID: string | null;
-  created: number;
+  created: number | null;
   durationMs: number | null;
   tokens: Tokens;
+  source?: AuxiliaryUsageSource;
 };
+
+type AuxiliaryUsageSource = 'generate' | 'title' | 'compaction' | 'unrecorded';
 
 type Aggregate = Tokens & {
   promptIDs: Set<string>;
@@ -272,6 +276,7 @@ type Aggregate = Tokens & {
 type ReportWindow = {
   title: string;
   start: number | null;
+  undated?: boolean;
 };
 
 type CachedSessionUsage = {
@@ -501,7 +506,8 @@ export class UsageReportService {
         archived: 'true',
         limit: String(SESSION_PAGE_LIMIT),
       };
-      if (start !== undefined) query.start = String(start);
+      // Native auxiliary usage does not advance the session's update time.
+      if (start !== undefined && this.server.apiVersion !== 2) query.start = String(start);
       if (cursor) query.cursor = cursor;
       const path = withQuery('/experimental/session', query);
       let response: unknown;
@@ -531,6 +537,8 @@ export class UsageReportService {
             id,
             directory,
             updated: numberValue(asRecord(record?.time)?.updated),
+            nativeTokens:
+              this.server.apiVersion === 2 ? nativeUsageTokens(record?.tokens) : undefined,
             pauses: readSessionPauses(record?.metadata),
             identity:
               stringValue(
@@ -555,6 +563,7 @@ export class UsageReportService {
   private async readSessionUsage(session: Session, warnings: string[]): Promise<Usage[]> {
     const cached = this.sessionUsageCache.get(session.id);
     if (
+      this.server.apiVersion !== 2 &&
       session.updated !== null &&
       cached?.updated === session.updated &&
       cached.pauseRevision === JSON.stringify(session.pauses ?? []) &&
@@ -591,7 +600,50 @@ export class UsageReportService {
         messageIDs.add(entry.id);
         usage.push(entry.usage);
       }
-      if (session.updated !== null) {
+      if (this.server.apiVersion === 2) {
+        try {
+          const log = await this.server.request(
+            'GET',
+            scopedPath(
+              `/api/experimental/session/${encodeURIComponent(session.id)}/log?follow=false&after=0`,
+              session.directory
+            ),
+            undefined,
+            { maxResponseBytes: SESSION_USAGE_MAX_BYTES }
+          );
+          usage.push(...readAuxiliaryUsageLog(log, session.id));
+        } catch (error) {
+          warnings.push(
+            `Could not read auxiliary usage for session ${session.id}: ${errorMessage(error)}.`
+          );
+        }
+        if (session.nativeTokens) {
+          const remaining = { ...session.nativeTokens };
+          for (const entry of usage) {
+            for (const key of ['input', 'output', 'reasoning', 'cacheRead', 'cacheWrite'] as const)
+              remaining[key] -= entry.tokens[key];
+          }
+          for (const key of ['input', 'output', 'reasoning', 'cacheRead', 'cacheWrite'] as const)
+            remaining[key] = Math.max(0, remaining[key]);
+          remaining.total =
+            remaining.input +
+            remaining.output +
+            remaining.reasoning +
+            remaining.cacheRead +
+            remaining.cacheWrite;
+          if (remaining.total > 0)
+            usage.push({
+              providerID: 'unknown',
+              modelID: 'unknown',
+              source: 'unrecorded',
+              created: null,
+              promptID: null,
+              durationMs: null,
+              tokens: remaining,
+            });
+        }
+      }
+      if (session.updated !== null && this.server.apiVersion !== 2) {
         this.cacheSessionUsage(session, usage);
       }
       return usage;
@@ -743,7 +795,8 @@ async function runLocalUsageWorker(
   const annotationsDirectory = getVarroStateReadDirectory('opencode-v2');
 
   return new Promise((resolve, reject) => {
-    const allTime = 'windows' in task && task.windows.some((window) => window.start === null);
+    const allTime =
+      'windows' in task && task.windows.some((window) => window.start === null && !window.undated);
     const worker = new Worker(LOCAL_USAGE_WORKER, {
       eval: true,
       workerData: {
@@ -953,7 +1006,7 @@ const compactUsageRow = (row) => {
     typeof original[4] === 'number' && original[4] >= fields[7]
       ? original[4] : null;
   return {
-    sessionID: row.sessionID, messageID: row.messageID, version: row.version, identity: row.identity, parentID: row.parentID,
+    sessionID: row.sessionID, messageID: row.messageID, version: row.version, identity: row.identity, parentID: row.parentID, usageSource: row.usageSource,
     providerID: fields[0], nestedProviderID: fields[1], modelID: fields[2],
     nestedModelID: fields[3] ?? fields[4], variant: fields[5] ?? fields[6],
     timeCreated: fields[7], timeCompleted: fields[8], total: fields[9], cost: fields[10],
@@ -1128,6 +1181,7 @@ const legacyInventory = (database) => {
         sources.splice(0, sources.length, 'SELECT * FROM live_usage_session');
       }
       const hasArchive = existsSync(workerData.archivePath);
+      const hasArchivedAuxiliary = hasArchive && !archiveSessions && !!database.prepare("SELECT 1 FROM stats.sqlite_master WHERE type='table' AND name='usage_auxiliary'").get();
       if (hasArchive) {
         if (archiveSessions) {
           // Copy only headers through a separate read connection. Holding an attached
@@ -1146,7 +1200,11 @@ const legacyInventory = (database) => {
       }
       if (!sources.length) throw new Error('No supported OpenCode usage tables found.');
       // Select a complete session before filtering dates or reading messages. Equal timestamps prefer v2.
-      const selected = 'WITH ranked AS (SELECT *, row_number() OVER (PARTITION BY identity ORDER BY time_updated DESC, version DESC, archived ASC, id DESC) AS rank FROM (' + sources.join(' UNION ALL ') + ')), selected AS (SELECT * FROM ranked WHERE rank = 1' + (archiveSessions || workerData.start === null ? '' : ' AND time_updated >= ?') + ') ';
+      const recentAuxiliary = [
+        ...(tables.has('event') ? ["(version = 2 AND archived = 0 AND EXISTS (SELECT 1 FROM event e WHERE e.aggregate_id = ranked.id AND e.type = 'session.usage.recorded.1' AND e.created >= ?1))"] : []),
+        ...(hasArchivedAuxiliary ? ["(archived = 1 AND EXISTS (SELECT 1 FROM stats.usage_auxiliary a WHERE a.session_id = ranked.id AND json_extract(a.data, '$.time.created') >= ?1))"] : []),
+      ];
+      const selected = 'WITH ranked AS (SELECT *, row_number() OVER (PARTITION BY identity ORDER BY time_updated DESC, version DESC, archived ASC, id DESC) AS rank FROM (' + sources.join(' UNION ALL ') + ')), selected AS (SELECT * FROM ranked WHERE rank = 1' + (archiveSessions || workerData.start === null ? '' : ' AND (time_updated >= ?1' + recentAuxiliary.map(test => ' OR ' + test).join('') + ')') + ') ';
       const parameters = archiveSessions || workerData.start === null ? [] : [workerData.start];
       progress('Resolving usage snapshot');
       const sessionCount = archiveSessions || workerData.exportCsv ? 0 : database.prepare(selected + 'SELECT count(*) AS count FROM selected').get(...parameters).count;
@@ -1210,7 +1268,7 @@ const legacyInventory = (database) => {
       // Keep selected sessions as the outer loop. Otherwise SQLite can scan and decode
       // every message in both versions before checking whether its session was selected.
       if (tables.has('session') && tables.has('message')) {
-        messages.push("SELECT m.id, s.identity, 1 AS version, m.session_id, m.data, NULL AS originalCompleted, " + (workerData.exportCsv ? 'NULL' : "json_extract(m.data, '$.parentID')") + " AS parentID FROM selected s CROSS JOIN message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 1" + bodyLimit + " AND json_extract(m.data, '$.role') = 'assistant'");
+        messages.push("SELECT m.id, s.identity, 1 AS version, m.session_id, m.data, NULL AS usageSource, NULL AS originalCompleted, " + (workerData.exportCsv ? 'NULL' : "json_extract(m.data, '$.parentID')") + " AS parentID FROM selected s CROSS JOIN message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 1" + bodyLimit + " AND json_extract(m.data, '$.role') = 'assistant'");
       }
       if (tables.has('session_v2') && tables.has('session_message')) {
         // Migration can replace completion times with the import time. Recover timing only
@@ -1221,13 +1279,21 @@ const legacyInventory = (database) => {
             : "(SELECT CASE WHEN json_valid(original.data) THEN CASE WHEN json_extract(original.data, '$.role') = 'assistant' AND json_extract(original.data, '$.time.created') = json_extract(m.data, '$.time.created') AND json_extract(original.data, '$.providerID') = coalesce(json_extract(m.data, '$.providerID'), json_extract(m.data, '$.model.providerID')) AND json_extract(original.data, '$.modelID') = coalesce(json_extract(m.data, '$.modelID'), json_extract(m.data, '$.model.id'), json_extract(m.data, '$.model.modelID')) AND json_type(original.data, '$.time.completed') IN ('integer', 'real') AND json_extract(original.data, '$.time.completed') >= json_extract(original.data, '$.time.created') THEN json_extract(original.data, '$.time.completed') END END FROM message original WHERE original.id = m.id AND original.session_id = s.identity)"
           : 'NULL';
         const parentID = workerData.exportCsv ? 'NULL' : "coalesce(json_extract(m.data, '$.parentID'), (SELECT u.id FROM usage_prompt u WHERE u.session_id = m.session_id AND u.seq < m.seq ORDER BY u.seq DESC LIMIT 1))";
-        messages.push("SELECT m.id, s.identity, 2 AS version, m.session_id, m.data, " + originalCompleted + " AS originalCompleted, " + parentID + " AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 2 AND m.type = 'assistant'" + bodyLimit);
+        messages.push("SELECT m.id, s.identity, 2 AS version, m.session_id, m.data, NULL AS usageSource, " + originalCompleted + " AS originalCompleted, " + parentID + " AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.archived = 0 AND s.version = 2 AND m.type = 'assistant'" + bodyLimit);
       }
       if (hasArchive && !archiveSessions) {
-        messages.push("SELECT m.id, s.identity, 0 AS version, m.session_id, m.data, NULL AS originalCompleted, " + (workerData.exportCsv ? 'NULL' : "json_extract(m.data, '$.parentID')") + " AS parentID FROM selected s CROSS JOIN stats.usage_message m ON s.id = m.session_id WHERE s.archived = 1" + bodyLimit);
+        messages.push("SELECT m.id, s.identity, 0 AS version, m.session_id, m.data, NULL AS usageSource, NULL AS originalCompleted, " + (workerData.exportCsv ? 'NULL' : "json_extract(m.data, '$.parentID')") + " AS parentID FROM selected s CROSS JOIN stats.usage_message m ON s.id = m.session_id WHERE s.archived = 1" + bodyLimit);
+      }
+      if (tables.has('event')) {
+        // Durable usage events have no model identity or assistant message. Read only
+        // the selected session's own events, never a fork parent's or step usage again.
+        messages.push("SELECT e.id, s.identity, 2 AS version, e.aggregate_id AS session_id, json_set(e.data, '$.time', json_object('created', e.created)) AS data, CASE WHEN json_extract(e.data, '$.sessionID') = s.id THEN coalesce(json_extract(e.data, '$.source'),'invalid') ELSE 'invalid' END AS usageSource, NULL AS originalCompleted, NULL AS parentID FROM selected s CROSS JOIN event e ON s.id = e.aggregate_id WHERE s.archived = 0 AND s.version = 2 AND e.type = 'session.usage.recorded.1'" + (workerData.exportCsv ? '' : ' AND length(e.data) <= ?'));
+      }
+      if (hasArchivedAuxiliary) {
+        messages.push("SELECT m.id, s.identity, 0 AS version, m.session_id, m.data, coalesce(json_extract(m.data, '$.source'),'invalid') AS usageSource, NULL AS originalCompleted, NULL AS parentID FROM selected s CROSS JOIN stats.usage_auxiliary m ON s.id = m.session_id WHERE s.archived = 1" + bodyLimit);
       }
       const query = compact ? selected +
-        "SELECT m.session_id AS sessionID, m.id AS messageID, m.identity, m.version AS version, m.parentID, m.originalCompleted AS originalTiming, json_extract(m.data, '$.providerID', '$.model.providerID', '$.modelID', '$.model.id', '$.model.modelID', '$.model.variant', '$.variant', '$.time.created', '$.time.completed', '$.tokens.total', '$.cost', '$.tokens.input', '$.tokens.output', '$.tokens.reasoning', '$.tokens.cache.read', '$.tokens.cache.write') AS fields FROM (" + messages.join(' UNION ALL ') + ') m LIMIT ?' : [
+        "SELECT m.session_id AS sessionID, m.id AS messageID, m.identity, m.version AS version, m.parentID, m.usageSource, m.originalCompleted AS originalTiming, json_extract(m.data, '$.providerID', '$.model.providerID', '$.modelID', '$.model.id', '$.model.modelID', '$.model.variant', '$.variant', '$.time.created', '$.time.completed', '$.tokens.total', '$.cost', '$.tokens.input', '$.tokens.output', '$.tokens.reasoning', '$.tokens.cache.read', '$.tokens.cache.write') AS fields FROM (" + messages.join(' UNION ALL ') + ') m LIMIT ?' : [
         selected,
         'SELECT m.session_id AS sessionID,',
         'm.id AS messageID, m.version AS version, m.identity,',
@@ -1237,6 +1303,7 @@ const legacyInventory = (database) => {
         "coalesce(json_extract(m.data, '$.model.id'), json_extract(m.data, '$.model.modelID')) AS nestedModelID,",
         ...(archiveSessions || workerData.exportCsv ? ["coalesce(json_extract(m.data, '$.model.variant'), json_extract(m.data, '$.variant')) AS variant,"] : []),
         'm.parentID AS parentID,',
+        'm.usageSource,',
         "json_extract(m.data, '$.time.created') AS timeCreated,",
         'm.originalCompleted AS originalCompleted,',
         "json_extract(m.data, '$.time.completed') AS timeCompleted,",
@@ -1253,7 +1320,31 @@ const legacyInventory = (database) => {
       const statement = database.prepare(query);
       if (archive) progress('Archiving assistant usage records');
       const rows = statement.iterate(...parameters, ...(workerData.exportCsv ? [] : messages.map(() => archive ? Number.MAX_SAFE_INTEGER : workerData.maxMessageDataBytes)), workerData.allTimeReport ? -1 : workerData.maxScannedAssistantRows + 1);
+      const nativeTotals = new Map();
+      if (tables.has('session_v2')) {
+        const columns = new Set(database.prepare('PRAGMA table_info(session_v2)').all().map(column => column.name));
+        if (['cost','tokens_input','tokens_output','tokens_reasoning','tokens_cache_read','tokens_cache_write'].every(column => columns.has(column))) {
+          for (const row of database.prepare(selected + 'SELECT s.id, n.cost, n.tokens_input AS input, n.tokens_output AS output, n.tokens_reasoning AS reasoning, n.tokens_cache_read AS cacheRead, n.tokens_cache_write AS cacheWrite FROM selected s CROSS JOIN session_v2 n ON n.id=s.id WHERE s.version=2 AND s.archived=0').iterate(...parameters)) {
+            if ([row.cost,row.input,row.output,row.reasoning,row.cacheRead,row.cacheWrite].some(value => optionalNonnegativeNumber(value) === null)) throw new Error('Malformed native session usage totals.');
+            nativeTotals.set(row.id, { ...row, nativeCost: row.cost, knownRecords: 0 });
+          }
+        }
+      }
+      // Default V2 servers keep cumulative counters but do not persist event history.
+      // Reconcile only the remainder, never guess its date, source, or model.
+      const usageRows = function* () {
+        for (const rawRow of rows) yield compact ? compactUsageRow(rawRow) : rawRow;
+        for (const [sessionID, remaining] of nativeTotals) {
+          const tokens = {};
+          for (const key of ['input','output','reasoning','cacheRead','cacheWrite']) tokens[key] = Math.max(0, remaining[key]);
+          const total = tokens.input + tokens.output + tokens.reasoning + tokens.cacheRead + tokens.cacheWrite;
+          const cost = remaining.cost > Number.EPSILON * remaining.nativeCost * Math.max(1, remaining.knownRecords) ? remaining.cost : 0;
+          if (total <= 0 && cost <= 0) continue;
+          yield { sessionID, messageID: 'native-total-residual', version: 2, usageSource: 'unrecorded', parentID: null, timeCreated: null, timeCompleted: null, originalCompleted: null, total, cost, ...tokens };
+        }
+      };
       const insertUsage = archive?.prepare('INSERT INTO usage_message VALUES (?, ?, ?)');
+      const insertAuxiliary = archive?.prepare('INSERT INTO usage_auxiliary VALUES (?, ?, ?)');
       const aggregates = workerData.windows.map(() => ({
         groups: new Map(),
         promptIDs: new Set(),
@@ -1268,11 +1359,12 @@ const legacyInventory = (database) => {
       let assistantRows = 0;
       let scannedAssistantRows = 0;
       let progressAt = Date.now();
-      const oldestWindowStart = workerData.exportCsv || workerData.windows.some((window) => window.start === null)
+      const datedWindows = workerData.windows.filter(window => !window.undated);
+      const oldestWindowStart = workerData.exportCsv || datedWindows.some((window) => window.start === null)
         ? null
-        : Math.min(...workerData.windows.map((window) => window.start));
+        : Math.min(...datedWindows.map((window) => window.start));
 
-      for (const rawRow of rows) {
+      for (const row of usageRows()) {
         scannedAssistantRows += 1;
         if (!workerData.allTimeReport && scannedAssistantRows > workerData.maxScannedAssistantRows) {
           throw new Error('Usage report exceeds the ' + workerData.maxScannedAssistantRows.toLocaleString() + '-message local scan limit.');
@@ -1281,11 +1373,22 @@ const legacyInventory = (database) => {
           progressAt = Date.now();
           progress('Read ' + scannedAssistantRows.toLocaleString() + ' assistant messages', scannedAssistantRows);
         }
-        const row = compact ? compactUsageRow(rawRow) : rawRow;
+        const auxiliary = row.usageSource !== null && row.usageSource !== undefined;
+        const undated = row.usageSource === 'unrecorded';
+        if (auxiliary && !['generate','title','compaction','unrecorded'].includes(row.usageSource)) throw new Error('Unsupported auxiliary usage source.');
         const sessionID = stringValue(row.sessionID);
         const timeCreated = numberValue(row.timeCreated);
-        const pausedAt = row.version === 2 && sessionID ? readPauseTime(sessionID, row.messageID) : undefined;
-        const preserved = row.version === 2 ? timing.completed(row) : null;
+        if (auxiliary && ((!undated && (timeCreated === null || timeCreated < 0)) || [row.input,row.output,row.reasoning,row.cacheRead,row.cacheWrite].some(value => optionalNonnegativeNumber(value) === null))) throw new Error('Malformed auxiliary usage record.');
+        if (row.version === 2 && !undated) {
+          const remaining = nativeTotals.get(sessionID);
+          if (remaining) {
+            for (const key of ['input','output','reasoning','cacheRead','cacheWrite']) remaining[key] -= nonnegativeNumber(row[key]);
+            remaining.cost -= nonnegativeNumber(row.cost);
+            remaining.knownRecords++;
+          }
+        }
+        const pausedAt = !auxiliary && row.version === 2 && sessionID ? readPauseTime(sessionID, row.messageID) : undefined;
+        const preserved = !auxiliary && row.version === 2 ? timing.completed(row) : null;
         const original = numberValue(row.originalCompleted);
         if (original !== null && preserved !== null && original !== preserved)
           throw new Error('Conflicting original usage timing for ' + row.messageID);
@@ -1295,10 +1398,11 @@ const legacyInventory = (database) => {
           : recordedCompleted;
         const created = timeCompleted ?? timeCreated;
         if (archive) {
-          insertUsage.run(row.messageID, row.sessionID, JSON.stringify({
-            providerID: stringValue(row.providerID) || stringValue(row.nestedProviderID),
-            modelID: stringValue(row.modelID) || stringValue(row.nestedModelID),
-            variant: stringValue(row.variant),
+          (auxiliary ? insertAuxiliary : insertUsage).run(row.messageID, row.sessionID, JSON.stringify({
+            ...(auxiliary ? { source: row.usageSource } : {}),
+            providerID: auxiliary ? null : stringValue(row.providerID) || stringValue(row.nestedProviderID),
+            modelID: auxiliary ? null : stringValue(row.modelID) || stringValue(row.nestedModelID),
+            variant: auxiliary ? null : stringValue(row.variant),
             parentID: row.parentID,
             cost: row.cost,
             time: { created: row.timeCreated, completed: timeCompleted },
@@ -1306,14 +1410,14 @@ const legacyInventory = (database) => {
           }));
           if (scannedAssistantRows % 1000 === 0) progress('Archived usage for ' + scannedAssistantRows.toLocaleString() + ' assistant messages');
         }
-        if (workerData.exportCsv && (created === null || !Number.isFinite(new Date(created).getTime()))) throw new Error('Cannot export usage with a missing or invalid message timestamp.');
-        if (created === null || (oldestWindowStart !== null && created < oldestWindowStart)) continue;
+        if (workerData.exportCsv && !undated && (created === null || !Number.isFinite(new Date(created).getTime()))) throw new Error('Cannot export usage with a missing or invalid message timestamp.');
+        if (!undated && (created === null || (oldestWindowStart !== null && created < oldestWindowStart))) continue;
         assistantRows += 1;
         if (!workerData.allTimeReport && assistantRows > (workerData.exportCsv ? workerData.maxScannedAssistantRows : workerData.maxAssistantRows)) {
           throw new Error('Usage report exceeds the ' + workerData.maxAssistantRows.toLocaleString() + '-message local aggregation limit.');
         }
-        const providerID = stringValue(row.providerID) || stringValue(row.nestedProviderID);
-        const modelID = stringValue(row.modelID) || stringValue(row.nestedModelID);
+        const providerID = auxiliary ? 'unknown' : stringValue(row.providerID) || stringValue(row.nestedProviderID);
+        const modelID = auxiliary ? 'unknown' : stringValue(row.modelID) || stringValue(row.nestedModelID);
         const parentID = stringValue(row.parentID);
         if (!sessionID || !providerID || !modelID) {
           if (workerData.exportCsv) throw new Error('Cannot export usage with missing session, provider, or model identity.');
@@ -1330,19 +1434,20 @@ const legacyInventory = (database) => {
         if (workerData.exportCsv) {
           const cost = optionalNonnegativeNumber(row.cost);
           if (total <= 0 && cost === null) continue;
-          const day = new Date(created).toISOString().slice(0, 10);
-          const variant = stringValue(row.variant) ?? 'unknown';
-          const key = JSON.stringify([day, providerID, modelID, variant]);
+          const day = undated ? 'unknown' : new Date(created).toISOString().slice(0, 10);
+          const variant = auxiliary ? 'unknown' : stringValue(row.variant) ?? 'unknown';
+          const source = auxiliary ? row.usageSource : 'assistant';
+          const key = JSON.stringify([day, providerID, modelID, variant, source]);
           let group = csvGroups.get(key);
           if (!group) {
             if (csvGroups.size >= workerData.maxCsvRows) throw new Error('Usage CSV exceeds the daily row limit. No partial export was saved.');
-            group = { day, providerID, modelID, variant, messages: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0, costedMessages: 0 };
+            group = { day, providerID, modelID, variant, source, auxiliaryRequests: 0, costedAuxiliaryRequests: 0, costedUnrecorded: 0, messages: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0, costedMessages: 0 };
             csvGroups.set(key, group);
           }
-          group.messages++;
+          if (!undated) { if (auxiliary) group.auxiliaryRequests++; else group.messages++; }
           group.input += input; group.output += output; group.reasoning += reasoning;
           group.cacheRead += cacheRead; group.cacheWrite += cacheWrite; group.total += total;
-          if (cost !== null) { group.cost += cost; group.costedMessages++; }
+          if (cost !== null) { group.cost += cost; if (undated) group.costedUnrecorded++; else if (auxiliary) group.costedAuxiliaryRequests++; else group.costedMessages++; }
           continue;
         }
         if (total <= 0) continue;
@@ -1350,7 +1455,7 @@ const legacyInventory = (database) => {
           ? timeCompleted - timeCreated
           : null;
         const promptID = parentID ? sessionID + '\u0000' + parentID : null;
-        const route = providerID + '\u0000' + modelID;
+        const route = providerID + '\u0000' + modelID + (auxiliary ? '\u0000' + row.usageSource : '');
         if (!routes.has(route)) {
           if (routes.size >= workerData.maxRoutes) {
             throw new Error('Usage report exceeds the ' + workerData.maxRoutes.toLocaleString() + '-route local aggregation limit.');
@@ -1360,7 +1465,7 @@ const legacyInventory = (database) => {
 
         for (let index = 0; index < workerData.windows.length; index += 1) {
           const window = workerData.windows[index];
-          if (window.start !== null && created < window.start) continue;
+          if (window.undated ? !undated : undated ? window.start !== null : window.start !== null && created < window.start) continue;
           const windowAggregate = aggregates[index];
           const aggregate = windowAggregate.groups.get(route) || emptyAggregate();
           if (promptID) {
@@ -1424,10 +1529,10 @@ const legacyInventory = (database) => {
           if (/^[\u0000-\u0020]*[=+@-]/.test(text)) text = "'" + text;
           return /[",\r\n]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
         };
-        const lines = ['day_utc,provider,model,reasoning_setting,messages,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,total_tokens,reported_cost_usd,costed_messages'];
+        const lines = ['day_utc,provider,model,reasoning_setting,messages,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,total_tokens,reported_cost_usd,costed_messages,usage_source,auxiliary_requests,costed_auxiliary_requests'];
         let bytes = 3 + Buffer.byteLength(lines[0]) + 2;
         for (const [, group] of [...csvGroups].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {
-          const line = [group.day, group.providerID, group.modelID, group.variant, group.messages, group.input, group.output, group.reasoning, group.cacheRead, group.cacheWrite, group.total, group.costedMessages ? Number(group.cost.toPrecision(15)) : '', group.costedMessages].map(csvCell).join(',');
+          const line = [group.day, group.providerID, group.modelID, group.variant, group.messages, group.input, group.output, group.reasoning, group.cacheRead, group.cacheWrite, group.total, group.costedMessages + group.costedAuxiliaryRequests + group.costedUnrecorded ? Number(group.cost.toPrecision(15)) : '', group.costedMessages, group.source, group.source === 'unrecorded' ? '' : group.auxiliaryRequests, group.source === 'unrecorded' ? '' : group.costedAuxiliaryRequests].map(csvCell).join(',');
           bytes += Buffer.byteLength(line) + 2;
           if (bytes > workerData.maxCsvBytes) throw new Error('Usage CSV exceeds the 64 MB export limit. No partial export was saved.');
           lines.push(line);
@@ -1441,7 +1546,8 @@ const legacyInventory = (database) => {
             const separator = route.indexOf('\u0000');
             return {
               providerID: route.slice(0, separator),
-              modelID: route.slice(separator + 1),
+              modelID: route.slice(separator + 1).split('\u0000')[0],
+              source: route.split('\u0000')[2],
               prompts: aggregate.promptCount ?? aggregate.promptIDs.size,
               durationMs: aggregate.durationMs,
               durationCount: aggregate.durationCount,
@@ -1509,11 +1615,100 @@ function normalizeLocalUsageSnapshot(
         cacheRead: nonnegativeNumber(group?.cacheRead),
         cacheWrite: nonnegativeNumber(group?.cacheWrite),
       };
-      groups.set(routeKey(providerID, modelID), aggregate);
+      const source = auxiliaryUsageSource(group?.source);
+      if (group?.source !== undefined && !source) return null;
+      groups.set(routeKey(providerID, modelID, source), aggregate);
     }
     aggregates.push({ window: windows[index]!, groups, totalPromptCount });
   }
   return { sessionCount, aggregates };
+}
+
+function auxiliaryUsageSource(value: unknown): AuxiliaryUsageSource | undefined {
+  return value === 'generate' ||
+    value === 'title' ||
+    value === 'compaction' ||
+    value === 'unrecorded'
+    ? value
+    : undefined;
+}
+
+function nativeUsageTokens(value: unknown): Tokens | undefined {
+  const tokens = asRecord(value);
+  const cache = asRecord(tokens?.cache);
+  if (
+    [tokens?.input, tokens?.output, tokens?.reasoning, cache?.read, cache?.write].some(
+      (count) => optionalNonnegativeNumber(count) === null
+    )
+  )
+    return undefined;
+  const input = nonnegativeNumber(tokens?.input),
+    output = nonnegativeNumber(tokens?.output),
+    reasoning = nonnegativeNumber(tokens?.reasoning),
+    cacheRead = nonnegativeNumber(cache?.read),
+    cacheWrite = nonnegativeNumber(cache?.write);
+  return {
+    input,
+    output,
+    reasoning,
+    cacheRead,
+    cacheWrite,
+    total: input + output + reasoning + cacheRead + cacheWrite,
+  };
+}
+
+/** Finite native logs are the only API source for usage without assistant messages. */
+function readAuxiliaryUsageLog(value: unknown, sessionID: string): Usage[] {
+  if (typeof value !== 'string') throw new Error('Invalid auxiliary usage log.');
+  const usage: Usage[] = [];
+  const seen = new Set<string>();
+  let synced = false;
+  for (const frame of value.replaceAll('\r\n', '\n').split('\n\n')) {
+    const text = frame
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n');
+    if (!text) continue;
+    const event = asRecord(JSON.parse(text));
+    if (!event || synced) throw new Error('Invalid auxiliary usage log frame.');
+    if (event.type === 'log.synced') {
+      if (event.aggregateID !== sessionID) throw new Error('Auxiliary usage log session mismatch.');
+      synced = true;
+      continue;
+    }
+    if (event.type !== 'session.usage.recorded') continue;
+    const data = asRecord(event.data);
+    const source = auxiliaryUsageSource(data?.source);
+    const id = stringValue(event.id);
+    const created = nonnegativeInteger(event.created);
+    const tokens = nativeUsageTokens(data?.tokens);
+    if (
+      !source ||
+      source === 'unrecorded' ||
+      !id ||
+      created === null ||
+      data?.sessionID !== sessionID ||
+      asRecord(event.durable)?.aggregateID !== sessionID ||
+      !tokens
+    )
+      throw new Error('Malformed auxiliary usage record.');
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (seen.size > SESSION_USAGE_CACHE_TOTAL_LIMIT)
+      throw new Error('Auxiliary usage exceeds the per-session record limit.');
+    usage.push({
+      providerID: 'unknown',
+      modelID: 'unknown',
+      source,
+      created,
+      promptID: null,
+      durationMs: null,
+      tokens,
+    });
+  }
+  if (!synced) throw new Error('Incomplete auxiliary usage log.');
+  return usage;
 }
 
 function normalizeUsage(
@@ -1607,6 +1802,7 @@ function createReportWindows(now: number, includeAllTime: boolean): ReportWindow
     { title: 'Last 7 rolling days', start: now - 7 * DAY_MS },
     { title: 'Last 30 rolling days', start: now - 30 * DAY_MS },
     ...(includeAllTime ? [{ title: 'All time', start: null }] : []),
+    { title: 'Undated session usage', start: null, undated: true },
   ];
 }
 
@@ -1614,14 +1810,21 @@ function addUsageToWindowAggregates(aggregates: WindowAggregates[], usage: Usage
   for (const entry of usage) {
     if (entry.tokens.total <= 0) continue;
     for (const aggregate of aggregates) {
-      if (aggregate.window.start !== null && entry.created < aggregate.window.start) continue;
+      if (
+        aggregate.window.undated
+          ? entry.created !== null
+          : entry.created === null
+            ? aggregate.window.start !== null
+            : aggregate.window.start !== null && entry.created < aggregate.window.start
+      )
+        continue;
       addUsageToAggregateGroup(aggregate.groups, entry);
     }
   }
 }
 
 function addUsageToAggregateGroup(groups: Map<string, Aggregate>, entry: Usage): void {
-  const key = routeKey(entry.providerID, entry.modelID);
+  const key = routeKey(entry.providerID, entry.modelID, entry.source);
   const aggregate = groups.get(key) || emptyAggregate();
   if (entry.promptID) aggregate.promptIDs.add(entry.promptID);
   if (entry.durationMs !== null) {
@@ -1644,9 +1847,12 @@ function renderAggregatedReport(
     `Generated ${new Date(now).toLocaleString()} from ${sessionCount.toLocaleString()} sessions scanned.`,
     '',
     'Token counts use compact notation. Cache rate is cache read / (input + cache read + cache write), calculated from summed token counts. A dash in Cache rate means no recorded input tokens.',
+    'Unattributed rows include recorded session generation (side questions and cache warming), title, and compaction usage. OpenCode does not record their model identity. They add tokens, not user prompts or assistant duration.',
+    'Undated session usage is the remainder of native session totals after message and retained-event usage. Default V2 servers do not persist events. This remainder can include side questions, cache warming, titles, compaction, or usage whose history is no longer available. Its dates, model, and request counts are unknown. It is excluded from dated windows and included in All time. Use /stats all to scan older sessions too.',
   ];
 
   for (const aggregate of aggregates) {
+    if (aggregate.window.undated && aggregate.groups.size === 0) continue;
     lines.push('', `## ${aggregate.window.title}`, '');
     if (aggregate.groups.size === 0) {
       lines.push('_No token usage._');
@@ -1678,8 +1884,22 @@ function renderAggregateTable(
       right.total - left.total ||
       leftRoute.localeCompare(rightRoute)
   )) {
-    const [providerID = '', modelID = ''] = route.split('\u0000');
-    lines.push(renderAggregateRow(providerID, modelID, aggregate));
+    const [providerID = '', modelID = '', source] = route.split('\u0000');
+    lines.push(
+      renderAggregateRow(
+        source ? 'Unattributed' : providerID,
+        source === 'generate'
+          ? 'Session generation'
+          : source === 'title'
+            ? 'Session titles'
+            : source === 'compaction'
+              ? 'Compaction'
+              : source === 'unrecorded'
+                ? 'Other session usage'
+                : modelID,
+        aggregate
+      )
+    );
   }
   lines.push(renderAggregateRow('**Total**', '', sumAggregates(groups.values(), totalPromptCount)));
 }
@@ -1778,8 +1998,8 @@ function scopedPath(path: string, directory: string): string {
   return `${path}${path.includes('?') ? '&' : '?'}directory=${encodeURIComponent(directory)}`;
 }
 
-function routeKey(providerID: string, modelID: string): string {
-  return `${providerID}\u0000${modelID}`;
+function routeKey(providerID: string, modelID: string, source?: AuxiliaryUsageSource): string {
+  return `${providerID}\u0000${modelID}${source ? `\u0000${source}` : ''}`;
 }
 
 function stringValue(value: unknown): string | null {

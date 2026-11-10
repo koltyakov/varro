@@ -151,6 +151,48 @@ The released-server adapter tests cover exact workspace resolution for Japanese 
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
 
+### Auxiliary usage reporting
+
+Usage reports and CSV exports now include native `session.usage.recorded.1`
+records from the selected V2 session snapshot. `generate` covers both side questions
+and cache warming; title and compaction records are included separately. The event
+timestamp controls date windows independently of the unchanged session update time.
+Only the owning session's events contribute, without counting step events twice.
+
+Default published V2 servers do not persist event rows. Reports also reconcile
+native cumulative counters against messages and retained events. The remainder
+is undated and has unknown source, model, and request count; it can include side
+questions, warming, and other usage no longer represented in history. It appears
+separately from dated windows and contributes to All time. CSV uses an unknown
+day and `unrecorded` source. Cleanup preserves these reconciled counters too.
+
+The backend records no provider/model identity for these events. Markdown labels
+them Unattributed, and CSV keeps those identities unknown with separate source and
+request-count columns. Prompt and assistant-duration totals do not increase.
+Explicit cleanup archives auxiliary scalars separately from assistant records.
+Ordinary reports and CSV reads never migrate live history or old archives.
+API-only V2 reports read bounded finite logs, bypass timestamp-only usage caching,
+and warn if auxiliary coverage cannot be read completely.
+
+Verification passed 292 focused usage, CSV, migration-timing, cleanup, and
+transcript-archive tests. The published v2.2.7 fixture also passed a real
+side-question plus keep-alive generation check: no assistant messages were added,
+26 tokens and $0.000088 were retained in CSV from native counters, and the API-only
+Markdown report showed the same undated token total. The check uses an isolated
+database and deterministic local provider, not a live account. Retained-event
+fixtures cover exact dates, sources, archive round trips, and reconciliation
+without duplicate counting. Older archives remain read-only, and malformed usage
+blocks archival rather than authorizing deletion with incomplete statistics.
+
+`npm run lint`, `npm run fmt`, `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` pass. Suggestion diagnostics
+are zero. Evidence uses the `artifacts/auxiliary-usage-` prefix. This targeted
+published-server check does not rerun or clear the startup failures recorded below.
+
+The full `npm run test` run passed 12,181 Vitest tests with 58 skipped, plus 284
+script tests with three skipped. There were no failures. Evidence is
+`artifacts/auxiliary-usage-all-tests.log`.
+
 ### 2.2.7 compatibility review
 
 Reviewed v2.2.6 to v2.2.7, `dc2ffcf8bf` through `fedc6f208a`, including the
@@ -201,11 +243,9 @@ Functionality review:
   by fixture-only compatibility checks.
 - Session generation, including side questions and cache-warming pings, now records
   `session.usage.recorded` with `source: "generate"` and updates native session
-  totals. Varro's usage reports and CSV aggregate assistant-message records, not
-  these auxiliary usage events. Recommended follow-up: account for title,
-  compaction, and generation usage without inventing assistant messages or
-  attributing events to an unrecorded model. This is a reporting gap, not a send
-  or transcript compatibility failure.
+  totals. The release review identified a reporting gap because Varro aggregated
+  assistant-message records only. The auxiliary usage implementation above now
+  includes these records without inventing messages or model attribution.
 - Console event watches can wake sessions for external changes, but require the
   `console_watches` flag and Console workspace support. They are opt-in backend
   behavior, not something this dependency bump enables. A dedicated watch manager

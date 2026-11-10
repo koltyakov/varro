@@ -130,6 +130,130 @@ afterEach(() => {
 });
 
 describe('UsageReportService', () => {
+  it('keeps API counter remainders undated and refreshes them without a session timestamp change', async () => {
+    let input = 20;
+    const tokens = { input: 10, output: 5, reasoning: 2, cache: { read: 3, write: 1 } };
+    const request = vi.fn<Request>(async (_method, path) => {
+      if (path.startsWith('/experimental/session'))
+        return [
+          {
+            id: 'one',
+            directory: '/remote',
+            time: { updated: NOW.getTime() },
+            model: { providerID: 'configured', modelID: 'not-recorded' },
+            tokens: { input, output: 10, reasoning: 4, cache: { read: 6, write: 2 } },
+          },
+        ];
+      if (path.startsWith('/session/one/message')) return [];
+      return [
+        {
+          id: 'evt_one',
+          type: 'session.usage.recorded',
+          created: NOW.getTime(),
+          durable: { aggregateID: 'one', seq: 1 },
+          data: { sessionID: 'one', source: 'generate', cost: 0, tokens },
+        },
+        { type: 'log.synced', aggregateID: 'one', seq: 1 },
+      ]
+        .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+        .join('');
+    });
+    const service = new UsageReportService({ request, apiVersion: 2, isAttachOnly: true }, vi.fn());
+    await service.openReport(true);
+    expect(reportSection(reportContent(), 'Today')).toContain('| **Total** |  | 0 | 21 | - |');
+    expect(reportSection(reportContent(), 'All time')).toContain('| **Total** |  | 0 | 42 | - |');
+    expect(reportSection(reportContent(), 'Undated session usage')).toContain(
+      '| **Total** |  | 0 | 21 | - |'
+    );
+    expect(reportContent()).not.toContain('not-recorded');
+    input = 30;
+    await service.openReport(true);
+    expect(reportSection(reportContent(), 'All time')).toContain('| **Total** |  | 0 | 52 | - |');
+    expect(reportSection(reportContent(), 'Undated session usage')).toContain(
+      '| **Total** |  | 0 | 31 | - |'
+    );
+  });
+
+  it('reads native auxiliary usage on every report even when session activity time is unchanged', async () => {
+    const now = NOW.getTime();
+    const event = (id: string) => ({
+      id,
+      type: 'session.usage.recorded',
+      created: now,
+      durable: { aggregateID: 'idle', seq: 1 },
+      data: {
+        sessionID: 'idle',
+        source: 'generate',
+        cost: 0.001,
+        tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 3, write: 1 } },
+      },
+    });
+    let events = [event('side-question'), event('side-question')];
+    const request = vi.fn<Request>(async (_method, path) => {
+      if (path.startsWith('/experimental/session'))
+        return [session('idle', '/remote', now - 60 * 86400000)];
+      if (path.startsWith('/session/idle/message')) return [];
+      if (path.includes('/log?'))
+        return [...events, { type: 'log.synced', aggregateID: 'idle' }]
+          .map((value) => `data: ${JSON.stringify(value)}\n\n`)
+          .join('');
+      throw new Error(`Unexpected path ${path}`);
+    });
+    const service = new UsageReportService({ request, apiVersion: 2, isAttachOnly: true }, vi.fn());
+    await service.openReport();
+    expect(reportSection(reportContent(), 'Today')).toContain('| **Total** |  | 0 | 21 | - |');
+    events = [event('side-question'), event('warming')];
+    await service.openReport();
+    expect(reportSection(reportContent(), 'Today')).toContain(
+      '| Unattributed | Session generation | 0 | 42 | - |'
+    );
+    expect(request.mock.calls.filter(([, path]) => path.includes('/log?'))).toHaveLength(2);
+    expect(request.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+    expect(new URL(request.mock.calls[0]![1], 'http://fixture').searchParams.has('start')).toBe(
+      false
+    );
+  });
+
+  it.each(['truncated', 'foreign', 'malformed', 'unavailable'])(
+    'warns instead of presenting partial auxiliary totals for a %s log',
+    async (kind) => {
+      const request = vi.fn<Request>(async (_method, path) => {
+        if (path.startsWith('/experimental/session'))
+          return [session('one', '/remote', NOW.getTime())];
+        if (path.startsWith('/session/one/message')) return [assistant('reply', NOW.getTime())];
+        if (kind === 'unavailable') throw new Error('404 Unsupported endpoint');
+        const usage = {
+          id: 'evt_one',
+          type: 'session.usage.recorded',
+          created: NOW.getTime(),
+          durable: { aggregateID: kind === 'foreign' ? 'other' : 'one', seq: 1 },
+          data: {
+            sessionID: 'one',
+            source: 'generate',
+            cost: 0,
+            tokens: {
+              input: kind === 'malformed' ? -1 : 10,
+              output: 5,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+          },
+        };
+        return (
+          `data: ${JSON.stringify(usage)}\n\n` +
+          (kind === 'truncated' ? '' : 'data: {"type":"log.synced","aggregateID":"one"}\n\n')
+        );
+      });
+      await new UsageReportService(
+        { request, apiVersion: 2, isAttachOnly: true },
+        vi.fn()
+      ).openReport();
+      expect(reportContent()).toContain('Could not read auxiliary usage');
+      expect(reportContent()).not.toContain('| Unattributed |');
+      expect(reportSection(reportContent(), 'Today')).toContain('| **Total** |  | 1 | 190 |');
+    }
+  );
+
   it('excludes paused time from API usage and invalidates timing when a pause annotation arrives', async () => {
     const now = NOW.getTime();
     let pauses: Array<{ messageId: string; pausedAt: number }> = [];
@@ -460,7 +584,7 @@ describe('UsageReportService', () => {
     expect(worker.terminate).not.toHaveBeenCalled();
     worker.listeners.get('message')?.({
       sessionCount: 1,
-      windows: Array.from({ length: 4 }, () => ({ totalPromptCount: 0, groups: [] })),
+      windows: Array.from({ length: 5 }, () => ({ totalPromptCount: 0, groups: [] })),
     });
     await report;
     expect(reportContent()).toContain('## All time');
@@ -566,7 +690,7 @@ describe('UsageReportService', () => {
     await Promise.resolve();
     workerMocks.instances.at(-1)?.listeners.get('message')?.({
       sessionCount: 2_209,
-      windows: Array.from({ length: 3 }, () => ({
+      windows: Array.from({ length: 4 }, () => ({
         totalPromptCount: 9,
         groups: [
           {

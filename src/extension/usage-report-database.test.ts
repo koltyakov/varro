@@ -188,10 +188,229 @@ async function fixture(versions: number[]) {
     check.close();
     return mocks.content;
   }
-  return { add, report, now, database };
+  function auxiliary(
+    sessionID: string,
+    id: string,
+    created: number,
+    source = 'generate',
+    overrides: {
+      cost?: number | null;
+      private?: string;
+      providerID?: string;
+      modelID?: string;
+      variant?: string;
+    } = {}
+  ) {
+    database.exec(`CREATE TABLE IF NOT EXISTS event (id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, created INTEGER, type TEXT, data TEXT);
+      CREATE INDEX IF NOT EXISTS event_aggregate_type_seq_idx ON event(aggregate_id, type, seq);`);
+    database.prepare('INSERT INTO event VALUES (?, ?, ?, ?, ?, ?)').run(
+      id,
+      sessionID,
+      1,
+      created,
+      'session.usage.recorded.1',
+      JSON.stringify({
+        sessionID,
+        source,
+        cost: 0.125,
+        tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 3, write: 1 } },
+        ...overrides,
+      })
+    );
+  }
+  return { add, auxiliary, report, now, database, path };
 }
 
 describe('local usage database versions', () => {
+  it.each([false, true])(
+    'includes generation usage for old idle sessions without adding prompts or duration, allTime=%s',
+    async (allTime) => {
+      const { add, auxiliary, database, report, now, path } = await fixture([2]);
+      const old = now - 60 * 86400000;
+      add(2, 'idle', old, 'old-model');
+      database
+        .prepare(
+          "UPDATE session_message SET data=json_set(data,'$.time.created',?,'$.time.completed',?) WHERE type='assistant'"
+        )
+        .run(old, old + 2000);
+      auxiliary('idle', 'side-question', now - 1000);
+      auxiliary('idle', 'warming', now);
+      auxiliary('foreign-session', 'foreign', now);
+      const before = database.prepare('SELECT * FROM event ORDER BY id').all();
+      const content = await report(allTime);
+      const today = content.split('## Today\n')[1]?.split('\n## ')[0];
+      expect(today).toContain(
+        '| Unattributed | Session generation | 0 | 42 | - | 20 | 10 | 4 | 6 | 2 | 21.4% |'
+      );
+      expect(today).toContain('| **Total** |  | 0 | 42 | - |');
+      expect(today).not.toContain('old-model');
+      expect(content).toContain('from 1 sessions scanned');
+      const check = new DatabaseSync(path, { readOnly: true });
+      expect(check.prepare('SELECT * FROM event ORDER BY id').all()).toEqual(before);
+      check.close();
+    }
+  );
+
+  it('exports and archives auxiliary tokens and reported cost exactly once without inventing model identity', async () => {
+    const { add, auxiliary, database, now } = await fixture([1, 2]);
+    add(1, 'original', now - 1, 'discard-legacy');
+    add(2, 'copy', now, 'selected-model', 'original');
+    const date = Date.UTC(2025, 0, 2);
+    auxiliary('copy', 'side-question', date);
+    auxiliary('copy', 'warming', date + 1, 'generate', { cost: 0 });
+    auxiliary('copy', 'title', date + 2, 'title', { cost: null });
+    auxiliary('copy', 'compact', date + 3, 'compaction');
+    auxiliary('original', 'discard-legacy-auxiliary', date);
+    auxiliary('copy', 'not-auxiliary', date, 'other');
+    database.prepare("UPDATE event SET type='session.step.ended.1' WHERE id='not-auxiliary'").run();
+    const before = database.prepare('SELECT * FROM event ORDER BY id').all();
+    const live = await readAllTimeUsageCsv();
+    expect(live.rowCount).toBe(4);
+    expect(live.csv).toContain(
+      '2025-01-02,unknown,unknown,unknown,0,20,10,4,6,2,42,0.125,0,generate,2,2\r\n'
+    );
+    expect(live.csv).toContain(
+      '2025-01-02,unknown,unknown,unknown,0,10,5,2,3,1,21,,0,title,1,0\r\n'
+    );
+    expect(live.csv).toContain(
+      '2025-01-02,unknown,unknown,unknown,0,10,5,2,3,1,21,0.125,0,compaction,1,1\r\n'
+    );
+    expect(live.csv).not.toContain('discard-legacy');
+    await archiveSessionUsage([{ id: 'copy', directory: '/project', updated: now }]);
+    await archiveSessionUsage([{ id: 'copy', directory: '/project', updated: now }]);
+    expect(await readAllTimeUsageCsv()).toEqual(live);
+    expect(database.prepare('SELECT * FROM event ORDER BY id').all()).toEqual(before);
+    const archive = new DatabaseSync(usageDatabasePaths().archivePath, { readOnly: true });
+    expect(archive.prepare('SELECT count(*) AS count FROM usage_auxiliary').get()?.count).toBe(4);
+    expect(archive.prepare('SELECT count(*) AS count FROM usage_message').get()?.count).toBe(2);
+    archive.close();
+    database.exec(
+      'DELETE FROM event; DELETE FROM session_message; DELETE FROM session_v2; DELETE FROM message; DELETE FROM session;'
+    );
+    database.close();
+    await rm(usageDatabasePaths().databasePath);
+    expect(await readAllTimeUsageCsv()).toEqual(live);
+  });
+
+  it('reads old archives without auxiliary tables without migrating them during reports', async () => {
+    const { add, database, now } = await fixture([2]);
+    add(2, 'old', now, 'old-model');
+    await archiveSessionUsage([{ id: 'old', directory: '/project', updated: now }]);
+    const archive = new DatabaseSync(usageDatabasePaths().archivePath);
+    archive.exec('DROP TABLE usage_auxiliary');
+    const before = archive.prepare('SELECT name,sql FROM sqlite_master ORDER BY name').all();
+    await readAllTimeUsageCsv();
+    expect(archive.prepare('SELECT name,sql FROM sqlite_master ORDER BY name').all()).toEqual(
+      before
+    );
+    archive.close();
+    database.close();
+  });
+
+  it('retains recent auxiliary-only activity after archival even when the session timestamp is old', async () => {
+    const { add, auxiliary, database, now } = await fixture([2]);
+    const old = now - 60 * 86400000;
+    add(2, 'idle', old, 'old-model');
+    database
+      .prepare(
+        "UPDATE session_message SET data=json_set(data,'$.time.created',?,'$.time.completed',?) WHERE type='assistant'"
+      )
+      .run(old, old + 2000);
+    auxiliary('idle', 'warming', now);
+    await archiveSessionUsage([{ id: 'idle', directory: '/project', updated: old }]);
+    database.close();
+    await rm(usageDatabasePaths().databasePath);
+    await new UsageReportService({ request: vi.fn() }, vi.fn()).openReport();
+    const today = mocks.content.split('## Today\n')[1]?.split('\n## ')[0];
+    expect(today).toContain('| Unattributed | Session generation | 0 | 21 | - |');
+    expect(today).not.toContain('old-model');
+  });
+
+  it('does not decode unrelated event bodies and archives only scalar auxiliary usage', async () => {
+    const { add, auxiliary, database, now } = await fixture([2]);
+    add(2, 'one', now, 'model');
+    auxiliary('one', 'generation', now, 'generate', {
+      private: 'PRIVATE_RESPONSE',
+      providerID: 'wrong',
+      modelID: 'wrong',
+      variant: 'high',
+    });
+    database
+      .prepare('INSERT INTO event VALUES (?,?,?,?,?,?)')
+      .run('tool', 'one', 2, now, 'session.tool.called.1', 'not valid JSON');
+    const csv = await readAllTimeUsageCsv();
+    expect(csv.csv).not.toContain('PRIVATE_RESPONSE');
+    expect(csv.csv).not.toContain('wrong');
+    await archiveSessionUsage([{ id: 'one', directory: '/project', updated: now }]);
+    const archive = new DatabaseSync(usageDatabasePaths().archivePath, { readOnly: true });
+    const data = archive.prepare('SELECT data FROM usage_auxiliary').get()?.data;
+    expect(data).not.toContain('PRIVATE_RESPONSE');
+    expect(data).not.toContain('wrong');
+    archive.close();
+    database.close();
+  });
+
+  it('refuses cleanup archival when a selected auxiliary event has malformed JSON', async () => {
+    const { add, auxiliary, database, now } = await fixture([2]);
+    add(2, 'one', now, 'model');
+    auxiliary('one', 'generation', now);
+    database.prepare("UPDATE event SET data='not valid JSON'").run();
+    await expect(
+      archiveSessionUsage([{ id: 'one', directory: '/project', updated: now }])
+    ).rejects.toThrow();
+    expect(database.prepare('SELECT count(*) AS count FROM session_v2').get()?.count).toBe(1);
+    database.close();
+  });
+
+  it('reconciles native totals against messages and retained events, preserving only the undated remainder', async () => {
+    const { add, auxiliary, database, now } = await fixture([2]);
+    add(2, 'one', now, 'model');
+    database
+      .prepare("UPDATE session_message SET data=json_set(data,'$.cost',0.1) WHERE type='assistant'")
+      .run();
+    auxiliary('one', 'recorded', now);
+    database.exec(`ALTER TABLE session_v2 ADD COLUMN cost REAL DEFAULT 0.45;
+      ALTER TABLE session_v2 ADD COLUMN tokens_input INTEGER DEFAULT 40;
+      ALTER TABLE session_v2 ADD COLUMN tokens_output INTEGER DEFAULT 20;
+      ALTER TABLE session_v2 ADD COLUMN tokens_reasoning INTEGER DEFAULT 8;
+      ALTER TABLE session_v2 ADD COLUMN tokens_cache_read INTEGER DEFAULT 12;
+      ALTER TABLE session_v2 ADD COLUMN tokens_cache_write INTEGER DEFAULT 4;`);
+    const csv = await readAllTimeUsageCsv();
+    expect(csv.csv).toContain(
+      'unknown,unknown,unknown,unknown,0,10,5,2,3,1,21,0.125,0,unrecorded,,\r\n'
+    );
+    await new UsageReportService({ request: vi.fn() }, vi.fn()).openReport(true);
+    const section = (name: string) => mocks.content.split(`## ${name}\n`)[1]?.split('\n## ')[0];
+    expect(section('Today')).toContain('| **Total** |  | 1 | 63 | 4s |');
+    expect(section('All time')).toContain('| **Total** |  | 1 | 84 | 4s |');
+    expect(section('Undated session usage')).toContain(
+      '| Unattributed | Other session usage | 0 | 21 | - |'
+    );
+    await archiveSessionUsage([{ id: 'one', directory: '/project', updated: now }]);
+    database.close();
+    await rm(usageDatabasePaths().databasePath);
+    expect(await readAllTimeUsageCsv()).toEqual(csv);
+    await new UsageReportService({ request: vi.fn() }, vi.fn()).openReport(true);
+    expect(section('All time')).toContain('| **Total** |  | 1 | 84 | 4s |');
+  });
+
+  it('does not invent residual cost from floating-point subtraction of fully accounted records', async () => {
+    const { add, auxiliary, database, now } = await fixture([2]);
+    add(2, 'one', now, 'model');
+    database
+      .prepare("UPDATE session_message SET data=json_set(data,'$.cost',0.1) WHERE type='assistant'")
+      .run();
+    auxiliary('one', 'recorded', now, 'generate', { cost: 0.3 });
+    database.exec(`ALTER TABLE session_v2 ADD COLUMN cost REAL DEFAULT 0.5000000000000001;
+      ALTER TABLE session_v2 ADD COLUMN tokens_input INTEGER DEFAULT 30;
+      ALTER TABLE session_v2 ADD COLUMN tokens_output INTEGER DEFAULT 15;
+      ALTER TABLE session_v2 ADD COLUMN tokens_reasoning INTEGER DEFAULT 6;
+      ALTER TABLE session_v2 ADD COLUMN tokens_cache_read INTEGER DEFAULT 9;
+      ALTER TABLE session_v2 ADD COLUMN tokens_cache_write INTEGER DEFAULT 3;`);
+    expect((await readAllTimeUsageCsv()).csv).not.toContain('unrecorded');
+    database.close();
+  });
+
   it.each([false, true])(
     'matches API compact token counts and weighted cache rates, allTime=%s',
     async (allTime) => {
@@ -423,7 +642,7 @@ describe('local usage database versions', () => {
     const result = await readAllTimeUsageCsv((message) => progress.push(message));
     expect(result.rowCount).toBe(1);
     expect(result.csv).toContain(
-      '2025-01-01,provider,model,high,200001,2000010,1000005,400002,600003,200001,4200021,,0\r\n'
+      '2025-01-01,provider,model,high,200001,2000010,1000005,400002,600003,200001,4200021,,0,assistant,0,0\r\n'
     );
     expect(archiveWork.jsonCalls).toBeLessThanOrEqual(count + 5);
     expect(progress).toContain(`Read ${(200_000).toLocaleString()} assistant messages`);
@@ -455,10 +674,10 @@ describe('local usage database versions', () => {
     const result = await readAllTimeUsageCsv();
     expect(result.rowCount).toBe(3);
     expect(result.csv).toBe(
-      '\uFEFFday_utc,provider,model,reasoning_setting,messages,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,total_tokens,reported_cost_usd,costed_messages\r\n' +
-        '2025-01-01,provider,legacy-model,unknown,1,10,5,2,3,1,21,,0\r\n' +
-        '2025-01-01,provider,native-model,high,1,10,5,2,3,1,21,0.125,1\r\n' +
-        '2025-01-02,provider,native-model,low,1,10,5,2,3,1,21,0.125,1\r\n'
+      '\uFEFFday_utc,provider,model,reasoning_setting,messages,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,total_tokens,reported_cost_usd,costed_messages,usage_source,auxiliary_requests,costed_auxiliary_requests\r\n' +
+        '2025-01-01,provider,legacy-model,unknown,1,10,5,2,3,1,21,,0,assistant,0,0\r\n' +
+        '2025-01-01,provider,native-model,high,1,10,5,2,3,1,21,0.125,1,assistant,0,0\r\n' +
+        '2025-01-02,provider,native-model,low,1,10,5,2,3,1,21,0.125,1,assistant,0,0\r\n'
     );
     expect(database.prepare('SELECT name, sql FROM sqlite_master ORDER BY name').all()).toEqual(
       before
@@ -479,7 +698,7 @@ describe('local usage database versions', () => {
     await archiveSessionUsage([{ id: 'copy', directory: '/project', updated: now }]);
     const live = await readAllTimeUsageCsv();
     expect(live.rowCount).toBe(1);
-    expect(live.csv).toContain(',current,high,2,20,10,4,6,2,42,,0\r\n');
+    expect(live.csv).toContain(',current,high,2,20,10,4,6,2,42,,0,assistant,0,0\r\n');
     expect(live.csv).not.toContain('discard-legacy');
     database.exec(
       'DELETE FROM session_message; DELETE FROM session_v2; DELETE FROM message; DELETE FROM session;'
@@ -511,7 +730,7 @@ describe('local usage database versions', () => {
       )
       .run('PRIVATE_PAYLOAD'.repeat(100_000));
     const result = await readAllTimeUsageCsv();
-    expect(result.csv).toContain(',large-model,unknown,2,20,10,4,6,2,42,,0\r\n');
+    expect(result.csv).toContain(',large-model,unknown,2,20,10,4,6,2,42,,0,assistant,0,0\r\n');
     expect(result.csv).not.toContain('PRIVATE_PAYLOAD');
     database.close();
   });
@@ -526,7 +745,7 @@ describe('local usage database versions', () => {
     archive.exec("UPDATE usage_message SET data = json_remove(data, '$.variant')");
     const before = archive.prepare('SELECT * FROM usage_message ORDER BY id').all();
     const result = await readAllTimeUsageCsv();
-    expect(result.csv).toContain(',old-model,unknown,2,20,10,4,6,2,42,,0\r\n');
+    expect(result.csv).toContain(',old-model,unknown,2,20,10,4,6,2,42,,0,assistant,0,0\r\n');
     expect(archive.prepare('SELECT * FROM usage_message ORDER BY id').all()).toEqual(before);
     archive.close();
   });
@@ -547,8 +766,10 @@ describe('local usage database versions', () => {
       .run();
     const result = await readAllTimeUsageCsv();
     expect(result.rowCount).toBe(2);
-    expect(result.csv).toContain(',provider,same-model,high,1,10,5,2,3,1,21,0,1\r\n');
-    expect(result.csv).toContain(',other-provider,same-model,low,1,10,5,2,3,1,21,,0\r\n');
+    expect(result.csv).toContain(',provider,same-model,high,1,10,5,2,3,1,21,0,1,assistant,0,0\r\n');
+    expect(result.csv).toContain(
+      ',other-provider,same-model,low,1,10,5,2,3,1,21,,0,assistant,0,0\r\n'
+    );
     database.close();
   });
 
@@ -574,7 +795,7 @@ describe('local usage database versions', () => {
       )
       .run();
     const result = await readAllTimeUsageCsv();
-    expect(result.csv).toContain(',model,unknown,2,20,10,4,6,2,198,0.25,1\r\n');
+    expect(result.csv).toContain(',model,unknown,2,20,10,4,6,2,198,0.25,1,assistant,0,0\r\n');
     database.close();
   });
 
@@ -600,8 +821,12 @@ describe('local usage database versions', () => {
     });
     const result = await readAllTimeUsageCsv();
     expect(result.rowCount).toBe(2);
-    expect(result.csv).toContain('2025-01-01,provider,model,unknown,1,10,5,2,3,1,21,,0\r\n');
-    expect(result.csv).toContain('2025-01-02,provider,model,unknown,1,10,5,2,3,1,21,,0\r\n');
+    expect(result.csv).toContain(
+      '2025-01-01,provider,model,unknown,1,10,5,2,3,1,21,,0,assistant,0,0\r\n'
+    );
+    expect(result.csv).toContain(
+      '2025-01-02,provider,model,unknown,1,10,5,2,3,1,21,,0,assistant,0,0\r\n'
+    );
     database.close();
   });
 

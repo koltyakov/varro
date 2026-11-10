@@ -45,6 +45,16 @@ The archive is `opencode-stats.db` beside `opencode.db`. With a custom `OPENCODE
 
 The archive retains session identity and last-update time, provider/model routes, recorded model variants for reasoning-setting exports, assistant timestamps, parent-message identities for prompt counting, token breakdowns, and reported costs. Older archives without variants remain readable and export the reasoning setting as `unknown`. It does not retain prompts, responses, tool output bodies, or image bytes. Pending cleanup records also retain the project directory and owned artifact paths until cleanup succeeds.
 
+New archive writes also retain native V2 `session.usage.recorded` events in a
+separate `usage_auxiliary` table. This preserves side-question/cache-warming,
+title, and compaction timestamps, token counts, sources, and reported costs without
+inventing assistant messages or model identities. Reports read older archives
+without creating this table. When event history was not retained, new archives
+preserve the remainder of native session counters after message and known-event
+usage. That remainder has no inferred date or request count. Auxiliary usage
+deleted before its counters or events were archived cannot be reconstructed from
+old assistant-only archives.
+
 Usage reports merge live V1, live V2, and archived records by original session identity. They select the newest complete snapshot, prefer V2 on equal update times, and prefer a live snapshot over an identical archive. Imported V1/V2 copies and retries do not double-count usage. Original migration completion times and Varro pause boundaries are applied before archiving, so durations survive deletion of the source messages and annotations.
 
 The statistics archive also supports a separate `usage_original_timing` table for original V1 completion timestamps used by retained live V2 messages. This is scalar provenance, not another usage snapshot: tokens, costs, prompts, and new messages still come from the selected live session. Readers use matching live V1 timing first, preserved originals second, and native V2 timing last, then apply current pause boundaries.

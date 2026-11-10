@@ -130,7 +130,7 @@ async function fixture() {
     const reply = asRecord(probe.replies.at(-1));
     const windows = reply?.windows;
     if (!Array.isArray(windows)) throw new Error('Missing aggregate reply');
-    const groups = asRecord(windows.at(-1))?.groups;
+    const groups = asRecord(windows[3])?.groups;
     if (!Array.isArray(groups)) throw new Error('Missing aggregate groups');
     return { content: probe.content, groups };
   };
