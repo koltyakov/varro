@@ -1210,8 +1210,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         },
         handleDroppedPaths: (paths) =>
           contextFilesState.handleDroppedPaths(paths, (message) => post(message)),
-        handleDroppedContent: (files) =>
-          contextFilesState.handleDroppedContent(files, (message) => post(message)),
+        handleDroppedContent: (files, directory) =>
+          contextFilesState.handleDroppedContent(files, (message) => post(message), directory),
         storePdf: (payload) => {
           const generation = webviewSession.getRequestGeneration();
           return this.storePdf(payload, post, () =>

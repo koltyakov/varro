@@ -1,4 +1,5 @@
 import type { OpenCodeInstallMethod } from './opencode-install';
+import type { DroppedContentDirectory } from './dropped-content-policy';
 import type { ExtensionContext } from './extension-context';
 import type { ContextBreakdownSegment } from './context-breakdown';
 import type { NativePdfAttachment } from './native-pdf';
@@ -1198,7 +1199,10 @@ export type WebviewMessage =
   | { type: 'files/drop'; payload: { paths: string[] } }
   | {
       type: 'files/drop-content';
-      payload: { files: Array<{ name: string; content: string; size: number }> };
+      payload: {
+        files: Array<{ name: string; content: string; size: number }>;
+        directory?: DroppedContentDirectory;
+      };
     }
   | {
       type: 'pdfs/store';

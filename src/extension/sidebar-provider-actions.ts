@@ -62,9 +62,7 @@ export interface SidebarProviderActionDeps {
   postConfigState(): void;
   handleReadyMessage(documentId?: number): Promise<void>;
   handleDroppedPaths(paths: string[]): Promise<void>;
-  handleDroppedContent(
-    files: Array<{ name: string; content: string; size: number }>
-  ): Promise<void>;
+  handleDroppedContent: MessageRouterCallbacks['handleDroppedContent'];
   storePdf: MessageRouterCallbacks['storePdf'];
   storeImage: MessageRouterCallbacks['storeImage'];
   releaseImages: MessageRouterCallbacks['releaseImages'];
@@ -283,7 +281,8 @@ export function createSidebarProviderActions(
     },
     checkServerRestart,
     handleDroppedPaths: (paths) => deps.handleDroppedPaths(paths),
-    handleDroppedContent: (files) => deps.handleDroppedContent(files),
+    handleDroppedContent: (files, directory) =>
+      directory ? deps.handleDroppedContent(files, directory) : deps.handleDroppedContent(files),
     storePdf: (payload) => deps.storePdf(payload),
     storeImage: (payload) => deps.storeImage(payload),
     releaseImages: (payload) => deps.releaseImages(payload),

@@ -8,7 +8,9 @@ export async function collectDroppedPaths(
 
   const paths = new Set<string>();
   const preferFileContent =
-    options.preferFileContent === true && Array.from(dataTransfer.files).length > 0;
+    options.preferFileContent === true &&
+    (Array.from(dataTransfer.files).length > 0 ||
+      Array.from(dataTransfer.items).some((item) => item.kind === 'file'));
 
   const knownTypes = [
     'CodeEditors',

@@ -13,6 +13,7 @@ import {
   type NativePdfAttachment,
 } from '../shared/native-pdf';
 import type { DroppedFilesService } from './dropped-files-service';
+import type { DroppedContentDirectory } from '../shared/dropped-content-policy';
 import { getRelativePath } from './util/path';
 
 export class SidebarProviderContextFiles {
@@ -58,11 +59,14 @@ export class SidebarProviderContextFiles {
 
   async handleDroppedContent(
     files: Array<{ name: string; content: string; size: number }>,
-    post: (message: ExtensionMessage) => void
+    post: (message: ExtensionMessage) => void,
+    directory?: DroppedContentDirectory
   ) {
     const clearGeneration = this.clearGeneration;
     const startedAt = this.mutationSequence;
-    const valid = await this.droppedFilesService.fromContent(files);
+    const valid = await (directory
+      ? this.droppedFilesService.fromContent(files, { directory })
+      : this.droppedFilesService.fromContent(files));
     await this.applyPendingFiles(valid, clearGeneration, startedAt, post);
   }
 

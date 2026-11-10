@@ -1755,6 +1755,51 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it('preserves copied folder metadata, including empty folders', () => {
+    for (const files of [[], [{ name: 'nested/note.txt', content: 'QQ==', size: 1 }]]) {
+      const message = {
+        type: 'files/drop-content',
+        payload: { files, directory: { name: 'external', directories: ['nested', 'empty'] } },
+      };
+      expect(parseWebviewMessage(message)).toEqual(message);
+    }
+  });
+
+  it.each(['../outside', '/absolute', 'C:\\outside', 'nested/../outside'])(
+    'rejects unsafe folder file and directory paths: %s',
+    (path) => {
+      expect(
+        parseWebviewMessage({
+          type: 'files/drop-content',
+          payload: {
+            files: [{ name: path, content: 'QQ==', size: 1 }],
+            directory: { name: 'root', directories: [] },
+          },
+        })
+      ).toBeNull();
+      expect(
+        parseWebviewMessage({
+          type: 'files/drop-content',
+          payload: { files: [], directory: { name: 'root', directories: [path] } },
+        })
+      ).toBeNull();
+    }
+  );
+
+  it('rejects malformed and unbounded copied folder metadata', () => {
+    for (const directory of [
+      null,
+      {},
+      { name: '../outside', directories: [] },
+      { name: 'root', directories: [1] },
+      { name: 'root', directories: Array.from({ length: 201 }, (_, i) => `${i}`) },
+    ]) {
+      expect(
+        parseWebviewMessage({ type: 'files/drop-content', payload: { files: [], directory } })
+      ).toBeNull();
+    }
+  });
+
   it('validates delegated image storage and release messages', () => {
     expect(
       parseWebviewMessage({

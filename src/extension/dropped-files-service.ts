@@ -4,13 +4,16 @@ import { writeFile, mkdtemp, mkdir, readFile, readdir, rm, stat as statPath } fr
 import { tmpdir } from 'os';
 import { Buffer } from 'buffer';
 import { randomBytes } from 'crypto';
-import { join, isAbsolute, relative, sep } from 'path';
+import { dirname, join, isAbsolute, relative, sep } from 'path';
 import * as vscode from 'vscode';
 import {
   MAX_DROPPED_CONTENT_FILES,
   MAX_DROPPED_CONTENT_FILE_BYTES,
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
+  MAX_DROPPED_DIRECTORY_ENTRIES,
+  isSafeDroppedRelativePath,
 } from '../shared/dropped-content-policy';
+import type { DroppedContentDirectory } from '../shared/dropped-content-policy';
 import type { DroppedFile } from '../shared/protocol';
 import type { ContextProvider } from './context-provider';
 import { logger } from './logger';
@@ -34,6 +37,7 @@ interface DropOwnerMarker {
 interface OwnedContentFile {
   queuedPdf: boolean;
   size: number;
+  directory?: boolean;
 }
 
 type DropOwnerReadResult =
@@ -89,12 +93,13 @@ export class DroppedFilesService {
 
   async fromContent(
     files: Array<{ name: string; content: string; size: number }>,
-    options: { maxFileBytes?: number } = {}
+    options: { maxFileBytes?: number; directory?: DroppedContentDirectory } = {}
   ) {
     if (this.disposePromise) await this.disposePromise;
     const operation = this.fromContentNow(
       files,
-      options.maxFileBytes ?? MAX_DROPPED_CONTENT_FILE_BYTES
+      options.maxFileBytes ?? MAX_DROPPED_CONTENT_FILE_BYTES,
+      options.directory
     );
     this.activeContentWrites.add(operation);
     try {
@@ -106,7 +111,8 @@ export class DroppedFilesService {
 
   private async fromContentNow(
     files: Array<{ name: string; content: string; size: number }>,
-    maxFileBytes: number
+    maxFileBytes: number,
+    directory?: DroppedContentDirectory
   ) {
     const candidates = files.slice(0, MAX_DROPPED_CONTENT_FILES);
     if (files.length > candidates.length) {
@@ -129,6 +135,10 @@ export class DroppedFilesService {
       if (isDroppedContentEncodingValid(file, maxFileBytes)) acceptedFiles.push(file);
     }
 
+    if (directory) {
+      if (acceptedFiles.length !== files.length) return [];
+      return this.writeDroppedDirectory(acceptedFiles, directory, totalSize);
+    }
     if (acceptedFiles.length === 0) return [];
     const dropsDir = await this.ensureDropsDir();
     if (!dropsDir) return [];
@@ -204,6 +214,69 @@ export class DroppedFilesService {
     }
   }
 
+  private async writeDroppedDirectory(
+    files: Array<{ name: string; content: string; size: number }>,
+    directory: DroppedContentDirectory,
+    totalSize: number
+  ): Promise<DroppedFileInput[]> {
+    if (
+      !isSafeDroppedRelativePath(directory.name) ||
+      directory.name.includes('/') ||
+      directory.name.length > 255 ||
+      directory.directories.length + files.length > MAX_DROPPED_DIRECTORY_ENTRIES ||
+      !directory.directories.every(isSafeDroppedRelativePath) ||
+      !files.every((file) => isSafeDroppedRelativePath(file.name))
+    ) {
+      logger.warn('Ignoring dropped folder: invalid relative paths');
+      return [];
+    }
+    const names = files.map((file) => file.name.toLowerCase());
+    if (new Set(names).size !== names.length) {
+      logger.warn('Ignoring dropped folder: duplicate file paths');
+      return [];
+    }
+    const dropsDir = await this.ensureDropsDir();
+    if (!dropsDir) return [];
+    if (
+      this.ownedContentBytes + this.reservedContentBytes + totalSize >
+      MAX_DROPPED_CONTENT_TOTAL_BYTES
+    ) {
+      logger.warn('Ignoring dropped folder: live temporary content exceeds the size limit');
+      return [];
+    }
+    this.reservedContentBytes += totalSize;
+    const targetPath = join(
+      dropsDir,
+      `${randomBytes(16).toString('hex')}-${sanitizeDroppedFileName(directory.name)}`
+    );
+    try {
+      await mkdir(targetPath, { mode: 0o700 });
+      for (const path of directory.directories) {
+        await mkdir(join(targetPath, path), { recursive: true, mode: 0o700 });
+      }
+      for (const file of files) {
+        const path = join(targetPath, file.name);
+        await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+        await this.tempDropsOps.write(path, Buffer.from(file.content, 'base64'), { mode: 0o600 });
+      }
+      this.ownedContentFiles.set(targetPath, {
+        queuedPdf: false,
+        size: totalSize,
+        directory: true,
+      });
+      this.ownedContentBytes += totalSize;
+      return [{ path: targetPath, relativePath: directory.name, type: 'directory' }];
+    } catch (err) {
+      await this.removeDropsDir(targetPath);
+      logger.warn(
+        `Failed to persist dropped folder ${directory.name}: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return [];
+    } finally {
+      this.reservedContentBytes -= totalSize;
+    }
+  }
+
   async removeOwnedFile(path: string): Promise<boolean> {
     if (this.retainedContentFiles.has(path)) return false;
     const timer = this.deferredRemovalTimers.get(path);
@@ -217,7 +290,7 @@ export class DroppedFilesService {
     if (!owned) return false;
     const laneIndex = this.nextOwnedRemovalLane++ % this.ownedRemovalLanes.length;
     const removal = this.ownedRemovalLanes[laneIndex]!.then(() =>
-      this.removeOwnedFileNow(path, owned.size)
+      this.removeOwnedFileNow(path, owned)
     );
     this.ownedRemovalLanes[laneIndex] = removal.then(
       () => undefined,
@@ -268,12 +341,15 @@ export class DroppedFilesService {
     this.deferredRemovalTimers.set(path, timer);
   }
 
-  private async removeOwnedFileNow(path: string, size: number): Promise<boolean> {
+  private async removeOwnedFileNow(path: string, owned: OwnedContentFile): Promise<boolean> {
     try {
-      await this.tempDropsOps.remove(path, { force: true });
+      await this.tempDropsOps.remove(
+        path,
+        owned.directory ? { recursive: true, force: true } : { force: true }
+      );
       this.ownedContentFiles.delete(path);
       this.clearFileSessionOwnership(path);
-      this.ownedContentBytes = Math.max(0, this.ownedContentBytes - size);
+      this.ownedContentBytes = Math.max(0, this.ownedContentBytes - owned.size);
       return true;
     } catch (err) {
       logger.warn(

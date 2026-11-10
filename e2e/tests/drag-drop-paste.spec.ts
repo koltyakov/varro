@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-returns -- Playwright callbacks inspect browser clipboard and request payloads whose values cross an untyped browser boundary. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions bridge controlled clipboard, drag, and harness request fixtures to the shapes under test. */
+import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
@@ -214,6 +215,87 @@ test('delivers a Shift file drop when the drag source only permits move', async 
     )
     .toEqual([{ type: 'files/drop', payload: { paths: ['C:\\repo\\src\\example.ts'] } }]);
   await expect(page.getByText('Drop to add to context')).toHaveCount(0);
+});
+
+test('delivers a native external folder drop without Shift after crossing the chat', async ({
+  page,
+}, testInfo) => {
+  const folder = testInfo.outputPath('external-folder');
+  await mkdir(`${folder}/nested`, { recursive: true });
+  await mkdir(`${folder}/empty`, { recursive: true });
+  await writeFile(`${folder}/nested/note.txt`, 'hello');
+
+  await page.addInitScript(() => {
+    // Model VS Code's window-level forwarding, installed before extension code.
+    const claimDrag = (event: DragEvent) => {
+      if (event.type === 'dragenter' && event.defaultPrevented) return;
+      if (event.shiftKey || !event.dataTransfer?.items.length) return;
+      if (!Array.from(event.dataTransfer.items).every((item) => item.kind === 'file')) return;
+      document.body.dataset.hostDragTakeovers = String(
+        Number(document.body.dataset.hostDragTakeovers ?? '0') + 1
+      );
+    };
+    window.addEventListener('dragenter', claimDrag);
+    window.addEventListener('dragover', claimDrag);
+  });
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  const composer = page.locator('.rich-composer').first();
+  await expect(composer).toBeVisible();
+  await page.evaluate(() => {
+    const harness = window as Window & { attachmentDrops?: unknown[] };
+    harness.attachmentDrops = [];
+    const send = harness.__sendToExtension;
+    if (!send) throw new Error('Expected the E2E extension bridge');
+    harness.__sendToExtension = (message) => {
+      if ((message as { type?: string }).type === 'files/drop-content') {
+        harness.attachmentDrops!.push(message);
+      }
+      return send(message);
+    };
+  });
+
+  const target = await composer.boundingBox();
+  if (!target) throw new Error('Expected incoming folder drop target');
+  const cdp = await page.context().newCDPSession(page);
+  const data = { items: [], files: [folder], dragOperationsMask: 1 };
+  try {
+    await cdp.send('Input.dispatchDragEvent', {
+      type: 'dragEnter',
+      x: 20,
+      y: 20,
+      data,
+      modifiers: 0,
+    });
+    await cdp.send('Input.dispatchDragEvent', {
+      type: 'dragOver',
+      x: 20,
+      y: 20,
+      data,
+      modifiers: 0,
+    });
+    await expect(page.getByText('Drop to add to context')).toBeVisible();
+    const x = target.x + target.width / 2;
+    const y = target.y + target.height / 2;
+    await cdp.send('Input.dispatchDragEvent', { type: 'dragOver', x, y, data, modifiers: 0 });
+    await cdp.send('Input.dispatchDragEvent', { type: 'drop', x, y, data, modifiers: 0 });
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as Window & { attachmentDrops?: unknown[] }).attachmentDrops)
+      )
+      .toEqual([
+        {
+          type: 'files/drop-content',
+          payload: {
+            directory: { name: 'external-folder', directories: ['empty', 'nested'] },
+            files: [{ name: 'nested/note.txt', content: 'aGVsbG8=', size: 5 }],
+          },
+        },
+      ]);
+    expect(await page.locator('body').getAttribute('data-host-drag-takeovers')).toBeNull();
+    await expect(page.getByText('Drop to add to context')).toHaveCount(0);
+  } finally {
+    await cdp.detach();
+  }
 });
 
 test('displays files received from files/dropped in the attachment strip', async ({ page }) => {

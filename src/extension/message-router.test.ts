@@ -338,6 +338,15 @@ describe('MessageRouter', () => {
     expect(cb.handleDroppedContent).toHaveBeenCalledWith(files);
   });
 
+  it('preserves copied folder metadata when dispatching dropped content', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    const files = [{ name: 'nested/a.ts', content: 'QQ==', size: 1 }];
+    const directory = { name: 'external', directories: ['nested', 'empty'] };
+    await router.handleMessage({ type: 'files/drop-content', payload: { files, directory } });
+    expect(cb.handleDroppedContent).toHaveBeenCalledWith(files, directory);
+  });
+
   it('preserves sent attachment ownership through parsing and dispatch', async () => {
     const cb = createCallbacks();
     const router = new MessageRouter(cb);

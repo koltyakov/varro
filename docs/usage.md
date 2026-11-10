@@ -220,6 +220,8 @@ Use any of these flows to add more context.
 - With an editor selection, use the editor context menu entry that also appears as `Varro: Add to Context`, or press `Cmd+Shift+K` / `Ctrl+Shift+K`.
 - Select terminal text and choose `Varro: Add to Context` from the terminal context menu, or press `Cmd+Shift+K` / `Ctrl+Shift+K`.
 - Drag files or folders into the composer.
+
+  For reliable drag and drop in VS Code, hold `Shift` before moving the drag into the VS Code window and keep it held until you drop. Drops without Shift can work when they enter Varro directly, but VS Code can intercept them before Varro receives any drag events. Waiting or hovering longer does not reliably release that interception. The attachment button avoids this routing issue.
 - Use the attachment button beside the composer.
 - Paste an image or PDF into the composer.
 - Type `@path/to/file` to search files across all open roots. Multi-root results include their folder label.
@@ -227,6 +229,8 @@ Use any of these flows to add more context.
 - Type `&` to search recent root sessions and insert a stable `session:<id>` reference. Session references in the composer and rendered responses open the referenced session.
 
 Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. In environments where other dropped items do not expose local paths, content-only drops are limited to 20 files, 10 MiB per file, and 50 MiB in total.
+
+External folder drops without local paths attach a temporary copy, preserving nested files and empty folders. Each copied folder is limited to 20 files and 200 total entries, with the same size limits as content-only file drops. Folders that exceed these limits are rejected rather than partially attached. Use the attachment picker to reference larger folders available to the extension host.
 
 ### PDF attachments
 

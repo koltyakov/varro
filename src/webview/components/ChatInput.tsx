@@ -343,6 +343,7 @@ import {
   readFileAsDataUrl,
   readItemByType,
 } from './chat-input/drop-paths';
+import { readDroppedDirectory } from './chat-input/drop-directories';
 import {
   getPastedContextFiles,
   getPromptTextWithoutContextReferences,
@@ -4561,15 +4562,25 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const dataTransfer = e.dataTransfer;
     if (!dataTransfer) return;
 
-    // Snapshot File objects now - DataTransfer is invalidated after the drop
-    // event returns, so FileReader fallback later wouldn't see them otherwise.
+    // Capture entries and start path reads before yielding. The browser invalidates
+    // DataTransfer when the drop handler returns, but captured entries remain readable.
+    const directoryEntries = Array.from(dataTransfer.items || [])
+      .map((item) => item.webkitGetAsEntry?.())
+      .filter((entry): entry is FileSystemDirectoryEntry => entry?.isDirectory === true);
+    const directoryNames = new Set(directoryEntries.map((entry) => entry.name));
     const droppedFiles = Array.from(dataTransfer.files || []);
-    const pdfFiles = droppedFiles.filter(isPdfFile);
+    const regularFiles = droppedFiles.filter((file) => !directoryNames.has(file.name));
+    const pdfFiles = regularFiles.filter(isPdfFile);
+    const remainingFiles = regularFiles.filter((file) => !isPdfFile(file));
+    const preferFileContent =
+      isRemoteExtensionHost() && (remainingFiles.length > 0 || directoryEntries.length > 0);
+    const pathsPromise = collectDroppedPaths(dataTransfer, {
+      includeFilePaths: !preferFileContent,
+      preferFileContent,
+    });
     if (pdfFiles.length > 0) {
       await attachNativePdfFiles(pdfFiles);
     }
-    const remainingFiles = droppedFiles.filter((file) => !isPdfFile(file));
-    const preferFileContent = isRemoteExtensionHost() && remainingFiles.length > 0;
 
     const pdfPaths = new Set<string>();
     for (const file of pdfFiles) {
@@ -4577,17 +4588,22 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       const path = (file as File & { path?: string }).path;
       if (path) pdfPaths.add(path);
     }
-    const paths = (
-      await collectDroppedPaths(dataTransfer, {
-        includeFilePaths: !preferFileContent,
-        preferFileContent,
-      })
-    ).filter((path) => !pdfPaths.has(path));
+    const paths = (await pathsPromise).filter((path) => !pdfPaths.has(path));
     if (paths.length > 0) {
       postMessage({ type: 'files/drop', payload: { paths } });
       return;
     }
-    if (preferFileContent) {
+    for (const directory of directoryEntries) {
+      try {
+        postMessage({ type: 'files/drop-content', payload: await readDroppedDirectory(directory) });
+      } catch (err) {
+        showSessionActionFeedback(
+          err instanceof Error ? err.message : 'The dropped folder could not be read.',
+          'warning'
+        );
+      }
+    }
+    if (preferFileContent || directoryEntries.length > 0) {
       await sendDroppedContent(remainingFiles);
       return;
     }
@@ -5357,6 +5373,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const beginDropTarget = (e: DragEvent) => {
       if (isInternalDrag(e)) return;
       e.preventDefault();
+      // VS Code's bubbling dragover handler forwards even default-prevented
+      // native drags to the workbench, which disables webview pointer events.
+      // Claim accepted drags across the whole chat, not just the composer.
+      e.stopPropagation();
       setAttachmentDropEffect(e.dataTransfer);
       setIsDraggingOver(true);
     };

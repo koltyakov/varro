@@ -2104,6 +2104,102 @@ describe('ChatInput', () => {
     }
   });
 
+  it.each([false, true])(
+    'attaches pathless external folders after the drop data expires, remote=%s',
+    async (remoteExtensionHost) => {
+      const bridgeWindow = fixture<{
+        __sendToExtension?: (message: WebviewMessage) => void;
+        __initialWebviewState?: { remoteExtensionHost: boolean };
+      }>(window);
+      const originalSend = bridgeWindow.__sendToExtension;
+      const originalState = bridgeWindow.__initialWebviewState;
+      const sent: WebviewMessage[] = [];
+      bridgeWindow.__sendToExtension = (message) => sent.push(message);
+      bridgeWindow.__initialWebviewState = { remoteExtensionHost };
+      const file = new File(['hello'], 'note.txt');
+      const child = fixture<FileSystemFileEntry>({
+        name: 'note.txt',
+        isFile: true,
+        isDirectory: false,
+        file: (resolve: (value: File) => void) => resolve(file),
+      });
+      const root = fixture<FileSystemDirectoryEntry>({
+        name: 'external',
+        isDirectory: true,
+        createReader: () => {
+          let read = false;
+          return {
+            readEntries: (resolve: (entries: FileSystemEntry[]) => void) => {
+              resolve(read ? [] : [child]);
+              read = true;
+            },
+          };
+        },
+      });
+      const folderFile = new File([], 'external');
+      const transfer = fixture<DataTransfer>({
+        types: ['Files'],
+        files: [folderFile],
+        items: [{ kind: 'file', webkitGetAsEntry: () => root, getAsFile: () => folderFile }],
+        getData: () => '',
+      });
+      try {
+        cleanup = render(() => ChatInput(), container!);
+        dispatchDragEvent(container!.querySelector('.chat-input-container')!, 'drop', transfer);
+        Object.defineProperties(transfer, {
+          files: { value: [] },
+          items: { value: [] },
+        });
+        await vi.waitFor(() =>
+          expect(sent).toContainEqual({
+            type: 'files/drop-content',
+            payload: {
+              directory: { name: 'external', directories: [] },
+              files: [{ name: 'note.txt', content: btoa('hello'), size: 5 }],
+            },
+          })
+        );
+        expect(sent.filter((message) => message.type === 'files/drop-content')).toHaveLength(1);
+      } finally {
+        bridgeWindow.__sendToExtension = originalSend;
+        bridgeWindow.__initialWebviewState = originalState;
+      }
+    }
+  );
+
+  it('keeps external folder drops path-based when the host exposes their path', async () => {
+    const bridgeWindow = fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window);
+    const originalSend = bridgeWindow.__sendToExtension;
+    const sent: WebviewMessage[] = [];
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    const createReader = vi.fn();
+    const root = fixture<FileSystemDirectoryEntry>({
+      name: 'external',
+      isDirectory: true,
+      createReader,
+    });
+    const file = fixture<File>({ name: 'external', path: '/outside/external' });
+    const transfer = fixture<DataTransfer>({
+      types: ['Files'],
+      files: [file],
+      items: [{ kind: 'file', getAsFile: () => file, webkitGetAsEntry: () => root }],
+      getData: () => '',
+    });
+    try {
+      cleanup = render(() => ChatInput(), container!);
+      dispatchDragEvent(container!.querySelector('.chat-input-container')!, 'drop', transfer);
+      await vi.waitFor(() =>
+        expect(sent).toContainEqual({
+          type: 'files/drop',
+          payload: { paths: ['/outside/external'] },
+        })
+      );
+      expect(createReader).not.toHaveBeenCalled();
+    } finally {
+      bridgeWindow.__sendToExtension = originalSend;
+    }
+  });
+
   it('rejects per-file and aggregate dropped content limits before FileReader work', async () => {
     const originalFileReader = globalThis.FileReader;
     // SAFETY: The fixture provides the unknown fields read by this statement.
@@ -6610,6 +6706,41 @@ describe('ChatInput', () => {
       const externalDrag = dispatchDragEvent(composer, 'dragenter', createDragDataTransfer());
       expect(externalDrag.defaultPrevented).toBe(true);
       expect(document.querySelector('.chat-drop-overlay')).not.toBeNull();
+    }
+  );
+
+  it.each([false, true])(
+    'keeps accepted external drags out of VS Code window handlers, Shift=%s',
+    (shiftKey) => {
+      // VS Code installs these bubbling window handlers before loading the extension.
+      // dragenter respects defaultPrevented, but dragover forwards even accepted drags.
+      const forwarded = vi.fn();
+      const hostDragEnter = (event: Event) => {
+        if (!event.defaultPrevented) forwarded(event.type);
+      };
+      const hostDragOver = (event: Event) => forwarded(event.type);
+      window.addEventListener('dragenter', hostDragEnter);
+      window.addEventListener('dragover', hostDragOver);
+      try {
+        cleanup = render(() => ChatInput(), container!);
+        const composer = container!.querySelector('.chat-input-container')!;
+        for (const target of [document, container!, composer]) {
+          for (const type of ['dragenter', 'dragover', 'dragover']) {
+            const event = new Event(type, { bubbles: true, cancelable: true });
+            Object.defineProperties(event, {
+              dataTransfer: { value: createDragDataTransfer() },
+              shiftKey: { value: shiftKey },
+            });
+            target.dispatchEvent(event);
+            expect(event.defaultPrevented).toBe(true);
+          }
+        }
+        expect(forwarded).not.toHaveBeenCalled();
+        expect(document.querySelector('.chat-drop-overlay')).not.toBeNull();
+      } finally {
+        window.removeEventListener('dragenter', hostDragEnter);
+        window.removeEventListener('dragover', hostDragOver);
+      }
     }
   );
 

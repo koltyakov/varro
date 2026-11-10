@@ -1,4 +1,5 @@
 import type { WebviewMessage } from '../shared/protocol';
+import type { DroppedContentDirectory } from '../shared/dropped-content-policy';
 import { logger } from './logger';
 
 type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['payload'];
@@ -104,7 +105,10 @@ export interface MessageRouterCallbacks {
   restartServer(force: boolean): Promise<void>;
   checkServerRestart(checkId: number): Promise<void>;
   handleDroppedPaths(paths: string[]): Promise<void>;
-  handleDroppedContent(files: DroppedContentFile[]): Promise<void>;
+  handleDroppedContent(
+    files: DroppedContentFile[],
+    directory?: DroppedContentDirectory
+  ): Promise<void>;
   storePdf(payload: Extract<WebviewMessage, { type: 'pdfs/store' }>['payload']): Promise<void>;
   storeImage(payload: Extract<WebviewMessage, { type: 'images/store' }>['payload']): Promise<void>;
   releaseImages(
@@ -438,7 +442,11 @@ export class MessageRouter {
   private async handleFilesDropContentMessage(
     msg: Extract<WebviewMessage, { type: 'files/drop-content' }>
   ) {
-    await this.callbacks.handleDroppedContent(msg.payload.files);
+    if (msg.payload.directory) {
+      await this.callbacks.handleDroppedContent(msg.payload.files, msg.payload.directory);
+    } else {
+      await this.callbacks.handleDroppedContent(msg.payload.files);
+    }
   }
 
   private handleFilesRemoveMessage(msg: Extract<WebviewMessage, { type: 'files/remove' }>) {

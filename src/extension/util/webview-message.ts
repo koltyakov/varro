@@ -5,7 +5,10 @@ import {
   MAX_DROPPED_CONTENT_FILES,
   MAX_DROPPED_CONTENT_FILE_BYTES,
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
+  MAX_DROPPED_DIRECTORY_ENTRIES,
+  isSafeDroppedRelativePath,
 } from '../../shared/dropped-content-policy';
+import type { DroppedContentDirectory } from '../../shared/dropped-content-policy';
 import { OPENCODE_TERMINAL_COMMANDS } from '../../shared/opencode-install';
 import { parseFollowupTitle } from '../../shared/followups';
 import { isInlineProblemAttachment } from '../../shared/extension-message';
@@ -700,17 +703,39 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
 
     case 'files/drop-content': {
       const payload = asRecord(message?.payload);
-      if (!Array.isArray(payload?.files) || payload.files.length === 0) return null;
+      if (!Array.isArray(payload?.files)) return null;
+      let directory: DroppedContentDirectory | undefined;
+      if (payload.directory !== undefined) {
+        const record = asRecord(payload.directory);
+        const name = getBoundedString(record?.name, 255);
+        if (
+          !name ||
+          name.includes('/') ||
+          !isSafeDroppedRelativePath(name) ||
+          !Array.isArray(record?.directories) ||
+          record.directories.length + payload.files.length > MAX_DROPPED_DIRECTORY_ENTRIES ||
+          !record.directories.every(
+            (path): path is string => isString(path) && isSafeDroppedRelativePath(path)
+          )
+        )
+          return null;
+        directory = { name, directories: record.directories };
+      }
+      if (!directory && payload.files.length === 0) return null;
       if (payload.files.length > MAX_DROPPED_CONTENT_FILES) return null;
       const files: Array<{ name: string; content: string; size: number }> = [];
       let totalSize = 0;
       for (const entry of payload.files) {
         const record = asRecord(entry);
-        const name = getBoundedString(record?.name, MAX_DROPPED_CONTENT_NAME_LENGTH);
+        const name = getBoundedString(
+          record?.name,
+          directory ? 1024 : MAX_DROPPED_CONTENT_NAME_LENGTH
+        );
         const content = getBoundedString(record?.content, MAX_DROPPED_CONTENT_BASE64_LENGTH, true);
         const size = getSafeInteger(record?.size);
         if (
           !name ||
+          (directory && !isSafeDroppedRelativePath(name)) ||
           content === null ||
           size === null ||
           size > MAX_DROPPED_CONTENT_FILE_BYTES ||
@@ -722,7 +747,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         if (totalSize > MAX_DROPPED_CONTENT_TOTAL_BYTES) return null;
         files.push({ name, content, size });
       }
-      return { type, payload: { files } };
+      return { type, payload: directory ? { files, directory } : { files } };
     }
 
     case 'pdfs/store': {

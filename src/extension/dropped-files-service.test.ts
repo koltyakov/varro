@@ -131,6 +131,69 @@ describe('DroppedFilesService', () => {
     expect(files[0]?.path).toMatch(/[\\/]varro-drops[\\/]drop-[^\\/]+[\\/].+-\.mp3$/);
   });
 
+  it('attaches a copied external folder with nested files and empty directories', async () => {
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
+    services.push(service);
+    const context = new SidebarProviderContextFiles(service);
+    const post = vi.fn();
+    await context.handleDroppedContent(
+      [{ name: 'nested/note.txt', content: Buffer.from('hello').toString('base64'), size: 5 }],
+      post,
+      { name: 'External folder', directories: ['nested', 'empty'] }
+    );
+    const [folder] = context.getContextFiles();
+    expect(folder).toMatchObject({ relativePath: 'External folder', type: 'directory' });
+    expect(await readFile(join(folder!.path, 'nested/note.txt'), 'utf8')).toBe('hello');
+    expect((await stat(join(folder!.path, 'empty'))).isDirectory()).toBe(true);
+    if (process.platform !== 'win32') {
+      expect((await stat(folder!.path)).mode & 0o777).toBe(0o700);
+      expect((await stat(join(folder!.path, 'nested/note.txt'))).mode & 0o777).toBe(0o600);
+    }
+    context.clearContextFiles('session-1');
+    await service.removeOwnedFile(folder!.path);
+    expect(await readFile(join(folder!.path, 'nested/note.txt'), 'utf8')).toBe('hello');
+    await service.removeSessionOwnedFiles(['session-1']);
+    await expect(access(folder!.path)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('creates and removes an empty external folder', async () => {
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
+    services.push(service);
+    const [folder] = await service.fromContent([], {
+      directory: { name: 'empty', directories: [] },
+    });
+    expect((await stat(folder!.path)).isDirectory()).toBe(true);
+    expect(await service.removeOwnedFile(folder!.path)).toBe(true);
+    await expect(access(folder!.path)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each(['../outside', '/absolute', 'C:\\outside'])(
+    'rejects unsafe copied folder paths: %s',
+    async (name) => {
+      const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
+      services.push(service);
+      await expect(
+        service.fromContent([{ name, content: 'QQ==', size: 1 }], {
+          directory: { name: 'root', directories: [] },
+        })
+      ).resolves.toEqual([]);
+    }
+  );
+
+  it('does not attach a partial folder when one file has invalid content', async () => {
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
+    services.push(service);
+    await expect(
+      service.fromContent(
+        [
+          { name: 'ok.txt', content: 'QQ==', size: 1 },
+          { name: 'invalid.txt', content: '!!!!', size: 1 },
+        ],
+        { directory: { name: 'root', directories: [] } }
+      )
+    ).resolves.toEqual([]);
+  });
+
   it('writes the actual host owner marker and removes its directory on dispose', async () => {
     const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
     services.push(service);
