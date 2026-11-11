@@ -27,6 +27,8 @@ export class ProviderLimitService {
   } as const;
   private static readonly RATE_LIMIT_ERROR_CACHE_TTL_MS = 60_000;
   private static readonly MAX_RATE_LIMIT_ERROR_CACHE_TTL_MS = 60 * 60_000;
+  private static readonly AUTH_FAILURE_BACKOFF_MS = 5 * 60_000;
+  private static readonly MAX_AUTH_FAILURE_BACKOFF_MS = 60 * 60_000;
   private static readonly PROVIDER_LIMIT_TIMEOUT_MS = 12_000;
   private static readonly CACHE_TTL_MS = 60_000;
 
@@ -36,7 +38,7 @@ export class ProviderLimitService {
   >();
   private readonly providerAuthFailureCache = new Map<
     string,
-    { credentialFingerprint: string; note: string }
+    { credentialFingerprint: string; note: string; retryAt: number; backoffMs: number }
   >();
   private readonly providerLastKnownGoodCache = new Map<string, AvailableProviderLimitStatus>();
   private readonly providerRateLimitBackoff = new Map<string, number>();
@@ -342,10 +344,23 @@ export class ProviderLimitService {
       });
     }
     const credentialFingerprint = getProviderCredentialFingerprint(provider, authStore);
-    if (!canCoordinate && cachedAuthFailure?.credentialFingerprint === credentialFingerprint) {
-      return createProviderLimitLoadResult(
-        unsupportedProviderStatus(provider.id, modelID, checkedAt, cachedAuthFailure.note)
-      );
+    if (!canCoordinate && cachedAuthFailure) {
+      if (
+        cachedAuthFailure.credentialFingerprint === credentialFingerprint &&
+        cachedAuthFailure.retryAt > Date.now()
+      ) {
+        return createProviderLimitLoadResult(
+          unsupportedProviderStatus(provider.id, modelID, checkedAt, cachedAuthFailure.note)
+        );
+      }
+      // Retain expired entries so only an actual rejection advances the backoff.
+      if (
+        cachedAuthFailure.credentialFingerprint !== credentialFingerprint &&
+        generation === this.providerSnapshotGeneration &&
+        this.providerAuthFailureCache.get(provider.id) === cachedAuthFailure
+      ) {
+        this.providerAuthFailureCache.delete(provider.id);
+      }
     }
 
     let providerLimit: ProviderLimitStatus | null;
@@ -436,15 +451,25 @@ export class ProviderLimitService {
       // Shared freshness and credential identity must not be hidden by local caches.
       return { ...createProviderLimitLoadResult(providerLimit), shared: true };
     }
-    if (
-      providerLimit &&
-      isAuthFailureProviderStatus(providerLimit) &&
-      generation === this.providerSnapshotGeneration
-    ) {
-      this.providerAuthFailureCache.set(provider.id, {
-        credentialFingerprint,
-        note: providerLimit.note,
-      });
+    if (providerLimit && generation === this.providerSnapshotGeneration) {
+      const currentAuthFailure = this.providerAuthFailureCache.get(provider.id);
+      if (isAuthFailureProviderStatus(providerLimit)) {
+        const backoffMs =
+          currentAuthFailure?.credentialFingerprint === credentialFingerprint
+            ? Math.min(
+                currentAuthFailure.backoffMs * 2,
+                ProviderLimitService.MAX_AUTH_FAILURE_BACKOFF_MS
+              )
+            : ProviderLimitService.AUTH_FAILURE_BACKOFF_MS;
+        this.providerAuthFailureCache.set(provider.id, {
+          credentialFingerprint,
+          note: providerLimit.note,
+          retryAt: Date.now() + backoffMs,
+          backoffMs,
+        });
+      } else if (providerLimit.status === 'available' && currentAuthFailure === cachedAuthFailure) {
+        this.providerAuthFailureCache.delete(provider.id);
+      }
     }
     if (providerLimit) {
       return this.withLastKnownGoodFallback(cacheKey, {

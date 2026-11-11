@@ -548,38 +548,42 @@ describe('ProviderLimitService', () => {
     );
   });
 
-  it('does not restore an auth-failure cache entry from a stale load', async () => {
-    const staleAdapter = deferred<ProviderLimitStatus | null>();
-    mocks.parseProviderAuthStoreMock.mockReturnValue({
-      anthropic: { type: 'oauth', access: 'same-token' },
-    });
-    mocks.fetchProviderLimitFromAdapterMock
-      .mockReturnValueOnce(staleAdapter.promise)
-      .mockResolvedValue(null);
-    const service = new ProviderLimitService(
-      createProviderServer([{ id: 'anthropic', models: {} }])
-    );
+  it.each(['zai', 'zai-coding-plan'])(
+    'does not restore a %s auth-failure cache entry from a stale load',
+    async (providerID) => {
+      const staleAdapter = deferred<ProviderLimitStatus | null>();
+      mocks.parseProviderAuthStoreMock.mockReturnValue({
+        [providerID]: { type: 'api', key: 'same-token' },
+      });
+      mocks.fetchProviderLimitFromAdapterMock
+        .mockReturnValueOnce(staleAdapter.promise)
+        .mockResolvedValue(null);
+      const service = new ProviderLimitService(
+        createProviderServer([{ id: providerID, models: {} }])
+      );
 
-    const stale = service.get('anthropic', 'model-1');
-    await vi.waitFor(() =>
-      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(1)
-    );
-    service.clearCache();
-    await service.get('anthropic', 'model-1');
+      const stale = service.get(providerID, 'model-1');
+      await vi.waitFor(() =>
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(1)
+      );
+      service.clearCache();
+      await service.get(providerID, 'model-1');
 
-    staleAdapter.resolve({
-      providerID: 'anthropic',
-      modelID: 'model-1',
-      status: 'unsupported',
-      source: 'provider',
-      checkedAt: Date.now(),
-      note: 'Anthropic usage endpoint rejected credentials (401)',
-    });
-    await stale;
-    await service.get('anthropic', 'model-2');
+      staleAdapter.resolve({
+        providerID,
+        modelID: 'model-1',
+        status: 'unsupported',
+        source: 'provider',
+        checkedAt: Date.now(),
+        note: 'Z.ai quota endpoint rejected credentials (401)',
+      });
+      await stale;
+      await service.get(providerID, 'model-2');
 
-    expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(3);
-  });
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(3);
+      service.dispose();
+    }
+  );
 
   it('caches available statuses for thirty seconds', async () => {
     const server = createServer();
@@ -923,6 +927,288 @@ describe('ProviderLimitService', () => {
     });
 
     expect(mocks.extractOpenCodeProviderLimitMock).not.toHaveBeenCalled();
+  });
+
+  describe.each(['zai', 'zai-coding-plan'])('%s credential-rejection backoff', (providerID) => {
+    let service: ProviderLimitService;
+
+    beforeEach(() => {
+      service = new ProviderLimitService(createProviderServer([{ id: providerID, models: {} }]));
+      mocks.parseProviderAuthStoreMock.mockReturnValue({
+        [providerID]: { type: 'api', key: 'same-token' },
+      });
+    });
+
+    afterEach(() => {
+      service.dispose();
+    });
+
+    function rejection(code: number): ProviderLimitStatus {
+      return {
+        providerID,
+        modelID: 'glm-4.5',
+        status: 'unsupported',
+        source: 'provider',
+        checkedAt: Date.now(),
+        note: `Z.ai quota endpoint rejected credentials (${code})`,
+      };
+    }
+
+    function available(): ProviderLimitStatus {
+      return {
+        ...createStatus('available'),
+        providerID,
+        modelID: 'glm-4.5',
+        source: 'provider',
+      };
+    }
+
+    it.each([401, 403])(
+      'recovers from %s at five minutes without extending cooldown on cache hits or model switches',
+      async (code) => {
+        mocks.fetchProviderLimitFromAdapterMock
+          .mockResolvedValueOnce(rejection(code))
+          .mockImplementation(async () => available());
+
+        await service.get(providerID, 'glm-4.5');
+        await expect(service.get(providerID, 'glm-4.5')).resolves.toMatchObject({
+          status: 'unsupported',
+          note: rejection(code).note,
+        });
+        await vi.advanceTimersByTimeAsync(60_000);
+        await expect(service.get(providerID, 'glm-4.7')).resolves.toMatchObject({
+          modelID: 'glm-4.7',
+          status: 'unsupported',
+          note: rejection(code).note,
+        });
+        await vi.advanceTimersByTimeAsync(4 * 60_000 - 1);
+        await service.get(providerID, 'glm-4.5');
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await expect(service.get(providerID, 'glm-4.5')).resolves.toMatchObject({
+          status: 'available',
+        });
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(2);
+      }
+    );
+
+    it.each([401, 403])(
+      'doubles the cooldown from the completion of another actual %s rejection',
+      async (code) => {
+        const retriedAdapter = deferred<ProviderLimitStatus | null>();
+        mocks.fetchProviderLimitFromAdapterMock
+          .mockResolvedValueOnce(rejection(code))
+          .mockReturnValueOnce(retriedAdapter.promise)
+          .mockImplementation(async () => available());
+
+        await service.get(providerID, 'glm-4.5');
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        const retry = service.get(providerID, 'glm-4.5');
+        await vi.waitFor(() =>
+          expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(2)
+        );
+        await vi.advanceTimersByTimeAsync(1_000);
+        retriedAdapter.resolve(rejection(code));
+        await expect(retry).resolves.toMatchObject({ status: 'unsupported' });
+
+        await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
+        await service.get(providerID, 'glm-4.5');
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(2);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await expect(service.get(providerID, 'glm-4.5')).resolves.toMatchObject({
+          status: 'available',
+        });
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(3);
+      }
+    );
+
+    it.each([401, 403])(
+      'backs off %s rejections through 5, 10, 20, 40, and capped 60 minute intervals',
+      async (code) => {
+        mocks.fetchProviderLimitFromAdapterMock.mockImplementation(async () => rejection(code));
+        await service.get(providerID, 'glm-4.5');
+        let polls = 1;
+
+        for (const minutes of [5, 10, 20, 40, 60, 60]) {
+          const halfIntervalMs = (minutes * 60_000) / 2;
+          await vi.advanceTimersByTimeAsync(halfIntervalMs);
+          await service.get(providerID, 'glm-4.5');
+          await service.get(providerID, 'glm-4.7');
+          await vi.advanceTimersByTimeAsync(halfIntervalMs - 1);
+          await service.get(providerID, 'glm-4.5');
+          expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(polls);
+
+          await vi.advanceTimersByTimeAsync(1);
+          await service.get(providerID, 'glm-4.5');
+          polls += 1;
+          expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(polls);
+        }
+      }
+    );
+
+    it.each([401, 403])('resets an increased %s backoff after success', async (code) => {
+      mocks.fetchProviderLimitFromAdapterMock
+        .mockResolvedValueOnce(rejection(code))
+        .mockResolvedValueOnce(rejection(code))
+        .mockResolvedValueOnce(available())
+        .mockResolvedValueOnce(rejection(code))
+        .mockImplementation(async () => available());
+
+      await service.get(providerID, 'glm-4.5');
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await service.get(providerID, 'glm-4.5');
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await expect(service.get(providerID, 'glm-4.5')).resolves.toMatchObject({
+        status: 'available',
+      });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await service.get(providerID, 'glm-4.5');
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(4);
+      await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+      await service.get(providerID, 'glm-4.5');
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(4);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(service.get(providerID, 'glm-4.5')).resolves.toMatchObject({
+        status: 'available',
+      });
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(5);
+    });
+
+    it.each([401, 403])('resets an increased %s backoff when credentials change', async (code) => {
+      mocks.fetchProviderLimitFromAdapterMock.mockImplementation(async () => rejection(code));
+      await service.get(providerID, 'glm-4.5');
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await service.get(providerID, 'glm-4.5');
+
+      mocks.parseProviderAuthStoreMock.mockReturnValue({
+        [providerID]: { type: 'api', key: 'new-token' },
+      });
+      await service.get(providerID, 'glm-4.5');
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(3);
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          authStore: { [providerID]: { type: 'api', key: 'new-token' } },
+        })
+      );
+
+      await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+      await service.get(providerID, 'glm-4.5');
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+      await service.get(providerID, 'glm-4.5');
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(4);
+    });
+
+    it.each([401, 403])(
+      'does not advance or reset %s backoff on a non-auth error',
+      async (code) => {
+        mocks.fetchProviderLimitFromAdapterMock
+          .mockResolvedValueOnce(rejection(code))
+          .mockResolvedValueOnce({
+            ...createStatus('error'),
+            providerID,
+            modelID: 'glm-4.5',
+            note: 'Z.ai quota endpoint returned 500',
+          })
+          .mockResolvedValueOnce(rejection(code))
+          .mockImplementation(async () => available());
+
+        await service.get(providerID, 'glm-4.5');
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await expect(service.get(providerID, 'glm-4.5')).resolves.toMatchObject({
+          status: 'error',
+        });
+        await vi.advanceTimersByTimeAsync(15_000);
+        await service.get(providerID, 'glm-4.5');
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(3);
+
+        await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
+        await service.get(providerID, 'glm-4.5');
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(3);
+        await vi.advanceTimersByTimeAsync(1);
+        await expect(service.get(providerID, 'glm-4.5')).resolves.toMatchObject({
+          status: 'available',
+        });
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(4);
+      }
+    );
+
+    it('does not let a stale success clear a newer rejection from another model', async () => {
+      const staleAdapter = deferred<ProviderLimitStatus | null>();
+      mocks.fetchProviderLimitFromAdapterMock
+        .mockResolvedValueOnce(rejection(401))
+        .mockReturnValueOnce(staleAdapter.promise)
+        .mockResolvedValueOnce(rejection(403));
+
+      await service.get(providerID, 'glm-4.5');
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      const stale = service.get(providerID, 'glm-4.5');
+      await vi.waitFor(() =>
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(2)
+      );
+      await service.get(providerID, 'glm-4.7');
+      staleAdapter.resolve(available());
+      await stale;
+
+      await expect(service.get(providerID, 'glm-5')).resolves.toMatchObject({
+        status: 'unsupported',
+        note: rejection(403).note,
+      });
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(3);
+    });
+
+    it.each([401, 403])(
+      'retries changed credentials before a %s cooldown expires',
+      async (code) => {
+        mocks.fetchProviderLimitFromAdapterMock
+          .mockResolvedValueOnce(rejection(code))
+          .mockImplementation(async () => available());
+
+        await service.get(providerID, 'glm-4.5');
+        mocks.parseProviderAuthStoreMock.mockReturnValue({
+          [providerID]: { type: 'api', key: 'new-token' },
+        });
+        await expect(service.get(providerID, 'glm-4.5')).resolves.toMatchObject({
+          status: 'available',
+        });
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(2);
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            authStore: { [providerID]: { type: 'api', key: 'new-token' } },
+          })
+        );
+
+        // Returning to the old credential must not restore its superseded cooldown.
+        await vi.advanceTimersByTimeAsync(60_000);
+        mocks.parseProviderAuthStoreMock.mockReturnValue({
+          [providerID]: { type: 'api', key: 'same-token' },
+        });
+        await expect(service.get(providerID, 'glm-4.5')).resolves.toMatchObject({
+          status: 'available',
+        });
+        expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(3);
+      }
+    );
+
+    it.each([401, 403])('clears an unexpired %s cooldown with clearCache', async (code) => {
+      mocks.fetchProviderLimitFromAdapterMock
+        .mockResolvedValueOnce(rejection(code))
+        .mockImplementation(async () => available());
+
+      await service.get(providerID, 'glm-4.5');
+      await service.get(providerID, 'glm-4.5');
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(1);
+
+      service.clearCache();
+      await expect(service.get(providerID, 'glm-4.5')).resolves.toMatchObject({
+        status: 'available',
+      });
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(2);
+    });
   });
 
   it.each(['anthropic', 'claude-agent'])(
