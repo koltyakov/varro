@@ -850,6 +850,47 @@ describe('RestProxy handleRequest', () => {
     }
   });
 
+  it.each([undefined, false, true, 'true'])(
+    'reads follow-up tracing only from user settings, ignoring request trace fields: %s',
+    async (trace) => {
+      const { proxy, callbacks } = createProxy();
+      const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
+        get: vi.fn(() => 'true'),
+        inspect: vi.fn((key?: string) => ({
+          globalValue: key === 'chat.followupTrace' ? trace : undefined,
+        })),
+      });
+      const suggest = vi
+        .spyOn(FollowupService.forServer(callbacks.server), 'suggest')
+        .mockResolvedValue({ summary: '', actions: [] });
+      try {
+        await proxy.handleRequest(
+          makePayload(513, 'POST', '/varro/session/session-1/followups', {
+            assistantMessageId: 'a',
+            userMessageId: 'u',
+            userPrompt: 'Review',
+            answer: 'One bug remains',
+            model: { providerID: 'openai', modelID: 'session' },
+            allowGenerate: true,
+            trace: true,
+            rootSessionID: 'forged-root',
+          })
+        );
+        expect(suggest).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'session-1', trace: trace === true })
+        );
+        expect(suggest.mock.calls[0]?.[0]).not.toHaveProperty('rootSessionID');
+      } finally {
+        suggest.mockRestore();
+        configuration.mockReturnValue({
+          get: vi.fn(() => undefined),
+          inspect: vi.fn(() => ({ globalValue: undefined })),
+        });
+        proxy.dispose();
+      }
+    }
+  );
+
   it.each([undefined, 'openai/small'])(
     'uses the session model and reasoning unless an override is set: %s',
     async (override) => {

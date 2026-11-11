@@ -58,6 +58,7 @@ import {
   readExtensionConfigState,
   readFollowupModel,
   readFollowupsEnabled,
+  readFollowupTrace,
 } from './extension-config';
 import { parseSelectedModel } from '../shared/model-preferences';
 import { ModelPricingCatalog } from './model-pricing';
@@ -1335,6 +1336,7 @@ export class RestProxy {
                 signal: requestSignal,
                 allowGenerate: asRecord(payload.body)?.allowGenerate === true,
                 cacheOnly: asRecord(payload.body)?.cacheOnly === true,
+                trace: readFollowupTrace(),
                 isModelCurrent: () => readFollowupsEnabled() && readFollowupModel() === modelRef,
               })
             : EMPTY_FOLLOWUP_SUGGESTIONS;

@@ -19,7 +19,7 @@ vi.mock('vscode', () => ({
   workspace: { getConfiguration: mocks.getConfiguration },
 }));
 
-import { readExtensionConfigState } from './extension-config';
+import { readExtensionConfigState, readFollowupTrace } from './extension-config';
 
 describe('readExtensionConfigState', () => {
   beforeEach(() => {
@@ -98,6 +98,24 @@ describe('readExtensionConfigState', () => {
       inspect: vi.fn(() => ({ globalValue: undefined })),
     });
     expect(readExtensionConfigState().followupModel).toBe('');
+  });
+
+  it('defaults follow-up tracing to disabled and requires an explicit user opt-in', () => {
+    expect(readFollowupTrace()).toBe(false);
+    for (const value of [false, 'true', 1, null]) {
+      mocks.values.set('varro.chat.followupTrace', value);
+      expect(readFollowupTrace()).toBe(false);
+    }
+    mocks.values.set('varro.chat.followupTrace', true);
+    expect(readFollowupTrace()).toBe(true);
+  });
+
+  it('does not let repository settings enable follow-up tracing', () => {
+    mocks.getConfiguration.mockReturnValueOnce({
+      get: vi.fn(() => true),
+      inspect: vi.fn(() => ({ globalValue: undefined })),
+    });
+    expect(readFollowupTrace()).toBe(false);
   });
 
   it('defaults to ask and reads automatic loading only from application settings', () => {
