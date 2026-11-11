@@ -153,69 +153,95 @@ for (const { name, value, resource, icon } of [
   });
 }
 
-test('delivers a Shift file drop when the drag source only permits move', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=blank');
-  const composer = page.locator('.rich-composer').first();
-  await expect(composer).toBeVisible();
+for (const cancelledChatDrag of [false, true]) {
+  test(`delivers a Shift move-only file drop, cancelled chat drag=${cancelledChatDrag}`, async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=blank');
+    const composer = page.locator('.rich-composer').first();
+    await expect(composer).toBeVisible();
 
-  await page.evaluate(() => {
-    const harness = window as Window & {
-      attachmentDrops?: unknown[];
-    };
-    harness.attachmentDrops = [];
-    const send = harness.__sendToExtension;
-    if (!send) throw new Error('Expected the E2E extension bridge');
-    harness.__sendToExtension = (message) => {
-      if ((message as { type?: string }).type === 'files/drop') {
-        harness.attachmentDrops!.push(message);
-      }
-      return send(message);
-    };
-    // An iframe keeps the native source outside the chat document, as in VS Code's explorer.
-    const outside = document.createElement('iframe');
-    outside.id = 'outside-file-source';
-    outside.style.cssText =
-      'position:fixed;top:20px;left:20px;width:200px;height:80px;z-index:9999';
-    document.body.append(outside);
-    const sourceDocument = outside.contentDocument!;
-    const source = sourceDocument.createElement('div');
-    source.id = 'windows-file-drag';
-    source.draggable = true;
-    source.textContent = 'Drag Windows file';
-    source.style.cssText = 'position:fixed;top:20px;left:20px;width:180px;height:40px;z-index:9999';
-    source.addEventListener('dragstart', (event) => {
-      event.dataTransfer!.effectAllowed = 'move';
-      event.dataTransfer!.setData('CodeFiles', JSON.stringify(['C:\\repo\\src\\example.ts']));
+    if (cancelledChatDrag) {
+      await page.evaluate(() => {
+        const source = document.createElement('a');
+        source.id = 'cancelled-chat-drag';
+        source.href = 'https://example.com/chat-link';
+        source.textContent = 'Cancelled chat drag';
+        source.style.cssText = 'position:fixed;top:120px;left:20px;z-index:9999';
+        source.addEventListener('dragstart', (event) => {
+          event.preventDefault();
+          source.dataset.cancelled = 'true';
+        });
+        document.body.append(source);
+      });
+      const source = page.locator('#cancelled-chat-drag');
+      await source.dragTo(composer);
+      await expect(source).toHaveAttribute('data-cancelled', 'true');
+      await source.evaluate((node) => node.remove());
+    }
+
+    await page.evaluate(() => {
+      const harness = window as Window & {
+        attachmentDrops?: unknown[];
+      };
+      harness.attachmentDrops = [];
+      const send = harness.__sendToExtension;
+      if (!send) throw new Error('Expected the E2E extension bridge');
+      harness.__sendToExtension = (message) => {
+        if ((message as { type?: string }).type === 'files/drop') {
+          harness.attachmentDrops!.push(message);
+        }
+        return send(message);
+      };
+      // An iframe keeps the native source outside the chat document, as in VS Code's explorer.
+      const outside = document.createElement('iframe');
+      outside.id = 'outside-file-source';
+      outside.style.cssText =
+        'position:fixed;top:20px;left:20px;width:200px;height:80px;z-index:9999';
+      document.body.append(outside);
+      const sourceDocument = outside.contentDocument!;
+      const source = sourceDocument.createElement('div');
+      source.id = 'windows-file-drag';
+      source.draggable = true;
+      source.textContent = 'Drag Windows file';
+      source.style.cssText =
+        'position:fixed;top:20px;left:20px;width:180px;height:40px;z-index:9999';
+      source.addEventListener('dragstart', (event) => {
+        event.dataTransfer!.effectAllowed = 'move';
+        event.dataTransfer!.setData('CodeFiles', JSON.stringify(['C:\\repo\\src\\example.ts']));
+      });
+      sourceDocument.body.append(source);
     });
-    sourceDocument.body.append(source);
+
+    const source = await page
+      .frameLocator('#outside-file-source')
+      .locator('#windows-file-drag')
+      .boundingBox();
+    const target = await composer.boundingBox();
+    if (!source || !target) throw new Error('Expected incoming file drag source and target');
+    await page.keyboard.down('Shift');
+    try {
+      await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(source.x + source.width / 2 + 15, source.y + source.height / 2, {
+        steps: 5,
+      });
+      await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, {
+        steps: 10,
+      });
+      await page.mouse.up();
+    } finally {
+      await page.keyboard.up('Shift');
+    }
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as Window & { attachmentDrops?: unknown[] }).attachmentDrops)
+      )
+      .toEqual([{ type: 'files/drop', payload: { paths: ['C:\\repo\\src\\example.ts'] } }]);
+    await expect(page.getByText('Drop to add to context')).toHaveCount(0);
   });
-
-  const source = await page
-    .frameLocator('#outside-file-source')
-    .locator('#windows-file-drag')
-    .boundingBox();
-  const target = await composer.boundingBox();
-  if (!source || !target) throw new Error('Expected incoming file drag source and target');
-  await page.keyboard.down('Shift');
-  try {
-    await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(source.x + source.width / 2 + 15, source.y + source.height / 2, {
-      steps: 5,
-    });
-    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 10 });
-    await page.mouse.up();
-  } finally {
-    await page.keyboard.up('Shift');
-  }
-
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as Window & { attachmentDrops?: unknown[] }).attachmentDrops)
-    )
-    .toEqual([{ type: 'files/drop', payload: { paths: ['C:\\repo\\src\\example.ts'] } }]);
-  await expect(page.getByText('Drop to add to context')).toHaveCount(0);
-});
+}
 
 test('delivers a native external folder drop without Shift after crossing the chat', async ({
   page,

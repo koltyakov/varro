@@ -6709,6 +6709,49 @@ describe('ChatInput', () => {
     }
   );
 
+  it.each([
+    { cancelled: false, shiftKey: false },
+    { cancelled: false, shiftKey: true },
+    { cancelled: true, shiftKey: false },
+    { cancelled: true, shiftKey: true },
+  ])(
+    'accepts external file drops after an unfinished chat drag, cancelled=$cancelled, Shift=$shiftKey',
+    async ({ cancelled, shiftKey }) => {
+      const bridgeWindow = fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(
+        window
+      );
+      const originalSend = bridgeWindow.__sendToExtension;
+      const sent: WebviewMessage[] = [];
+      bridgeWindow.__sendToExtension = (message) => sent.push(message);
+      try {
+        cleanup = render(() => ChatInput(), container!);
+        const source = document.createElement('a');
+        container!.append(source);
+        if (cancelled) source.addEventListener('dragstart', (event) => event.preventDefault());
+        const outgoing = createDragDataTransfer();
+        outgoing.setData('text/uri-list', 'https://example.com/chat-link');
+        dispatchDragEvent(source, 'dragstart', outgoing);
+        // Cancelled drags have no dragend; the host can also lose it after an outgoing drop.
+        const incoming = Object.assign(createDragDataTransfer(), { files: [], items: [] });
+        incoming.setData('CodeFiles', JSON.stringify(['/repo/src/incoming.ts']));
+        const composer = container!.querySelector('.chat-input-container')!;
+        for (const type of ['dragenter', 'dragover', 'drop']) {
+          const event = new MouseEvent(type, { bubbles: true, cancelable: true, shiftKey });
+          Object.defineProperty(event, 'dataTransfer', { value: incoming });
+          composer.dispatchEvent(event);
+          expect(event.defaultPrevented).toBe(true);
+        }
+        await flushAsyncWork();
+        expect(sent.filter((message) => message.type === 'files/drop')).toEqual([
+          { type: 'files/drop', payload: { paths: ['/repo/src/incoming.ts'] } },
+        ]);
+        expect(document.querySelector('.chat-drop-overlay')).toBeNull();
+      } finally {
+        bridgeWindow.__sendToExtension = originalSend;
+      }
+    }
+  );
+
   it.each([false, true])(
     'keeps accepted external drags out of VS Code window handlers, Shift=%s',
     (shiftKey) => {

@@ -878,7 +878,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let providerLimitPopupRef: HTMLDivElement | undefined;
   let busyMenuRef: HTMLDivElement | undefined;
   let busyToggleRef: HTMLButtonElement | undefined;
-  let dragStartedInChat = false;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
   const [showWorkspacePicker, setShowWorkspacePicker] = createSignal(false);
@@ -4541,11 +4540,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   function isInternalDrag(event: DragEvent) {
-    return (
-      dragStartedInChat ||
-      Array.from(event.dataTransfer?.types ?? []).some(
-        (type) => type === QUEUED_MESSAGE_DRAG_TYPE || type.startsWith('application/x-varro-')
-      )
+    return Array.from(event.dataTransfer?.types ?? []).some(
+      (type) => type === QUEUED_MESSAGE_DRAG_TYPE || type.startsWith('application/x-varro-')
     );
   }
 
@@ -5358,16 +5354,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     const hideDropTarget = () => setIsDraggingOver(false);
 
-    const handleWindowDragStart = () => {
-      // Native text, link, and image drags have no Varro MIME marker.
-      // Keep their origin until dragend, including while they leave the webview.
-      dragStartedInChat = true;
+    const handleWindowDragStart = (e: DragEvent) => {
       hideDropTarget();
-    };
-
-    const handleWindowDragEnd = () => {
-      dragStartedInChat = false;
-      hideDropTarget();
+      if (e.defaultPrevented) return;
+      // Mark this drag, not the composer: cancelled/outgoing drags can miss
+      // dragend. Run after source handlers, which may clear the native payload.
+      e.dataTransfer?.setData('application/x-varro-chat-origin', 'true');
     };
 
     const beginDropTarget = (e: DragEvent) => {
@@ -5428,8 +5420,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     window.addEventListener('blur', hideDropTarget);
     document.addEventListener('paste', handleAttachmentPaste);
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    document.addEventListener('dragstart', handleWindowDragStart, true);
-    document.addEventListener('dragend', handleWindowDragEnd, true);
+    document.addEventListener('dragstart', handleWindowDragStart);
+    document.addEventListener('dragend', hideDropTarget, true);
     document.addEventListener('dragenter', beginDropTarget, true);
     document.addEventListener('dragover', handleWindowDragOver, true);
     document.addEventListener('drop', handleWindowDrop, true);
@@ -5442,8 +5434,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       window.removeEventListener('blur', hideDropTarget);
       document.removeEventListener('paste', handleAttachmentPaste);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      document.removeEventListener('dragstart', handleWindowDragStart, true);
-      document.removeEventListener('dragend', handleWindowDragEnd, true);
+      document.removeEventListener('dragstart', handleWindowDragStart);
+      document.removeEventListener('dragend', hideDropTarget, true);
       document.removeEventListener('dragenter', beginDropTarget, true);
       document.removeEventListener('dragover', handleWindowDragOver, true);
       document.removeEventListener('drop', handleWindowDrop, true);
