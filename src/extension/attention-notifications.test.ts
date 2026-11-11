@@ -29,7 +29,6 @@ function createNotifications() {
     reportError: vi.fn<AttentionNotificationHost['reportError']>(),
   };
   const transport = {
-    isEditorVisible: vi.fn(async () => false),
     show: vi.fn<AttentionNotificationTransport['show']>(async () => {}),
     playSound: vi.fn(async () => {}),
     dispose: vi.fn(),
@@ -50,78 +49,23 @@ describe('AttentionNotifications', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('suppresses visible unfocused windows without consuming cooldown or replaying old events', async () => {
-    const test = createNotifications();
-    test.transport.isEditorVisible.mockResolvedValue(true);
-    test.add('visible-request');
-    test.complete();
-    await vi.advanceTimersByTimeAsync(300);
-    expect(test.transport.show).not.toHaveBeenCalled();
-    expect(test.transport.playSound).not.toHaveBeenCalled();
-    test.transport.isEditorVisible.mockResolvedValue(false);
-    test.notifications.update();
-    await vi.advanceTimersByTimeAsync(300);
-    expect(test.transport.show).not.toHaveBeenCalled();
-    test.add('new-request');
-    await vi.advanceTimersByTimeAsync(300);
-    expect(test.transport.show).toHaveBeenCalledOnce();
-    expect(test.transport.playSound).toHaveBeenCalledOnce();
-  });
-
-  it.each(['focused', 'resolved', 'disposed'] as const)(
-    'rechecks events after an asynchronous visibility read: %s',
-    async (change) => {
-      const test = createNotifications();
-      let resolve!: (visible: boolean) => void;
-      test.transport.isEditorVisible.mockReturnValue(
-        new Promise<boolean>((accept) => {
-          resolve = accept;
-        })
-      );
-      test.add('request');
+  it.each(['permission', 'question', 'completed', 'plan-ready'] as const)(
+    'notifies only the unfocused originating window for %s when another window is active',
+    async (kind) => {
+      const background = createNotifications();
+      const active = createNotifications();
+      active.host.isFocused.mockReturnValue(true);
+      for (const window of [background, active]) {
+        if (kind === 'permission' || kind === 'question') window.add('request', kind);
+        else window.complete('session', kind);
+      }
       await vi.advanceTimersByTimeAsync(300);
-      if (change === 'focused') test.host.isFocused.mockReturnValue(true);
-      if (change === 'resolved') test.pending.delete('request');
-      if (change === 'disposed') test.notifications.dispose();
-      resolve(false);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(test.transport.show).not.toHaveBeenCalled();
-      expect(test.transport.playSound).not.toHaveBeenCalled();
+      expect(background.transport.show).toHaveBeenCalledOnce();
+      expect(background.transport.playSound).toHaveBeenCalledOnce();
+      expect(active.transport.show).not.toHaveBeenCalled();
+      expect(active.transport.playSound).not.toHaveBeenCalled();
     }
   );
-
-  it('coalesces events arriving while visibility is being checked', async () => {
-    const test = createNotifications();
-    let resolve!: (visible: boolean) => void;
-    test.transport.isEditorVisible.mockReturnValue(
-      new Promise<boolean>((accept) => {
-        resolve = accept;
-      })
-    );
-    test.add('first');
-    await vi.advanceTimersByTimeAsync(300);
-    test.add('second', 'question');
-    await vi.advanceTimersByTimeAsync(300);
-    expect(test.transport.isEditorVisible).toHaveBeenCalledOnce();
-    resolve(false);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(test.transport.show).toHaveBeenCalledOnce();
-    expect(test.transport.playSound).toHaveBeenCalledOnce();
-  });
-
-  it('drops an uncertain-visibility burst and retries visibility for the next event', async () => {
-    const test = createNotifications();
-    const error = new Error('Window list unavailable');
-    test.transport.isEditorVisible.mockRejectedValueOnce(error);
-    test.add('uncertain');
-    await vi.advanceTimersByTimeAsync(300);
-    expect(test.host.reportError).toHaveBeenCalledWith('native', error);
-    expect(test.transport.show).not.toHaveBeenCalled();
-    expect(test.transport.playSound).not.toHaveBeenCalled();
-    test.add('next');
-    await vi.advanceTimersByTimeAsync(300);
-    expect(test.transport.show).toHaveBeenCalledOnce();
-  });
 
   it('keeps the three display fields single-line and supplies missing-name fallbacks', async () => {
     const test = createNotifications();

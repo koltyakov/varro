@@ -517,13 +517,13 @@
             "completed": false,
             "planReady": false
           },
-          "markdownDescription": "Choose which events play the water-plop sound when VS Code is in the background. On macOS, sound stays off while an editor window is still visible, including side-by-side use. Leave all events unchecked to disable sound. Requires a local desktop extension host. On Linux, install `paplay`, `aplay`, or `canberra-gtk-play`."
+          "markdownDescription": "Choose which events play the water-plop sound when the originating VS Code window is not focused, including while another VS Code window is active or visible side by side. Leave all events unchecked to disable sound. Requires a local desktop extension host. On Linux, install `paplay`, `aplay`, or `canberra-gtk-play`."
         },
         "varro.notifications.native": {
           "type": "boolean",
           "scope": "application",
           "default": false,
-          "markdownDescription": "Show operating-system notifications for completed replies, plans ready for review, permission requests, and questions when VS Code is in the background. On macOS, notifications stay off while an editor window is still visible, including side-by-side use. Sound is controlled separately by `varro.notifications.sound`. Requires a local desktop extension host and OS notification permissions. On Linux, install `notify-send`."
+          "markdownDescription": "Show operating-system notifications for completed replies, plans ready for review, permission requests, and questions when the originating VS Code window is not focused, including while another VS Code window is active or visible side by side. Sound is controlled separately by `varro.notifications.sound`. Requires a local desktop extension host and OS notification permissions. On Linux, install `notify-send`."
         },
         "varro.server.port": {
           "oneOf": [

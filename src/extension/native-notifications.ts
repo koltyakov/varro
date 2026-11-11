@@ -98,8 +98,7 @@ export class NativeNotifications implements AttentionNotificationTransport {
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly run: RunNotificationCommand = runNotificationCommand,
     storageDirectory?: string,
-    private readonly notificationUrlFor?: (sessionID: string) => Promise<string>,
-    private readonly editorProcessID = process.ppid
+    private readonly notificationUrlFor?: (sessionID: string) => Promise<string>
   ) {
     if (platform === 'darwin' && storageDirectory) {
       this.macOSHelper = new MacOSNotificationHelper(
@@ -108,13 +107,6 @@ export class NativeNotifications implements AttentionNotificationTransport {
         (file, args, timeout) => this.run({ file, args, timeout }, this.abort.signal)
       );
     }
-  }
-
-  async isEditorVisible(): Promise<boolean> {
-    // VS Code supplies the foreground check on every platform. macOS also exposes occlusion.
-    if (this.platform !== 'darwin') return false;
-    if (!this.macOSHelper) throw new Error('Varro notification helper storage is unavailable.');
-    return this.macOSHelper.isEditorVisible(this.editorProcessID);
   }
 
   async show(notification: AttentionNotification): Promise<void> {

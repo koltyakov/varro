@@ -8,7 +8,6 @@ export interface AttentionNotificationSettings {
 }
 
 export interface AttentionNotificationTransport {
-  isEditorVisible(): Promise<boolean>;
   show(notification: AttentionNotification): Promise<void>;
   playSound(): Promise<void>;
   dispose(): void;
@@ -46,7 +45,6 @@ export class AttentionNotifications {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private nextDeliveryAt = 0;
   private disposed = false;
-  private checkingVisibility = false;
 
   constructor(
     private readonly host: AttentionNotificationHost,
@@ -107,11 +105,11 @@ export class AttentionNotifications {
       clearTimeout(this.timer);
       this.timer = undefined;
     }
-    if (hasQueuedNotifications && this.timer === undefined && !this.checkingVisibility) {
+    if (hasQueuedNotifications && this.timer === undefined) {
       // A fixed batching window avoids starvation during a continuous stream of asks.
       this.timer = setTimeout(
         () => {
-          void this.deliver();
+          this.deliver();
         },
         Math.max(300, this.nextDeliveryAt - Date.now())
       );
@@ -128,30 +126,15 @@ export class AttentionNotifications {
     this.transport.dispose();
   }
 
-  private async deliver(): Promise<void> {
+  private deliver(): void {
     this.timer = undefined;
     if (this.disposed) return;
-    this.checkingVisibility = true;
-    try {
-      if (this.host.isFocused() || (await this.transport.isEditorVisible())) {
-        this.queued.clear();
-        this.completions.clear();
-        return;
-      }
-      if (!this.disposed) this.deliverHidden();
-    } catch (error: unknown) {
-      // Without a visibility result, drop this burst rather than interrupt a potentially visible editor.
+    // Focus belongs to this VS Code window, not every window owned by the editor process.
+    if (this.host.isFocused()) {
       this.queued.clear();
       this.completions.clear();
-      if (!this.disposed)
-        this.host.reportError('native', error instanceof Error ? error : new Error(String(error)));
-    } finally {
-      this.checkingVisibility = false;
-      if (!this.disposed) this.update();
+      return;
     }
-  }
-
-  private deliverHidden(): void {
     const pending = this.host.getPending();
     const settings = this.host.getSettings();
     const requests = [...this.queued].flatMap((id) => {
