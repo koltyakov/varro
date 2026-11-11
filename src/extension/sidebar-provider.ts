@@ -547,7 +547,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         undefined,
         undefined,
         globalStorageUri?.fsPath,
-        () => this.notificationWindowUrl()
+        (sessionID) => this.notificationWindowUrl(sessionID)
       )
     );
     this.notificationUriHandler = vscode.window.registerUriHandler({
@@ -1485,8 +1485,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private async notificationWindowUrl(): Promise<string> {
-    return this.projectWindowUrl(this.contextProvider.context.workspacePath ?? undefined);
+  private async notificationWindowUrl(sessionID: string): Promise<string> {
+    const directory = this.contextProvider.context.workspacePath ?? undefined;
+    if (
+      vscode.workspace.workspaceFile?.scheme === 'file' ||
+      vscode.workspace.workspaceFolders?.length
+    )
+      return this.projectWindowUrl(directory);
+
+    // Scratch is an internal working directory, not a project to open in the active window.
+    // Resolve an extension callback so VS Code routes the click to this specific window.
+    const query = new URLSearchParams({
+      session: sessionID,
+      root: this.sessionState.rootSessionIdFor(sessionID),
+    });
+    if (directory) query.set('directory', directory);
+    const uri = vscode.Uri.from({
+      scheme: vscode.env.uriScheme,
+      authority: this.extensionId,
+      path: '/notification',
+      query: query.toString(),
+    });
+    return (await vscode.env.asExternalUri(uri)).toString();
   }
 
   private traySessions(): TraySession[] {

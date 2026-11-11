@@ -429,9 +429,9 @@ describe('SidebarProvider desktop notifications', () => {
     const test = await createHarness();
     try {
       const provider = test.provider as unknown as {
-        notificationWindowUrl(): Promise<string>;
+        notificationWindowUrl(sessionID: string): Promise<string>;
       };
-      const url = new URL(await provider.notificationWindowUrl());
+      const url = new URL(await provider.notificationWindowUrl('child'));
       expect(url.protocol).toBe('vscode:');
       expect(url.hostname).toBe('file');
       expect(url.pathname).toBe('/repo');
@@ -449,9 +449,64 @@ describe('SidebarProvider desktop notifications', () => {
         scheme: 'file',
         path: '/work/Projects.code-workspace',
       };
-      const provider = test.provider as unknown as { notificationWindowUrl(): Promise<string> };
-      expect(await provider.notificationWindowUrl()).toBe(
+      const provider = test.provider as unknown as {
+        notificationWindowUrl(sessionID: string): Promise<string>;
+      };
+      expect(await provider.notificationWindowUrl('child')).toBe(
         'vscode://file/work/Projects.code-workspace'
+      );
+    } finally {
+      await test.provider.dispose();
+    }
+  });
+
+  it('routes a scratch notification to its originating window without opening a folder', async () => {
+    const test = await createHarness();
+    try {
+      const scratch = '/varro/scratch folder';
+      test.vscode.workspace.workspaceFolders = [];
+      test.contextProvider.context.workspacePath = scratch;
+      const provider = test.provider as unknown as {
+        notificationWindowUrl(sessionID: string): Promise<string>;
+      };
+      const url = new URL(await provider.notificationWindowUrl('child'));
+      expect(url.protocol).toBe('vscode:');
+      expect(url.hostname).toBe('koltyakov.varro');
+      expect(url.pathname).toBe('/notification');
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        session: 'child',
+        root: 'root',
+        directory: scratch,
+        windowId: '42',
+      });
+      expect(test.vscode.env.asExternalUri).toHaveBeenCalledOnce();
+      const open = vi.spyOn(test.provider, 'openSessionInSidebar').mockResolvedValue();
+      const handler = test.vscode.window.registerUriHandler.mock.calls.at(-1)?.[0];
+      if (!handler) throw new Error('Missing notification URI handler');
+      test.vscode.commands.executeCommand.mockClear();
+      await handler.handleUri({
+        authority: url.hostname,
+        path: url.pathname,
+        query: url.search.slice(1),
+      } as never);
+      expect(open).toHaveBeenCalledExactlyOnceWith('child', scratch);
+      expect(test.vscode.commands.executeCommand).not.toHaveBeenCalled();
+    } finally {
+      await test.provider.dispose();
+    }
+  });
+
+  it('does not fall back to opening scratch as a folder when window routing fails', async () => {
+    const test = await createHarness();
+    try {
+      test.vscode.workspace.workspaceFolders = [];
+      test.contextProvider.context.workspacePath = '/varro/scratch';
+      test.vscode.env.asExternalUri.mockRejectedValueOnce(new Error('Window routing unavailable'));
+      const provider = test.provider as unknown as {
+        notificationWindowUrl(sessionID: string): Promise<string>;
+      };
+      await expect(provider.notificationWindowUrl('root')).rejects.toThrow(
+        'Window routing unavailable'
       );
     } finally {
       await test.provider.dispose();

@@ -84,6 +84,14 @@ for (const scenario of [
     code: 0,
   },
   {
+    name: 'opens the window-routed scratch callback unchanged before acknowledging the click',
+    action: 'default',
+    url: 'vscode://koltyakov.varro/notification?session=ses_test&root=ses_root&directory=%2Fvarro%2Fscratch&windowId=42',
+    result: 'success',
+    events: ['open', 'complete'],
+    code: 0,
+  },
+  {
     name: 'rejects a non-editor protocol',
     action: 'default',
     url: 'https://file/Users/test/project',

@@ -57,7 +57,7 @@ Chat indicators and the status bar link to running sessions, requests needing at
 
 ### Desktop notifications
 
-Enable banners with `varro.notifications.native` and sounds with `varro.notifications.sound`. Both are off by default. Alerts cover permissions, questions, replies, and plans; clicking opens the project window. Alerts use the originating VS Code window's focus on every platform, including macOS. An unfocused window can notify while another VS Code window is active, even when both windows are visible.
+Enable banners with `varro.notifications.native` and sounds with `varro.notifications.sound`. Both are off by default. Alerts cover permissions, questions, replies, and plans; clicking opens the project window or returns to the originating scratch window's chat. Alerts use the originating VS Code window's focus on every platform, including macOS. An unfocused window can notify while another VS Code window is active, even when both windows are visible.
 
 Requires a local desktop host, not SSH, WSL, or containers. On macOS 11+, allow the bundled [Varro helper](native/macos-notifications/README.md) in System Settings > Notifications. Linux needs `notify-send` for banners and `paplay`, `aplay`, or `canberra-gtk-play` for sound. OS notification settings apply.
 
