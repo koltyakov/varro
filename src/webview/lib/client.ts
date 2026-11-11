@@ -72,6 +72,7 @@ import type { McpConfigScope } from '../../shared/mcp-config';
 import { applySessionShareOverride } from './session-share-overrides';
 import { CURRENT_OPENCODE_ENDPOINTS } from '../../shared/opencode-endpoints';
 import { STARTUP_DEFAULT_MODEL_TIMEOUT_MS, withStartupDeadline } from '../../shared/startup';
+import type { StartupAddonFailure } from '../../shared/startup';
 import { isBoolean, isNumber, isString, isObject } from './runtime-values';
 import type {
   ChildTaskControls,
@@ -583,25 +584,44 @@ export const client = {
   },
 
   config: {
+    async startupDiagnostics(signal: AbortSignal): Promise<StartupAddonFailure[]> {
+      const path = VARRO_API_ENDPOINTS.startupDiagnostics;
+      const entries = requireArray<unknown>(
+        await apiCall('GET', path, undefined, { signal, retries: 0 }),
+        path
+      );
+      return entries.slice(0, 5).flatMap((entry) => {
+        const value = asRecord(entry);
+        if (
+          (value?.kind !== 'plugin' && value?.kind !== 'mcp') ||
+          !isString(value.name) ||
+          !isBoolean(value.timedOut)
+        )
+          return [];
+        return [{ kind: value.kind, name: value.name.slice(0, 120), timedOut: value.timedOut }];
+      });
+    },
     modelPricing(providerID: string, modelID: string): Promise<ModelPricing | null> {
       const params = new URLSearchParams({ providerID, modelID });
       return apiCall('GET', `${VARRO_API_ENDPOINTS.modelPricing}?${params}`, undefined, {
         retries: 0,
       });
     },
-    async providers(): Promise<{
+    async providers(signal?: AbortSignal): Promise<{
       providers: Provider[];
       default: Record<string, string>;
       defaultModel: ChatModelSelection | null | undefined;
     }> {
       const path = '/config/providers';
       const [providerResponse, defaultModel] = await Promise.all([
-        apiCall('GET', path),
+        signal ? apiCall('GET', path, undefined, { signal }) : apiCall('GET', path),
         // This endpoint is optional and unsupported servers may return their HTML shell.
         withStartupDeadline(
-          (signal) => apiCall('GET', '/model/default', undefined, { signal, retries: 0 }),
+          (defaultSignal) =>
+            apiCall('GET', '/model/default', undefined, { signal: defaultSignal, retries: 0 }),
           STARTUP_DEFAULT_MODEL_TIMEOUT_MS,
-          'Default model lookup'
+          'Default model lookup',
+          signal
         )
           .then(parseDefaultModel)
           .catch(() => undefined),

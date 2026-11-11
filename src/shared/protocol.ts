@@ -468,6 +468,7 @@ export const VARRO_API_ENDPOINTS = {
   promptCompletionModels: `${VARRO_API_NAMESPACE}/prompt-completion/models`,
   promptCompletionTest: `${VARRO_API_NAMESPACE}/prompt-completion/test`,
   modelPricing: `${VARRO_API_NAMESPACE}/model-pricing`,
+  startupDiagnostics: `${VARRO_API_NAMESPACE}/startup-diagnostics`,
   providerLimit: `${VARRO_API_NAMESPACE}/provider-limit`,
   planOpen: `${VARRO_API_NAMESPACE}/plan/open`,
   openCodeConfig: `${VARRO_API_NAMESPACE}/opencode-config`,

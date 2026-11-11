@@ -14,6 +14,8 @@ import type {
   RecycleBinEntry,
 } from '../../shared/protocol';
 import { getRelativePathWithinWorkspace } from '../../shared/workspace-path';
+import { formatStartupAddonFailures, withStartupDeadline } from '../../shared/startup';
+import type { StartupAddonFailure } from '../../shared/startup';
 import type {
   Agent,
   Command,
@@ -27,11 +29,32 @@ import type {
 import { reconcileLoadedAgents, reconcileLoadedProviders } from './routing-state';
 
 type Logger = (context: string, cause: unknown) => void;
+type StartupCatalogReload = {
+  controller: AbortController;
+  activationError: Error | null;
+  onWaitingForPlugins?: (waiting: boolean) => void;
+  onAddonWarning?: (warning: string | null) => void;
+  diagnosticRead?: Promise<void>;
+  addonWarning?: string | null;
+};
+type EssentialSnapshotReadiness = {
+  state: 'loaded' | 'failed' | 'superseded';
+  failed: string[];
+  error?: string;
+};
 const EMPTY_SESSION_SNAPSHOT_CONFIRMATIONS = 2;
 const SESSION_PAGE_SIZE = 100;
 const MAX_SESSION_PAGE_LIMIT = 1_000_000;
 const WORKSPACE_CATALOG_RELOAD_ATTEMPTS = 2;
 const WORKSPACE_CATALOG_LOAD_TIMEOUT_MS = 10_000;
+const STARTUP_CATALOG_TIMEOUT_MS = 60_000;
+const STARTUP_CATALOG_RETRY_MS = 500;
+
+function isPluginActivationPending(error: unknown): error is Error {
+  return (
+    error instanceof Error && error.message === '503 Location plugins did not finish activating'
+  );
+}
 
 async function runLoad<T>(
   label: string,
@@ -83,7 +106,8 @@ export function createStateBoundDataLoaderOperations(deps: {
     setSelectedAgent: routingStore.setSelectedAgent,
     listCommands: () => client.command.list(),
     setCommands: routingStore.setCommands,
-    listProviders: () => client.config.providers(),
+    listProviders: (signal) => client.config.providers(signal),
+    readStartupDiagnostics: (signal) => client.config.startupDiagnostics(signal),
     setProvidersLoaded: routingStore.setProvidersLoaded,
     setProviders: routingStore.setProviders,
     setProviderDefaults: routingStore.setProviderDefaults,
@@ -146,11 +170,12 @@ export function createDataLoaderOperations(deps: {
   ): void;
   listCommands(): Promise<Command[] | null | undefined>;
   setCommands(commands: Command[]): void;
-  listProviders(): Promise<{
+  listProviders(signal?: AbortSignal): Promise<{
     providers: Provider[];
     default?: Record<string, string>;
     defaultModel?: SelectedModel | null;
   }>;
+  readStartupDiagnostics?(signal: AbortSignal): Promise<StartupAddonFailure[]>;
   setProvidersLoaded(value: boolean): void;
   setProviders(
     providers: Provider[],
@@ -218,6 +243,8 @@ export function createDataLoaderOperations(deps: {
   let latestAgentLoad: Promise<boolean> | null = null;
   let latestCommandLoad: Promise<boolean> | null = null;
   let latestProviderLoad: Promise<boolean> | null = null;
+  let startupCatalog: StartupCatalogReload | null = null;
+  let startupCatalogError: string | null = null;
   let knownProviderIDs: Set<string> | null = null;
   const questionSnapshots = createMutationAwareSnapshotReconciler(deps.getQuestions);
   const sessionSnapshots = createMutationAwareSnapshotReconciler(deps.getSessions);
@@ -349,15 +376,19 @@ export function createDataLoaderOperations(deps: {
     return request;
   };
 
-  const loadProviders = (): Promise<boolean> => {
+  const loadProviders = (parentSignal = startupCatalog?.controller.signal): Promise<boolean> => {
+    const controller = new AbortController();
+    const signal = parentSignal ? AbortSignal.any([parentSignal, controller.signal]) : undefined;
     const workspace = workspaceGeneration;
+    const startup = startupCatalog;
     const generation = ++providerLoadGeneration;
     const isLatest = () =>
       workspace === workspaceGeneration && generation === providerLoadGeneration;
+    const isCurrent = () => isLatest() && !signal?.aborted;
     const request = inheritSupersededLoad(
       loadProvidersWithDependencies(
         {
-          listProviders: deps.listProviders,
+          listProviders: () => deps.listProviders(signal),
           setProvidersLoaded: deps.setProvidersLoaded,
           setProviders: (providers, defaults) => {
             const knownProviders = knownProviderIDs;
@@ -377,9 +408,31 @@ export function createDataLoaderOperations(deps: {
           getComposerSessionId: deps.getComposerSessionId,
           setSelectedModel: deps.setSelectedModel,
         },
-        deps.logError,
-        isLatest
-      ),
+        (context, error) => {
+          if (startup && isCurrent()) {
+            startup.activationError = isPluginActivationPending(error) ? error : null;
+            if (startup.activationError) startup.onWaitingForPlugins?.(true);
+            if (startup.activationError && !startup.diagnosticRead && deps.readStartupDiagnostics) {
+              startup.diagnosticRead = withStartupDeadline(
+                (diagnosticSignal) => deps.readStartupDiagnostics!(diagnosticSignal),
+                1_500,
+                'Startup addon warning',
+                startup.controller.signal
+              )
+                .then((failures) => {
+                  if (startupCatalog !== startup || startup.controller.signal.aborted) return;
+                  startup.addonWarning = formatStartupAddonFailures(failures);
+                  startup.onAddonWarning?.(startup.addonWarning);
+                })
+                .catch(() => {
+                  // Optional failure inventory must never delay or fail essential startup.
+                });
+            }
+          }
+          deps.logError(context, error);
+        },
+        isCurrent
+      ).finally(() => controller.abort()),
       workspace,
       isLatest,
       () => latestProviderLoad
@@ -392,20 +445,36 @@ export function createDataLoaderOperations(deps: {
     await Promise.all([loadAgents(), loadCommands(), loadProviders()]);
   };
 
-  const performWorkspaceCatalogReload = async () => {
+  const performWorkspaceCatalogReload = async (signal?: AbortSignal) => {
     const workspace = workspaceGeneration;
     let agentsLoaded = false;
     let commandsLoaded = false;
     let providersLoaded = false;
 
-    for (let attempt = 0; attempt < WORKSPACE_CATALOG_RELOAD_ATTEMPTS; attempt += 1) {
+    for (let attempt = 0; ; attempt += 1) {
+      signal?.throwIfAborted();
       [agentsLoaded, commandsLoaded, providersLoaded] = await Promise.all([
         agentsLoaded ? true : runWorkspaceCatalogLoadWithTimeout(loadAgents),
         commandsLoaded ? true : runWorkspaceCatalogLoadWithTimeout(loadCommands),
-        providersLoaded ? true : runWorkspaceCatalogLoadWithTimeout(loadProviders),
+        providersLoaded
+          ? true
+          : signal
+            ? withStartupDeadline(
+                (requestSignal) => loadProviders(requestSignal),
+                WORKSPACE_CATALOG_LOAD_TIMEOUT_MS,
+                'Provider catalog',
+                signal
+              ).catch(() => false)
+            : runWorkspaceCatalogLoadWithTimeout(loadProviders),
       ]);
       if (workspace !== workspaceGeneration) return false;
+      signal?.throwIfAborted();
       if (agentsLoaded && commandsLoaded && providersLoaded) break;
+      if (signal && agentsLoaded && commandsLoaded && startupCatalog?.activationError) {
+        await waitForStartupCatalogRetry(signal);
+        continue;
+      }
+      if (attempt + 1 >= WORKSPACE_CATALOG_RELOAD_ATTEMPTS) break;
     }
 
     if (workspace !== workspaceGeneration) return false;
@@ -414,11 +483,56 @@ export function createDataLoaderOperations(deps: {
     return loaded;
   };
 
-  const reloadWorkspaceCatalogs = () => {
+  const reloadWorkspaceCatalogs = (options?: {
+    startup?: boolean;
+    onWaitingForPlugins?: (waiting: boolean) => void;
+    onAddonWarning?: (warning: string | null) => void;
+  }) => {
     if (inFlightCatalogReload) return inFlightCatalogReload;
-    const request = performWorkspaceCatalogReload().finally(() => {
-      if (inFlightCatalogReload === request) inFlightCatalogReload = null;
-    });
+    const workspace = workspaceGeneration;
+    const startup: StartupCatalogReload | null = options?.startup
+      ? {
+          controller: new AbortController(),
+          activationError: null,
+          onWaitingForPlugins: options.onWaitingForPlugins,
+          onAddonWarning: options.onAddonWarning,
+        }
+      : null;
+    startupCatalog = startup;
+    startupCatalogError = null;
+    const operation = startup
+      ? withStartupDeadline(
+          async (signal) => {
+            // Event-driven provider refreshes share startup's cancellation and error owner.
+            const abort = () => startup.controller.abort(signal.reason);
+            signal.addEventListener('abort', abort, { once: true });
+            try {
+              return await performWorkspaceCatalogReload(signal);
+            } finally {
+              signal.removeEventListener('abort', abort);
+            }
+          },
+          STARTUP_CATALOG_TIMEOUT_MS,
+          'Startup routing catalogs',
+          startup.controller.signal
+        ).catch(() => false)
+      : performWorkspaceCatalogReload();
+    const request = operation
+      .then((loaded) => {
+        if (workspace === workspaceGeneration && !loaded && startup?.activationError)
+          startupCatalogError = [startup.activationError.message, startup.addonWarning]
+            .filter(Boolean)
+            .join('. ');
+        return loaded;
+      })
+      .finally(() => {
+        if (startupCatalog === startup) {
+          startupCatalog = null;
+          startup?.controller.abort();
+          if (workspace === workspaceGeneration) startup?.onWaitingForPlugins?.(false);
+        }
+        if (inFlightCatalogReload === request) inFlightCatalogReload = null;
+      });
     inFlightCatalogReload = request;
     return request;
   };
@@ -541,14 +655,31 @@ export function createDataLoaderOperations(deps: {
     return request;
   };
 
-  const loadEssentialSnapshots = async () => {
+  const loadEssentialSnapshots = async (options?: {
+    onWaitingForPlugins?: (waiting: boolean) => void;
+    onAddonWarning?: (warning: string | null) => void;
+  }) => {
     const workspace = workspaceGeneration;
-    const results = await Promise.all([loadSessions(), reloadWorkspaceCatalogs(), loadQuestions()]);
+    const results = await Promise.all([
+      loadSessions(),
+      reloadWorkspaceCatalogs({
+        startup: true,
+        onWaitingForPlugins: options?.onWaitingForPlugins,
+        onAddonWarning: options?.onAddonWarning,
+      }),
+      loadQuestions(),
+    ]);
     if (workspace !== workspaceGeneration) return { state: 'superseded' as const, failed: [] };
     const failed = ['sessions', 'routing catalogs', 'pending questions'].filter(
       (_, index) => results[index] !== true
     );
-    return { state: failed.length ? ('failed' as const) : ('loaded' as const), failed };
+    const result: EssentialSnapshotReadiness = {
+      state: failed.length ? ('failed' as const) : ('loaded' as const),
+      failed,
+    };
+    if (failed.includes('routing catalogs') && startupCatalogError)
+      result.error = startupCatalogError;
+    return result;
   };
 
   const loadMoreSessions = () => {
@@ -608,6 +739,9 @@ export function createDataLoaderOperations(deps: {
 
   const invalidateWorkspace = (options?: { preserveSessionCatalog?: boolean }) => {
     workspaceGeneration += 1;
+    startupCatalog?.controller.abort();
+    startupCatalog = null;
+    startupCatalogError = null;
     mcpLoadGeneration += 1;
     questionLoadGeneration += 1;
     sessionLoadGeneration += 1;
@@ -663,6 +797,22 @@ async function runWorkspaceCatalogLoadWithTimeout(load: () => Promise<boolean>) 
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
+}
+
+function waitForStartupCatalogRetry(signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, STARTUP_CATALOG_RETRY_MS);
+    signal.addEventListener('abort', abort, { once: true });
+  });
 }
 
 function createMutationAwareSnapshotReconciler<T extends { id: string }>(getCurrent: () => T[]) {

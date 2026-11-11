@@ -137,9 +137,11 @@ export function App() {
         errorRetry={defaultAppState.errorRetry}
         onDismissError={() => defaultAppState.setError(null)}
         status={() =>
-          isReconnecting()
-            ? { message: 'Reconnecting to server', icon: wifiIcon, tone: 'warning' }
-            : null
+          isReconnecting() && defaultAppState.startupWaitingForPlugins()
+            ? { message: 'Waiting for OpenCode plugins to activate', icon: statusIcons.clock }
+            : isReconnecting()
+              ? { message: 'Reconnecting to server', icon: wifiIcon, tone: 'warning' }
+              : null
         }
       />
     </div>
@@ -154,6 +156,13 @@ function WorkspaceLoading() {
         <span class="loading-dot" style={{ 'animation-delay': '0.3s' }} />
         <span class="loading-dot" style={{ 'animation-delay': '0.6s' }} />
       </div>
+      <Show when={defaultAppState.startupWaitingForPlugins()}>
+        <p class="text-[12px] text-vscode-muted">Waiting for OpenCode plugins to activate</p>
+        <p class="max-w-[420px] px-4 text-center text-[12px] text-vscode-muted">
+          {defaultAppState.startupAddonWarning() ??
+            'OpenCode has not identified which addon is delaying activation. Check its server log for details.'}
+        </p>
+      </Show>
     </div>
   );
 }

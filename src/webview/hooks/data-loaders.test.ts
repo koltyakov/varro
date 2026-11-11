@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
-import type { Agent, Command, QuestionRequest, Session, SessionStatus } from '../types';
+import type { Agent, Command, Provider, QuestionRequest, Session, SessionStatus } from '../types';
 import {
   applyModelPreferencesSnapshot,
   getModelPreferencesSnapshot,
@@ -119,6 +119,229 @@ function deferred<T>() {
 }
 
 describe('data loaders', () => {
+  const activationError = () => new Error('503 Location plugins did not finish activating');
+
+  it('waits and retries activation-pending startup providers beyond two attempts', async () => {
+    vi.useFakeTimers();
+    const onWaitingForPlugins = vi.fn();
+    const deps = createLoaderDeps({
+      listProviders: vi
+        .fn<DataLoaderDependencies['listProviders']>()
+        .mockRejectedValueOnce(activationError())
+        .mockRejectedValueOnce(activationError())
+        .mockResolvedValue({ providers: [], default: {} }),
+      listAgents: vi.fn(async () => []),
+      listCommands: vi.fn(async () => []),
+    });
+    const operations = createDataLoaderOperations(deps);
+    const startup = operations.loadEssentialSnapshots({ onWaitingForPlugins });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onWaitingForPlugins).toHaveBeenLastCalledWith(true);
+    expect(deps.finishWorkspaceCatalogReload).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(startup).resolves.toEqual({ state: 'loaded', failed: [] });
+    expect(deps.listProviders).toHaveBeenCalledTimes(3);
+    expect(deps.listAgents).toHaveBeenCalledOnce();
+    expect(deps.listCommands).toHaveBeenCalledOnce();
+    expect(vi.mocked(deps.listProviders).mock.calls.every(([signal]) => signal?.aborted)).toBe(
+      true
+    );
+    expect(onWaitingForPlugins).toHaveBeenLastCalledWith(false);
+    expect(deps.finishWorkspaceCatalogReload).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('retains the activation 503 when the startup budget expires', async () => {
+    vi.useFakeTimers();
+    const onWaitingForPlugins = vi.fn();
+    const deps = createLoaderDeps({ listProviders: vi.fn().mockRejectedValue(activationError()) });
+    const operations = createDataLoaderOperations(deps);
+    const startup = operations.loadEssentialSnapshots({ onWaitingForPlugins });
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(onWaitingForPlugins).toHaveBeenLastCalledWith(true);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(startup).resolves.toEqual({
+      state: 'failed',
+      failed: ['routing catalogs'],
+      error: '503 Location plugins did not finish activating',
+    });
+    const calls = vi.mocked(deps.listProviders).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.listProviders).toHaveBeenCalledTimes(calls);
+    expect(deps.finishWorkspaceCatalogReload).not.toHaveBeenCalled();
+    expect(onWaitingForPlugins).toHaveBeenLastCalledWith(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cancels timed-out startup reads and ignores their late provider results', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<{ providers: Provider[]; default: Record<string, string> }>();
+    const signals: Array<AbortSignal | undefined> = [];
+    const deps = createLoaderDeps({
+      listProviders: vi
+        .fn<DataLoaderDependencies['listProviders']>()
+        .mockRejectedValueOnce(activationError())
+        .mockImplementation((signal) => {
+          signals.push(signal);
+          return pending.promise;
+        }),
+    });
+    const operations = createDataLoaderOperations(deps);
+    const startup = operations.loadEssentialSnapshots();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(startup).resolves.toMatchObject({
+      state: 'failed',
+      error: '503 Location plugins did not finish activating',
+    });
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+    pending.resolve({ providers: [provider('late', {})], default: {} });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.setProviders).not.toHaveBeenCalled();
+    expect(deps.finishWorkspaceCatalogReload).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    '503 Service unavailable',
+    '401 Authentication failed',
+    '403 Location plugins did not finish activating',
+    'listener changed',
+  ])('does not extend startup retries for other failures: %s', async (message) => {
+    const onWaitingForPlugins = vi.fn();
+    const deps = createLoaderDeps({ listProviders: vi.fn().mockRejectedValue(new Error(message)) });
+    const operations = createDataLoaderOperations(deps);
+    await expect(operations.loadEssentialSnapshots({ onWaitingForPlugins })).resolves.toEqual({
+      state: 'failed',
+      failed: ['routing catalogs'],
+    });
+    expect(deps.listProviders).toHaveBeenCalledTimes(2);
+    expect(onWaitingForPlugins).not.toHaveBeenCalledWith(true);
+  });
+
+  it('stops activation retries when the workspace changes without affecting the next startup', async () => {
+    vi.useFakeTimers();
+    const onWaitingForPlugins = vi.fn();
+    const deps = createLoaderDeps({
+      listProviders: vi
+        .fn<DataLoaderDependencies['listProviders']>()
+        .mockRejectedValueOnce(activationError())
+        .mockResolvedValue({ providers: [], default: {} }),
+    });
+    const operations = createDataLoaderOperations(deps);
+    const oldStartup = operations.loadEssentialSnapshots({ onWaitingForPlugins });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onWaitingForPlugins).toHaveBeenLastCalledWith(true);
+    operations.invalidateWorkspace();
+    const newWaiting = vi.fn();
+    const newStartup = operations.loadEssentialSnapshots({ onWaitingForPlugins: newWaiting });
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(oldStartup).resolves.toEqual({ state: 'superseded', failed: [] });
+    await expect(newStartup).resolves.toEqual({ state: 'loaded', failed: [] });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.listProviders).toHaveBeenCalledTimes(2);
+    expect(onWaitingForPlugins).not.toHaveBeenCalledWith(false);
+    expect(deps.finishWorkspaceCatalogReload).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps background activation failures on the ordinary two-attempt bound', async () => {
+    const deps = createLoaderDeps({ listProviders: vi.fn().mockRejectedValue(activationError()) });
+    const operations = createDataLoaderOperations(deps);
+    await expect(operations.reloadWorkspaceCatalogs()).resolves.toBe(false);
+    expect(deps.listProviders).toHaveBeenCalledTimes(2);
+    expect(deps.finishWorkspaceCatalogReload).not.toHaveBeenCalled();
+  });
+
+  it('does not read addon diagnostics on the normal startup path', async () => {
+    const readStartupDiagnostics = vi.fn(async () => []);
+    const operations = createDataLoaderOperations(createLoaderDeps({ readStartupDiagnostics }));
+    await expect(operations.loadEssentialSnapshots()).resolves.toMatchObject({ state: 'loaded' });
+    expect(readStartupDiagnostics).not.toHaveBeenCalled();
+  });
+
+  it('reports a bounded named addon failure without blaming it for activation', async () => {
+    vi.useFakeTimers();
+    const readStartupDiagnostics = vi.fn(async () => [
+      { kind: 'mcp' as const, name: 'atlassian', timedOut: true },
+    ]);
+    const onAddonWarning = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listProviders: vi.fn().mockRejectedValue(activationError()),
+        readStartupDiagnostics,
+      })
+    );
+    const startup = operations.loadEssentialSnapshots({ onAddonWarning });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onAddonWarning).toHaveBeenCalledWith(
+      'OpenCode also reports: MCP "atlassian" timed out. These failures may be separate from plugin activation.'
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(startup).resolves.toMatchObject({
+      state: 'failed',
+      error: expect.stringContaining('MCP "atlassian" timed out'),
+    });
+    expect(readStartupDiagnostics).toHaveBeenCalledOnce();
+  });
+
+  it('does not let an unavailable addon inventory delay otherwise recoverable startup', async () => {
+    vi.useFakeTimers();
+    const onAddonWarning = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listProviders: vi
+          .fn<DataLoaderDependencies['listProviders']>()
+          .mockRejectedValueOnce(activationError())
+          .mockResolvedValue({ providers: [], default: {} }),
+        readStartupDiagnostics: () => new Promise(() => {}),
+      })
+    );
+    const startup = operations.loadEssentialSnapshots({ onAddonWarning });
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(startup).resolves.toMatchObject({ state: 'loaded' });
+    expect(onAddonWarning).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('stops extending retries if activation pending changes to a different error', async () => {
+    vi.useFakeTimers();
+    const deps = createLoaderDeps({
+      listProviders: vi
+        .fn<DataLoaderDependencies['listProviders']>()
+        .mockRejectedValueOnce(activationError())
+        .mockRejectedValueOnce(activationError())
+        .mockRejectedValue(new Error('401 Authentication failed')),
+    });
+    const operations = createDataLoaderOperations(deps);
+    const startup = operations.loadEssentialSnapshots();
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(startup).resolves.toEqual({ state: 'failed', failed: ['routing catalogs'] });
+    expect(deps.listProviders).toHaveBeenCalledTimes(3);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('inherits an event-driven startup provider success instead of retaining an obsolete 503', async () => {
+    vi.useFakeTimers();
+    const old = deferred<Awaited<ReturnType<DataLoaderDependencies['listProviders']>>>();
+    const deps = createLoaderDeps({
+      listProviders: vi
+        .fn<DataLoaderDependencies['listProviders']>()
+        .mockRejectedValueOnce(activationError())
+        .mockReturnValueOnce(old.promise)
+        .mockResolvedValue({ providers: [provider('latest', {})], default: {} }),
+    });
+    const operations = createDataLoaderOperations(deps);
+    const startup = operations.loadEssentialSnapshots();
+    await vi.advanceTimersByTimeAsync(500);
+    await operations.refreshRoutingState();
+    old.resolve({ providers: [provider('stale', {})], default: {} });
+    await expect(startup).resolves.toEqual({ state: 'loaded', failed: [] });
+    expect(deps.setProviders).toHaveBeenCalledExactlyOnceWith([provider('latest', {})], {}, []);
+    expect(deps.listProviders).toHaveBeenCalledTimes(3);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('shares essential in-flight snapshots and reports failed and superseded readiness', async () => {
     const pending = deferred<Session[]>();
     const deps = createLoaderDeps({ listSessions: vi.fn(() => pending.promise) });

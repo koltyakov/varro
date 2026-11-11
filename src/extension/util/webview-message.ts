@@ -1868,6 +1868,7 @@ const API_ROUTES: ApiRoute[] = [
   route('/global/config', methodsNoQuery('GET')),
   route('/model/default', methodsNoQuery('GET')),
   route('/config/providers', methodsNoQuery('GET')),
+  route(VARRO_API_ENDPOINTS.startupDiagnostics, methodsNoQuery('GET')),
   route('/provider', methodsNoQuery('GET')),
   route('/provider/auth', methodsNoQuery('GET')),
   route('/auth/:id', methodsNoQuery('PUT', 'DELETE')),

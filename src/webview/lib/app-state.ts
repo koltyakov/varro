@@ -265,6 +265,10 @@ export interface AppStateInstance {
   setErrorRetry(action: (() => void) | null): void;
   connectionInitialized: Accessor<boolean>;
   setConnectionInitialized: Setter<boolean>;
+  startupWaitingForPlugins: Accessor<boolean>;
+  setStartupWaitingForPlugins: Setter<boolean>;
+  startupAddonWarning: Accessor<string | null>;
+  setStartupAddonWarning: Setter<string | null>;
   showSessionPicker: Accessor<boolean>;
   setShowSessionPicker: Setter<boolean>;
   manualWorkspaceSelection: Accessor<boolean>;
@@ -561,6 +565,8 @@ export function createAppState(): AppStateInstance {
     setErrorRetrySignal(() => action);
   };
   const [connectionInitialized, setConnectionInitialized] = createSignal(false);
+  const [startupWaitingForPlugins, setStartupWaitingForPlugins] = createSignal(false);
+  const [startupAddonWarning, setStartupAddonWarning] = createSignal<string | null>(null);
   const [showSessionPicker, setShowSessionPicker] = createSignal(false);
   const storedWorkspacePath = readStored<unknown>(STORAGE_KEYS.workspacePath);
   const initialManualWorkspaceSelection =
@@ -657,6 +663,10 @@ export function createAppState(): AppStateInstance {
     setErrorRetry,
     connectionInitialized,
     setConnectionInitialized,
+    startupWaitingForPlugins,
+    setStartupWaitingForPlugins,
+    startupAddonWarning,
+    setStartupAddonWarning,
     showSessionPicker,
     setShowSessionPicker,
     manualWorkspaceSelection,
@@ -754,6 +764,10 @@ export const errorRetry = defaultAppState.errorRetry;
 export const setErrorRetry = defaultAppState.setErrorRetry;
 export const connectionInitialized = defaultAppState.connectionInitialized;
 export const setConnectionInitialized = defaultAppState.setConnectionInitialized;
+export const startupWaitingForPlugins = defaultAppState.startupWaitingForPlugins;
+export const setStartupWaitingForPlugins = defaultAppState.setStartupWaitingForPlugins;
+export const startupAddonWarning = defaultAppState.startupAddonWarning;
+export const setStartupAddonWarning = defaultAppState.setStartupAddonWarning;
 export const showSessionPicker = defaultAppState.showSessionPicker;
 export const setShowSessionPicker = defaultAppState.setShowSessionPicker;
 export const manualWorkspaceSelection = defaultAppState.manualWorkspaceSelection;
@@ -817,6 +831,8 @@ export function resetDefaultAppState() {
   setLoadingLastActivityAt(next.loadingLastActivityAt());
   setError(next.error());
   setConnectionInitialized(next.connectionInitialized());
+  setStartupWaitingForPlugins(next.startupWaitingForPlugins());
+  setStartupAddonWarning(next.startupAddonWarning());
   setShowSessionPicker(next.showSessionPicker());
   setManualWorkspaceSelection(next.manualWorkspaceSelection());
   setShowModelPicker(next.showModelPicker());

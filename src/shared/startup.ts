@@ -3,6 +3,25 @@ export const STARTUP_HEALTH_TIMEOUT_MS = 30_000;
 export const STARTUP_DEFAULT_MODEL_TIMEOUT_MS = 1_000;
 export const STARTUP_TODO_TIMEOUT_MS = 1_000;
 
+export type StartupAddonFailure = {
+  kind: 'plugin' | 'mcp';
+  name: string;
+  timedOut: boolean;
+};
+
+export function formatStartupAddonFailures(
+  failures: readonly StartupAddonFailure[]
+): string | null {
+  if (!failures.length) return null;
+  const names = failures
+    .slice(0, 5)
+    .map(
+      (failure) =>
+        `${failure.kind === 'mcp' ? 'MCP' : 'Plugin'} "${failure.name.replace(/[\r\n\t"]/g, ' ').slice(0, 120)}" ${failure.timedOut ? 'timed out' : 'failed'}`
+    );
+  return `OpenCode also reports: ${names.join('; ')}. These failures may be separate from plugin activation.`;
+}
+
 export type StartupPhase =
   | 'activation'
   | 'registration'

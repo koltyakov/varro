@@ -48,6 +48,8 @@ import {
   errorRetry,
   resetDefaultAppState,
   setConnectionInitialized,
+  setStartupWaitingForPlugins,
+  setStartupAddonWarning,
   setError,
   setErrorRetry,
   setState,
@@ -190,6 +192,32 @@ describe('AppRoot', () => {
     expect(showModels()).toBe(false);
     expect(providerConnectionRequest()).toBe(request);
     expect(appMocks.chatMountCount).toBe(1);
+  });
+
+  it('shows plugin activation waiting without exposing an uninitialized chat', () => {
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    mountAppRoot();
+    setStartupWaitingForPlugins(true);
+    expect(container?.querySelector('[role="status"]')?.textContent).toContain(
+      'Waiting for OpenCode plugins to activate'
+    );
+    expect(appMocks.chatMountCount).toBe(0);
+    setStartupWaitingForPlugins(false);
+    setConnectionInitialized(true);
+    expect(container?.textContent).not.toContain('Waiting for OpenCode plugins to activate');
+    expect(appMocks.chatMountCount).toBe(1);
+  });
+
+  it('shows OpenCode-reported addon failures separately from the unknown activation cause', () => {
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    mountAppRoot();
+    setStartupWaitingForPlugins(true);
+    expect(container?.textContent).toContain('OpenCode has not identified which addon');
+    setStartupAddonWarning(
+      'OpenCode also reports: MCP "atlassian" timed out. These failures may be separate from plugin activation.'
+    );
+    expect(container?.textContent).toContain('MCP "atlassian" timed out');
+    expect(container?.textContent).toContain('may be separate');
   });
 
   it('does not open provider setup for configured providers', () => {

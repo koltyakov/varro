@@ -608,6 +608,25 @@ describe('client', () => {
     ]);
   });
 
+  it('validates the optional startup failure inventory and passes cancellation', async () => {
+    const { client } = await loadClient();
+    const signal = new AbortController().signal;
+    bridgeMocks.apiCall.mockResolvedValue([
+      { kind: 'mcp', name: 'atlassian', timedOut: true },
+      { kind: 'plugin', name: 'invalid', timedOut: 'yes' },
+      { kind: 'unknown', name: 'invalid', timedOut: false },
+    ]);
+    await expect(client.config.startupDiagnostics(signal)).resolves.toEqual([
+      { kind: 'mcp', name: 'atlassian', timedOut: true },
+    ]);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'GET',
+      '/varro/startup-diagnostics',
+      undefined,
+      { signal, retries: 0 }
+    );
+  });
+
   it('bounds and cancels an optional default lookup without losing provider metadata', async () => {
     vi.useFakeTimers();
     try {
@@ -637,6 +656,30 @@ describe('client', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('propagates startup cancellation to provider and optional default reads', async () => {
+    const { client } = await loadClient();
+    const controller = new AbortController();
+    const signals = new Map<string, AbortSignal>();
+    bridgeMocks.apiCall.mockImplementation(
+      (_method: string, path: string, _body: undefined, options?: { signal?: AbortSignal }) => {
+        const signal = options?.signal;
+        if (!signal) throw new Error('Expected a cancellable catalog read');
+        signals.set(path, signal);
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      }
+    );
+    const loading = client.config.providers(controller.signal);
+    await Promise.resolve();
+    expect(signals.get('/config/providers')).toBe(controller.signal);
+    expect(signals.get('/model/default')).toBeInstanceOf(AbortSignal);
+    const rejected = expect(loading).rejects.toThrow('catalog cancelled');
+    controller.abort(new Error('catalog cancelled'));
+    await rejected;
+    expect(signals.get('/model/default')?.aborted).toBe(true);
   });
 
   it('preserves explicit null and falls back when the optional default endpoint is unavailable', async () => {

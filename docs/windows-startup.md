@@ -208,6 +208,23 @@ The optional default-model lookup has a one-second cancellable budget and no ret
 a late response cannot overwrite the selected model. Startup errors offer initialization
 retry without restarting a healthy server or clearing unrelated errors.
 
+Startup routing catalogs retry the exact V2 `503 Location plugins did not finish
+activating` response within a sixty-second total catalog budget, with 500 ms gaps.
+Successful agent/command catalogs are retained while providers wait. Other failures
+keep the existing two-attempt bound. The loader displays the plugin-activation wait;
+expiry retains the original 503 in the startup error and offers initialization retry,
+not a server restart. Provider reads have cancellable ten-second attempt deadlines.
+Workspace invalidation cancels the old catalog owner, and aborted or superseded reads
+cannot apply late provider results or update the next workspace's waiting state.
+
+Only after an activation-pending 503, startup may read the current location's plugin
+and MCP failure inventories with a one-second host deadline. This optional read
+never gates readiness and adds no requests to normal startup. Display only bounded
+addon names and failure/timeout categories, never raw stderr, command arguments,
+remote URLs, or credentials. V2's plugin inventory reports active/failed, not setup
+timings or the currently waiting plugin. A named MCP timeout is a reported addon
+failure, not proof that it caused the catalog gate. Keep that uncertainty explicit.
+
 Native todo hydration has a one-second cancellable read budget, with message-derived
 todos as its fallback. Selection resets and native events invalidate older native reads;
 a late success or failure cannot overwrite newer todo state or prolong transcript hydration.

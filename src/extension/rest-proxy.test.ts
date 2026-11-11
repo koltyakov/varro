@@ -2983,6 +2983,27 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 8, data: limitStatus });
   });
 
+  it('reads bounded startup addon failures only from the selected workspace', async () => {
+    const request = vi.fn(async (_method: string, route: string) => ({
+      data:
+        route === '/api/mcp'
+          ? [{ name: 'atlassian', status: { status: 'failed', error: 'Request timed out' } }]
+          : [],
+    }));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2, request },
+    });
+    await proxy.handleRequest(makePayload(80, 'GET', '/varro/startup-diagnostics'));
+    expect(request).toHaveBeenCalledWith('GET', '/api/mcp', undefined, {
+      directory: '/repo',
+      signal: expect.any(AbortSignal),
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 80,
+      data: [{ kind: 'mcp', name: 'atlassian', timedOut: true }],
+    });
+  });
+
   it('routes leased auto-approve judge requests after server startup', async () => {
     const judgeResult = { decision: 'allow' as const, reason: 'safe' };
     const serverRequest = vi.fn((method: string, path: string) => {

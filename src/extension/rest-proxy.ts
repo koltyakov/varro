@@ -61,6 +61,7 @@ import {
 } from './extension-config';
 import { parseSelectedModel } from '../shared/model-preferences';
 import { ModelPricingCatalog } from './model-pricing';
+import { StartupDiagnostics } from './startup-diagnostics';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
 import type { OpenCodeServer } from './server';
@@ -1793,6 +1794,14 @@ export class RestProxy {
       }
 
       const pricingUrl = new URL(payload.path, 'http://localhost');
+      if (method === 'GET' && pricingUrl.pathname === VARRO_API_ENDPOINTS.startupDiagnostics) {
+        const data = await new StartupDiagnostics(this.callbacks.server).read(
+          explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot() ?? undefined,
+          requestSignal
+        );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
       if (method === 'GET' && pricingUrl.pathname === VARRO_API_ENDPOINTS.modelPricing) {
         const data = await this.modelPricing.get(
           pricingUrl.searchParams.get('providerID') ?? '',

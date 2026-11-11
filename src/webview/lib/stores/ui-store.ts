@@ -18,6 +18,8 @@ import {
   setPersistentShowSessionPicker,
   setComposerFocusKey,
   setConnectionInitialized,
+  setStartupWaitingForPlugins,
+  setStartupAddonWarning,
   setDesktopSessionPaneSide,
   setError,
   setErrorRetry,
@@ -51,6 +53,8 @@ import {
   showThinking,
   startLoading,
   stopLoading,
+  startupWaitingForPlugins,
+  startupAddonWarning,
   theme,
   toggleThinking,
 } from '../state';
@@ -58,6 +62,10 @@ import {
 export const uiStore = {
   connectionInitialized,
   setConnectionInitialized,
+  startupWaitingForPlugins,
+  setStartupWaitingForPlugins,
+  startupAddonWarning,
+  setStartupAddonWarning,
   showThinking,
   setShowThinking,
   showFileDiffs,

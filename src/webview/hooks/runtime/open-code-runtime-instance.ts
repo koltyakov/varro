@@ -2317,6 +2317,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     activeInitializationAttempt = null;
     initializationOperation = null;
     startupStatusSnapshot = null;
+    uiStore.setStartupWaitingForPlugins(false);
+    uiStore.setStartupAddonWarning(null);
   }
 
   function invalidateWorkspaceAsyncWork(
@@ -2421,7 +2423,16 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     loadInitialData: async () => {
       const workspace = workspaceGeneration;
       const [snapshots, , statuses] = await Promise.all([
-        dataLoaders.loadEssentialSnapshots(),
+        dataLoaders.loadEssentialSnapshots({
+          onWaitingForPlugins: (waiting) => {
+            if (workspace !== workspaceGeneration) return;
+            uiStore.setStartupWaitingForPlugins(waiting);
+            if (!waiting) uiStore.setStartupAddonWarning(null);
+          },
+          onAddonWarning: (warning) => {
+            if (workspace === workspaceGeneration) uiStore.setStartupAddonWarning(warning);
+          },
+        }),
         syncPendingPermissions({ waitForAutomation: false }),
         loadCurrentSessionStatusSnapshot(),
       ]);
@@ -2429,7 +2440,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         throw new Error(
           snapshots.state === 'superseded'
             ? 'Startup snapshots were superseded by a workspace change'
-            : `Could not load ${snapshots.failed.join(', ')}`
+            : `Could not load ${snapshots.failed.join(', ')}${snapshots.error ? `: ${snapshots.error}` : ''}`
         );
       if (workspace === workspaceGeneration)
         startupStatusSnapshot = { workspace, snapshot: statuses };

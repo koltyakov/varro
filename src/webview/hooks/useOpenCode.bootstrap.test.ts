@@ -219,6 +219,62 @@ describe('useOpenCode initialization', () => {
     }
   });
 
+  it('shows plugin activation waiting and recovers startup without restarting the server', async () => {
+    const fixture = await startupFixture();
+    vi.useFakeTimers();
+    clientMocks.providerList
+      .mockRejectedValueOnce(new Error('503 Location plugins did not finish activating'))
+      .mockRejectedValueOnce(new Error('503 Location plugins did not finish activating'));
+    try {
+      fixture.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.stateModule.startupWaitingForPlugins()).toBe(true);
+      expect(fixture.stateModule.connectionInitialized()).toBe(false);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fixture.stateModule.connectionInitialized()).toBe(true);
+      expect(fixture.stateModule.startupWaitingForPlugins()).toBe(false);
+      expect(fixture.stateModule.error()).toBeNull();
+      expect(clientMocks.health).toHaveBeenCalledOnce();
+      expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'server/restart' })
+      );
+    } finally {
+      fixture.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('retains expired activation errors and offers initialization retry on the healthy server', async () => {
+    const fixture = await startupFixture();
+    vi.useFakeTimers();
+    clientMocks.providerList.mockRejectedValue(
+      new Error('503 Location plugins did not finish activating')
+    );
+    try {
+      fixture.start();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fixture.stateModule.connectionInitialized()).toBe(false);
+      expect(fixture.stateModule.startupWaitingForPlugins()).toBe(false);
+      expect(fixture.stateModule.error()).toBe(
+        'Failed to load OpenCode startup data: Could not load routing catalogs: 503 Location plugins did not finish activating'
+      );
+      expect(fixture.stateModule.state.serverStatus.state).toBe('running');
+      const retry = fixture.stateModule.errorRetry();
+      expect(retry).toBeTypeOf('function');
+      clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+      retry?.();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.stateModule.connectionInitialized()).toBe(true);
+      expect(fixture.stateModule.error()).toBeNull();
+      expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'server/restart' })
+      );
+    } finally {
+      fixture.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('does not supersede essential bootstrap when SSE connects while snapshots are loading', async () => {
     const fixture = await startupFixture();
     let finishCatalog!: (sessions: ReturnType<typeof session>[]) => void;

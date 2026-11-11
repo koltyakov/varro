@@ -191,6 +191,28 @@ what was omitted.
 
 ## Real Editor Setup
 
+### Focused startup verification
+
+For a startup-only request, build Varro and run `node scripts/ai-startup-fuzzy.mjs`.
+It uses released OpenCode 2.2.7, a cancellable ten-second provider read budget, a
+deliberately slow local plugin, and a dummy stdio MCP. Every case has separate
+database/configuration/state and a real VS Code development host. It does not send
+model prompts or access production sessions. Keep this distinct from AI-01 through
+AI-08 and the full action matrix.
+
+Set `VARRO_STARTUP_SEED`, `VARRO_OPENCODE_TEST_BINARY`, and
+`VARRO_VSCODE_EXECUTABLE`, or pass `VARRO_STARTUP_TOOLS` pointing to the JSON emitted
+by `scripts/ai-startup-fuzzy-bootstrap.mjs`. Bootstrap downloads checksum-verified,
+native test tools into the checkout's isolated artifacts directory, not user
+configuration. It requires explicit approval before installing missing software.
+`VARRO_STARTUP_CASES` selects comma-separated case names from the runner's plan.
+Retain the plan, real-editor observations, native process/database ownership,
+addon PID/parent-PID events, cleanup results, and final process scan under
+`artifacts/ai-test-data/`, and summarize them in an `artifacts/ai-fuzzy/` ledger.
+The deliberately uncooperative Promise plugin can require a birth-verified forced
+stop during the shutdown case; distinguish this bounded fixture cleanup from a
+surviving or unverified process.
+
 ### Database isolation
 
 A separate VS Code profile does not isolate OpenCode storage. Live tests must use a dedicated
