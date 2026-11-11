@@ -3333,7 +3333,11 @@ body.vscode-dark[data-vscode-theme-id='Dark 2026'] .interactive-session .chat-in
 }
 
 .interactive-session .chat-input-container.focused,
-body.vscode-dark .interactive-session .chat-input-container.focused {
+body.vscode-dark .interactive-session .chat-input-container.focused,
+.interactive-session .chat-input-container:has(.chat-attachments-container:focus-within),
+body.vscode-dark
+  .interactive-session
+  .chat-input-container:has(.chat-attachments-container:focus-within) {
   --chat-input-focus-ring-color: color-mix(in srgb, var(--color-vscode-accent) 35%, transparent);
   border-color: var(--color-vscode-accent);
 }

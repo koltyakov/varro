@@ -12409,35 +12409,94 @@ describe('ChatInput', () => {
     }
   });
 
-  it('pastes images as attachments after the attachment row takes focus', async () => {
-    const fileReader = installControllableFileReader();
-    try {
-      cleanup = render(() => ChatInput(), container!);
-      await flushAsyncWork();
+  it.each(
+    [false, true].flatMap((editorWasFocused) =>
+      ['row', 'body', 'editor'].map((pasteTarget) => ({ editorWasFocused, pasteTarget }))
+    )
+  )(
+    'pastes outside the draft with editor focus=$editorWasFocused and paste target=$pasteTarget',
+    async ({ editorWasFocused, pasteTarget }) => {
+      const fileReader = installControllableFileReader();
+      try {
+        cleanup = render(() => ChatInput(), container!);
+        await flushAsyncWork();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor) throw new Error('Expected composer editor');
-      editor.focus();
-      dispatchImagePaste(editor, [new File(['first'], 'first.png', { type: 'image/png' })]);
-      fileReader.resolve('first.png');
-      await flushAsyncWork();
+        const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+        if (!editor) throw new Error('Expected composer editor');
+        editor.focus();
+        dispatchImagePaste(editor, [new File(['first'], 'first.png', { type: 'image/png' })]);
+        fileReader.resolve('first.png');
+        await flushAsyncWork();
 
-      const attachmentRow = container?.querySelector<HTMLElement>('.chat-attachments-container');
-      if (!attachmentRow) throw new Error('Expected attachment row');
-      editor.blur();
-      attachmentRow.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        const attachmentRow = container?.querySelector<HTMLElement>('.chat-attachments-container');
+        if (!attachmentRow) throw new Error('Expected attachment row');
+        setInputText('Existing draft');
+        editor.focus();
+        if (editor.firstChild) setCollapsedSelection(editor.firstChild, 8);
+        if (!editorWasFocused) editor.blur();
+        attachmentRow.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        expect(document.activeElement).toBe(attachmentRow);
 
-      dispatchImagePaste(document.body, [
-        new File(['second'], 'second.png', { type: 'image/png' }),
-      ]);
-      fileReader.resolve('second.png');
-      await flushAsyncWork();
+        const target =
+          pasteTarget === 'row' ? attachmentRow : pasteTarget === 'editor' ? editor : document.body;
+        const paste = dispatchImagePaste(
+          target,
+          [new File(['second'], 'second.png', { type: 'image/png' })],
+          'Clipboard image label'
+        );
+        expect(paste.defaultPrevented).toBe(true);
+        fileReader.resolve('second.png');
+        await flushAsyncWork();
 
-      expect(inputText()).toBe('');
-      expect(state.clipboardImages.map((image) => image.filename)).toEqual(['Image 1', 'Image 2']);
-    } finally {
-      fileReader.restore();
+        expect(inputText()).toBe('Existing draft');
+        expect(state.clipboardImages.map((image) => image.filename)).toEqual([
+          'Image 1',
+          'Image 2',
+        ]);
+        expect(attachmentRow.querySelectorAll('.chat-attachment-chip')).toHaveLength(2);
+        expect(document.activeElement).toBe(attachmentRow);
+
+        editor.focus();
+        if (editor.firstChild) setCollapsedSelection(editor.firstChild, 8);
+        dispatchImagePaste(editor, [new File(['third'], 'third.png', { type: 'image/png' })]);
+        fileReader.resolve('third.png');
+        await flushAsyncWork();
+
+        expect(inputText()).toBe('Existing [Image 3] draft');
+        expect(attachmentRow.querySelectorAll('.chat-attachment-chip')).toHaveLength(2);
+      } finally {
+        fileReader.restore();
+      }
     }
+  );
+
+  it('does not claim pastes after focus leaves the attachment row', async () => {
+    addClipboardImage({
+      id: 'existing-image',
+      url: 'data:image/png;base64,aW1hZ2U=',
+      mime: 'image/png',
+      filename: 'Image 1',
+      size: 5,
+    });
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const row = container?.querySelector<HTMLElement>('.chat-attachments-container');
+    if (!row) throw new Error('Expected attachment row');
+    row.click();
+    expect(document.activeElement).toBe(row);
+    const textPaste = dispatchImagePaste(row, [], 'Plain text');
+    expect(textPaste.defaultPrevented).toBe(false);
+
+    const otherInput = document.createElement('textarea');
+    container?.append(otherInput);
+    otherInput.focus();
+    const imagePaste = dispatchImagePaste(otherInput, [
+      new File(['other'], 'other.png', { type: 'image/png' }),
+    ]);
+    expect(imagePaste.defaultPrevented).toBe(false);
+    expect(inputText()).toBe('');
+    expect(state.clipboardImages).toHaveLength(1);
   });
 
   it.each([20, 10_000])('does not reread %i loaded messages on keystrokes', async (count) => {

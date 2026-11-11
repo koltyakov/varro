@@ -2933,6 +2933,11 @@
   );
 }
 
+.chat-attachments-container:focus {
+  /* The enclosing composer supplies the focus ring. */
+  outline: none;
+}
+
 .chat-attachment-chip {
   display: inline-flex;
   align-items: center;

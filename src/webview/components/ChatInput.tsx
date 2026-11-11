@@ -851,7 +851,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let richEditorRef: HTMLDivElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let inputFrameRef: HTMLDivElement | undefined;
-  let attachmentRowOwnsPaste = false;
   let composerDisposed = false;
   let pdfAttachmentEpoch = 0;
   let permissionPickerRef: HTMLButtonElement | undefined;
@@ -5291,8 +5290,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       // SAFETY: The surrounding shape or discriminator check establishes the Node contract used below.
       const target = e.target as Node | null;
       if (target && mcpAuthDialogRef?.contains(target)) return;
-      attachmentRowOwnsPaste =
-        !!target && !!inputFrameRef?.querySelector('.chat-attachments-container')?.contains(target);
       const clickedInsideInteractiveArea =
         !!target && (containerRef?.contains(target) || modelPopoverRef?.contains(target));
 
@@ -5400,17 +5397,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     };
 
     const handleAttachmentPaste = (e: ClipboardEvent) => {
-      // SAFETY: Clipboard event targets are DOM nodes when dispatched by the document.
-      const target = e.target as Node | null;
-      if (target && richEditorRef?.contains(target)) return;
       const attachmentRow = inputFrameRef?.querySelector('.chat-attachments-container');
-      if (!attachmentRowOwnsPaste && (!target || !attachmentRow?.contains(target))) return;
+      // VS Code's execCommand('paste') can target the retained document selection
+      // instead of the focused row. Focus owns placement, not the event target.
+      if (!attachmentRow?.contains(document.activeElement)) return;
       const hasImage = Array.from(e.clipboardData?.items ?? []).some(
         (item) => item.kind === 'file' && item.type.startsWith('image/')
       );
       if (!hasImage) return;
 
       e.preventDefault();
+      e.stopPropagation();
       handlePaste(e);
       handlePasteInsertion(e, null);
     };
@@ -5418,7 +5415,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     window.addEventListener('keydown', handlePopupEscape, true);
     window.addEventListener('click', handleWindowClick, true);
     window.addEventListener('blur', hideDropTarget);
-    document.addEventListener('paste', handleAttachmentPaste);
+    document.addEventListener('paste', handleAttachmentPaste, true);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('dragstart', handleWindowDragStart);
     document.addEventListener('dragend', hideDropTarget, true);
@@ -5432,7 +5429,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       window.removeEventListener('keydown', handlePopupEscape, true);
       window.removeEventListener('click', handleWindowClick, true);
       window.removeEventListener('blur', hideDropTarget);
-      document.removeEventListener('paste', handleAttachmentPaste);
+      document.removeEventListener('paste', handleAttachmentPaste, true);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('dragstart', handleWindowDragStart);
       document.removeEventListener('dragend', hideDropTarget, true);

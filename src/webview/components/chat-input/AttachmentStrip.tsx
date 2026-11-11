@@ -78,7 +78,17 @@ export function AttachmentStrip(props: {
     ].toSorted((a, b) => getAttachmentSequence(a) - getAttachmentSequence(b));
 
   return (
-    <div class="chat-attachments-container">
+    <div
+      class="chat-attachments-container"
+      role="group"
+      aria-label="Attachments"
+      tabIndex={0}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          event.currentTarget.focus({ preventScroll: true });
+        }
+      }}
+    >
       <For each={props.extensionContexts}>
         {(context) => (
           <AttachmentChip
