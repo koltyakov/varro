@@ -1876,6 +1876,11 @@ export class OpenCodeServer extends EventEmitter {
       )
         throw new Error('OpenCode server is not accepting requests while stopping');
     }
+    if (method === 'POST' && new URL(path, 'http://localhost').pathname === '/global/dispose') {
+      options?.signal?.throwIfAborted();
+      await this.processManager.reconcileInjectedWebSearch();
+      options?.signal?.throwIfAborted();
+    }
     return this.transport.request(method, path, body, options);
   }
 

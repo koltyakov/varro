@@ -30,6 +30,7 @@ import { Service } from '@opencode/client/service';
 import * as processInspection from './process-inspection';
 import { getVarroStateDirectory } from './varro-state-paths';
 import { ServerConnectionAdmission } from './server-connection-admission';
+import { hasStoredWebSearchPreference } from './websearch-preference';
 
 const { loggerMock, spawnMock, vscodeMock, waitForProcessExitMock } = vi.hoisted(() => ({
   loggerMock: {
@@ -58,6 +59,7 @@ const { loggerMock, spawnMock, vscodeMock, waitForProcessExitMock } = vi.hoisted
 vi.mock('vscode', () => vscodeMock);
 vi.mock('@opencode/client/service', () => ({ Service: { discover: vi.fn() } }));
 vi.mock('./logger', () => ({ logger: loggerMock }));
+vi.mock('./websearch-preference', () => ({ hasStoredWebSearchPreference: vi.fn() }));
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 vi.mock('cross-spawn', () => ({ default: spawnMock, spawn: spawnMock }));
 vi.mock('./windows-process-inspector', () => ({
@@ -650,6 +652,7 @@ beforeEach(async () => {
   vi.stubEnv('XDG_STATE_HOME', join(tmpdir(), 'state'));
   vi.stubEnv('LOCALAPPDATA', join(tmpdir(), 'appdata'));
   vi.mocked(Service.discover).mockReset();
+  vi.mocked(hasStoredWebSearchPreference).mockReset().mockResolvedValue(false);
   delete process.env.OPENCODE_CONFIG;
   delete process.env.OPENCODE_CONFIG_CONTENT;
   delete process.env.XDG_CONFIG_HOME;
@@ -5632,6 +5635,206 @@ describe('OpenCodeProcess server ownership leases', () => {
 });
 
 describe('OpenCodeProcess config ownership', () => {
+  it.each([
+    'override',
+    'disabled',
+    'saved',
+    'removed',
+    'unchanged',
+    'foreign',
+    'replaced',
+    'unmanaged',
+    'v1',
+    'custom-runtime',
+    'malformed',
+  ])(
+    'reconciles the search fallback on config refresh without changing other settings: %s',
+    async (scenario) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-search-refresh-'));
+      process.env.XDG_CONFIG_HOME = join(root, 'config');
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      await manager.syncInjectedConfigFile();
+      manager.rememberInstalledCliVersion(scenario === 'v1' ? '1.19.5' : '2.2.7');
+      const state = manager as unknown as {
+        injectedConfigPath: string;
+        hostOwner: string;
+        ownershipLease: ManagedServerOwnershipLease;
+        matchesOwnershipLease(lease: ManagedServerOwnershipLease): Promise<boolean>;
+        readOwnershipLease(): Promise<ManagedServerOwnershipLease | null>;
+      };
+      const configPath = state.injectedConfigPath;
+      const runtime: { keep: { unrelated: boolean }; websearch?: false | { provider: string } } = {
+        keep: { unrelated: true },
+      };
+      if (scenario !== 'removed')
+        runtime.websearch = scenario === 'custom-runtime' ? false : { provider: 'random' };
+      const original = scenario === 'malformed' ? '{broken' : JSON.stringify(runtime);
+      await writeFile(configPath, original);
+      state.ownershipLease = {
+        version: 1,
+        pid: 777,
+        port: 4096,
+        executable: 'fixture',
+        birthIdentity: 'fixture:1',
+        owner: 'fixture-owner',
+        host: scenario === 'foreign' ? 'other-host' : state.hostOwner,
+        state: 'active',
+        createdAt: Date.now(),
+        configPath,
+      };
+      manager.managedProcess = scenario !== 'unmanaged';
+      vi.spyOn(state, 'readOwnershipLease').mockImplementation(async () => state.ownershipLease);
+      vi.spyOn(state, 'matchesOwnershipLease').mockResolvedValue(scenario !== 'replaced');
+      await writeFile(
+        join(dirname(configPath), 'owner.json'),
+        JSON.stringify({ pid: 777, owner: 'fixture-owner' })
+      );
+      if (scenario === 'override' || scenario === 'disabled') {
+        const path = join(root, 'config/opencode/opencode.jsonc');
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(
+          path,
+          JSON.stringify({ websearch: scenario === 'disabled' ? false : { provider: 'tavily' } })
+        );
+      }
+      if (scenario === 'saved') vi.mocked(hasStoredWebSearchPreference).mockResolvedValue(true);
+      try {
+        await manager.reconcileInjectedWebSearch();
+        const result = await readFile(configPath, 'utf-8');
+        if (['override', 'disabled', 'saved'].includes(scenario))
+          expect(JSON.parse(result)).toEqual({ keep: { unrelated: true } });
+        else if (scenario === 'removed')
+          expect(JSON.parse(result)).toEqual({
+            keep: { unrelated: true },
+            websearch: { provider: 'random' },
+          });
+        else expect(result).toBe(original);
+      } finally {
+        await manager.cleanupPreparedInjectedConfigFile();
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['2.0.5', '2.2.7', '1.19.5', 'unknown'])(
+    'defaults web search to random only for managed V2 configuration: %s',
+    async (version) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-search-version-'));
+      process.env.XDG_CONFIG_HOME = root;
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      manager.rememberInstalledCliVersion(version);
+      try {
+        const config = JSON.parse(await manager.serializeInjectedConfig());
+        expect(config.websearch).toEqual(
+          version.startsWith('2.') ? { provider: 'random' } : undefined
+        );
+        expect(hasStoredWebSearchPreference).toHaveBeenCalledTimes(
+          version.startsWith('2.') ? 1 : 0
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    '{}',
+    '{"websearch":false}',
+    '{"websearch":{"provider":"exa"}}',
+    '{"websearch":{"provider":"random"}}',
+    '{broken',
+  ])('preserves inherited web search configuration: %s', async (content) => {
+    const root = await mkdtemp(join(tmpdir(), 'varro-search-inherited-'));
+    process.env.XDG_CONFIG_HOME = root;
+    process.env.OPENCODE_CONFIG_CONTENT = content;
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
+    manager.rememberInstalledCliVersion('2.2.7');
+    try {
+      const config = JSON.parse(await manager.serializeInjectedConfig());
+      expect(config.websearch).toEqual(content === '{}' ? { provider: 'random' } : undefined);
+      expect(process.env.OPENCODE_CONFIG_CONTENT).toBe(content);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'opencode.json',
+    'opencode.jsonc',
+    '.opencode/opencode.json',
+    '.opencode/opencode.jsonc',
+  ])(
+    'preserves ancestor %s search settings above the Git root and rechecks on regeneration',
+    async (filename) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-search-ancestor-'));
+      process.env.XDG_CONFIG_HOME = join(root, 'config');
+      const workspace = join(root, 'parent/project');
+      const path = join(root, 'parent', filename);
+      await mkdir(join(workspace, '.git'), { recursive: true });
+      await mkdir(dirname(path), { recursive: true });
+      vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: workspace } }];
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      manager.rememberInstalledCliVersion('2.2.7');
+      try {
+        expect(JSON.parse(await manager.serializeInjectedConfig()).websearch).toEqual({
+          provider: 'random',
+        });
+        const content = '{ // user preference\n "websearch": false, }';
+        await writeFile(path, content);
+        expect(JSON.parse(await manager.serializeInjectedConfig()).websearch).toBeUndefined();
+        expect(await readFile(path, 'utf-8')).toBe(content);
+        await rm(path);
+        expect(JSON.parse(await manager.serializeInjectedConfig()).websearch).toEqual({
+          provider: 'random',
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['opencode.json', 'opencode.jsonc'])(
+    'preserves global %s search settings without changing the file',
+    async (filename) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-search-global-'));
+      process.env.XDG_CONFIG_HOME = root;
+      const path = join(root, 'opencode', filename);
+      await mkdir(dirname(path));
+      const content = '{"websearch":{"provider":"tavily"}}';
+      await writeFile(path, content);
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      manager.rememberInstalledCliVersion('2.2.7');
+      try {
+        expect(JSON.parse(await manager.serializeInjectedConfig()).websearch).toBeUndefined();
+        expect(hasStoredWebSearchPreference).not.toHaveBeenCalled();
+        expect(await readFile(path, 'utf-8')).toBe(content);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['saved', 'unreadable'])(
+    'does not replace a %s stored web search preference',
+    async (scenario) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-search-stored-'));
+      process.env.XDG_CONFIG_HOME = root;
+      if (scenario === 'saved') vi.mocked(hasStoredWebSearchPreference).mockResolvedValue(true);
+      else vi.mocked(hasStoredWebSearchPreference).mockRejectedValue(new Error('unavailable'));
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      manager.rememberInstalledCliVersion('2.2.7');
+      try {
+        expect(JSON.parse(await manager.serializeInjectedConfig()).websearch).toBeUndefined();
+        if (scenario === 'unreadable')
+          expect(loggerMock.warn).toHaveBeenCalledWith(
+            expect.stringContaining('saved preference could not be inspected')
+          );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it.each(['replacement', 'runtime-present', 'foreign', 'unmanaged'])(
     'identifies runtime config recovery only for an owned replacement: %s',
     (scenario) => {

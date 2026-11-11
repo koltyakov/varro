@@ -533,6 +533,48 @@ External edits to project-level OpenCode configuration may not be detected. If a
 
 The Models view also shows whether a model exposes tools, variants, vision support, and a known context-window size. A lightning marker identifies GPT model names containing `Fast`; its tooltip notes that fast models can be more expensive.
 
+### Web search
+
+Web search lets the agent look up current information beyond its training data and cite sources. OpenCode supplies the search tool and providers; Varro displays their results and any requests for input.
+
+When Varro launches an OpenCode V2 server and no search preference exists, it supplies this temporary runtime default:
+
+```jsonc
+{
+  "websearch": {
+    "provider": "random",
+  },
+}
+```
+
+This avoids interrupting the first search with a provider-selection prompt and does not prefer a particular provider. In `random` mode, OpenCode selects an available provider and keeps it for that session. After an HTTP 429 rate-limit response, it retries with another available provider. If every provider is cooling down, the search fails.
+
+Varro preserves explicit search configuration and choices previously saved through OpenCode's selection prompt, including disabled search. The fallback does not edit your config files or saved preferences, change tool permissions, or make searches by itself. V1 and externally managed servers keep their existing behavior. Caller-provided `OPENCODE_CONFIG` also disables Varro's runtime injection.
+
+Search queries are sent to external search providers. Available providers, credentials, rate limits, and possible charges depend on your OpenCode setup. Selecting `random` does not provision accounts or guarantee free searches. See [OpenCode's web search documentation](https://opencode.ai/docs/websearch) for provider details.
+
+To choose a provider explicitly, add this to your global `~/.config/opencode/opencode.jsonc` or project `opencode.jsonc`:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "websearch": {
+    "provider": "tavily",
+  },
+}
+```
+
+To disable the built-in web search tool instead:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "websearch": false,
+}
+```
+
+Global config refresh rechecks the fallback before reloading OpenCode. For external project config edits that do not take effect, use `Varro: Restart Server` after active work finishes. Attached servers must be configured on their host.
+
 ### Configure Primary Agents
 
 Define primary agents in OpenCode configuration. Varro lists them in the agent picker and uses the selected agent for the main conversation.

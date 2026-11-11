@@ -273,6 +273,14 @@ Global active status and observed attention remain blockers for historical paths
 
 ## Regression checklist for agents
 
+Managed V2 launch config defaults web search to `random` only when no explicit or
+saved preference exists. Inspect the saved `websearch:provider` key in a read-only
+SQLite worker with a two-second deadline; never create or migrate the database.
+Inspection failures preserve OpenCode's selection flow rather than enabling search.
+Before global config reload, recheck the fallback in the temporary runtime config
+under the same private-lease, process-identity, config-owner, and atomic-write checks
+as stream-timeout maintenance. Never rewrite an attached or foreign server's config.
+
 Run the standard lint, format, typecheck, and suggestion checks plus these unit files:
 
 ```sh

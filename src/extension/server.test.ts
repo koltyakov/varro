@@ -48,6 +48,9 @@ const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writ
   }));
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
+vi.mock('./websearch-preference', () => ({
+  hasStoredWebSearchPreference: vi.fn().mockResolvedValue(false),
+}));
 vi.mock('./server-connection-info', () => ({
   readLocalServerConnectionInfo: vi.fn(async () => ({
     startedAt: null,
@@ -2193,6 +2196,41 @@ describe('OpenCodeServer event stream', () => {
 });
 
 describe('OpenCodeServer runtime config injection', () => {
+  it('rechecks search defaults before a global config reload', async () => {
+    const server = new OpenCodeServer(4096, true, 'opencode');
+    const state = server as unknown as {
+      processManager: OpenCodeProcess;
+      transport: { request(method: string, path: string): Promise<unknown> };
+    };
+    const order: string[] = [];
+    const reconcile = vi
+      .spyOn(state.processManager, 'reconcileInjectedWebSearch')
+      .mockImplementation(async () => {
+        order.push('reconcile');
+      });
+    vi.spyOn(state.transport, 'request').mockImplementation(async () => {
+      order.push('reload');
+    });
+    await server.request('POST', '/global/dispose');
+    expect(order).toEqual(['reconcile', 'reload']);
+    await server.request('GET', '/config');
+    expect(reconcile).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reload config when search-default reconciliation fails', async () => {
+    const server = new OpenCodeServer(4096, true, 'opencode');
+    const state = server as unknown as {
+      processManager: OpenCodeProcess;
+      transport: { request(method: string, path: string): Promise<unknown> };
+    };
+    vi.spyOn(state.processManager, 'reconcileInjectedWebSearch').mockRejectedValue(
+      new Error('config write failed')
+    );
+    const request = vi.spyOn(state.transport, 'request');
+    await expect(server.request('POST', '/global/dispose')).rejects.toThrow('config write failed');
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('injects runtime defaults without overriding caller compaction configuration', async () => {
     const actualFs = await vi.importActual<typeof FsPromisesModule>('fs/promises');
     const os = await import('os');
