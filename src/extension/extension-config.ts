@@ -54,10 +54,10 @@ export function readFollowupModel(
 }
 
 /** Session attribution is an explicit user opt-in, never a repository preference. */
-export function readFollowupTrace(
+export function readPromptTrace(
   config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro')
 ): boolean {
-  return config.inspect?.<boolean>('chat.followupTrace')?.globalValue === true;
+  return config.inspect?.<boolean>('chat.promptTrace')?.globalValue === true;
 }
 
 function readResetWarningDays(config: vscode.WorkspaceConfiguration): number {

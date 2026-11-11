@@ -6,6 +6,7 @@ import { open, realpath, stat as fileStat } from 'node:fs/promises';
 import { isAbsolute, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 import { tryGenerateOneShot } from './one-shot-generation';
+import { tracePrompt } from './prompt-trace';
 
 import type { PermissionRule } from '../shared/opencode-types';
 import type { ChatModelSelection } from '../shared/protocol';
@@ -463,6 +464,7 @@ export class CommitMessageService {
         model: route,
         directory: attempt.directory,
         signal: attempt.controller.signal,
+        trace: { purpose: 'commit-message' },
       });
       if (generated) {
         throwIfCancelled(attempt);
@@ -485,7 +487,13 @@ export class CommitMessageService {
       throwIfCancelled(attempt);
 
       const request: CommitMessageRequest = {
-        system: buildSystemPrompt(commitRules),
+        system: await tracePrompt(this.server, {
+          purpose: 'commit-message',
+          helperSessionID: attempt.sessionID,
+          directory: attempt.directory,
+          signal: attempt.controller.signal,
+          prompt: buildSystemPrompt(commitRules),
+        }),
         parts: [
           {
             type: 'text',

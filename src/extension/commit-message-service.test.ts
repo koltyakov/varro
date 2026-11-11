@@ -4,6 +4,8 @@ import type * as nodeFsPromises from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import packageJson from '../../package.json';
+import * as extensionConfig from './extension-config';
+import { configurePromptTrace } from './prompt-trace';
 
 import type { PermissionRule } from '../shared/opencode-types';
 
@@ -330,6 +332,45 @@ afterEach(() => {
 });
 
 describe('CommitMessageService', () => {
+  it.each([false, true])(
+    'traces repository scope without using the active chat, stateless=%s',
+    async (native) => {
+      const trace = vi.spyOn(extensionConfig, 'readPromptTrace').mockReturnValue(true);
+      configurePromptTrace(extensionConfig.readPromptTrace);
+      setGitRepositories([createRepository()]);
+      const request = createRequest();
+      const original = request.getMockImplementation()!;
+      request.mockImplementation((...args) => {
+        if (args[1] === '/openapi.json')
+          return Promise.resolve({ paths: { '/api/experimental/generate': { post: {} } } });
+        if (args[1] === '/api/experimental/generate')
+          return Promise.resolve({ data: { text: '{"subject":"fix: trace generation"}' } });
+        return original(...args);
+      });
+      try {
+        const service = new CommitMessageService(
+          { request, apiVersion: native ? 2 : 1 },
+          createHiddenSessions(),
+          async () => {},
+          () => '/repo',
+          () => ({ providerID: 'openai', modelID: 'active-chat-model' })
+        );
+        await service.generate();
+        const body = requestBody(request, native ? '/api/experimental/generate' : '/message?');
+        expect(body).toMatchObject({
+          [native ? 'prompt' : 'system']: expect.stringMatching(
+            /^VARRO_TRACE_V1 \{"purpose":"commit-message","workspaceID":"[a-f0-9]{64}"/
+          ),
+        });
+        expect(body?.[native ? 'prompt' : 'system']).not.toContain('"sessionID"');
+        if (!native) expect(body?.system).toContain('"helperSessionID":"helper-1"');
+      } finally {
+        trace.mockRestore();
+        configurePromptTrace(() => false);
+      }
+    }
+  );
+
   it('replaces Generate with Cancel in the same toolbar position for the active repository only', () => {
     const menus = packageJson.contributes.menus['scm/title'];
     expect(menus.find((menu) => menu.command === 'varro.generateCommitMessage')).toMatchObject({

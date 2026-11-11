@@ -6,6 +6,8 @@ import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { PermissionRule } from '../shared/opencode-types';
+import * as extensionConfig from './extension-config';
+import { configurePromptTrace } from './prompt-trace';
 
 const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn() },
@@ -66,6 +68,35 @@ function resolveToolAction(rules: PermissionRule[], tool: string) {
 }
 
 describe('AutoApproveJudge', () => {
+  it('traces the permission owner rather than the temporary judge session', async () => {
+    const trace = vi.spyOn(extensionConfig, 'readPromptTrace').mockReturnValue(true);
+    configurePromptTrace(extensionConfig.readPromptTrace);
+    const request = createAskJudgeRequest();
+    const original = request.getMockImplementation()!;
+    request.mockImplementation((method, path) =>
+      path === '/session/session-1' ? Promise.resolve({ id: 'session-1' }) : original(method, path)
+    );
+    try {
+      const judge = new AutoApproveJudge({ request }, new HiddenSessionManager());
+      await expect(
+        judge.judge({ permission: cargoBuildPermission('perm-trace') })
+      ).resolves.toMatchObject({ decision: 'ask' });
+      expect(request).toHaveBeenCalledWith(
+        'POST',
+        '/session/judge-session-1/message',
+        expect.objectContaining({
+          system: expect.stringMatching(
+            /^VARRO_TRACE_V1 \{"purpose":"permission-judge","sessionID":"session-1","rootSessionID":"session-1","requestID":"perm-trace","helperSessionID":"judge-session-1"\}\n/
+          ),
+        })
+      );
+      expect(request).toHaveBeenCalledWith('DELETE', '/session/judge-session-1');
+    } finally {
+      trace.mockRestore();
+      configurePromptTrace(() => false);
+    }
+  });
+
   it('scopes model resolution and helper session requests to the permission workspace', async () => {
     const request = vi.fn(
       async (method: string, path: string, _body?: unknown, _options?: unknown) => {

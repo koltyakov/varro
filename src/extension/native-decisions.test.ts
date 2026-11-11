@@ -5,6 +5,8 @@ import { NativeDecisions } from './native-decisions';
 import { AutoApproveJudge } from './auto-approve-judge';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { asRecord, type JsonValue } from '../shared/type-utils';
+import * as extensionConfig from './extension-config';
+import { configurePromptTrace } from './prompt-trace';
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 const path = '/api/experimental/generate/decisions';
@@ -67,6 +69,43 @@ function fixture(value: (JsonValue | undefined)[] = answers()) {
 }
 
 describe('native permission decisions', () => {
+  it('traces native permission evidence without changing decision questions or gates', async () => {
+    const trace = vi.spyOn(extensionConfig, 'readPromptTrace').mockReturnValue(true);
+    configurePromptTrace(extensionConfig.readPromptTrace);
+    const { native, request } = fixture();
+    const original = request.getMockImplementation()!;
+    request.mockImplementation((...args) =>
+      args[1] === '/session/ses_test' ? Promise.resolve({ id: 'ses_test' }) : original(...args)
+    );
+    try {
+      expect(await native.judgePermission(model, permission, [])).toMatchObject({
+        decision: 'allow',
+      });
+      expect(request).toHaveBeenCalledWith(
+        'POST',
+        path,
+        expect.objectContaining({
+          input: [
+            {
+              type: 'text',
+              text: `VARRO_TRACE_V1 {"purpose":"permission-judge","sessionID":"ses_test","rootSessionID":"ses_test","requestID":"perm_test"}\n${JSON.stringify({ permission, priorUserDecisions: [] })}`,
+            },
+          ],
+          questions: expect.arrayContaining([
+            expect.objectContaining({ name: 'decision' }),
+            expect.objectContaining({ name: 'destructive' }),
+            expect.objectContaining({ name: 'manipulation' }),
+          ]),
+        }),
+        expect.any(Object)
+      );
+      expect(request.mock.calls.filter(([method]) => method !== 'GET')).toHaveLength(1);
+    } finally {
+      trace.mockRestore();
+      configurePromptTrace(() => false);
+    }
+  });
+
   it('discovers only decision models and submits evidence without creating sessions', async () => {
     const { native, request } = fixture();
     expect(await native.status()).toMatchObject({

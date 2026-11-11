@@ -7,6 +7,7 @@ import type { HiddenSessionManager } from './hidden-session-manager';
 import { logger } from './logger';
 import { parseModelRoute } from './sidebar-provider-utils';
 import { tryGenerateOneShot } from './one-shot-generation';
+import { tracePrompt } from './prompt-trace';
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'request'> &
   Partial<Pick<OpenCodeServer, 'apiVersion'>>;
@@ -170,6 +171,7 @@ export class SessionTitleFallback {
         model,
         directory: attempt.workspaceDirectory,
         signal: attempt.controller.signal,
+        trace: { purpose: 'session-title', sessionID },
       });
       if (generated) {
         if (!this.isCurrentAttempt(sessionID, attempt)) return null;
@@ -202,8 +204,20 @@ export class SessionTitleFallback {
       const route = await this.resolveTitleModel(messages, attempt.workspaceDirectory);
       if (!this.isCurrentAttempt(sessionID, attempt)) return null;
       const request: TitleMessageRequest = {
-        system: buildTitleSystemPrompt(),
-        parts: [{ type: 'text', text: buildTitleUserPrompt(transcript) }],
+        system: await tracePrompt(this.server, {
+          purpose: 'session-title',
+          sessionID,
+          helperSessionID: attempt.hiddenSessionID,
+          directory: attempt.workspaceDirectory,
+          signal: attempt.controller.signal,
+          prompt: buildTitleSystemPrompt(),
+        }),
+        parts: [
+          {
+            type: 'text',
+            text: buildTitleUserPrompt(transcript),
+          },
+        ],
         format: titleOutputFormat(),
       };
       if (route) {

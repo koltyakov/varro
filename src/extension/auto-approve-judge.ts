@@ -22,6 +22,7 @@ import { resolveHelperModel } from './helper-model-selection';
 import type { JevDecisions } from './jev-decisions';
 import type { NativeDecisions } from './native-decisions';
 import { logger } from './logger';
+import { tracePrompt } from './prompt-trace';
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'request'>;
 type JevPermissionJudge = Pick<JevDecisions, 'isAutoApproveEnabled' | 'judgePermission' | 'model'>;
@@ -273,7 +274,14 @@ export class AutoApproveJudge {
       if (!sessionID) return { decision: 'ask', reason: 'Judge session was not created.' };
 
       const request: JudgeMessageRequest = {
-        system: buildJudgeSystemPrompt(),
+        system: await tracePrompt(this.server, {
+          purpose: 'permission-judge',
+          sessionID: permission.sessionID,
+          requestID: permission.id,
+          helperSessionID: sessionID,
+          directory: workspacePath,
+          prompt: buildJudgeSystemPrompt(),
+        }),
         parts: [
           {
             type: 'text',

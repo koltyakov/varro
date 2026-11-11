@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PromptCompletionService } from './prompt-completion-service';
 import type { OpenCodeServer } from './server';
 import type { UnknownRecord } from '../shared/type-utils';
+import * as extensionConfig from './extension-config';
+import { configurePromptTrace } from './prompt-trace';
 
 const input = { draft: 'Add a test', history: ['Add a feature'] };
 const route = { providerID: 'meta', modelID: 'fast' };
@@ -74,6 +76,42 @@ function setup({
 afterEach(() => vi.useRealTimers());
 
 describe('direct prompt completion', () => {
+  it.each([
+    ['compatible', '@opencode/ai/providers/openai-compatible', 'chat'],
+    ['openrouter', '@opencode/ai/providers/openrouter', 'chat'],
+    ['openai', '@opencode/ai/providers/openai', 'responses'],
+    ['anthropic', '@opencode/ai/providers/anthropic', 'messages'],
+  ])(
+    'traces direct %s completion without attributing a draft to an unrelated session',
+    async (providerID, packageName, protocol) => {
+      const test = setup({
+        provider: { id: providerID },
+        model: {
+          api: { id: 'text-model', npm: packageName, url: 'https://api.example/v1' },
+          variants: {},
+        },
+      });
+      const trace = vi.spyOn(extensionConfig, 'readPromptTrace').mockReturnValue(true);
+      configurePromptTrace(extensionConfig.readPromptTrace);
+      try {
+        await test.service.complete(input, { providerID, modelID: 'fast' }, '/repo');
+        const body = JSON.parse(String(test.fetchProvider.mock.calls[0]![1]?.body));
+        const prompt =
+          protocol === 'responses'
+            ? body.input
+            : body.messages[protocol === 'messages' ? 0 : 1].content;
+        expect(prompt).toMatch(
+          /^VARRO_TRACE_V1 \{"purpose":"prompt-completion","workspaceID":"[a-f0-9]{64}"\}\n/
+        );
+        expect(prompt.slice(prompt.indexOf('\n') + 1)).toBe(JSON.stringify(input));
+        expect(test.request.mock.calls.some(([, path]) => path.startsWith('/session'))).toBe(false);
+      } finally {
+        trace.mockRestore();
+        configurePromptTrace(() => false);
+      }
+    }
+  );
+
   it.each([
     ['compatible', '@opencode/ai/providers/openai-compatible', 'chat'],
     ['openrouter', '@opencode/ai/providers/openrouter', 'chat'],

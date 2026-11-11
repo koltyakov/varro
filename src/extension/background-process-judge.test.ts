@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ShellInfo } from '@opencode/client';
 import { BackgroundProcessJudge } from './background-process-judge';
+import * as extensionConfig from './extension-config';
+import { configurePromptTrace } from './prompt-trace';
 
 const shell: ShellInfo = {
   id: 'sh_server',
@@ -15,6 +17,40 @@ const shell: ShellInfo = {
 const specification = { paths: { '/api/experimental/generate': { post: {} } } };
 
 describe('background process model judgment', () => {
+  it('traces the owning conversation and shell request', async () => {
+    const trace = vi.spyOn(extensionConfig, 'readPromptTrace').mockReturnValue(true);
+    configurePromptTrace(extensionConfig.readPromptTrace);
+    const request = vi.fn(async (_method: string, path: string) => {
+      if (path === '/api/session/ses_one')
+        return { data: { model: { providerID: 'test', id: 'small' } } };
+      if (path === '/session/ses_one') return { id: 'ses_one' };
+      if (path === '/openapi.json') return specification;
+      return { data: { text: '{"blocking":false}' } };
+    });
+    try {
+      expect(
+        await new BackgroundProcessJudge(request).classify(
+          shell,
+          '/repo',
+          new AbortController().signal
+        )
+      ).toBe(true);
+      expect(request).toHaveBeenLastCalledWith(
+        'POST',
+        '/api/experimental/generate',
+        expect.objectContaining({
+          prompt: expect.stringMatching(
+            /^VARRO_TRACE_V1 \{"purpose":"background-process-judge","sessionID":"ses_one","rootSessionID":"ses_one","requestID":"sh_server"\}\n/
+          ),
+        }),
+        expect.any(Object)
+      );
+    } finally {
+      trace.mockRestore();
+      configurePromptTrace(() => false);
+    }
+  });
+
   it.each([true, false])(
     'uses the owning model and a tool-free request for blocking=%s',
     async (blocking) => {

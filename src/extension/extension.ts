@@ -9,6 +9,8 @@ import { disposeProcessInspection, prepareProcessInspection } from './process-in
 import { diagnosticTimeline } from './diagnostics';
 import { measureStartupPhase } from '../shared/startup';
 import { prepareVarroScratchDirectory } from './varro-state-paths';
+import { readPromptTrace } from './extension-config';
+import { configurePromptTrace } from './prompt-trace';
 
 const CONTEXT_RESCOPE_RETRY_MS = 50;
 const CONTEXT_RESTART_GRACE_MS = 3000;
@@ -206,6 +208,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 async function activateExtension(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
+  configurePromptTrace(readPromptTrace);
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection values are untrusted and narrowed for logging.
   void prepareProcessInspection().catch((error: unknown) => {
     logger.warn(
@@ -386,6 +389,7 @@ async function activateExtension(context: vscode.ExtensionContext) {
 }
 
 export async function deactivate() {
+  configurePromptTrace(() => false);
   contextUpdateGeneration += 1;
   await disposeSafe(() => sidebarProvider?.dispose(), 'sidebarProvider dispose');
   await disposeSafe(() => contextProvider?.dispose(), 'contextProvider dispose');

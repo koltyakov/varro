@@ -1,6 +1,7 @@
 import type { OpenCodeServer } from './server';
 import type { ChatModelSelection } from '../shared/protocol';
 import { asRecord, isString } from '../shared/type-utils';
+import { tracePrompt, type PromptTraceContext } from './prompt-trace';
 
 type GenerationServer = Pick<OpenCodeServer, 'request'> &
   Partial<Pick<OpenCodeServer, 'apiVersion'>>;
@@ -15,6 +16,7 @@ export async function tryGenerateOneShot(
     directory?: string;
     signal: AbortSignal;
     maxResponseBytes?: number;
+    trace?: PromptTraceContext;
   }
 ): Promise<{ text: string } | null> {
   if (server.apiVersion !== 2) return null;
@@ -40,11 +42,20 @@ export async function tryGenerateOneShot(
       signal: input.signal,
     };
     if (input.maxResponseBytes) options.maxResponseBytes = input.maxResponseBytes;
+    const prompt = input.trace
+      ? await tracePrompt(server, {
+          ...input.trace,
+          prompt: input.prompt,
+          directory: input.directory,
+          signal: input.signal,
+        })
+      : input.prompt;
+    input.signal.throwIfAborted();
     response = await server.request(
       'POST',
       generatePath,
       {
-        prompt: input.prompt,
+        prompt,
         model: input.model
           ? {
               providerID: input.model.providerID,

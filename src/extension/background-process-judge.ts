@@ -37,6 +37,7 @@ export class BackgroundProcessJudge {
       {
         directory,
         signal: boundedSignal,
+        trace: { purpose: 'background-process-judge', sessionID, requestID: shell.id },
         model: {
           providerID: model.providerID,
           modelID: model.id,

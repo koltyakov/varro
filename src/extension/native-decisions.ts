@@ -8,6 +8,7 @@ import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type
 import type { OpenCodeServer } from './server';
 import { parseModelRoute } from './sidebar-provider-utils';
 import { gatePermissionDecision, permissionDecisionQuestions } from './jev-decisions';
+import { tracePrompt } from './prompt-trace';
 
 const DECISION_PATH = '/api/experimental/generate/decisions';
 
@@ -83,7 +84,18 @@ export class NativeDecisions {
     );
     const body: ExperimentalGenerateDecisionsInput = {
       model: { providerID: model.providerID, id: model.modelID },
-      input: [{ type: 'text', text: JSON.stringify({ permission, priorUserDecisions }) }],
+      input: [
+        {
+          type: 'text',
+          text: await tracePrompt(this.server, {
+            purpose: 'permission-judge',
+            sessionID: isString(permission.sessionID) ? permission.sessionID : undefined,
+            requestID: isString(permission.id) ? permission.id : undefined,
+            signal,
+            prompt: JSON.stringify({ permission, priorUserDecisions }),
+          }),
+        },
+      ],
       questions,
     };
     const response = await this.server.request('POST', DECISION_PATH, body, {

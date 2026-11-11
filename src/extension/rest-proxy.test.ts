@@ -851,13 +851,13 @@ describe('RestProxy handleRequest', () => {
   });
 
   it.each([undefined, false, true, 'true'])(
-    'reads follow-up tracing only from user settings, ignoring request trace fields: %s',
+    'does not forward client-controlled trace fields to follow-up generation: %s',
     async (trace) => {
       const { proxy, callbacks } = createProxy();
       const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
         get: vi.fn(() => 'true'),
         inspect: vi.fn((key?: string) => ({
-          globalValue: key === 'chat.followupTrace' ? trace : undefined,
+          globalValue: key === 'chat.promptTrace' ? trace : undefined,
         })),
       });
       const suggest = vi
@@ -876,9 +876,8 @@ describe('RestProxy handleRequest', () => {
             rootSessionID: 'forged-root',
           })
         );
-        expect(suggest).toHaveBeenCalledWith(
-          expect.objectContaining({ sessionId: 'session-1', trace: trace === true })
-        );
+        expect(suggest).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-1' }));
+        expect(suggest.mock.calls[0]?.[0]).not.toHaveProperty('trace');
         expect(suggest.mock.calls[0]?.[0]).not.toHaveProperty('rootSessionID');
       } finally {
         suggest.mockRestore();

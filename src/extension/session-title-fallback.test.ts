@@ -2,6 +2,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { PermissionRule } from '../shared/opencode-types';
+import type { OpenCodeServer } from './server';
+import * as extensionConfig from './extension-config';
+import { configurePromptTrace } from './prompt-trace';
 
 const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -41,6 +44,53 @@ function resolveToolAction(rules: PermissionRule[], tool: string) {
 }
 
 describe('SessionTitleFallback', () => {
+  it.each([false, true])(
+    'traces the source conversation for title generation, stateless=%s',
+    async (native) => {
+      const trace = vi.spyOn(extensionConfig, 'readPromptTrace').mockReturnValue(true);
+      configurePromptTrace(extensionConfig.readPromptTrace);
+      const request = vi.fn<OpenCodeServer['request']>(async (method, path) => {
+        if (path === '/session/session-1')
+          return { id: 'session-1', title: method === 'PATCH' ? 'Fix Parser' : 'New session' };
+        if (path.endsWith('/message?limit=20'))
+          return [{ info: { role: 'user' }, parts: [{ type: 'text', text: 'Fix parser' }] }];
+        if (path === '/config') return { small_model: 'test/small' };
+        if (path === '/openapi.json')
+          return { paths: { '/api/experimental/generate': { post: {} } } };
+        if (path === '/api/experimental/generate')
+          return { data: { text: '{"title":"Fix Parser"}' } };
+        if (path === '/session' && method === 'POST') return { id: 'hidden-1' };
+        if (path === '/session/hidden-1/message')
+          return { info: { structured: { title: 'Fix Parser' } } };
+        if (path === '/session/hidden-1' && method === 'DELETE') return true;
+        throw new Error(`Unexpected request ${method} ${path}`);
+      });
+      try {
+        const service = new SessionTitleFallback(
+          { request, apiVersion: native ? 2 : 1 },
+          createHiddenSessions(),
+          () => true
+        );
+        expect(await service.renameIfUntitled('session-1', '/repo')).toMatchObject({
+          title: 'Fix Parser',
+        });
+        expect(request).toHaveBeenCalledWith(
+          'POST',
+          native ? '/api/experimental/generate' : '/session/hidden-1/message',
+          expect.objectContaining({
+            [native ? 'prompt' : 'system']: expect.stringMatching(
+              /^VARRO_TRACE_V1 \{"purpose":"session-title","sessionID":"session-1","rootSessionID":"session-1"/
+            ),
+          }),
+          expect.any(Object)
+        );
+      } finally {
+        trace.mockRestore();
+        configurePromptTrace(() => false);
+      }
+    }
+  );
+
   it('uses advertised v2 stateless generation without creating a title session', async () => {
     const hidden = createHiddenSessions();
     const request = vi.fn(async (method: string, path: string) => {

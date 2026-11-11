@@ -9,8 +9,11 @@ import { logger } from './logger';
 import { EMPTY_FOLLOWUP_SUGGESTIONS } from '../shared/followups';
 import type { Persistence } from '../shared/persistence';
 import { asRecord, isString } from '../shared/type-utils';
+import { readPromptTrace } from './extension-config';
+import { configurePromptTrace } from './prompt-trace';
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn() } }));
+vi.mock('./extension-config', () => ({ readPromptTrace: vi.fn(() => false) }));
 
 const source = {
   assistantMessageId: 'answer',
@@ -34,9 +37,12 @@ beforeEach(async () => {
   await mkdir(parent, { recursive: true });
   directory = await mkdtemp(join(parent, 'followup-service-'));
   vi.stubEnv('VARRO_TEST_STATE_ROOT', directory);
+  vi.mocked(readPromptTrace).mockReturnValue(false);
+  configurePromptTrace(readPromptTrace);
 });
 
 afterEach(async () => {
+  configurePromptTrace(() => false);
   vi.useRealTimers();
   vi.unstubAllEnvs();
   await rm(directory, { recursive: true, force: true });
@@ -117,7 +123,8 @@ describe('FollowupService', () => {
     'does not add tracing or read ancestry when trace is %s',
     async (trace) => {
       const { server, request, input } = setup();
-      expect(await new FollowupService(server).suggest({ ...input, trace })).toEqual(suggestions);
+      vi.mocked(readPromptTrace).mockReturnValue(trace === true);
+      expect(await new FollowupService(server).suggest(input)).toEqual(suggestions);
       expect(request).toHaveBeenCalledWith(
         'POST',
         '/api/experimental/generate',
@@ -144,7 +151,8 @@ describe('FollowupService', () => {
         sessions.set('root', { id: 'root' });
       }
       const service = new FollowupService(server);
-      const traced = { ...input, trace: true, model: { ...input.model, variant: 'high' } };
+      vi.mocked(readPromptTrace).mockReturnValue(true);
+      const traced = { ...input, model: { ...input.model, variant: 'high' } };
       expect(await service.suggest(traced)).toEqual(suggestions);
       expect(request).toHaveBeenCalledWith(
         'POST',
@@ -169,7 +177,8 @@ describe('FollowupService', () => {
         }
       }
       const reads = request.mock.calls.length;
-      expect(await service.suggest({ ...traced, trace: false })).toEqual(suggestions);
+      vi.mocked(readPromptTrace).mockReturnValue(false);
+      expect(await service.suggest(traced)).toEqual(suggestions);
       expect(
         request.mock.calls
           .slice(reads)
@@ -187,9 +196,8 @@ describe('FollowupService', () => {
     const service = new FollowupService(server);
     const plainInput = { ...input, source: { ...source, userPrompt } };
     expect(await service.suggest(plainInput)).toEqual(suggestions);
-    expect(await service.suggest({ ...plainInput, directory: '/other-repo', trace: true })).toEqual(
-      suggestions
-    );
+    vi.mocked(readPromptTrace).mockReturnValue(true);
+    expect(await service.suggest({ ...plainInput, directory: '/other-repo' })).toEqual(suggestions);
     const posts = request.mock.calls.filter(([method]) => method === 'POST');
     expect(posts).toHaveLength(2);
     const plainPrompt = asRecord(posts[0]?.[2])?.prompt;
@@ -219,9 +227,8 @@ describe('FollowupService', () => {
     request.mockImplementation((...args) =>
       args[1] === '/session/s' ? Promise.resolve(response) : original(...args)
     );
-    expect(await new FollowupService(server).suggest({ ...input, trace: true })).toEqual(
-      suggestions
-    );
+    vi.mocked(readPromptTrace).mockReturnValue(true);
+    expect(await new FollowupService(server).suggest(input)).toEqual(suggestions);
     expect(request).toHaveBeenCalledWith(
       'POST',
       '/api/experimental/generate',
@@ -245,9 +252,8 @@ describe('FollowupService', () => {
         for (let i = 0; i < 16; i += 1)
           sessions.set(`parent-${i}`, { id: `parent-${i}`, parentID: `parent-${i + 1}` });
       }
-      expect(await new FollowupService(server).suggest({ ...input, trace: true })).toEqual(
-        suggestions
-      );
+      vi.mocked(readPromptTrace).mockReturnValue(true);
+      expect(await new FollowupService(server).suggest(input)).toEqual(suggestions);
       expect(request).toHaveBeenCalledWith(
         'POST',
         '/api/experimental/generate',
@@ -287,7 +293,8 @@ describe('FollowupService', () => {
       });
       const service = new FollowupService(server);
       try {
-        const pending = service.suggest({ ...input, trace: true });
+        vi.mocked(readPromptTrace).mockReturnValue(true);
+        const pending = service.suggest(input);
         await vi.waitFor(() => expect(started).toBe(true));
         expect(timeout).toHaveBeenCalledWith(2_000);
         if (kind === 'timeout')

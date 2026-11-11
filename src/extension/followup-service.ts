@@ -10,9 +10,10 @@ import {
 import type { ChatModelSelection } from '../shared/protocol';
 import type { Persistence } from '../shared/persistence';
 import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
-import { asRecord, isNumber, isString } from '../shared/type-utils';
+import { asRecord, isNumber } from '../shared/type-utils';
 import { logger } from './logger';
 import { tryGenerateOneShot } from './one-shot-generation';
+import { tracePrompt } from './prompt-trace';
 import type { OpenCodeServer } from './server';
 import { FollowupCache } from './followup-cache';
 
@@ -75,7 +76,6 @@ export class FollowupService {
     signal?: AbortSignal;
     allowGenerate?: boolean;
     cacheOnly?: boolean;
-    trace?: boolean;
     isModelCurrent: () => boolean;
   }): Promise<FollowupSuggestionSet> {
     if (this.server.apiVersion !== 2 || !input.isModelCurrent()) return EMPTY_FOLLOWUP_SUGGESTIONS;
@@ -310,7 +310,6 @@ export class FollowupService {
       source: FollowupSource;
       model: ChatModelSelection;
       directory?: string;
-      trace?: boolean;
       isModelCurrent: () => boolean;
     },
     signal: AbortSignal,
@@ -320,7 +319,13 @@ export class FollowupService {
   ): Promise<FollowupSuggestionSet> {
     if (!input.isModelCurrent() || !(await this.waitForIdle(input, signal)))
       return EMPTY_FOLLOWUP_SUGGESTIONS;
-    const trace = input.trace === true ? await this.tracePrefix(input, signal) : '';
+    const trace = await tracePrompt(this.server, {
+      purpose: 'followup',
+      sessionID: input.sessionId,
+      directory: input.directory,
+      signal,
+      prompt: '',
+    });
     if (!(await this.sourceIsCurrent(input, signal)) || !input.isModelCurrent())
       return EMPTY_FOLLOWUP_SUGGESTIONS;
     // Once admission begins, another host can observe it and wait for this result.
@@ -383,53 +388,6 @@ export class FollowupService {
     } finally {
       if (!completed) await this.cache.complete(key, digest, EMPTY_FOLLOWUP_SUGGESTIONS);
     }
-  }
-
-  private async tracePrefix(
-    input: { sessionId: string; directory?: string },
-    signal: AbortSignal
-  ): Promise<string> {
-    const rootSessionID = await this.traceRootSession(input, signal);
-    signal.throwIfAborted();
-    if (!rootSessionID) logger.info('Follow-ups trace root unavailable');
-    return `VARRO_TRACE_V1 ${JSON.stringify({
-      purpose: 'followup',
-      sessionID: input.sessionId,
-      rootSessionID,
-    })}\n`;
-  }
-
-  /** Best-effort attribution only: a failed parent lookup must not block follow-ups. */
-  private async traceRootSession(
-    input: { sessionId: string; directory?: string },
-    signal: AbortSignal
-  ): Promise<string | undefined> {
-    const lookupSignal = AbortSignal.any([signal, AbortSignal.timeout(2_000)]);
-    const visited = new Set<string>();
-    let sessionID = input.sessionId;
-    try {
-      for (let reads = 0; reads < 16; reads += 1) {
-        lookupSignal.throwIfAborted();
-        if (!/^[\w-]{1,200}$/.test(sessionID) || visited.has(sessionID)) return undefined;
-        visited.add(sessionID);
-        const session = asRecord(
-          await this.server.request('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
-            directory: input.directory,
-            signal: lookupSignal,
-            maxResponseBytes: 64 * 1024,
-          })
-        );
-        lookupSignal.throwIfAborted();
-        if (session?.id !== sessionID) return undefined;
-        if (session.parentID === undefined) return sessionID;
-        if (!isString(session.parentID)) return undefined;
-        sessionID = session.parentID;
-      }
-    } catch {
-      // Root discovery is optional. Preserve cancellation of the overall follow-up attempt.
-      signal.throwIfAborted();
-    }
-    return undefined;
   }
 
   /** Native terminal-step events can precede the backend's idle snapshot. Retry reads, not inference. */

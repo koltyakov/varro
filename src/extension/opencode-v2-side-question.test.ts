@@ -8,6 +8,8 @@ import {
   MAX_SIDE_QUESTION_CONTEXT_LENGTH,
 } from '../shared/side-question';
 import { OpenCodeV2Adapter } from './opencode-v2-adapter';
+import * as extensionConfig from './extension-config';
+import { configurePromptTrace } from './prompt-trace';
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
@@ -35,6 +37,33 @@ function fixtureWire(overrides: Record<string, FixtureValue> = {}) {
 }
 
 describe('native V2 side questions', () => {
+  it('adds purpose metadata while keeping the existing session-scoped generation route', async () => {
+    const trace = vi.spyOn(extensionConfig, 'readPromptTrace').mockReturnValue(true);
+    configurePromptTrace(extensionConfig.readPromptTrace);
+    const wire = fixtureWire();
+    try {
+      expect(
+        await new OpenCodeV2Adapter(wire).request('POST', '/session/ses_side/side-question', {
+          question: 'Why?',
+        })
+      ).toEqual({ text: '**Because** the default was missing.' });
+      expect(wire).toHaveBeenLastCalledWith(
+        'POST',
+        '/api/session/ses_side/generate',
+        {
+          prompt: expect.stringMatching(
+            /^VARRO_TRACE_V1 \{"purpose":"side-question","sessionID":"ses_side","rootSessionID":"ses_side"\}\nThe user is asking/
+          ),
+        },
+        expect.any(Object)
+      );
+      expect(wire.mock.calls.filter(([method]) => method !== 'GET')).toHaveLength(1);
+    } finally {
+      trace.mockRestore();
+      configurePromptTrace(() => false);
+    }
+  });
+
   it('accepts 2.2.7 generation usage without exposing it as answer text or adding history', async () => {
     const generated: SessionGenerateResponse['data'] = {
       text: '  The default was missing.  ',

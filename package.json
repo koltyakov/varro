@@ -674,11 +674,11 @@
           "default": true,
           "markdownDescription": "Suggest optional next actions after completed Build responses. Requires OpenCode V2 stateless generation. Sends the current request and final answer for additional inference, which may consume paid tokens or subscription quota. Disable to opt out."
         },
-        "varro.chat.followupTrace": {
+        "varro.chat.promptTrace": {
           "type": "boolean",
           "scope": "application",
           "default": false,
-          "markdownDescription": "Include a VARRO_TRACE_V1 attribution line in follow-up prompts for compatible proxy hooks. Sends the originating session ID and, when resolved, its root session ID. Requires a proxy hook to apply accounting metadata and strip the line before inference; otherwise the model receives it. Does not change conversation history or enable follow-ups."
+          "markdownDescription": "Include a VARRO_TRACE_V1 attribution line in auxiliary inference prompts for compatible proxy hooks: follow-ups, permission judging, commit messages, titles, side questions, background-process judging, and prompt completion. Sends purpose, known session/root IDs, and available request/helper IDs; requests without a source session use a hashed workspace ID when available. Requires a proxy hook to apply accounting metadata and strip the line before inference; otherwise the model receives it. Does not change conversation history, permissions, or enable inference features."
         },
         "varro.chat.followupModel": {
           "type": "string",

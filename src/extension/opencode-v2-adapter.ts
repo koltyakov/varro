@@ -44,6 +44,7 @@ import {
   MAX_SIDE_QUESTION_CONTEXT_LENGTH,
 } from '../shared/side-question';
 import type { SideQuestionTurn } from '../shared/side-question';
+import { tracePrompt } from './prompt-trace';
 import type {
   ProviderAuthMethod,
   ProviderAuthPromptCondition,
@@ -938,21 +939,27 @@ export class OpenCodeV2Adapter {
           );
         }
         const result = await data<unknown>('POST', `${endpoint}/generate`, {
-          prompt: [
-            'The user is asking a quick side question about the conversation so far.',
-            'Answer directly and concisely in Markdown from what you already know.',
-            'Do not call any tools and do not take any actions.',
-            'File and line references do not imply file contents. Use only included text or existing conversation context, and do not claim to read files.',
-            ...(turns.length
-              ? [
-                  'Previous side questions and answers, for context only:',
-                  JSON.stringify(turns),
-                  'Answer the following follow-up:',
-                ]
-              : []),
-            '',
-            input.question.trim(),
-          ].join('\n'),
+          prompt: await tracePrompt(this, {
+            purpose: 'side-question',
+            sessionID,
+            directory,
+            signal: options.signal,
+            prompt: [
+              'The user is asking a quick side question about the conversation so far.',
+              'Answer directly and concisely in Markdown from what you already know.',
+              'Do not call any tools and do not take any actions.',
+              'File and line references do not imply file contents. Use only included text or existing conversation context, and do not claim to read files.',
+              ...(turns.length
+                ? [
+                    'Previous side questions and answers, for context only:',
+                    JSON.stringify(turns),
+                    'Answer the following follow-up:',
+                  ]
+                : []),
+              '',
+              input.question.trim(),
+            ].join('\n'),
+          }),
         });
         const text = asRecord(result)?.text;
         if (!isString(text) || !text.trim()) {

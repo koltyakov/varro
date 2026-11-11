@@ -11,6 +11,7 @@ import { asRecord, getString, isString, type UnknownRecord } from '../shared/typ
 import { readBoundedResponseText } from './provider-limits/adapter-utils';
 import { logger } from './logger';
 import type { OpenCodeServer } from './server';
+import { tracePrompt } from './prompt-trace';
 
 const SYSTEM_PROMPT = `You provide inline autocomplete for a human user writing a prompt to a coding agent. You are not the agent answering that prompt.
 The JSON input contains the user's unfinished "draft", "history" with their last user prompts in chronological order, and optionally "lastAssistantResponse" with the agent's latest reply from the same chat.
@@ -242,7 +243,12 @@ export class PromptCompletionService {
       history: input.history,
     };
     if (input.lastAssistantResponse) context.lastAssistantResponse = input.lastAssistantResponse;
-    const prompt = JSON.stringify(context);
+    const prompt = await tracePrompt(this.server, {
+      purpose: 'prompt-completion',
+      directory,
+      signal,
+      prompt: JSON.stringify(context),
+    });
     // OpenRouter can translate effort into an Anthropic thinking budget of at least 1,024.
     // Leave another 256 tokens for visible output instead of exhausting that shared budget.
     const budget = connection.reasoning

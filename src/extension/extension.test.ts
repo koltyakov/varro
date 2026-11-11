@@ -7,6 +7,7 @@ const scratchMock = vi.hoisted(() => ({
   prepare: vi.fn(() => Promise.resolve()),
   folders: undefined as { uri: { fsPath: string } }[] | undefined,
 }));
+const promptTracePreference = vi.hoisted(() => ({ enabled: false }));
 vi.mock('./varro-state-paths', async (importOriginal) => ({
   ...(await importOriginal()),
   prepareVarroScratchDirectory: scratchMock.prepare,
@@ -118,7 +119,12 @@ vi.mock('vscode', () => ({
     get workspaceFolders() {
       return scratchMock.folders;
     },
-    getConfiguration: vi.fn(() => ({ get: getMock })),
+    getConfiguration: vi.fn(() => ({
+      get: getMock,
+      inspect: (key: string) => ({
+        globalValue: key === 'chat.promptTrace' ? promptTracePreference.enabled : undefined,
+      }),
+    })),
     onDidChangeConfiguration: onDidChangeConfigurationMock,
   },
   window: {
@@ -334,10 +340,37 @@ describe('extension activation', () => {
     sweepStaleInjectedConfigDirectoriesMock.mockResolvedValue(undefined);
     scratchMock.folders = undefined;
     scratchMock.prepare.mockResolvedValue(undefined);
+    promptTracePreference.enabled = false;
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('binds live prompt-tracing preferences only for the active editor host', async () => {
+    const { activate, deactivate } = await import('./extension');
+    const { tracePrompt } = await import('./prompt-trace');
+    const server = { request: vi.fn() };
+    const input = {
+      purpose: 'commit-message' as const,
+      directory: '/repo',
+      prompt: 'Write a commit',
+    };
+    promptTracePreference.enabled = true;
+    expect(await tracePrompt(server, input)).toBe(input.prompt);
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    expect(await tracePrompt(server, input)).toMatch(/^VARRO_TRACE_V1 /);
+    promptTracePreference.enabled = false;
+    expect(await tracePrompt(server, input)).toBe(input.prompt);
+    promptTracePreference.enabled = true;
+    await deactivate();
+    expect(await tracePrompt(server, input)).toBe(input.prompt);
+    expect(server.request).not.toHaveBeenCalled();
   });
 
   it('does not wait for native helper preparation before registering the server and views', async () => {
