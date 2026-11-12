@@ -144,6 +144,7 @@ function v1AuthMethods(integration: IntegrationInfo | undefined): ProviderAuthMe
     integration?.methods
       .filter((item) => item.type === 'oauth' || item.type === 'key' || item.type === 'external')
       .map((item) => ({
+        id: item.type === 'key' ? undefined : item.id,
         type: item.type === 'key' ? 'api' : item.type,
         label: item.label ?? 'API key',
         prompts: item.form?.flatMap<NonNullable<ProviderAuthMethod['prompts']>[number]>((field) => {

@@ -920,6 +920,7 @@ describe('v2 authentication fields', () => {
       expect(await adapter.request('GET', '/provider/auth', undefined)).toEqual({
         opencode: [
           {
+            id: 'login',
             type: 'oauth',
             label: 'Sign in',
             prompts: [

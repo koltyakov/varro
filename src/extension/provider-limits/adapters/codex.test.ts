@@ -104,7 +104,7 @@ describe('createCodexAdapter', () => {
       providerID: 'openai',
       modelID: 'gpt-6.1-sol',
       status: 'unsupported',
-      note: expect.stringContaining('Reconnect OpenAI using Codex browser (legacy)'),
+      note: expect.stringContaining('Reconnect OpenAI using ChatGPT via Codex'),
     });
     expect(fetch).not.toHaveBeenCalled();
     expect(readFile).not.toHaveBeenCalled();

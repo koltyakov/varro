@@ -89,7 +89,7 @@ export function createCodexAdapter(): ProviderLimitAdapter {
           provider.id,
           modelID,
           checkedAt,
-          'ChatGPT token sharing cannot read usage limits or reset credits. Reconnect OpenAI using Codex browser (legacy) to display them.'
+          'ChatGPT token sharing cannot read usage limits or reset credits. Reconnect OpenAI using ChatGPT via Codex to display them.'
         );
       }
       const credentials = await resolveCodexCredentials(authStore);

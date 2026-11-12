@@ -500,6 +500,39 @@
   border-radius: var(--radius-control);
 }
 
+.provider-connect-method.has-description {
+  height: auto;
+  min-height: var(--provider-connect-control-height);
+  padding-block: 8px;
+}
+
+.provider-connect-method-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.provider-connect-method-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.provider-connect-method-recommendation,
+.provider-connect-method-description {
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+}
+
+.provider-connect-method-description {
+  overflow: hidden;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .provider-connect-option:hover,
 .provider-connect-option.is-active,
 .provider-connect-method:hover {

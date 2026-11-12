@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
+import type { ProviderAuthMethod } from '../../shared/opencode-types';
 import type { Provider } from '../types';
 import {
   markProviderAuthFailure,
   providerRequiresReconnection,
   resetProviderConnectionState,
 } from '../lib/provider-connection-state';
-import { resetDefaultAppState, setState } from '../lib/state';
+import { resetDefaultAppState, setState, state } from '../lib/state';
 import { ProviderConnectionDialog } from './ProviderConnectionDialog';
 
 type TestRuntimeValue =
@@ -393,6 +394,108 @@ describe('ProviderConnectionDialog provider list', () => {
 });
 
 describe('ProviderConnectionDialog method selection', () => {
+  const openaiMethods: ProviderAuthMethod[] = [
+    { id: 'key', type: 'api', label: 'API key' },
+    { id: 'chatgpt-token-sharing', type: 'oauth', label: 'Sign in with ChatGPT' },
+    { id: 'chatgpt-headless', type: 'oauth', label: 'Codex device code (legacy)' },
+    { id: 'chatgpt-browser', type: 'oauth', label: 'Codex browser (legacy)' },
+  ];
+
+  it.each([true, false])(
+    'recommends Codex browser and explains OpenAI methods without changing the catalog (IDs supplied: %s)',
+    (withIDs) => {
+      const methods = openaiMethods.map(({ id, ...method }) =>
+        withIDs ? { id, ...method } : method
+      );
+      setState('providerAuthMethods', 'openai', methods);
+      renderDialog({ initialProviderID: 'openai' });
+
+      const buttons = Array.from(dialog()!.querySelectorAll('.provider-connect-method'));
+      expect(
+        buttons.map(
+          (button) => button.querySelector('.provider-connect-method-heading > span')?.textContent
+        )
+      ).toEqual([
+        'ChatGPT via Codex',
+        'ChatGPT via Codex device code',
+        'ChatGPT token sharing',
+        'OpenAI API key',
+      ]);
+      expect(buttons[0]?.textContent).toContain('Recommended');
+      expect(
+        buttons.map((button) => {
+          const description = button.querySelector('.provider-connect-method-description');
+          expect(description?.getAttribute('title')).toBe(description?.textContent);
+          return description?.textContent;
+        })
+      ).toEqual([
+        'Usage limits and reset credits when available.',
+        'Sign in using a device code.',
+        'View usage limits in ChatGPT settings.',
+        'Uses separate API billing.',
+      ]);
+      expect(dialog()!.querySelectorAll('.provider-connect-method-recommendation')).toHaveLength(1);
+      expect(dialog()!.textContent).not.toContain('(legacy)');
+      expect(state.providerAuthMethods.openai).toEqual(methods);
+    }
+  );
+
+  it.each([
+    ['ChatGPT via Codex', 3],
+    ['ChatGPT via Codex device code', 2],
+    ['ChatGPT token sharing', 1],
+  ] as const)('keeps the original auth index for %s after reordering', async (label, index) => {
+    setState('providerAuthMethods', 'openai', openaiMethods);
+    renderDialog({ initialProviderID: 'openai', lockProvider: true, reauthentication: true });
+    chooseMethod(label);
+    primaryButton().click();
+    await flush();
+
+    expect(clientMocks.authorizeProvider).toHaveBeenCalledWith(
+      { providerID: 'openai', method: index, inputs: {} },
+      { signal: expect.any(AbortSignal) }
+    );
+    expect(clientMocks.completeProviderAuth).toHaveBeenCalledWith(
+      { providerID: 'openai', method: index, attemptID: undefined },
+      { signal: expect.any(AbortSignal) }
+    );
+    expect(state.providerAuthMethods.openai).toEqual(openaiMethods);
+  });
+
+  it('uses stable OpenAI IDs even if upstream changes the labels', () => {
+    setState('providerAuthMethods', 'openai', [
+      { id: 'chatgpt-token-sharing', type: 'oauth', label: 'New sharing label' },
+      { id: 'chatgpt-browser', type: 'oauth', label: 'New browser label' },
+    ]);
+    renderDialog({ initialProviderID: 'openai' });
+
+    expect(methodButton('ChatGPT via Codex')?.textContent).toContain('Recommended');
+    expect(methodButton('ChatGPT token sharing')).toBeInstanceOf(HTMLButtonElement);
+  });
+
+  it('leaves unknown OpenAI OAuth methods unchanged and does not recommend a missing browser method', () => {
+    setState('providerAuthMethods', 'openai', [
+      { id: 'custom-login', type: 'oauth', label: 'Codex browser (legacy)' },
+      openaiMethods[1]!,
+    ]);
+    renderDialog({ initialProviderID: 'openai' });
+
+    expect(methodButton('Codex browser (legacy)')).toBeInstanceOf(HTMLButtonElement);
+    expect(dialog()!.querySelector('.provider-connect-method-recommendation')).toBeNull();
+  });
+
+  it('does not relabel or reorder other providers', () => {
+    setState('providerAuthMethods', 'anthropic', openaiMethods);
+    renderDialog({ initialProviderID: 'anthropic' });
+
+    expect(
+      Array.from(dialog()!.querySelectorAll('.provider-connect-method-heading > span')).map(
+        (label) => label.textContent
+      )
+    ).toEqual(openaiMethods.map((method) => method.label));
+    expect(dialog()!.querySelector('.provider-connect-method-recommendation')).toBeNull();
+  });
+
   it('preselects a trimmed initial provider id', () => {
     renderDialog({ initialProviderID: ' openai ' });
 

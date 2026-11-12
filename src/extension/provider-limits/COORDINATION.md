@@ -14,8 +14,9 @@ Supported identities:
   probes remain local. JWT claims are not used as an account-sharing shortcut.
   ChatGPT token-sharing OAuth is not Codex OAuth. Its grants cannot read these
   endpoints. Preserve the credential's method ID and skip polling and coordination
-  for token sharing. Numeric limits and reset credits require the Codex browser
-  login. Never substitute an inactive Codex credential or a local Codex account
+  for token sharing. Numeric limits and reset credits require a Codex login,
+  shown as "ChatGPT via Codex" in Varro. Never substitute an inactive Codex
+  credential or a local Codex account
   for the selected token-sharing connection.
   V2 attach-only connections read the active OpenAI OAuth credential through the
   authenticated server's `/api/credential` endpoint. They never read the extension

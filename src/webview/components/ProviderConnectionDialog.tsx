@@ -96,6 +96,16 @@ export function ProviderConnectionDialog(props: {
     const index = methodIndex();
     return index === null ? undefined : selectedProvider()?.methods[index];
   });
+  const displayedMethods = createMemo(() =>
+    (selectedProvider()?.methods ?? [])
+      .map((method, index) => ({
+        method,
+        // Display order must not change the server's authorization method index.
+        index,
+        ...authMethodPresentation(providerID(), method),
+      }))
+      .toSorted((a, b) => a.order - b.order)
+  );
   const usesClaudeCodeLogin = () =>
     providerID() === 'claude-agent' && selectedMethod()?.type === 'external';
   const visiblePrompts = createMemo(() => {
@@ -465,18 +475,36 @@ export function ProviderConnectionDialog(props: {
                         </button>
                       </Show>
                       <div class="provider-connect-intro">Choose how you want to authenticate.</div>
-                      <For each={selectedProvider()?.methods ?? []}>
-                        {(method, index) => (
+                      <For each={displayedMethods()}>
+                        {(entry) => (
                           <button
                             type="button"
                             class="provider-connect-method"
-                            onClick={() => chooseMethod(index())}
+                            classList={{ 'has-description': Boolean(entry.description) }}
+                            onClick={() => chooseMethod(entry.index)}
                           >
-                            <span>{method.label}</span>
+                            <span class="provider-connect-method-copy">
+                              <span class="provider-connect-method-heading">
+                                <span>{entry.label}</span>
+                                <Show when={entry.recommended}>
+                                  <span class="provider-connect-method-recommendation">
+                                    Recommended
+                                  </span>
+                                </Show>
+                              </span>
+                              <Show when={entry.description}>
+                                <span
+                                  class="provider-connect-method-description"
+                                  title={entry.description}
+                                >
+                                  {entry.description}
+                                </span>
+                              </Show>
+                            </span>
                             <span class="provider-connect-method-type">
-                              {method.type === 'api'
+                              {entry.method.type === 'api'
                                 ? 'API key'
-                                : method.type === 'external'
+                                : entry.method.type === 'external'
                                   ? 'External credentials'
                                   : 'OAuth'}
                             </span>
@@ -738,6 +766,58 @@ const CLAUDE_AGENT_AUTH_METHOD: ProviderAuthMethod = {
   type: 'external',
   label: 'Claude Code login (claude auth login)',
 };
+
+type AuthMethodPresentation = {
+  label: string;
+  description?: string;
+  order: number;
+  recommended?: boolean;
+};
+
+function authMethodPresentation(
+  providerID: string | null,
+  method: ProviderAuthMethod
+): AuthMethodPresentation {
+  if (providerID === 'openai') {
+    if (method.type === 'api' && method.label === 'API key') {
+      return {
+        label: 'OpenAI API key',
+        description: 'Uses separate API billing.',
+        order: 3,
+      };
+    }
+    if (method.type === 'oauth') {
+      // V1 does not supply method IDs. Match only known labels in that case.
+      switch (method.id ?? method.label) {
+        case 'chatgpt-browser':
+        case 'Codex browser':
+        case 'Codex browser (legacy)':
+          return {
+            label: 'ChatGPT via Codex',
+            description: 'Usage limits and reset credits when available.',
+            order: 0,
+            recommended: true,
+          };
+        case 'chatgpt-headless':
+        case 'Codex device code':
+        case 'Codex device code (legacy)':
+          return {
+            label: 'ChatGPT via Codex device code',
+            description: 'Sign in using a device code.',
+            order: 1,
+          };
+        case 'chatgpt-token-sharing':
+        case 'Sign in with ChatGPT':
+          return {
+            label: 'ChatGPT token sharing',
+            description: 'View usage limits in ChatGPT settings.',
+            order: 2,
+          };
+      }
+    }
+  }
+  return { label: method.label, order: 3 };
+}
 
 function BackArrowIcon() {
   return <UiIcon source={arrowLeftIcon} width={11} height={11} aria-hidden="true" />;

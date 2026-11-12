@@ -882,6 +882,7 @@ export type ProviderAuthPromptSelect = {
 };
 
 export type ProviderAuthMethod = {
+  id?: string;
   type: 'oauth' | 'api' | 'external';
   label: string;
   prompts?: Array<ProviderAuthPromptText | ProviderAuthPromptSelect>;
