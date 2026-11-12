@@ -12,6 +12,7 @@ import fileIcon from 'material-icon-theme/icons/file.svg';
 import gemfileIcon from 'material-icon-theme/icons/gemfile.svg';
 import gitIcon from 'material-icon-theme/icons/git.svg';
 import goIcon from 'material-icon-theme/icons/go.svg';
+import goModIcon from 'material-icon-theme/icons/go-mod.svg';
 import gradleIcon from 'material-icon-theme/icons/gradle.svg';
 import graphqlIcon from 'material-icon-theme/icons/graphql.svg';
 import htmlIcon from 'material-icon-theme/icons/html.svg';
@@ -73,8 +74,8 @@ const FILE_NAME_ICONS = new Map<string, string>(
     'docker-compose.yml': dockerIcon,
     dockerfile: dockerIcon,
     gemfile: gemfileIcon,
-    'go.mod': goIcon,
-    'go.sum': goIcon,
+    'go.mod': goModIcon,
+    'go.sum': goModIcon,
     'gradle.properties': gradleIcon,
     'gradle-wrapper.properties': gradleIcon,
     gradlew: gradleIcon,

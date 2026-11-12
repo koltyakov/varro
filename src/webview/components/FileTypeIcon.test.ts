@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import dockerIcon from 'material-icon-theme/icons/docker.svg';
+import goIcon from 'material-icon-theme/icons/go.svg';
+import goModIcon from 'material-icon-theme/icons/go-mod.svg';
 import gradleIcon from 'material-icon-theme/icons/gradle.svg';
 import nodeIcon from 'material-icon-theme/icons/nodejs.svg';
 import readmeIcon from 'material-icon-theme/icons/readme.svg';
@@ -23,9 +25,13 @@ describe('getFileTypeIcon', () => {
     expect(getFileTypeIcon('unknown.custom-extension')).toBe(getFileTypeIcon(undefined));
   });
 
-  it('uses Go icons for Go module files', () => {
-    expect(getFileTypeIcon('go.mod')).toBe(getFileTypeIcon('main.go'));
-    expect(getFileTypeIcon('go.sum')).toBe(getFileTypeIcon('main.go'));
+  it('uses the pink Go module icon for module files and keeps the source icon for .go files', () => {
+    for (const path of ['go.mod', 'go.sum', '/workspace/go.mod', 'C:\\workspace\\GO.SUM']) {
+      expect(getFileTypeIcon(path)).toBe(goModIcon);
+      expect(hasRecognizedFileType(path)).toBe(true);
+    }
+    expect(getFileTypeIcon('main.go')).toBe(goIcon);
+    expect(goModIcon).not.toBe(goIcon);
   });
 
   it('uses the Git icon for remote names ending in .git', () => {
