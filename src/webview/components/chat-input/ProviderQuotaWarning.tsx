@@ -21,6 +21,7 @@ import { STORAGE_KEYS } from '../../lib/state-storage';
 import { formatDuration } from '../../lib/time-format';
 import { xmarkIcon } from '../../lib/ui-icons';
 import { UiIcon } from '../UiIcon';
+import { CodexLoginWarning } from './CodexLoginWarning';
 import { ProviderLimitPopup } from './ProviderLimitPopup';
 import {
   getLowQuotaWindows,
@@ -168,100 +169,103 @@ export function ProviderQuotaWarning(props: {
   });
 
   return (
-    <Show when={visibleWindows().length > 0 || expiringResets().length > 0}>
-      <div
-        class="chat-quota-warning"
-        classList={{
-          error: showResetExpirations()
-            ? (expiringResets()[0]?.[0] ?? Infinity) - now() <= 24 * 60 * 60_000
-            : isCritical(),
-        }}
-      >
-        <div class="chat-quota-warning-copy" role="status" aria-live="polite">
-          <Show when={!showResetExpirations()}>
-            <For each={visibleWindows()}>
-              {(window) => (
-                <div class="chat-quota-warning-row">
-                  <span>{formatQuotaWarning(window)}</span>
-                  <Show when={window.resetAt !== null}>
-                    <span class="chat-quota-warning-reset">
-                      {' '}
-                      · resets in {formatQuotaReset(window.resetAt!, now())}
+    <>
+      <CodexLoginWarning limit={props.limit} />
+      <Show when={visibleWindows().length > 0 || expiringResets().length > 0}>
+        <div
+          class="chat-quota-warning"
+          classList={{
+            error: showResetExpirations()
+              ? (expiringResets()[0]?.[0] ?? Infinity) - now() <= 24 * 60 * 60_000
+              : isCritical(),
+          }}
+        >
+          <div class="chat-quota-warning-copy" role="status" aria-live="polite">
+            <Show when={!showResetExpirations()}>
+              <For each={visibleWindows()}>
+                {(window) => (
+                  <div class="chat-quota-warning-row">
+                    <span>{formatQuotaWarning(window)}</span>
+                    <Show when={window.resetAt !== null}>
+                      <span class="chat-quota-warning-reset">
+                        {' '}
+                        · resets in {formatQuotaReset(window.resetAt!, now())}
+                      </span>
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </Show>
+            <Show when={showResetExpirations()}>
+              <For each={expiringResets().slice(0, 1)}>
+                {([expiresAt]) => (
+                  <div class="chat-quota-warning-row">
+                    <span>
+                      Reset expires in{' '}
+                      <span class="chat-quota-warning-reset">
+                        {formatQuotaReset(expiresAt, now())}
+                      </span>
                     </span>
-                  </Show>
-                </div>
-              )}
-            </For>
-          </Show>
-          <Show when={showResetExpirations()}>
-            <For each={expiringResets().slice(0, 1)}>
-              {([expiresAt]) => (
-                <div class="chat-quota-warning-row">
-                  <span>
-                    Reset expires in{' '}
-                    <span class="chat-quota-warning-reset">
-                      {formatQuotaReset(expiresAt, now())}
-                    </span>
-                  </span>
-                </div>
-              )}
-            </For>
-          </Show>
-        </div>
-        <div class="chat-quota-warning-actions">
-          <Show when={availableResets() > 0}>
-            <div ref={(el) => (resetPopupAnchor = el)} class="chat-quota-warning-resets">
-              <button
-                ref={(el) => (resetPopupButton = el)}
-                type="button"
-                class="chat-quota-warning-usage"
-                aria-expanded={showResetPopup()}
-                onClick={() => setShowResetPopup((visible) => !visible)}
-              >
-                {resetLabel()}
-              </button>
-              <Show when={showResetPopup()}>
-                <ProviderLimitPopup
-                  limit={props.limit}
-                  providerName={props.providerName}
-                  resetsOnly
-                  onClose={() => setShowResetPopup(false)}
-                />
-              </Show>
-            </div>
-          </Show>
-          <button
-            type="button"
-            class="chat-quota-warning-close"
-            aria-label={`Dismiss ${props.providerName} quota warning`}
-            title={
-              props.forceShow
-                ? 'Dismiss debug preview'
-                : expiringResets().length > 0
-                  ? 'Snooze reset reminders until the next milestone and dismiss current quota warnings'
-                  : isCritical()
-                    ? 'Dismiss until quota resets (1 hour if unknown)'
-                    : 'Dismiss until quota becomes critical or resets (1 hour if reset unknown)'
-            }
-            onClick={() => {
-              if (props.forceShow) setDebugDismissed(true);
-              else {
-                const providerID = props.limit!.providerID;
-                const windows = visibleWindows();
-                const expirations = expiringResets().map(([expiresAt]) => expiresAt);
-                const dismissedAt = Date.now();
-                batch(() => {
-                  quotaWarningDismissals.dismiss(providerID, windows, dismissedAt);
-                  resetWarningDismissals.dismiss(providerID, expirations, dismissedAt);
-                });
+                  </div>
+                )}
+              </For>
+            </Show>
+          </div>
+          <div class="chat-quota-warning-actions">
+            <Show when={availableResets() > 0}>
+              <div ref={(el) => (resetPopupAnchor = el)} class="chat-quota-warning-resets">
+                <button
+                  ref={(el) => (resetPopupButton = el)}
+                  type="button"
+                  class="chat-quota-warning-usage"
+                  aria-expanded={showResetPopup()}
+                  onClick={() => setShowResetPopup((visible) => !visible)}
+                >
+                  {resetLabel()}
+                </button>
+                <Show when={showResetPopup()}>
+                  <ProviderLimitPopup
+                    limit={props.limit}
+                    providerName={props.providerName}
+                    resetsOnly
+                    onClose={() => setShowResetPopup(false)}
+                  />
+                </Show>
+              </div>
+            </Show>
+            <button
+              type="button"
+              class="chat-quota-warning-close"
+              aria-label={`Dismiss ${props.providerName} quota warning`}
+              title={
+                props.forceShow
+                  ? 'Dismiss debug preview'
+                  : expiringResets().length > 0
+                    ? 'Snooze reset reminders until the next milestone and dismiss current quota warnings'
+                    : isCritical()
+                      ? 'Dismiss until quota resets (1 hour if unknown)'
+                      : 'Dismiss until quota becomes critical or resets (1 hour if reset unknown)'
               }
-            }}
-          >
-            <UiIcon source={xmarkIcon} width="12" height="12" />
-          </button>
+              onClick={() => {
+                if (props.forceShow) setDebugDismissed(true);
+                else {
+                  const providerID = props.limit!.providerID;
+                  const windows = visibleWindows();
+                  const expirations = expiringResets().map(([expiresAt]) => expiresAt);
+                  const dismissedAt = Date.now();
+                  batch(() => {
+                    quotaWarningDismissals.dismiss(providerID, windows, dismissedAt);
+                    resetWarningDismissals.dismiss(providerID, expirations, dismissedAt);
+                  });
+                }
+              }}
+            >
+              <UiIcon source={xmarkIcon} width="12" height="12" />
+            </button>
+          </div>
         </div>
-      </div>
-    </Show>
+      </Show>
+    </>
   );
 }
 

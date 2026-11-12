@@ -180,6 +180,41 @@ describe('parseExtensionMessage', () => {
     }
   });
 
+  it('validates the explicit Codex-login warning without accepting it on unrelated statuses', () => {
+    const message = {
+      type: 'provider-limit/updated',
+      payload: {
+        directory: '/repo',
+        status: {
+          providerID: 'openai',
+          status: 'unsupported',
+          source: 'provider',
+          checkedAt: 1,
+          note: 'Token sharing cannot read quotas',
+          codexLoginRequired: { connectionID: 'connection' },
+        },
+      },
+    };
+    expect(parseExtensionMessage(message)).toEqual(message);
+    for (const invalid of [
+      { codexLoginRequired: null },
+      { codexLoginRequired: {} },
+      { codexLoginRequired: { connectionID: 42 } },
+      { codexLoginRequired: { connectionID: ' ' } },
+      { status: 'error' },
+      { status: 'available', windows: [] },
+      { providerID: 'anthropic' },
+      { source: 'opencode' },
+    ]) {
+      expect(
+        parseExtensionMessage({
+          ...message,
+          payload: { ...message.payload, status: { ...message.payload.status, ...invalid } },
+        })
+      ).toBeNull();
+    }
+  });
+
   it.each([0, 7, Number.MAX_SAFE_INTEGER])(
     'parses workspace selection failure with requestId %s',
     (requestId) => {

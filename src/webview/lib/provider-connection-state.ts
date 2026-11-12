@@ -4,6 +4,7 @@ import type { Message } from '../types';
 type ProviderConnectionRequest = {
   id: number;
   providerID: string | null;
+  methodID?: string;
 };
 
 const [providerConnectionRequest, setProviderConnectionRequest] =
@@ -93,9 +94,9 @@ export function resolveProviderAuthFailure(providerID: string) {
   });
 }
 
-export function requestProviderConnection(providerID?: string) {
+export function requestProviderConnection(providerID?: string, methodID?: string) {
   const normalizedProviderID = providerID?.trim() || null;
-  setProviderConnectionRequest({ id: ++nextRequestID, providerID: normalizedProviderID });
+  setProviderConnectionRequest({ id: ++nextRequestID, providerID: normalizedProviderID, methodID });
 }
 
 export function consumeProviderConnectionRequest(id: number) {

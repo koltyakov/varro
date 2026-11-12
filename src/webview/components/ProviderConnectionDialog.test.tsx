@@ -3,6 +3,7 @@ import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import type { ProviderAuthMethod } from '../../shared/opencode-types';
 import type { Provider } from '../types';
+import { codexLoginWarningDismissal } from '../lib/codex-login-warning';
 import {
   markProviderAuthFailure,
   providerRequiresReconnection,
@@ -275,6 +276,7 @@ beforeEach(() => {
   });
   clientMocks.completeProviderAuth.mockResolvedValue(true);
   clientMocks.connectApiProvider.mockResolvedValue(true);
+  codexLoginWarningDismissal.reset();
   setState('providerAuthMethods', {
     anthropic: [{ type: 'oauth', label: 'Claude subscription' }],
     openai: [{ type: 'api', label: 'API key' }],
@@ -400,6 +402,70 @@ describe('ProviderConnectionDialog method selection', () => {
     { id: 'chatgpt-headless', type: 'oauth', label: 'Codex device code (legacy)' },
     { id: 'chatgpt-browser', type: 'oauth', label: 'Codex browser (legacy)' },
   ];
+
+  it.each([true, false])(
+    'preselects Codex browser from a warning without starting OAuth (IDs: %s)',
+    async (withIDs) => {
+      setState(
+        'providerAuthMethods',
+        'openai',
+        openaiMethods.map(({ id, ...method }) => (withIDs ? { id, ...method } : method))
+      );
+      renderDialog({
+        initialProviderID: 'openai',
+        initialMethodID: 'chatgpt-browser',
+        lockProvider: true,
+      });
+      expect(dialog()!.querySelector('.provider-connect-form')).not.toBeNull();
+      expect(clientMocks.authorizeProvider).not.toHaveBeenCalled();
+      primaryButton().click();
+      await flush();
+      expect(clientMocks.authorizeProvider).toHaveBeenCalledWith(
+        { providerID: 'openai', method: 3, inputs: {} },
+        { signal: expect.any(AbortSignal) }
+      );
+    }
+  );
+
+  it('leaves method selection open if Codex browser is unavailable', () => {
+    setState('providerAuthMethods', 'openai', [openaiMethods[1]!]);
+    renderDialog({
+      initialProviderID: 'openai',
+      initialMethodID: 'chatgpt-browser',
+      lockProvider: true,
+    });
+    expect(methodButton('ChatGPT token sharing')).toBeInstanceOf(HTMLButtonElement);
+    expect(clientMocks.authorizeProvider).not.toHaveBeenCalled();
+  });
+
+  it('clears the saved notice dismissal only after successful OpenAI authentication', async () => {
+    codexLoginWarningDismissal.dismiss('connection');
+    renderDialog({ initialProviderID: 'openai' });
+    chooseMethod('API key');
+    const input = dialog()!.querySelector<HTMLInputElement>('input[type="password"]')!;
+    type(input, 'test-key');
+    expect(codexLoginWarningDismissal.read()?.dismissed).toBe(true);
+    primaryButton().click();
+    await flush();
+    expect(codexLoginWarningDismissal.read()).toBeNull();
+  });
+
+  it('retains the saved notice dismissal when authentication fails or is cancelled', async () => {
+    codexLoginWarningDismissal.dismiss('connection');
+    clientMocks.authorizeProvider.mockRejectedValue(new Error('Authentication failed'));
+    setState('providerAuthMethods', 'openai', openaiMethods);
+    renderDialog({
+      initialProviderID: 'openai',
+      initialMethodID: 'chatgpt-browser',
+      lockProvider: true,
+    });
+    primaryButton().click();
+    await flush();
+    expect(codexLoginWarningDismissal.read()?.dismissed).toBe(true);
+    findButton('Back to methods')!.click();
+    dialog()!.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click();
+    expect(codexLoginWarningDismissal.read()?.dismissed).toBe(true);
+  });
 
   it.each([true, false])(
     'recommends Codex browser and explains OpenAI methods without changing the catalog (IDs supplied: %s)',

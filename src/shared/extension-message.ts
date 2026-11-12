@@ -841,6 +841,18 @@ function isProviderLimitStatus(value: UnknownRecord | null): value is ProviderLi
     (value.note !== undefined && !isString(value.note))
   )
     return false;
+  if (value.codexLoginRequired !== undefined) {
+    const warning = asRecord(value.codexLoginRequired);
+    if (
+      value.status !== 'unsupported' ||
+      value.providerID !== 'openai' ||
+      value.source !== 'provider' ||
+      !warning ||
+      !isString(warning.connectionID) ||
+      !warning.connectionID.trim()
+    )
+      return false;
+  }
   if (value.status === 'error' || value.status === 'unsupported') return isString(value.note);
   if (value.status !== 'available' || !Array.isArray(value.windows)) return false;
   if (value.planName !== undefined && !isString(value.planName)) return false;

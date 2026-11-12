@@ -446,6 +446,15 @@ export class ProviderLimitService {
         note: `Provider limit adapter failed: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+    if (providerLimit?.status === 'unsupported' && providerLimit.codexLoginRequired) {
+      providerLimit = {
+        ...providerLimit,
+        codexLoginRequired: {
+          // Credential IDs survive token rotation and server restarts; never expose them to the UI.
+          connectionID: fingerprintSecret(providerLimit.codexLoginRequired.connectionID),
+        },
+      };
+    }
     loading = false;
     if (shared && providerLimit) {
       // Shared freshness and credential identity must not be hidden by local caches.
@@ -559,6 +568,7 @@ export class ProviderLimitService {
             JSON.stringify({
               openai: {
                 ...value,
+                credentialID: active?.id,
                 accountId: metadata?.accountID ?? metadata?.accountId,
               },
             })
@@ -712,6 +722,7 @@ function serializeProviderAuthStore(authStore: Record<string, ProviderAuthRecord
               auth.expires || 0,
               fingerprintSecret(auth.accountId || ''),
               auth.methodID || '',
+              auth.credentialID || '',
             ]
           : [providerID, auth.type, fingerprintSecret(auth.key)]
       )

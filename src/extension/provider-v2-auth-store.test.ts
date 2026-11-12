@@ -43,7 +43,13 @@ describe(
       const before = await readFile(path);
 
       await expect(readOpenCodeV2AuthStore(path)).resolves.toEqual({
-        xai: { type: 'oauth', access: 'current', refresh: 'refresh', expires: 1234 },
+        xai: {
+          type: 'oauth',
+          access: 'current',
+          refresh: 'refresh',
+          expires: 1234,
+          credentialID: 'active',
+        },
         openrouter: { type: 'api', key: 'new' },
       });
       expect(await readFile(path)).toEqual(before);
@@ -69,7 +75,12 @@ describe(
       const before = await readFile(path);
 
       await expect(readOpenCodeV2AuthStore(path)).resolves.toEqual({
-        openai: { type: 'oauth', access: 'token', accountId: 'account-current' },
+        openai: {
+          type: 'oauth',
+          access: 'token',
+          accountId: 'account-current',
+          credentialID: 'active',
+        },
       });
       expect(await readFile(path)).toEqual(before);
     });
@@ -113,7 +124,12 @@ describe(
       const before = await readFile(path);
 
       await expect(readOpenCodeV2AuthStore(path)).resolves.toEqual({
-        openai: { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'new-sharing' },
+        openai: {
+          type: 'oauth',
+          methodID: 'chatgpt-token-sharing',
+          access: 'new-sharing',
+          credentialID: 'active',
+        },
       });
       expect(await readFile(path)).toEqual(before);
     });

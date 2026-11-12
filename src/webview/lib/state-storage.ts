@@ -12,6 +12,7 @@ export const STORAGE_KEYS = {
   providerLimitPins: 'varro.providerLimitPins',
   quotaWarningDismissals: 'varro.quotaWarningDismissals',
   resetWarningDismissals: 'varro.resetWarningDismissals',
+  codexLoginWarningDismissal: 'varro.codexLoginWarningDismissal',
   modelOrder: 'varro.modelOrder',
   draftPermissionMode: 'varro.draftPermissionMode',
   sessionPermissionModes: 'varro.sessionPermissionModes',

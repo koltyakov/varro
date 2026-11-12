@@ -4172,6 +4172,29 @@ describe('header status badges', () => {
     expect(dialog?.querySelector('[aria-label="Search providers"]')).toBeNull();
   });
 
+  it('opens the Codex browser handoff from a usage notice without starting authentication', async () => {
+    vi.spyOn(client.config, 'providerCatalog').mockResolvedValue({
+      all: [{ id: 'openai', name: 'OpenAI', source: 'api', models: {} }],
+      default: {},
+      connected: ['openai'],
+    });
+    const authorize = vi.spyOn(client.config, 'authorizeProvider');
+    setState('providerAuthMethods', {
+      openai: [
+        { id: 'chatgpt-token-sharing', type: 'oauth', label: 'Sign in with ChatGPT' },
+        { id: 'chatgpt-browser', type: 'oauth', label: 'Codex browser (legacy)' },
+      ],
+    });
+    setState('sessions', [session('session-1', 500)]);
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => Chat(), container!);
+    requestProviderConnection('openai', 'chatgpt-browser');
+    await vi.waitFor(() => expect(document.querySelector('.provider-connect-form')).not.toBeNull());
+    expect(document.querySelector('.provider-connect-oauth-handoff')).not.toBeNull();
+    expect(document.querySelector('.provider-connect-methods')).toBeNull();
+    expect(authorize).not.toHaveBeenCalled();
+  });
+
   it('opens the provider picker for a generic connection request', async () => {
     vi.spyOn(client.config, 'providerCatalog').mockResolvedValue({
       all: [

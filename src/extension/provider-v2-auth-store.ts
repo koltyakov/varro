@@ -36,7 +36,7 @@ try {
   const auth = Object.create(null);
   // Match V2 Credential.list selection: active first, then newest creation and ID.
   const rows = database.prepare(
-    'SELECT integration_id, value FROM credential WHERE integration_id IS NOT NULL ' +
+    'SELECT id, integration_id, value FROM credential WHERE integration_id IS NOT NULL ' +
     'ORDER BY active DESC, time_created DESC, id DESC'
   ).all();
   const selected = new Set();
@@ -48,6 +48,7 @@ try {
     else if (value?.type === 'oauth') {
       auth[row.integration_id] = {
         ...value,
+        credentialID: row.id,
         accountId: value.metadata?.accountID ?? value.metadata?.accountId,
       };
     }

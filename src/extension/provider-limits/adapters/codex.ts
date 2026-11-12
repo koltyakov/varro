@@ -85,12 +85,17 @@ export function createCodexAdapter(): ProviderLimitAdapter {
       const auth = authStore.openai;
       if (auth?.type === 'oauth' && auth.methodID === 'chatgpt-token-sharing') {
         // Token-sharing grants target api.openai.com, not the Codex usage API.
-        return unsupportedProviderStatus(
-          provider.id,
-          modelID,
-          checkedAt,
-          'ChatGPT token sharing cannot read usage limits or reset credits. Reconnect OpenAI using ChatGPT via Codex to display them.'
-        );
+        return {
+          ...unsupportedProviderStatus(
+            provider.id,
+            modelID,
+            checkedAt,
+            'ChatGPT token sharing cannot read usage limits or reset credits. Reconnect OpenAI using ChatGPT via Codex to display them.'
+          ),
+          codexLoginRequired: {
+            connectionID: auth.credentialID || auth.accountId || 'chatgpt-token-sharing',
+          },
+        };
       }
       const credentials = await resolveCodexCredentials(authStore);
       signal?.throwIfAborted();

@@ -18,6 +18,7 @@ import type {
 import type { Provider } from '../types';
 import { postMessage } from '../lib/bridge';
 import { client } from '../lib/client';
+import { codexLoginWarningDismissal } from '../lib/codex-login-warning';
 import { trapModalFocus } from '../lib/modal-focus';
 import { resolveProviderAuthFailure } from '../lib/provider-connection-state';
 import { openProviderSetup } from '../lib/provider-setup';
@@ -31,6 +32,7 @@ export function ProviderConnectionDialog(props: {
   providerLoadError: string;
   isLoadingProviders: boolean;
   initialProviderID?: string | null;
+  initialMethodID?: string;
   lockProvider?: boolean;
   reauthentication?: boolean;
   onClose: () => void;
@@ -144,7 +146,20 @@ export function ProviderConnectionDialog(props: {
     if (initialProviderApplied || props.isLoadingProviders) return;
     initialProviderApplied = true;
     const id = props.initialProviderID?.trim();
-    if (id && providers().some((provider) => provider.id === id)) chooseProvider(id);
+    if (id && providers().some((provider) => provider.id === id)) {
+      chooseProvider(id);
+      const initialMethodID = props.initialMethodID;
+      if (initialMethodID) {
+        const index = selectedProvider()?.methods.findIndex(
+          (method) =>
+            method.id === initialMethodID ||
+            (!method.id &&
+              initialMethodID === 'chatgpt-browser' &&
+              authMethodPresentation(id, method).label === 'ChatGPT via Codex')
+        );
+        if (index !== undefined && index >= 0) chooseMethod(index);
+      }
+    }
   });
 
   function handleProviderSearchKeyDown(event: KeyboardEvent) {
@@ -360,6 +375,7 @@ export function ProviderConnectionDialog(props: {
     cancelAuthorization();
     const id = providerID();
     if (id) resolveProviderAuthFailure(id);
+    if (id === 'openai') codexLoginWarningDismissal.reset();
     setApiKey('');
     setAuthorizationCode('');
     setInputs({});

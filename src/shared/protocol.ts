@@ -350,6 +350,7 @@ export type ProviderLimitStatus =
       source: 'opencode' | 'provider';
       checkedAt: number;
       note: string;
+      codexLoginRequired?: { connectionID: string };
     };
 
 export type ProviderLimitUpdate = {

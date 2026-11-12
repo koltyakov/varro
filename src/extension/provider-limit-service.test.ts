@@ -273,11 +273,13 @@ describe('ProviderLimitService', () => {
     };
     const credentials = [
       {
+        id: 'inactive',
         integrationID: 'openai',
         active: false,
         value: { type: 'oauth', access: 'inactive-token' },
       },
       {
+        id: 'active',
         integrationID: 'openai',
         active: true,
         value: {
@@ -309,6 +311,7 @@ describe('ProviderLimitService', () => {
             methodID: 'chatgpt-browser',
             access: 'active-server-token',
             accountId: 'active-server-account',
+            credentialID: 'active',
           },
         },
         setProviderAuth: undefined,
@@ -318,6 +321,34 @@ describe('ProviderLimitService', () => {
     expect(mocks.readV2AuthStoreMock).not.toHaveBeenCalled();
     expect(server.isAttachOnly).toBe(true);
     service.dispose();
+  });
+
+  it('publishes a stable opaque warning identity across polls and server reconnections', async () => {
+    const warning = {
+      providerID: 'openai',
+      status: 'unsupported',
+      source: 'provider',
+      checkedAt: Date.now(),
+      note: 'Token sharing cannot read quotas',
+      codexLoginRequired: { connectionID: 'credential-a' },
+    };
+    mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue(warning);
+    const readWarning = async (url: string) => {
+      const service = new ProviderLimitService({ ...createServer(), url });
+      const result = await service.get('openai', null);
+      service.dispose();
+      if (result.status !== 'unsupported') throw new Error('Expected token-sharing notice');
+      return result.codexLoginRequired?.connectionID;
+    };
+    const first = await readWarning('http://127.0.0.1:4000');
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(first).not.toBe('credential-a');
+    expect(await readWarning('http://127.0.0.1:5000')).toBe(first);
+    mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue({
+      ...warning,
+      codexLoginRequired: { connectionID: 'credential-b' },
+    });
+    expect(await readWarning('http://127.0.0.1:5000')).not.toBe(first);
   });
 
   it.each(['inactive', 'api-key', 'malformed', 'unavailable'])(

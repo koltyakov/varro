@@ -105,10 +105,30 @@ describe('createCodexAdapter', () => {
       modelID: 'gpt-6.1-sol',
       status: 'unsupported',
       note: expect.stringContaining('Reconnect OpenAI using ChatGPT via Codex'),
+      codexLoginRequired: { connectionID: 'chatgpt-token-sharing' },
     });
     expect(fetch).not.toHaveBeenCalled();
     expect(readFile).not.toHaveBeenCalled();
     expect(coordinate).not.toHaveBeenCalled();
+  });
+
+  it('uses the saved connection identity rather than rotating tokens for login warnings', async () => {
+    const getStatus = (credentialID: string, access: string) =>
+      adapter.fetch({
+        provider: oauthProvider,
+        authStore: {
+          openai: { type: 'oauth', methodID: 'chatgpt-token-sharing', credentialID, access },
+        },
+        modelID: null,
+        checkedAt: 1000,
+      });
+    const initial = await getStatus('credential-a', 'token-a');
+    expect(await getStatus('credential-a', 'rotated-token')).toEqual(initial);
+    expect(await getStatus('credential-b', 'reauthenticated-token')).toMatchObject({
+      codexLoginRequired: { connectionID: 'credential-b' },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(readFile).not.toHaveBeenCalled();
   });
 
   it('restores weekly limits and available reset credits after a Codex browser login', async () => {

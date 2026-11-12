@@ -123,6 +123,7 @@ export function Chat() {
     error: string;
     loading: boolean;
     providerID: string | null;
+    methodID?: string;
   } | null>(null);
 
   createEffect(() => {
@@ -134,6 +135,7 @@ export function Chat() {
       error: '',
       loading: true,
       providerID: request.providerID,
+      methodID: request.methodID,
     };
     setProviderConnectionData(loadingState);
     void client.config.providerCatalog().then(
@@ -144,6 +146,7 @@ export function Chat() {
           error: '',
           loading: false,
           providerID: request.providerID,
+          methodID: request.methodID,
         });
       },
       (error) => {
@@ -153,6 +156,7 @@ export function Chat() {
           error: error instanceof Error ? error.message : String(error),
           loading: false,
           providerID: request.providerID,
+          methodID: request.methodID,
         });
       }
     );
@@ -1022,6 +1026,7 @@ export function Chat() {
             providerLoadError={data().error}
             isLoadingProviders={data().loading}
             initialProviderID={data().providerID}
+            initialMethodID={data().methodID}
             lockProvider={Boolean(data().providerID)}
             reauthentication={Boolean(data().providerID)}
             onClose={() => setProviderConnectionData(null)}

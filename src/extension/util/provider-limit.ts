@@ -18,6 +18,7 @@ export type ProviderAuthRecord =
       expires?: number;
       accountId?: string;
       methodID?: string;
+      credentialID?: string;
     }
   | { type: 'api' | 'wellknown'; key: string };
 
@@ -253,6 +254,8 @@ export function parseProviderAuthStore(raw: string): Record<string, ProviderAuth
       if (accountId && oauth.type === 'oauth') oauth.accountId = accountId;
       const methodID = getString(auth.methodID);
       if (methodID) oauth.methodID = methodID;
+      const credentialID = getString(auth.credentialID);
+      if (credentialID) oauth.credentialID = credentialID;
       authStore[providerID] = oauth;
       continue;
     }

@@ -2695,6 +2695,11 @@
   text-decoration: none;
 }
 
+.chat-codex-login-warning .chat-quota-warning-usage {
+  color: color-mix(in srgb, var(--quota-warning-color) 70%, var(--color-vscode-fg));
+  text-align: left;
+}
+
 .chat-quota-warning-close {
   display: inline-flex;
   align-items: center;

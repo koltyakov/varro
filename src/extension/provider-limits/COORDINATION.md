@@ -18,6 +18,10 @@ Supported identities:
   shown as "ChatGPT via Codex" in Varro. Never substitute an inactive Codex
   credential or a local Codex account
   for the selected token-sharing connection.
+  Token sharing returns an explicit Codex-login notice with a hashed saved-credential
+  identity. Its dismissal survives polling and token rotation, but resets after an
+  explicit OpenAI login or account change. Opening the notice only preselects the
+  existing Codex browser flow; authorization still requires user confirmation.
   V2 attach-only connections read the active OpenAI OAuth credential through the
   authenticated server's `/api/credential` endpoint. They never read the extension
   host's credential database or fall back to local Codex files, inactive accounts,
