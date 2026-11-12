@@ -309,9 +309,15 @@ export type SessionStatusSnapshot = {
 type PermissionJudgeAttempt = {
   permission: Permission;
   automationLease?: number;
+  decisionTurnMessageId?: string;
   status: 'judging' | 'visible' | 'responded';
   countedInFlight: boolean;
   promise: Promise<void>;
+};
+
+type PermissionDecisionReference = {
+  reference: AutoApproveJudgeReference;
+  turnMessageId: string | undefined;
 };
 
 type PermissionJudgeOutcome =
@@ -1171,7 +1177,33 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let sessionActivationPreserveTranscript = false;
   let initialRouteConsumed = false;
   let restoredPermissionsClassified = false;
-  const permissionDecisionReferencesByTree = new Map<string, AutoApproveJudgeReference[]>();
+  const permissionDecisionReferencesByTree = new Map<string, PermissionDecisionReference[]>();
+  const permissionDecisionTurnsBySession = new Map<string, { id: string; created: number }>();
+
+  function getPermissionDecisionTurnMessageId(sessionId: string): string | undefined {
+    const rootId = getPermissionDecisionScopeId(sessionId);
+    const isRootUserMessage = (entry: MessageEntry) =>
+      entry.info.sessionID === rootId && entry.info.role === 'user';
+    const message =
+      appStore.state.messages.findLast(isRootUserMessage)?.info ??
+      getCachedSessionMessages(rootId).findLast(isRootUserMessage)?.info;
+    if (message) recordPermissionDecisionTurn(message);
+    return permissionDecisionTurnsBySession.get(rootId)?.id;
+  }
+
+  function recordPermissionDecisionTurn(message: MessageEntry['info']) {
+    const previous = permissionDecisionTurnsBySession.get(message.sessionID);
+    if (
+      !previous ||
+      message.time.created > previous.created ||
+      (message.time.created === previous.created && message.id > previous.id)
+    ) {
+      permissionDecisionTurnsBySession.set(message.sessionID, {
+        id: message.id,
+        created: message.time.created,
+      });
+    }
+  }
   const permissionJudgeAttempts = new Map<string, PermissionJudgeAttempt>();
   const pendingPermissionSnapshot = new Map<string, Permission>();
   let permissionSynchronization: { ready: Promise<void>; complete: Promise<void> } | null = null;
@@ -1327,6 +1359,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         syncSessionMessages,
       },
       repairSessionTitle,
+      userMessageUpdated: recordPermissionDecisionTurn,
       sessionApprovalOperations: {
         respondPermission: sessionApprovalOperations.respondPermission,
         respondAutomaticPermission: (sessionId, permissionId, response, options) =>
@@ -1999,13 +2032,19 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       );
       return;
     }
-    if (outcome.response.decision === 'ask') {
-      showPermissionAfterJudge(attempt, outcome.response.reason, outcome.response.actionSummary);
+    const staleRejection =
+      outcome.response.decision === 'reject' &&
+      attempt.decisionTurnMessageId !== getPermissionDecisionTurnMessageId(permission.sessionID);
+    if (outcome.response.decision === 'ask' || staleRejection) {
+      const reason = staleRejection
+        ? 'A new user message arrived after this review. Please confirm this request.'
+        : outcome.response.reason;
+      showPermissionAfterJudge(attempt, reason, outcome.response.actionSummary);
       finishPermissionJudgeAttempt(attempt);
       finishAutoApproveActivity(
         permission,
         'approval-required',
-        outcome.response.reason || 'Automatic review requested manual approval.',
+        reason || 'Automatic review requested manual approval.',
         outcome.response.reviewerModel
       );
       return;
@@ -2088,12 +2127,21 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const judgeRequest = Promise.resolve()
       .then(async (): Promise<PermissionJudgeOutcome> => {
         const model = resolvePermissionJudgeModel(permission.sessionID);
+        const turnMessageId = getPermissionDecisionTurnMessageId(permission.sessionID);
+        attempt.decisionTurnMessageId = turnMessageId;
+        const references =
+          permissionDecisionReferencesByTree.get(
+            getPermissionDecisionScopeId(permission.sessionID)
+          ) || [];
         const request = {
           permission,
-          approvedReferences:
-            permissionDecisionReferencesByTree.get(
-              getPermissionDecisionScopeId(permission.sessionID)
-            ) || [],
+          // A rejection blocks retries within this turn, not a later user request.
+          approvedReferences: references
+            .filter(
+              ({ reference, turnMessageId: referenceTurn }) =>
+                reference.response !== 'reject' || referenceTurn === turnMessageId
+            )
+            .map(({ reference }) => reference),
           model: model || undefined,
         };
         if (attempt.automationLease === undefined) {
@@ -2350,6 +2398,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     promptHistoryLoads.clear();
     promptHistoryPageLoads.clear();
     permissionDecisionReferencesByTree.clear();
+    permissionDecisionTurnsBySession.clear();
     for (const attempt of permissionJudgeAttempts.values()) {
       finishPermissionJudgeAttempt(attempt);
       clearReviewingAutoApproveActivity(attempt.permission);
@@ -3457,6 +3506,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const decisionReference = permission
       ? toApprovedPermissionReference(permission, response)
       : null;
+    const decisionTurnMessageId = getPermissionDecisionTurnMessageId(sessionId);
     const releaseRemovalIntent = registerPermissionRemovalIntent(
       groupMembers.length > 0 ? groupMembers.map((member) => member.id) : [permissionId],
       response === 'always'
@@ -3490,7 +3540,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       releaseRemovalIntent();
     }
     if (permission && decisionReference) {
-      recordPermissionDecisionReference(permission.sessionID, decisionReference);
+      recordPermissionDecisionReference(
+        permission.sessionID,
+        decisionReference,
+        decisionTurnMessageId
+      );
       for (const member of groupMembers.length > 0 ? groupMembers : [permission]) {
         finishAutoApproveActivity(
           member,
@@ -3549,11 +3603,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   function recordPermissionDecisionReference(
     sessionId: string,
-    reference: AutoApproveJudgeReference
+    reference: AutoApproveJudgeReference,
+    turnMessageId: string | undefined
   ) {
     const scopeId = getPermissionDecisionScopeId(sessionId);
     const references = permissionDecisionReferencesByTree.get(scopeId) || [];
-    permissionDecisionReferencesByTree.set(scopeId, [...references, reference].slice(-20));
+    permissionDecisionReferencesByTree.set(
+      scopeId,
+      [...references, { reference, turnMessageId }].slice(-20)
+    );
   }
 
   async function respondQuestion(

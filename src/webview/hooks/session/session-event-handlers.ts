@@ -134,6 +134,7 @@ type EventHandlerDependencies = {
   isSessionTreeStatusWorking(sessionId: string): boolean;
   isSessionInActiveTree?(sessionId: string): boolean;
   getMessages(): MessageEntry[];
+  userMessageUpdated?(message: Message): void;
   findMessageById?(messageId: string): MessageEntry | null;
   findMessagePart?(messageId: string, partId: string): Part | null;
   isMessageRemovalDeferred?(sessionId: string, messageId: string): boolean;
@@ -216,6 +217,7 @@ type EventHandlerOperationDependencies = {
   >;
   sessionSyncOperations: Pick<EventHandlerDependencies, 'syncSession' | 'syncSessionMessages'>;
   repairSessionTitle?: EventHandlerDependencies['repairSessionTitle'];
+  userMessageUpdated?: EventHandlerDependencies['userMessageUpdated'];
   sessionApprovalOperations: Pick<
     EventHandlerDependencies,
     | 'respondPermission'
@@ -255,6 +257,7 @@ export class SessionEventHandlerOperations {
         );
       },
       getMessages: () => appStore.state.messages,
+      userMessageUpdated: this.deps.userMessageUpdated,
       findMessageById: sessionStore.getMessageById,
       findMessagePart: sessionStore.getMessagePartById,
       isMessageRemovalDeferred: this.deps.isMessageRemovalDeferred,
@@ -1494,6 +1497,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const sessionID = partialMessage?.sessionID;
       if (!isString(sessionID) || !sessionID) return;
       const message = isCompleteMessageInfo(info) ? info : null;
+      if (message?.role === 'user') deps.userMessageUpdated?.(message);
       const assistantMessage = message && isAssistantMessage(message) ? message : null;
       const assistantFinished =
         partialMessage.role === 'assistant' &&

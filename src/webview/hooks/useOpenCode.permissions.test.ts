@@ -1665,6 +1665,171 @@ describe('useOpenCode permission and config flows', () => {
     }
   );
 
+  it.each(['reject', 'once', 'always'] as const)(
+    'scopes a confirmed %s reference correctly after a new root user message from another view',
+    async (response) => {
+      const serverEventHandlers = captureServerEventHandlers();
+      configureReconciliationMocks();
+      clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+      clientMocks.varroJudgePermission.mockResolvedValue({ decision: 'ask', reason: 'review' });
+
+      const { stateModule, hookModule } = await loadModules();
+      stateModule.setState('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1' },
+        session('session-2'),
+      ]);
+      stateModule.setState('messages', [{ info: userMessage('user-first'), parts: [] }]);
+      stateModule.setPermissionModeForSession('session-1', 'auto');
+      stateModule.setPermissionModeForSession('session-2', 'auto');
+      const dispose = createRoot((cleanup) => {
+        hookModule.useOpenCode();
+        return cleanup;
+      });
+
+      try {
+        serverEventHandlers.get('permission.asked')?.({
+          properties: { ...permissionListItem('perm-manual'), sessionID: 'child-1' },
+        });
+        await vi.waitFor(() => expect(stateModule.state.permissions).toHaveLength(1));
+        await hookModule.respondPermission('child-1', 'perm-manual', response);
+
+        // Unrelated conversations and subagent launch prompts do not start a new root turn.
+        for (const sessionID of ['session-2', 'child-1']) {
+          serverEventHandlers.get('message.updated')?.({
+            properties: { info: { ...userMessage(`user-${sessionID}`), sessionID } },
+          });
+        }
+        serverEventHandlers.get('permission.asked')?.({
+          properties: permissionListItem('perm-same-turn'),
+        });
+        await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(2));
+        expect(clientMocks.varroJudgePermission.mock.calls[1]?.[0]).toEqual(
+          expect.objectContaining({
+            approvedReferences: [expect.objectContaining({ response })],
+          })
+        );
+        await vi.waitFor(() => expect(stateModule.state.permissions).toHaveLength(1));
+
+        serverEventHandlers.get('message.updated')?.({
+          properties: { info: userMessage('user-retry') },
+        });
+        serverEventHandlers.get('permission.asked')?.({
+          properties: { ...permissionListItem('perm-retry'), sessionID: 'child-1' },
+        });
+        await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(3));
+        expect(clientMocks.varroJudgePermission.mock.calls[2]?.[0]).toEqual(
+          expect.objectContaining({
+            approvedReferences:
+              response === 'reject' ? [] : [expect.objectContaining({ response })],
+          })
+        );
+        await vi.waitFor(() =>
+          expect(stateModule.state.permissions).toContainEqual(
+            expect.objectContaining({ id: 'perm-retry' })
+          )
+        );
+        expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(1);
+      } finally {
+        dispose();
+      }
+    }
+  );
+
+  it.each(['manual reply', 'automatic review'] as const)(
+    'does not carry a rejection into a new turn while its %s is pending',
+    async (race) => {
+      const serverEventHandlers = captureServerEventHandlers();
+      configureReconciliationMocks();
+      const reply = deferred<void>();
+      const review = deferred<{ decision: 'reject'; reason: string }>();
+      clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+      if (race === 'manual reply') {
+        clientMocks.sessionRespondPermission.mockReturnValueOnce(reply.promise);
+      }
+      clientMocks.varroJudgePermission.mockResolvedValue({ decision: 'ask', reason: 'review' });
+
+      const { stateModule, hookModule } = await loadModules();
+      stateModule.setState('sessions', [session()]);
+      stateModule.setState('messages', [{ info: userMessage('user-first'), parts: [] }]);
+      stateModule.setPermissionModeForSession('session-1', 'auto');
+      const dispose = createRoot((cleanup) => {
+        hookModule.useOpenCode();
+        return cleanup;
+      });
+
+      try {
+        serverEventHandlers.get('permission.asked')?.({
+          properties: permissionListItem('perm-manual'),
+        });
+        await vi.waitFor(() => expect(stateModule.state.permissions).toHaveLength(1));
+        const rejection = hookModule.respondPermission('session-1', 'perm-manual', 'reject');
+        await vi.waitFor(() => expect(clientMocks.sessionRespondPermission).toHaveBeenCalledOnce());
+
+        if (race === 'automatic review') {
+          await rejection;
+          clientMocks.varroJudgePermission.mockReturnValueOnce(review.promise);
+          serverEventHandlers.get('permission.asked')?.({
+            properties: permissionListItem('perm-reviewing'),
+          });
+          await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(2));
+        }
+
+        serverEventHandlers.get('message.updated')?.({
+          properties: { info: { ...userMessage('user-retry'), time: { created: 2 } } },
+        });
+        // A delayed update for the old prompt must not restore its rejection scope.
+        serverEventHandlers.get('message.updated')?.({
+          properties: { info: userMessage('user-first') },
+        });
+        if (race === 'manual reply') {
+          reply.resolve();
+          await rejection;
+        } else {
+          review.resolve({ decision: 'reject', reason: 'Matches the old rejection.' });
+          await vi.waitFor(() =>
+            expect(stateModule.state.permissions).toContainEqual(
+              expect.objectContaining({
+                id: 'perm-reviewing',
+                autoApproveReason: expect.stringContaining('new user message'),
+              })
+            )
+          );
+          expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toContainEqual(
+            expect.objectContaining({ permissionId: 'perm-reviewing', status: 'approval-required' })
+          );
+        }
+
+        serverEventHandlers.get('permission.asked')?.({
+          properties: permissionListItem('perm-retry'),
+        });
+        await vi.waitFor(() =>
+          expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(
+            race === 'manual reply' ? 2 : 3
+          )
+        );
+        expect(clientMocks.varroJudgePermission.mock.lastCall?.[0]).toEqual(
+          expect.objectContaining({ approvedReferences: [] })
+        );
+        await vi.waitFor(() =>
+          expect(
+            stateModule.state.permissions.flatMap(
+              (item) => item.groupMembers?.map((member) => member.id) ?? [item.id]
+            )
+          ).toContain('perm-retry')
+        );
+        expect(clientMocks.sessionRespondPermission).toHaveBeenCalledOnce();
+        expect(stateModule.state.sessionAutoPermissionCounts['session-1']).toEqual({
+          inFlight: 0,
+          approved: 0,
+          rejected: 0,
+        });
+      } finally {
+        dispose();
+      }
+    }
+  );
+
   it('rechecks an already-visible request after always approval records a preference', async () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();

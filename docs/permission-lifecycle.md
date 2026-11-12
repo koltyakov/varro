@@ -330,6 +330,14 @@ retain the draft and do not replace project/session rules or resolve pending ask
 - A failed response must leave the user with an actionable retry.
 - A successful response records a bounded decision reference for later auto-judge context across the
   same root conversation and its child sessions.
+- Rejection references apply only within the current root user-message turn. A new root user message
+  starts fresh review without the previous turn's rejections; it does not grant permission or clear
+  configured deny rules. Once and Always references retain their existing conversation scope. Root
+  user-message events from another view must advance this boundary even when the conversation is not
+  active locally. Child launch prompts, unrelated conversations, and stale message updates do not
+  advance it. Capture the turn before awaiting a manual reply so a delayed acknowledgement cannot
+  attach an old rejection to a new turn. A late automatic rejection from an earlier turn reveals the
+  pending request for manual approval instead of denying it.
 
 Equivalent pending requests may be grouped for display. Group identity includes type, pattern,
 session ID, title, and metadata, so requests from different sessions are not grouped together.
