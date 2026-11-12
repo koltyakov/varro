@@ -425,7 +425,7 @@ describe('SidebarProvider desktop notifications', () => {
     }
   });
 
-  it('targets the project window through the built-in file route', async () => {
+  it('targets the project window without allowing a closed project to replace another window', async () => {
     const test = await createHarness();
     try {
       const provider = test.provider as unknown as {
@@ -435,7 +435,7 @@ describe('SidebarProvider desktop notifications', () => {
       expect(url.protocol).toBe('vscode:');
       expect(url.hostname).toBe('file');
       expect(url.pathname).toBe('/repo');
-      expect(url.search).toBe('');
+      expect(Object.fromEntries(url.searchParams)).toEqual({ windowId: '_blank' });
       expect(test.vscode.env.asExternalUri).not.toHaveBeenCalled();
     } finally {
       await test.provider.dispose();
@@ -453,7 +453,7 @@ describe('SidebarProvider desktop notifications', () => {
         notificationWindowUrl(sessionID: string): Promise<string>;
       };
       expect(await provider.notificationWindowUrl('child')).toBe(
-        'vscode://file/work/Projects.code-workspace'
+        'vscode://file/work/Projects.code-workspace?windowId=_blank'
       );
     } finally {
       await test.provider.dispose();

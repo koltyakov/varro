@@ -32,10 +32,14 @@ static NSURL *notificationURL(id value) {
   if (![value isKindOfClass:NSString.class] || [value length] > 8192) return nil;
   NSURLComponents *url = [NSURLComponents componentsWithString:value];
   BOOL editorScheme = [@[@"vscode", @"vscode-insiders", @"vscodium", @"vscodium-insiders", @"code-oss"] containsObject:url.scheme];
-  BOOL project = [url.host isEqualToString:@"file"] && [url.path hasPrefix:@"/"] && url.path.length > 1 && !url.query && !url.fragment;
+  BOOL project = [url.host isEqualToString:@"file"] && [url.path hasPrefix:@"/"] && url.path.length > 1 &&
+    (!url.query || [url.query isEqualToString:@"windowId=_blank"]) && !url.fragment;
   // Retain support for already-delivered banners from older extension versions.
   BOOL legacy = [url.host isEqualToString:@"koltyakov.varro"] && [url.path isEqualToString:@"/notification"];
   if (!editorScheme || (!project && !legacy) || url.user || url.password || url.port) return nil;
+  // Protect unrelated windows even for project links in already-delivered notifications.
+  // VS Code focuses a matching project first and uses a new window only if none exists.
+  if (project) url.query = @"windowId=_blank";
   return url.URL;
 }
 

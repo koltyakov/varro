@@ -1490,8 +1490,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (
       vscode.workspace.workspaceFile?.scheme === 'file' ||
       vscode.workspace.workspaceFolders?.length
-    )
-      return this.projectWindowUrl(directory);
+    ) {
+      const url = this.projectWindowUrl(directory);
+      // VS Code still focuses an existing project window. If it was closed, open a new
+      // window rather than replacing whichever unrelated workspace is currently active.
+      return url ? `${url}?windowId=_blank` : '';
+    }
 
     // Scratch is an internal working directory, not a project to open in the active window.
     // Resolve an extension callback so VS Code routes the click to this specific window.
