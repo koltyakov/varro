@@ -109,6 +109,14 @@ for (const { name, value, resource, icon } of [
     await link.scrollIntoViewIfNeeded();
 
     await page.evaluate(() => {
+      // Observe the payload after MarkdownRenderer's delegated dragstart handler.
+      document.addEventListener(
+        'dragstart',
+        (event) => {
+          document.body.dataset.dragUri = event.dataTransfer!.getData('text/uri-list');
+        },
+        { once: true }
+      );
       const outside = document.createElement('iframe');
       outside.id = 'external-text-target';
       outside.style.cssText =
@@ -137,6 +145,7 @@ for (const { name, value, resource, icon } of [
         steps: 5,
       }
     );
+    await expect(page.locator('body')).toHaveAttribute('data-drag-uri', resource || value);
     await expect(page.locator('.chat-drop-overlay')).toHaveCount(0);
     await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
       steps: 10,
@@ -144,7 +153,9 @@ for (const { name, value, resource, icon } of [
     await page.mouse.up();
 
     await expect(target).toHaveValue(value);
-    await expect(target).toHaveAttribute('data-uri', resource || value);
+    // Chromium sanitizes file:// URI-list entries from an HTTP page across frames.
+    // Plain text and VS Code's resource list must still reach the native drop target intact.
+    await expect(target).toHaveAttribute('data-uri', resource ? 'about:blank#blocked' : value);
     await expect(target).toHaveAttribute(
       'data-resource',
       resource ? JSON.stringify([resource]) : ''

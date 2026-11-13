@@ -13,6 +13,7 @@ import { FollowupSuggestions } from './FollowupSuggestions';
 
 const mocks = vi.hoisted(() => ({
   fork: vi.fn<(id: string) => Promise<string | null>>(),
+  rename: vi.fn<(id: string, title: string) => Promise<boolean>>(),
   select: vi.fn(async () => true),
   send: vi.fn<
     (
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../hooks/useOpenCode', () => ({
   sendMessage: mocks.send,
   forkSession: mocks.fork,
+  renameSession: mocks.rename,
   selectSession: mocks.select,
 }));
 
@@ -71,6 +73,7 @@ beforeEach(() => {
   ]);
   mocks.send.mockReset().mockResolvedValue(true);
   mocks.select.mockClear();
+  mocks.rename.mockReset().mockResolvedValue(true);
   mocks.fork.mockReset().mockImplementation(async () => {
     setState('sessions', [session('session-1'), session('fork-1')]);
     return 'fork-1';
@@ -193,6 +196,10 @@ describe('FollowupSuggestions', () => {
       { ...actions[1]!, sessionId: 'fork-1' },
       '/workspace'
     );
+    expect(mocks.rename).toHaveBeenCalledExactlyOnceWith(
+      'fork-1',
+      `${actions[1]!.title} (session-1)`
+    );
     expect(state.activeSessionId).toBe('session-1');
     expect(mocks.select).not.toHaveBeenCalled();
     expect(state.messages.map((entry) => entry.info.id)).toEqual(['user', 'answer']);
@@ -206,6 +213,24 @@ describe('FollowupSuggestions', () => {
     expect(state.queuedMessages).toHaveLength(0);
     expect(client.varro.dismissFollowups).not.toHaveBeenCalled();
     expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it.each([
+    ['Parser review', 'Inspect parser failures (Parser review)'],
+    ['  Parser review  ', 'Inspect parser failures (Parser review)'],
+    ['', 'Inspect parser failures'],
+    ['   ', 'Inspect parser failures'],
+  ])('names the follow-up session using the original title %j', async (originalTitle, title) => {
+    setState('sessions', 0, 'title', originalTitle);
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
+    await openActionMenu();
+    menuItem('Run in new session').click();
+    await flush();
+    expect(mocks.rename).toHaveBeenCalledExactlyOnceWith('fork-1', title);
+    expect(container.querySelector('.followup-session-link')?.textContent).toBe(actions[0]!.title);
   });
 
   it('updates the linked session spinner from live busy, retry, and idle status', async () => {
@@ -350,6 +375,52 @@ describe('FollowupSuggestions', () => {
     expect(mocks.fork).toHaveBeenCalledOnce();
   });
 
+  it.each(['rejected', 'error'])(
+    'keeps the running session link when renaming is %s',
+    async (failure) => {
+      const { setWorking } = mount();
+      setWorking(false);
+      await flush();
+      vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
+      if (failure === 'error') mocks.rename.mockRejectedValueOnce(new Error('Unavailable'));
+      else mocks.rename.mockResolvedValueOnce(false);
+      await openActionMenu();
+      menuItem('Run in new session').click();
+      await flush();
+      expect(mocks.rename).toHaveBeenCalledExactlyOnceWith(
+        'fork-1',
+        `${actions[0]!.title} (session-1)`
+      );
+      expect(container.querySelector('.followup-session-link')?.getAttribute('href')).toBe(
+        '#session/fork-1'
+      );
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        'session could not be renamed'
+      );
+      expect(mocks.send).toHaveBeenCalledOnce();
+      expect(client.varro.linkFollowupSession).toHaveBeenCalledOnce();
+      expect(state.activeSessionId).toBe('session-1');
+    }
+  );
+
+  it('does not show a rename failure in a different session', async () => {
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
+    let finish!: (renamed: boolean) => void;
+    mocks.rename.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    await openActionMenu();
+    menuItem('Run in new session').click();
+    await flush();
+    expect(mocks.rename).toHaveBeenCalledOnce();
+    setState('activeSessionId', 'session-2');
+    finish(false);
+    await flush();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(state.activeSessionId).toBe('session-2');
+  });
+
   it('does not fork an action dismissed in another window', async () => {
     const { setWorking } = mount();
     setWorking(false);
@@ -453,6 +524,7 @@ describe('FollowupSuggestions', () => {
       expect(container.querySelectorAll('.followup-suggestions-actions button')).toHaveLength(3);
       expect(state.activeSessionId).toBe('session-1');
       expect(client.varro.dismissFollowups).not.toHaveBeenCalled();
+      expect(mocks.rename).not.toHaveBeenCalled();
     }
   );
 

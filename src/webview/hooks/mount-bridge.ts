@@ -1,3 +1,4 @@
+import { batch } from 'solid-js';
 import { reconcile } from 'solid-js/store';
 import { clearRemoteImagePreviews } from '../lib/remote-image-previews';
 import { syncWindowChatTheme } from '../lib/window-chat-theme';
@@ -77,24 +78,40 @@ export function createMountBridgeOperations(deps: {
         reloadSessionCatalog: deps.reloadSessionCatalog,
         sessionTransferred: ({ sessionId, directory, available }) => {
           const session = appStore.state.sessions.find((entry) => entry.id === sessionId);
-          if (session)
-            appStore.setState('sessions', (entry) => entry.id === sessionId, 'transfer', {
-              originDirectory: session.transfer?.originDirectory ?? session.directory,
-              available,
-            });
-          appStore.setState('sessions', (entry) => entry.id === sessionId, 'directory', directory);
-          appStore.setState(
-            'transferredSessions',
-            reconcile(
-              available
-                ? Object.fromEntries(
-                    Object.entries(appStore.state.transferredSessions).filter(
-                      ([id]) => id !== sessionId
+          const directoryChanged = session && !isSameWorkspacePath(session.directory, directory);
+          batch(() => {
+            if (session)
+              appStore.setState('sessions', (entry) => entry.id === sessionId, 'transfer', {
+                originDirectory: session.transfer?.originDirectory ?? session.directory,
+                available,
+              });
+            if (directoryChanged) {
+              appStore.setState(
+                'sessions',
+                (entry) => entry.id === sessionId,
+                'isGitWorktree',
+                undefined
+              );
+            }
+            appStore.setState(
+              'sessions',
+              (entry) => entry.id === sessionId,
+              'directory',
+              directory
+            );
+            appStore.setState(
+              'transferredSessions',
+              reconcile(
+                available
+                  ? Object.fromEntries(
+                      Object.entries(appStore.state.transferredSessions).filter(
+                        ([id]) => id !== sessionId
+                      )
                     )
-                  )
-                : { ...appStore.state.transferredSessions, [sessionId]: directory }
-            )
-          );
+                  : { ...appStore.state.transferredSessions, [sessionId]: directory }
+              )
+            );
+          });
           if (appStore.state.activeSessionId !== sessionId) {
             void deps.reloadSessionCatalog?.();
             return;

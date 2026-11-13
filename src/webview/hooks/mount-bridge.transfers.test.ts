@@ -29,6 +29,7 @@ function createOperations() {
 }
 
 afterEach(() => {
+  appStore.setState('sessions', []);
   appStore.setState('activeSessionId', null);
   appStore.setState('transferredSessions', reconcile({}));
   appStore.setState('messagesLoading', false);
@@ -38,6 +39,62 @@ afterEach(() => {
 });
 
 describe('session transfer bridge', () => {
+  it('clears stale worktree metadata immediately when the chat returns to its origin', () => {
+    const { operations, openSession } = createOperations();
+    appStore.setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        title: 'Worktree chat',
+        version: '2',
+        directory: '/worktrees/feature',
+        isGitWorktree: true,
+        time: { created: 1, updated: 2 },
+        transfer: { originDirectory: '/repo', available: true },
+      },
+    ]);
+    appStore.setState('activeSessionId', 'session-1');
+    composerStore.setInputText('Keep this draft');
+    const messages = appStore.state.messages;
+    openSession.mockImplementation(() => {
+      expect(appStore.state.sessions[0]?.directory).toBe('/repo');
+      expect(appStore.state.sessions[0]?.isGitWorktree).toBeUndefined();
+    });
+    operations.handleExtensionMessage({
+      type: 'session/transferred',
+      payload: { sessionId: 'session-1', directory: '/repo', available: true },
+    });
+    expect(appStore.state.sessions[0]?.isGitWorktree).toBeUndefined();
+    expect(appStore.state.sessions[0]?.transfer).toEqual({
+      originDirectory: '/repo',
+      available: true,
+    });
+    expect(appStore.state.messages).toBe(messages);
+    expect(composerStore.inputText()).toBe('Keep this draft');
+    expect(openSession).toHaveBeenCalledExactlyOnceWith('session-1', '/repo', true);
+  });
+
+  it('keeps verified worktree metadata for a same-directory availability refresh', () => {
+    const { operations } = createOperations();
+    appStore.setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        title: 'Worktree chat',
+        version: '2',
+        directory: '/worktrees/feature',
+        isGitWorktree: true,
+        time: { created: 1, updated: 2 },
+        transfer: { originDirectory: '/repo', available: false },
+      },
+    ]);
+    operations.handleExtensionMessage({
+      type: 'session/transferred',
+      payload: { sessionId: 'session-1', directory: '/worktrees/feature', available: true },
+    });
+    expect(appStore.state.sessions[0]?.isGitWorktree).toBe(true);
+  });
+
   it('keeps the active transcript and draft when the destination is not open', () => {
     const { operations, openSession, reloadSessionCatalog } = createOperations();
     appStore.setState('activeSessionId', 'session-1');

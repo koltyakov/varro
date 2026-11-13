@@ -32,6 +32,33 @@ afterEach(() => {
 });
 
 describe('worktree location actions', () => {
+  it.each([
+    { action: 'merge', request: mergeSessionWorktree, work: 'Rebase the task commits' },
+    {
+      action: 'migrate',
+      request: moveSessionWorktreeResults,
+      work: 'Identify the complete task result',
+    },
+  ])(
+    'moves the chat before $action work but delays worktree cleanup until success',
+    async ({ request, work }) => {
+      expect(await request('session-1', '/worktrees/feature')).toBe(true);
+      const prompt = vi.mocked(sendMessage).mock.calls[0]![0];
+      const checks = prompt.indexOf('First perform only the minimal read-only checks');
+      const move = prompt.indexOf('Immediately move this same conversation');
+      const transfer = prompt.indexOf(work);
+      const cleanup = prompt.indexOf('Only after the requested work and verification succeed');
+      expect(checks).toBeGreaterThanOrEqual(0);
+      expect(move).toBeGreaterThan(checks);
+      expect(transfer).toBeGreaterThan(move);
+      expect(cleanup).toBeGreaterThan(transfer);
+      expect(prompt).toContain('Wait for acknowledgement');
+      expect(prompt).toContain('If the move fails, stop');
+      expect(prompt).toContain('explicit absolute paths or git -C');
+      expect(prompt).toContain('Never remove the target folder');
+    }
+  );
+
   it('sends a follow-up-style merge prompt to the owning session without consuming the composer', async () => {
     expect(await mergeSessionWorktree('session-1', '/worktrees/feature')).toBe(true);
     expect(client.varro.session.location).toHaveBeenCalledWith('session-1', {

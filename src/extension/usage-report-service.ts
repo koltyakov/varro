@@ -1845,10 +1845,6 @@ function renderAggregatedReport(
     '# OpenCode Usage Report',
     '',
     `Generated ${new Date(now).toLocaleString()} from ${sessionCount.toLocaleString()} sessions scanned.`,
-    '',
-    'Token counts use compact notation. Cache rate is cache read / (input + cache read + cache write), calculated from summed token counts. A dash in Cache rate means no recorded input tokens.',
-    'Unattributed rows include recorded session generation (side questions and cache warming), title, and compaction usage. OpenCode does not record their model identity. They add tokens, not user prompts or assistant duration.',
-    'Undated session usage is the remainder of native session totals after message and retained-event usage. Default V2 servers do not persist events. This remainder can include side questions, cache warming, titles, compaction, or usage whose history is no longer available. Its dates, model, and request counts are unknown. It is excluded from dated windows and included in All time. Use /stats all to scan older sessions too.',
   ];
 
   for (const aggregate of aggregates) {

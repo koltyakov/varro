@@ -33,7 +33,10 @@ explanation.
   also offer "Merge changes", which sends a follow-up-style prompt to that conversation without
   consuming the composer draft. The full instructions revalidate the target project's current branch,
   preserve unrelated changes, stop on conflicts, require verified fast-forward integration and checks,
-  then move the chat back before safely removing the clean worktree. Clicking the menu does not run
+  and safely remove the clean worktree after success. Both worktree prompts require moving the chat
+  back immediately after minimal read-only source/target checks, before planning, commits, rebasing,
+  migration, or tests. Commands then use explicit source and target paths. A failed move stops the
+  workflow without changing or deleting either checkout. Clicking the menu does not run
   Git directly or bypass tool permissions.
 - "Migrate changes" uses the same prompt delivery but transfers task files into the target working tree,
   leaving tracked changes unstaged and new files untracked. It must not change the target's branch,
@@ -47,6 +50,8 @@ explanation.
   a closed destination. Unknown sessions and other servers do not inherit these read capabilities.
 - A transfer refresh preserves the active transcript, message IDs, pagination, expansion state, draft,
   and scroll ownership. It does not clear the chat or force a jump to the latest message.
+- Changing a conversation's directory clears its old presentation-only worktree flag before refreshing
+  history, so the old Git icon does not linger when the chat returns to its original folder.
 - A destination outside the authorized workspace keeps the last transcript and composer draft on
   screen, with a persistent "Conversation moved" notice. Sends are blocked rather than dispatched
   through the previous directory. The server execution itself is not cancelled.

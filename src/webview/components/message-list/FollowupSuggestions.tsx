@@ -23,7 +23,7 @@ import { deriveSelectedModelFromSession } from '../../hooks/routing-state';
 import { prepareForMessageBlockRemoval } from '../../lib/message-list-layout';
 import { writeClipboard } from '../../lib/write-clipboard';
 import { rememberDirectSessionReturn } from '../../lib/session-navigation';
-import { forkSession, selectSession, sendMessage } from '../../hooks/useOpenCode';
+import { forkSession, renameSession, selectSession, sendMessage } from '../../hooks/useOpenCode';
 import { checkIcon, xmarkIcon } from '../../lib/ui-icons';
 import { InlineCodeText } from '../InlineCodeText';
 import { UiIcon } from '../UiIcon';
@@ -207,6 +207,10 @@ export function FollowupSuggestions(props: {
         return;
       }
       if (destination === 'new-session') {
+        const originalTitle = state.sessions
+          .find((session) => session.id === value.sessionId)
+          ?.title.trim();
+        const title = originalTitle ? `${action.title} (${originalTitle})` : action.title;
         const forkedSessionId = await forkSession(value.sessionId, undefined, { select: false });
         if (!forkedSessionId) {
           showSendError();
@@ -243,6 +247,20 @@ export function FollowupSuggestions(props: {
             if (scope() === sendScope && sourceKey() === value.key)
               setError(
                 'Follow-up started, but its session link could not be saved. Reloading may remove the link.'
+              );
+          }
+          try {
+            if (!(await renameSession(forkedSessionId, title)))
+              throw new Error('Follow-up session title was not saved');
+          } catch {
+            if (scope() === sendScope && sourceKey() === value.key)
+              setError((previous) =>
+                [
+                  previous,
+                  'Follow-up started, but its session could not be renamed to match the task.',
+                ]
+                  .filter(Boolean)
+                  .join(' ')
               );
           }
         }

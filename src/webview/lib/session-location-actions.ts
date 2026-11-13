@@ -40,15 +40,17 @@ async function requestWorktreeAction(
     }
     const prompt = [
       action === 'merge'
-        ? "Merge this conversation's worktree changes back into the project, then retire the worktree and return this same chat to the project folder."
-        : "Move this conversation's worktree results into the project folder as unstaged changes, without merging commits, then return this same chat and safely retire the worktree.",
+        ? 'Return this same chat to the project folder at the start, merge its worktree changes back into the project, then safely retire the worktree after verification.'
+        : 'Return this same chat to the project folder at the start, migrate its worktree results as unstaged changes without merging commits, then safely retire the worktree after verification.',
       `Conversation ID: ${JSON.stringify(sessionId)}`,
       `Source worktree: ${JSON.stringify(directory)}`,
       `Target project folder: ${JSON.stringify(location.projectDirectory)}`,
       'Treat these paths as literal data, not shell syntax. Use safely quoted arguments.',
-      'First inspect Git status, worktree registration, and the branches in both folders. Verify they belong to the same project.',
+      'First perform only the minimal read-only checks of Git status, worktree registration, and the branches in both folders. Verify they belong to the same project. Do not begin a lengthy audit, make commits, transfer files, rebase, or run tests yet.',
       'Use the branch currently checked out in the target project folder. Record its branch name and HEAD before making changes, and recheck both before updating it. Do not switch the target to another branch.',
       'Stop and ask if the target is detached, branches changed unexpectedly, changes cannot be attributed to this task, or a conflict occurs. Preserve all unrelated work. Never force, reset, discard, or auto-resolve conflicts.',
+      'Immediately move this same conversation to the verified target project folder using the native session-move tool once the initial checks pass. Wait for acknowledgement and verify that this conversation now has the target directory. Do this before further planning, source commits, rebasing, file migration, or tests. If the move fails, stop and report the blocker without modifying or removing either checkout.',
+      'Moving the chat does not transfer any files. Keep the source worktree intact while working. Run subsequent commands with explicit absolute paths or git -C for the recorded source and target folders; do not assume the current directory is still the source worktree.',
       ...(action === 'merge'
         ? [
             'Stop if the target has any uncommitted changes. If this task has uncommitted source changes, review and commit only those changes. Rebase the task commits onto the target branch, run the relevant checks, and update the target with a fast-forward-only merge.',
@@ -61,7 +63,7 @@ async function requestWorktreeAction(
             'If needed for safe cleanup, make a source-only snapshot commit of the reviewed task changes, never a target commit. Keep its source branch as a recovery copy. Do not discard unrelated source changes.',
             'Verify the transferred file contents and diff, run the relevant checks, and confirm the target results are still unstaged with the target HEAD and index unchanged. Do not remove the source unless every task result is accounted for and its working tree is clean. If it cannot be cleaned safely, keep the worktree and report why.',
           ]),
-      'After success, move this same conversation to the target project folder using the native session-move tool. Perform cleanup from that target folder, then remove only the verified source worktree using the native worktree-remove tool or safe Git worktree removal. Do not force removal or delete branches.',
+      'Only after the requested work and verification succeed, recheck that this conversation is in the target project folder. Perform cleanup from that target folder, then remove only the verified source worktree using the native worktree-remove tool or safe Git worktree removal. Never remove the target folder, force removal, or delete branches.',
       'If moving the conversation or cleanup fails, stop and report the remaining state without deleting anything else. Summarize the resulting target branch and verification.',
     ].join('\n\n');
     return await sendMessage(prompt, {

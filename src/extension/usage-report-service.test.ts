@@ -322,7 +322,7 @@ describe('UsageReportService', () => {
     expect(workerMocks.instances).toHaveLength(0);
   });
 
-  it('opens the report as a named Markdown preview', async () => {
+  it('opens the report as a named Markdown preview without an explanatory preamble', async () => {
     const uri = {
       scheme: 'varro-tool-output',
       path: '/id/OpenCode Usage Report.md',
@@ -338,7 +338,9 @@ describe('UsageReportService', () => {
     await service.openReport();
 
     expect(openDocument).toHaveBeenCalledWith(
-      expect.stringContaining('# OpenCode Usage Report'),
+      expect.stringContaining(
+        `# OpenCode Usage Report\n\nGenerated ${NOW.toLocaleString()} from 0 sessions scanned.\n\n## Today\n`
+      ),
       'OpenCode Usage Report'
     );
     expect(mocks.executeCommand).toHaveBeenCalledWith('markdown.showPreview', uri);
