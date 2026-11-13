@@ -64,6 +64,41 @@ describe('sendMessage', () => {
       expect(stateModule.error()).toContain('Conversation moved to /outside');
     }
   );
+
+  it('clears the old read-only marker after reloading a verified worktree and sends there', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    const directory = '/worktrees/feature';
+    const moved = {
+      ...session(),
+      directory,
+      transfer: { originDirectory: '/repo', available: false },
+    };
+    stateModule.setState('activeSessionId', moved.id);
+    stateModule.setState('sessions', [moved]);
+    stateModule.setState('transferredSessions', { [moved.id]: directory });
+    stateModule.setInputText('Continue from here');
+    clientMocks.sessionGet.mockResolvedValue({
+      ...moved,
+      transfer: { ...moved.transfer, available: true },
+    });
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+
+    await hookModule.selectSession(moved.id, { directory, preserveTranscript: true });
+
+    expect(stateModule.state.transferredSessions[moved.id]).toBeUndefined();
+    expect(
+      stateModule.state.sessions.find((entry) => entry.id === moved.id)?.transfer?.available
+    ).toBe(true);
+    expect(stateModule.inputText()).toBe('Continue from here');
+    expect(await hookModule.sendMessage('Continue from here')).toBe(true);
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(moved.id, expect.anything(), {
+      directory,
+    });
+    expect(clientMocks.sessionCreate).not.toHaveBeenCalled();
+  });
+
   it('keeps the latest Build selection when older Ask confirmations arrive before send', async () => {
     const { stateModule, hookModule } = await loadModules();
     stateModule.setState('activeSessionId', 'session-1');

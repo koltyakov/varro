@@ -97,7 +97,9 @@ export interface MessageRouterCallbacks {
   exportSession(sessionId: string, directory?: string): Promise<void>;
   generateUsageReport(includeAllTime: boolean): Promise<void>;
   reloadWebview(): Promise<void>;
-  openFolder(): Promise<void>;
+  openFolder(
+    payload?: Extract<WebviewMessage, { type: 'vscode/open-folder' }>['payload']
+  ): Promise<void>;
   openTransferredSession?(sessionId: string): Promise<void>;
   openSettings(query?: string): Promise<void>;
   showOutput(): void;
@@ -303,7 +305,8 @@ export class MessageRouter {
           await this.callbacks.reloadWebview();
           break;
         case 'vscode/open-folder':
-          await this.callbacks.openFolder();
+          if (msg.payload) await this.callbacks.openFolder(msg.payload);
+          else await this.callbacks.openFolder();
           break;
         case 'session/open-transferred':
           await this.callbacks.openTransferredSession?.(msg.payload.sessionId);

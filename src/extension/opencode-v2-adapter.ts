@@ -1592,7 +1592,13 @@ export class OpenCodeV2Adapter {
           })),
       ];
     }
-    if (['/skill', '/project', '/vcs', '/vcs/status'].includes(route) && method === 'GET')
+    if (route === '/experimental/worktree' && method === 'GET') {
+      const projectID = url.searchParams.get('projectID');
+      if (!projectID) throw new Error('Worktree inventory requires a project ID');
+      return raw('GET', `/api/worktree?projectID=${encodeURIComponent(projectID)}`);
+    }
+    if (route === '/project' && method === 'GET') return raw('GET', '/api/project');
+    if (['/skill', '/vcs', '/vcs/status'].includes(route) && method === 'GET')
       return data('GET', query(`/api${route}`, true));
     if (route === '/project/current' || route === '/path') {
       const location = await raw('GET', query('/api/location', true));

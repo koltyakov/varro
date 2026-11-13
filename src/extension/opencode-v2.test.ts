@@ -28,6 +28,49 @@ import { nativePdfFixture } from '../shared/native-pdf.test-support';
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 afterEach(() => vi.unstubAllGlobals());
 
+describe('saved project worktree inventory', () => {
+  it('reads the native bare worktree inventory without loading a destination location', async () => {
+    const worktrees = [{ directory: '/worktrees/feature', strategy: 'git' }];
+    const wire = vi.fn(async () => worktrees);
+    const adapter = new OpenCodeV2Adapter(wire);
+    expect(
+      await adapter.request('GET', '/experimental/worktree?projectID=project%2F1', undefined, {
+        directory: '/repo',
+      })
+    ).toEqual(worktrees);
+    expect(wire).toHaveBeenCalledExactlyOnceWith(
+      'GET',
+      '/api/worktree?projectID=project%2F1',
+      undefined,
+      expect.objectContaining({ unscoped: true })
+    );
+  });
+
+  it('reads the native bare project list without requiring a data envelope or location', async () => {
+    const projects = [{ id: 'project-1', canonical: '/repo', vcs: 'git', sandboxes: [] }];
+    const wire = vi.fn(async () => projects);
+    const adapter = new OpenCodeV2Adapter(wire);
+    expect(await adapter.request('GET', '/project', undefined, { directory: '/repo' })).toEqual(
+      projects
+    );
+    expect(wire).toHaveBeenCalledExactlyOnceWith(
+      'GET',
+      '/api/project',
+      undefined,
+      expect.objectContaining({ unscoped: true })
+    );
+  });
+
+  it('requires an explicit project ID before reading worktree inventory', async () => {
+    const wire = vi.fn();
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(adapter.request('GET', '/experimental/worktree', undefined)).rejects.toThrow(
+      'Worktree inventory requires a project ID'
+    );
+    expect(wire).not.toHaveBeenCalled();
+  });
+});
+
 describe('native session forms', () => {
   const form: FormInfo = {
     id: 'frm_fixture',

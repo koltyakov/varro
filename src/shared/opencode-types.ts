@@ -421,6 +421,8 @@ export type Session = {
   workspaceID?: string;
   directory: string;
   workspaceScope?: SessionWorkspaceScope;
+  /** Presentation-only metadata from the server's saved Git worktree inventory. */
+  isGitWorktree?: boolean;
   /** Local link retained in the workspace where this session was transferred from. */
   transfer?: {
     originDirectory: string;

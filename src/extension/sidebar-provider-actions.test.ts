@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
         getConfiguration: vi.fn(() => config),
       },
       Uri: {
+        file: vi.fn((fsPath: string) => ({ fsPath })),
         parse: vi.fn((value: string) => ({ value })),
       },
       ConfigurationTarget: {
@@ -797,6 +798,46 @@ describe('createSidebarProviderActions', () => {
     expect(mocks.vscode.commands.executeCommand).toHaveBeenCalledWith(
       'workbench.action.files.openFolder'
     );
+  });
+
+  it.each(['/repo', '/worktrees/feature'])(
+    'opens the verified session folder %s in a new window',
+    async (directory) => {
+      const { actions, restProxy, server } = createActionFixture();
+      restProxy.authorizeSessionDirectory.mockResolvedValue(true);
+      server.request.mockResolvedValue({ id: 'session-1', directory });
+      await actions.openFolder({ sessionId: 'session-1', directory });
+      expect(restProxy.authorizeSessionDirectory).toHaveBeenCalledWith('session-1', directory);
+      expect(mocks.vscode.commands.executeCommand).toHaveBeenCalledWith(
+        'vscode.openFolder',
+        expect.objectContaining({ fsPath: directory }),
+        true
+      );
+    }
+  );
+
+  it('rejects a stale folder target and an unapproved session', async () => {
+    const { actions, restProxy, server } = createActionFixture();
+    restProxy.authorizeSessionDirectory.mockResolvedValue(true);
+    server.request.mockResolvedValue({ id: 'session-1', directory: '/elsewhere' });
+    await expect(
+      actions.openFolder({ sessionId: 'session-1', directory: '/repo' })
+    ).rejects.toThrow('Session does not belong');
+    restProxy.authorizeSessionDirectory.mockResolvedValue(false);
+    await expect(
+      actions.openFolder({ sessionId: 'foreign', directory: '/outside' })
+    ).rejects.toThrow('Session workspace folder is not open');
+    expect(mocks.vscode.commands.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('uses the existing verified transfer action for an explicitly opened read-only link', async () => {
+    const { deps, restProxy } = createActionFixture();
+    restProxy.authorizeSessionDirectory.mockResolvedValue(false);
+    const openTransferredSession = vi.fn(async () => {});
+    const actions = createSidebarProviderActionsForTest({ ...deps, openTransferredSession });
+    await actions.openFolder({ sessionId: 'session-1', directory: '/outside' });
+    expect(openTransferredSession).toHaveBeenCalledExactlyOnceWith('session-1');
+    expect(mocks.vscode.commands.executeCommand).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -355,6 +355,117 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     ]);
   });
 
+  it('reads native bare project and worktree inventories for move authorization', async (context) => {
+    if (transport.version !== 2) return context.skip();
+    const project = asRecord(await transport.request('GET', '/project/current'));
+    if (!isString(project?.id)) throw new Error('Missing isolated workspace project');
+    const projects = await transport.request('GET', '/project');
+    expect(Array.isArray(projects)).toBe(true);
+    expect(projects).toContainEqual(expect.objectContaining({ id: project.id, vcs: 'git' }));
+    const worktrees = await transport.request(
+      'GET',
+      `/experimental/worktree?projectID=${encodeURIComponent(project.id)}`
+    );
+    expect(Array.isArray(worktrees)).toBe(true);
+    expect(worktrees).toContainEqual(
+      expect.objectContaining({ directory: join(root, 'workspace') })
+    );
+    expect(modelRequests).toHaveLength(0);
+  });
+
+  it('continues a real isolated conversation after moving into a registered Git worktree', async (context) => {
+    if (transport.version !== 2) return context.skip();
+    const workspace = join(root, 'worktree-project');
+    const hooks = join(root, 'empty-git-hooks');
+    await mkdir(workspace);
+    await mkdir(hooks);
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_'))
+    );
+    for (const args of [
+      ['init', '--quiet', '--template='],
+      [
+        '-c',
+        'user.name=Varro test',
+        '-c',
+        'user.email=varro-test@example.invalid',
+        '-c',
+        `core.hooksPath=${hooks}`,
+        '-c',
+        'commit.gpgsign=false',
+        'commit',
+        '--quiet',
+        '--allow-empty',
+        '-m',
+        'Isolated worktree fixture',
+      ],
+    ]) {
+      const result = spawnSync('git', args, { cwd: workspace, env, encoding: 'utf8' });
+      if (result.status !== 0)
+        throw new Error(`Could not initialize worktree fixture: ${result.stderr}`);
+    }
+    const project = asRecord(
+      await transport.request('GET', '/project/current', undefined, {
+        directory: workspace,
+      })
+    );
+    if (!isString(project?.id)) throw new Error('Missing isolated Git project');
+    const worktree = asRecord(
+      await transport.request(
+        'POST',
+        '/api/worktree',
+        {
+          projectID: project.id,
+          directory: join(root, 'worktrees'),
+          name: 'continued-chat',
+        },
+        { directory: workspace }
+      )
+    );
+    if (!isString(worktree?.directory)) throw new Error('Missing isolated worktree');
+    const created = asRecord(
+      await transport.request(
+        'POST',
+        '/session',
+        {
+          title: 'Worktree continuation fixture',
+          model: { providerID: 'fixture', modelID: 'fixture' },
+        },
+        { directory: workspace }
+      )
+    );
+    if (!isString(created?.id)) throw new Error('Missing isolated continuation session');
+    const id = created.id;
+    try {
+      await transport.request('POST', `/api/session/${id}/move`, { directory: worktree.directory });
+      await vi.waitFor(async () => {
+        const moved = await transport.request('GET', `/session/${id}`);
+        expect(moved).toMatchObject({ projectID: project.id, directory: worktree.directory });
+      });
+      const inventory = await transport.request(
+        'GET',
+        `/experimental/worktree?projectID=${encodeURIComponent(project.id)}`
+      );
+      expect(inventory).toContainEqual(expect.objectContaining({ directory: worktree.directory }));
+      const reply = await transport.request(
+        'POST',
+        `/session/${id}/message`,
+        {
+          parts: [{ type: 'text', text: 'Continue from this worktree. Do not call tools.' }],
+          model: { providerID: 'fixture', modelID: 'fixture' },
+        },
+        { directory: worktree.directory }
+      );
+      expect(reply).toMatchObject({
+        parts: expect.arrayContaining([
+          expect.objectContaining({ type: 'text', text: 'Adapter stream verified.' }),
+        ]),
+      });
+    } finally {
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 30_000);
+
   it('reports native side-question and warming usage without adding assistant messages', async (context) => {
     const health = await transport.readHealthInfo();
     if (transport.version !== 2 || compareVersions(health.version ?? '0', '2.2.7') < 0)

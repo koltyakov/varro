@@ -4,6 +4,7 @@ import { HostActions } from '../HostActions';
 import { Portal } from 'solid-js/web';
 import type { SessionDiffSummary, SiblingWorkspaceAlertKind } from '../../../shared/protocol';
 import { readSessionPauses } from '../../../shared/session-pauses';
+import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import { deleteSession } from '../../hooks/useOpenCode';
 import { postMessage } from '../../lib/bridge';
 import { requestWorkspaceSelection } from '../../lib/workspace-selection';
@@ -34,6 +35,7 @@ import { SharedSessionIcon } from './SharedSessionIcon';
 import { Tooltip } from '../Tooltip';
 import { UiIcon } from '../UiIcon';
 import { PlusIcon } from '../PlusIcon';
+import { SessionLocationIndicator } from './SessionLocationIndicator';
 
 const SIBLING_ALERT_REMINDER_INTERVAL_MS = 10_000;
 const SIBLING_ALERT_COLOR_INTERVAL_MS = 2_000;
@@ -666,6 +668,20 @@ export function ActiveChatHeader(props: {
               </Tooltip>
             </Show>
           </span>
+          <Show when={getActiveSession()}>
+            {(session) => (
+              <SessionLocationIndicator
+                sessionId={session().id}
+                directory={session().directory}
+                isGitWorktree={session().isGitWorktree}
+                moved={Boolean(
+                  session().transfer &&
+                  !isSameWorkspacePath(session().directory, session().transfer?.originDirectory)
+                )}
+                readOnly={session().transfer?.available === false}
+              />
+            )}
+          </Show>
           <Show when={props.activeSubagentRootId}>
             {(rootSessionId) => (
               <Tooltip content={props.activeSubagentLabel}>

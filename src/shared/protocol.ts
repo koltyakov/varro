@@ -294,6 +294,12 @@ export type SessionTokenBreakdown = {
   subagentCount: number;
 };
 
+export type SessionLocation = {
+  directory: string;
+  isGitWorktree: boolean;
+  projectDirectory?: string;
+};
+
 export type SessionDiffSummary = {
   files: number;
   filesTruncated?: boolean;
@@ -517,6 +523,7 @@ export interface ModelPricing {
 }
 
 export type VarroSessionEndpointAction =
+  | 'location'
   | 'activate'
   | 'delete'
   | 'diff-summary'
@@ -1192,7 +1199,7 @@ export type WebviewMessage =
   | { type: 'session/export'; payload: { sessionId: string; directory?: string } }
   | { type: 'usage/report'; payload: { includeAllTime: boolean } }
   | { type: 'webview/reload' }
-  | { type: 'vscode/open-folder' }
+  | { type: 'vscode/open-folder'; payload?: { sessionId: string; directory: string } }
   | { type: 'vscode/open-settings'; payload: { query?: string } }
   | { type: 'vscode/show-output' }
   | { type: 'vscode/mermaid-preview'; payload: { open: boolean } }

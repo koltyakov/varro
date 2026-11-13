@@ -280,6 +280,14 @@ describe('MessageRouter', () => {
     expect(cb.openFolder).toHaveBeenCalledOnce();
   });
 
+  it('dispatches a session-scoped folder opening without discarding its target', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    const payload = { sessionId: 'session-1', directory: '/repo' };
+    await router.handleMessage({ type: 'vscode/open-folder', payload });
+    expect(cb.openFolder).toHaveBeenCalledWith(payload);
+  });
+
   it('dispatches webview/reload', async () => {
     const cb = createCallbacks();
     const router = new MessageRouter(cb);

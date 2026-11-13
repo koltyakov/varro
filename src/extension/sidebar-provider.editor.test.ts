@@ -289,6 +289,7 @@ describe('SidebarProvider editor panels', () => {
   it.each([
     ['/other', true],
     ['/outside', false],
+    ['/worktrees/feature', true],
   ] as const)(
     'handles an active conversation moving to %s without treating it as deleted',
     async (directory, available) => {
@@ -297,14 +298,20 @@ describe('SidebarProvider editor panels', () => {
         path === '/repo' || path === '/other' ? path : null
       );
       const server = createServer({
-        request: vi.fn(async () => ({
-          id: 'session-1',
-          directory,
-          projectID: 'project-1',
-          title: 'Transferred chat',
-          version: '2',
-          time: { created: 1, updated: 2 },
-        })),
+        request: vi.fn(async (_method, path) => {
+          if (path === '/project/current') return { id: 'project-1', worktree: '/repo' };
+          if (path === '/project') return [{ id: 'project-1', vcs: 'git' }];
+          if (path.startsWith('/experimental/worktree'))
+            return [{ directory: '/worktrees/feature', strategy: 'git' }];
+          return {
+            id: 'session-1',
+            directory,
+            projectID: 'project-1',
+            title: 'Transferred chat',
+            version: '2',
+            time: { created: 1, updated: 2 },
+          };
+        }),
       });
       const { provider } = await createSidebarProviderInstance({ contextProvider, server });
       const editor = createPanel();

@@ -60,6 +60,7 @@ import {
   skipPlanSession,
 } from '../lib/state';
 import { ralphStore } from '../lib/stores/ralph-store';
+import { SessionLifecycleOperations } from '../hooks/session/session-lifecycle';
 import { sessionStore } from '../lib/stores/session-store';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
 import { clearDirectSessionReturn, rememberDirectSessionReturn } from '../lib/session-navigation';
@@ -239,6 +240,47 @@ it('keeps a transferred conversation visible with an explicit open-folder action
     setInputText('');
   }
 });
+
+it.each([false, true])(
+  'reconciles a verified worktree snapshot without clearing a newer move, newerMove=%s',
+  (newerMove) => {
+    const directory = '/worktrees/feature';
+    const moved = session('session-1', 500, {
+      directory,
+      transfer: { originDirectory: '/repo', available: false },
+    });
+    setState('sessions', [moved]);
+    setState('activeSessionId', moved.id);
+    setState('transferredSessions', { [moved.id]: newerMove ? '/outside' : directory });
+    setConnectionInitialized(true);
+    setInputText('Continue from here');
+    setState('selectedModel', { providerID: 'openai', modelID: 'test-model' });
+    const operations = new SessionLifecycleOperations({
+      getCurrentWorkspacePath: () => '/repo',
+      clearPendingAbort: vi.fn(),
+      clearPendingAbortTree: vi.fn(),
+      resetTodoSync: vi.fn(),
+      resetToolCallExpansionState: vi.fn(),
+      publishSessionModel: vi.fn(),
+    });
+    cleanup = render(() => Chat(), container!);
+    expect(container!.querySelector('.chat-transport-banner')).not.toBeNull();
+    expect(
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Send (Enter)"]')?.disabled
+    ).toBe(true);
+
+    operations.upsertSession({
+      ...moved,
+      transfer: { ...moved.transfer!, available: true },
+    });
+
+    expect(container!.querySelector('.chat-transport-banner') !== null).toBe(newerMove);
+    expect(
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Send (Enter)"]')?.disabled
+    ).toBe(newerMove);
+    expect(inputText()).toBe('Continue from here');
+  }
+);
 
 function assistantMessageEntry(id: string): MessageEntry<AssistantMessage> {
   const info: AssistantMessage = {

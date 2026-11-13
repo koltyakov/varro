@@ -34,11 +34,13 @@ import {
 import { fixture } from '../../test-fixtures';
 import {
   compressIcon,
+  gitIcon,
   flashSolidIcon,
   forwardMessageIcon,
   hourglassIcon,
 } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
+import * as locationActions from '../../lib/session-location-actions';
 
 type TestRuntimeValue =
   | string
@@ -427,6 +429,53 @@ describe('SessionListView keyboard recovery', () => {
 });
 
 describe('SessionListView model details', () => {
+  it.each([false, true])(
+    'offers location actions from a moved row icon, worktree=%s',
+    (worktree) => {
+      const copy = vi.spyOn(locationActions, 'copySessionFolderPath').mockResolvedValue();
+      setSessions([
+        session('moved', Date.now(), {
+          directory: '/outside',
+          isGitWorktree: worktree,
+          transfer: { originDirectory: '/repo', available: true },
+        }),
+      ]);
+      cleanup = render(() => <SessionListView />, container);
+      container
+        .querySelector('.session-item-folder-meta-icon')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      const items = Array.from(
+        document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+      );
+      expect(items.some((item) => item.textContent?.trim() === 'Merge changes')).toBe(worktree);
+      items.find((item) => item.textContent?.trim() === 'Copy folder path')!.click();
+      expect(copy).toHaveBeenCalledExactlyOnceWith('/outside');
+    }
+  );
+
+  it.each([false, true])(
+    'uses the Git icon and path for a verified worktree, moved=%s',
+    (moved) => {
+      setState('editorContext', 'workspacePath', '/repo');
+      setSessions([
+        session('worktree', Date.now(), {
+          directory: '/worktrees/feature',
+          isGitWorktree: true,
+          transfer: moved ? { originDirectory: '/repo', available: true } : undefined,
+        }),
+      ]);
+      cleanup = render(() => <SessionListView />, container);
+      const label = container.querySelector('.session-item-folder')!;
+      expect(label.textContent).toBe('feature');
+      expect(label.textContent).not.toContain('Worktree:');
+      expect(label.textContent).not.toContain('Moved to');
+      expect(label.getAttribute('title')).toBe('/worktrees/feature');
+      const icon = label.querySelector<HTMLElement>('.session-item-folder-meta-icon')!;
+      expect(icon.getAttribute('aria-label')).toBe('Git worktree');
+      expect(icon.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(gitIcon));
+    }
+  );
+
   it('hides a moved link from its origin list without deleting or switching the active conversation', async () => {
     const moved = session('moved', Date.now(), {
       directory: '/outside',

@@ -1621,6 +1621,27 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it('validates session-scoped folder openings and read-only location metadata routes', () => {
+    const message = {
+      type: 'vscode/open-folder',
+      payload: { sessionId: 'session-1', directory: '/repo' },
+    };
+    expect(parseWebviewMessage(message)).toEqual(message);
+    for (const payload of [
+      null,
+      {},
+      { sessionId: '../foreign', directory: '/repo' },
+      { sessionId: 'session-1' },
+      { sessionId: 'session-1', directory: 42 },
+    ])
+      expect(parseWebviewMessage({ type: 'vscode/open-folder', payload })).toBeNull();
+    expect(isAllowedApiRequest('GET', '/varro/session/session-1/location?directory=%2Frepo')).toBe(
+      true
+    );
+    expect(isAllowedApiRequest('POST', '/varro/session/session-1/location')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/varro/session/session-1/location?extra=1')).toBe(false);
+  });
+
   it('validates and preserves selected-model visibility in command state', () => {
     for (const model of [null, { providerID: 'openai', modelID: 'gpt' }]) {
       for (const modelVisible of [false, true]) {
@@ -1984,8 +2005,8 @@ describe('parseWebviewMessage protocol coverage', () => {
   }
 
   /**
-   * Types whose payload is optional by design: a missing or garbage payload
-   * degrades to the no-payload form instead of dropping the message. Listing
+   * Types whose payload is optional by design. Most also tolerate garbage,
+   * but an invalid folder target must not fall back to the folder picker. Listing
    * them explicitly means a type cannot quietly join the set later.
    */
   const OPTIONAL_PAYLOAD_TYPES = new Set<WebviewMessage['type']>([
@@ -2004,6 +2025,9 @@ describe('parseWebviewMessage protocol coverage', () => {
     'vscode/open-settings',
     'server/restart',
   ]);
+  const GARBAGE_PAYLOAD_TYPES = new Set<WebviewMessage['type']>(
+    [...OPTIONAL_PAYLOAD_TYPES].filter((type) => type !== 'vscode/open-folder')
+  );
 
   it('tolerates a garbage payload only for the types that opt into it', () => {
     const tolerant = Object.keys(WEBVIEW_MESSAGE_TYPES).filter((type) =>
@@ -2011,16 +2035,17 @@ describe('parseWebviewMessage protocol coverage', () => {
         (payload) => parseWebviewMessage({ type, payload }) !== null
       )
     );
-    expect(tolerant.toSorted()).toEqual([...OPTIONAL_PAYLOAD_TYPES].toSorted());
+    expect(tolerant.toSorted()).toEqual([...GARBAGE_PAYLOAD_TYPES].toSorted());
   });
 
   for (const [type] of entries) {
-    if (OPTIONAL_PAYLOAD_TYPES.has(type)) continue;
+    if (GARBAGE_PAYLOAD_TYPES.has(type)) continue;
     it(`rejects ${type} with a non-object payload`, () => {
       for (const payload of [null, 'string', 42, true, []]) {
         expect(parseWebviewMessage({ type, payload })).toBeNull();
       }
-      expect(parseWebviewMessage({ type })).toBeNull();
+      if (OPTIONAL_PAYLOAD_TYPES.has(type)) expect(parseWebviewMessage({ type })).toEqual({ type });
+      else expect(parseWebviewMessage({ type })).toBeNull();
     });
   }
 });

@@ -43,6 +43,21 @@ async function loadClient() {
 
 type ClientApi = Awaited<ReturnType<typeof loadClient>>['client'];
 
+it('reads and validates the session location for the header indicator', async () => {
+  const { client } = await loadClient();
+  const location = { directory: '/worktrees/feature', isGitWorktree: true };
+  bridgeMocks.apiCall.mockResolvedValueOnce(location);
+  await expect(
+    client.varro.session.location('session-1', { directory: '/worktrees/feature' })
+  ).resolves.toEqual(location);
+  expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+    'GET',
+    '/varro/session/session-1/location?directory=%2Fworktrees%2Ffeature'
+  );
+  bridgeMocks.apiCall.mockResolvedValueOnce({ directory: '/repo', isGitWorktree: 'yes' });
+  await expect(client.varro.session.location('session-1')).rejects.toThrow('Malformed response');
+});
+
 it('sends reviewed patterns and keeps global config routes separate from saved approvals', async () => {
   const { client } = await loadClient();
   const patterns = ['git diff *'];

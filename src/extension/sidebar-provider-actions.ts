@@ -263,7 +263,24 @@ export function createSidebarProviderActions(
     },
     generateUsageReport: (includeAllTime) => deps.usageReportService.openReport(includeAllTime),
     reloadWebview: () => deps.webviewSession.reload(),
-    openFolder: async () => {
+    openFolder: async (payload) => {
+      if (payload) {
+        const { sessionId, directory } = payload;
+        if (!isAbsolute(directory)) throw new Error('Session folder must be an absolute path');
+        if (!(await deps.restProxy.authorizeSessionDirectory(sessionId, directory))) {
+          if (!deps.openTransferredSession) throw new Error('Session workspace folder is not open');
+          await deps.openTransferredSession(sessionId);
+          return;
+        }
+        const current = await assertSessionInCurrentWorkspace(
+          deps.sessionServer ?? deps.server,
+          sessionId,
+          directory
+        );
+        if (!current) throw new Error('Session folder is unavailable');
+        await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(current), true);
+        return;
+      }
       await vscode.commands.executeCommand('workbench.action.files.openFolder');
     },
     openSettings: async (query) => {

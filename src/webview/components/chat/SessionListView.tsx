@@ -92,7 +92,6 @@ import {
 import { SharedSessionIcon } from './SharedSessionIcon';
 import { isNumber, isString, type UnknownRecord, isObject } from '../../lib/runtime-values';
 import { UiIcon } from '../UiIcon';
-import { FolderIcon } from '../FolderIcon';
 import {
   FormattedModelName,
   getWorkspaceCompactLabel,
@@ -1174,7 +1173,15 @@ export function SessionListView(props: {
     return [...folders.values()];
   });
   const getSessionFolderLabel = (session: Session): string | null => {
-    if (session.transfer)
+    if (session.isGitWorktree)
+      return (
+        getWorkspaceCompactLabel(session.directory, state.editorContext.workspaceFolders ?? []) ??
+        getDirectoryName(session.directory)
+      );
+    if (
+      session.transfer &&
+      !isSameWorkspacePath(session.directory, session.transfer.originDirectory)
+    )
       return `Moved to ${getWorkspaceCompactLabel(session.directory, state.editorContext.workspaceFolders ?? []) ?? getDirectoryName(session.directory)}`;
     const currentDirectory = sessionHistoryDirectory();
     const showWorkspaceFolder =
@@ -2139,6 +2146,24 @@ export function SessionListView(props: {
   );
 }
 
+function SessionFolderIcon(props: { session: Session }) {
+  return (
+    <UiIcon
+      source={
+        props.session.isGitWorktree
+          ? gitIcon
+          : props.session.workspaceScope === 'workspace'
+            ? folderSettingsIcon
+            : folderIcon
+      }
+      class="session-item-folder-meta-icon"
+      width={12}
+      height={12}
+      aria-label={props.session.isGitWorktree ? 'Git worktree' : undefined}
+    />
+  );
+}
+
 function RecycleBinListItem(props: {
   entry: RecycleBinEntry;
   now: () => number;
@@ -2165,19 +2190,7 @@ function RecycleBinListItem(props: {
           <span class="session-item-meta">
             <Show when={props.showFolder}>
               <span class="session-item-folder" title={props.entry.root.directory}>
-                <Show
-                  when={props.entry.root.workspaceScope === 'workspace'}
-                  fallback={
-                    <FolderIcon class="session-item-folder-meta-icon" width={10} height={10} />
-                  }
-                >
-                  <UiIcon
-                    source={folderSettingsIcon}
-                    class="session-item-folder-meta-icon"
-                    width={10}
-                    height={10}
-                  />
-                </Show>
+                <SessionFolderIcon session={props.entry.root} />
                 <span>
                   {props.entry.root.workspaceScope === 'workspace'
                     ? 'Workspace'
@@ -2678,19 +2691,7 @@ function SessionListItem(props: {
           <span class="session-item-meta session-item-stats-meta">
             <Show when={props.folderLabel}>
               <span class="session-item-folder" title={props.session.directory}>
-                <Show
-                  when={props.session.workspaceScope === 'workspace'}
-                  fallback={
-                    <FolderIcon class="session-item-folder-meta-icon" width={10} height={10} />
-                  }
-                >
-                  <UiIcon
-                    source={folderSettingsIcon}
-                    class="session-item-folder-meta-icon"
-                    width={10}
-                    height={10}
-                  />
-                </Show>
+                <SessionFolderIcon session={props.session} />
                 <span>{props.folderLabel}</span>
               </span>
               {' · '}

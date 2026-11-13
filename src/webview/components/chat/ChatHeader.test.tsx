@@ -1,5 +1,5 @@
 import { render } from 'solid-js/web';
-import { cableTagIcon } from '../../lib/ui-icons';
+import { cableTagIcon, folderIcon, gitIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
@@ -15,6 +15,7 @@ import {
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionActionFeedback } from './SessionActionFeedback';
 import { closeSideQuestion, sideQuestionView } from '../../lib/side-question';
+import * as locationActions from '../../lib/session-location-actions';
 
 const deleteSessionMock = vi.hoisted(() => vi.fn());
 const renameSessionMock = vi.hoisted(() => vi.fn());
@@ -91,6 +92,10 @@ beforeEach(() => {
   deleteSessionMock.mockResolvedValue(undefined);
   renameSessionMock.mockReset();
   renameSessionMock.mockResolvedValue(true);
+  vi.spyOn(client.varro.session, 'location').mockResolvedValue({
+    directory: '/repo',
+    isGitWorktree: false,
+  });
 });
 
 afterEach(() => {
@@ -141,6 +146,168 @@ describe('SessionActionFeedback icon state', () => {
 });
 
 describe('ActiveChatHeader', () => {
+  it.each([false, true])(
+    'offers Copy folder path for moved folders and worktrees, worktree=%s',
+    async (worktree) => {
+      const copy = vi.spyOn(locationActions, 'copySessionFolderPath').mockResolvedValue();
+      setState('sessions', [
+        session({
+          directory: '/outside',
+          isGitWorktree: worktree,
+          transfer: { originDirectory: '/repo', available: true },
+        }),
+      ]);
+      renderHeader();
+      container.querySelector<HTMLButtonElement>('.chat-header-location')!.click();
+      const items = Array.from(
+        document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+      );
+      expect(items.some((item) => item.textContent?.trim() === 'Merge changes')).toBe(worktree);
+      items.find((item) => item.textContent?.trim() === 'Copy folder path')!.click();
+      expect(copy).toHaveBeenCalledExactlyOnceWith('/outside');
+    }
+  );
+
+  it.each([false, true])(
+    'dispatches worktree merging only when writable, readOnly=%s',
+    (readOnly) => {
+      const merge = vi.spyOn(locationActions, 'mergeSessionWorktree').mockResolvedValue(true);
+      const move = vi.spyOn(locationActions, 'moveSessionWorktreeResults').mockResolvedValue(true);
+      setState('sessions', [
+        session({
+          directory: '/worktrees/feature',
+          isGitWorktree: true,
+          transfer: { originDirectory: '/repo', available: !readOnly },
+        }),
+      ]);
+      renderHeader();
+      container.querySelector<HTMLButtonElement>('.chat-header-location')!.click();
+      const action = Array.from(
+        document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+      ).find((item) => item.textContent?.trim() === 'Merge changes')!;
+      expect(action.disabled).toBe(readOnly);
+      action.click();
+      expect(merge).toHaveBeenCalledTimes(readOnly ? 0 : 1);
+      if (!readOnly) expect(merge).toHaveBeenCalledWith('session-1', '/worktrees/feature');
+      if (!readOnly) container.querySelector<HTMLButtonElement>('.chat-header-location')!.click();
+      const moveAction = Array.from(
+        document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+      ).find((item) => item.textContent?.trim() === 'Migrate changes')!;
+      expect(moveAction.disabled).toBe(readOnly);
+      moveAction.click();
+      expect(move).toHaveBeenCalledTimes(readOnly ? 0 : 1);
+      if (!readOnly) expect(move).toHaveBeenCalledWith('session-1', '/worktrees/feature');
+    }
+  );
+
+  it.each([false, true])(
+    'does not add a folder icon to an ordinary chat, returnedToOrigin=%s',
+    async (returnedToOrigin) => {
+      if (returnedToOrigin)
+        setState('sessions', [
+          session({ transfer: { originDirectory: '/repo', available: true } }),
+        ]);
+      renderHeader();
+      await Promise.resolve();
+      expect(container.querySelector('.chat-header-location')).toBeNull();
+    }
+  );
+
+  it.each([false, true])(
+    'shows the session path in a custom tooltip with worktree=%s',
+    async (isGitWorktree) => {
+      const directory = isGitWorktree ? '/worktrees/feature' : '/repo';
+      setState('sessions', [
+        session({
+          directory,
+          isGitWorktree,
+          transfer: isGitWorktree ? undefined : { originDirectory: '/origin', available: true },
+        }),
+      ]);
+      vi.mocked(client.varro.session.location).mockResolvedValue({ directory, isGitWorktree });
+      renderHeader();
+      const indicator = container.querySelector<HTMLButtonElement>('.chat-header-location')!;
+      expect(
+        indicator.previousElementSibling?.classList.contains('chat-header-session-title')
+      ).toBe(true);
+      expect(indicator.hasAttribute('title')).toBe(false);
+      await vi.waitFor(() =>
+        expect(indicator.getAttribute('aria-label')).toBe(
+          isGitWorktree ? 'Session Git worktree' : 'Session folder'
+        )
+      );
+      expect(
+        indicator.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(isGitWorktree ? gitIcon : folderIcon));
+      vi.useFakeTimers();
+      try {
+        indicator.dispatchEvent(new MouseEvent('mouseenter'));
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+        expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe(directory);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('opens the current session folder from the location context menu without opening session actions', async () => {
+    const send = vi.fn<(message: WebviewMessage) => void>();
+    // SAFETY: The fixture owns the bridge callback and removes it after each test.
+    (window as { __sendToExtension?: (message: WebviewMessage) => void }).__sendToExtension = send;
+    setState('sessions', [session({ transfer: { originDirectory: '/origin', available: true } })]);
+    renderHeader();
+    const indicator = container.querySelector<HTMLButtonElement>('.chat-header-location')!;
+    indicator.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 42, clientY: 51 })
+    );
+    await Promise.resolve();
+    const menu = document.body.querySelector<HTMLElement>('[aria-label="Session folder actions"]')!;
+    expect(menu.style.left).toBe('42px');
+    expect(menu.style.top).toBe('51px');
+    expect(document.body.querySelector('[aria-label="Session actions"]')).toBeNull();
+    expect(document.activeElement).toBe(menu.querySelector('[role="menuitem"]'));
+    menu.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-folder',
+      payload: { sessionId: 'session-1', directory: '/repo' },
+    });
+    expect(document.body.querySelector('[aria-label="Session folder actions"]')).toBeNull();
+  });
+
+  it('closes the location menu on Escape, outside interaction, and session change', async () => {
+    setState('sessions', [session({ transfer: { originDirectory: '/origin', available: true } })]);
+    renderHeader();
+    const indicator = () => container.querySelector<HTMLButtonElement>('.chat-header-location')!;
+    indicator().click();
+    await Promise.resolve();
+    document.body
+      .querySelector('[aria-label="Session folder actions"]')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(document.body.querySelector('[aria-label="Session folder actions"]')).toBeNull();
+    expect(document.activeElement).toBe(indicator());
+    indicator().click();
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    expect(document.body.querySelector('[aria-label="Session folder actions"]')).toBeNull();
+    indicator().click();
+    setState('sessions', [session({ directory: '/other' })]);
+    expect(document.body.querySelector('[aria-label="Session folder actions"]')).toBeNull();
+  });
+
+  it('ignores stale worktree metadata after the session location changes', async () => {
+    let resolve!: (value: { directory: string; isGitWorktree: boolean }) => void;
+    vi.mocked(client.varro.session.location).mockReturnValueOnce(
+      new Promise((next) => {
+        resolve = next;
+      })
+    );
+    renderHeader();
+    setState('sessions', [session({ directory: '/other' })]);
+    resolve({ directory: '/repo', isGitWorktree: true });
+    await Promise.resolve();
+    expect(container.querySelector('.chat-header-location')).toBeNull();
+  });
+
   it.each([false, true])('opens the V2 side-question form with busy=%s', (busy) => {
     setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
     setState('sessionStatus', busy ? { 'session-1': { type: 'busy' } } : {});

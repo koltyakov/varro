@@ -25,6 +25,7 @@ import type {
   ServerEvent,
   ServerEventName,
   SessionDiffSummary,
+  SessionLocation,
   SessionHistoryScope,
   SessionTitleFallbackResponse,
   WorkspaceStatusEventSummary,
@@ -759,6 +760,28 @@ export const client = {
       },
     },
     session: {
+      async location(
+        sessionID: string,
+        options?: { directory?: string }
+      ): Promise<SessionLocation> {
+        const path = withDirectory(
+          buildVarroSessionEndpoint(sessionID, 'location'),
+          options?.directory
+        );
+        const value = asRecord(await apiCall('GET', path));
+        if (!isString(value?.directory) || !isBoolean(value.isGitWorktree)) {
+          throw new Error(`Malformed response from ${path}`);
+        }
+        if (value.projectDirectory !== undefined && !isString(value.projectDirectory)) {
+          throw new Error(`Malformed response from ${path}`);
+        }
+        const location: SessionLocation = {
+          directory: value.directory,
+          isGitWorktree: value.isGitWorktree,
+        };
+        if (isString(value.projectDirectory)) location.projectDirectory = value.projectDirectory;
+        return location;
+      },
       async hideTransfer(sessionID: string, options?: { directory?: string }): Promise<boolean> {
         return apiCall(
           'POST',

@@ -1017,7 +1017,12 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  vertical-align: text-bottom;
+  vertical-align: middle;
+}
+
+.session-item-folder-meta-icon {
+  flex-shrink: 0;
+  align-self: center;
 }
 
 .session-item-indicator.is-running,

@@ -172,6 +172,15 @@ function createDeps(overrides?: {
 }
 
 describe('session-lifecycle helpers', () => {
+  it('preserves verified worktree presentation across same-directory events but not a move', () => {
+    const worktree = { ...session('moved', '/worktrees/feature', 100), isGitWorktree: true };
+    const setup = createDeps({ sessions: [worktree] });
+    upsertSession(setup.deps, session('moved', '/worktrees/feature', 110));
+    expect(setup.current.sessions[0]?.isGitWorktree).toBe(true);
+    upsertSession(setup.deps, session('moved', '/elsewhere', 120));
+    expect(setup.current.sessions[0]?.isGitWorktree).toBeUndefined();
+  });
+
   it('applies persisted link visibility from an older transfer summary without regressing live metadata', () => {
     const live = {
       ...session('moved', '/outside', 100),

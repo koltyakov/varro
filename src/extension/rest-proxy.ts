@@ -26,6 +26,7 @@ import type {
   PermissionMode,
   ServerStatus,
   SessionDiffSummary,
+  SessionLocation,
   SessionHistoryScope,
   SessionWorkspaceScope,
   WebviewMessage,
@@ -296,6 +297,7 @@ type ResolvedSessionCatalogScope =
 type SessionCatalogProject = {
   id: string;
   worktree: string;
+  canonical?: string;
   vcs?: string;
 };
 
@@ -477,6 +479,12 @@ export class RestProxy {
   private readonly requestWorkspaceDirectory = new AsyncLocalStorage<string | undefined>();
   private sessionDirectories = new Map<string, string>();
   private authorizedSessionDirectories = new Map<string, AuthorizedSessionDirectory>();
+  private readonly authorizedTransferWorktrees = new Map<string, AuthorizedSessionDirectory>();
+  private sessionCatalogGeneration = 0;
+  private readonly projectGitWorktrees = new Map<
+    string,
+    { expiresAt: number; request: Promise<ReadonlySet<string>> }
+  >();
   private authorizedSessionCatalogs = new Map<
     string,
     { rootIdentity: string; sessions: Map<string, AuthorizedSessionDirectory> }
@@ -571,10 +579,13 @@ export class RestProxy {
   }
 
   invalidateSessionCatalog() {
+    this.sessionCatalogGeneration++;
     this.workspaceSessionStatusCoordinator.clearCatalogs();
     this.currentProjects.clear();
     this.sessionEventCatalogRefreshes.clear();
     this.authorizedSessionDirectories.clear();
+    this.authorizedTransferWorktrees.clear();
+    this.projectGitWorktrees.clear();
     this.authorizedSessionCatalogs.clear();
     this.hasSessionDirectorySnapshot = false;
   }
@@ -627,6 +638,7 @@ export class RestProxy {
 
   async authorizeSessionDirectory(sessionID: string, directory: string): Promise<boolean> {
     if (!sessionID.trim() || !normalizeWorkspaceIdentity(directory)) return false;
+    const generation = this.sessionCatalogGeneration;
     try {
       this.requireOpenWorkspaceRoot(directory);
       return true;
@@ -648,17 +660,116 @@ export class RestProxy {
         this.loadWorkspaceStatusSessionCatalog(scope.root, undefined, true, scope)
       )
     );
-    return catalogs.some((catalog) =>
-      catalog.sessions.some(
-        (session) => session.id === sessionID && isSameWorkspacePath(session.directory, directory)
+    if (
+      catalogs.some((catalog) =>
+        catalog.sessions.some(
+          (session) => session.id === sessionID && isSameWorkspacePath(session.directory, directory)
+        )
       )
-    );
+    )
+      return true;
+    return this.authorizeTransferredWorktree(sessionID, directory, generation);
+  }
+
+  private async authorizeTransferredWorktree(
+    sessionID: string,
+    directory: string,
+    generation: number
+  ): Promise<boolean> {
+    const roots = this.getOpenWorkspaceRoots();
+    const transfer = this.callbacks
+      .getTransferredSessions?.(roots, { includeHidden: true })
+      .find(
+        (session) => session.id === sessionID && isSameWorkspacePath(session.directory, directory)
+      );
+    if (!transfer || !isSafePersistedSessionId(sessionID)) return false;
+    const previous = this.authorizedTransferWorktrees.get(sessionID);
+    this.authorizedTransferWorktrees.delete(sessionID);
+    if (previous && this.authorizedSessionDirectories.get(sessionID) === previous) {
+      this.authorizedSessionDirectories.delete(sessionID);
+    }
+    try {
+      const signal = AbortSignal.timeout(5_000);
+      for (const root of roots) {
+        this.requireOpenWorkspaceRoot(root);
+        const project = await this.loadSessionCatalogProject(root, signal);
+        if (project.id === 'global' || project.id !== transfer.projectID) continue;
+        const projects = await this.requestServer('GET', '/project', undefined, {
+          directory: root,
+          signal,
+        });
+        if (
+          !Array.isArray(projects) ||
+          !projects.some((value) => {
+            const info = asRecord(value);
+            return info?.id === project.id && info.vcs === 'git';
+          })
+        )
+          continue;
+        // Saved inventory reads must not initialize configuration in an unapproved destination.
+        const worktrees = await this.requestServer(
+          'GET',
+          `/experimental/worktree?projectID=${encodeURIComponent(project.id)}`,
+          undefined,
+          { directory: root, signal }
+        );
+        if (
+          !Array.isArray(worktrees) ||
+          !worktrees.some((value) => {
+            const info = asRecord(value);
+            const worktreeDirectory = typeof value === 'string' ? value : info?.directory;
+            return (
+              typeof worktreeDirectory === 'string' &&
+              isSameWorkspacePath(worktreeDirectory, directory) &&
+              (info?.strategy === undefined || info.strategy === 'git')
+            );
+          })
+        )
+          continue;
+        const session = asRecord(
+          await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
+            directory: root,
+            signal,
+          })
+        );
+        if (
+          session?.id !== sessionID ||
+          session.projectID !== project.id ||
+          typeof session.directory !== 'string' ||
+          !isSameWorkspacePath(session.directory, directory)
+        )
+          return false;
+        if (
+          this.disposed ||
+          generation !== this.sessionCatalogGeneration ||
+          !this.getOpenWorkspaceRoots().some((candidate) => isSameWorkspacePath(candidate, root))
+        )
+          return false;
+        this.requireOpenWorkspaceRoot(root);
+        const authorized = { directory: session.directory, catalogRoot: root };
+        this.authorizedTransferWorktrees.set(sessionID, authorized);
+        this.authorizedSessionDirectories.set(sessionID, authorized);
+        return true;
+      }
+    } catch (error) {
+      logger.warn(
+        `Could not verify moved conversation worktree: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    return false;
   }
 
   async refreshSessionCatalogEventAuthorization(
     sessionIDs: readonly string[],
     directory?: string
   ): Promise<boolean> {
+    for (const sessionID of sessionIDs) {
+      const authorized = this.authorizedTransferWorktrees.get(sessionID);
+      if (authorized && directory && !isSameWorkspacePath(authorized.directory, directory)) {
+        this.authorizedTransferWorktrees.delete(sessionID);
+        this.authorizedSessionDirectories.delete(sessionID);
+      }
+    }
     const hasDirectoryDrift = Boolean(
       directory &&
       sessionIDs.some((sessionID) => {
@@ -864,23 +975,33 @@ export class RestProxy {
       const transferRead = Boolean(
         transfer &&
         method === 'GET' &&
-        /^(?:\/session\/[^/]+(?:\/(?:message(?:\/[^/]+(?:\/part\/[^/]+)?)?|diff|todo))?|\/varro\/session\/[^/]+\/diff-summary)$/.test(
+        /^(?:\/session\/[^/]+(?:\/(?:message(?:\/[^/]+(?:\/part\/[^/]+)?)?|diff|todo))?|\/varro\/session\/[^/]+\/(?:diff-summary|location))$/.test(
           new URL(payload.path, 'http://localhost').pathname
         )
       );
-      if (transfer && !transfer.transfer?.available && !transferRead) {
+      if (
+        transferRead &&
+        transfer &&
+        requestedWorkspaceDirectory &&
+        !isSameWorkspacePath(requestedWorkspaceDirectory, transfer.directory) &&
+        !isSameWorkspacePath(requestedWorkspaceDirectory, transfer.transfer?.originDirectory)
+      )
+        throw new Error('404 Session not found');
+      const transferAvailable =
+        transfer &&
+        (transfer.transfer?.available ||
+          (await this.authorizeTransferredWorktree(
+            transfer.id,
+            transfer.directory,
+            this.sessionCatalogGeneration
+          )));
+      if (transfer && !transferAvailable && !transferRead) {
         throw new Error(
           `Conversation moved to ${transfer.directory}. Open its folder to continue.`
         );
       }
       let explicitWorkspaceDirectory: string | null = null;
       if (transferRead && transfer) {
-        if (
-          requestedWorkspaceDirectory &&
-          !isSameWorkspacePath(requestedWorkspaceDirectory, transfer.directory) &&
-          !isSameWorkspacePath(requestedWorkspaceDirectory, transfer.transfer?.originDirectory)
-        )
-          throw new Error('404 Session not found');
         explicitWorkspaceDirectory = transfer.directory;
       } else if (requestedWorkspaceDirectory) {
         if (directSessionID) {
@@ -1636,7 +1757,11 @@ export class RestProxy {
         const data = await this.requestWorkspaceSessions(payload.path, requestSignal);
         this.callbacks.postApiResponse(requestGeneration, {
           id: payload.id,
-          data: this.includeTransferredSessions(data, payload.path),
+          data: await this.annotateSessionWorktrees(
+            this.includeTransferredSessions(data, payload.path),
+            payload.path,
+            requestSignal
+          ),
         });
         return;
       }
@@ -1647,6 +1772,85 @@ export class RestProxy {
       ) {
         const data = await this.requestWorkspaceSessionStatuses(requestSignal);
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const locationMatch =
+        method === 'GET' && requestPathname.match(/^\/varro\/session\/([^/]+)\/location$/);
+      if (locationMatch) {
+        const sessionID = decodeURIComponent(locationMatch[1]!);
+        if (this.isHiddenSession(sessionID)) throw new Error('404 Session not found');
+        const root =
+          this.authorizedSessionDirectories.get(sessionID)?.catalogRoot ??
+          this.getOpenWorkspaceRoots()[0];
+        const session = asRecord(
+          await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
+            directory: root,
+            signal: requestSignal,
+          })
+        );
+        if (
+          session?.id !== sessionID ||
+          typeof session.directory !== 'string' ||
+          typeof session.projectID !== 'string'
+        ) {
+          throw new Error('Malformed session location');
+        }
+        const sessionDirectory = session.directory;
+        if (
+          explicitWorkspaceDirectory &&
+          !isSameWorkspacePath(session.directory, explicitWorkspaceDirectory)
+        ) {
+          throw new Error('Conversation location changed. Refresh before opening its folder.');
+        }
+        let isGitWorktree = false;
+        try {
+          if (this.callbacks.server.apiVersion === 2 && root) {
+            isGitWorktree = (
+              await this.readProjectGitWorktrees(session.projectID, root, requestSignal)
+            ).has(normalizeWorkspaceIdentity(sessionDirectory)!);
+          } else {
+            const worktrees = await this.requestServer(
+              'GET',
+              `/experimental/worktree?projectID=${encodeURIComponent(session.projectID)}`,
+              undefined,
+              { directory: root, signal: requestSignal }
+            );
+            const match = Array.isArray(worktrees)
+              ? worktrees.find((value) => {
+                  const directory = typeof value === 'string' ? value : asRecord(value)?.directory;
+                  return (
+                    typeof directory === 'string' &&
+                    isSameWorkspacePath(directory, sessionDirectory)
+                  );
+                })
+              : undefined;
+            if (typeof match === 'string' && root) {
+              const project = await this.loadSessionCatalogProject(root, requestSignal);
+              isGitWorktree =
+                project.vcs === 'git' && !isSameWorkspacePath(project.worktree, match);
+            } else {
+              isGitWorktree = asRecord(match)?.strategy === 'git';
+            }
+          }
+        } catch (error) {
+          requestSignal?.throwIfAborted();
+          logger.warn(
+            `Could not read session worktree metadata: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+        const location: SessionLocation = { directory: sessionDirectory, isGitWorktree };
+        if (isGitWorktree && root) {
+          const projectLocation = await this.readWorktreeProjectDirectory(
+            session.projectID,
+            sessionDirectory,
+            root,
+            requestSignal
+          );
+          if (projectLocation.projectDirectory)
+            location.projectDirectory = projectLocation.projectDirectory;
+        }
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data: location });
         return;
       }
 
@@ -3048,6 +3252,7 @@ export class RestProxy {
             id: value.id,
             worktree: value.worktree,
           };
+          if (typeof value.canonical === 'string') project.canonical = value.canonical;
           if (typeof value.vcs === 'string') project.vcs = value.vcs;
           return project;
         }),
@@ -3161,9 +3366,9 @@ export class RestProxy {
       sessions: authorized,
     });
     this.authorizedSessionDirectories = new Map(
-      [...this.authorizedSessionCatalogs.values()].flatMap((catalog) => [
-        ...catalog.sessions.entries(),
-      ])
+      [...this.authorizedSessionCatalogs.values()]
+        .flatMap((catalog) => [...catalog.sessions.entries()])
+        .concat([...this.authorizedTransferWorktrees.entries()])
     );
   }
 
@@ -3688,6 +3893,102 @@ export class RestProxy {
       return transfer ? { ...result, transfer: transfer.transfer } : result;
     }
     return data;
+  }
+
+  private async readWorktreeProjectDirectory(
+    projectID: string,
+    directory: string,
+    root: string,
+    signal?: AbortSignal
+  ): Promise<{ projectDirectory?: string }> {
+    const project = await this.loadSessionCatalogProject(root, signal);
+    if (project.id !== projectID) return {};
+    const target = isSameWorkspacePath(root, directory)
+      ? (project.canonical ?? project.worktree)
+      : root;
+    return isSameWorkspacePath(target, directory) ? {} : { projectDirectory: target };
+  }
+
+  private readProjectGitWorktrees(
+    projectID: string,
+    root: string,
+    signal?: AbortSignal
+  ): Promise<ReadonlySet<string>> {
+    let cached = this.projectGitWorktrees.get(projectID);
+    if (!cached || cached.expiresAt <= Date.now()) {
+      const entry = {
+        expiresAt: Date.now() + CURRENT_PROJECT_CACHE_TTL_MS,
+        request: this.requestServer(
+          'GET',
+          `/experimental/worktree?projectID=${encodeURIComponent(projectID)}`,
+          undefined,
+          { directory: root, signal: AbortSignal.timeout(5_000) }
+        ).then((value) => {
+          if (!Array.isArray(value)) throw new Error('Malformed project worktree inventory');
+          return new Set(
+            value.flatMap((item) => {
+              const info = asRecord(item);
+              const directory =
+                typeof info?.directory === 'string'
+                  ? normalizeWorkspaceIdentity(info.directory)
+                  : null;
+              return info?.strategy === 'git' && directory ? [directory] : [];
+            })
+          );
+        }),
+      };
+      cached = entry;
+      this.projectGitWorktrees.set(projectID, entry);
+      void entry.request.catch(() => {
+        if (this.projectGitWorktrees.get(projectID) === entry)
+          this.projectGitWorktrees.delete(projectID);
+      });
+    }
+    return raceAgainstAbort(cached.request, signal);
+  }
+
+  private async annotateSessionWorktrees(
+    data: unknown,
+    path: string,
+    signal?: AbortSignal
+  ): Promise<unknown> {
+    if (this.callbacks.server.apiVersion !== 2) return data;
+    const page = asRecord(data);
+    const items = Array.isArray(data) ? data : Array.isArray(page?.items) ? page.items : null;
+    const root = getExplicitWorkspaceDirectory(path) ?? this.getOpenWorkspaceRoots()[0];
+    if (!items || !root) return data;
+    const projectIDs = [
+      ...new Set(
+        items.flatMap((item) => {
+          const projectID = asRecord(item)?.projectID;
+          return typeof projectID === 'string' && projectID !== 'global' ? [projectID] : [];
+        })
+      ),
+    ];
+    const inventories = new Map<string, ReadonlySet<string>>();
+    await mapWithConcurrency(projectIDs, 4, async (projectID) => {
+      try {
+        inventories.set(projectID, await this.readProjectGitWorktrees(projectID, root, signal));
+      } catch (error) {
+        signal?.throwIfAborted();
+        logger.warn(
+          `Could not read catalog worktree metadata: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    });
+    const annotated = items.map((item) => {
+      const session = asRecord(item);
+      const inventory =
+        typeof session?.projectID === 'string' ? inventories.get(session.projectID) : undefined;
+      const directory =
+        typeof session?.directory === 'string'
+          ? normalizeWorkspaceIdentity(session.directory)
+          : null;
+      return inventory && directory
+        ? { ...session, isGitWorktree: inventory.has(directory) }
+        : item;
+    });
+    return Array.isArray(data) ? annotated : { ...page, items: annotated };
   }
 
   private includeTransferredSessions(data: unknown, path: string): unknown {

@@ -221,11 +221,20 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'terminal-selection/clear':
     case 'files/pick':
     case 'webview/reload':
-    case 'vscode/open-folder':
     case 'vscode/show-output':
     case 'chat/new-editor':
     case 'chat/new-window':
       return { type };
+
+    case 'vscode/open-folder': {
+      if (message?.payload === undefined) return { type };
+      const payload = asRecord(message.payload);
+      const sessionId = payload?.sessionId;
+      const directory = getBoundedString(payload?.directory, MAX_PATH_LENGTH);
+      return isSafePersistedSessionId(sessionId) && /^[A-Za-z0-9_-]+$/.test(sessionId) && directory
+        ? { type, payload: { sessionId, directory } }
+        : null;
+    }
 
     case 'ready': {
       if (message?.payload === undefined) return { type };
@@ -1978,6 +1987,10 @@ const API_ROUTES: ApiRoute[] = [
     ({ method, url }) => method === 'GET' && queryWithOptionalDirectory(url, 'revision')
   ),
   route(`${VARRO_API_ENDPOINTS.session}/:id/activate`, methodsNoQuery('POST')),
+  route(
+    `${VARRO_API_ENDPOINTS.session}/:id/location`,
+    ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)
+  ),
   route(
     `${VARRO_API_ENDPOINTS.session}/:id/followups`,
     ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)

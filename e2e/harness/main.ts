@@ -5787,6 +5787,21 @@ async function handleApiRequest(
   const url = new URL(rawPath, 'http://varro.test');
   const path = url.pathname;
 
+  if (
+    method === 'GET' &&
+    /^\/varro\/session\/[^/]+\/diff-summary$/.test(path) &&
+    new URLSearchParams(window.location.search).has('locationAlignment')
+  ) {
+    return {
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 358_000,
+      activeStartedAt: null,
+    };
+  }
+
   if (method === 'POST' && /^\/varro\/session\/[^/]+\/followups$/.test(path) && state.followups) {
     const fixture = state.followups;
     const cacheOnly = asRecord(body).cacheOnly === true;

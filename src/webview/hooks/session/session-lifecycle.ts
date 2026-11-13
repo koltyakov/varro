@@ -1,4 +1,5 @@
 import { batch } from 'solid-js';
+import { reconcile } from 'solid-js/store';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
@@ -27,6 +28,7 @@ type LifecycleDependencies = {
   getOpenWorkspacePaths(): string[];
   isSessionTransferred?(sessionId: string): boolean;
   setSessions(sessions: Session[], complete?: boolean): void;
+  reconcileTransferredSessions?(sessions: Session[]): void;
   clearSessionStatusEntry(sessionId: string): void;
   clearPendingAbort(sessionId: string | null | undefined): void;
   clearPendingAbortTree(sessionIds: string[]): void;
@@ -78,6 +80,21 @@ export class SessionLifecycleOperations {
           appStore.state.editorContext?.workspaceDirectory,
         ].filter((path): path is string => Boolean(path)),
       setSessions: sessionStore.setSessions,
+      reconcileTransferredSessions: (sessions) => {
+        const entries = Object.entries(appStore.state.transferredSessions);
+        if (entries.length === 0) return;
+        const available = new Map(
+          sessions
+            .filter((session) => session.transfer?.available === true)
+            .map((session) => [session.id, session.directory])
+        );
+        const pending = entries.filter(
+          ([id, directory]) => !isSameWorkspacePath(available.get(id), directory)
+        );
+        if (pending.length !== entries.length) {
+          appStore.setState('transferredSessions', reconcile(Object.fromEntries(pending)));
+        }
+      },
       clearSessionStatusEntry: sessionStore.clearSessionStatusEntry,
       clearPendingAbort: deps.clearPendingAbort,
       clearPendingAbortTree: deps.clearPendingAbortTree,
@@ -170,6 +187,13 @@ function isPlaceholderSessionTitle(title: string | null | undefined) {
 
 function mergeFreshSession(existing: Session | undefined, incoming: Session) {
   if (!existing) return incoming;
+  if (
+    incoming.isGitWorktree === undefined &&
+    existing.isGitWorktree !== undefined &&
+    isSameWorkspacePath(existing.directory, incoming.directory)
+  ) {
+    incoming = { ...incoming, isGitWorktree: existing.isGitWorktree };
+  }
   let transfer = incoming.transfer ?? existing.transfer;
   if (transfer && existing.transfer?.hiddenOrigins?.length && incoming.transfer) {
     transfer = {
@@ -228,6 +252,7 @@ export function applySessions(deps: LifecycleDependencies, sessions: Session[], 
   );
   batch(() => {
     deps.setSessions(nextSessions, complete);
+    deps.reconcileTransferredSessions?.(nextSessions);
 
     if (
       activeSessionId &&
