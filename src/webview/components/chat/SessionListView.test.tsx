@@ -2748,33 +2748,64 @@ describe('SessionListView actions', () => {
     expect(rows[1]!.classList.contains('is-context-obscured')).toBe(false);
   });
 
-  it('renames a session from its row action menu', async () => {
-    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
-      files: 0,
-      additions: 0,
-      deletions: 0,
-      tokens: 0,
-      durationMs: 0,
-      activeStartedAt: null,
-    });
-    setState('sessions', [session('session-1', Date.now())]);
+  it('disables Rename for a read-only moved link without opening the form', () => {
+    setSessions([
+      session('moved', Date.now(), {
+        directory: '/outside',
+        transfer: { originDirectory: '/repo', available: false },
+      }),
+    ]);
     cleanup = render(() => <SessionListView />, container);
-
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
-    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-      .find((button) => button.textContent?.trim() === 'Rename')!
-      .click();
 
-    const input = document.querySelector<HTMLInputElement>('[id^="session-rename-"]')!;
-    input.value = '  Better title  ';
-    input.dispatchEvent(new InputEvent('input', { bubbles: true }));
-    input.closest('form')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true }));
+    const rename = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+    ).find((button) => button.textContent?.trim() === 'Rename')!;
+    expect(rename.disabled).toBe(true);
+    expect(rename.title).toBe('Open the destination folder to rename this moved conversation');
+    rename.click();
 
-    await vi.waitFor(() => {
-      expect(renameSessionMock).toHaveBeenCalledWith('session-1', 'Better title');
-    });
-    await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).toBeNull());
+    expect(document.querySelector('.session-item-rename-form')).toBeNull();
+    expect(renameSessionMock).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    'renames a writable session from its row menu, moved=%s',
+    async (moved) => {
+      vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+        files: 0,
+        additions: 0,
+        deletions: 0,
+        tokens: 0,
+        durationMs: 0,
+        activeStartedAt: null,
+      });
+      setSessions([
+        session('session-1', Date.now(), {
+          transfer: moved ? { originDirectory: '/other', available: true } : undefined,
+        }),
+      ]);
+      cleanup = render(() => <SessionListView />, container);
+
+      openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+      const rename = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+      ).find((button) => button.textContent?.trim() === 'Rename')!;
+      expect(rename.disabled).toBe(false);
+      expect(rename.hasAttribute('title')).toBe(false);
+      rename.click();
+
+      const input = document.querySelector<HTMLInputElement>('[id^="session-rename-"]')!;
+      input.value = '  Better title  ';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      input.closest('form')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true }));
+
+      await vi.waitFor(() => {
+        expect(renameSessionMock).toHaveBeenCalledWith('session-1', 'Better title');
+      });
+      await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).toBeNull());
+    }
+  );
 
   it('opens the row menu at the right-click position without an actions button', () => {
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({

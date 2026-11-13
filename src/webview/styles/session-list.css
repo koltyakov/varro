@@ -706,11 +706,16 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   cursor: pointer;
 }
 
-.session-item-actions-menu > button:hover,
+.session-item-actions-menu > button:hover:not(:disabled),
 .session-item-actions-menu > button:focus-visible {
   outline: none;
   background: var(--color-vscode-hover);
   color: var(--color-vscode-fg);
+}
+
+.session-item-actions-menu > button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .session-item-actions-menu > button.is-destructive {

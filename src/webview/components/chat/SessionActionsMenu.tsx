@@ -90,6 +90,7 @@ export function SessionActionsMenu(props: {
 }) {
   let menuRef: HTMLDivElement | undefined;
   let renameInputRef: HTMLInputElement | undefined;
+  const isReadOnlyTransfer = () => props.session.transfer?.available === false;
 
   const openAsEditor = (inWindow = false) => {
     const sessionId = props.session.id;
@@ -125,6 +126,7 @@ export function SessionActionsMenu(props: {
   };
 
   const beginRename = () => {
+    if (isReadOnlyTransfer()) return;
     props.state.beginRename(props.session.title);
     queueMicrotask(() => {
       renameInputRef?.focus();
@@ -132,7 +134,7 @@ export function SessionActionsMenu(props: {
     });
   };
   const submitRename = async () => {
-    if (props.state.renamePending()) return;
+    if (props.state.renamePending() || isReadOnlyTransfer()) return;
     const title = props.state.renameValue().trim();
     if (!title) return;
     const sessionId = props.session.id;
@@ -270,7 +272,17 @@ export function SessionActionsMenu(props: {
               </button>
               <Show when={!props.session.parentID}>
                 <div class="session-item-actions-separator" role="separator" />
-                <button type="button" role="menuitem" onClick={beginRename}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={isReadOnlyTransfer()}
+                  title={
+                    isReadOnlyTransfer()
+                      ? 'Open the destination folder to rename this moved conversation'
+                      : undefined
+                  }
+                  onClick={beginRename}
+                >
                   Rename
                 </button>
                 <button
@@ -359,7 +371,7 @@ export function SessionActionsMenu(props: {
               onSelect={(event) => updateRenameSelection(event.currentTarget)}
               onMouseUp={(event) => updateRenameSelection(event.currentTarget)}
               onKeyUp={(event) => updateRenameSelection(event.currentTarget)}
-              disabled={props.state.renamePending()}
+              disabled={props.state.renamePending() || isReadOnlyTransfer()}
             />
             <div class="session-item-rename-actions">
               <button type="button" onClick={props.state.close}>
@@ -367,7 +379,11 @@ export function SessionActionsMenu(props: {
               </button>
               <button
                 type="submit"
-                disabled={!props.state.renameValue().trim() || props.state.renamePending()}
+                disabled={
+                  !props.state.renameValue().trim() ||
+                  props.state.renamePending() ||
+                  isReadOnlyTransfer()
+                }
               >
                 Save
               </button>

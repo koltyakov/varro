@@ -337,6 +337,59 @@ describe('ActiveChatHeader', () => {
     expect(menu!.style.top).toBe('50px');
   });
 
+  it.each([false, true])(
+    'sets Rename availability for a moved session, available=%s',
+    (available) => {
+      setState('sessions', [
+        session({
+          directory: '/outside',
+          transfer: { originDirectory: '/repo', available },
+        }),
+      ]);
+      renderHeader();
+      container
+        .querySelector<HTMLElement>('.chat-header-session-title')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+      const rename = Array.from(
+        document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+      ).find((button) => button.textContent?.trim() === 'Rename')!;
+      expect(rename.disabled).toBe(!available);
+      rename.click();
+
+      expect(document.querySelector('.session-item-rename-form') !== null).toBe(available);
+      expect(renameSessionMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('blocks a rename if the conversation becomes a read-only moved link while editing', () => {
+    renderHeader();
+    container
+      .querySelector<HTMLElement>('.chat-header-session-title')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Rename')!
+      .click();
+    const input = document.querySelector<HTMLInputElement>('[id^="header-session-rename-"]')!;
+    input.value = 'New title';
+    input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+
+    setState('sessions', [
+      session({
+        directory: '/outside',
+        transfer: { originDirectory: '/repo', available: false },
+      }),
+    ]);
+
+    const form = document.querySelector<HTMLFormElement>('.session-item-rename-form')!;
+    expect(form.querySelector<HTMLInputElement>('input')?.disabled).toBe(true);
+    expect(form.querySelector<HTMLButtonElement>('[type="submit"]')?.disabled).toBe(true);
+    form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
+    expect(renameSessionMock).not.toHaveBeenCalled();
+    form.querySelector<HTMLButtonElement>('[type="button"]')!.click();
+    expect(document.querySelector('.session-item-rename-form')).toBeNull();
+  });
+
   it('hides rename and recycle-bin actions for an active sub-agent session', () => {
     setState('sessions', [session({ parentID: 'parent' })]);
     renderHeader();
