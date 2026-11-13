@@ -2870,10 +2870,16 @@ export class RestProxy {
           rootStatusRequest,
           this.loadWorkspaceStatusSessionCatalog(root, signal, false, scope),
         ]);
+        // Retained transfers receive live events and appear in the session list,
+        // even when folder-scoped catalogs omit their destination. Poll that
+        // destination too, or a snapshot omission erases their running status.
+        const transfers = this.callbacks.getTransferredSessions?.([root]) ?? [];
+        const statusSessions = [...catalog.sessions, ...transfers];
+        const transferredIDs = new Set(transfers.map((session) => session.id));
         const statusDirectories = new Map<string, string>();
         const rootIdentity = normalizeWorkspaceIdentity(root);
         if (rootIdentity) statusDirectories.set(rootIdentity, root);
-        for (const session of catalog.sessions) {
+        for (const session of statusSessions) {
           const sessionIdentity = normalizeWorkspaceIdentity(session.directory);
           if (sessionIdentity) statusDirectories.set(sessionIdentity, session.directory);
         }
@@ -2900,7 +2906,7 @@ export class RestProxy {
           })
         );
         const sessions = catalog.sessions;
-        const visibleSessions = this.filterWorkspaceVisibleSessions(sessions);
+        const visibleSessions = this.filterWorkspaceVisibleSessions(statusSessions);
         const visibleSessionsByID = new Map(
           visibleSessions.map((session) => [session.id, session] as const)
         );
@@ -2917,6 +2923,7 @@ export class RestProxy {
               .map(([sessionID, status]) => {
                 const sessionDirectory = visibleSessionsByID.get(sessionID)?.directory;
                 const exposeFullStatus =
+                  transferredIDs.has(sessionID) ||
                   !endpointWorkspaceDirectory ||
                   isSameWorkspacePath(sessionDirectory, endpointWorkspaceDirectory);
                 return [

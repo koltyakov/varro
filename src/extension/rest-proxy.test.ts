@@ -1671,6 +1671,67 @@ describe('RestProxy handleRequest', () => {
       error: '404 Session not found',
     });
   });
+  it.each([
+    { type: 'busy' },
+    { type: 'busy', background: true, backgroundStartedAt: 10, backgroundCommand: 'npm test' },
+    { type: 'retry', attempt: 1, next: 20, message: 'Retrying provider' },
+  ])('retains moved-session status in folder snapshots: %j', async (status) => {
+    const moved = {
+      id: 'moved',
+      projectID: 'project-1',
+      directory: '/outside',
+      title: 'Transferred conversation',
+      version: '2',
+      time: { created: 1, updated: 2 },
+      transfer: { originDirectory: '/repo', available: false },
+    };
+    let retained = false;
+    let completed = false;
+    let destinationUnavailable = false;
+    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(
+      async (_method, path, _body, options) => {
+        if (path === '/session/status') {
+          if (options?.directory !== moved.directory) return {};
+          if (destinationUnavailable) throw new Error('Destination status unavailable');
+          if (completed) return {};
+          return { moved: status, unrelated: { type: 'busy' } };
+        }
+        return [];
+      }
+    );
+    const { proxy, callbacks } = createProxy({
+      getTransferredSessions: () => (retained ? [moved] : []),
+      server: { ...createCallbacks().server, request: serverRequest },
+    });
+
+    await proxy.handleRequest(makePayload(9029, 'GET', '/session/status'));
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 9029, data: {} });
+    retained = true;
+    await proxy.handleRequest(makePayload(9030, 'GET', '/session/status'));
+
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 9030,
+      data: { moved: status },
+    });
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/status', undefined, {
+      directory: moved.directory,
+    });
+    expect(proxy.isSessionCatalogEventAuthorized('moved', moved.directory)).toBe(false);
+
+    destinationUnavailable = true;
+    await proxy.handleRequest(makePayload(9031, 'GET', '/session/status'));
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 9031,
+      error: 'Could not load session statuses from: /repo',
+    });
+
+    destinationUnavailable = false;
+    completed = true;
+    await proxy.handleRequest(makePayload(9032, 'GET', '/session/status'));
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 9032, data: {} });
+    proxy.dispose();
+  });
+
   it.each([undefined, '/repo'])(
     'hides a transferred link locally with scope %s, without mutating the server',
     async (directory) => {
