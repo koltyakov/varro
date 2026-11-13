@@ -532,6 +532,16 @@ describe('getLeadingSlashCommand', () => {
     expect(getLeadingSlashCommand('prefix /test')).toBeNull();
     expect(getLeadingSlashCommand('')).toBeNull();
   });
+
+  it.each([
+    ['/find-skills\n\n', ''],
+    ['/find-skills\n\ntest', 'test'],
+    ['/find-skills\ntest\ntest', 'test\ntest'],
+    ['  /FIND-SKILLS first\n\nsecond  ', 'first\n\nsecond'],
+    ['/find-skills\r\nfirst\r\nsecond', 'first\r\nsecond'],
+  ])('preserves multiline arguments in %j', (input, args) => {
+    expect(getLeadingSlashCommand(input)).toEqual({ name: 'find-skills', args });
+  });
 });
 
 describe('getCompletionSelection', () => {

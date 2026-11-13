@@ -4799,7 +4799,7 @@ describe('ChatInput', () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
-  it.each(['/docs test', '/docs', '  /DOCS test'])(
+  it.each(['/docs test', '/docs', '  /DOCS test', '/docs\ntest\ntest', '/docs\n\ntest'])(
     'renders the leading skill command %s as a chip without changing its send path',
     async (draft) => {
       setState('commands', [
@@ -4824,7 +4824,7 @@ describe('ChatInput', () => {
       await flushAsyncWork();
       expect(runSlashCommandByNameMock).toHaveBeenCalledWith(
         'docs',
-        draft.includes('test') ? 'test' : ''
+        draft.trim().replace(/^\/docs\s*/i, '')
       );
       expect(sendMessageMock).not.toHaveBeenCalled();
     }

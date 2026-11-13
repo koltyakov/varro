@@ -8,7 +8,7 @@ type PlanImplementationSendOptions = {
 };
 
 type InitSendOptions = { targetSessionId: string };
-type CommandRouting = { agent?: string; model?: string };
+type CommandRouting = { agent?: string; model?: string; variant?: string };
 type SessionCommandInput = CommandRouting & { command: string; arguments: string };
 
 export type SessionCommandOptions = {

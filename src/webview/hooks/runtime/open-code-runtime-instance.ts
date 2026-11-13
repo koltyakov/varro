@@ -16,6 +16,7 @@ import {
   createSessionWorkspaceMetadata,
 } from '../../../shared/protocol';
 import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
+import { normalizeModelVariant } from '../../../shared/model-variant';
 import { getFollowupActionTitle } from '../../../shared/followups';
 import { getResolvedAgentPermissionRules } from '../../../shared/permission-rules';
 import { isPlaceholderSessionTitle } from '../../../shared/session-title';
@@ -2903,10 +2904,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getCommandRouting: (sessionId = appStore.state.activeSessionId) => {
       const model =
         routingStore.getSelectedModelForSession(sessionId) ?? appStore.state.selectedModel;
-      return {
+      const variant = normalizeModelVariant(model?.modelID, model?.variant);
+      const routing = {
         agent: appStore.state.selectedAgent ?? undefined,
         model: model ? `${model.providerID}/${model.modelID}` : undefined,
       };
+      return variant ? { ...routing, variant } : routing;
     },
     startLoading: uiStore.startLoading,
     runSessionCommand: (sessionId, input) =>

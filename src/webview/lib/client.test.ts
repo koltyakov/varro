@@ -119,6 +119,28 @@ afterEach(() => {
 });
 
 describe('client', () => {
+  it.each(['low', undefined])(
+    'forwards command effort %s without adding a default variant',
+    async (variant) => {
+      const { client } = await loadClient();
+      const body: Parameters<ClientApi['session']['command']>[1] = {
+        command: 'find-skills',
+        arguments: 'first\n\nsecond',
+        model: 'openai/gpt-5.5',
+      };
+      if (variant) body.variant = variant;
+
+      await client.session.command('session-1', body, { directory: '/repo' });
+
+      expect(bridgeMocks.apiCall).toHaveBeenCalledExactlyOnceWith(
+        'POST',
+        '/session/session-1/command?directory=%2Frepo',
+        body
+      );
+      if (!variant) expect(bridgeMocks.apiCall.mock.calls[0]?.[2]).not.toHaveProperty('variant');
+    }
+  );
+
   it('hides moved links through a host-owned endpoint scoped to the list folder', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue(true);

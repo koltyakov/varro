@@ -250,7 +250,7 @@ export function getSessionReferenceIds(text: string) {
 
 export function getLeadingSlashCommand(text: string) {
   const trimmed = text.trim();
-  const match = trimmed.match(/^\/([^\s]+)(?:\s+(.*))?$/);
+  const match = trimmed.match(/^\/([^\s]+)(?:\s+(.*))?$/s);
   if (!match) return null;
 
   return {

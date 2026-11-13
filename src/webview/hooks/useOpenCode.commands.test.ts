@@ -140,7 +140,11 @@ describe('command helpers', () => {
       const { stateModule, hookModule } = await loadModules();
       stateModule.setState('activeSessionId', 'session-1');
       stateModule.setState('selectedAgent', 'ask');
-      stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'chosen-model' });
+      stateModule.setState('selectedModel', {
+        providerID: 'openai',
+        modelID: 'chosen-model',
+        variant: 'low',
+      });
       stateModule.setState('commands', [
         override
           ? {
@@ -161,6 +165,7 @@ describe('command helpers', () => {
         arguments: '',
         agent: 'ask',
         model: 'openai/chosen-model',
+        variant: 'low',
       });
       // OpenCode applies command overrides before these request defaults.
       expect(stateModule.state.commands[0]?.agent).toBe(override ? 'reviewer' : undefined);
@@ -170,13 +175,68 @@ describe('command helpers', () => {
     }
   );
 
+  it.each([
+    ['low', 'low'],
+    ['high', 'high'],
+    ['minimal', 'low'],
+    ['default', undefined],
+    [undefined, undefined],
+  ])('sends a skill command with selected effort %s', async (selectedVariant, expectedVariant) => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('selectedModel', {
+      providerID: 'openai',
+      modelID: 'gpt-5.5',
+      variant: selectedVariant,
+    });
+    stateModule.setState('commands', [{ name: 'find-skills', template: '', source: 'skill' }]);
+    clientMocks.sessionCommand.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    expect(await hookModule.runSlashCommandByName('find-skills', '')).toBe(true);
+
+    const body = clientMocks.sessionCommand.mock.calls[0]?.[1];
+    expect(body).toEqual({
+      command: 'find-skills',
+      arguments: '',
+      model: 'openai/gpt-5.5',
+      variant: expectedVariant,
+    });
+    if (!expectedVariant) expect(body).not.toHaveProperty('variant');
+  });
+
+  it('uses the session Default instead of the global or remembered reasoning variant', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('activeSessionId', 'session-1');
+    const model = { providerID: 'openai', modelID: 'gpt-5.5' };
+    stateModule.setState('selectedModel', { ...model, variant: 'high' });
+    stateModule.setState('sessionSelectedModels', 'session-1', model);
+    stateModule.setState('modelVariantSelections', { 'openai:gpt-5.5': 'high' });
+    stateModule.setState('commands', [{ name: 'find-skills', template: '', source: 'skill' }]);
+    clientMocks.sessionCommand.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    expect(await hookModule.runSlashCommandByName('find-skills', '')).toBe(true);
+
+    const body = clientMocks.sessionCommand.mock.calls[0]?.[1];
+    expect(body).toMatchObject({ command: 'find-skills', model: 'openai/gpt-5.5' });
+    expect(body).not.toHaveProperty('variant');
+    expect(stateModule.state.modelVariantSelections['openai:gpt-5.5']).toBe('high');
+  });
+
   it.each([false, true])(
     'captures blank-session command routing before creation (navigate: %s)',
     async (navigate) => {
       const { stateModule, hookModule } = await loadModules();
       stateModule.setState('activeSessionId', null);
       stateModule.setState('selectedAgent', 'ask');
-      stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'chosen-model' });
+      stateModule.setState('selectedModel', {
+        providerID: 'openai',
+        modelID: 'chosen-model',
+        variant: 'low',
+      });
       stateModule.setState('commands', [{ name: 'inspect', template: 'Inspect this code' }]);
       let finish!: (value: ReturnType<typeof session>) => void;
       clientMocks.sessionCreate.mockReturnValue(
@@ -191,7 +251,11 @@ describe('command helpers', () => {
         stateModule.setSessions([session('other')]);
         stateModule.setState('activeSessionId', 'other');
         stateModule.setState('selectedAgent', 'build');
-        stateModule.setState('selectedModel', { providerID: 'other', modelID: 'other-model' });
+        stateModule.setState('selectedModel', {
+          providerID: 'other',
+          modelID: 'other-model',
+          variant: 'high',
+        });
         stateModule.startLoading();
       }
       finish(session('created'));
@@ -203,6 +267,7 @@ describe('command helpers', () => {
           arguments: 'files',
           agent: 'ask',
           model: 'openai/chosen-model',
+          variant: 'low',
         },
         { directory: '/repo' }
       );

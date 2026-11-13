@@ -572,6 +572,7 @@ export const client = {
         messageID?: string;
         agent?: string;
         model?: string;
+        variant?: string;
       },
       options?: { directory?: string }
     ): Promise<MessageEntry | void> {
