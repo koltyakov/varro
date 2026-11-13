@@ -1,4 +1,5 @@
 import { render } from 'solid-js/web';
+import { createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Permission } from '../types';
 import { setState } from '../lib/app-state';
@@ -422,6 +423,112 @@ describe('PermissionPrompt', () => {
     expect(mocks.respondPermission).not.toHaveBeenCalled();
   });
 
+  it.each(['session', 'project', 'global'] as const)(
+    'prefills V2 WebFetch %s reviews with requested URLs instead of wildcard save suggestions',
+    async (scope) => {
+      setState('serverStatus', { state: 'running', apiVersion: 2 });
+      const url = 'https://example.com/requested?query=value';
+      const permission = createPermission({
+        type: 'webfetch',
+        pattern: [url],
+        always: ['*'],
+        metadata: { url: 'https://example.com/original#fragment' },
+      });
+      cleanup = render(() => PermissionPrompt({ permission }), container!);
+      container!.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')!.click();
+      await Promise.resolve();
+      document.body
+        .querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+        .item(['session', 'project', 'global'].indexOf(scope))
+        .click();
+      expect(container!.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe(url);
+      expect(permission.always).toEqual(['*']);
+      container!
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      const approve =
+        scope === 'session'
+          ? mocks.alwaysAllowPermissionForSession
+          : scope === 'project'
+            ? mocks.alwaysAllowPermissionForProject
+            : mocks.alwaysAllowPermissionForGlobal;
+      expect(approve).toHaveBeenCalledExactlyOnceWith('session-1', 'permission-1', [url]);
+    }
+  );
+
+  it.each([undefined, '*'])(
+    'uses the WebFetch metadata URL when request resources are %s',
+    async (pattern) => {
+      setState('serverStatus', { state: 'running', apiVersion: 2 });
+      cleanup = render(
+        () =>
+          PermissionPrompt({
+            permission: createPermission({
+              type: 'webfetch',
+              pattern,
+              always: ['*'],
+              metadata: { url: 'https://example.com/exact' },
+            }),
+          }),
+        container!
+      );
+      container!.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')!.click();
+      await Promise.resolve();
+      document.body.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+      expect(container!.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe(
+        'https://example.com/exact'
+      );
+    }
+  );
+
+  it('preserves the review draft and expansion on same-ID refreshes and resets for a new ID', async () => {
+    setState('serverStatus', { state: 'running', apiVersion: 2 });
+    const [permission, setPermission] = createSignal(
+      createPermission({
+        always: ['git *'],
+        metadata: { command: 'git diff --stat' },
+      })
+    );
+    cleanup = render(
+      () =>
+        PermissionPrompt({
+          get permission() {
+            return permission();
+          },
+        }),
+      container!
+    );
+    container!.querySelector<HTMLButtonElement>('.permission-command-toggle')!.click();
+    container!.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')!.click();
+    await Promise.resolve();
+    document.body.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    await Promise.resolve();
+    const textarea = container!.querySelector<HTMLTextAreaElement>('textarea')!;
+    textarea.value = 'git diff *';
+    textarea.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    for (let refresh = 0; refresh < 3; refresh++) {
+      setPermission({ ...permission(), metadata: { command: 'git diff --stat' } });
+      expect(container!.querySelector('textarea')).toBe(textarea);
+      expect(textarea.value).toBe('git diff *');
+      expect(document.activeElement).toBe(textarea);
+      expect(
+        container!.querySelector('.permission-command-toggle')!.getAttribute('aria-expanded')
+      ).toBe('true');
+    }
+    expect(mocks.alwaysAllowPermissionForSession).not.toHaveBeenCalled();
+    setPermission(
+      createPermission({ id: 'permission-2', always: ['npm *'], metadata: { command: 'npm test' } })
+    );
+    expect(container!.querySelector('textarea')).toBeNull();
+    expect(
+      container!.querySelector('.permission-command-toggle')!.getAttribute('aria-expanded')
+    ).toBe('false');
+    container!.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')!.click();
+    await Promise.resolve();
+    document.body.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    expect(container!.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('npm *');
+  });
+
   it('cancels the review with Escape and restores the original actions and keyboard focus', async () => {
     setState('serverStatus', { state: 'running', apiVersion: 2 });
     cleanup = render(
@@ -467,6 +574,69 @@ describe('PermissionPrompt', () => {
     expect(writeText).toHaveBeenCalledWith(command);
     toggle.click();
     expect(container!.querySelector('.permission-command-expanded')).toBeNull();
+  });
+
+  it.each([
+    { type: 'bash', child: false, source: 'resources' },
+    { type: 'shell', child: true, source: 'resources' },
+    { type: 'bash', child: true, source: 'title' },
+    { type: 'shell', child: false, source: 'title' },
+  ])('expands and copies fallback commands: %j', async ({ type, child, source }) => {
+    const command = `printf '%s\\n' '${'long shell command '.repeat(80)}'\nprintf done`;
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    if (child)
+      setState('sessions', [
+        {
+          id: 'session-1',
+          parentID: 'root-session',
+          agent: 'general',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Child',
+          version: '2',
+          time: { created: 0, updated: 0 },
+        },
+      ]);
+    const permission = createPermission({
+      type,
+      title: `${type} ${command}`,
+      pattern: source === 'resources' ? [command] : undefined,
+      metadata: {},
+    });
+    cleanup = render(() => PermissionPrompt({ permission }), container!);
+    expect(container!.querySelector('.permission-prompt-agent')?.textContent).toBe(
+      child ? '@general' : undefined
+    );
+    expect(container!.querySelector('.permission-prompt-text')!.textContent).toBe('Run command');
+    const toggle = container!.querySelector<HTMLButtonElement>('.permission-command-toggle')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    toggle.click();
+    expect(
+      container!.querySelector('.permission-command-expanded .permission-meta-value')!.textContent
+    ).toBe(command);
+    container!.querySelector<HTMLButtonElement>('[aria-label^="Copy command:"]')!.click();
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(command);
+    toggle.click();
+    expect(container!.querySelector('.permission-command-expanded')).toBeNull();
+    expect(permission.metadata).toEqual({});
+    expect(mocks.respondPermission).not.toHaveBeenCalled();
+  });
+
+  it('does not treat non-shell resource patterns as commands', () => {
+    cleanup = render(
+      () =>
+        PermissionPrompt({
+          permission: createPermission({
+            type: 'read',
+            title: 'read file',
+            pattern: ['src/file.ts'],
+          }),
+        }),
+      container!
+    );
+    expect(container!.querySelector('.permission-command-toggle')).toBeNull();
   });
 
   it.each(['session', 'global'] as const)(

@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests inspect controlled private configuration state on the provider fixture. */
 import { dirname } from 'node:path';
+import { parse } from 'jsonc-parser';
 import { describe, expect, it, vi } from 'vitest';
 import {
   attachTestView,
@@ -13,6 +14,151 @@ import { getOpenCodeConfigPaths } from './open-code-process';
 const vscodeMock = getVscodeMock();
 
 describe('SidebarProvider local config routing', () => {
+  it('preserves inline native entries when adding the missing config schema', async () => {
+    const baseline = '{ "action": "shell", "resource": "*", "effect": "ask" }';
+    let raw = `{"permissions":[${baseline}]}`;
+    vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath !== '/repo/opencode.json') throw { code: 'FileNotFound' };
+      return new TextEncoder().encode(raw);
+    });
+    vscodeMock.workspace.fs.stat.mockRejectedValue({ code: 'FileNotFound' });
+    vscodeMock.workspace.fs.writeFile.mockImplementation(async (_uri, bytes) => {
+      raw = new TextDecoder().decode(bytes);
+    });
+    const { provider } = await createSidebarProviderInstance({
+      server: createServer({ apiVersion: 2 }),
+    });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 997,
+        method: 'POST',
+        path: '/varro/opencode-config/permissions',
+        body: {
+          rules: [
+            { permission: 'bash', pattern: '*', action: 'ask' },
+            { permission: 'webfetch', pattern: 'https://example.com/*', action: 'allow' },
+          ],
+        },
+      },
+    });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 997,
+        data: expect.objectContaining({ projectRules: expect.any(Array) }),
+      },
+    });
+    expect(raw).toContain(baseline);
+    expect(parse(raw)).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      permissions: [
+        { action: 'shell', resource: '*', effect: 'ask' },
+        { action: 'webfetch', resource: 'https://example.com/*', effect: 'allow' },
+      ],
+    });
+  });
+
+  it.each(['project', 'global'] as const)(
+    'preserves compact %s permission entries through approval and panel edits',
+    async (scope) => {
+      const path =
+        scope === 'project'
+          ? '/repo/opencode.jsonc'
+          : getOpenCodeConfigPaths().find((candidate) => candidate.endsWith('/opencode.json'))!;
+      const baseline = '    { "action": "shell", "resource": "*", "effect": "ask" }';
+      let raw = `{\n  // unrelated settings\n  "model": "fixture/existing",\n  "permissions": [\n    // baseline permission\n${baseline} // keep attached\n  ]\n}\n`;
+      vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+        if (uri.fsPath !== path) throw { code: 'FileNotFound' };
+        return new TextEncoder().encode(raw);
+      });
+      vscodeMock.workspace.fs.stat.mockRejectedValue({ code: 'FileNotFound' });
+      vscodeMock.workspace.fs.writeFile.mockImplementation(async (_uri, bytes) => {
+        raw = new TextDecoder().decode(bytes);
+      });
+      const request = vi.fn(async (_method: string, route: string) => {
+        if (route.startsWith('/session/session-1'))
+          return { id: 'session-1', projectID: 'project-1', directory: '/repo' };
+        if (route === '/permission')
+          return [
+            {
+              id: 'perm-1',
+              sessionID: 'session-1',
+              permission: 'webfetch',
+              always: ['*'],
+            },
+          ];
+        return undefined;
+      });
+      const { provider } = await createSidebarProviderInstance({
+        server: createServer({ apiVersion: 2, request }),
+      });
+      const { posted } = attachTestView(provider);
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 994,
+          method: 'POST',
+          path: `/varro/permission/${scope}-allow`,
+          body: {
+            sessionId: 'session-1',
+            permissionId: 'perm-1',
+            patterns: ['https://example.com/*'],
+          },
+        },
+      });
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: {
+          id: 994,
+          data: { permission: 'webfetch', patterns: ['https://example.com/*'] },
+        },
+      });
+      expect(raw).toContain(`${baseline}, // keep attached`);
+      expect(raw).toContain(
+        '    { "action": "webfetch", "resource": "https://example.com/*", "effect": "allow" }'
+      );
+
+      const panelPath = `/varro/opencode-config/${scope === 'global' ? 'global-permissions' : 'permissions'}`;
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 995,
+          method: 'POST',
+          path: panelPath,
+          body: {
+            rules: [
+              { permission: 'bash', pattern: '*', action: 'ask' },
+              { permission: 'webfetch', pattern: 'https://example.com/exact', action: 'allow' },
+            ],
+          },
+        },
+      });
+      expect(raw).toContain(`${baseline}, // keep attached`);
+      expect(raw).toContain(
+        '    { "action": "webfetch", "resource": "https://example.com/exact", "effect": "allow" }'
+      );
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 996,
+          method: 'POST',
+          path: panelPath,
+          body: { rules: [{ permission: 'bash', pattern: '*', action: 'ask' }] },
+        },
+      });
+      expect(raw).toContain(baseline);
+      expect(raw).toContain('// unrelated settings');
+      expect(raw).toContain('// baseline permission');
+      expect(parse(raw).permissions).toEqual([{ action: 'shell', resource: '*', effect: 'ask' }]);
+      expect(
+        vscodeMock.workspace.fs.writeFile.mock.calls.every(([uri]) => uri.fsPath === path)
+      ).toBe(true);
+      expect(request.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+    }
+  );
+
   it.each(['dirty', 'concurrent'] as const)(
     'rejects global permission edits when the config is %s',
     async (conflict) => {

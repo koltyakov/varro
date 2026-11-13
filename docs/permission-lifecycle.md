@@ -235,8 +235,11 @@ automatic retry rather than exposing a manual approval that contradicts full acc
 Default mode presents `Reject`, `Once`, and an `Always` scope menu.
 The `Allow always` button only opens the menu; it has no default or remembered scope.
 On V1, choosing a scope immediately submits that approval. On V2, session, project, and global
-choices open a resource-pattern review prefilled from the request's `always` suggestions. The user may
-edit those patterns, keep them unchanged, or cancel without resolving the request. Saving requires
+choices open a resource-pattern review prefilled from the request's `always` suggestions. V2 WebFetch
+reviews instead use the requested URL resources, falling back to the metadata URL when needed, so a
+wildcard save suggestion does not default to allowing every URL. Same-ID request refreshes must retain
+the review scope, draft, focus, and command expansion; only a different request ID resets them. The user
+may edit those patterns, keep them unchanged, or cancel without resolving the request. Saving requires
 explicit confirmation. The review replaces the ordinary action row with Cancel and Save & allow;
 cancelling restores the original actions without sending a permission reply.
 Patterns are bounded to 1-50 nonempty strings of at most 2000 characters each.
@@ -267,6 +270,8 @@ ID and owning session against the server before changing rules.
   saved-permission PATCH. It requires V2 and a locally managed connection. Attach-only connections
   cannot edit host files. Global config edits preserve unrelated settings and comments, serialize by
   canonical file path across windows, and reject dirty documents and concurrent file changes.
+  Native permission-array edits preserve existing entry formatting and comments where possible;
+  appended entries follow the existing compact or multiline style instead of reserializing the array.
   The Permissions screen edits/removes global config rules independently of project, session, and
   database approvals. Config changes take effect when OpenCode next loads the configuration; saving
   must not restart or dispose the active instance.

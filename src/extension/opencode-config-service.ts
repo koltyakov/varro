@@ -22,6 +22,7 @@ import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/works
 import { logger } from './logger';
 import { readFollowupModel } from './extension-config';
 import { v1Action, v2Action } from './opencode-v2-projection';
+import { editNativePermissionConfig } from './opencode-permission-config';
 import { getOpenCodeApiCapabilities } from './opencode-api-capabilities';
 import type { OpenCodeServer } from './server';
 import { asRecord, parseModelRoute } from './sidebar-provider-utils';
@@ -882,7 +883,12 @@ export class OpenCodeConfigService {
         const initialStat = await this.readConfigStat(target.uri);
         let nextRaw = target.raw.trim() ? target.raw : '{}\n';
         if (typeof target.config.$schema !== 'string' || !target.config.$schema.trim()) {
-          nextRaw = applyJsoncChange(nextRaw, ['$schema'], 'https://opencode.ai/config.json');
+          nextRaw = applyJsoncChange(
+            nextRaw,
+            ['$schema'],
+            'https://opencode.ai/config.json',
+            Array.isArray(target.config.permissions)
+          );
         }
 
         const targetPermissionConfig = target.config.permission;
@@ -900,18 +906,14 @@ export class OpenCodeConfigService {
             ? effectivePermissionConfig
             : null;
         if (native) {
-          nextRaw = applyJsoncChange(
-            nextRaw,
-            ['permissions'],
-            [
-              ...(Array.isArray(target.config.permissions) ? target.config.permissions : []),
-              ...patterns.map((resource) => ({
-                action: v2Action(permission),
-                resource,
-                effect: 'allow',
-              })),
-            ]
-          );
+          nextRaw = editNativePermissionConfig(nextRaw, [
+            ...(Array.isArray(target.config.permissions) ? target.config.permissions : []),
+            ...patterns.map((resource) => ({
+              action: v2Action(permission),
+              resource,
+              effect: 'allow',
+            })),
+          ]);
         } else if (fallbackAction) {
           const permissionConfig: Record<string, unknown> = { '*': fallbackAction };
           permissionConfig[permission] = scalarConfigPermission
@@ -1435,7 +1437,12 @@ export class OpenCodeConfigService {
         const initialStat = await this.readConfigStat(target.uri);
         let nextRaw = target.raw.trim() ? target.raw : '{}\n';
         if (typeof target.config.$schema !== 'string' || !target.config.$schema.trim()) {
-          nextRaw = applyJsoncChange(nextRaw, ['$schema'], 'https://opencode.ai/config.json');
+          nextRaw = applyJsoncChange(
+            nextRaw,
+            ['$schema'],
+            'https://opencode.ai/config.json',
+            Array.isArray(target.config.permissions)
+          );
         }
         const permissionConfig: Record<
           string,
@@ -1458,19 +1465,20 @@ export class OpenCodeConfigService {
           patterns[rule.pattern] = rule.action;
           permissionConfig[rule.permission] = patterns;
         }
-        nextRaw = applyJsoncChange(
-          nextRaw,
-          [native ? 'permissions' : 'permission'],
-          native
-            ? rules.map((rule) => ({
+        nextRaw = native
+          ? editNativePermissionConfig(
+              nextRaw,
+              rules.map((rule) => ({
                 action: v2Action(rule.permission),
                 resource: rule.pattern,
                 effect: rule.action,
               }))
-            : rules.length > 0
-              ? permissionConfig
-              : undefined
-        );
+            )
+          : applyJsoncChange(
+              nextRaw,
+              ['permission'],
+              rules.length > 0 ? permissionConfig : undefined
+            );
 
         const latestStat = await this.readConfigStat(target.uri);
         if (!this.areConfigStatsEqual(initialStat, latestStat)) {
@@ -1652,11 +1660,16 @@ function mergeOpenCodeConfig(
   return merged;
 }
 
-function applyJsoncChange(raw: string, path: (string | number)[], value: unknown) {
+function applyJsoncChange(
+  raw: string,
+  path: (string | number)[],
+  value: unknown,
+  preserveFormatting = false
+) {
   return applyEdits(
     raw,
     modify(raw, path, value, {
-      formattingOptions: { insertSpaces: true, tabSize: 2 },
+      formattingOptions: preserveFormatting ? undefined : { insertSpaces: true, tabSize: 2 },
     })
   );
 }

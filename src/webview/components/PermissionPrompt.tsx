@@ -64,6 +64,7 @@ export function PermissionPrompt(props: {
   const [commandExpanded, setCommandExpanded] = createSignal(false);
   const [reviewScope, setReviewScope] = createSignal<'session' | 'project' | 'global'>();
   const [patternDraft, setPatternDraft] = createSignal('');
+  const currentPermissionId = createMemo(() => props.permission.id);
   const patternHintId = createUniqueId();
   const nativeServer = () =>
     state.serverStatus.state === 'running' && state.serverStatus.apiVersion === 2;
@@ -87,15 +88,13 @@ export function PermissionPrompt(props: {
     return 'One pattern per line. * matches any text.';
   };
   createEffect(
-    on(
-      () => props.permission.id,
-      () => {
-        setCommandExpanded(false);
-        setReviewScope(undefined);
-        setAlwaysMenuOpen(false);
-        setResponseError(undefined);
-      }
-    )
+    on(currentPermissionId, () => {
+      setCommandExpanded(false);
+      setReviewScope(undefined);
+      setPatternDraft('');
+      setAlwaysMenuOpen(false);
+      setResponseError(undefined);
+    })
   );
   const [responseError, setResponseError] = createSignal<string>();
   const [alwaysMenuPosition, setAlwaysMenuPosition] = createSignal({ left: 0, top: 0 });
@@ -133,7 +132,17 @@ export function PermissionPrompt(props: {
   const chooseScope = (scope: 'session' | 'server' | 'project' | 'global') => {
     setAlwaysMenuOpen(false);
     if (nativeServer() && scope !== 'server') {
-      setPatternDraft((props.permission.always ?? []).join('\n'));
+      let patterns = props.permission.always ?? [];
+      if (props.permission.type === 'webfetch') {
+        const resources = props.permission.pattern;
+        const requested = (Array.isArray(resources) ? resources : [resources]).filter(
+          (resource): resource is string => isString(resource) && /^https?:\/\//i.test(resource)
+        );
+        const url = props.permission.metadata?.url;
+        if (requested.length > 0) patterns = requested;
+        else if (isString(url) && url.trim()) patterns = [url];
+      }
+      setPatternDraft(patterns.join('\n'));
       setResponseError(undefined);
       setReviewScope(scope);
     } else {
@@ -195,20 +204,31 @@ export function PermissionPrompt(props: {
     });
   });
 
-  const metadataEntries = () => {
+  const shellCommand = createMemo(() => {
+    if (props.permission.type !== 'bash' && props.permission.type !== 'shell') return undefined;
+    const command = props.permission.metadata?.command;
+    if (isString(command) && command.trim()) return command;
+    const patterns = props.permission.pattern;
+    const resources = (Array.isArray(patterns) ? patterns : [patterns]).filter(
+      (pattern): pattern is string => isString(pattern) && Boolean(pattern.trim())
+    );
+    if (resources.length > 0) return resources.join('\n');
+    return /^(?:bash|shell)\s+([\s\S]+)$/.exec(props.permission.title)?.[1];
+  });
+  const metadataEntries = (): [string, unknown][] => {
     const meta = props.permission.metadata;
-    if (!meta || !isObject(meta)) return [];
-    return Object.entries(meta).filter(([, v]) => v !== undefined && v !== null);
+    const entries =
+      meta && isObject(meta)
+        ? Object.entries(meta).filter(([, v]) => v !== undefined && v !== null)
+        : [];
+    const command = shellCommand();
+    if (command) return [['command', command], ...entries.filter(([key]) => key !== 'command')];
+    return entries;
   };
   const displayTitle = () => {
     const summary = props.permission.actionSummary?.trim();
     if (summary) return summary;
-    const command = props.permission.metadata?.command;
-    if (
-      (props.permission.type === 'bash' || props.permission.type === 'shell') &&
-      isString(command) &&
-      command.trim()
-    ) {
+    if (shellCommand()) {
       return 'Run command';
     }
     return props.permission.title;
