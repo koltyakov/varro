@@ -57,7 +57,7 @@ test('clicking the attachment row takes focus and keeps pasted images out of the
       await page.evaluate(async () => {
         const clipboardData = new DataTransfer();
         for (const item of await navigator.clipboard.read()) {
-          for (const type of item.types.filter((type) => type.startsWith('image/'))) {
+          for (const type of item.types.filter((mimeType) => mimeType.startsWith('image/'))) {
             clipboardData.items.add(new File([await item.getType(type)], 'image.png', { type }));
           }
         }
