@@ -214,7 +214,14 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
       output: v2ToolOutput(data.content),
     });
   }
-  if (event.type.startsWith('session.step.')) {
+  if (
+    [
+      'session.step.started',
+      'session.step.streamed',
+      'session.step.ended',
+      'session.step.failed',
+    ].includes(event.type)
+  ) {
     if (event.type === 'session.step.streamed')
       return emit('session.next.context.updated', { sessionID });
     const model = asRecord(data.model);

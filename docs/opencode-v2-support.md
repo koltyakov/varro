@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.5` and v2 `2.2.7`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.5` and v2 `2.3.0`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -192,6 +192,75 @@ published-server check does not rerun or clear the startup failures recorded bel
 The full `npm run test` run passed 12,181 Vitest tests with 58 skipped, plus 284
 script tests with three skipped. There were no failures. Evidence is
 `artifacts/auxiliary-usage-all-tests.log`.
+
+### 2.3.0 compatibility review
+
+Reviewed v2.2.7 to v2.3.0, `fedc6f208a` through `a554d70499`. The complete
+upstream diff is retained in `artifacts/opencode-2.3.0-upstream.diff`. All 139
+HTTP paths and their operations remain available. Consumed session/message/inbox
+shapes, permission/form payloads, and managed `serve`/upgrade arguments remain
+compatible. V1 `1.19.5` remains current, and both support floors are unchanged.
+
+The new durable `session.step.first-token` event exposed a sequence-accounting
+gap: Varro's broad step-event projection emitted an unknown event name, which
+the event bridge dropped. The next event could then trigger missed-event
+reconciliation. Step projection now handles only its supported event names;
+other durable step events use the existing sequence-only fallback without UI
+activity. Both the released first-token event and an unknown future step event
+failed the regression before the fix. Native first-token timing display remains
+optional parity work.
+
+Other additions are server-owned: experimental MCP events, provider client
+certificates, freeform model tool inputs, timed-out foreground shells moving to
+the background, shell output retention on interruption, and durable child-session
+reports/recovery. Tool execution still receives object inputs, file edits retain
+their `metadata.files` diffs, and shell metadata retains the fields Varro consumes.
+Desktop/TUI, client-store, localization, and site changes require no adaptation.
+
+The dependency install also synchronized the user's existing Varro version,
+`@vscode/vsce`, and `jsdom` manifest edits into the lockfile. npm reported a
+blocked `@vscode/vsce-sign@2.1.1` postinstall because the existing allowlist pins
+`2.1.0`; this bump does not expand install-script permissions.
+
+All 674 focused adapter, transport, bridge, and session-event tests pass after
+the fix. `npm run lint`, `npm run fmt`, `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` pass. Suggestion diagnostics
+are zero. Both lint commands report one existing `no-shadow` warning in
+`e2e/tests/attachment-paste.spec.ts`. Evidence uses the
+`artifacts/opencode-2.3.0-` prefix.
+
+The v1 dependency is unchanged, so the Docker v1 support-range matrix is not
+rerun. Real-editor visuals, live-model action parity, and native Windows checks
+are not part of this bump's verification.
+
+The published-server matrix passed all 158 applicable checks, with 62
+family/platform skips and no leaked or recovered processes. Evidence is
+`artifacts/opencode-2.3.0-adapters.log` and
+`artifacts/opencode-adapters/run-viLCfJ/`. The 2.3.0 checks loaded the
+sequence-event fix; earlier matrix entries began before that fix. All five
+compatibility-summary tests passed after the matrix completed.
+
+| Published server | Passed | Skipped | Issues found | All cases complete |
+| --- | ---: | ---: | --- | --- |
+| v1.16.0 | 30 | 25 | None in tested cases | Yes, applicable automated cases |
+| v1.19.5 | 31 | 24 | None in tested cases | Yes, applicable automated cases |
+| v2.0.5 | 45 | 10 | None in tested cases | Yes, applicable automated cases |
+| v2.3.0 | 52 | 3 | First-token sequence gap fixed; none remaining in tested cases | Yes, applicable automated cases |
+
+No further product fixes are indicated by these checks. Keep the durable
+sequence-only fallback when adding support for native first-token timing.
+
+A post-fix v2.0.5 adapter-contract recheck also passed all 35 applicable cases,
+with 10 family/platform skips, in `artifacts/opencode-2.3.0-floor-recheck.log`.
+The full `npm run test` run passed 12,423 tests, skipped 58, and failed one:
+`src/test/development-compatibility.test.ts` requires the npm install-script
+allowlist to match the locked versions. The existing VSCE manifest update now
+locks `@vscode/vsce-sign@2.1.1`, but the allowlist still names `2.1.0`. This is
+a development-configuration mismatch, not an OpenCode adapter failure. Review
+that package's postinstall before updating its allowlist entry, then rerun the
+development-compatibility test and full suite. This bump leaves that permission
+unchanged. The script-test phase did not run after the unit failure. Evidence is
+`artifacts/opencode-2.3.0-all-tests.log`.
 
 ### 2.2.7 compatibility review
 

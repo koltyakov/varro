@@ -2452,6 +2452,30 @@ describe('v2 transcript and permission projection', () => {
     expect(unknown).toMatchObject({ sequenceOnly: true, seq: 9 });
   });
 
+  it.each(['session.step.first-token', 'session.step.future'])(
+    'preserves sequence accounting for unprojected step event %s without UI activity',
+    (type) => {
+      const events = projectV2Event({
+        id: 'evt_first_token',
+        created: 50,
+        type,
+        durable: { aggregateID: 'ses_one', seq: 8, version: 1 },
+        location: { directory: '/repo' },
+        data: { sessionID: 'ses_one', assistantMessageID: 'msg_one' },
+      });
+
+      expect(events).toHaveLength(1);
+      expect(parseServerEvent(events[0])).toEqual({
+        id: 'evt_first_token',
+        type: 'session.next.context.updated',
+        sequenceOnly: true,
+        seq: 8,
+        workspaceDirectory: '/repo',
+        properties: { sessionID: 'ses_one' },
+      });
+    }
+  );
+
   it('preserves execution interruption before idle and advances the durable sequence once', () => {
     const events = projectV2Event({
       id: 'evt_interrupted',
