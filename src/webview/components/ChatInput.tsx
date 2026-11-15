@@ -3081,7 +3081,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (
       completion?.type !== 'mention' &&
       completion?.type !== 'session' &&
-      completion?.type !== 'skill'
+      completion?.type !== 'skill' &&
+      completion?.type !== 'slash'
     )
       return;
     applyCompletionValue(completion, completionSelection.value);
@@ -3203,7 +3204,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   function applyCompletionValue(
     completion: Extract<
       ReturnType<typeof getActiveCompletion>,
-      { type: 'mention' | 'session' | 'skill' }
+      { type: 'mention' | 'session' | 'skill' | 'slash' }
     >,
     value: string
   ) {
@@ -6953,7 +6954,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               if (
                 completion?.type !== 'mention' &&
                 completion?.type !== 'session' &&
-                completion?.type !== 'skill'
+                completion?.type !== 'skill' &&
+                completion?.type !== 'slash'
               )
                 return;
               applyCompletionValue(completion, completionSelection.value);

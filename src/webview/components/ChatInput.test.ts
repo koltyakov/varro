@@ -5034,6 +5034,111 @@ describe('ChatInput', () => {
     expect(titles).not.toContain('/skill:browser-bridge');
   });
 
+  it.each(
+    ['bro', 'browser-bridge', 'BROWSER-BRIDGE', 'web'].flatMap((query) =>
+      ['Enter', 'Tab', 'click'].flatMap((selection) =>
+        [' for this', '', '\nKeep this line'].map((suffix) => ({ query, selection, suffix }))
+      )
+    )
+  )(
+    'preserves surrounding draft text when selecting /$query with $selection before "$suffix"',
+    async ({ query, selection, suffix }) => {
+      setState('commands', [
+        {
+          name: 'browser-bridge',
+          description: 'Control a browser',
+          template: 'Control a browser',
+          source: 'skill',
+          hints: ['web'],
+        },
+      ]);
+      const prefix = 'Please use ';
+      setInputText(`${prefix}/${query}${suffix}`);
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+      editor.focus();
+      setCollapsedSelection(editor.firstChild, prefix.length + query.length + 1);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'o', bubbles: true }));
+      await flushAsyncWork();
+
+      const items = [...container!.querySelectorAll<HTMLButtonElement>('.completion-slash')];
+      const index = items.findIndex(
+        (item) =>
+          item.querySelector('.composer-completion-title')?.textContent === '/skill:browser-bridge'
+      );
+      expect(index).toBeGreaterThanOrEqual(0);
+      if (selection === 'click') {
+        items[index]!.click();
+      } else {
+        for (let i = 0; i < index; i++) {
+          editor.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+          );
+        }
+        editor.dispatchEvent(
+          new KeyboardEvent('keydown', { key: selection, bubbles: true, cancelable: true })
+        );
+      }
+      await flushAsyncWork();
+
+      const expected = `Please use $[browser-bridge]${suffix || ' '}`;
+      expect(inputText()).toBe(expected);
+      expect(editor.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
+        'browser-bridge'
+      );
+      expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+      await flushAsyncWork();
+      expect(sendMessageMock.mock.calls[0]?.[0]).toBe(expected);
+      expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    '/docs/README.md',
+    'Inspect /docs/README.md',
+    'Inspect /docs\\README.md',
+    '//docs/share',
+    'C:\\docs\\README.md',
+    'https://example.com/docs',
+    'prefix/docs',
+    'cost$5',
+    '$5',
+    '$HOME',
+    '$docs-other',
+    'Use /docs-other',
+    'Use $[%ZZ]',
+    'Use $[]',
+  ])('keeps skill-like input %s as ordinary draft text', async (draft) => {
+    setState('commands', [
+      {
+        name: 'docs',
+        description: 'Write a document',
+        template: 'Write a document',
+        source: 'skill',
+      },
+    ]);
+    setInputText(draft);
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    editor.focus();
+    setCollapsedSelection(editor, editor.childNodes.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(inputText()).toBe(draft);
+    expect(editor.querySelector('[data-chip-type="mention-skill"]')).toBeNull();
+    expect(container?.querySelector('.composer-completion-menu')).toBeNull();
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
   it.each(['Enter', 'Tab', 'click'])(
     'selects a dollar skill inline with %s and sends it with the prompt',
     async (selection) => {
@@ -5096,35 +5201,38 @@ describe('ChatInput', () => {
     }
   );
 
-  it('adds another skill at the end without replacing the first and restores chips from draft text', async () => {
-    setState('commands', [
-      { name: 'unslop', description: 'Edit writing', template: 'Edit writing', source: 'skill' },
-    ]);
-    setInputText('Use $[browser-bridge] then $un');
-    cleanup = render(() => ChatInput(), container!);
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.lastChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    setCollapsedSelection(editor.lastChild, editor.lastChild.textContent?.length ?? 0);
-    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'n', bubbles: true }));
-    await flushAsyncWork();
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
-    );
-    await flushAsyncWork();
-    expect(inputText()).toBe('Use $[browser-bridge] then $[unslop] ');
-    expect(
-      Array.from(editor.querySelectorAll('[data-chip-type="mention-skill"]')).map(
-        (chip) => chip.textContent
-      )
-    ).toEqual(['browser-bridge', 'unslop']);
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    await flushAsyncWork();
-    expect(sendMessageMock.mock.calls[0]?.[0]).toBe('Use $[browser-bridge] then $[unslop] ');
-    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
-  });
+  it.each(['$', '/'])(
+    'adds another %s skill without replacing an existing skill chip',
+    async (trigger) => {
+      setState('commands', [
+        { name: 'unslop', description: 'Edit writing', template: 'Edit writing', source: 'skill' },
+      ]);
+      setInputText(`Use $[browser-bridge] then ${trigger}un`);
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.lastChild) throw new Error('Expected populated composer editor');
+      editor.focus();
+      setCollapsedSelection(editor.lastChild, editor.lastChild.textContent?.length ?? 0);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'n', bubbles: true }));
+      await flushAsyncWork();
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+      );
+      await flushAsyncWork();
+      expect(inputText()).toBe('Use $[browser-bridge] then $[unslop] ');
+      expect(
+        Array.from(editor.querySelectorAll('[data-chip-type="mention-skill"]')).map(
+          (chip) => chip.textContent
+        )
+      ).toEqual(['browser-bridge', 'unslop']);
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+      await flushAsyncWork();
+      expect(sendMessageMock.mock.calls[0]?.[0]).toBe('Use $[browser-bridge] then $[unslop] ');
+      expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    }
+  );
 
   it('shows only skills for a bare dollar and dismisses without clearing the draft', async () => {
     setState('commands', [

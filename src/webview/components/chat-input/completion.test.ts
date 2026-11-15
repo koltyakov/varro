@@ -380,16 +380,20 @@ describe('getActiveCompletion', () => {
     expect(getActiveCompletion('review test', 11)).toBeNull();
   });
 
-  it.each(['/usr/libexec/lsd', '/usr/libexec/', '//server/share/file.txt', '/repo\\file.txt'])(
-    'does not search slash commands for the path %s',
-    (path) => {
-      for (const text of [path, `Inspect ${path}`]) {
-        expect(getActiveCompletion(text, text.length)).toBeNull();
-      }
-      // Moving the caret inside an already pasted path must not reopen the picker.
-      expect(getActiveCompletion(path, 2)).toBeNull();
+  it.each([
+    '/usr/libexec/lsd',
+    '/usr/libexec/',
+    '//server/share/file.txt',
+    '/repo\\file.txt',
+    '/browser-bridge/file.md',
+    '/browser-bridge\\file.md',
+  ])('does not search slash commands for the path %s', (path) => {
+    for (const text of [path, `Inspect ${path}`]) {
+      expect(getActiveCompletion(text, text.length)).toBeNull();
     }
-  );
+    // Moving the caret inside an already pasted path must not reopen the picker.
+    expect(getActiveCompletion(path, 2)).toBeNull();
+  });
 
   it('still offers explicit file and skill lookups containing path separators', () => {
     for (const [prefix, type] of [
@@ -545,6 +549,82 @@ describe('getLeadingSlashCommand', () => {
 });
 
 describe('getCompletionSelection', () => {
+  it.each(['bro', 'browser-bridge'])(
+    'inserts the inline slash skill query %s as a skill reference',
+    (query) => {
+      const prefix = 'Please use ';
+      const text = `${prefix}/${query} for this`;
+      expect(
+        getCompletionSelection(getActiveCompletion(text, prefix.length + query.length + 1), {
+          key: 'skill:browser-bridge',
+          type: 'slash',
+          source: 'skill',
+          name: 'browser-bridge',
+          aliases: [],
+          description: 'Control a browser',
+          action: () => {},
+        })
+      ).toEqual({ type: 'apply-mention', value: '$[browser-bridge]' });
+    }
+  );
+
+  it.each([
+    ['review [日本語]', 'rev', '$[review%20%5B%E6%97%A5%E6%9C%AC%E8%AA%9E%5D]'],
+    ['skills', 'ski', '$[skills]'],
+    ['problems', 'problems', '$[problems]'],
+    ['browser-bridge', 'BROWSER-BRIDGE', '$[browser-bridge]'],
+    ['browser-bridge', 'web', '$[browser-bridge]'],
+  ])('formats the selected inline skill %s for query %s', (name, query, value) => {
+    const text = `Use /${query}`;
+    expect(
+      getCompletionSelection(getActiveCompletion(text, text.length), {
+        key: `skill:${name}`,
+        type: 'slash',
+        source: 'skill',
+        name,
+        aliases: [],
+        description: 'A skill',
+        action: () => {},
+      })
+    ).toEqual({ type: 'apply-mention', value });
+  });
+
+  it.each(['command', 'mcp'] as const)(
+    'does not treat a %s completion as an inline skill',
+    (source) => {
+      const text = 'Use /bro';
+      expect(
+        getCompletionSelection(getActiveCompletion(text, text.length), {
+          key: 'slash:browser-bridge',
+          type: 'slash',
+          source,
+          name: 'browser-bridge',
+          aliases: [],
+          description: 'An ordinary command',
+          action: () => {},
+        })
+      ).toEqual({ type: 'set-slash', value: '/browser-bridge' });
+    }
+  );
+
+  it.each([
+    ['bro', 'set-slash'],
+    ['browser-bridge', 'run-slash'],
+  ])('preserves leading slash skill behavior for %s', (query, type) => {
+    const text = `/${query}`;
+    expect(
+      getCompletionSelection(getActiveCompletion(text, text.length), {
+        key: 'skill:browser-bridge',
+        type: 'slash',
+        source: 'skill',
+        name: 'browser-bridge',
+        aliases: [],
+        description: 'Control a browser',
+        action: () => {},
+      })
+    ).toEqual({ type, value: '/browser-bridge' });
+  });
+
   it('keeps slash selections as composer text updates until the command is typed exactly', () => {
     expect(
       getCompletionSelection(

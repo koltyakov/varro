@@ -275,6 +275,9 @@ export function getCompletionSelection(
 
   if (completion.type === 'slash') {
     if (!('name' in item)) return null;
+    if (completion.start > 0 && item.type === 'slash' && item.source === 'skill') {
+      return { type: 'apply-mention', value: formatSkillReference(item.name) };
+    }
     if (completion.query.toLowerCase().startsWith(`${SKILLS_COMMAND_NAME} `)) {
       return {
         type: 'set-slash',
