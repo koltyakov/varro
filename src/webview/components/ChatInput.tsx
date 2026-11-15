@@ -332,7 +332,11 @@ import {
   shouldRequestMentionFileSearch,
 } from './chat-input/completion';
 import { forkActiveSession, getSlashCommands } from './chat-input/slash-commands';
-import { openSideQuestion, sideQuestionUnavailableReason } from '../lib/side-question';
+import {
+  openSideQuestion,
+  SIDE_QUESTION_IMAGE_HINT,
+  sideQuestionUnavailableReason,
+} from '../lib/side-question';
 import { getSideQuestionText } from '../../shared/side-question';
 import { formatSkillReference, getSkillReferences } from '../lib/skill-reference';
 import type { SessionCommandOptions } from '../hooks/session/session-actions';
@@ -1673,6 +1677,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const inlineChips = createMemo((): RichComposerChip[] => {
     const chips: RichComposerChip[] = [];
     const text = inputText();
+    const sideQuestion = getSideQuestionText(text) !== null;
     const problems = explicitProblemAttachment();
     const terminal = composerTerminalSelection();
     if (terminal && text.includes(TERMINAL_SELECTION_MARKER)) {
@@ -1790,13 +1795,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           label: image.filename,
           path: image.filename,
           icon: 'image',
-          title: imageError(image.id),
+          disabled: sideQuestion,
+          title: sideQuestion ? SIDE_QUESTION_IMAGE_HINT : imageError(image.id),
           previewImage: canPreviewImage(image.id)
             ? { url: image.url, alt: image.filename }
             : undefined,
           textMarker: marker,
           compressible: canCompressImage(image.id),
-          compressionHint: imageCompressionHint(image.id),
+          compressionHint: sideQuestion ? undefined : imageCompressionHint(image.id),
         });
       }
     }
@@ -6701,6 +6707,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               nativePdfs={visibleNativePdfs()}
               nativePdfsSupported={currentModelSupportsPdf()}
               clipboardImagesNeedVision={clipboardImagesNeedVision()}
+              clipboardImagesExcludedReason={
+                isSideQuestionDraft() ? SIDE_QUESTION_IMAGE_HINT : undefined
+              }
               onToggleActiveContext={() => toggleCurrentDocumentEnabled(composerSessionId())}
               onPinActiveContext={canPinActiveContext() ? pinActiveContext : undefined}
               onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}

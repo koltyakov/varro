@@ -47,6 +47,7 @@ export function AttachmentStrip(props: {
   nativePdfs: NativePdfAttachment[];
   nativePdfsSupported: boolean;
   clipboardImagesNeedVision: boolean;
+  clipboardImagesExcludedReason?: string;
   onToggleActiveContext: () => void;
   onPinActiveContext?: () => void;
   onClearTerminalSelection: () => void;
@@ -226,9 +227,10 @@ export function AttachmentStrip(props: {
               <AttachmentChip
                 label={item.value.filename}
                 path={item.value.filename}
-                disabled={props.clipboardImagesNeedVision}
+                disabled={!!props.clipboardImagesExcludedReason || props.clipboardImagesNeedVision}
                 icon="image"
                 title={
+                  props.clipboardImagesExcludedReason ??
                   props.imageError?.(item.value.id) ??
                   (props.clipboardImagesNeedVision
                     ? `${item.value.filename} · Use a vision-capable model or vision subagent to send this image`
@@ -248,7 +250,11 @@ export function AttachmentStrip(props: {
                     ? undefined
                     : { url: item.value.url, alt: item.value.filename }
                 }
-                compressionHint={props.imageCompressionHint?.(item.value.id)}
+                compressionHint={
+                  props.clipboardImagesExcludedReason
+                    ? undefined
+                    : props.imageCompressionHint?.(item.value.id)
+                }
                 onCompress={
                   props.canCompressImage?.(item.value.id)
                     ? (event) => props.onCompressImage?.(item.value.id, event)

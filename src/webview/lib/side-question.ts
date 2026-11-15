@@ -6,6 +6,10 @@ import { buildSessionSendBody } from '../hooks/session/session-send';
 import { showSessionActionFeedback } from '../components/chat/SessionActionFeedback';
 import { getCurrentDocumentEnabled, inputText, state } from './state';
 import { PROBLEMS_REFERENCE, problemReferenceMarker } from './editor-problems';
+import { stripClipboardImagePlaceholders } from './clipboard-images';
+
+export const SIDE_QUESTION_IMAGE_HINT =
+  'Images are not included in side questions. Kept attached for your next regular message.';
 
 type SideQuestionView = {
   sessionID: string;
@@ -49,8 +53,8 @@ export function sideQuestionUnavailableReason(
   if (!session) return 'Open a conversation';
   if (session.transfer && !session.transfer.available) return 'Open its folder';
   if (!checkComposerDraft) return null;
-  if (state.clipboardImages.length || state.nativePdfs.length) {
-    return 'Remove images or PDFs to ask a side question';
+  if (state.nativePdfs.length) {
+    return 'Remove PDFs to ask a side question';
   }
   const promptReason = sideQuestionPromptUnavailableReason(draft);
   if (promptReason) return promptReason;
@@ -101,15 +105,16 @@ function captureSideQuestionContext(question: string, sessionID: string): string
 }
 
 export function openSideQuestion(question = '', draft = inputText()): boolean {
+  const prompt = stripClipboardImagePlaceholders(question, state.clipboardImages).trim();
   const reason =
-    sideQuestionUnavailableReason(true, draft) ?? sideQuestionPromptUnavailableReason(question);
+    sideQuestionUnavailableReason(true, draft) ?? sideQuestionPromptUnavailableReason(prompt);
   if (reason || state.serverStatus.state !== 'running') return false;
   const session = state.sessions.find((entry) => entry.id === state.activeSessionId);
   if (!session) return false;
   let context: string;
   try {
-    context = captureSideQuestionContext(question, session.id);
-    if ([question, context].filter(Boolean).join('\n\n').length > MAX_SIDE_QUESTION_LENGTH) {
+    context = captureSideQuestionContext(prompt, session.id);
+    if ([prompt, context].filter(Boolean).join('\n\n').length > MAX_SIDE_QUESTION_LENGTH) {
       throw new Error('Question and context exceed the side-question limit');
     }
   } catch (cause) {
@@ -120,7 +125,7 @@ export function openSideQuestion(question = '', draft = inputText()): boolean {
     sessionID: session.id,
     directory: session.directory,
     serverURL: state.serverStatus.url,
-    question,
+    question: prompt,
   };
   if (context) view.context = context;
   setSideQuestionView(view);

@@ -10686,6 +10686,13 @@ describe('ChatInput', () => {
     setState('sessionStatus', 'session-1', { type: 'busy' });
     setIsLoading(true);
     setState('droppedFiles', [{ path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' }]);
+    addClipboardImage({
+      id: 'busy-side-image',
+      filename: 'Image 1',
+      mime: 'image/png',
+      url: 'data:image/png;base64,aW1hZ2U=',
+      size: 5,
+    });
     setInputText('Why did that fail?\nKeep it short.');
     cleanup = render(() => ChatInput(), container!);
     container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')!.click();
@@ -10705,6 +10712,8 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('');
     expect(container?.querySelector('.busy-menu')).toBeNull();
     expect(state.droppedFiles).toHaveLength(1);
+    expect(state.clipboardImages).toHaveLength(1);
+    expect(sideQuestionView()?.context).not.toContain('data:image');
     expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
     expect(state.queuedMessages).toEqual([]);
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -10728,6 +10737,84 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('Ordinary follow-up');
     expect(sideQuestionView()).toBeNull();
   });
+
+  it.each(
+    ['strip', 'inline'].flatMap((placement) =>
+      ['send', 'enter'].map((action) => ({ placement, action }))
+    )
+  )(
+    'excludes a $placement image from /btw using $action and keeps it for the next regular send',
+    async ({ placement, action }) => {
+      setupModelState();
+      setState('providers', 0, 'models', 'gpt-4o', 'capabilities', 'vision', true);
+      setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+      setState('activeSessionId', 'session-1');
+      setState('sessions', [session('session-1', 1, { directory: '/repo' })]);
+      const image = {
+        id: 'side-image',
+        filename: 'Image 1',
+        mime: 'image/png',
+        url: 'data:image/png;base64,aW1hZ2U=',
+        size: 5,
+      };
+      addClipboardImage(image);
+      const attachedImage = { ...state.clipboardImages[0]! };
+      const prompt = placement === 'inline' ? '[Image 1] Why?' : 'Why?';
+      setInputText(prompt);
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+      const imageChip = () =>
+        container!.querySelector<HTMLElement>(
+          placement === 'inline' ? '[data-chip-type="image"]' : '.chat-attachment-chip'
+        )!;
+      expect(imageChip().classList.contains('disabled')).toBe(false);
+      enterComposerText(editor, `/btw ${prompt}`);
+      await flushAsyncWork();
+      expect(imageChip().classList.contains('disabled')).toBe(true);
+      expect(imageChip().title).toBe(
+        'Images are not included in side questions. Kept attached for your next regular message.'
+      );
+      enterComposerText(editor, prompt);
+      await flushAsyncWork();
+      expect(imageChip().classList.contains('disabled')).toBe(false);
+      enterComposerText(editor, `/btw ${prompt}`);
+      await flushAsyncWork();
+      const send = container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!;
+      expect(send.disabled).toBe(false);
+      if (action === 'send') send.click();
+      else
+        container!
+          .querySelector('.rich-composer')!
+          .dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+          );
+      await flushAsyncWork();
+
+      expect(sideQuestionView()).toMatchObject({ sessionID: 'session-1', question: 'Why?' });
+      expect(sideQuestionView()?.context ?? '').toBe('');
+      expect(state.clipboardImages).toEqual([attachedImage]);
+      expect(inputText()).toBe('');
+      expect(container!.querySelector('.chat-attachment-chip.disabled')).toBeNull();
+      expect(container!.querySelector('.chat-attachment-chip')?.textContent).toContain('Image 1');
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+      expect(state.queuedMessages).toEqual([]);
+
+      closeSideQuestion();
+      setInputText('Now inspect the image');
+      const sentImages: (typeof image)[] = [];
+      sendMessageMock.mockImplementationOnce(async () => {
+        sentImages.push(...state.clipboardImages);
+        return true;
+      });
+      container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
+      await flushAsyncWork();
+      expect(sendMessageMock).toHaveBeenCalledTimes(1);
+      expect(sendMessageMock.mock.calls[0]?.[0]).toBe('Now inspect the image');
+      expect(sentImages).toEqual([attachedImage]);
+    }
+  );
 
   it.each(['/b', '/bt'])(
     'opens the /btw suggestion from %s without treating the draft as a command',

@@ -347,6 +347,22 @@ describe('AttachmentStrip', () => {
     expect(enabledImageChip?.getAttribute('data-title')).toBe('diagram.png');
   });
 
+  it('strikes through excluded images and prioritizes the explanation over vision and size warnings', () => {
+    const reason =
+      'Images are not included in side questions. Kept attached for your next regular message.';
+    renderAttachmentStrip({
+      clipboardImages: [createClipboardImage()],
+      clipboardImagesNeedVision: true,
+      clipboardImagesExcludedReason: reason,
+      imageError: () => 'Preview unavailable',
+      imageCompressionHint: () => 'Large image',
+    });
+
+    const chip = getChip('diagram.png');
+    expect(chip?.getAttribute('data-disabled')).toBe('true');
+    expect(chip?.getAttribute('data-title')).toBe(reason);
+  });
+
   it('opens files and previews images when their chips are clicked', () => {
     const renderResult = renderAttachmentStrip({
       files: [createDroppedFile()],

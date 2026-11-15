@@ -42,26 +42,33 @@ describe('side-question prompt compatibility and context', () => {
     expect(sideQuestionView()).toBeNull();
   });
 
-  it.each(['image', 'pdf'] as const)('blocks an attached %s instead of ignoring it', (kind) => {
-    if (kind === 'image')
-      setState('clipboardImages', [
-        fixture<ClipboardImage>({
-          id: 'image',
-          filename: 'Image 1',
-          mime: 'image/png',
-          url: 'data:image/png;base64,eA==',
-        }),
-      ]);
-    else
-      setState('nativePdfs', [
-        fixture<NativePdfAttachment>({
-          id: 'pdf',
-          filename: 'file.pdf',
-          url: 'data:application/pdf;base64,eA==',
-        }),
-      ]);
+  it('excludes images and their placeholders without consuming the attachments', () => {
+    const image = fixture<ClipboardImage>({
+      id: 'image',
+      filename: 'Image 1',
+      mime: 'image/png',
+      url: 'data:image/png;base64,eA==',
+    });
+    setState('clipboardImages', [image]);
+    setInputText('/btw [Image 1] Why?');
+    expect(sideQuestionUnavailableReason()).toBeNull();
+    expect(openSideQuestion('[Image 1] Why?')).toBe(true);
+    expect(sideQuestionView()).toMatchObject({ question: 'Why?' });
+    expect(sideQuestionView()?.context ?? '').toBe('');
+    expect(inputText()).toBe('/btw [Image 1] Why?');
+    expect(state.clipboardImages).toEqual([image]);
+  });
+
+  it('still blocks PDFs instead of silently dropping them', () => {
+    setState('nativePdfs', [
+      fixture<NativePdfAttachment>({
+        id: 'pdf',
+        filename: 'file.pdf',
+        url: 'data:application/pdf;base64,eA==',
+      }),
+    ]);
     setInputText('/btw Why?');
-    expect(sideQuestionUnavailableReason()).toContain('Remove images or PDFs');
+    expect(sideQuestionUnavailableReason()).toBe('Remove PDFs to ask a side question');
     expect(openSideQuestion('Why?')).toBe(false);
     expect(inputText()).toBe('/btw Why?');
     expect(state.clipboardImages.length + state.nativePdfs.length).toBe(1);

@@ -338,9 +338,7 @@ for (const width of [390, 1100]) {
     expect(writes!.every((requestPath) => requestPath.includes('/side-question'))).toBe(true);
   });
 
-  test(`incompatible inline content and images disable side questions at ${width}px`, async ({
-    page,
-  }) => {
+  test(`incompatible inline content disables side questions at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await prepare(page, 'busy-stop-send');
     const composer = page.locator('.rich-composer').first();
@@ -368,36 +366,6 @@ for (const width of [390, 1100]) {
     await page.screenshot({
       path: path.resolve(`tmp/_OC_v2/01_side-questions/incompatible-side-question-${width}px.png`),
     });
-    await composer.fill('/btw Explain');
-    await page.evaluate(() => {
-      // SAFETY: This image snapshot belongs only to the isolated harness.
-      window.dispatchEvent(
-        new MessageEvent('message', {
-          data: {
-            type: 'composer/images-sync',
-            payload: {
-              images: [
-                {
-                  id: 'blocked-image',
-                  filename: 'Image 1',
-                  mime: 'image/png',
-                  size: 1,
-                  url: 'data:image/png;base64,eA==',
-                  contextFile: {
-                    path: '/workspace/varro/image.png',
-                    relativePath: 'image.png',
-                    type: 'file',
-                  },
-                },
-              ],
-            },
-          } satisfies ExtensionMessage,
-        })
-      );
-    });
-    await expect(page.getByRole('button', { name: 'Send (Enter)', exact: true })).toBeDisabled();
-    await composer.press('Enter');
-    await expect(page.getByRole('dialog', { name: 'Side question' })).toHaveCount(0);
     expect(
       await page.evaluate(() => {
         // SAFETY: Reads only the isolated harness's captured side requests.
@@ -405,6 +373,120 @@ for (const width of [390, 1100]) {
       })
     ).toHaveLength(0);
   });
+
+  for (const placement of ['strip', 'inline'] as const) {
+    test(`/btw excludes ${placement} images and retains them for a regular send at ${width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await prepare(page);
+      await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
+      await page.getByText('GPT-4.1', { exact: true }).click();
+      await expect(page.getByLabel('OpenAI / GPT-4.1')).toBeVisible();
+      const originalUrl = await page.evaluate(() => {
+        // SAFETY: This image snapshot belongs only to the isolated harness.
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1;
+        const url = canvas.toDataURL('image/png');
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            data: {
+              type: 'composer/images-sync',
+              payload: {
+                images: [
+                  {
+                    id: 'side-image',
+                    filename: 'Image 1',
+                    mime: 'image/png',
+                    size: atob(url.split(',')[1]!).length,
+                    url,
+                  },
+                ],
+              },
+            } satisfies ExtensionMessage,
+          })
+        );
+        return url;
+      });
+      const composer = page.locator('.rich-composer').first();
+      const prompt = placement === 'inline' ? 'Explain [Image 1]' : 'Explain';
+      const image = page.locator(
+        placement === 'inline' ? '[data-chip-type="image"]' : '.chat-attachment-chip'
+      );
+      await composer.fill(prompt);
+      await expect(image).toBeVisible();
+      await expect(image).not.toHaveClass(/disabled/);
+      await composer.fill(`/btw ${prompt}`);
+      await expect(image).toHaveClass(/disabled/);
+      await expect(image.locator('.inline-chip-label, .chip-label')).toHaveCSS(
+        'text-decoration-line',
+        'line-through'
+      );
+      await image.hover();
+      await expect(image).toHaveAttribute(
+        'title',
+        'Images are not included in side questions. Kept attached for your next regular message.'
+      );
+      await expect(page.getByRole('button', { name: 'Send (Enter)', exact: true })).toBeEnabled();
+      await page.screenshot({
+        path: path.resolve(
+          `tmp/_OC_v2/01_side-questions/excluded-${placement}-image-${width}px.png`
+        ),
+      });
+      await composer.fill(prompt);
+      await expect(image).not.toHaveClass(/disabled/);
+      await composer.fill(`/btw ${prompt}`);
+      const messages = await page.locator('.user-message-card').count();
+      await composer.press('Enter');
+      const dialog = page.getByRole('dialog', { name: 'Side question' });
+      await expect(dialog.getByRole('status')).toBeVisible();
+      expect(
+        await page.evaluate(() => {
+          // SAFETY: Reads only the isolated harness's captured side requests.
+          return (window as SideQuestionHarnessWindow).sideQuestionRequests?.map(
+            (request) => request.body
+          );
+        })
+      ).toEqual([{ question: 'Explain' }]);
+      await answer(page);
+      await expect(dialog.locator('.side-question-answer')).toHaveCount(1);
+      await dialog.getByRole('button', { name: 'Close side question' }).click();
+      await expect(composer).toHaveText('');
+      await expect(page.locator('.user-message-card')).toHaveCount(messages);
+      const retainedImage = page.locator('.chat-attachment-chip');
+      await expect(retainedImage).toContainText('Image 1');
+      await expect(retainedImage).not.toHaveClass(/disabled/);
+      await retainedImage.hover();
+      await expect(page.locator('.chat-attachment-image-preview img')).toHaveAttribute(
+        'src',
+        originalUrl
+      );
+      await composer.fill('Now inspect the image');
+      await page.getByRole('button', { name: 'Send (Enter)', exact: true }).click();
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            // SAFETY: Reads only the isolated harness's captured prompt request.
+            return (window as SideQuestionHarnessWindow).sideQuestionTraffic?.find(
+              (message) =>
+                message.type === 'api/request' && message.payload.path.includes('/prompt_async')
+            );
+          })
+        )
+        .toMatchObject({
+          type: 'api/request',
+          payload: {
+            method: 'POST',
+            body: {
+              parts: expect.arrayContaining([
+                { type: 'file', filename: 'Image 1', mime: 'image/png', url: originalUrl },
+              ]),
+            },
+          },
+        });
+      await expect(retainedImage).toHaveCount(0);
+    });
+  }
 
   test(`only side-question bubbles are capped at two lines at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
