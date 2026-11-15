@@ -139,6 +139,35 @@ function connectionInfo(integration: IntegrationInfo | undefined) {
   };
 }
 
+function isUnsupportedSubscriptionModel(provider: UnknownRecord, model: UnknownRecord): boolean {
+  const providerSettings = asRecord(provider.options);
+  const modelSettings = asRecord(model.settings) ?? asRecord(model.options);
+  const tier =
+    asRecord(model.body)?.service_tier ??
+    asRecord(provider.body)?.service_tier ??
+    modelSettings?.serviceTier ??
+    providerSettings?.serviceTier;
+  // Cyber models need separately approved Daybreak API access, not a Codex-plan login.
+  const modelID = model.modelID ?? asRecord(model.api)?.id ?? model.id;
+  const isCyber = isString(modelID) && /^gpt-\d+(?:\.\d+)?-cyber(?:-|$)/.test(modelID);
+  if (tier !== 'flex' && !isCyber) return false;
+  const baseURL = modelSettings?.baseURL ?? providerSettings?.baseURL;
+  if (!isString(baseURL) || !URL.canParse(baseURL)) return false;
+  let url = new URL(baseURL);
+  // OpenAI's subscription request hook redirects API-origin model overrides too.
+  if (
+    provider.id === 'openai' &&
+    url.origin === 'https://api.openai.com' &&
+    isString(providerSettings?.baseURL) &&
+    URL.canParse(providerSettings.baseURL)
+  )
+    url = new URL(providerSettings.baseURL);
+  return (
+    (url.hostname === 'chatgpt.com' || url.hostname === 'chat.openai.com') &&
+    (url.pathname === '/backend-api/codex' || url.pathname.startsWith('/backend-api/codex/'))
+  );
+}
+
 function v1AuthMethods(integration: IntegrationInfo | undefined): ProviderAuthMethod[] {
   return (
     integration?.methods
@@ -2076,6 +2105,15 @@ export class OpenCodeV2Adapter {
             : (existing?.variants ?? {}),
         };
       }
+    }
+    // The native catalog can offer Flex and Cyber despite the subscription route rejecting them.
+    // Filter after legacy config restoration too, and before selecting defaults.
+    for (const provider of all) {
+      provider.models = Object.fromEntries(
+        Object.entries(provider.models).filter(
+          ([, model]) => !isUnsupportedSubscriptionModel(provider, model)
+        )
+      );
     }
     const defaults = Object.fromEntries(
       all.map((provider) => [

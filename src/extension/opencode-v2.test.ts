@@ -1664,6 +1664,159 @@ describe('v2 configured model catalogs', () => {
   const tier = { tier: { type: 'context', size: 128_000 }, input: 4, output: 16 };
   const base = { input: 2, output: 8, cache: { read: 0.5, write: 1 } };
 
+  it.each([undefined, '2.2.0'])(
+    'filters unsupported subscription models from both catalogs and defaults on %s',
+    async (version) => {
+      const providers = [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          settings: { baseURL: 'https://chatgpt.com/backend-api/codex' },
+        },
+        {
+          id: 'subscription-alias',
+          name: 'Subscription',
+          settings: { baseURL: 'https://chatgpt.com/backend-api/codex/' },
+        },
+        {
+          id: 'api',
+          name: 'API',
+          settings: { baseURL: 'https://api.openai.com/v1' },
+        },
+      ];
+      const definitions = [
+        { id: 'flex', settings: { serviceTier: 'flex' } },
+        { id: 'renamed-tier', body: { service_tier: 'flex' } },
+        { id: 'gpt-6-cyber', modelID: 'gpt-6-cyber' },
+        { id: 'gpt-5.6-cyber', modelID: 'gpt-5.6-cyber' },
+        { id: 'gpt-6-cyber-fast', modelID: 'gpt-6-cyber', settings: { serviceTier: 'priority' } },
+        { id: 'security-alias', modelID: 'gpt-6-cyber' },
+        { id: 'gpt-5.5-cyber-preview', modelID: 'gpt-5.5-cyber-preview' },
+        { id: 'standard' },
+        { id: 'fast', settings: { serviceTier: 'priority' } },
+        { id: 'flexible-name', name: 'Flex', settings: { serviceTier: 'priority' } },
+        { id: 'cyber-name', name: 'Cyber', modelID: 'gpt-6.1-sol' },
+        { id: 'gpt-6-cyber-alias', modelID: 'gpt-6.1-sol' },
+        {
+          id: 'api-override',
+          settings: { serviceTier: 'flex', baseURL: 'https://api.openai.com/v1' },
+        },
+        {
+          id: 'body-override',
+          settings: { serviceTier: 'flex' },
+          body: { service_tier: 'default' },
+        },
+      ];
+      const models = providers.flatMap((provider) =>
+        definitions.map((definition) => ({
+          modelID: 'gpt-6.1-sol',
+          providerID: provider.id,
+          name: definition.id,
+          capabilities: { tools: true, input: ['text'], output: ['text'] },
+          variants: [],
+          time: { released: 0 },
+          cost: [base],
+          enabled: true,
+          ...definition,
+        }))
+      );
+      const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+        if (path === '/api/provider') return { data: providers };
+        if (path === '/api/model') return { data: models };
+        if (path === '/api/integration') return { data: [] };
+        if (path === '/api/config')
+          return [
+            {
+              info: {
+                providers: {
+                  openai: {
+                    models: {
+                      'configured-flex': { settings: { serviceTier: 'flex' } },
+                      'configured-cyber': { modelID: 'gpt-6-cyber' },
+                    },
+                  },
+                },
+              },
+            },
+          ];
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      adapter.setServerVersion(version);
+      for (const route of ['/provider', '/config/providers']) {
+        const catalog = asRecord(await adapter.request('GET', route, undefined));
+        const entries = catalog?.all ?? catalog?.providers;
+        if (!Array.isArray(entries)) throw new Error('Missing provider catalog');
+        for (const entry of entries) {
+          const provider = asRecord(entry);
+          const available = Object.keys(asRecord(provider?.models) ?? {});
+          expect(available).toEqual(
+            definitions
+              .filter(
+                (definition) =>
+                  provider?.id === 'api' ||
+                  (![
+                    'flex',
+                    'renamed-tier',
+                    'gpt-6-cyber',
+                    'gpt-5.6-cyber',
+                    'gpt-6-cyber-fast',
+                    'security-alias',
+                    'gpt-5.5-cyber-preview',
+                  ].includes(definition.id) &&
+                    !(provider?.id === 'openai' && definition.id === 'api-override'))
+              )
+              .map((definition) => definition.id)
+          );
+        }
+        expect(catalog?.default).toEqual({
+          openai: 'standard',
+          'subscription-alias': 'standard',
+          api: 'flex',
+        });
+      }
+      // Projection must not change the backend's catalog objects.
+      expect(models[0]?.settings).toEqual({ serviceTier: 'flex' });
+      expect(models).toHaveLength(providers.length * definitions.length);
+    }
+  );
+
+  it('restores restricted entries after switching from a subscription endpoint to the API', async () => {
+    let baseURL = 'https://chatgpt.com/backend-api/codex';
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+      if (path === '/api/provider')
+        return { data: [{ id: 'openai', activation: 'enabled', settings: { baseURL } }] };
+      if (path === '/api/model')
+        return {
+          data: [
+            {
+              id: 'flex',
+              providerID: 'openai',
+              settings: { serviceTier: 'flex' },
+              time: { released: 0 },
+              variants: [],
+            },
+            {
+              id: 'gpt-6-cyber',
+              providerID: 'openai',
+              time: { released: 0 },
+              variants: [],
+            },
+          ],
+        };
+      if (path === '/api/integration') return { data: [] };
+      if (path === '/api/config') return [{ info: {} }];
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    expect(await adapter.request('GET', '/config/providers', undefined)).toMatchObject({
+      default: { openai: '' },
+    });
+    baseURL = 'https://api.openai.com/v1';
+    expect(await adapter.request('GET', '/config/providers', undefined)).toMatchObject({
+      default: { openai: 'flex' },
+      providers: [{ models: { flex: expect.any(Object), 'gpt-6-cyber': expect.any(Object) } }],
+    });
+  });
+
   it('keeps modern native catalogs authoritative for chat models and defaults', async () => {
     const adapter = new OpenCodeV2Adapter(async (_method, path) => {
       if (path === '/api/provider') return { data: [{ id: 'custom', name: 'Custom' }] };
