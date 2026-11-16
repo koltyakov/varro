@@ -7410,7 +7410,6 @@ export function MessageList() {
             !containerRef?.isConnected ||
             !containerRef.contains(element) ||
             state.messagesLoading ||
-            editingMessage() ||
             diffFocusPauseActive ||
             stickyNavigationOwnsScroll()
           )
@@ -7437,9 +7436,9 @@ export function MessageList() {
             reserveHeldScrollbarRange(collapseHeight);
             return;
           }
-          if (!autoScroll() || !pinnedToBottom) {
-            // Protect the detached reader before removal can clamp the scroll range. Do not
-            // arm a collapse scroll owner that could undo their next wheel or key movement.
+          if (editingMessage() || !autoScroll() || !pinnedToBottom) {
+            // Protect editing and detached readers before removal can clamp the scroll range.
+            // Do not arm a collapse scroll owner that could undo their next wheel or key movement.
             const shortfall =
               containerRef.scrollTop -
               (containerRef.scrollHeight - containerRef.clientHeight - collapseHeight);

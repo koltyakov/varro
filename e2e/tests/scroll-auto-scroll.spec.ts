@@ -649,6 +649,7 @@ test.describe('auto-scroll', () => {
           editing: boolean;
           reserveHeight: number;
           replacementVisible: boolean;
+          summaryVisible: boolean;
         }>;
       };
       const originalSend = harness.__sendToExtension;
@@ -712,6 +713,7 @@ test.describe('auto-scroll', () => {
         editing: boolean;
         reserveHeight: number;
         replacementVisible: boolean;
+        summaryVisible: boolean;
       }> = [];
       let replacementVisibleFrames = 0;
       const scheduleSample = () => {
@@ -733,6 +735,9 @@ test.describe('auto-scroll', () => {
           editing: container.classList.contains('editing-message'),
           reserveHeight,
           replacementVisible,
+          summaryVisible: !!container.querySelector(
+            '[data-msg-id="message-large-assistant-239"] .assistant-dialog-summary'
+          ),
         });
         replacementVisibleFrames = replacementVisible ? replacementVisibleFrames + 1 : 0;
         if (samples.length < 120 && replacementVisibleFrames < 12) scheduleSample();
@@ -758,6 +763,7 @@ test.describe('auto-scroll', () => {
               editing: boolean;
               reserveHeight: number;
               replacementVisible: boolean;
+              summaryVisible: boolean;
             }>;
           }
         ).editReplacementSamples ?? []
@@ -769,6 +775,11 @@ test.describe('auto-scroll', () => {
       JSON.stringify(samples)
     ).toBe(true);
     expect(samples[0]?.editing).toBe(true);
+    expect(samples[0]?.summaryVisible).toBe(true);
+    expect(
+      samples.some((sample) => sample.editing && !sample.summaryVisible),
+      JSON.stringify(samples)
+    ).toBe(true);
     expect(
       samples.some((sample) => sample.replacementVisible),
       JSON.stringify(samples)

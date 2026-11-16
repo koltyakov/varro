@@ -1,4 +1,14 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import {
+  For,
+  Show,
+  createComputed,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  untrack,
+} from 'solid-js';
 import { isAbortedAssistantError } from '../../../shared/error-classification';
 import { forkSession, implementPlan, openPlan } from '../../hooks/useOpenCode';
 import {
@@ -8,6 +18,7 @@ import {
 } from '../../lib/message-edit-state';
 import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
+import { prepareForMessageBlockRemoval } from '../../lib/message-list-layout';
 import type { AssistantActivityGroupInfo } from '../../lib/assistant-activity';
 import {
   formatNumber,
@@ -188,6 +199,19 @@ export function MessageRow(
     return ownIndex > editedIndex;
   });
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
+  createComputed((hadSummary: boolean | undefined) => {
+    const hasSummary = !!summary();
+    if (hadSummary && !hasSummary) {
+      untrack(() => {
+        if (!editingMessage()) return;
+        const element = rowRef?.querySelector<HTMLElement>('.assistant-dialog-summary');
+        // Reconciliation hides Worked before replacing history. Reserve its lost range
+        // before the DOM shrinks, without handing scrolling back to bottom follow.
+        if (element) prepareForMessageBlockRemoval(element);
+      });
+    }
+    return hasSummary;
+  });
   const assistantActivityGroups = () =>
     props.assistantActivityGroupMap?.get(props.msg.info.id) ?? null;
   const highlightFinalAnswer = () => {

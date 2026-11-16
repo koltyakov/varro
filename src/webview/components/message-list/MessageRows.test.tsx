@@ -4,6 +4,8 @@ import { createSignal } from 'solid-js';
 import type * as UseOpenCodeModule from '../../hooks/useOpenCode';
 import { formatClockTime } from '../../lib/message-time';
 import { setState, skipPlanSession, startLoading, stopLoading } from '../../lib/state';
+import { resetMessageEditState, startEditingMessage } from '../../lib/message-edit-state';
+import { registerMessageBlockRemovalHandler } from '../../lib/message-list-layout';
 import { copyIcon, gitForkIcon, xmarkCircleIcon } from '../../lib/ui-icons';
 import { assistantMessage, textPart, userMessage } from '../MessageList.test-utils';
 import { toCssUrl } from '../UiIcon';
@@ -13,6 +15,7 @@ import {
   getForkBoundaryMessageId,
   getUserMessageSeriesEndId,
 } from './MessageRows';
+import type { AssistantDialogSummaryInfo } from './assistant-dialog';
 
 const forkSessionMock = vi.hoisted(() => vi.fn(async () => 'forked-session'));
 
@@ -36,11 +39,61 @@ afterEach(() => {
   cleanup = undefined;
   vi.useRealTimers();
   stopLoading();
+  resetMessageEditState();
   setState('messages', []);
   setState('skippedPlanSessions', {});
   setState('sessions', []);
   container.remove();
 });
+
+it.each([false, true])(
+  'announces disappearing Worked geometry before removal only during editing, editing=%s',
+  (editing) => {
+    const message = { info: assistantMessage('assistant-1'), parts: [] };
+    const summaries = new Map<string, AssistantDialogSummaryInfo>([
+      ['assistant-1', { durationMs: 1_000, inputTokens: 10, outputTokens: 5, agentCount: 0 }],
+    ]);
+    const [summaryMap, setSummaryMap] = createSignal(summaries);
+    if (editing) startEditingMessage('user-1', message.info.sessionID, 'Prompt');
+    const onRemoval = vi.fn((element: HTMLElement) => {
+      expect(element.isConnected).toBe(true);
+      expect(element.classList).toContain('assistant-dialog-summary');
+      expect(container.querySelector('.assistant-dialog-summary')).toBe(element);
+    });
+    const unregister = registerMessageBlockRemovalHandler(onRemoval);
+    try {
+      cleanup = render(
+        () => (
+          <MessageRow
+            msg={message}
+            modelChangeMap={new Map()}
+            promptNumberMap={new Map()}
+            showPromptNumbers={false}
+            showSentTimestamps={false}
+            lastAssistantID={null}
+            previousTrailingFileEventSignatureMap={new Map()}
+            assistantDialogSummaryMap={summaryMap()}
+            isFinalAssistantMessage={() => false}
+            hasBuildAgent={false}
+            latestPlanImplementationMessageId={null}
+            questionRequestForTool={() => null}
+            permissionMatchForTool={() => null}
+          />
+        ),
+        container
+      );
+      expect(container.querySelector('.assistant-dialog-summary')).not.toBeNull();
+      expect(onRemoval).not.toHaveBeenCalled();
+      setSummaryMap(new Map());
+      expect(onRemoval).toHaveBeenCalledTimes(editing ? 1 : 0);
+      expect(container.querySelector('.assistant-dialog-summary')).toBeNull();
+      setSummaryMap(summaries);
+      expect(onRemoval).toHaveBeenCalledTimes(editing ? 1 : 0);
+    } finally {
+      unregister();
+    }
+  }
+);
 
 it('retains the hover class when virtual row classes change', () => {
   const [nearViewport, setNearViewport] = createSignal(true);

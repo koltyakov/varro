@@ -694,6 +694,10 @@ Direct input acquires ownership only when it can affect the transcript:
 - While inline editing is active, the edited row top may not move above the sticky message-jump inset.
   Clamp native and wheel movement at that boundary and settle for bounded frames. Editing never
   re-enables bottom follow.
+- Submitting an inline edit suppresses the abandoned turn's Worked summary before replacement
+  publication. Announce that disappearing block before removing it and reserve only the scroll-range
+  shortfall, without changing the edit scroll owner. Restoring the summary or publishing replacement
+  content consumes the reserve. `scroll-auto-scroll.spec.ts` checks every delayed-deletion frame.
 - The inline composer replaces a real prompt card and remains a sticky collision boundary. The
   preceding sticky prompt must yield to it so the edit banner and Cancel control stay actionable.
 - Focused diff content owns local interaction geometry and pauses bottom follow. Resume only if follow
