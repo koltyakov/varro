@@ -172,7 +172,6 @@ export class SessionStateManager {
   };
   private readonly questionResponsePendingRequests = new Map<string, string>();
   private readonly deferredPermissionAttention = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly trailingBusyAfterCompletion = new Set<string>();
   private readonly trailingTerminalsWhileBusy = new Map<string, TerminalWave>();
   private readonly serverBusyTerminalEvidence = new Map<string, TerminalEvidence>();
   private readonly blockingRequestMutations = new Set<string>();
@@ -556,7 +555,6 @@ export class SessionStateManager {
   markSessionBusy(sessionID: string): SessionBusyAttempt | undefined {
     if (!sessionID) return undefined;
     this.touchSessionMetadata(sessionID);
-    this.trailingBusyAfterCompletion.delete(sessionID);
     const attempt = { sessionID, id: ++this.nextBusyAttemptID };
     this.addBusyGeneration(sessionID, attempt.id);
     if (this.markBusyInternal(sessionID)) {
@@ -646,14 +644,7 @@ export class SessionStateManager {
         const statusType = getString(asRecord(props?.status)?.type);
         if (!sessionID || !statusType) break;
         this.clearQuestionResponsePending(sessionID);
-        if (
-          statusType === 'busy' &&
-          this.trailingBusyAfterCompletion.delete(sessionID) &&
-          asRecord(props?.status)?.background !== true
-        )
-          break;
         if (statusType === 'busy' || statusType === 'retry') {
-          this.trailingBusyAfterCompletion.delete(sessionID);
           this.serverBusySessions.add(sessionID);
           this.addServerBusyGeneration(sessionID);
           changed = this.markBusyInternal(sessionID) || changed;
@@ -708,7 +699,6 @@ export class SessionStateManager {
       case 'session.next.prompt.admitted': {
         const sessionID = getString(props?.sessionID);
         if (sessionID) {
-          this.trailingBusyAfterCompletion.delete(sessionID);
           this.serverBusyTerminalEvidence.delete(sessionID);
         }
         break;
@@ -723,7 +713,6 @@ export class SessionStateManager {
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
         this.clearQuestionResponsePending(sessionID);
-        this.trailingBusyAfterCompletion.delete(sessionID);
         const error = asRecord(props?.error);
         changed =
           (error && isAbortedErrorRecord(error)
@@ -754,7 +743,6 @@ export class SessionStateManager {
 
         if (getString(info?.role) !== 'assistant') {
           if (getString(info?.role) === 'user') {
-            this.trailingBusyAfterCompletion.delete(sessionID);
             this.noteSuccessorProgress(sessionID);
           }
           break;
@@ -1505,7 +1493,6 @@ export class SessionStateManager {
     const label =
       kind === 'question' ? describeQuestionRequest(props) : describePermissionRequest(props);
     this.clearBusy(sessionID);
-    this.trailingBusyAfterCompletion.delete(sessionID);
     const pending: PendingAttentionEntry = {
       sessionID,
       kind,
@@ -1540,7 +1527,6 @@ export class SessionStateManager {
     changed = this.unclaimedInterruptedSessions.delete(sessionID) || changed;
     this.busyStartedAt.delete(sessionID);
     this.busyEvidenceRevisions.delete(sessionID);
-    this.trailingBusyAfterCompletion.delete(sessionID);
     this.trailingTerminalsWhileBusy.delete(sessionID);
     this.serverBusyTerminalEvidence.delete(sessionID);
     this.clearQuestionResponsePending(sessionID);
@@ -1793,7 +1779,6 @@ export class SessionStateManager {
 
     this.clearBusy(sessionID);
     this.addCompletedSession(sessionID, evidence.completedAt);
-    this.trailingBusyAfterCompletion.add(sessionID);
     this.listener.onSessionCompleted?.(
       sessionID,
       this.isPlanSession(sessionID) ? 'plan-ready' : 'completed'

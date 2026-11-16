@@ -627,12 +627,13 @@ Direct input acquires ownership only when it can affect the transcript:
   even if it has completed partial text and `finish: error`. Keep the loading slot through retry and
   the next empty attempt; do not briefly insert Worked. `automatic-retry.spec.ts` checks that handoff
   and the gap from the retry notice to Thinking every frame.
-- The trailing final-answer marker requires settled execution and presentation, even when a terminal
-  step's Worked summary is already visible or retained. A message completion timestamp or `finish: stop`
-  alone does not prove the session is finished. Remove that marker when work resumes, keep it absent
-  through background notices and continuation loading, and mark only the settled continuation.
-  Earlier completed turns keep their markers while a new turn runs. `MessageList.rendering.test.ts`
-  covers busy, retry, local loading, child execution, streaming, and background handoffs.
+- The trailing Worked summary and final-answer marker require settled execution and presentation.
+  A message completion timestamp or `finish: stop` alone does not prove the session is finished.
+  Revoke both when work resumes, including a retained summary, and keep them absent through
+  background notices and continuation loading. Show them only for the settled continuation.
+  Earlier completed turns keep their summaries and markers while a new turn runs.
+  `MessageList.rendering.test.ts` covers busy, retry, local loading, child execution, streaming,
+  and background handoffs.
 - Follow-ups use that same settled final-response identity. New inference requires an observed
   unfinished assistant or new live prompt, or an unread opening captured before acknowledging it.
   Unread eligibility compares answer completion with the previous seen timestamp. A busy snapshot

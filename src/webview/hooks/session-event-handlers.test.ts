@@ -3879,7 +3879,7 @@ describe('registerSessionEventHandlers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
-  it('keeps the session idle on a trailing busy status after the reply already completed', () => {
+  it('accepts busy status after the latest reply completed', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
 
@@ -3899,10 +3899,10 @@ describe('registerSessionEventHandlers', () => {
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
 
-    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
-    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'busy' });
-    expect(startLoading).not.toHaveBeenCalled();
-    expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
+    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
 
     loadingStartedAt.mockReturnValue(null);
   });
@@ -3971,36 +3971,48 @@ describe('registerSessionEventHandlers', () => {
     loadingStartedAt.mockReturnValue(null);
   });
 
-  it('ignores trailing busy status after an explicitly terminal assistant finish', () => {
-    const handlers = installHandlers();
-    const setSessionStatusEntry = vi.fn();
-    const terminalAssistant = createCompletedAssistantEntry(1, 2);
-    terminalAssistant.info.finish = 'stop';
+  it.each(['idle', 'busy', 'retry'] as const)(
+    'accepts busy after a terminal assistant finish when the previous status is %s',
+    (previousStatus) => {
+      const handlers = installHandlers();
+      const setSessionStatusEntry = vi.fn();
+      const terminalAssistant = createCompletedAssistantEntry(1, 2);
+      terminalAssistant.info.finish = 'stop';
 
-    loadingStartedAt.mockReturnValue(1);
-    startLoading.mockClear();
-    stopLoading.mockClear();
+      loadingStartedAt.mockReturnValue(1);
+      startLoading.mockClear();
+      stopLoading.mockClear();
 
-    registerSessionEventHandlers(
-      createDefaultDeps({
-        getActiveSessionId: () => 'session-1',
-        getMessages: () => [terminalAssistant],
-        getSessionStatus: () => ({ type: 'busy' }),
-        setSessionStatusEntry,
-      })
-    );
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          getMessages: () => [terminalAssistant],
+          getSessionStatus: () =>
+            previousStatus === 'retry'
+              ? { type: 'retry', attempt: 1, next: 5, message: 'Retrying' }
+              : { type: previousStatus },
+          setSessionStatusEntry,
+        })
+      );
 
-    handlers.get('session.status')?.({
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
+      handlers.get('session.status')?.({
+        properties: { sessionID: 'session-1', status: { type: 'busy' } },
+      });
 
-    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
-    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'busy' });
-    expect(startLoading).not.toHaveBeenCalled();
-    expect(stopLoading).toHaveBeenCalledTimes(1);
+      expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
+      expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+      expect(startLoading).toHaveBeenCalledTimes(1);
+      expect(stopLoading).not.toHaveBeenCalled();
 
-    loadingStartedAt.mockReturnValue(null);
-  });
+      setSessionStatusEntry.mockClear();
+      handlers.get('session.status')?.({
+        properties: { sessionID: 'session-1', status: { type: 'idle' } },
+      });
+      expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+
+      loadingStartedAt.mockReturnValue(null);
+    }
+  );
 
   it('keeps a terminal response pending when background work is reported', () => {
     const handlers = installHandlers();
@@ -4327,6 +4339,79 @@ describe('registerSessionEventHandlers', () => {
     upsertMessageInfo.mockReset();
   });
 
+  it.each(['step-finish', 'step-ended', 'native-step-ended'] as const)(
+    'does not let terminal %s end known busy or retrying execution',
+    (event) => {
+      const handlers = installHandlers();
+      let assistantEntry: MessageEntry = createAssistantEntry();
+      const recheckSessionStatus = vi.fn().mockResolvedValue(undefined);
+      const setSessionStatusEntry = vi.fn();
+      const cleanups = registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          getMessages: () => [assistantEntry],
+          getSessionStatus: () => ({ type: 'busy' }),
+          setSessionStatusEntry,
+          recheckSessionStatus,
+        })
+      );
+      upsertMessageInfo.mockImplementation((info: Message) => {
+        assistantEntry = { ...assistantEntry, info };
+      });
+      finishMessageStreaming.mockClear();
+      stopLoading.mockClear();
+      try {
+        if (event === 'step-finish') {
+          emitServerEvent(handlers, 'message.part.updated', {
+            properties: {
+              timestamp: 3,
+              part: {
+                id: 'terminal-step',
+                sessionID: 'session-1',
+                messageID: 'assistant-1',
+                type: 'step-finish',
+                reason: 'stop',
+                cost: 0,
+                tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+              },
+            },
+          });
+        } else {
+          emitServerEvent(handlers, 'session.next.step.ended', {
+            properties: {
+              sessionID: 'session-1',
+              assistantMessageID: 'assistant-1',
+              finish: 'stop',
+              executionContinues: event === 'native-step-ended',
+              timestamp: 3,
+            },
+          });
+        }
+        expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+        expect(stopLoading).not.toHaveBeenCalled();
+        if (event !== 'native-step-ended') {
+          expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+          expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
+        }
+
+        const retry = { type: 'retry', attempt: 1, next: 10, message: 'Retrying' } as const;
+        emitServerEvent(handlers, 'session.status', {
+          properties: { sessionID: 'session-1', status: retry },
+        });
+        expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', retry);
+        expect(stopLoading).not.toHaveBeenCalled();
+
+        emitServerEvent(handlers, 'session.status', {
+          properties: { sessionID: 'session-1', status: { type: 'idle' } },
+        });
+        expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+      } finally {
+        upsertMessageInfo.mockReset();
+        for (const cleanup of cleanups) cleanup();
+      }
+    }
+  );
+
   it('keeps tool-call step-finish parts in progress', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
@@ -4549,12 +4634,13 @@ describe('registerSessionEventHandlers', () => {
     upsertMessageInfo.mockReset();
   });
 
-  it('settles a pending terminal v2 step after the legacy assistant sync arrives', async () => {
+  it('completes a pending terminal step after sync without ending newer execution', async () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
     const updateUsageLimitState = vi.fn();
     const clearPendingAbort = vi.fn();
     const syncSession = vi.fn().mockResolvedValue(undefined);
+    const recheckSessionStatus = vi.fn().mockResolvedValue(undefined);
     let messages: MessageEntry[] = [createUserEntry()];
     const assistantEntry = createAssistantEntry();
     const syncSessionMessages = vi.fn(async () => {
@@ -4578,6 +4664,7 @@ describe('registerSessionEventHandlers', () => {
         syncSession,
         shouldResyncSessionAfterIdle: () => true,
         syncSessionMessages,
+        recheckSessionStatus,
       })
     );
 
@@ -4600,11 +4687,12 @@ describe('registerSessionEventHandlers', () => {
     });
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
-    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
-    expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
-    expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' });
-    expect(syncSession).toHaveBeenCalledWith('session-1');
-    expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(clearPendingAbort).not.toHaveBeenCalled();
+    expect(updateUsageLimitState).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(syncSession).not.toHaveBeenCalled();
+    expect(stopLoading).not.toHaveBeenCalled();
+    expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
 
     upsertMessageInfo.mockReset();
   });
@@ -5230,7 +5318,7 @@ describe('registerSessionEventHandlers', () => {
     loadingStartedAt.mockReturnValue(null);
   });
 
-  it('keeps a completed child session idle on a trailing busy status', () => {
+  it('accepts busy for a child session whose latest assistant already completed', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
 
@@ -5259,10 +5347,10 @@ describe('registerSessionEventHandlers', () => {
       properties: { sessionID: 'session-child', status: { type: 'busy' } },
     });
 
-    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-child', { type: 'idle' });
-    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-child', { type: 'busy' });
-    expect(startLoading).not.toHaveBeenCalled();
-    expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-child', { type: 'busy' });
+    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-child', { type: 'idle' });
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
 
     loadingStartedAt.mockReturnValue(null);
   });
@@ -5336,10 +5424,10 @@ describe('registerSessionEventHandlers', () => {
     expect(stopLoading).toHaveBeenCalledTimes(1);
   });
 
-  it('stops loading for a stale busy status when synced assistant already completed', () => {
+  it('keeps loading for busy status when synced assistant already completed', () => {
     const handlers = installHandlers();
 
-    loadingStartedAt.mockReturnValueOnce(1);
+    loadingStartedAt.mockReturnValue(1);
     startLoading.mockClear();
     stopLoading.mockClear();
 
@@ -5354,8 +5442,9 @@ describe('registerSessionEventHandlers', () => {
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
 
-    expect(stopLoading).toHaveBeenCalledTimes(1);
-    expect(startLoading).not.toHaveBeenCalled();
+    expect(stopLoading).not.toHaveBeenCalled();
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    loadingStartedAt.mockReturnValue(null);
   });
 
   it('applies late part updates after completion without restarting loading', () => {

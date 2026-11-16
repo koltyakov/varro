@@ -11,7 +11,6 @@ import { serverEvents } from '../../lib/client';
 import {
   hasUnsettledToolPart,
   isAssistantMessage,
-  isContinuationAssistantFinish,
   latestAssistantFinishedBeforeLoading,
 } from '../../lib/message-metrics';
 import { isRunningSessionStatus } from '../../lib/session-event-reducer';
@@ -450,15 +449,6 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const isStaleProgressAfterFinishedAssistant = (sessionId: string) =>
     isSessionInActiveTree(sessionId) &&
     latestAssistantFinishedBeforeLoading(messagesForSession(sessionId), uiStore.loadingStartedAt());
-  const latestAssistantHasExplicitTerminalFinish = (sessionId: string) => {
-    const latest = messagesForSession(sessionId).at(-1)?.info;
-    return (
-      latest?.role === 'assistant' &&
-      !!latest.time.completed &&
-      !!latest.finish &&
-      !isContinuationAssistantFinish(latest.finish)
-    );
-  };
   const scheduleMessageSync = (sessionId: string, ensureLatest = false) => {
     if (disposed) return;
     if (messageSyncs.has(sessionId)) {
@@ -475,7 +465,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (completedAt === undefined) return;
         pendingTerminalStepSettles.delete(sessionId);
         if (!settleLatestAssistantOnIdle(sessionId, completedAt)) return;
-        handleSessionIdle(sessionId, deps.hasPendingAbort(sessionId));
+        reconcileCompletedAssistantStep(sessionId);
       })
       .catch((err) => {
         if (!disposed) deps.logError('syncSessionMessages', err);
@@ -758,6 +748,16 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     } else if (isSessionInActiveTree(sessionId) && deps.shouldResyncSessionAfterIdle(sessionId)) {
       deps.syncSessionMessages(sessionId).catch((err) => deps.logError('syncSessionMessages', err));
     }
+  };
+  const reconcileCompletedAssistantStep = (sessionId: string) => {
+    // Legacy step events can recover a missing idle signal, but a provider
+    // response must never override execution that the server still reports running.
+    if (!isRunningSessionStatus(deps.getSessionStatus(sessionId))) {
+      handleSessionIdle(sessionId, deps.hasPendingAbort(sessionId));
+    }
+    void deps
+      .recheckSessionStatus?.(sessionId)
+      .catch((err) => deps.logError('recheckSessionStatus after assistant step', err));
   };
   const recordToolExecutionTime = (eventName: string, props: UnknownRecord) => {
     const sessionId = isString(props.sessionID) ? props.sessionID : null;
@@ -1401,27 +1401,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         handleSessionIdle(sessionID, abortedRetry, status);
         return;
       }
-      // opencode emits `busy` immediately after both continuation and terminal
-      // assistant messages. A terminal finish is already authoritative; allowing
-      // that trailing status to restart loading flashes Thinking before idle arrives.
-      if (
-        status.type === 'busy' &&
-        !status.background &&
-        isSessionInActiveTree(sessionID) &&
-        latestAssistantFinishedBeforeLoading(
-          messagesForSession(sessionID),
-          uiStore.loadingStartedAt()
-        ) &&
-        (!isRunningSessionStatus(deps.getSessionStatus(sessionID)) ||
-          latestAssistantHasExplicitTerminalFinish(sessionID))
-      ) {
-        const idleStatus: Extract<SessionStatus, { type: 'idle' }> = { type: 'idle' };
-        if (status.backgroundServices !== undefined)
-          idleStatus.backgroundServices = status.backgroundServices;
-        deps.setSessionStatusEntry(sessionID, idleStatus);
-        if (!isActiveTreeWorking()) uiStore.stopLoading();
-        return;
-      }
+      // Message completion only closes a provider response. Execution can
+      // continue or resume before another assistant message reaches this view.
+      // Keep the server's busy/retry status until an execution boundary settles it.
       if (status.type === 'busy' || status.type === 'retry')
         cancelTransientConnectionRetry(sessionID);
       settledIdleSessions.delete(sessionID);
@@ -1636,7 +1618,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         sessionStore.upsertPart(part);
         if (part.type === 'tool') deps.syncTodosFromMessages();
         if (settleAssistantStepFinishPart(part, getEventTimestamp(data.properties || {}))) {
-          handleSessionIdle(part.sessionID, deps.hasPendingAbort(part.sessionID));
+          reconcileCompletedAssistantStep(part.sessionID);
           return;
         }
         if (!staleCompletedMessage) {
@@ -1735,7 +1717,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         const activeTreeEvent = isSessionInActiveTree(sessionID);
         if (eventName === 'session.next.step.ended' && settleAssistantStepEnd(sessionID, p)) {
           if (activeTreeEvent) recordSessionMessageSnapshotMutation(sessionID);
-          handleSessionIdle(sessionID, deps.hasPendingAbort(sessionID));
+          reconcileCompletedAssistantStep(sessionID);
           return;
         }
         const compactionEnded = eventName === 'session.next.compaction.ended';

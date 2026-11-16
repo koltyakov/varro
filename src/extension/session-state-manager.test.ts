@@ -882,8 +882,8 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
-  it.each(['assistant completion', 'terminal step end'])(
-    'ignores a trailing stale busy event after %s but accepts a new prompt',
+  it.each(['assistant completion', 'terminal step end', 'server idle'])(
+    'accepts the first busy status after %s without a new prompt',
     (completionKind) => {
       const manager = createManager();
       manager.handleServerEvent({
@@ -912,23 +912,25 @@ describe('SessionStateManager notifications', () => {
                 },
               },
             }
-          : {
-              type: 'session.next.step.ended',
-              properties: { sessionID: 'session-1', finish: 'stop' },
-            }
+          : completionKind === 'terminal step end'
+            ? {
+                type: 'session.next.step.ended',
+                properties: { sessionID: 'session-1', finish: 'stop' },
+              }
+            : {
+                type: 'session.status',
+                properties: { sessionID: 'session-1', status: { type: 'idle' } },
+              }
       );
       manager.handleServerEvent({
         type: 'session.status',
         properties: { sessionID: 'session-1', status: { type: 'busy' } },
       });
 
-      expect(manager.busy.has('session-1')).toBe(false);
-      expect(manager.completed.has('session-1')).toBe(true);
-      expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledTimes(1);
-
-      manager.markSessionBusy('session-1');
       expect(manager.busy.has('session-1')).toBe(true);
       expect(manager.completed.has('session-1')).toBe(false);
+      expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledTimes(1);
+
       manager.handleServerEvent({
         type: 'session.status',
         properties: { sessionID: 'session-1', status: { type: 'idle' } },
@@ -939,7 +941,7 @@ describe('SessionStateManager notifications', () => {
     }
   );
 
-  it('accepts busy for a newly admitted prompt after suppressing a terminal trailing busy', () => {
+  it('accepts retry then busy after completion without a newly admitted prompt', () => {
     const manager = createManager();
     manager.markSessionBusy('session-1');
     manager.handleServerEvent({
@@ -955,16 +957,15 @@ describe('SessionStateManager notifications', () => {
     });
     manager.handleServerEvent({
       type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+      properties: {
+        sessionID: 'session-1',
+        status: { type: 'retry', attempt: 1, message: 'Retrying', next: 8_000 },
+      },
     });
 
-    expect(manager.busy.has('session-1')).toBe(false);
-    expect(manager.completed.has('session-1')).toBe(true);
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
 
-    manager.handleServerEvent({
-      type: 'session.next.prompt.admitted',
-      properties: { sessionID: 'session-1', messageID: 'message-2' },
-    });
     manager.handleServerEvent({
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'busy' } },

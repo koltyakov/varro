@@ -606,16 +606,16 @@ describe('session status helpers', () => {
           messages = [{ info: completedAssistantMessage(), parts: [] }];
         }),
         startLoading: startLoadingSpy,
-        loadingStartedAt: () => 3,
+        loadingStartedAt: () => 1,
         isActiveSession: () => true,
-        getCurrentSessionStatus: () => ({ type: 'busy' }),
+        getCurrentSessionStatus: () => ({ type: 'idle' }),
         getMessages: () => messages,
         logError: vi.fn(),
       },
       'session-1'
     );
 
-    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
     expect(stopLoadingSpy).toHaveBeenCalledTimes(1);
     expect(startLoadingSpy).not.toHaveBeenCalled();
   });
@@ -649,36 +649,59 @@ describe('session status helpers', () => {
     );
   });
 
-  it('preserves newer background work after an idle recheck syncs a completed reply', async () => {
-    const stopLoadingSpy = vi.fn();
-    const startLoadingSpy = vi.fn();
-    const setSessionStatusEntry = vi.fn();
-    await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
-        loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
-        stopLoading: stopLoadingSpy,
-        setSessionStatusEntry,
-        setSessionStatuses: vi.fn(),
-        shouldResyncSessionAfterIdle: () => true,
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
-        startLoading: startLoadingSpy,
-        isActiveSession: () => true,
-        getCurrentSessionStatus: () => ({ type: 'busy', background: true }),
-        getMessages: () => [{ info: completedAssistantMessage(), parts: [] }],
-        logError: vi.fn(),
-      },
-      'session-1'
-    );
-    expect(setSessionStatusEntry).not.toHaveBeenCalled();
-    expect(stopLoadingSpy).not.toHaveBeenCalled();
-    expect(startLoadingSpy).toHaveBeenCalledOnce();
-  });
+  it.each([
+    { type: 'busy' },
+    { type: 'busy', background: true },
+    { type: 'retry', attempt: 1, message: 'Retrying', next: 8_000 },
+  ] satisfies SessionStatus[])(
+    'preserves newer %j during an idle recheck message sync',
+    async (status) => {
+      const stopLoadingSpy = vi.fn();
+      const startLoadingSpy = vi.fn();
+      const setSessionStatusEntry = vi.fn();
+      let currentStatus: SessionStatus = { type: 'idle' };
+      let finishSync!: () => void;
+      let startedSync!: () => void;
+      const syncStarted = new Promise<void>((resolve) => {
+        startedSync = resolve;
+      });
+      const syncFinished = new Promise<void>((resolve) => {
+        finishSync = resolve;
+      });
+      const recheck = recheckSessionStatusWithDependencies(
+        {
+          isDocumentVisible: () => true,
+          loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
+          shouldIgnorePendingAbortStatus: () => false,
+          hasPendingAbort: () => false,
+          updateUsageLimitState: vi.fn(),
+          clearPendingAbort: vi.fn(),
+          stopLoading: stopLoadingSpy,
+          setSessionStatusEntry,
+          setSessionStatuses: vi.fn(),
+          shouldResyncSessionAfterIdle: () => true,
+          syncSession: vi.fn(async () => {}),
+          syncSessionMessages: vi.fn(async () => {
+            startedSync();
+            await syncFinished;
+          }),
+          startLoading: startLoadingSpy,
+          isActiveSession: () => true,
+          getCurrentSessionStatus: () => currentStatus,
+          getMessages: () => [{ info: completedAssistantMessage(), parts: [] }],
+          logError: vi.fn(),
+        },
+        'session-1'
+      );
+      await syncStarted;
+      currentStatus = status;
+      finishSync();
+      await recheck;
+      expect(setSessionStatusEntry).not.toHaveBeenCalled();
+      expect(stopLoadingSpy).not.toHaveBeenCalled();
+      expect(startLoadingSpy).toHaveBeenCalledOnce();
+    }
+  );
 
   it('updates usage limits from the reconciled status after a stale recheck snapshot', async () => {
     const retryStatus = {

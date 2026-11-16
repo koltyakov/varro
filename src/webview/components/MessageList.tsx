@@ -928,8 +928,6 @@ export function MessageList() {
     sessionId: string;
     messageId: string;
   } | null>(null);
-  const [trailingSummaryOwnerConfirmed, setTrailingSummaryOwnerConfirmed] = createSignal(false);
-  let trailingSummaryOwnerEpoch = 0;
   const [loadingOlderHistoryOwners, setLoadingOlderHistoryOwners] = createSignal<
     ReadonlyMap<string, HistoryLoadingOwner>
   >(new Map());
@@ -2520,16 +2518,6 @@ export function MessageList() {
       return null;
     return structurallyTrailingFinalResponseMessageId();
   });
-  const explicitTerminalFinalResponseMessageId = createMemo(() => {
-    const messageId = structurallyTrailingFinalResponseMessageId();
-    if (!messageId) return null;
-    const info = messages().find((entry) => entry.info.id === messageId)?.info;
-    return info?.role === 'assistant' &&
-      !!info.finish &&
-      !isContinuationAssistantFinish(info.finish)
-      ? messageId
-      : null;
-  });
   const structurallyTrailingRejectedInteractionMessageId = createMemo(() => {
     messageStructureVersion();
     messageInfoVersion();
@@ -2584,14 +2572,22 @@ export function MessageList() {
       response.messageId === structurallyTrailingFinalResponseCandidateMessageId()
     );
   });
+  const trailingTurnInProgress = createMemo(
+    () =>
+      activeSessionWorking() ||
+      !!state.streamingPartId ||
+      state.streamingText.length > 0 ||
+      presentation.pending() ||
+      waitingForBackground() ||
+      subagentsWorking()
+  );
   const trailingSummaryMessageId = createMemo(() =>
-    presentation.pending() || waitingForBackground() || subagentsWorking()
+    trailingTurnInProgress()
       ? null
       : (structurallyTrailingInterruptedMessageId() ??
-        explicitTerminalFinalResponseMessageId() ??
-        (!activeSessionWorking() ? structurallyTrailingRejectedInteractionMessageId() : null) ??
+        structurallyTrailingRejectedInteractionMessageId() ??
         trailingSummaryOwner()?.messageId ??
-        (!isLoading() && !activeSessionWorking() ? trailingFinalResponseMessageId() : null) ??
+        trailingFinalResponseMessageId() ??
         null)
   );
 
@@ -3050,42 +3046,23 @@ export function MessageList() {
     const sessionId = state.activeSessionId;
     const owner = trailingSummaryOwner();
     const ownerMatchesCurrentResponse =
-      !waitingForBackground() &&
-      !subagentsWorking() &&
+      !trailingTurnInProgress() &&
       owner &&
       owner.sessionId === sessionId &&
       owner.messageId === structurallyTrailingFinalResponseCandidateMessageId();
     if (ownerMatchesCurrentResponse) {
-      const streaming = !!state.streamingPartId || state.streamingText.length > 0;
-      if (streaming && !trailingSummaryOwnerConfirmed()) {
-        trailingSummaryOwnerEpoch += 1;
-        batch(() => {
-          setTrailingSummarySettled(false);
-          setTrailingSummaryOwner(null);
-          setTrailingSummaryOwnerConfirmed(false);
-        });
-        return;
-      }
       if (!trailingSummarySettled()) setTrailingSummarySettled(true);
       return;
     }
 
     const messageId = trailingFinalResponseMessageId();
-    const settled = !waitingForBackground() && !activeSessionWorking() && messageId !== null;
+    const settled = !trailingTurnInProgress() && messageId !== null;
     const nextOwner = settled && sessionId && messageId ? { sessionId, messageId } : null;
-    const ownerEpoch = ++trailingSummaryOwnerEpoch;
     batch(() => {
       setTrailingSummarySettled(settled);
       setTrailingSummaryOwner(nextOwner);
-      setTrailingSummaryOwnerConfirmed(false);
       if (settled && !loadingRowEligible()) setReserveLoadingRow(false);
     });
-    if (nextOwner) {
-      queueMicrotask(() => {
-        if (disposed || ownerEpoch !== trailingSummaryOwnerEpoch) return;
-        setTrailingSummaryOwnerConfirmed(true);
-      });
-    }
   });
 
   const questionRequestsByToolCall = createMemo(
@@ -10622,8 +10599,8 @@ export function MessageList() {
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
               assistantDialogSummaryMap={rowAssistantDialogSummaryMap()}
               isFinalAssistantMessage={(messageId) => {
-                // Worked can retain a terminal step while execution continues. Only mark
-                // the trailing answer once work and its queued presentation have settled.
+                // A terminal step does not finish the turn until execution and
+                // its queued presentation have settled.
                 if (structurallyTrailingFinalResponseCandidateMessageId() === messageId) {
                   return (
                     state.activeSessionId !== null &&

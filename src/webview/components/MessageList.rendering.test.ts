@@ -342,6 +342,8 @@ describe('final assistant markers', () => {
       expect(
         container?.querySelector('[data-msg-id="answer"] .assistant-final-mark-pulse')
       ).toBeNull();
+      expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
+      expect(container?.querySelectorAll('.assistant-dialog-summary')).toHaveLength(1);
 
       batch(() => {
         stopLoading();
@@ -353,6 +355,8 @@ describe('final assistant markers', () => {
       expect(
         container?.querySelector('[data-msg-id="answer"] .assistant-message-flow-item-final')
       ).not.toBeNull();
+      expect(container?.querySelector('.trailing-assistant-summary-row')).not.toBeNull();
+      expect(container?.querySelectorAll('.assistant-dialog-summary')).toHaveLength(2);
     }
   );
 
@@ -5016,82 +5020,105 @@ describe('MessageList loading row', () => {
     );
   });
 
-  it('keeps the worked summary visible across post-completion signals until a new prompt', async () => {
-    setState('activeSessionId', 'session-1');
-    const completedDialog: MessageEntry[] = [
-      {
-        info: { ...userMessage('user-1'), time: { created: 1_000 } },
-        parts: [textPart('text-user-1', 'Prompt')],
-      },
-      {
-        info: assistantMessage('assistant-1', {
-          time: { created: 2_000, completed: 11_000 },
-          tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
-        }),
-        parts: [textPart('text-assistant-1', 'Final response')],
-      },
-    ];
-    replaceMessages(completedDialog);
-
-    cleanup = render(() => MessageList(), container!);
-    await Promise.resolve();
-
-    const workedRow = container?.querySelector('.trailing-assistant-summary-row');
-    expect(workedRow).toBeInstanceOf(HTMLDivElement);
-
-    batch(() => {
-      startLoading(12_000);
-      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
-    });
-    await Promise.resolve();
-    vi.advanceTimersByTime(700);
-    await Promise.resolve();
-
-    expect(container?.querySelector('.trailing-assistant-summary-row')).toBe(workedRow);
-    expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
-    expect(container?.querySelector('.loading-indicator')).toBeNull();
-
-    batch(() => {
-      setState('streamingPartId', 'text-assistant-1');
-      setState('streamingText', 'Final response');
-    });
-    await Promise.resolve();
-
-    expect(container?.querySelector('.trailing-assistant-summary-row')).toBe(workedRow);
-    expect(container?.querySelector('.loading-indicator')).toBeNull();
-
-    replaceMessages([
-      completedDialog[0]!,
-      {
-        info: assistantMessage('assistant-1', {
-          time: { created: 2_000 },
-          tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
-        }),
-        parts: [textPart('text-assistant-1', 'Final response')],
-      },
-    ]);
-    await Promise.resolve();
-
-    expect(container?.querySelector('.trailing-assistant-summary-row')).toBe(workedRow);
-    expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
-    expect(container?.querySelector('.loading-indicator')).toBeNull();
-
-    batch(() => {
-      setState('streamingPartId', null);
-      setState('streamingText', '');
-      replaceMessages([
-        ...completedDialog,
+  it.each(['busy', 'retry', 'loading', 'streaming'] as const)(
+    'revokes a retained worked summary as soon as %s resumes',
+    async (workingState) => {
+      setState('activeSessionId', 'session-1');
+      const completedDialog: MessageEntry[] = [
         {
-          info: { ...userMessage('user-2'), time: { created: 13_000 } },
-          parts: [textPart('text-user-2', 'Follow-up prompt')],
+          info: { ...userMessage('user-1'), time: { created: 1_000 } },
+          parts: [textPart('text-user-1', 'Prompt')],
+        },
+        {
+          info: assistantMessage('assistant-1', {
+            time: { created: 2_000, completed: 11_000 },
+            tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+          }),
+          parts: [textPart('text-assistant-1', 'Final response')],
+        },
+      ];
+      replaceMessages(completedDialog);
+
+      cleanup = render(() => MessageList(), container!);
+      await Promise.resolve();
+
+      const workedRow = container?.querySelector('.trailing-assistant-summary-row');
+      expect(workedRow).toBeInstanceOf(HTMLDivElement);
+
+      batch(() => {
+        if (workingState === 'loading') startLoading(12_000);
+        else if (workingState === 'streaming') {
+          setState('streamingPartId', 'text-assistant-1');
+          setState('streamingText', 'Final response');
+        } else {
+          setState(
+            'sessionStatus',
+            'session-1',
+            workingState === 'busy'
+              ? { type: 'busy' }
+              : { type: 'retry', attempt: 1, message: 'Retrying', next: 20_000 }
+          );
+        }
+      });
+      await Promise.resolve();
+      vi.advanceTimersByTime(700);
+      await Promise.resolve();
+
+      expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
+      expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
+
+      batch(() => {
+        setState('streamingPartId', 'text-assistant-1');
+        setState('streamingText', 'Final response');
+      });
+      await Promise.resolve();
+
+      expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
+      expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
+
+      replaceMessages([
+        completedDialog[0]!,
+        {
+          info: assistantMessage('assistant-1', {
+            time: { created: 2_000 },
+            tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+          }),
+          parts: [textPart('text-assistant-1', 'Final response')],
         },
       ]);
-    });
-    await Promise.resolve();
+      await Promise.resolve();
 
-    expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
-    expect(container?.querySelector('.loading-indicator')).toBeInstanceOf(HTMLDivElement);
-  });
+      expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
+      expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
+
+      batch(() => {
+        setState('streamingPartId', null);
+        setState('streamingText', '');
+        stopLoading();
+        setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+        replaceMessages(completedDialog);
+      });
+      await Promise.resolve();
+      expect(container?.querySelector('.trailing-assistant-summary-row')).not.toBeNull();
+      expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
+      expect(container?.querySelector('.loading-indicator')).toBeNull();
+
+      batch(() => {
+        startLoading(13_000);
+        replaceMessages([
+          ...completedDialog,
+          {
+            info: { ...userMessage('user-2'), time: { created: 13_000 } },
+            parts: [textPart('text-user-2', 'Follow-up prompt')],
+          },
+        ]);
+      });
+      await Promise.resolve();
+
+      expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
+      expect(container?.querySelector('.loading-indicator')).toBeInstanceOf(HTMLDivElement);
+    }
+  );
 
   it.each(['busy', 'retry'] as const)(
     'withholds the completed-turn summary while a nested subagent is %s',
@@ -5156,35 +5183,62 @@ describe('MessageList loading row', () => {
     }
   );
 
-  it('keeps an explicitly terminal worked summary visible while stale busy state settles', async () => {
-    setState('activeSessionId', 'session-1');
-    const terminalAssistant = assistantMessage('assistant-1', {
-      time: { created: 2_000, completed: 11_000 },
-      tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
-    });
-    terminalAssistant.finish = 'stop';
-    replaceMessages([
-      {
-        info: { ...userMessage('user-1'), time: { created: 1_000 } },
-        parts: [textPart('text-user-1', 'Prompt')],
-      },
-      {
-        info: terminalAssistant,
-        parts: [textPart('text-assistant-1', 'Final response')],
-      },
-    ]);
-    startLoading(1_000);
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+  it.each(['busy', 'retry', 'loading', 'streaming'] as const)(
+    'withholds an explicitly terminal worked summary while %s remains active',
+    async (workingState) => {
+      setState('activeSessionId', 'session-1');
+      const terminalAssistant = assistantMessage('assistant-1', {
+        time: { created: 2_000, completed: 11_000 },
+        tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+      });
+      terminalAssistant.finish = 'stop';
+      replaceMessages([
+        {
+          info: { ...userMessage('user-1'), time: { created: 1_000 } },
+          parts: [textPart('text-user-1', 'Prompt')],
+        },
+        {
+          info: terminalAssistant,
+          parts: [textPart('text-assistant-1', 'Final response')],
+        },
+      ]);
+      if (workingState === 'loading') startLoading(1_000);
+      else if (workingState === 'streaming') {
+        setState('streamingPartId', 'text-assistant-1');
+        setState('streamingText', 'Final response');
+      } else {
+        setState(
+          'sessionStatus',
+          'session-1',
+          workingState === 'busy'
+            ? { type: 'busy' }
+            : { type: 'retry', attempt: 1, message: 'Retrying', next: 20_000 }
+        );
+      }
 
-    cleanup = render(() => MessageList(), container!);
-    await Promise.resolve();
+      cleanup = render(() => MessageList(), container!);
+      await vi.advanceTimersByTimeAsync(700);
 
-    expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
-    expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
-      HTMLDivElement
-    );
-    expect(container?.querySelector('.loading-indicator')).toBeNull();
-  });
+      expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
+      expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
+      if (workingState !== 'streaming')
+        expect(container?.querySelector('.loading-indicator')).not.toBeNull();
+
+      batch(() => {
+        stopLoading();
+        setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+        setState('streamingPartId', null);
+        setState('streamingText', '');
+      });
+      await Promise.resolve();
+
+      expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
+      expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
+        HTMLDivElement
+      );
+      expect(container?.querySelector('.loading-indicator')).toBeNull();
+    }
+  );
 
   it('shows the background process card through the final-answer and resume handoff', async () => {
     setState('activeSessionId', 'session-1');
