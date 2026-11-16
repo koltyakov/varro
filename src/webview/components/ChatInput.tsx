@@ -382,6 +382,7 @@ import { ModelPicker } from './ModelPicker';
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
 const AUTHORITATIVE_QUEUED_STATUS_MAX_AGE_MS = 5_000;
 const QUEUED_STATUS_RECONCILIATION_DELAY_MS = 1_000;
+const QUEUED_RUNNING_STATUS_RECONCILIATION_DELAY_MS = 5_000;
 
 interface CurrentComposerModel {
   providerID: string | null;
@@ -4134,6 +4135,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (status === 'busy') {
       dispatch.phase = 'running';
       dispatch.completedBeforeAdmission = false;
+      dispatch.statusCheckAfter = Date.now() + QUEUED_RUNNING_STATUS_RECONCILIATION_DELAY_MS;
       scheduleQueuedStatusReconciliation();
       return false;
     }
@@ -4171,7 +4173,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     let candidate: { sessionId: string; dispatch: QueuedSessionDispatchPhase } | undefined;
     let reconcileAt = Number.POSITIVE_INFINITY;
     for (const [sessionId, dispatch] of queuedSessionDispatchPhases) {
-      if (dispatch.phase !== 'admitted' || dispatch.statusCheckInFlight) continue;
+      // A reconnect can restore idle through a snapshot without replaying its event.
+      // Keep checking running admissions too, or that lost event blocks the queue forever.
+      if (
+        dispatch.phase === 'dispatching' ||
+        dispatch.admittedAt === undefined ||
+        dispatch.statusCheckInFlight
+      )
+        continue;
       const nextCheckAt = dispatch.statusCheckAfter ?? now;
       if (nextCheckAt >= reconcileAt) continue;
       candidate = { sessionId, dispatch };

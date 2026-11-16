@@ -6332,6 +6332,91 @@ describe('ChatInput', () => {
     ]);
   });
 
+  it.each([false, true])(
+    'recovers a running queue when idle arrives only through a snapshot, active=%s',
+    async (activateQueuedSession) => {
+      vi.useFakeTimers();
+      setState('activeSessionId', 'session-2');
+      setState('sessionStatus', {
+        'session-1': { type: 'idle' },
+        'session-2': { type: 'idle' },
+      });
+      setState('queuedMessages', [
+        { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
+        { id: 'q2', sessionId: 'session-1', text: 'Continue after completion' },
+      ]);
+      sendMessageMock.mockImplementation(async (_text, options) => {
+        if (!options?.targetSessionId) throw new Error('Missing queued target session');
+        setState('sessionStatus', options.targetSessionId, { type: 'busy' });
+        return true;
+      });
+      vi.mocked(client.session.status).mockResolvedValue({ 'session-1': { type: 'idle' } });
+
+      cleanup = render(() => ChatInput(), container!);
+      await vi.advanceTimersByTimeAsync(300);
+      await flushAsyncWork();
+      expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
+      postQueuedSessionStatus('session-1', 'busy');
+      await flushAsyncWork();
+
+      // A reconnect/status snapshot restores idle without replaying the idle event.
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      if (activateQueuedSession) setState('activeSessionId', 'session-1');
+      await vi.advanceTimersByTimeAsync(5_000);
+      await flushAsyncWork();
+
+      expect(client.session.status).toHaveBeenCalled();
+      expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+        'First prompt',
+        'Continue after completion',
+      ]);
+      expect(state.queuedMessages).toEqual([]);
+    }
+  );
+
+  it('rechecks running dispatches at a bounded interval and stops after the queue drains', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('sessionStatus', {
+      'session-1': { type: 'idle' },
+      'session-2': { type: 'idle' },
+    });
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
+      { id: 'q2', sessionId: 'session-1', text: 'After confirmed idle' },
+    ]);
+    sendMessageMock.mockResolvedValue(true);
+    vi.mocked(client.session.status)
+      .mockResolvedValueOnce({ 'session-1': { type: 'busy' } })
+      .mockResolvedValueOnce({ 'session-1': { type: 'idle' } });
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+    postQueuedSessionStatus('session-1', 'busy');
+    await flushAsyncWork();
+
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(client.session.status).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await flushAsyncWork();
+    expect(client.session.status).toHaveBeenCalledOnce();
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flushAsyncWork();
+    expect(client.session.status).toHaveBeenCalledTimes(2);
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+      'First prompt',
+      'After confirmed idle',
+    ]);
+    expect(state.queuedMessages).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(client.session.status).toHaveBeenCalledTimes(2);
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+  });
+
   it('retries an unresolved status reconciliation after remounting', async () => {
     vi.useFakeTimers();
     setState('activeSessionId', 'session-2');
