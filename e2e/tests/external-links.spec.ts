@@ -36,7 +36,7 @@ for (const url of ['http://ingest.above-all.test/', 'https://example.test/docs']
           type: 'text',
           text:
             entry.info.role === 'assistant'
-              ? `[Docs](${href}) ${href}\n\n| Component | URL |\n| --- | --- |\n| Ingestion | ${href} |\n\nFile: \`src/shared/protocol.ts:12-15\`\n\n[Project folder](src/) [Local folder](file:///workspace/varro/src/)`
+              ? `[Docs](${href}) ${href}\n\n| Component | URL |\n| --- | --- |\n| Ingestion | ${href} |\n\n[\`http.Transport\`](${href}#Transport)\n\nFile: \`src/shared/protocol.ts:12-15\`\n\n[Project folder](src/) [Local folder](file:///workspace/varro/src/)`
               : `See ${href}.`,
         };
         harness.updateMessagePart(part);
@@ -68,8 +68,36 @@ for (const url of ['http://ingest.above-all.test/', 'https://example.test/docs']
     }, url);
 
     const user = page.locator('[data-msg-id="message-rapid-user-streaming"]');
-    await expect(assistant.locator('a.external-link')).toHaveCount(3);
+    await expect(assistant.locator('a.external-link')).toHaveCount(4);
     await expect(user.locator('a.external-link')).toHaveCount(1);
+    const codeLink = assistant.locator('a.external-link').nth(3);
+    await expect(codeLink).toHaveText('http.Transport');
+    await expect(codeLink).toHaveAttribute('href', `${url}#Transport`);
+    await expect(codeLink.locator('code')).toHaveCSS(
+      'background-color',
+      'rgba(255, 255, 255, 0.1)'
+    );
+    await expect(codeLink.locator('code')).toHaveCSS('padding', '1px 3px');
+
+    // VS Code's host stylesheet underlines anchors even when they are not hovered.
+    const hostLinkStyle = await page.addStyleTag({ content: 'a { text-decoration: underline; }' });
+    for (const link of [
+      assistant.locator('a.external-link').first(),
+      codeLink,
+      user.locator('a.external-link'),
+    ]) {
+      expect(await link.evaluate((element) => element.matches(':hover'))).toBe(false);
+      await expect(link.locator('.link-leading-content')).toHaveCSS(
+        'text-decoration-line',
+        'underline'
+      );
+    }
+    await hostLinkStyle.evaluate((element) => element.parentNode?.removeChild(element));
+    await expect(codeLink.locator('.link-leading-content')).toHaveCSS(
+      'text-decoration-line',
+      'none'
+    );
+
     const host = await page.evaluateHandle(() => {
       const observations = { linkClicks: 0, contextMenus: 0 };
       // Match VS Code's window-level handling: it does not check defaultPrevented for links.
@@ -88,6 +116,7 @@ for (const url of ['http://ingest.above-all.test/', 'https://example.test/docs']
       assistant.locator('a.external-link .link-leading-label').nth(0),
       assistant.locator('a.external-link .link-leading-label').nth(1),
       assistant.locator('a.external-link .link-leading-label').nth(2),
+      assistant.locator('a.external-link .link-leading-label').nth(3),
       user.locator('a.external-link .link-leading-label'),
     ]) {
       await label.click();
@@ -96,7 +125,7 @@ for (const url of ['http://ingest.above-all.test/', 'https://example.test/docs']
       () =>
         (window as Window & { __varroE2E?: { externalUrls: string[] } }).__varroE2E?.externalUrls
     );
-    expect(externalUrls).toEqual([url, url, url, url]);
+    expect(externalUrls).toEqual([url, url, url, `${url}#Transport`, url]);
     expect(await host.evaluate((observations) => observations.linkClicks)).toBe(0);
 
     const link = user.locator('a.external-link');

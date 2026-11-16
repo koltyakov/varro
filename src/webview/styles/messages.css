@@ -2360,6 +2360,12 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   white-space: nowrap;
 }
 
+/* Carry the anchor's decoration through code into the atomic icon/letter wrapper. */
+.rendered-markdown a.external-link code,
+.rendered-markdown a.external-link .link-leading-content {
+  text-decoration: inherit;
+}
+
 .rendered-markdown .link-leading-content.file-icon-selected {
   position: relative;
   isolation: isolate;
