@@ -15,8 +15,8 @@ describe('ProviderLimitPopup', () => {
     vi.clearAllMocks();
   });
 
-  it.each([62_500, 0, undefined])(
-    'shows the credit balance %s separately from quotas',
+  it.each([62_500, 0.5, 0, undefined])(
+    'shows only nonzero credit balances separately from quotas, balance=%s',
     (balance) => {
       const limit: ProviderLimitStatus = {
         providerID: 'openai',
@@ -44,7 +44,7 @@ describe('ProviderLimitPopup', () => {
       );
 
       const credits = container.querySelector('.provider-limit-credit-section');
-      if (balance === undefined) {
+      if (balance === undefined || balance === 0) {
         expect(credits).toBeNull();
       } else {
         expect(credits?.querySelector('.provider-limit-row-label')?.textContent).toBe('Credits');
@@ -57,6 +57,33 @@ describe('ProviderLimitPopup', () => {
       expect(hasProviderLimitWindowWithinThreshold(limit, 10)).toBe(false);
     }
   );
+
+  it('shows the empty state when the credit balance is zero and there are no quotas', () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    dispose = render(
+      () => (
+        <ProviderLimitPopup
+          providerName="OpenAI"
+          onClose={() => {}}
+          limit={{
+            providerID: 'openai',
+            status: 'available',
+            source: 'provider',
+            checkedAt: 1,
+            creditBalance: 0,
+            windows: [],
+          }}
+        />
+      ),
+      container
+    );
+
+    expect(container.querySelector('.provider-limit-credit-section')).toBeNull();
+    expect(container.querySelector('.provider-limit-popup-empty')?.textContent).toBe(
+      'No active limits'
+    );
+  });
 
   it('expands Grok reset expiration details and opens Grok Usage', () => {
     const sendToExtension = vi.fn();

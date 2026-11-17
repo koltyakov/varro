@@ -34,8 +34,10 @@ export function ProviderLimitPopup(props: {
   const windows = () => getOrderedProviderLimitWindows(props.limit);
   const planName = () =>
     props.limit?.status === 'available' ? props.limit.planName || null : null;
-  const creditBalance = () =>
-    props.limit?.status === 'available' ? props.limit.creditBalance : undefined;
+  const creditBalance = () => {
+    const balance = props.limit?.status === 'available' ? props.limit.creditBalance : undefined;
+    return balance === 0 ? undefined : balance;
+  };
   const resetCredits = () => {
     if (props.limit?.status !== 'available') return null;
     const resets = props.limit.usageLimitResets;
