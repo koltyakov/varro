@@ -253,6 +253,85 @@ for (const numbered of [false, true]) {
   });
 }
 
+for (const numbered of [false, true]) {
+  test(`keeps nested ${numbered ? 'numbered' : 'bullet'} list spacing when later paragraphs make it loose`, async ({
+    page,
+  }) => {
+    // ses_e160e10e0ffeIjl71mdZKf95SK: the indented paragraph changes already-painted
+    // list text into <p> elements, which must not acquire top-level prose spacing.
+    await page.setViewportSize({ width: 544, height: 900 });
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    const markdown = page.locator(`${ROW} .rendered-markdown`);
+    await expect(markdown).toHaveText('Starting...');
+    const marker = (index: number) => (numbered ? `${index}.` : '-');
+    let text = [
+      'Starting...',
+      '',
+      '## Issues found before accepting external results',
+      '',
+      `${marker(1)} **Runtime measurement validation needs tightening.**${numbered ? ' Confirmed directly in [`Metrics.record()`](tests/fixtures/comparative-benchmark/metrics.ts:15):' : ''}`,
+      '   - `usage: {}` becomes known zero input/output tokens.',
+      '   - An unknown event kind can increment browser requests.',
+    ].join('\n');
+    await appendDeltaToRapidStreaming(page, text.slice('Starting...'.length));
+    await expect(markdown.locator('li li')).toHaveCount(2);
+    const collector = await markdown.evaluateHandle((element) => {
+      const state = { running: true, gaps: [] as number[], paragraphWrappers: [] as boolean[] };
+      const sample = () => {
+        const nested = element.querySelector('li > ul');
+        const item = nested?.parentElement;
+        if (!nested || !item) throw new Error('Missing nested validation list');
+        const prose = document.createRange();
+        prose.setStart(item, 0);
+        prose.setEndBefore(nested);
+        // Measure glyphs, not the optional paragraph wrapper's line box.
+        const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
+        let lastText: Node | null = null;
+        while (walker.nextNode()) {
+          if (prose.intersectsNode(walker.currentNode) && walker.currentNode.textContent?.trim()) {
+            lastText = walker.currentNode;
+          }
+        }
+        if (!lastText) throw new Error('Missing prose before nested validation list');
+        prose.selectNodeContents(lastText);
+        const lines = [...prose.getClientRects()].filter((rect) => rect.height > 0);
+        const bottom = Math.max(...lines.map((rect) => rect.bottom));
+        state.gaps.push(nested.getBoundingClientRect().top - bottom);
+        state.paragraphWrappers.push(item.firstElementChild?.tagName === 'P');
+        if (state.running) requestAnimationFrame(sample);
+      };
+      sample();
+      return state;
+    });
+    for (const delta of [
+      '\n\n   Require strict event schemas and mandatory usage fields,',
+      ' with negative tests through the dynamic adapter boundary.',
+      `\n\n${marker(2)} **Adapter trust is not certification.**`,
+      '\n\n   Adapters receive controller context containing expected outcomes.',
+      '\n\nFollowing paragraph.',
+    ]) {
+      text += delta;
+      await appendDeltaToRapidStreaming(page, delta);
+      await waitForAnimationFrames(page, 6);
+    }
+    await completeResponse(page, text);
+    await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+    await waitForAnimationFrames(page, 6);
+    const samples = await collector.evaluate((state) => {
+      state.running = false;
+      return { gaps: state.gaps, paragraphWrappers: state.paragraphWrappers };
+    });
+    await attachEvidence(test.info(), 'nested-list-spacing.json', JSON.stringify(samples));
+    expect(samples.paragraphWrappers).toContain(false);
+    expect(samples.paragraphWrappers).toContain(true);
+    expect(samples.gaps.length).toBeGreaterThan(5);
+    expect(
+      Math.max(...samples.gaps) - Math.min(...samples.gaps),
+      JSON.stringify(samples)
+    ).toBeLessThan(1);
+  });
+}
+
 test('keeps the Thinking gap fixed while a pending indicator holds growing content', async ({
   page,
 }) => {

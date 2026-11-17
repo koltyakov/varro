@@ -1006,7 +1006,7 @@ export class OpenCodeServer extends EventEmitter {
   private async hasMissingRuntimeAskAgent(signal?: AbortSignal): Promise<boolean> {
     if (
       this.isAttachOnly ||
-      !this.processManager.needsRuntimeConfigRecovery ||
+      !(await this.processManager.needsRuntimeConfigRecovery()) ||
       !(await this.processManager.shouldRestoreRuntimeAskAgent())
     ) {
       signal?.throwIfAborted();
@@ -1040,14 +1040,28 @@ export class OpenCodeServer extends EventEmitter {
     disposeGeneration: number,
     signal: AbortSignal
   ): Promise<string | undefined> {
-    // A service replacement can retain our credentials but lose OPENCODE_CONFIG.
+    // A service replacement or temp cleanup can remove our runtime config.
     // Restore the runtime before publishing running state and routing catalogs.
     // Ordinary reuse keeps the background ownership-preparation fast path.
-    if (!this.processManager.hasRuntimeConfigRecoveryCandidate || this.isAttachOnly) return;
+    if (this.isAttachOnly) return;
+    const candidate = await withStartupDeadline(
+      () => this.processManager.hasRuntimeConfigRecoveryCandidate(),
+      2000,
+      'OpenCode runtime config inspection',
+      signal
+    );
+    this.throwIfStartCancelled(disposeGeneration, signal);
+    if (!candidate) return;
     this.startExistingServerPreparation(disposeGeneration, signal);
     await this.existingServerPreparationOperation;
     this.throwIfStartCancelled(disposeGeneration, signal);
-    if (!(await this.hasMissingRuntimeAskAgent())) return;
+    const missingAsk = await withStartupDeadline(
+      (recoverySignal) => this.hasMissingRuntimeAskAgent(recoverySignal),
+      2000,
+      'OpenCode Ask agent preparation',
+      signal
+    );
+    if (!missingAsk) return;
     this.throwIfStartCancelled(disposeGeneration, signal);
     if ((await this.readRestartBlockers()).totalSessionCount > 0) return;
     this.throwIfStartCancelled(disposeGeneration, signal);
@@ -1057,7 +1071,7 @@ export class OpenCodeServer extends EventEmitter {
       // The claim protects ownership, not work submitted by other clients.
       if ((await this.readRestartBlockers()).totalSessionCount > 0) return;
       this.throwIfStartCancelled(disposeGeneration, signal);
-      logger.info('Restoring Varro runtime Ask agent on the replaced managed OpenCode server');
+      logger.info('Restoring Varro runtime Ask agent on the managed OpenCode server');
       await this.stopServerForRestart(true);
     } finally {
       await release();
@@ -2175,7 +2189,7 @@ export class OpenCodeServer extends EventEmitter {
     // runRestart reserves the lifecycle, drains requests, rechecks global work
     // and acquires verified ownership before stopping. Never force this repair.
     await this.runRestart(async () => {
-      logger.info('Restoring Varro runtime Ask agent on the replaced managed OpenCode server');
+      logger.info('Restoring Varro runtime Ask agent on the managed OpenCode server');
       await this.processManager.stopServerForRestart();
     });
     this.runtimeAskRecoveryPending = false;

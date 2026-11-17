@@ -19,6 +19,10 @@ delivery against the real webview, saves snapshots, and verifies host shutdown. 
 credentials or production database. Evidence stays in `artifacts/ai-streaming/runner-smoke-<timestamp>/`.
 Use it to diagnose runner setup; it is not a visual or live-model suite verdict.
 
+For targeted native cold-scroll, retained-text paint, and pagination-top checks, see
+[native paint regressions](native-paint-regressions.md). Those checks keep failed frames
+even when a later pagination re-grab succeeds.
+
 Verify the controller against each installed v1/v2 executable with:
 
 ```sh

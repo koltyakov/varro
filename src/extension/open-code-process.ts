@@ -2035,13 +2035,21 @@ export class OpenCodeProcess {
     );
   }
 
-  get needsRuntimeConfigRecovery(): boolean {
-    return this.isAdoptedManagedServer && !this.ownershipLease?.configPath;
+  async needsRuntimeConfigRecovery(): Promise<boolean> {
+    const lease = this.ownershipLease;
+    if (
+      !this._managedProcess ||
+      !lease ||
+      lease.host !== this.hostOwner ||
+      lease.state !== 'active'
+    )
+      return false;
+    return !lease.configPath || this.isMissingManagedInjectedConfig(lease);
   }
 
-  get hasRuntimeConfigRecoveryCandidate(): boolean {
+  async hasRuntimeConfigRecoveryCandidate(): Promise<boolean> {
     const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
-    return !!lease && !lease.configPath;
+    return !!lease && (!lease.configPath || this.isMissingManagedInjectedConfig(lease));
   }
 
   get serverOwnership(): OpenCodeServerOwnership {
@@ -2160,7 +2168,11 @@ export class OpenCodeProcess {
       return false;
     }
     if (lease.host === this.hostOwner && lease.state === 'active') {
-      if (lease.configPath && !(await this.matchesInjectedConfigOwner(lease)))
+      if (
+        lease.configPath &&
+        !(await this.matchesInjectedConfigOwner(lease)) &&
+        !(await this.isMissingManagedInjectedConfig(lease))
+      )
         throw new Error('Managed OpenCode ownership no longer matches its temporary config');
       this.adoptManagedServerOwnership(lease);
       return true;
@@ -2216,7 +2228,11 @@ export class OpenCodeProcess {
         await this.removeOwnershipLease(lease.owner, lease.host);
         return release;
       }
-      if (lease.configPath && !(await this.matchesInjectedConfigOwner(lease))) {
+      if (
+        lease.configPath &&
+        !(await this.matchesInjectedConfigOwner(lease)) &&
+        !(await this.isMissingManagedInjectedConfig(lease))
+      ) {
         throw new Error('Managed OpenCode ownership no longer matches its temporary config');
       }
 
@@ -3409,7 +3425,11 @@ export class OpenCodeProcess {
     }
   }
 
-  private async isMissingManagedInjectedConfig(configPath: string): Promise<boolean> {
+  private async isMissingManagedInjectedConfig(
+    lease: ManagedServerOwnershipLease
+  ): Promise<boolean> {
+    const configPath = lease.configPath;
+    if (!configPath) return false;
     const parent = dirname(configPath);
     const directoryName = basename(parent);
     if (
@@ -3436,15 +3456,26 @@ export class OpenCodeProcess {
       }
     }
 
-    for (const path of [configPath, join(parent, INJECTED_CONFIG_OWNER_FILE)]) {
-      try {
-        await lstat(path);
-        return false;
-      } catch (error) {
-        if (!isMissingPathError(error)) throw error;
-      }
+    try {
+      await lstat(configPath);
+      return false;
+    } catch (error) {
+      if (!isMissingPathError(error)) throw error;
     }
-    return true;
+
+    // Temp cleanup can remove only opencode.json. A surviving owner file is
+    // acceptable only when it still belongs to this independently verified lease.
+    const ownerPath = join(parent, INJECTED_CONFIG_OWNER_FILE);
+    try {
+      const ownerInfo = await lstat(ownerPath);
+      if (!ownerInfo.isFile() || ownerInfo.isSymbolicLink()) return false;
+      const owner = asRecord(JSON.parse(await readFile(ownerPath, 'utf-8')));
+      return owner?.pid === lease.pid && owner.owner === lease.owner;
+    } catch (error) {
+      if (isMissingPathError(error)) return true;
+      if (error instanceof SyntaxError) return false;
+      throw error;
+    }
   }
 
   private async findInjectedConfigOwner(
@@ -3749,7 +3780,7 @@ export class OpenCodeProcess {
       if (!(await this.matchesOwnershipLease(current))) return null;
       let recoveredMissingConfig = false;
       if (current.configPath && !(await this.matchesInjectedConfigOwner(current))) {
-        if (!(await this.isMissingManagedInjectedConfig(current.configPath))) {
+        if (!(await this.isMissingManagedInjectedConfig(current))) {
           throw new Error(
             'The live OpenCode server has lost its managed configuration; its ownership evidence was retained'
           );

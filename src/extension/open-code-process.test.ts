@@ -5,6 +5,7 @@ import type * as FsPromises from 'fs/promises';
 import {
   chmod,
   link as createHardLink,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -71,7 +72,7 @@ vi.mock('./windows-process-inspector', () => ({
 }));
 vi.mock('fs/promises', async () => {
   const actual = await vi.importActual<typeof FsPromises>('fs/promises');
-  if (process.platform !== 'win32') return actual;
+  if (process.platform !== 'win32') return { ...actual, lstat: vi.fn(actual.lstat) };
   // Windows ignores POSIX creation modes. Model them for the Linux/macOS
   // ownership fixtures while retaining real files, symlinks, and atomic writes.
   const modes = new Map<string, number>();
@@ -116,14 +117,14 @@ vi.mock('fs/promises', async () => {
         modes.delete(resolvePath(args[0]));
       }
     },
-    async lstat(...args: Parameters<typeof actual.lstat>) {
+    lstat: vi.fn(async (...args: Parameters<typeof actual.lstat>) => {
       const info = await actual.lstat(...args);
       if (typeof args[0] === 'string' && !args[1]?.bigint) {
         const mode = modes.get(resolvePath(args[0]));
         if (mode !== undefined) info.mode = (Number(info.mode) & ~0o777) | mode;
       }
       return info;
-    },
+    }),
   };
   return { ...mocked, default: mocked };
 });
@@ -5593,48 +5594,219 @@ describe('OpenCodeProcess server ownership leases', () => {
     ]);
   });
 
-  it('recovers a Varro server after macOS removes its temporary runtime config', async () => {
-    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+  it.each(['removed-owner', 'matching-owner'])(
+    'recovers a Varro server with missing runtime config and %s',
+    async (scenario) => {
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+      const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+      const configDirectory = await mkdtemp(join(tmpdir(), 'varro-opencode-config-'));
+      const leasePath = join(directory, 'lease.json');
+      const configPath = join(configDirectory, 'opencode.json');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: MOCK_LINUX_PID,
+        port: 4096,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'darwin:Fri Jul 10 12:00:00 2026',
+        owner: 'removed-config-owner',
+        host: 'exited-host',
+        state: 'relinquished',
+        createdAt: Date.now(),
+        configPath,
+      };
+      await writeFile(leasePath, JSON.stringify(lease), 'utf-8');
+      await writeFile(`${leasePath}.managed`, JSON.stringify(lease), 'utf-8');
+      const ownerPath = join(configDirectory, 'owner.json');
+      const ownerContent = JSON.stringify({ pid: lease.pid, owner: lease.owner });
+      if (scenario === 'matching-owner') await writeFile(ownerPath, ownerContent);
+      vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue([lease.pid]);
+      vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue(lease.executable);
+      vi.spyOn(processInspection, 'readProcessBirthIdentity').mockResolvedValue(
+        lease.birthIdentity
+      );
+      vi.spyOn(process, 'kill').mockReturnValue(true);
+      const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
+
+      await expect(manager.recoverManagedServerOwnership()).resolves.toBe(true);
+
+      expect(manager.serverOwnership).toBe('current-host');
+      await expect(manager.needsRuntimeConfigRecovery()).resolves.toBe(true);
+      expect(JSON.parse(await readFile(leasePath, 'utf-8'))).not.toHaveProperty('configPath');
+      expect(JSON.parse(await readFile(`${leasePath}.managed`, 'utf-8'))).not.toHaveProperty(
+        'configPath'
+      );
+      if (scenario === 'matching-owner')
+        await expect(readFile(ownerPath, 'utf-8')).resolves.toBe(ownerContent);
+      await Promise.all([
+        rm(directory, { recursive: true, force: true }),
+        rm(configDirectory, { recursive: true, force: true }),
+      ]);
+    }
+  );
+});
+
+describe('OpenCodeProcess config ownership', () => {
+  it.each([
+    'missing-owner',
+    'matching-owner',
+    'current-child',
+    'present',
+    'foreign',
+    'unmanaged',
+    'wrong-owner',
+    'wrong-pid',
+    'malformed-owner',
+    'symlink-owner',
+    'symlink-config',
+    'unsafe-path',
+    'unreadable',
+  ])('inspects recorded runtime config before recovery: %s', async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const configDirectory = await mkdtemp(join(tmpdir(), 'varro-opencode-config-'));
-    const leasePath = join(directory, 'lease.json');
-    const configPath = join(configDirectory, 'opencode.json');
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, join(root, 'lease.json'));
+    const state = manager as unknown as {
+      hostOwner: string;
+      ownershipLease: ManagedServerOwnershipLease;
+    };
+    const configPath = join(scenario === 'unsafe-path' ? root : configDirectory, 'opencode.json');
     const lease: ManagedServerOwnershipLease = {
       version: 1,
       pid: MOCK_LINUX_PID,
       port: 4096,
       executable: '/usr/bin/opencode',
-      birthIdentity: 'darwin:Fri Jul 10 12:00:00 2026',
-      owner: 'removed-config-owner',
-      host: 'exited-host',
-      state: 'relinquished',
+      birthIdentity: 'fixture:1',
+      owner: 'missing-config-owner',
+      host: scenario === 'foreign' ? 'another-host' : state.hostOwner,
+      state: 'active',
       createdAt: Date.now(),
       configPath,
     };
-    await writeFile(leasePath, JSON.stringify(lease), 'utf-8');
-    await writeFile(`${leasePath}.managed`, JSON.stringify(lease), 'utf-8');
-    vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue([lease.pid]);
-    vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue(lease.executable);
-    vi.spyOn(processInspection, 'readProcessBirthIdentity').mockResolvedValue(lease.birthIdentity);
-    vi.spyOn(process, 'kill').mockReturnValue(true);
-    const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
-
-    await expect(manager.recoverManagedServerOwnership()).resolves.toBe(true);
-
-    expect(manager.serverOwnership).toBe('current-host');
-    expect(manager.needsRuntimeConfigRecovery).toBe(true);
-    expect(JSON.parse(await readFile(leasePath, 'utf-8'))).not.toHaveProperty('configPath');
-    expect(JSON.parse(await readFile(`${leasePath}.managed`, 'utf-8'))).not.toHaveProperty(
-      'configPath'
-    );
-    await Promise.all([
-      rm(directory, { recursive: true, force: true }),
-      rm(configDirectory, { recursive: true, force: true }),
-    ]);
+    state.ownershipLease = lease;
+    manager.managedProcess = scenario !== 'unmanaged';
+    if (scenario === 'current-child')
+      manager.process = Object.assign(new EventEmitter(), { pid: lease.pid }) as ChildProcess;
+    const ownerPath = join(configDirectory, 'owner.json');
+    const ownerContent =
+      scenario === 'malformed-owner'
+        ? '{broken'
+        : JSON.stringify({
+            pid: scenario === 'wrong-pid' ? lease.pid + 1 : lease.pid,
+            owner: scenario === 'wrong-owner' ? 'another-owner' : lease.owner,
+          });
+    if (scenario !== 'missing-owner' && scenario !== 'symlink-owner')
+      await writeFile(ownerPath, ownerContent);
+    if (scenario === 'symlink-owner') {
+      const target = join(root, 'owner.json');
+      await writeFile(target, ownerContent);
+      await symlink(target, ownerPath);
+    }
+    if (scenario === 'present') await writeFile(configPath, '{"agent":{"ask":{}}}');
+    if (scenario === 'symlink-config') await symlink(join(root, 'missing.json'), configPath);
+    const leasePath = join(root, 'lease.json');
+    const originalLease = JSON.stringify(lease);
+    await writeFile(leasePath, originalLease);
+    if (scenario === 'unreadable') {
+      const error = Object.assign(new Error('Config inspection denied'), { code: 'EACCES' });
+      vi.mocked(lstat).mockRejectedValueOnce(error).mockRejectedValueOnce(error);
+    }
+    try {
+      if (scenario === 'unreadable') {
+        await expect(manager.needsRuntimeConfigRecovery()).resolves.toBe(false);
+        await expect(manager.hasRuntimeConfigRecoveryCandidate()).resolves.toBe(false);
+      } else {
+        const recoverable = [
+          'missing-owner',
+          'matching-owner',
+          'current-child',
+          'foreign',
+          'unmanaged',
+        ].includes(scenario);
+        await expect(manager.hasRuntimeConfigRecoveryCandidate()).resolves.toBe(recoverable);
+        await expect(manager.needsRuntimeConfigRecovery()).resolves.toBe(
+          recoverable && scenario !== 'foreign' && scenario !== 'unmanaged'
+        );
+      }
+      await expect(readFile(leasePath, 'utf-8')).resolves.toBe(originalLease);
+      if (scenario === 'matching-owner')
+        await expect(readFile(ownerPath, 'utf-8')).resolves.toBe(ownerContent);
+    } finally {
+      await Promise.all([
+        rm(root, { recursive: true, force: true }),
+        rm(configDirectory, { recursive: true, force: true }),
+      ]);
+    }
   });
-});
 
-describe('OpenCodeProcess config ownership', () => {
+  it.each(['matching-owner', 'wrong-owner', 'wrong-pid', 'malformed-owner'])(
+    'revalidates missing runtime config during same-host adoption and restart: %s',
+    async (scenario) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+      const configDirectory = await mkdtemp(join(tmpdir(), 'varro-opencode-config-'));
+      const leasePath = join(root, 'lease.json');
+      const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
+      const state = manager as unknown as {
+        hostOwner: string;
+        ownershipLeaseCandidate: ManagedServerOwnershipLease;
+      };
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid: MOCK_LINUX_PID,
+        port: 4096,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'fixture:1',
+        owner: 'missing-config-owner',
+        host: state.hostOwner,
+        state: 'active',
+        createdAt: Date.now(),
+        configPath: join(configDirectory, 'opencode.json'),
+      };
+      state.ownershipLeaseCandidate = lease;
+      const originalLease = JSON.stringify(lease);
+      await writeFile(leasePath, originalLease);
+      const ownerPath = join(configDirectory, 'owner.json');
+      const matchingOwner = JSON.stringify({ pid: lease.pid, owner: lease.owner });
+      await writeFile(ownerPath, matchingOwner);
+      vi.spyOn(processInspection, 'findListeningPids').mockResolvedValue([lease.pid]);
+      vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue(lease.executable);
+      vi.spyOn(processInspection, 'readProcessBirthIdentity').mockResolvedValue(
+        lease.birthIdentity
+      );
+      try {
+        await expect(manager.hasRuntimeConfigRecoveryCandidate()).resolves.toBe(true);
+        await expect(manager.recoverManagedServerOwnership()).resolves.toBe(true);
+        await expect(manager.needsRuntimeConfigRecovery()).resolves.toBe(true);
+        const content =
+          scenario === 'malformed-owner'
+            ? '{broken'
+            : JSON.stringify({
+                pid: scenario === 'wrong-pid' ? lease.pid + 1 : lease.pid,
+                owner: scenario === 'wrong-owner' ? 'another-owner' : lease.owner,
+              });
+        await writeFile(ownerPath, content);
+        if (scenario === 'matching-owner') {
+          const release = await manager.acquireManagedServerRestartOwnership();
+          await release();
+          await expect(manager.needsRuntimeConfigRecovery()).resolves.toBe(true);
+        } else {
+          state.ownershipLeaseCandidate = lease;
+          await expect(manager.recoverManagedServerOwnership()).rejects.toThrow(
+            'ownership no longer matches its temporary config'
+          );
+          await expect(manager.acquireManagedServerRestartOwnership()).rejects.toThrow(
+            'ownership no longer matches its temporary config'
+          );
+          await expect(readFile(leasePath, 'utf-8')).resolves.toBe(originalLease);
+        }
+        await expect(readFile(ownerPath, 'utf-8')).resolves.toBe(content);
+      } finally {
+        await Promise.all([
+          rm(root, { recursive: true, force: true }),
+          rm(configDirectory, { recursive: true, force: true }),
+        ]);
+      }
+    }
+  );
+
   it.each([
     'override',
     'disabled',
@@ -5837,7 +6009,7 @@ describe('OpenCodeProcess config ownership', () => {
 
   it.each(['replacement', 'runtime-present', 'foreign', 'unmanaged'])(
     'identifies runtime config recovery only for an owned replacement: %s',
-    (scenario) => {
+    async (scenario) => {
       const manager = new OpenCodeProcess(4096, true, 'opencode');
       const state = manager as unknown as {
         hostOwner: string;
@@ -5857,8 +6029,10 @@ describe('OpenCodeProcess config ownership', () => {
       if (scenario === 'runtime-present')
         state.ownershipLease.configPath = '/fixture/opencode.json';
       manager.managedProcess = scenario !== 'unmanaged';
-      expect(manager.needsRuntimeConfigRecovery).toBe(scenario === 'replacement');
-      expect(manager.hasRuntimeConfigRecoveryCandidate).toBe(scenario !== 'runtime-present');
+      await expect(manager.needsRuntimeConfigRecovery()).resolves.toBe(scenario === 'replacement');
+      await expect(manager.hasRuntimeConfigRecoveryCandidate()).resolves.toBe(
+        scenario !== 'runtime-present'
+      );
     }
   );
 

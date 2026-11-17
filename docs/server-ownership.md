@@ -93,6 +93,11 @@ services, credentials, and sessions are left unchanged.
 A recovered replacement without runtime configuration is checked for Varro's Ask
 agent. If no user definition exists and the owned server is globally idle, startup
 relaunches it with a fresh temporary config before publishing routing catalogs.
+An owned server whose recorded runtime-config file has disappeared follows the same
+recovery path, including while its original owning host is still running. A surviving
+`owner.json` must match the lease PID and owner token; malformed, mismatched, symlinked,
+or unreadable ownership evidence never authorizes recovery. Read-only inspection
+does not rewrite ownership records, and restart rechecks process and config ownership.
 Recovery checks work again under verified restart ownership. If sessions, questions,
 or approvals block startup repair, catalog/send preflight and maintenance retry it;
 an idle event bypasses the ordinary maintenance throttle while repair is pending.

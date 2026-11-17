@@ -2161,14 +2161,14 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   text-wrap: wrap;
 }
 
-.rendered-markdown p:not(.markdown-bold-heading):has(+ p),
+.rendered-markdown p:where(:not(li > p)):not(.markdown-bold-heading):has(+ p),
 .rendered-markdown
   > [data-markdown-segment='stable'][data-markdown-tail-tag='p']
   > p:last-child:not(.markdown-bold-heading) {
   margin-bottom: 12px;
 }
 
-.rendered-markdown p:has(+ :is(ul, ol, .streaming-markdown-pending-list)),
+.rendered-markdown p:where(:not(li > p)):has(+ :is(ul, ol, .streaming-markdown-pending-list)),
 .rendered-markdown
   > [data-markdown-segment='stable']:is(
     [data-markdown-tail-tag='ul'],
@@ -2197,7 +2197,7 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   margin-right: 0.3em;
 }
 
-.rendered-markdown p.markdown-bold-heading {
+.rendered-markdown p.markdown-bold-heading:where(:not(li > p)) {
   margin-top: 14px;
   margin-bottom: 8px;
 }
@@ -2322,6 +2322,8 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   margin: 1px 0;
 }
 .rendered-markdown li > p {
+  /* Tight lists gain paragraph wrappers when later streamed text makes them loose.
+     Prose adjacency and bold-heading spacing must not apply to these wrappers. */
   margin: 0;
 }
 
