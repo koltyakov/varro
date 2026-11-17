@@ -1792,6 +1792,54 @@ kbd {
   border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
 }
 
+.chat-tool-invocation-part .code-mode-tool-calls {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  list-style: none;
+  border-block: 1px solid var(--color-vscode-border-soft);
+}
+
+.chat-tool-invocation-part .code-mode-tool-call {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-vscode-border-soft);
+  border-radius: var(--radius-inset);
+}
+
+.chat-tool-invocation-part .code-mode-tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
+.chat-tool-invocation-part .code-mode-tool-call-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-tool-invocation-part .code-mode-tool-call-status {
+  flex: none;
+  color: var(--color-vscode-fg-muted);
+}
+
+.chat-tool-invocation-part .code-mode-tool-call[data-status='error'] {
+  border-color: var(--color-vscode-error);
+}
+
+.chat-tool-invocation-part .code-mode-tool-call[data-status='error'] .code-mode-tool-call-status {
+  color: var(--color-vscode-error);
+}
+
+.chat-tool-invocation-part .code-mode-tool-call > .structured-tool-card {
+  border-radius: 0;
+  background: transparent;
+}
+
 .chat-tool-invocation-part .structured-tool-label {
   padding: var(--space-4) 0 var(--space-4) 10px;
   color: var(--color-vscode-fg-muted);

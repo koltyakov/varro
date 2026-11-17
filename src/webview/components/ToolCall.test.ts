@@ -243,6 +243,245 @@ describe('getVisibleInputEntries', () => {
 });
 
 describe('ToolCall', () => {
+  describe('Code Mode', () => {
+    function executePart(metadata: UnknownRecord = {}, tool = 'execute'): ToolPart {
+      return {
+        id: 'tool-execute',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-execute',
+        tool,
+        state: {
+          ...completedState({ code: 'return await tools.docs.lookup({ id: 1 });' }, '', 'Result'),
+          metadata,
+        },
+      };
+    }
+
+    it.each([
+      { error: true },
+      { error: false, toolCalls: [{ tool: 'docs.lookup', status: 'error' }] },
+    ])('styles completed execute failures from metadata %j', (metadata) => {
+      const part = executePart(metadata);
+      cleanup = render(() => ToolCall({ part }), container!);
+
+      expect(container?.querySelector('.tool-call-icon')?.classList).toContain('tool-status-error');
+      expect(container?.querySelector('.tool-invocation-error-label')?.textContent).toBe('failed');
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      const result = container?.querySelector('.structured-tool-row-result');
+      expect(result?.classList).toContain('structured-tool-row-error');
+      expect(result?.querySelector('.tool-invocation-error')?.textContent).toBe('Result');
+      expect(part.state.status).toBe('completed');
+    });
+
+    it.each([
+      {},
+      { error: false },
+      { error: 'true' },
+      { toolCalls: [{ tool: 'docs.lookup', status: 'completed' }] },
+      { toolCalls: [{ tool: 'docs.lookup', status: 'running' }] },
+    ])('keeps successful execute results neutral with metadata %j', (metadata) => {
+      const part = executePart(metadata);
+      cleanup = render(() => ToolCall({ part }), container!);
+
+      expect(container?.querySelector('.tool-call-icon')?.classList).toContain(
+        'tool-status-completed'
+      );
+      expect(container?.querySelector('.tool-invocation-error-label')).toBeNull();
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      expect(container?.querySelector('.structured-tool-row-error')).toBeNull();
+      expect(container?.querySelector('.structured-tool-row-result')?.textContent).toContain(
+        'Result'
+      );
+    });
+
+    it.each(['bash', 'task', 'docs_lookup'])(
+      'does not apply Code Mode metadata rendering or failure classification to %s',
+      (tool) => {
+        const part = executePart(
+          { error: true, toolCalls: [{ tool: 'docs.lookup', status: 'error' }] },
+          tool
+        );
+        cleanup = render(() => ToolCall({ part }), container!);
+
+        expect(container?.querySelector('.tool-call-icon')?.classList).toContain(
+          'tool-status-completed'
+        );
+        expect(container?.querySelector('.tool-invocation-error-label')).toBeNull();
+        container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+        expect(container?.querySelector('.code-mode-tool-calls')).toBeNull();
+        expect(container?.querySelector('.structured-tool-row-error')).toBeNull();
+      }
+    );
+
+    it('renders nested call inputs and all three statuses for namespaced execute tools', () => {
+      const part = executePart(
+        {
+          toolCalls: [
+            {
+              tool: 'docs.lookup',
+              status: 'running',
+              input: { id: 0, cached: false, filter: { tags: ['api'] } },
+            },
+            { tool: 'docs.lookup', status: 'completed', input: { id: 2 } },
+            { tool: 'docs.lookup', status: 'error' },
+          ],
+        },
+        'functions.execute'
+      );
+      cleanup = render(() => ToolCall({ part }), container!);
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+      const list = container?.querySelector('.code-mode-tool-calls');
+      expect(list?.getAttribute('aria-label')).toBe('Code Mode tool calls');
+      const calls = Array.from(list?.querySelectorAll('.code-mode-tool-call') ?? []);
+      expect(calls).toHaveLength(3);
+      expect(
+        calls.map((call) => call.querySelector('.code-mode-tool-call-name')?.textContent)
+      ).toEqual(['docs.lookup', 'docs.lookup', 'docs.lookup']);
+      expect(calls.map((call) => call.querySelector('[role="status"]')?.textContent)).toEqual([
+        'Running',
+        'Completed',
+        'Error',
+      ]);
+      expect(calls.map((call) => call.getAttribute('data-status'))).toEqual([
+        'running',
+        'completed',
+        'error',
+      ]);
+      for (const call of calls) {
+        expect(call.querySelector('.tool-call-icon')?.classList).toContain(
+          `tool-status-${call.getAttribute('data-status')}`
+        );
+      }
+      expect(calls[0]?.textContent).toContain('id0');
+      expect(calls[0]?.textContent).toContain('cachedfalse');
+      expect(calls[0]?.textContent).toContain('"api"');
+      expect(calls[1]?.textContent).toContain('id2');
+      expect(calls[2]?.querySelectorAll('.structured-tool-row')).toHaveLength(0);
+    });
+
+    it.each([
+      {},
+      { toolCalls: [] },
+      { toolCalls: null },
+      { toolCalls: { tool: 'docs.lookup', status: 'error' } },
+      { toolCalls: [null, 1, {}, { status: 'error' }, { tool: 'docs.lookup', status: 'failed' }] },
+    ])('retains the generic fallback for absent or invalid nested calls %j', (metadata) => {
+      const part = executePart(metadata);
+      cleanup = render(() => ToolCall({ part }), container!);
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+      expect(container?.querySelector('.code-mode-tool-calls')).toBeNull();
+      expect(container?.querySelector('.tool-call-icon')?.classList).toContain(
+        'tool-status-completed'
+      );
+      expect(
+        Array.from(container?.querySelectorAll('.structured-tool-label') ?? []).map(
+          (label) => label.textContent
+        )
+      ).toEqual(['code', 'result']);
+      expect(container?.textContent).toContain('return await tools.docs.lookup');
+      expect(container?.querySelector('.structured-tool-row-result')?.textContent).toContain(
+        'Result'
+      );
+    });
+
+    it('updates nested calls in place during streaming and marks the completed outer call failed', () => {
+      const initial = executePart();
+      const [part, setPart] = createSignal<ToolPart>({
+        ...initial,
+        state: {
+          status: 'running',
+          input: initial.state.input,
+          time: { start: 0 },
+          metadata: {},
+        },
+      });
+      cleanup = render(
+        () =>
+          createComponent(ToolCall, {
+            get part() {
+              return part();
+            },
+          }),
+        container!
+      );
+      const header = container!.querySelector<HTMLButtonElement>('.tool-invocation-header')!;
+      header.click();
+      expect(container?.querySelector('.code-mode-tool-calls')).toBeNull();
+
+      setPart({
+        ...part(),
+        state: {
+          ...part().state,
+          metadata: {
+            toolCalls: [{ tool: 'docs.lookup', status: 'running', input: { id: 1 } }],
+          },
+        },
+      });
+      const first = container!.querySelector('.code-mode-tool-call')!;
+      expect(first.getAttribute('data-status')).toBe('running');
+      expect(first.textContent).toContain('id1');
+      expect(header.querySelector('.tool-call-icon')?.classList).toContain('tool-status-running');
+
+      setPart({
+        ...part(),
+        state: {
+          ...part().state,
+          metadata: {
+            toolCalls: [
+              { tool: 'docs.lookup', status: 'completed', input: { id: 10 } },
+              { tool: 'docs.lookup', status: 'running', input: { id: 2 } },
+            ],
+          },
+        },
+      });
+      expect(container?.querySelector('.code-mode-tool-call')).toBe(first);
+      expect(first.getAttribute('data-status')).toBe('completed');
+      expect(first.querySelector('[role="status"]')?.textContent).toBe('Completed');
+      expect(first.textContent).toContain('id10');
+      const second = container!.querySelectorAll('.code-mode-tool-call')[1]!;
+      expect(second.getAttribute('data-status')).toBe('running');
+
+      const metadata = {
+        toolCalls: [
+          { tool: 'docs.lookup', status: 'completed', input: { id: 10 } },
+          { tool: 'docs.lookup', status: 'error', input: { id: 2 } },
+        ],
+      };
+      setPart({ ...part(), state: { ...part().state, metadata } });
+      expect(container?.querySelectorAll('.code-mode-tool-call')[1]).toBe(second);
+      expect(second.querySelector('[role="status"]')?.textContent).toBe('Error');
+      expect(header.querySelector('.tool-call-icon')?.classList).toContain('tool-status-running');
+
+      setPart(executePart(metadata));
+      expect(container?.querySelector('.tool-invocation-header')).toBe(header);
+      expect(container?.querySelector('.code-mode-tool-call')).toBe(first);
+      expect(header.querySelector('.tool-call-icon')?.classList).toContain('tool-status-error');
+      expect(container?.querySelector('.structured-tool-row-result')?.classList).toContain(
+        'structured-tool-row-error'
+      );
+      header.click();
+      expect(container?.querySelector('.code-mode-tool-calls')).toBeNull();
+      expect(header.querySelector('.tool-invocation-error-label')?.textContent).toBe('failed');
+    });
+
+    it('makes nested-only execute metadata expandable', () => {
+      const metadata = { toolCalls: [{ tool: 'docs.lookup', status: 'completed' }] };
+      const part = executePart(metadata);
+      part.state = { ...completedState(), metadata };
+      cleanup = render(() => ToolCall({ part }), container!);
+      const header = container!.querySelector<HTMLButtonElement>('.tool-invocation-header')!;
+      expect(header.disabled).toBe(false);
+      header.click();
+      expect(container?.querySelector('.code-mode-tool-call-name')?.textContent).toBe(
+        'docs.lookup'
+      );
+    });
+  });
+
   it('uses shared expansion state helpers', () => {
     const part: ToolPart = {
       id: 'tool-1',

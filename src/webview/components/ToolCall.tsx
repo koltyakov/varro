@@ -1,6 +1,7 @@
 import {
   Show,
   For,
+  Index,
   createEffect,
   createMemo,
   createRenderEffect,
@@ -283,6 +284,37 @@ function getRunningToolOutput(state: ToolPart['state']) {
     if (isString(value)) return value;
   }
   return '';
+}
+
+type CodeModeToolCall = {
+  tool: string;
+  status: 'running' | 'completed' | 'error';
+  input: UnknownRecord;
+};
+
+function getCodeModeToolCalls(toolName: string, state: ToolPart['state']): CodeModeToolCall[] {
+  if (normalizeToolName(toolName) !== 'execute' || state.status === 'pending') return [];
+  const calls = state.metadata?.toolCalls;
+  if (!Array.isArray(calls)) return [];
+  return calls.flatMap((value) => {
+    const call = asRecord(value);
+    if (
+      !isString(call?.tool) ||
+      !call.tool.trim() ||
+      (call.status !== 'running' && call.status !== 'completed' && call.status !== 'error')
+    )
+      return [];
+    return [{ tool: call.tool, status: call.status, input: asRecord(call.input) ?? {} }];
+  });
+}
+
+function isCodeModeFailure(toolName: string, state: ToolPart['state']): boolean {
+  return (
+    normalizeToolName(toolName) === 'execute' &&
+    state.status === 'completed' &&
+    (state.metadata.error === true ||
+      getCodeModeToolCalls(toolName, state).some((call) => call.status === 'error'))
+  );
 }
 
 export function getVisibleInputEntries(input: UnknownRecord) {
@@ -569,7 +601,9 @@ export function ToolCall(props: {
       case 'running':
         return 'tool-status-running';
       case 'completed':
-        return 'tool-status-completed';
+        return isCodeModeFailure(tool().tool, state())
+          ? 'tool-status-error'
+          : 'tool-status-completed';
       case 'error':
         return isAbortedToolError(state()) ? 'tool-status-aborted' : 'tool-status-error';
     }
@@ -1468,6 +1502,9 @@ function GenericToolCall(props: {
   lightweight?: boolean;
 }) {
   const toolName = () => normalizeToolName(props.tool.tool);
+  const codeModeCalls = createMemo(() => getCodeModeToolCalls(props.tool.tool, props.state));
+  const codeModeFailure = () => isCodeModeFailure(props.tool.tool, props.state);
+  const isFailed = () => props.state.status === 'error' || codeModeFailure();
   const isAborted = () => isAbortedToolError(props.state);
   const isPermissionRejected = () => isPermissionRejectedToolError(props.state);
   const isQuestionSkipped = () => isQuestionSkippedToolError(props.state);
@@ -1674,6 +1711,13 @@ function GenericToolCall(props: {
       };
     }
     if (props.state.status !== 'completed') return null;
+    if (codeModeFailure()) {
+      return {
+        label: 'error',
+        value: isBlank(props.fullOutput) ? '(no output)' : props.fullOutput,
+        status: 'error',
+      };
+    }
     if (isTask()) return taskResult();
     if (isSearchTool()) {
       return {
@@ -1731,7 +1775,7 @@ function GenericToolCall(props: {
   const hasExpandableContent = () => {
     if (props.lightweight) return false;
     if (props.tool.deferred) return true;
-    if (props.state.status === 'error') return true;
+    if (isFailed() || codeModeCalls().length > 0) return true;
     if (taskSessionId()) return true;
     if (hasOnlyHeaderCommand()) return false;
     if (detailInputEntries().length > 0) return true;
@@ -1826,7 +1870,7 @@ function GenericToolCall(props: {
               <span class="tool-invocation-retry-label">retrying #{retry().attempt}</span>
             )}
           </Show>
-          <Show when={props.state.status === 'error' && !isExpanded()}>
+          <Show when={isFailed() && !isExpanded()}>
             <span
               class={`tool-invocation-error-label${isAborted() ? ' is-aborted' : ''}${isPermissionRejected() || isQuestionSkipped() ? ' is-rejected' : ''}`}
             >
@@ -1885,6 +1929,11 @@ function GenericToolCall(props: {
                     </Show>
                   }
                   inputEntries={detailInputEntries()}
+                  details={
+                    <Show when={codeModeCalls().length > 0}>
+                      <CodeModeToolCalls calls={codeModeCalls()} />
+                    </Show>
+                  }
                   result={structuredResult()}
                   onOpenPath={openGenericToolFile}
                   toolTitle={props.title}
@@ -2044,8 +2093,40 @@ function LiveTerminalOutput(props: { content: string }) {
   );
 }
 
+function CodeModeToolCalls(props: { calls: CodeModeToolCall[] }) {
+  return (
+    <ol class="code-mode-tool-calls" aria-label="Code Mode tool calls">
+      {/* Calls have no IDs; OpenCode reports them in start order. Keep rows mounted by position. */}
+      <Index each={props.calls}>
+        {(call) => (
+          <li class="code-mode-tool-call" data-status={call().status}>
+            <div class="code-mode-tool-call-header">
+              <ToolCallIcon toolName={call().tool} statusClass={`tool-status-${call().status}`} />
+              <span class="code-mode-tool-call-name">{call().tool}</span>
+              <span class="code-mode-tool-call-status" role="status" aria-live="polite">
+                {call().status === 'running'
+                  ? 'Running'
+                  : call().status === 'completed'
+                    ? 'Completed'
+                    : 'Error'}
+              </span>
+            </div>
+            <StructuredToolCard
+              inputEntries={getVisibleInputEntries(call().input)}
+              result={null}
+              onOpenPath={openGenericToolFile}
+              toolTitle={call().tool}
+            />
+          </li>
+        )}
+      </Index>
+    </ol>
+  );
+}
+
 function StructuredToolCard(props: {
   actions?: JSX.Element;
+  details?: JSX.Element;
   inputEntries: Array<[string, unknown]>;
   result: StructuredToolResult | null;
   onOpenPath: (path: string) => void;
@@ -2109,6 +2190,7 @@ function StructuredToolCard(props: {
           </div>
         )}
       </Show>
+      {props.details}
       <Show when={props.result}>
         {(result) => (
           <div
