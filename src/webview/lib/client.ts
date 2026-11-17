@@ -26,6 +26,7 @@ import type {
   ServerEventName,
   SessionDiffSummary,
   SessionLocation,
+  SessionLookup,
   SessionHistoryScope,
   SessionTitleFallbackResponse,
   WorkspaceStatusEventSummary,
@@ -760,6 +761,27 @@ export const client = {
       },
     },
     session: {
+      async reference(sessionID: string): Promise<SessionLookup> {
+        const path = buildVarroSessionEndpoint(sessionID, 'reference');
+        const value = asRecord(await apiCall('GET', path));
+        if (
+          value?.id !== sessionID ||
+          !isString(value.title) ||
+          !isString(value.directory) ||
+          !isBoolean(value.external)
+        ) {
+          throw new Error(`Malformed response from ${path}`);
+        }
+        return {
+          id: sessionID,
+          title: value.title,
+          directory: value.directory,
+          external: value.external,
+        };
+      },
+      async openReference(sessionID: string): Promise<void> {
+        await apiCall('POST', buildVarroSessionEndpoint(sessionID, 'reference'));
+      },
       async location(
         sessionID: string,
         options?: { directory?: string }

@@ -213,6 +213,8 @@ import {
   TERMINAL_SELECTION_MARKER,
 } from '../../shared/context-files';
 import { normalizeSessionTitle } from '../../shared/session-title';
+import { SESSION_ID_RE } from '../lib/session-reference';
+import { lookupSessionReference } from '../lib/session-reference-lookups';
 import { isSubagentCardVisible } from '../lib/subagent-visibility';
 import { createOpenCodeMessageID } from '../../shared/opencode-id';
 import { getQueuedAttachmentSnapshot } from '../hooks/session/session-send';
@@ -1222,7 +1224,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
   const [tableSearchResults, setTableSearchResults] = createSignal<DatabaseTableReference[]>([]);
   const [sessionSearchResults, setSessionSearchResults] = createSignal<Session[]>([]);
-  const [sessionReferences, setSessionReferences] = createSignal<Record<string, Session>>({});
+  const [sessionReferences, setSessionReferences] = createSignal<
+    Record<string, Pick<Session, 'id' | 'title' | 'directory'>>
+  >({});
   const [showFileSearchHint, setShowFileSearchHint] = createSignal(false);
   const [suppressCompletion, setSuppressCompletion] = createSignal(false);
   const [toolbarCompactMode, setToolbarCompactMode] = createSignal<ToolbarCompactMode>('full');
@@ -1626,7 +1630,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     visibleClipboardImages().length > 0 ||
     visibleNativePdfs().length > 0;
 
-  function rememberSessionReference(session: Session) {
+  function rememberSessionReference(session: Pick<Session, 'id' | 'title' | 'directory'>) {
     setSessionReferences((current) =>
       current[session.id] === session ? current : { ...current, [session.id]: session }
     );
@@ -1644,14 +1648,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
       if (pendingSessionReferenceIds.has(id)) continue;
       pendingSessionReferenceIds.add(id);
-      void client.session
-        .list({ limit: 30, search: id, roots: true })
-        .then((page) => {
-          const session = (Array.isArray(page) ? page : page.items).find(
-            (candidate) => candidate.id === id
-          );
+      void lookupSessionReference(id)
+        .then((session) => {
           if (!session) return;
-          if (session.parentID || session.time.archived) return;
           if (!getSessionReferenceIds(inputText()).includes(id)) return;
           rememberSessionReference(session);
         })
@@ -1822,11 +1821,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
 
     for (const session of Object.values(sessionReferences())) {
-      const marker = `session:${session.id}`;
-      if (text.includes(marker)) {
+      const markers = new Set(
+        Array.from(text.matchAll(SESSION_ID_RE))
+          .filter((match) => (match[1] || match[2]) === session.id)
+          .map((match) => match[0])
+      );
+      for (const marker of markers) {
         const title = normalizeSessionTitle(session.title) || 'Untitled';
         chips.push({
-          id: `session:${session.id}`,
+          id: marker.startsWith('session:') ? marker : `session-raw:${session.id}`,
           type: 'mention-session',
           label: title,
           title,

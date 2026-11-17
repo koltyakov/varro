@@ -217,6 +217,101 @@ function createProxy(overrides: Partial<RestProxyCallbacks> = {}) {
   return { proxy: new RestProxy(callbacks), callbacks };
 }
 
+describe('cross-project session references', () => {
+  it.each([1, 2] as const)(
+    'reads only metadata on API V%s without granting workspace access',
+    async (apiVersion) => {
+      const source = {
+        id: 'ses_other',
+        title: 'Other project',
+        directory: '/other',
+        permission: ['secret'],
+        metadata: { secret: true },
+      };
+      const server = {
+        ...createCallbacks().server,
+        apiVersion,
+        request: vi.fn(async () => source),
+      };
+      const { proxy, callbacks } = createProxy({ server });
+      await proxy.handleRequest(makePayload(1, 'GET', '/varro/session/ses_other/reference'));
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 1,
+        data: { id: source.id, title: source.title, directory: source.directory, external: true },
+      });
+      expect(server.request).toHaveBeenCalledExactlyOnceWith(
+        'GET',
+        '/session/ses_other',
+        undefined,
+        {
+          directory: '/repo',
+          signal: expect.any(AbortSignal),
+        }
+      );
+      expect(proxy.isSessionCatalogInventoryAuthorized(source.id, source.directory)).toBe(false);
+      expect(callbacks.sessionState.handleServerEvent).not.toHaveBeenCalled();
+    }
+  );
+
+  it('keeps references to an open workspace folder local', async () => {
+    const { proxy, callbacks } = createProxy();
+    vi.mocked(callbacks.server.request).mockResolvedValue({
+      id: 'ses_here',
+      title: 'Here',
+      directory: '/repo',
+    });
+    await proxy.handleRequest(makePayload(1, 'GET', '/varro/session/ses_here/reference'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 1,
+      data: { id: 'ses_here', title: 'Here', directory: '/repo', external: false },
+    });
+  });
+
+  it('rechecks the current server directory on explicit open instead of trusting a client path', async () => {
+    const openReferencedSession = vi.fn(async () => {});
+    const { proxy, callbacks } = createProxy({ openReferencedSession });
+    vi.mocked(callbacks.server.request).mockResolvedValue({
+      id: 'ses_other',
+      title: 'Moved',
+      directory: '/new-location',
+    });
+    await proxy.handleRequest(
+      makePayload(1, 'POST', '/varro/session/ses_other/reference', { directory: '/stale' })
+    );
+    expect(openReferencedSession).toHaveBeenCalledExactlyOnceWith({
+      id: 'ses_other',
+      title: 'Moved',
+      directory: '/new-location',
+      external: true,
+    });
+  });
+
+  it.each([
+    { id: 'ses_wrong', title: 'Wrong', directory: '/other' },
+    { id: 'ses_other', title: null, directory: '/other' },
+    { id: 'ses_other', title: 'Other', directory: '' },
+  ])('does not link malformed metadata %j', async (value) => {
+    const { proxy, callbacks } = createProxy();
+    vi.mocked(callbacks.server.request).mockResolvedValue(value);
+    await proxy.handleRequest(makePayload(1, 'GET', '/varro/session/ses_other/reference'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 1,
+      error: '404 Session not found',
+    });
+  });
+
+  it('keeps hidden sessions unavailable', async () => {
+    const { proxy, callbacks } = createProxy();
+    vi.mocked(callbacks.sessionTrash.isHidden).mockReturnValue(true);
+    await proxy.handleRequest(makePayload(1, 'GET', '/varro/session/ses_hidden/reference'));
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 1,
+      error: '404 Session not found',
+    });
+  });
+});
+
 function makePayload(id: number, method: string, path: string, body?: unknown) {
   return { id, method, path, body };
 }

@@ -19,6 +19,7 @@ import { installHighlightWorker, requestHighlight } from '../lib/highlight-worke
 import { clearDirectSessionReturn, getDirectSessionReturnId } from '../lib/session-navigation';
 import { checkIcon, copyIcon, expandIcon, xmarkIcon } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
+import { client } from '../lib/client';
 
 type TestRuntimeValue =
   | string
@@ -142,6 +143,7 @@ beforeEach(() => {
   selectSessionMock.mockReset();
   clearDirectSessionReturn();
   setState('sessions', []);
+  setState('serverStatus', { state: 'stopped' });
   setState('activeSessionId', null);
   setState('editorContext', {
     workspacePath: null,
@@ -2490,6 +2492,39 @@ $$`,
       directory: '/repo',
     });
     expect(getDirectSessionReturnId('ses_found123')).toBe('ses_origin123');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('resolves an unloaded cross-project ID and opens it in its own project window', async () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    const reference = {
+      id: 'ses_external123',
+      title: 'Review release',
+      directory: '/projects/other',
+      external: true,
+    };
+    const lookup = vi.spyOn(client.varro.session, 'reference').mockResolvedValue(reference);
+    const open = vi.spyOn(client.varro.session, 'openReference').mockResolvedValue();
+    setState('serverStatus', { state: 'running', url: 'http://localhost/markdown-references' });
+    setState('activeSessionId', 'ses_origin');
+    cleanup = render(
+      () => MarkdownRenderer({ content: 'Check this too ses_external123', cacheByContent: true }),
+      container!
+    );
+    await vi.waitFor(() =>
+      expect(container?.querySelector('a.session-reference-link')?.textContent).toBe(
+        'Review release · other'
+      )
+    );
+    const link = container?.querySelector<HTMLAnchorElement>('a.session-reference-link');
+    expect(lookup).toHaveBeenCalledExactlyOnceWith('ses_external123');
+    expect(link?.dataset.sessionDirectory).toBe('/projects/other');
+    expect(link?.dataset.sessionExternal).toBe('true');
+    dispatchAnchorClick(link);
+    expect(open).toHaveBeenCalledExactlyOnceWith('ses_external123');
+    expect(selectSessionMock).not.toHaveBeenCalled();
+    expect(getDirectSessionReturnId('ses_external123')).toBeNull();
     expect(send).not.toHaveBeenCalled();
   });
 

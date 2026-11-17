@@ -270,6 +270,9 @@ vi.mock('../lib/client', () => ({
       })),
       workspaceProblems: vi.fn(async () => ({ total: 0, diagnostics: [] })),
       session: {
+        reference: vi.fn<typeof client.varro.session.reference>(async () => {
+          throw new Error('Session not found');
+        }),
         diffSummary: vi.fn(async () => ({
           files: 0,
           additions: 0,
@@ -5447,32 +5450,39 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('');
   });
 
-  it('resolves pasted session markers to titled links', async () => {
-    const result = session('session-auth', 2_000, { title: 'Investigate authentication' });
-    vi.mocked(client.session.list).mockResolvedValue({ items: [result], hasMore: false });
-    setInputText('Review session:session-auth');
+  it.each(['session:ses_otherProject', 'ses_otherProject'])(
+    'resolves pasted cross-project marker %s to a titled link without rewriting the prompt',
+    async (marker) => {
+      const result = {
+        id: 'ses_otherProject',
+        title: 'Investigate authentication',
+        directory: '/other-project',
+        external: true,
+      };
+      setState('serverStatus', { state: 'running', url: `http://localhost/${marker}` });
+      vi.mocked(client.varro.session.reference).mockResolvedValue(result);
+      setInputText(`Review ${marker}`);
 
-    cleanup = render(() => ChatInput(), container!);
-    await flushAsyncWork();
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
 
-    expect(client.session.list).toHaveBeenCalledWith({
-      limit: 30,
-      search: 'session-auth',
-      roots: true,
-    });
-    await vi.waitFor(() =>
-      expect(
-        container?.querySelector<HTMLElement>(
-          '.composer-session-reference[data-chip-type="mention-session"]'
-        )
-      ).not.toBeNull()
-    );
-    const reference = container?.querySelector<HTMLElement>(
-      '.composer-session-reference[data-chip-type="mention-session"]'
-    );
-    expect(reference?.textContent).toBe('Investigate authentication');
-    expect(reference?.dataset.chipMarker).toBe('session:session-auth');
-  });
+      expect(client.varro.session.reference).toHaveBeenCalledWith('ses_otherProject');
+      await vi.waitFor(() =>
+        expect(
+          container?.querySelector<HTMLElement>(
+            '.composer-session-reference[data-chip-type="mention-session"]'
+          )
+        ).not.toBeNull()
+      );
+      const reference = container?.querySelector<HTMLElement>(
+        '.composer-session-reference[data-chip-type="mention-session"]'
+      );
+      expect(reference?.textContent).toBe('Investigate authentication');
+      expect(reference?.dataset.chipMarker).toBe(marker);
+      expect(inputText()).toBe(`Review ${marker}`);
+      expect(state.sessions.some((candidate) => candidate.id === result.id)).toBe(false);
+    }
+  );
 
   it('renders HTTPS URLs as editable links without replacing their DOM while typing', () => {
     setInputText("What's this https://iconoir.com?");

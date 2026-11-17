@@ -27,6 +27,7 @@ import type {
   ServerStatus,
   SessionDiffSummary,
   SessionLocation,
+  SessionLookup,
   SessionHistoryScope,
   SessionWorkspaceScope,
   WebviewMessage,
@@ -460,6 +461,7 @@ export interface RestProxyCallbacks {
     catalogRoot: string,
     signal?: AbortSignal
   ): Promise<unknown>;
+  openReferencedSession?(session: SessionLookup): Promise<void>;
   sessionTransferred?(
     sessionID: string,
     directory: string,
@@ -919,6 +921,63 @@ export class RestProxy {
         this.activeRequests.set(payload.cancelKey, request);
       }
       this.assertPermissionAutomationLeaseCurrent(method, payload);
+
+      const referenceMatch = new URL(payload.path, 'http://localhost').pathname.match(
+        /^\/varro\/session\/([^/]+)\/reference$/
+      );
+      if (referenceMatch) {
+        const sessionID = decodeURIComponent(referenceMatch[1]!);
+        if (!isSafePersistedSessionId(sessionID) || this.isHiddenSession(sessionID)) {
+          throw new Error('404 Session not found');
+        }
+        const signal = request
+          ? AbortSignal.any([request.controller.signal, AbortSignal.timeout(5_000)])
+          : AbortSignal.timeout(5_000);
+        // Read by ID from an already-open root. Do not initialize the other project's
+        // configuration or grant it catalog, event, or mutation access in this window.
+        const session = asRecord(
+          await this.callbacks.server.request(
+            'GET',
+            `/session/${encodeURIComponent(sessionID)}`,
+            undefined,
+            { directory: this.getOpenWorkspaceRoots()[0], signal }
+          )
+        );
+        if (
+          session?.id !== sessionID ||
+          typeof session.title !== 'string' ||
+          typeof session.directory !== 'string' ||
+          !normalizeWorkspaceIdentity(session.directory)
+        ) {
+          throw new Error('404 Session not found');
+        }
+        signal.throwIfAborted();
+        if (
+          this.disposed ||
+          requestGeneration !== this.callbacks.getRequestGeneration() ||
+          this.isHiddenSession(sessionID)
+        )
+          throw new Error('404 Session not found');
+        const directory = session.directory;
+        const reference: SessionLookup = {
+          id: sessionID,
+          title: session.title,
+          directory,
+          external:
+            !this.getOpenWorkspaceRoots().some((root) => isSameWorkspacePath(root, directory)) &&
+            !this.isAuthorizedSessionDirectory(sessionID, directory),
+        };
+        if (method === 'POST') {
+          if (!this.callbacks.openReferencedSession)
+            throw new Error('Session opening is unavailable');
+          await this.callbacks.openReferencedSession(reference);
+        }
+        this.callbacks.postApiResponse(requestGeneration, {
+          id: payload.id,
+          data: method === 'GET' ? reference : true,
+        });
+        return;
+      }
 
       const attentionReplyRequestID = parseAttentionReplyRequestID(method, payload.path);
       const attentionReplyDirectory = attentionReplyRequestID

@@ -43,6 +43,18 @@ async function loadClient() {
 
 type ClientApi = Awaited<ReturnType<typeof loadClient>>['client'];
 
+it('looks up session metadata by exact ID and opens references without trusting a client path', async () => {
+  const { client } = await loadClient();
+  const reference = { id: 'ses_other', title: 'Other', directory: '/other', external: true };
+  bridgeMocks.apiCall.mockResolvedValueOnce(reference);
+  await expect(client.varro.session.reference('ses_other')).resolves.toEqual(reference);
+  expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/varro/session/ses_other/reference');
+  await client.varro.session.openReference('ses_other');
+  expect(bridgeMocks.apiCall).toHaveBeenCalledWith('POST', '/varro/session/ses_other/reference');
+  bridgeMocks.apiCall.mockResolvedValueOnce({ ...reference, id: 'ses_wrong' });
+  await expect(client.varro.session.reference('ses_other')).rejects.toThrow('Malformed response');
+});
+
 it('reads and validates the session location for the header indicator', async () => {
   const { client } = await loadClient();
   const location = { directory: '/worktrees/feature', isGitWorktree: true };

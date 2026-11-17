@@ -22,6 +22,8 @@ import { state, theme } from '../lib/state';
 import { getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { getSessionReferenceContextKey, splitSessionReferenceText } from '../lib/session-reference';
+import { lookupSessionReferences } from '../lib/session-reference-lookups';
+import { client } from '../lib/client';
 import { rememberDirectSessionReturn } from '../lib/session-navigation';
 import { selectSession } from '../hooks/useOpenCode';
 import { trapModalFocus } from '../lib/modal-focus';
@@ -985,8 +987,11 @@ function linkifySessionReferences(fragment: DocumentFragment) {
       anchor.href = segment.reference.href;
       anchor.dataset.sessionId = segment.reference.id;
       anchor.dataset.sessionDirectory = segment.reference.directory;
+      if (segment.reference.external) anchor.dataset.sessionExternal = 'true';
       anchor.dataset.copyMarker = segment.reference.marker;
-      anchor.title = `Open session ${segment.reference.id}`;
+      anchor.title = segment.reference.external
+        ? `Open session in ${segment.reference.directory}`
+        : `Open session ${segment.reference.id}`;
       const icon = createMaterialChipIconElement('session', 'session-reference-icon');
       const label = document.createElement('span');
       label.textContent = segment.reference.title;
@@ -2378,6 +2383,13 @@ export function MarkdownRenderer(props: MarkdownProps) {
     postMessage({ type: 'vscode/mermaid-preview', payload: { open: false } });
   }
 
+  createEffect(() => {
+    const content = props.content || '';
+    void state.serverStatus;
+    void state.editorContext.workspacePath;
+    lookupSessionReferences(content);
+  });
+
   let pendingContent: string | null = null;
   let rafId: number | null = null;
   const stableHighlights = new CodeHighlightBinding();
@@ -2943,6 +2955,15 @@ export function MarkdownRenderer(props: MarkdownProps) {
     );
     if (sessionLink?.dataset.sessionId) {
       e.preventDefault();
+      e.stopPropagation();
+      if (sessionLink.dataset.sessionExternal === 'true') {
+        void client.varro.session
+          .openReference(sessionLink.dataset.sessionId)
+          .catch(() =>
+            showSessionActionFeedback('Could not open the session in its project window', 'warning')
+          );
+        return;
+      }
       if (state.activeSessionId) {
         rememberDirectSessionReturn(sessionLink.dataset.sessionId, state.activeSessionId);
       }

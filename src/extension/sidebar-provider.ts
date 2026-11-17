@@ -33,6 +33,7 @@ import type {
 import { isPlaceholderSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
+import { SessionProjectWindow } from './session-project-window';
 
 const WORKSPACE_CATALOG_EVENT_TYPES = new Set<ServerEvent['type']>([
   'session.created',
@@ -245,6 +246,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly attentionNotifications: AttentionNotifications;
   private readonly macOSTray: MacOSTray | undefined;
   private readonly notificationUriHandler: vscode.Disposable;
+  private readonly sessionProjectWindow: SessionProjectWindow;
+  private sessionProjectRestore: Promise<void> | undefined;
   private nativeNotificationErrorShown = false;
   private readonly sessionTrash: SessionTrashManager;
   private readonly pinnedSessions: PinnedSessionManager;
@@ -365,6 +368,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     globalStorageUri?: vscode.Uri
   ) {
     this.contextProvider = contextProvider;
+    this.sessionProjectWindow = new SessionProjectWindow(globalState);
     const extensionPackageJson: unknown = vscode.extensions.getExtension(extensionId)?.packageJSON;
     this.extensionVersion =
       extensionPackageJson &&
@@ -1027,6 +1031,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           rules,
           directory ?? endpointServer.getWorkspaceCwd()
         ),
+      openReferencedSession: async (session) => {
+        if (this.disposing) return;
+        await this.sessionProjectWindow.queue(session, this.server.url ?? '');
+        await vscode.commands.executeCommand(
+          'vscode.openFolder',
+          vscode.Uri.file(session.directory),
+          true
+        );
+      },
       activateSession: async (sessionID, directory, catalogRoot, signal) => {
         const workspacePath = this.getOpenSessionDirectory(catalogRoot);
         if (!workspacePath) throw new Error('Session workspace folder is not open');
@@ -1207,6 +1220,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           }
           this.providerFileRefresh.postStatus();
           void this.recoverPendingPermissionModeFallbacks();
+          if (webviewContext.surface === 'sidebar') this.restoreReferencedSession();
         },
         handleDroppedPaths: (paths) =>
           contextFilesState.handleDroppedPaths(paths, (message) => post(message)),
@@ -1577,6 +1591,33 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       authority: 'file',
       path: target.path,
     }).toString();
+  }
+
+  private restoreReferencedSession(): void {
+    if (
+      this.disposing ||
+      this.sessionProjectRestore ||
+      !this.server.url ||
+      ![...this.endpoints].some((endpoint) => endpoint.surface === 'sidebar' && endpoint.ready)
+    )
+      return;
+    const context = this.contextProvider.context;
+    const serverUrl = this.server.url;
+    const directories = (context.workspaceFolders ?? []).map((folder) => folder.path);
+    if (context.workspacePath) directories.push(context.workspacePath);
+    const operation = (async () => {
+      const reference = await this.sessionProjectWindow.take(directories, serverUrl);
+      if (reference && !this.disposing) {
+        await this.openSessionInSidebar(reference.id, reference.directory);
+      }
+    })()
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection boundary.
+      .catch((error: unknown) => logger.warn('Could not open referenced session', error))
+      .finally(() => {
+        if (this.sessionProjectRestore === operation) this.sessionProjectRestore = undefined;
+        if (this.server.url !== serverUrl) this.restoreReferencedSession();
+      });
+    this.sessionProjectRestore = operation;
   }
 
   private async openNotificationUri(uri: vscode.Uri): Promise<void> {
@@ -1996,6 +2037,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     if (msg.type === 'server/status' && msg.payload.state === 'running') {
       void this.recoverPendingPermissionModeFallbacks();
+      this.restoreReferencedSession();
     }
     if (msg.type === 'server/event') this.postQueuedSessionStatus(msg.payload);
     if (msg.type === 'server/event') this.releaseDeletedEditorRestorations(msg.payload);

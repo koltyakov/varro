@@ -300,6 +300,13 @@ export type SessionLocation = {
   projectDirectory?: string;
 };
 
+export type SessionLookup = {
+  id: string;
+  title: string;
+  directory: string;
+  external: boolean;
+};
+
 export type SessionDiffSummary = {
   files: number;
   filesTruncated?: boolean;
@@ -535,6 +542,7 @@ export interface ModelPricing {
 
 export type VarroSessionEndpointAction =
   | 'location'
+  | 'reference'
   | 'activate'
   | 'delete'
   | 'diff-summary'

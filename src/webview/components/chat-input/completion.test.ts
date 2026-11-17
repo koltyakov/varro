@@ -514,6 +514,11 @@ describe('normalizeSessionLookupQuery', () => {
 });
 
 describe('getSessionReferenceIds', () => {
+  it('recognizes bare IDs, preserves case, and deduplicates canonical references', () => {
+    expect(
+      getSessionReferenceIds('Check (ses_otherProject), then session:ses_otherProject.')
+    ).toEqual(['ses_otherProject']);
+  });
   it('extracts canonical session markers from composer text', () => {
     expect(getSessionReferenceIds('Compare session:ses_first with session:ses-second.')).toEqual([
       'ses_first',

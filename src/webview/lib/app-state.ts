@@ -38,6 +38,7 @@ import type {
   ProviderLimitStatus,
   RecycleBinEntry,
   RestartBlockedState,
+  SessionLookup,
   ServerStatus,
   SiblingWorkspaceAlert,
   WebviewThemeKind,
@@ -137,6 +138,7 @@ export interface AppState {
   clipboardImages: ClipboardImage[];
   nativePdfs: NativePdfAttachment[];
   sessions: Session[];
+  sessionLookups: Record<string, SessionLookup>;
   sessionsLoadError: string | null;
   sessionsHasMore: boolean;
   sessionsLoadingMore: boolean;
@@ -426,6 +428,7 @@ export function createAppState(): AppStateInstance {
     clipboardImages: initialClipboardImages,
     nativePdfs: [],
     sessions: [],
+    sessionLookups: {},
     sessionsLoadError: null,
     sessionsHasMore: false,
     sessionsLoadingMore: false,

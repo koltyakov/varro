@@ -28,6 +28,30 @@ const resolvers = [
 ];
 
 describe('session references', () => {
+  it('resolves external metadata without adding it to the workspace catalog', () => {
+    setState('sessionLookups', 'ses_other', {
+      id: 'ses_other',
+      title: 'Other project investigation',
+      directory: '/projects/other',
+      external: true,
+    });
+    expect(resolveSessionReference('ses_other')).toMatchObject({
+      title: 'Other project investigation',
+      directory: '/projects/other',
+      folderLabel: 'other',
+      external: true,
+    });
+    expect(splitSessionReferenceText('ses_other session:ses_other')).toEqual([
+      { type: 'session', reference: resolveSessionReference('ses_other', 'ses_other') },
+      { type: 'text', content: ' ' },
+      { type: 'session', reference: resolveSessionReference('ses_other', 'session:ses_other') },
+    ]);
+    expect(getSessionReferenceContextKey('ses_other')).toContain(':other:external');
+    expect(state.sessions).toEqual([]);
+    setState('sessions', [session('ses_other', 'Live catalog title')]);
+    expect(resolveSessionReference('ses_other')?.title).toBe('Live catalog title');
+    expect(resolveSessionReference('ses_other')?.external).toBeUndefined();
+  });
   it.each(resolvers)(
     '$name traverses the catalog at most once for many references',
     ({ resolve }) => {

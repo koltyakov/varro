@@ -1,7 +1,11 @@
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { getWorkspaceFolderLabel } from '../../shared/workspace-folders';
 import type { Session } from '../types';
+import type { SessionLookup } from '../../shared/protocol';
+import { getLeafPathName } from './path-display';
 import { state } from './state';
+
+type ReferenceSession = Pick<Session, 'id' | 'title' | 'directory'> & { external?: boolean };
 
 export type SessionReference = {
   id: string;
@@ -10,6 +14,7 @@ export type SessionReference = {
   title: string;
   href: string;
   marker: string;
+  external?: boolean;
 };
 
 export type SessionReferenceTextSegment =
@@ -22,18 +27,21 @@ export function resolveSessionReference(
   sessionId: string,
   marker = sessionId
 ): SessionReference | null {
-  const session = state.sessions.find((candidate) => candidate.id === sessionId);
+  const session =
+    state.sessions.find((candidate) => candidate.id === sessionId) ??
+    state.sessionLookups[sessionId];
   return createSessionReference(session, marker);
 }
 
 function createSessionReference(
-  session: Session | undefined,
+  session: ReferenceSession | undefined,
   marker: string
 ): SessionReference | null {
   if (!session) return null;
 
-  const folderLabel =
-    (state.editorContext.workspaceFolders?.length ?? 0) > 1
+  const folderLabel = session.external
+    ? getLeafPathName(session.directory)
+    : (state.editorContext.workspaceFolders?.length ?? 0) > 1
       ? (getWorkspaceFolderLabel(session.directory, state.editorContext.workspaceFolders ?? []) ??
         undefined)
       : undefined;
@@ -44,6 +52,7 @@ function createSessionReference(
     href: `#session/${encodeURIComponent(session.id)}`,
     marker,
   };
+  if (session.external) reference.external = true;
   if (folderLabel) reference.folderLabel = folderLabel;
   return reference;
 }
@@ -92,16 +101,18 @@ export function getSessionReferenceContextKey(content: string): string {
       : resolveSessionReference(sessionId, marker);
     keys.push(
       reference
-        ? `found:${reference.id}:${reference.directory}:${reference.title}:${reference.folderLabel ?? ''}`
+        ? `found:${reference.id}:${reference.directory}:${reference.title}:${reference.folderLabel ?? ''}${reference.external ? ':external' : ''}`
         : `missing:${marker}`
     );
   }
   return keys.join('\u0000');
 }
 
-function indexReferencedSessions(matches: readonly RegExpMatchArray[]): Map<string, Session> {
+function indexReferencedSessions(
+  matches: readonly RegExpMatchArray[]
+): Map<string, Session | SessionLookup> {
   const remaining = new Set(matches.map((match) => match[1] || match[2]!));
-  const sessions = new Map<string, Session>();
+  const sessions = new Map<string, Session | SessionLookup>();
   // Keep the first matching session, as Array.find does, and retain only the
   // referenced IDs. This index lives for one calculation so metadata stays live.
   for (const session of state.sessions) {
@@ -109,6 +120,10 @@ function indexReferencedSessions(matches: readonly RegExpMatchArray[]): Map<stri
     if (!remaining.delete(id)) continue;
     sessions.set(id, session);
     if (remaining.size === 0) break;
+  }
+  for (const id of remaining) {
+    const session = state.sessionLookups[id];
+    if (session) sessions.set(id, session);
   }
   return sessions;
 }

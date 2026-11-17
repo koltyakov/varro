@@ -1622,6 +1622,12 @@ describe('webview message validation', () => {
   });
 
   it('validates session-scoped folder openings and read-only location metadata routes', () => {
+    expect(isAllowedApiRequest('GET', '/varro/session/ses_other/reference')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/session/ses_other/reference')).toBe(true);
+    expect(isAllowedApiRequest('PATCH', '/varro/session/ses_other/reference')).toBe(false);
+    expect(
+      isAllowedApiRequest('GET', '/varro/session/ses_other/reference?directory=%2Fother')
+    ).toBe(false);
     const message = {
       type: 'vscode/open-folder',
       payload: { sessionId: 'session-1', directory: '/repo' },

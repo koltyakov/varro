@@ -16,6 +16,9 @@ import type {
 } from '../shared/protocol';
 import type { SessionStateManager } from './session-state-manager';
 import { parseExtensionMessage } from '../shared/extension-message';
+import { SessionProjectWindow } from './session-project-window';
+import { fixture } from '../webview/test-fixtures';
+import type { Memento } from 'vscode';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -24,6 +27,87 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+it('opens a cross-project reference in a new project window without changing its session', async () => {
+  const reference = { id: 'ses_other', title: 'Other', directory: '/other' };
+  const server = createServer({ request: vi.fn(async () => reference) });
+  const { provider, globalState } = await createSidebarProviderInstance({ server });
+  attachTestView(provider);
+  try {
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 99, method: 'POST', path: '/varro/session/ses_other/reference' },
+    });
+    expect(globalState.update).toHaveBeenCalledWith('varro.sessionProjectWindow:/other', {
+      id: 'ses_other',
+      directory: '/other',
+      serverUrl: server.url,
+      createdAt: expect.any(Number),
+    });
+    expect(getVscodeMock().commands.executeCommand).toHaveBeenCalledWith(
+      'vscode.openFolder',
+      expect.objectContaining({ fsPath: '/other' }),
+      true
+    );
+    expect(server.request.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+  } finally {
+    await provider.dispose();
+  }
+});
+
+it.each([false, true])(
+  'selects a reference in its destination after sidebar readiness, delayed server=%s',
+  async (delayed) => {
+    const globalState = createWorkspaceState();
+    const saved = new Map<string, unknown>();
+    globalState.get.mockImplementation((key, fallback) => saved.get(key) ?? fallback);
+    globalState.update.mockImplementation(async (key, value) => {
+      if (value === undefined) saved.delete(key);
+      else saved.set(key, value);
+    });
+    const server = createServer();
+    await new SessionProjectWindow(fixture<Memento>(globalState)).queue(
+      {
+        id: 'ses_reference',
+        title: 'Target',
+        directory: '/repo',
+        external: true,
+      },
+      server.url
+    );
+    const serverUrl = server.url;
+    const { provider } = await createSidebarProviderInstance({ globalState, server });
+    expect(saved.get('varro.sessionProjectWindow:/repo')).toMatchObject({
+      id: 'ses_reference',
+      directory: '/repo',
+    });
+    if (delayed) server.url = 'http://127.0.0.1:4097';
+    const sidebar = createPanel();
+    try {
+      await provider.resolveWebviewView(sidebar.panel as never, {} as never, {} as never);
+      await vi.waitFor(() => expect(sidebar.panel.webview.html).toContain('documentId'));
+      sidebar.ready();
+      sidebar.receive({
+        type: 'commands/state',
+        payload: { canAbort: false, canSwitchSessions: false, model: null },
+      });
+      if (delayed) {
+        await Promise.resolve();
+        server.url = serverUrl;
+        provider.post({ type: 'server/status', payload: { state: 'running', url: serverUrl } });
+      }
+      await vi.waitFor(() =>
+        expect(sidebar.panel.webview.postMessage).toHaveBeenCalledWith({
+          type: 'command/open-session',
+          payload: { sessionId: 'ses_reference', directory: '/repo' },
+        })
+      );
+      expect(saved.has('varro.sessionProjectWindow:/repo')).toBe(false);
+    } finally {
+      await provider.dispose();
+    }
+  }
+);
 
 function lastEditorContext(messages: unknown[]) {
   return (messages as Array<{ type?: string; payload?: EditorContext }>)
