@@ -2056,7 +2056,33 @@ export function MessageList() {
   );
   let changedLayoutAnchorInputEpoch = -1;
   let resumeChangedLayoutAnchor: (() => void) | null = null;
-  function cancelDeferredLayoutAnchor() {
+  let deferredLayoutInputAnchor: {
+    anchor: VisibleScrollAnchor;
+    scrollTop: number;
+    inputEpoch: number;
+    sessionId: string | null;
+  } | null = null;
+  function cancelDeferredLayoutAnchor(preserveDestination = false) {
+    const previousInputAnchor = deferredLayoutInputAnchor;
+    const anchor = untrack(changedLayoutAnchor);
+    deferredLayoutInputAnchor =
+      preserveDestination &&
+      pendingInlineDiffLoads.size > 0 &&
+      anchor &&
+      changedLayoutAnchorInputEpoch === directScrollInputEpoch - 1
+        ? {
+            anchor,
+            // Passive wheel delivery may already include the native movement.
+            // The last observed coordinate still describes the retained destination.
+            scrollTop: lastObservedScrollTop,
+            inputEpoch: directScrollInputEpoch,
+            sessionId: state.activeSessionId,
+          }
+        : preserveDestination &&
+            previousInputAnchor?.inputEpoch === directScrollInputEpoch - 1 &&
+            previousInputAnchor.sessionId === state.activeSessionId
+          ? { ...previousInputAnchor, inputEpoch: directScrollInputEpoch }
+          : null;
     if (!resumeChangedLayoutAnchor) return;
     resumeChangedLayoutAnchor = null;
     setChangedLayoutAnchor(null);
@@ -6249,6 +6275,23 @@ export function MessageList() {
     const top = clampEditScrollTop(containerRef.scrollTop);
     const currentViewportHeight = containerRef.clientHeight;
     const scrollDelta = top - lastObservedScrollTop;
+    const inputAnchor = deferredLayoutInputAnchor;
+    const movedLayoutAnchor: VisibleScrollAnchor | null =
+      inputAnchor &&
+      inputAnchor.inputEpoch === directScrollInputEpoch &&
+      inputAnchor.sessionId === state.activeSessionId &&
+      !suppressSyncScrollTop &&
+      Math.abs(scrollDelta) > 0.5
+        ? {
+            ...inputAnchor.anchor,
+            top: inputAnchor.anchor.top + inputAnchor.scrollTop - top,
+            messageTop:
+              inputAnchor.anchor.messageTop === undefined
+                ? undefined
+                : inputAnchor.anchor.messageTop + inputAnchor.scrollTop - top,
+          }
+        : null;
+    if (movedLayoutAnchor) deferredLayoutInputAnchor = null;
     const layoutAnchorSettling =
       !!untrack(changedLayoutAnchor) && changedLayoutAnchorInputEpoch === directScrollInputEpoch;
     const mountedDetachedAnchor = (() => {
@@ -6554,7 +6597,7 @@ export function MessageList() {
       }
       scheduleDetachedVisibleAnchorRefresh();
       if (
-        pendingInlineDiffLoads.size > 0 &&
+        (pendingInlineDiffLoads.size > 0 || movedLayoutAnchor) &&
         actualScrollMovement &&
         userScrollInputActive &&
         !layoutAnchorSettling &&
@@ -6564,8 +6607,40 @@ export function MessageList() {
         !diffFocusPauseActive &&
         !pendingExpansionScrollAnchor
       ) {
-        const anchor = captureExactPaintedVisibleScrollAnchor();
+        let anchor = movedLayoutAnchor;
         if (anchor) {
+          // Reconcile unpresented partial growth against the user's actual movement
+          // before deciding whether that gesture exposed an earlier paragraph.
+          restoreVisibleScrollAnchor(anchor, {
+            useMessageOffsetFallback: true,
+            reserveBottomOverflow: true,
+          });
+          const element = getMountedScrollAnchorElement(anchor);
+          const targetTop =
+            element?.dataset.msgId === anchor.messageId
+              ? (anchor.messageTop ?? anchor.top)
+              : anchor.top;
+          // A bottom reserve may still be mounting. Do not recapture until the
+          // saved destination is reachable and its partial growth is corrected.
+          if (
+            element &&
+            Math.abs(
+              element.getBoundingClientRect().top -
+                containerRef.getBoundingClientRect().top -
+                targetTop
+            ) <= 0.5
+          ) {
+            anchor = captureExactPaintedVisibleScrollAnchor() ?? anchor;
+          }
+        } else {
+          anchor = captureExactPaintedVisibleScrollAnchor();
+        }
+        if (anchor) {
+          if (movedLayoutAnchor) {
+            directMovementAnchor = { anchor, scrollTop: containerRef.scrollTop };
+            pendingWheelResizeAnchor = null;
+            rememberDetachedVisibleAnchor(anchor);
+          }
           // The input cancelled the old view-change owner. Preserve its actual
           // new painted destination through the still-pending detail arrivals.
           settleChangedLayoutAnchor(
@@ -6717,7 +6792,7 @@ export function MessageList() {
     }
     lastWheelAt = performance.now();
     directScrollInputEpoch += 1;
-    cancelDeferredLayoutAnchor();
+    cancelDeferredLayoutAnchor(true);
     virtualPlaceholderReleaseBlockedUntil = lastWheelAt + USER_SCROLL_IDLE_MS;
     if (deltaY > 0.5) lastWheelUpAt = Number.NEGATIVE_INFINITY;
     if (initialScrollRafId) {
@@ -6893,7 +6968,7 @@ export function MessageList() {
     }
     lastScrollInputAt = performance.now();
     directScrollInputEpoch += 1;
-    cancelDeferredLayoutAnchor();
+    cancelDeferredLayoutAnchor(true);
     virtualPlaceholderReleaseBlockedUntil = lastScrollInputAt + USER_SCROLL_IDLE_MS;
     const metrics = shouldVirtualize() ? virtualMetrics() : null;
     const index = metrics
@@ -8061,6 +8136,7 @@ export function MessageList() {
     newTurnReserveSessionId = null;
     lastVirtualContentOrigin = 0;
     rememberDetachedVisibleAnchor(null);
+    deferredLayoutInputAnchor = null;
     directMovementAnchor = null;
     pendingWheelResizeAnchor = null;
     measuredHeights.clear();

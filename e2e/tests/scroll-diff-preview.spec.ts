@@ -290,6 +290,14 @@ test.describe('diff preview anchoring', () => {
             element.getBoundingClientRect().top -
             document.querySelector('.interactive-list')!.getBoundingClientRect().top
         );
+      // The first large wheel can hydrate and round virtual rows. Correct that
+      // setup drift natively before recording the destination under test.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const offset = (await position()) - 113;
+        if (Math.abs(offset) <= 2) break;
+        await page.mouse.wheel(0, offset);
+        await waitForAnimationFrames(page, 20);
+      }
       const before = await position();
       expect(Math.abs(before - 113)).toBeLessThanOrEqual(2);
       const showDiffs = (showFileDiffs: boolean) =>
@@ -341,7 +349,16 @@ test.describe('diff preview anchoring', () => {
       }
       await page.mouse.wheel(0, -96);
       await expect
-        .poll(() => list.evaluate((element) => element.scrollTop))
+        // Hydration compensation can already have changed the live scrollTop.
+        // Check native movement at receipt, before that correction, instead.
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as PartialDiffWindow).partialDiffProbe.events.find(
+                (event) => event.type === 'wheel' && event.trusted
+              )?.top
+          )
+        )
         .toBe(inputScrollTop - 96);
       await page.clock.runFor(17);
       const afterInput = await position();

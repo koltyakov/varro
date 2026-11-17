@@ -215,6 +215,11 @@ the shared invariants below remain true.
   Keep that detached anchor while deferred preview requests remain pending. Pause bounded settling
   when waiting and wake it from detail completion before paint; do not expire it after twelve idle
   frames or poll indefinitely. New direct input cancels the retained owner and pin.
+  For wheel or keyboard movement, transfer its saved paragraph identity and translate the saved
+  destination by the actual movement from the last observed scroll coordinate. Reconcile partial
+  hydration against that destination before recapturing genuinely exposed earlier prose. A passive
+  wheel callback may already see native movement and unpresented growth; neither its live rectangle
+  nor an additional predicted wheel delta describes the presented destination.
   Exact painted-anchor selection must exclude the sticky prompt's opaque card and solid gap.
   A paragraph behind that overlay can enter the scrollport after a wheel tick without
   becoming visible. Preserving it during hydration moves the genuinely visible prose
