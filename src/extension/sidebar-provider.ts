@@ -247,7 +247,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly macOSTray: MacOSTray | undefined;
   private readonly notificationUriHandler: vscode.Disposable;
   private readonly sessionProjectWindow: SessionProjectWindow;
-  private sessionProjectRestore: Promise<void> | undefined;
   private nativeNotificationErrorShown = false;
   private readonly sessionTrash: SessionTrashManager;
   private readonly pinnedSessions: PinnedSessionManager;
@@ -365,10 +364,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly simulateNoProviders = false,
     providerSignatureFileSystem: ProviderSignatureFileSystem = nodeProviderSignatureFileSystem,
     secrets?: vscode.SecretStorage,
-    globalStorageUri?: vscode.Uri
+    private readonly globalStorageUri?: vscode.Uri
   ) {
     this.contextProvider = contextProvider;
-    this.sessionProjectWindow = new SessionProjectWindow(globalState);
+    this.sessionProjectWindow = new SessionProjectWindow(globalStorageUri?.fsPath);
     const extensionPackageJson: unknown = vscode.extensions.getExtension(extensionId)?.packageJSON;
     this.extensionVersion =
       extensionPackageJson &&
@@ -1033,12 +1032,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ),
       openReferencedSession: async (session) => {
         if (this.disposing) return;
-        await this.sessionProjectWindow.queue(session, this.server.url ?? '');
-        await vscode.commands.executeCommand(
-          'vscode.openFolder',
-          vscode.Uri.file(session.directory),
-          true
-        );
+        const request = await this.sessionProjectWindow.queue(session, this.server.url ?? '');
+        try {
+          const marker = vscode.Uri.joinPath(
+            this.globalStorageUri!,
+            'session-lookups',
+            basename(request)
+          );
+          await vscode.commands.executeCommand(
+            'vscode.openFolder',
+            vscode.Uri.file(session.directory),
+            {
+              forceNewWindow: true,
+              filesToOpen: [marker],
+            }
+          );
+        } catch (error) {
+          await this.sessionProjectWindow.discard(request);
+          throw error;
+        }
       },
       activateSession: async (sessionID, directory, catalogRoot, signal) => {
         const workspacePath = this.getOpenSessionDirectory(catalogRoot);
@@ -1220,7 +1232,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           }
           this.providerFileRefresh.postStatus();
           void this.recoverPendingPermissionModeFallbacks();
-          if (webviewContext.surface === 'sidebar') this.restoreReferencedSession();
         },
         handleDroppedPaths: (paths) =>
           contextFilesState.handleDroppedPaths(paths, (message) => post(message)),
@@ -1593,33 +1604,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }).toString();
   }
 
-  private restoreReferencedSession(): void {
-    if (
-      this.disposing ||
-      this.sessionProjectRestore ||
-      !this.server.url ||
-      ![...this.endpoints].some((endpoint) => endpoint.surface === 'sidebar' && endpoint.ready)
-    )
-      return;
-    const context = this.contextProvider.context;
-    const serverUrl = this.server.url;
-    const directories = (context.workspaceFolders ?? []).map((folder) => folder.path);
-    if (context.workspacePath) directories.push(context.workspacePath);
-    const operation = (async () => {
-      const reference = await this.sessionProjectWindow.take(directories, serverUrl);
-      if (reference && !this.disposing) {
-        await this.openSessionInSidebar(reference.id, reference.directory);
-      }
-    })()
-      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection boundary.
-      .catch((error: unknown) => logger.warn('Could not open referenced session', error))
-      .finally(() => {
-        if (this.sessionProjectRestore === operation) this.sessionProjectRestore = undefined;
-        if (this.server.url !== serverUrl) this.restoreReferencedSession();
-      });
-    this.sessionProjectRestore = operation;
-  }
-
   private async openNotificationUri(uri: vscode.Uri): Promise<void> {
     if (this.disposing || uri.authority !== this.extensionId || uri.path !== '/notification')
       return;
@@ -1765,6 +1749,53 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       location: vscode.TerminalLocation.Editor,
     });
     terminal.show(false);
+  }
+
+  async openSessionLookup(
+    uri: vscode.Uri,
+    launcher: vscode.WebviewPanel,
+    token?: vscode.CancellationToken
+  ): Promise<void> {
+    if (
+      !this.globalStorageUri ||
+      uri.scheme !== this.globalStorageUri.scheme ||
+      uri.authority !== this.globalStorageUri.authority
+    )
+      throw new Error('Session lookup belongs to a different editor profile or machine');
+    let closed = token?.isCancellationRequested ?? false;
+    const listener = launcher.onDidDispose(() => {
+      closed = true;
+    });
+    try {
+      const directories = (this.contextProvider.context.workspaceFolders ?? []).map(
+        (folder) => folder.path
+      );
+      const current = this.contextProvider.context.workspacePath;
+      if (current) directories.push(current);
+      const request = await this.sessionProjectWindow.read(uri.fsPath, directories);
+      if (closed || this.disposing) return;
+      const serverUrl = await this.runtime.ensureServerStarted();
+      if (closed || token?.isCancellationRequested || this.disposing) {
+        await this.sessionProjectWindow.discard(uri.fsPath);
+        return;
+      }
+      if (!this.contextProvider.getOpenWorkspaceRoot(request.directory)) {
+        throw new Error('Session workspace folder is no longer open');
+      }
+      if (!serverUrl) throw new Error('OpenCode server is unavailable');
+      const reference = await this.sessionProjectWindow.consume(uri.fsPath, request, serverUrl);
+      if (closed || token?.isCancellationRequested || this.disposing) return;
+      await this.openSessionInEditor(
+        reference.id,
+        undefined,
+        undefined,
+        undefined,
+        reference.directory
+      );
+      launcher.dispose();
+    } finally {
+      listener.dispose();
+    }
   }
 
   async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: PersistedEditorState) {
@@ -2037,7 +2068,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     if (msg.type === 'server/status' && msg.payload.state === 'running') {
       void this.recoverPendingPermissionModeFallbacks();
-      this.restoreReferencedSession();
     }
     if (msg.type === 'server/event') this.postQueuedSessionStatus(msg.payload);
     if (msg.type === 'server/event') this.releaseDeletedEditorRestorations(msg.payload);

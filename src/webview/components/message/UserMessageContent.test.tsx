@@ -27,6 +27,9 @@ import { pastedTextDataUrl } from '../../../shared/pasted-text';
 import { createChatAnnotation } from '../../../shared/chat-annotation';
 import { citationPathChecks } from '../../lib/citation-path-checks';
 import { isAssistantActivityPart } from '../../lib/assistant-activity';
+import { client } from '../../lib/client';
+import * as feedback from '../chat/SessionActionFeedback';
+import type { SessionLookup } from '../../../shared/protocol';
 
 const selectSessionMock = vi.hoisted(() => vi.fn());
 const retryMessageMock = vi.hoisted(() => vi.fn());
@@ -1407,6 +1410,140 @@ describe('UserMessageContent', () => {
       }
     }
   );
+
+  describe('cross-project session references in plain user messages', () => {
+    const external: SessionLookup = {
+      id: 'ses_external123',
+      title: 'Review release',
+      directory: '/projects/other',
+      external: true,
+    };
+    let lookupScope = 0;
+
+    function installSessionLookups() {
+      const lookup = vi
+        .spyOn(client.varro.session, 'reference')
+        .mockImplementation(async (id: string) => {
+          if (id === external.id) return external;
+          throw new Error(`Unknown session ${id}`);
+        });
+      const open = vi.spyOn(client.varro.session, 'openReference').mockResolvedValue();
+      const warn = vi.spyOn(feedback, 'showSessionActionFeedback').mockImplementation(() => {});
+      // A unique server URL gives each test a fresh lookup cache scope.
+      lookupScope += 1;
+      setAppState('serverStatus', {
+        state: 'running',
+        url: `http://localhost/user-message-references-${lookupScope}`,
+      });
+      setAppState('activeSessionId', 'ses_origin123');
+      return { lookup, open, warn };
+    }
+
+    async function waitForExternalLink(): Promise<HTMLAnchorElement> {
+      await vi.waitFor(() =>
+        expect(container?.querySelector('a.session-reference-link')?.textContent).toBe(
+          'Review release · other'
+        )
+      );
+      return container!.querySelector<HTMLAnchorElement>('a.session-reference-link')!;
+    }
+
+    it.each([
+      ['bare', 'Check ses_external123 too', 'ses_external123'],
+      ['prefixed', 'Check session:ses_external123 too', 'session:ses_external123'],
+    ])(
+      'resolves a %s ID without assistant rendering and labels its project',
+      async (_kind, text, marker) => {
+        const send = installSendToExtension();
+        const { lookup, open } = installSessionLookups();
+        renderUserContent([textPart('text-1', text)]);
+
+        // Plain prose path, not the Markdown renderer used by assistant messages.
+        expect(container?.querySelector('.user-message-markdown')).toBeNull();
+        const link = await waitForExternalLink();
+        expect(lookup).toHaveBeenCalledExactlyOnceWith('ses_external123');
+        expect(link.closest('p.user-message-text')).not.toBeNull();
+        expect(link.getAttribute('href')).toBe('#session/ses_external123');
+        expect(link.getAttribute('data-copy-marker')).toBe(marker);
+        expect(link.dataset.sessionId).toBe('ses_external123');
+        expect(link.dataset.sessionDirectory).toBe('/projects/other');
+        expect(link.dataset.sessionExternal).toBe('true');
+        expect(link.getAttribute('title')).toBe('Open session in /projects/other');
+        expect(link.querySelector('.session-reference-folder')?.textContent).toBe(' · other');
+        expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}')).toMatchObject({
+          varroLinkText: 'Review release · other',
+        });
+        expect(container?.querySelector('.user-message-text')?.textContent).toBe(
+          'Check Review release · other too'
+        );
+        expect(open).not.toHaveBeenCalled();
+        expect(send).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([
+      'a.session-reference-link',
+      '.session-reference-link .link-leading-label',
+      '.session-reference-link .session-reference-icon',
+      '.session-reference-link .session-reference-folder',
+    ])('opens the project window when clicking %s', async (target) => {
+      const send = installSendToExtension();
+      const { open, warn } = installSessionLookups();
+      renderUserContent([textPart('text-1', 'Check session:ses_external123 too')]);
+      await waitForExternalLink();
+
+      const element = container!.querySelector(target);
+      expect(element).not.toBeNull();
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      element!.dispatchEvent(click);
+
+      expect(click.defaultPrevented).toBe(true);
+      expect(open).toHaveBeenCalledExactlyOnceWith('ses_external123');
+      expect(selectSessionMock).not.toHaveBeenCalled();
+      expect(getDirectSessionReturnId('ses_external123')).toBeNull();
+      expect(state.activeSessionId).toBe('ses_origin123');
+      expect(send).not.toHaveBeenCalled();
+      await Promise.resolve();
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('keeps unknown IDs as plain text beside a resolved reference', async () => {
+      const { lookup } = installSessionLookups();
+      renderUserContent([
+        textPart('text-1', 'Open ses_external123 first'),
+        textPart('text-2', 'Skip session:ses_missing456 later'),
+      ]);
+      await waitForExternalLink();
+      await vi.waitFor(() => expect(lookup).toHaveBeenCalledWith('ses_missing456'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(container?.querySelectorAll('a.session-reference-link')).toHaveLength(1);
+      expect(container?.querySelectorAll('.user-message-text')[1]?.textContent).toBe(
+        'Skip session:ses_missing456 later'
+      );
+      expect(container?.querySelector('[data-session-id="ses_missing456"]')).toBeNull();
+    });
+
+    it('warns without falling back to local selection when the project window cannot open', async () => {
+      const { open, warn } = installSessionLookups();
+      open.mockRejectedValue(new Error('No project window'));
+      renderUserContent([textPart('text-1', 'Check ses_external123 too')]);
+      const link = await waitForExternalLink();
+
+      link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+      await vi.waitFor(() =>
+        expect(warn).toHaveBeenCalledExactlyOnceWith(
+          'Could not open the session in its project window',
+          'warning'
+        )
+      );
+      expect(open).toHaveBeenCalledExactlyOnceWith('ses_external123');
+      expect(selectSessionMock).not.toHaveBeenCalled();
+      expect(getDirectSessionReturnId('ses_external123')).toBeNull();
+      expect(state.activeSessionId).toBe('ses_origin123');
+    });
+  });
 
   it.each(['https://example.test/docs', 'http://localhost:3000', 'http://app.above-all.test/x'])(
     'renders %s as an external link and opens it through the bridge',

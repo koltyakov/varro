@@ -16,9 +16,8 @@ import type {
 } from '../shared/protocol';
 import type { SessionStateManager } from './session-state-manager';
 import { parseExtensionMessage } from '../shared/extension-message';
-import { SessionProjectWindow } from './session-project-window';
+import type { SessionProjectWindow } from './session-project-window';
 import { fixture } from '../webview/test-fixtures';
-import type { Memento } from 'vscode';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -31,23 +30,35 @@ function deferred<T>() {
 it('opens a cross-project reference in a new project window without changing its session', async () => {
   const reference = { id: 'ses_other', title: 'Other', directory: '/other' };
   const server = createServer({ request: vi.fn(async () => reference) });
-  const { provider, globalState } = await createSidebarProviderInstance({ server });
+  const globalStorageUri = { fsPath: '/private/lookup-state', scheme: 'file', authority: '' };
+  const { provider } = await createSidebarProviderInstance({ server, globalStorageUri });
+  const service = fixture<{ sessionProjectWindow: SessionProjectWindow }>(
+    provider
+  ).sessionProjectWindow;
+  const filename =
+    '/private/lookup-state/session-lookups/12345678-1234-1234-1234-123456789abc.varro-session';
+  const queue = vi.spyOn(service, 'queue').mockResolvedValue(filename);
+  const marker = { fsPath: filename, toString: () => 'vscode-resource://icon.png' as const };
+  getVscodeMock().Uri.joinPath.mockReturnValueOnce(marker);
   attachTestView(provider);
   try {
     await provider.handleMessage({
       type: 'api/request',
       payload: { id: 99, method: 'POST', path: '/varro/session/ses_other/reference' },
     });
-    expect(globalState.update).toHaveBeenCalledWith('varro.sessionProjectWindow:/other', {
-      id: 'ses_other',
-      directory: '/other',
-      serverUrl: server.url,
-      createdAt: expect.any(Number),
-    });
+    expect(queue).toHaveBeenCalledWith(
+      {
+        id: 'ses_other',
+        title: 'Other',
+        directory: '/other',
+        external: true,
+      },
+      server.url
+    );
     expect(getVscodeMock().commands.executeCommand).toHaveBeenCalledWith(
       'vscode.openFolder',
       expect.objectContaining({ fsPath: '/other' }),
-      true
+      { forceNewWindow: true, filesToOpen: [marker] }
     );
     expect(server.request.mock.calls.every(([method]) => method === 'GET')).toBe(true);
   } finally {
@@ -55,59 +66,84 @@ it('opens a cross-project reference in a new project window without changing its
   }
 });
 
-it.each([false, true])(
-  'selects a reference in its destination after sidebar readiness, delayed server=%s',
-  async (delayed) => {
-    const globalState = createWorkspaceState();
-    const saved = new Map<string, unknown>();
-    globalState.get.mockImplementation((key, fallback) => saved.get(key) ?? fallback);
-    globalState.update.mockImplementation(async (key, value) => {
-      if (value === undefined) saved.delete(key);
-      else saved.set(key, value);
-    });
-    const server = createServer();
-    await new SessionProjectWindow(fixture<Memento>(globalState)).queue(
-      {
-        id: 'ses_reference',
-        title: 'Target',
-        directory: '/repo',
-        external: true,
-      },
-      server.url
+it('opens the intended conversation in a normal editor without waiting for the destination sidebar', async () => {
+  const server = createServer();
+  const globalStorageUri = { fsPath: '/private/lookup-state', scheme: 'file', authority: '' };
+  const { provider } = await createSidebarProviderInstance({ server, globalStorageUri });
+  const service = fixture<{ sessionProjectWindow: SessionProjectWindow }>(
+    provider
+  ).sessionProjectWindow;
+  const request = {
+    id: 'ses_reference',
+    directory: '/repo',
+    serverUrl: server.url,
+    createdAt: Date.now(),
+  };
+  const read = vi.spyOn(service, 'read').mockResolvedValue(request);
+  const consume = vi.spyOn(service, 'consume').mockResolvedValue(request);
+  const launcher = createPanel();
+  const editor = createPanel();
+  getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+  const uri = {
+    ...globalStorageUri,
+    fsPath: '/private/lookup-state/session-lookups/request.varro-session',
+  };
+  try {
+    await provider.openSessionLookup(uri as never, launcher.panel as never);
+    expect(read).toHaveBeenCalledWith(uri.fsPath, ['/repo']);
+    expect(consume).toHaveBeenCalledWith(uri.fsPath, request, server.url);
+    expect(launcher.panel.dispose).toHaveBeenCalledOnce();
+    expect(editor.panel.dispose).not.toHaveBeenCalled();
+    expect(editor.panel.webview.html).toContain('"sessionId":"ses_reference"');
+    expect(editor.panel.webview.html).toContain('"directory":"/repo"');
+    expect(getVscodeMock().window.createWebviewPanel).toHaveBeenCalledWith(
+      'varro.editor',
+      expect.any(String),
+      expect.anything(),
+      expect.anything()
     );
-    const serverUrl = server.url;
-    const { provider } = await createSidebarProviderInstance({ globalState, server });
-    expect(saved.get('varro.sessionProjectWindow:/repo')).toMatchObject({
-      id: 'ses_reference',
-      directory: '/repo',
-    });
-    if (delayed) server.url = 'http://127.0.0.1:4097';
-    const sidebar = createPanel();
-    try {
-      await provider.resolveWebviewView(sidebar.panel as never, {} as never, {} as never);
-      await vi.waitFor(() => expect(sidebar.panel.webview.html).toContain('documentId'));
-      sidebar.ready();
-      sidebar.receive({
-        type: 'commands/state',
-        payload: { canAbort: false, canSwitchSessions: false, model: null },
-      });
-      if (delayed) {
-        await Promise.resolve();
-        server.url = serverUrl;
-        provider.post({ type: 'server/status', payload: { state: 'running', url: serverUrl } });
-      }
-      await vi.waitFor(() =>
-        expect(sidebar.panel.webview.postMessage).toHaveBeenCalledWith({
-          type: 'command/open-session',
-          payload: { sessionId: 'ses_reference', directory: '/repo' },
-        })
-      );
-      expect(saved.has('varro.sessionProjectWindow:/repo')).toBe(false);
-    } finally {
-      await provider.dispose();
-    }
+  } finally {
+    await provider.dispose();
   }
-);
+});
+
+it('does not open a conversation after the launcher is closed during server startup', async () => {
+  const start = deferred<string>();
+  const server = createServer({ status: { state: 'starting' }, start: vi.fn(() => start.promise) });
+  const globalStorageUri = { fsPath: '/private/lookup-state', scheme: 'file', authority: '' };
+  const { provider } = await createSidebarProviderInstance({ server, globalStorageUri });
+  const service = fixture<{ sessionProjectWindow: SessionProjectWindow }>(
+    provider
+  ).sessionProjectWindow;
+  const request = {
+    id: 'ses_reference',
+    directory: '/repo',
+    serverUrl: server.url,
+    createdAt: Date.now(),
+  };
+  vi.spyOn(service, 'read').mockResolvedValue(request);
+  const consume = vi.spyOn(service, 'consume').mockResolvedValue(request);
+  const discard = vi.spyOn(service, 'discard').mockResolvedValue();
+  const open = vi.spyOn(provider, 'openSessionInEditor').mockResolvedValue();
+  const launcher = createPanel();
+  const uri = {
+    ...globalStorageUri,
+    fsPath: '/private/lookup-state/session-lookups/request.varro-session',
+  };
+  try {
+    const loading = provider.openSessionLookup(uri as never, launcher.panel as never);
+    await vi.waitFor(() => expect(server.start).toHaveBeenCalled());
+    launcher.panel.dispose();
+    start.resolve(server.url);
+    await loading;
+    expect(discard).toHaveBeenCalledWith(uri.fsPath);
+    expect(consume).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  } finally {
+    start.resolve(server.url);
+    await provider.dispose();
+  }
+});
 
 function lastEditorContext(messages: unknown[]) {
   return (messages as Array<{ type?: string; payload?: EditorContext }>)

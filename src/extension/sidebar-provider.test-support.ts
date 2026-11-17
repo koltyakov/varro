@@ -289,6 +289,7 @@ export async function createSidebarProviderInstance(
     extensionUri?: { fsPath: string };
     workspaceState?: ReturnType<typeof createWorkspaceState>;
     globalState?: ReturnType<typeof createWorkspaceState>;
+    globalStorageUri?: { fsPath: string; scheme: string; authority: string };
     contextProvider?: ReturnType<typeof createContextProvider>;
     providerSignatureFileSystem?: typeof mocks.providerSignatureFileSystem;
     server?: ReturnType<typeof createServer>;
@@ -307,7 +308,9 @@ export async function createSidebarProviderInstance(
     server as never,
     'koltyakov.varro',
     false,
-    options.providerSignatureFileSystem ?? mocks.providerSignatureFileSystem
+    options.providerSignatureFileSystem ?? mocks.providerSignatureFileSystem,
+    undefined,
+    options.globalStorageUri as never
   );
 
   return { SidebarProvider, provider, workspaceState, globalState, contextProvider, server };

@@ -137,6 +137,18 @@
     }
   },
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "varro.sessionLookup",
+        "displayName": "Varro session lookup",
+        "selector": [
+          {
+            "filenamePattern": "*.varro-session"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
     "viewsContainers": {
       "secondarySidebar": [
         {

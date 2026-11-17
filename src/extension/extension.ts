@@ -11,6 +11,7 @@ import { measureStartupPhase } from '../shared/startup';
 import { prepareVarroScratchDirectory } from './varro-state-paths';
 import { readPromptTrace } from './extension-config';
 import { configurePromptTrace } from './prompt-trace';
+import { SessionProjectWindow } from './session-project-window';
 
 const CONTEXT_RESCOPE_RETRY_MS = 50;
 const CONTEXT_RESTART_GRACE_MS = 3000;
@@ -320,6 +321,13 @@ async function activateExtension(context: vscode.ExtensionContext) {
   );
   context.subscriptions.push(
     vscode.window.registerWebviewPanelSerializer(SidebarProvider.editorViewType, sidebarProvider)
+  );
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(SessionProjectWindow.viewType, {
+      openCustomDocument: (uri) => ({ uri, dispose() {} }),
+      resolveCustomEditor: (document, panel, token) =>
+        sidebarProvider!.openSessionLookup(document.uri, panel, token),
+    })
   );
 
   context.subscriptions.push(
