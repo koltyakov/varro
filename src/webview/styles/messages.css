@@ -1759,19 +1759,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
 .assistant-file-edit-stack {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-
-.assistant-file-edit-stack:not(:has(.file-change-inline-diffs-unwrapped))
-  > :is(.file-change-card, .file-change-truncated-summary)
-  + .file-change-card {
-  margin-top: -0.5px;
-}
-
-.assistant-file-edit-stack:not(:has(.file-change-inline-diffs-unwrapped))
-  > :is(.file-change-card, .file-change-truncated-summary)
-  + .file-change-truncated-summary {
-  margin-top: 2.5px;
+  gap: var(--assistant-bordered-block-gap, 9px);
 }
 
 .assistant-file-edit-stack:has(.file-change-inline-diffs-unwrapped) {

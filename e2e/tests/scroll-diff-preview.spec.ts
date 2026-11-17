@@ -322,6 +322,24 @@ test.describe('diff preview anchoring', () => {
       await showDiffs(false);
       await waitForAnimationFrames(page, 30);
       expect(Math.abs((await position()) - before)).toBeLessThanOrEqual(2);
+      const collapsedCardGaps = await page.evaluate(() =>
+        [...document.querySelectorAll('.assistant-file-edit-stack')].flatMap((stack) => {
+          const cards = [...stack.children].filter((element) =>
+            element.matches('.file-change-card')
+          );
+          return cards
+            .slice(1)
+            .map(
+              (card, index) =>
+                card.getBoundingClientRect().top - cards[index]!.getBoundingClientRect().bottom
+            );
+        })
+      );
+      expect(collapsedCardGaps.length).toBeGreaterThan(0);
+      expect(
+        collapsedCardGaps.every((gap) => Math.abs(gap - 9) <= 0.1),
+        `Collapsed edit-card gaps must match the 9 px bordered-card spacing: ${JSON.stringify(collapsedCardGaps)}`
+      ).toBe(true);
       await page.evaluate(() => {
         (window as PartialDiffWindow).partialDiffProbe.gate = true;
       });
