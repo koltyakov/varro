@@ -2010,9 +2010,7 @@ function SessionReferenceLink(props: { reference: SessionReference }) {
     if (props.reference.external) {
       void client.varro.session
         .openReference(props.reference.id)
-        .catch(() =>
-          showSessionActionFeedback('Could not open the session in its project window', 'warning')
-        );
+        .catch(() => showSessionActionFeedback('Could not open the project window', 'warning'));
       return;
     }
     if (state.activeSessionId) {
@@ -2034,7 +2032,7 @@ function SessionReferenceLink(props: { reference: SessionReference }) {
       data-session-external={props.reference.external ? 'true' : undefined}
       title={
         props.reference.external
-          ? `Open session in ${props.reference.directory}`
+          ? `Open project folder ${props.reference.directory}`
           : `Open session ${props.reference.id}`
       }
       onClick={openSession}

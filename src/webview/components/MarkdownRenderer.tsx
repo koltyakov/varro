@@ -990,7 +990,7 @@ function linkifySessionReferences(fragment: DocumentFragment) {
       if (segment.reference.external) anchor.dataset.sessionExternal = 'true';
       anchor.dataset.copyMarker = segment.reference.marker;
       anchor.title = segment.reference.external
-        ? `Open session in ${segment.reference.directory}`
+        ? `Open project folder ${segment.reference.directory}`
         : `Open session ${segment.reference.id}`;
       const icon = createMaterialChipIconElement('session', 'session-reference-icon');
       const label = document.createElement('span');
@@ -2959,9 +2959,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       if (sessionLink.dataset.sessionExternal === 'true') {
         void client.varro.session
           .openReference(sessionLink.dataset.sessionId)
-          .catch(() =>
-            showSessionActionFeedback('Could not open the session in its project window', 'warning')
-          );
+          .catch(() => showSessionActionFeedback('Could not open the project window', 'warning'));
         return;
       }
       if (state.activeSessionId) {

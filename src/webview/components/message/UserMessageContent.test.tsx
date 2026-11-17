@@ -1468,7 +1468,7 @@ describe('UserMessageContent', () => {
         expect(link.dataset.sessionId).toBe('ses_external123');
         expect(link.dataset.sessionDirectory).toBe('/projects/other');
         expect(link.dataset.sessionExternal).toBe('true');
-        expect(link.getAttribute('title')).toBe('Open session in /projects/other');
+        expect(link.getAttribute('title')).toBe('Open project folder /projects/other');
         expect(link.querySelector('.session-reference-folder')?.textContent).toBe(' · other');
         expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}')).toMatchObject({
           varroLinkText: 'Review release · other',
@@ -1533,10 +1533,7 @@ describe('UserMessageContent', () => {
       link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 
       await vi.waitFor(() =>
-        expect(warn).toHaveBeenCalledExactlyOnceWith(
-          'Could not open the session in its project window',
-          'warning'
-        )
+        expect(warn).toHaveBeenCalledExactlyOnceWith('Could not open the project window', 'warning')
       );
       expect(open).toHaveBeenCalledExactlyOnceWith('ses_external123');
       expect(selectSessionMock).not.toHaveBeenCalled();

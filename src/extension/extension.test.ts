@@ -32,7 +32,6 @@ const {
   getMock,
   onDidChangeConfigurationMock,
   registerWebviewPanelSerializerMock,
-  registerCustomEditorProviderMock,
   registerWebviewViewProviderMock,
   showInformationMessageMock,
   sweepStaleInjectedConfigDirectoriesMock,
@@ -58,7 +57,6 @@ const {
   }),
   onDidChangeConfigurationMock: vi.fn((_listener: ConfigChangeListener) => ({ dispose: vi.fn() })),
   registerWebviewPanelSerializerMock: vi.fn(() => ({ dispose: vi.fn() })),
-  registerCustomEditorProviderMock: vi.fn(() => ({ dispose: vi.fn() })),
   registerWebviewViewProviderMock: vi.fn(() => ({ dispose: vi.fn() })),
   showInformationMessageMock: vi.fn(() => Promise.resolve('Reload Window')),
   sweepStaleInjectedConfigDirectoriesMock: vi.fn(() => Promise.resolve()),
@@ -131,7 +129,6 @@ vi.mock('vscode', () => ({
   },
   window: {
     registerWebviewPanelSerializer: registerWebviewPanelSerializerMock,
-    registerCustomEditorProvider: registerCustomEditorProviderMock,
     registerWebviewViewProvider: registerWebviewViewProviderMock,
     showInformationMessage: showInformationMessageMock,
   },
@@ -667,13 +664,6 @@ describe('extension activation', () => {
       'varro.editor',
       expect.anything()
     );
-    expect(registerCustomEditorProviderMock).toHaveBeenCalledWith(
-      'varro.sessionLookup',
-      expect.objectContaining({
-        openCustomDocument: expect.any(Function),
-        resolveCustomEditor: expect.any(Function),
-      })
-    );
     expect(registerCommandsMock).toHaveBeenCalledWith(
       context as never,
       expect.anything(),
@@ -692,7 +682,7 @@ describe('extension activation', () => {
     expect(
       latestSidebarProviderInstance.current?.startProviderFileObservation
     ).toHaveBeenCalledOnce();
-    expect(context.subscriptions).toHaveLength(4);
+    expect(context.subscriptions).toHaveLength(3);
   });
 
   it.each(primarySidebarHosts)(
@@ -1800,12 +1790,6 @@ describe('extension manifest', () => {
   });
 
   it('activates on Varro use instead of every VS Code startup', () => {
-    expect(packageJson.contributes.customEditors).toContainEqual({
-      viewType: 'varro.sessionLookup',
-      displayName: 'Varro session lookup',
-      selector: [{ filenamePattern: '*.varro-session' }],
-      priority: 'default',
-    });
     expect(packageJson.contributes.views.varro).toContainEqual(
       expect.objectContaining({ id: 'varro.chat' })
     );
