@@ -164,6 +164,44 @@ describe('ProviderLimitService with only V1 credentials', () => {
   );
 
   describe.each(['zai', 'zai-coding-plan'])('%s V1 reset-card failures', (providerID) => {
+    it('retains reset cards only on failure and clears them on a successful empty response', async () => {
+      await writeAuth({ [providerID]: { type: 'api', key: 'v1-zai-token' } });
+      createService({ id: providerID, models: {} });
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(zaiQuotaResponse(now))
+        .mockResolvedValueOnce(
+          Response.json({
+            code: 200,
+            success: true,
+            data: {
+              weekResets: [{ available: true, expireTime: '2026-11-01T00:00:00Z' }],
+              fiveHourResets: [],
+            },
+          })
+        );
+      const checkedAt = now;
+      await expect(service.get(providerID, null)).resolves.toMatchObject({
+        usageLimitResets: { availableCount: 1, checkedAt },
+      });
+      now += 30_000;
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(zaiQuotaResponse(now))
+        .mockResolvedValueOnce(new Response('', { status: 503 }));
+      await expect(service.get(providerID, null)).resolves.toMatchObject({
+        status: 'available',
+        checkedAt: now,
+        usageLimitResets: { availableCount: 1, checkedAt, stale: true },
+      });
+      now += 30_000;
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(zaiQuotaResponse(now))
+        .mockResolvedValueOnce(
+          Response.json({ code: 200, success: true, data: { weekResets: [], fiveHourResets: [] } })
+        );
+      expect(await service.get(providerID, null)).not.toHaveProperty('usageLimitResets');
+      await expectNoV2Store();
+    });
+
     it.each(['unavailable', 'api-error'] as const)(
       'keeps quota windows when reset cards are %s',
       async (failure) => {

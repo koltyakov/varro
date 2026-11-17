@@ -2,6 +2,7 @@ import type { DesktopSessionPaneSide, PermissionMode } from './protocol';
 import type { RemoteImageMode } from './remote-images';
 
 export const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS = 120;
+export const PROVIDER_LIMIT_STALE_RETENTION_MS = 15 * 60_000;
 export const DEFAULT_RESET_WARNING_DAYS = 5;
 
 export type ExtensionConfigState = {

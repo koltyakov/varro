@@ -178,8 +178,8 @@ import {
   formatVariantInitial,
   formatVariantLabel,
   getProviderLimitCompactBadges,
-  hasProviderLimitWindowWithinThreshold,
 } from '../lib/format';
+import { createProviderLimitDisplay } from '../lib/provider-limit-display';
 import { getVariantsForModel } from '../lib/model-variants';
 import {
   getContextWindow,
@@ -5982,7 +5982,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
     return getActiveUsageLimitNotice(activeSessionId);
   });
-  const currentProviderLimit = createMemo(() => {
+  const currentProviderLimit = createProviderLimitDisplay(() => {
     const current = currentModel();
     if (!current.providerID) return null;
     return getProviderLimit(current.providerID, current.modelID);
@@ -5995,15 +5995,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       current.modelName
     );
   });
-  const showCurrentProviderLimit = createMemo(() =>
-    hasProviderLimitWindowWithinThreshold(currentCompactProviderLimit(), 100)
+  const currentProviderLimitBadges = createMemo(() =>
+    getProviderLimitCompactBadges(currentCompactProviderLimit())
   );
+  const showCurrentProviderLimit = createMemo(() => currentProviderLimitBadges().length > 0);
 
   const currentProviderLimitTitle = createMemo(() =>
     showCurrentProviderLimit() ? formatProviderLimitTitle(currentCompactProviderLimit()) : null
-  );
-  const currentProviderLimitBadges = createMemo(() =>
-    showCurrentProviderLimit() ? getProviderLimitCompactBadges(currentCompactProviderLimit()) : []
   );
   const availableMcpNames = createMemo(() => [
     ...new Set([

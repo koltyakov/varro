@@ -8,6 +8,7 @@ import {
 import {
   formatProviderLimitWindowReset,
   formatProviderLimitWindowValue,
+  formatProviderLimitRetry,
   getOrderedProviderLimitWindows,
   getProviderLimitWindowRemainingPercent,
   getProviderLimitWindowUsedPercent,
@@ -15,6 +16,7 @@ import {
 import { postMessage } from '../../lib/bridge';
 import { getProviderUsageLink } from '../../lib/provider-usage';
 import { isFunction } from '../../lib/runtime-values';
+import { createProviderLimitDisplay } from '../../lib/provider-limit-display';
 import { navArrowRightIcon, openNewWindowIcon } from '../../lib/ui-icons';
 import { UiIcon } from '../UiIcon';
 
@@ -30,20 +32,33 @@ export function ProviderLimitPopup(props: {
   resetsOnly?: boolean;
   onClose: () => void;
 }) {
+  const limit = createProviderLimitDisplay(() => props.limit);
   const [resetCreditsExpanded, setResetCreditsExpanded] = createSignal(false);
-  const windows = () => getOrderedProviderLimitWindows(props.limit);
-  const planName = () =>
-    props.limit?.status === 'available' ? props.limit.planName || null : null;
+  const windows = () => getOrderedProviderLimitWindows(limit());
+  const planName = () => {
+    const current = limit();
+    return current?.status === 'available' ? current.planName || null : null;
+  };
   const creditBalance = () => {
-    const balance = props.limit?.status === 'available' ? props.limit.creditBalance : undefined;
+    const current = limit();
+    const balance = current?.status === 'available' ? current.creditBalance : undefined;
     return balance === 0 ? undefined : balance;
   };
   const resetCredits = () => {
-    if (props.limit?.status !== 'available') return null;
-    const resets = props.limit.usageLimitResets;
+    const current = limit();
+    if (current?.status !== 'available') return null;
+    const resets = current.usageLimitResets;
     return resets && resets.availableCount > 0 ? resets : null;
   };
-  const resetCreditsUsageLink = () => getProviderUsageLink(props.limit?.providerID);
+  const resetCreditsUsageLink = () => getProviderUsageLink(limit()?.providerID);
+  const failureMessage = () => {
+    const current = limit();
+    if (!current) return null;
+    if (current.status !== 'available') {
+      return `${current.failureKind === 'authentication' ? 'Authentication failed. ' : ''}${current.note}`;
+    }
+    return current.stale ? `Quota data is stale. ${current.note ?? ''}` : null;
+  };
   let popupEl: HTMLDivElement | undefined;
 
   const setRef = (el: HTMLDivElement) => {
@@ -76,13 +91,14 @@ export function ProviderLimitPopup(props: {
         </div>
 
         <Show
-          when={props.limit?.status === 'available' && windows().length > 0}
+          when={limit()?.status === 'available' && windows().length > 0}
           fallback={
             <Show when={creditBalance() === undefined}>
-              <div class="provider-limit-popup-empty">
-                {props.limit?.status === 'unsupported' || props.limit?.status === 'error'
-                  ? props.limit.note || 'Limits unavailable'
-                  : 'No active limits'}
+              <div
+                class="provider-limit-popup-empty"
+                role={failureMessage() ? 'status' : undefined}
+              >
+                {failureMessage() || 'No active limits'}
               </div>
             </Show>
           }
@@ -90,6 +106,14 @@ export function ProviderLimitPopup(props: {
           <div class="provider-limit-popup-rows">
             <For each={windows()}>{(window) => <ProviderLimitRow window={window} />}</For>
           </div>
+        </Show>
+        <Show when={limit()?.status === 'available' && failureMessage()}>
+          <div class="provider-limit-popup-empty" role="status">
+            {failureMessage()}
+          </div>
+        </Show>
+        <Show when={formatProviderLimitRetry(limit())}>
+          {(retry) => <div class="provider-limit-popup-empty">{retry()}</div>}
         </Show>
 
         <Show when={creditBalance() !== undefined}>
@@ -124,6 +148,12 @@ export function ProviderLimitPopup(props: {
                     height="10"
                   />
                 </button>
+              </Show>
+              <Show when={resets().stale}>
+                <div class="provider-limit-reset-unavailable" role="status">
+                  Reset credits may be outdated. Showing cached data because the latest refresh
+                  failed.
+                </div>
               </Show>
               <Show when={props.resetsOnly || resetCreditsExpanded()}>
                 <div class="provider-limit-reset-content">

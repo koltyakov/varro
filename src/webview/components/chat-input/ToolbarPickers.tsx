@@ -1065,6 +1065,7 @@ export function ProviderLimitChip(props: {
   badges: Array<{ label: string; tone: string }>;
   title: string | null;
   ariaLabel?: string | null;
+  expanded?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -1082,6 +1083,7 @@ export function ProviderLimitChip(props: {
           type="button"
           class="toolbar-limit-chip"
           aria-label={props.ariaLabel ?? props.title ?? 'Provider limits'}
+          aria-expanded={props.expanded}
           on:click={props.onClick}
         >
           <span class="toolbar-limit-chip-label">

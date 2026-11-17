@@ -182,6 +182,7 @@ describe('createZaiAdapter', () => {
       note: 'Polled Z.ai quota endpoint',
       usageLimitResets: {
         availableCount: 2,
+        checkedAt: 1_000,
         credits: [
           {
             title: '5-hour quota reset',
@@ -252,8 +253,67 @@ describe('createZaiAdapter', () => {
       source: 'provider',
       checkedAt: 1_000,
       note: 'Z.ai quota endpoint rejected credentials (401)',
+      failureKind: 'authentication',
     });
   });
+
+  it.each([
+    'http-error',
+    'api-error',
+    'network-error',
+    'invalid-json',
+    'missing-lists',
+    'invalid-entry',
+  ] as const)(
+    'distinguishes reset-credit %s from a successful zero-credit response',
+    async (failure) => {
+      const quota = {
+        code: 200,
+        data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] },
+      };
+      vi.mocked(fetch).mockResolvedValueOnce(Response.json(quota));
+      if (failure === 'network-error') {
+        vi.mocked(fetch).mockRejectedValueOnce(new Error('connection reset'));
+      } else {
+        vi.mocked(fetch).mockResolvedValueOnce(
+          failure === 'http-error'
+            ? new Response('', { status: 503 })
+            : failure === 'invalid-json'
+              ? new Response('not json')
+              : Response.json(
+                  failure === 'api-error'
+                    ? { code: 401, success: false }
+                    : {
+                        code: 200,
+                        success: true,
+                        data:
+                          failure === 'missing-lists'
+                            ? {}
+                            : { weekResets: [{}], fiveHourResets: [] },
+                      }
+                )
+        );
+      }
+      const context = { provider, authStore: {}, modelID: 'glm-4.5', checkedAt: 1_000 };
+      const failed = await adapter.fetch(context);
+      expect(failed).toMatchObject({
+        status: 'available',
+        usageLimitResetsUnavailable: true,
+        windows: [{ id: 'five_hour', remaining: 90 }],
+      });
+      expect(failed).not.toHaveProperty('usageLimitResets');
+
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(Response.json(quota))
+        .mockResolvedValueOnce(
+          Response.json({ code: 200, success: true, data: { weekResets: [], fiveHourResets: [] } })
+        );
+      const empty = await adapter.fetch(context);
+      expect(empty).toMatchObject({ status: 'available' });
+      expect(empty).not.toHaveProperty('usageLimitResetsUnavailable');
+      expect(empty).not.toHaveProperty('usageLimitResets');
+    }
+  );
 
   it('treats HTTP auth failures as unsupported', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 403 }));
@@ -272,6 +332,7 @@ describe('createZaiAdapter', () => {
       source: 'provider',
       checkedAt: 1_000,
       note: 'Z.ai quota endpoint rejected credentials (403)',
+      failureKind: 'authentication',
     });
   });
 
@@ -345,11 +406,49 @@ describe('createZaiAdapter', () => {
     });
   });
 
+  it.each([
+    { name: 'missing data', payload: { code: 200, success: true } },
+    { name: 'missing limits', payload: { code: 200, data: {} } },
+    { name: 'non-array limits', payload: { code: 200, data: { limits: {} } } },
+    { name: 'empty limits', payload: { code: 200, data: { limits: [] } } },
+    { name: 'invalid entries', payload: { code: 200, data: { limits: [null, {}] } } },
+    {
+      name: 'unparseable remaining',
+      payload: { data: { limits: [{ type: 'CREDIT_LIMIT', remaining: 'unknown' }] } },
+    },
+    {
+      name: 'body error without success flag',
+      payload: {
+        code: 500,
+        data: { limits: [{ type: 'CREDIT_LIMIT', percentage: 25 }] },
+      },
+    },
+  ])('treats $name as a refresh error rather than unsupported', async ({ payload }) => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json(payload));
+    const status = await adapter.fetch({
+      provider,
+      authStore: {},
+      modelID: 'glm-4.5',
+      checkedAt: 1_000,
+    });
+    expect(status).toMatchObject({ status: 'error', source: 'provider' });
+    expect(status).not.toHaveProperty('windows');
+    expect(status).not.toHaveProperty('failureKind');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('reuses aliased auth and normalizes custom bounded windows', async () => {
-    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
       expect(init?.headers).toMatchObject({
         Authorization: 'oauth-token',
       });
+      if (String(input).includes('/customer-package-reset/list')) {
+        return Response.json({
+          code: 200,
+          success: true,
+          data: { weekResets: [], fiveHourResets: [] },
+        });
+      }
 
       return new Response(
         JSON.stringify({
@@ -460,7 +559,7 @@ describe('createZaiAdapter', () => {
     });
   });
 
-  it('reports unsupported when the endpoint does not expose any windows', async () => {
+  it('reports a refresh error when the endpoint does not expose any windows', async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -483,7 +582,7 @@ describe('createZaiAdapter', () => {
     expect(status).toEqual({
       providerID: 'zai',
       modelID: null,
-      status: 'unsupported',
+      status: 'error',
       source: 'provider',
       checkedAt: 1_000,
       note: 'Z.ai quota endpoint did not expose any bounded quotas',

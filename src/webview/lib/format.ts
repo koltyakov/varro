@@ -1,5 +1,6 @@
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../shared/protocol';
 import { formatRelativeReset } from './time-format';
+import { getProviderLimitDisplay } from './provider-limit-display';
 import {
   getProviderLimitWindowPeriodLabel,
   getProviderLimitWindowUsedPercent as getWindowPercent,
@@ -126,6 +127,7 @@ export function getProviderLimitWindowRemainingPercent(
 export function getOrderedProviderLimitWindows(
   limit: ProviderLimitStatus | null | undefined
 ): ProviderLimitWindow[] {
+  limit = getProviderLimitDisplay(limit);
   if (!limit || limit.status !== 'available') return [];
   return [...limit.windows].toSorted((a, b) => compareProviderLimitDisplayWindows(a, b));
 }
@@ -200,7 +202,13 @@ export function getProviderLimitCompactBadges(
     fallbackCount?: number;
   }
 ) {
-  if (!limit || limit.status !== 'available') return [];
+  limit = getProviderLimitDisplay(limit);
+  if (!limit) return [];
+  if (limit.status !== 'available') {
+    return limit.providerID === 'zai' || limit.providerID === 'zai-coding-plan'
+      ? [{ label: 'Unavailable', tone: 'warning' }]
+      : [];
+  }
 
   const preferredPeriods = options?.preferredPeriods ?? ['5h', 'W', 'M'];
   const fallbackCount = options?.fallbackCount ?? 1;
@@ -221,7 +229,7 @@ export function getProviderLimitCompactBadges(
           })
           .slice(0, fallbackCount);
 
-  return visible.flatMap((window) => {
+  const badges = visible.flatMap((window) => {
     const value = formatProviderLimitCompact(limit, window);
     if (!value) return [];
     const prefix = formatProviderLimitCompactPrefix(limit, window);
@@ -232,6 +240,8 @@ export function getProviderLimitCompactBadges(
       },
     ];
   });
+  if (limit.stale) badges.push({ label: 'Stale', tone: 'warning' });
+  return badges;
 }
 
 function formatRemainingPercent(value: number) {
@@ -244,8 +254,17 @@ export function formatProviderLimitTitle(
   limit: ProviderLimitStatus | null | undefined,
   now = Date.now()
 ) {
+  limit = getProviderLimitDisplay(limit, now);
   if (!limit) return '';
-  if (limit.status !== 'available') return limit.note;
+  const retry = formatProviderLimitRetry(limit);
+  if (limit.status !== 'available') {
+    const prefix =
+      limit.providerID === 'zai' || limit.providerID === 'zai-coding-plan'
+        ? 'Limits unavailable. '
+        : '';
+    const auth = limit.failureKind === 'authentication' ? 'Authentication failed. ' : '';
+    return `${prefix}${auth}${limit.note}${retry ? `\n${retry}` : ''}`;
+  }
 
   const windowDescriptions = limit.windows
     .map((window) => {
@@ -259,9 +278,19 @@ export function formatProviderLimitTitle(
       return `${label}: ${usage}${reset}`;
     })
     .join('\n');
-  return limit.note && limit.note !== 'Polled provider quota endpoint'
-    ? `${windowDescriptions}\n${limit.note}`
-    : windowDescriptions;
+  const title =
+    limit.note && limit.note !== 'Polled provider quota endpoint'
+      ? `${windowDescriptions}\n${limit.note}`
+      : windowDescriptions;
+  return `${limit.stale ? 'Quota data is stale.\n' : ''}${title}${retry ? `\n${retry}` : ''}`;
+}
+
+export function formatProviderLimitRetry(limit: ProviderLimitStatus | null | undefined) {
+  if (limit?.retryAt === undefined) return '';
+  return `Retry available at ${new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+  }).format(limit.retryAt)}.`;
 }
 
 function compareProviderLimitWindows(a: ProviderLimitWindow, b: ProviderLimitWindow) {

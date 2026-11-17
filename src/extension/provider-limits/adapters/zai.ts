@@ -5,6 +5,7 @@ import type {
   ProviderLimitStatus,
   ProviderLimitWindow,
 } from '../../../shared/protocol';
+import { isBoolean } from '../../../shared/type-utils';
 import {
   parseRateLimitResetAt,
   type ProviderAuthRecord,
@@ -31,7 +32,7 @@ const ZAI_MCP_MODELS = new Set(['search-prime', 'web-reader', 'zread']);
 
 type ZaiPayloadResult =
   | { kind: 'available'; windows: ProviderLimitWindow[] }
-  | { kind: 'unsupported'; note: string }
+  | { kind: 'authentication'; note: string }
   | { kind: 'error'; note: string };
 
 export function createZaiAdapter(): ProviderLimitAdapter {
@@ -62,12 +63,15 @@ export function createZaiAdapter(): ProviderLimitAdapter {
         });
 
         if (response.status === 401 || response.status === 403) {
-          return unsupportedProviderStatus(
-            provider.id,
-            modelID,
-            checkedAt,
-            `Z.ai quota endpoint rejected credentials (${response.status})`
-          );
+          return {
+            ...unsupportedProviderStatus(
+              provider.id,
+              modelID,
+              checkedAt,
+              `Z.ai quota endpoint rejected credentials (${response.status})`
+            ),
+            failureKind: 'authentication',
+          };
         }
 
         if (!response.ok) {
@@ -81,8 +85,11 @@ export function createZaiAdapter(): ProviderLimitAdapter {
 
         const payload = await readBoundedResponseJson(response);
         const result = extractZaiPayload(payload, checkedAt);
-        if (result.kind === 'unsupported') {
-          return unsupportedProviderStatus(provider.id, modelID, checkedAt, result.note);
+        if (result.kind === 'authentication') {
+          return {
+            ...unsupportedProviderStatus(provider.id, modelID, checkedAt, result.note),
+            failureKind: 'authentication',
+          };
         }
         if (result.kind === 'error') {
           return providerErrorStatus(provider.id, modelID, checkedAt, result.note);
@@ -97,8 +104,12 @@ export function createZaiAdapter(): ProviderLimitAdapter {
           windows: result.windows,
           note: 'Polled Z.ai quota endpoint',
         };
-        const resetCredits = await fetchZaiResetCredits(token);
-        if (resetCredits) status.usageLimitResets = resetCredits;
+        const resetResult = await fetchZaiResetCredits(token);
+        if (resetResult.kind === 'error') {
+          status.usageLimitResetsUnavailable = true;
+        } else if (resetResult.credits.availableCount > 0) {
+          status.usageLimitResets = { ...resetResult.credits, checkedAt };
+        }
         return status;
       } catch {
         return providerErrorStatus(
@@ -112,7 +123,11 @@ export function createZaiAdapter(): ProviderLimitAdapter {
   };
 }
 
-async function fetchZaiResetCredits(token: string): Promise<ProviderLimitResetCredits | null> {
+type ZaiResetCreditsResult =
+  | { kind: 'available'; credits: ProviderLimitResetCredits }
+  | { kind: 'error' };
+
+async function fetchZaiResetCredits(token: string): Promise<ZaiResetCreditsResult> {
   try {
     const response = await fetch(ZAI_RESET_CARDS_ENDPOINT, {
       headers: {
@@ -123,12 +138,24 @@ async function fetchZaiResetCredits(token: string): Promise<ProviderLimitResetCr
       },
       signal: AbortSignal.timeout(10_000),
     });
-    if (!response.ok) return null;
+    if (!response.ok) return { kind: 'error' };
 
     const payload = asRecord(await readBoundedResponseJson(response));
-    if (parseFiniteNumber(payload?.code) !== 200 || payload?.success === false) return null;
+    if (parseFiniteNumber(payload?.code) !== 200 || payload?.success === false) {
+      return { kind: 'error' };
+    }
 
     const data = asRecord(payload?.data);
+    if (!Array.isArray(data?.weekResets) || !Array.isArray(data?.fiveHourResets)) {
+      return { kind: 'error' };
+    }
+    if (
+      [...data.weekResets, ...data.fiveHourResets].some(
+        (entry) => !isBoolean(asRecord(entry)?.available)
+      )
+    ) {
+      return { kind: 'error' };
+    }
     const credits = [
       ...extractZaiResetCredits(data?.weekResets, 'Weekly quota reset'),
       ...extractZaiResetCredits(data?.fiveHourResets, '5-hour quota reset'),
@@ -136,9 +163,9 @@ async function fetchZaiResetCredits(token: string): Promise<ProviderLimitResetCr
     const availableCount =
       countAvailableZaiResetCredits(data?.weekResets) +
       countAvailableZaiResetCredits(data?.fiveHourResets);
-    return availableCount > 0 ? { availableCount, credits } : null;
+    return { kind: 'available', credits: { availableCount, credits } };
   } catch {
-    return null;
+    return { kind: 'error' };
   }
 }
 
@@ -179,12 +206,12 @@ function extractZaiPayload(payload: unknown, checkedAt: number): ZaiPayloadResul
 
   if (code === 401 || code === 403) {
     return {
-      kind: 'unsupported',
+      kind: 'authentication',
       note: `Z.ai quota endpoint rejected credentials (${formatNumeric(code)})`,
     };
   }
 
-  if (success === false) {
+  if (success === false || (code !== null && code !== 0 && code !== 200)) {
     return {
       kind: 'error',
       note: buildZaiApiErrorNote(code, message),
@@ -192,7 +219,10 @@ function extractZaiPayload(payload: unknown, checkedAt: number): ZaiPayloadResul
   }
 
   const data = asRecord(record.data);
-  const limits = Array.isArray(data?.limits) ? data.limits : [];
+  if (!Array.isArray(data?.limits)) {
+    return { kind: 'error', note: 'Z.ai quota endpoint returned invalid quota data' };
+  }
+  const limits = data.limits;
   const windows: ProviderLimitWindow[] = [];
   const seen = new Set<string>();
 
@@ -205,7 +235,7 @@ function extractZaiPayload(payload: unknown, checkedAt: number): ZaiPayloadResul
 
   if (windows.length === 0) {
     return {
-      kind: 'unsupported',
+      kind: 'error',
       note: 'Z.ai quota endpoint did not expose any bounded quotas',
     };
   }

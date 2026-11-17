@@ -3,6 +3,7 @@
 import * as fs from 'fs/promises';
 import { createHash } from 'crypto';
 import type { ProviderLimitStatus, ProviderLimitUpdate, ServerStatus } from '../shared/protocol';
+import { PROVIDER_LIMIT_STALE_RETENTION_MS } from '../shared/provider-limit-config';
 import { asRecord } from '../shared/type-utils';
 import { withStartupDeadline } from '../shared/startup';
 import { fetchProviderLimitFromAdapter } from './provider-limits';
@@ -40,7 +41,10 @@ export class ProviderLimitService {
     string,
     { credentialFingerprint: string; note: string; retryAt: number; backoffMs: number }
   >();
-  private readonly providerLastKnownGoodCache = new Map<string, AvailableProviderLimitStatus>();
+  private readonly providerLastKnownGoodCache = new Map<
+    string,
+    { status: AvailableProviderLimitStatus; credentialFingerprint?: string }
+  >();
   private readonly providerRateLimitBackoff = new Map<string, number>();
   private providerMetadataPromise: Promise<ProviderMetadata[]> | null = null;
   private providerMetadataFetchedAt = 0;
@@ -112,25 +116,73 @@ export class ProviderLimitService {
     if (cached && cached.expiresAt > now) return cached.promise;
 
     const generation = this.providerSnapshotGeneration;
+    let resolvedCredentialFingerprint: string | undefined;
     // Include catalogs and credentials in the optional deadline, not just the
     // provider poll. A quota refresh must settle before the bridge's slow warning.
     const loadPromise = withStartupDeadline(
-      (signal) => this.load(providerID, modelID, generation, signal),
+      (signal) =>
+        this.load(providerID, modelID, generation, signal, (fingerprint) => {
+          resolvedCredentialFingerprint = fingerprint;
+        }),
       ProviderLimitService.PROVIDER_LIMIT_TIMEOUT_MS,
       'Provider quota lookup'
       // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection values are untrusted and narrowed before presentation.
     ).catch((error: unknown) =>
-      this.withLastKnownGoodFallback(cacheKey, {
-        providerID,
-        modelID,
-        status: 'error',
-        source: 'provider',
-        checkedAt: Date.now(),
-        note: `Provider quota lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-      })
+      this.withLastKnownGoodFallback(
+        cacheKey,
+        {
+          providerID,
+          modelID,
+          status: 'error',
+          source: 'provider',
+          checkedAt: Date.now(),
+          note: `Provider quota lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        resolvedCredentialFingerprint
+      )
     );
     const promise = loadPromise
-      .then((result) => result.status)
+      .then((result) => {
+        const cachedEntry = this.providerLimitCache.get(cacheKey);
+        if (!cachedEntry || cachedEntry.promise !== promise) return result.status;
+        const retryAt =
+          Date.now() +
+          (result.shared ? 0 : this.getProviderLimitCacheTtl(cacheKey, result.ttlStatus));
+        cachedEntry.expiresAt = retryAt;
+        if (result.status.status === 'available' && result.ttlStatus.status === 'error') {
+          cachedEntry.expiresAt = Math.min(
+            cachedEntry.expiresAt,
+            result.status.checkedAt + PROVIDER_LIMIT_STALE_RETENTION_MS
+          );
+        }
+        if (
+          result.status.status === 'available' &&
+          result.status.usageLimitResets?.stale &&
+          result.status.usageLimitResets.checkedAt !== undefined
+        ) {
+          cachedEntry.expiresAt = Math.min(
+            cachedEntry.expiresAt,
+            result.status.usageLimitResets.checkedAt + PROVIDER_LIMIT_STALE_RETENTION_MS
+          );
+        }
+        let status = result.status;
+        if (isZaiProvider(providerID) && (status.status !== 'available' || status.stale)) {
+          const authFailure = this.providerAuthFailureCache.get(providerID);
+          status = {
+            ...status,
+            retryAt: isAuthFailureProviderStatus(status)
+              ? (authFailure?.retryAt ?? retryAt)
+              : retryAt,
+          };
+        }
+        if (result.rememberLastKnownGood && status.status === 'available') {
+          this.providerLastKnownGoodCache.set(cacheKey, {
+            status,
+            credentialFingerprint: result.credentialFingerprint,
+          });
+        }
+        return status;
+      })
       .catch((err) => {
         if (this.providerLimitCache.get(cacheKey)?.promise === promise) {
           this.providerLimitCache.delete(cacheKey);
@@ -143,24 +195,6 @@ export class ProviderLimitService {
       promise,
     });
 
-    void loadPromise
-      .then((result) => {
-        const cachedEntry = this.providerLimitCache.get(cacheKey);
-        if (!cachedEntry || cachedEntry.promise !== promise) return;
-        cachedEntry.expiresAt =
-          Date.now() +
-          (result.shared ? 0 : this.getProviderLimitCacheTtl(cacheKey, result.ttlStatus));
-        if (result.status.status === 'available' && result.ttlStatus.status === 'error') {
-          cachedEntry.expiresAt = Math.min(
-            cachedEntry.expiresAt,
-            result.status.checkedAt + 15 * 60_000
-          );
-        }
-        if (result.rememberLastKnownGood && result.status.status === 'available') {
-          this.providerLastKnownGoodCache.set(cacheKey, result.status);
-        }
-      })
-      .catch(() => {});
     return promise;
   }
 
@@ -185,8 +219,10 @@ export class ProviderLimitService {
   }
 
   private pruneExpiredProviderLimitCache(now: number) {
-    for (const [key, status] of this.providerLastKnownGoodCache) {
-      if (now - status.checkedAt > 15 * 60_000) this.providerLastKnownGoodCache.delete(key);
+    for (const [key, { status }] of this.providerLastKnownGoodCache) {
+      if (now - status.checkedAt >= PROVIDER_LIMIT_STALE_RETENTION_MS) {
+        this.providerLastKnownGoodCache.delete(key);
+      }
     }
     for (const [key, entry] of this.providerLimitCache.entries()) {
       if (entry.expiresAt <= now) {
@@ -199,7 +235,8 @@ export class ProviderLimitService {
     providerID: string,
     modelID: string | null,
     generation: number,
-    signal: AbortSignal
+    signal: AbortSignal,
+    onIdentityResolved: (fingerprint: string) => void
   ): Promise<ProviderLimitLoadResult> {
     const cacheKey = `${providerID}:${modelID || ''}`;
     this.coordinator.clearObservations(
@@ -232,7 +269,10 @@ export class ProviderLimitService {
       'varro-claude',
     ].includes(providerID);
     try {
-      providers = await this.getProviderMetadata(canCoordinate, signal);
+      providers = await this.getProviderMetadata(
+        canCoordinate || isZaiProvider(providerID),
+        signal
+      );
       signal.throwIfAborted();
     } catch (err) {
       signal.throwIfAborted();
@@ -318,7 +358,7 @@ export class ProviderLimitService {
     let authStore: Record<string, ProviderAuthRecord>;
     try {
       authStore = await this.readProviderAuthStore(
-        canCoordinate || Boolean(cachedAuthFailure),
+        canCoordinate || isZaiProvider(providerID) || Boolean(cachedAuthFailure),
         signal
       );
       signal.throwIfAborted();
@@ -344,14 +384,22 @@ export class ProviderLimitService {
       });
     }
     const credentialFingerprint = getProviderCredentialFingerprint(provider, authStore);
+    onIdentityResolved(credentialFingerprint);
     if (!canCoordinate && cachedAuthFailure) {
       if (
         cachedAuthFailure.credentialFingerprint === credentialFingerprint &&
         cachedAuthFailure.retryAt > Date.now()
       ) {
-        return createProviderLimitLoadResult(
-          unsupportedProviderStatus(provider.id, modelID, checkedAt, cachedAuthFailure.note)
+        const status = unsupportedProviderStatus(
+          provider.id,
+          modelID,
+          checkedAt,
+          cachedAuthFailure.note
         );
+        if (isZaiProvider(providerID)) {
+          status.failureKind = 'authentication';
+        }
+        return createProviderLimitLoadResult(status);
       }
       // Retain expired entries so only an actual rejection advances the backoff.
       if (
@@ -462,7 +510,31 @@ export class ProviderLimitService {
     }
     if (providerLimit && generation === this.providerSnapshotGeneration) {
       const currentAuthFailure = this.providerAuthFailureCache.get(provider.id);
+      if (
+        isZaiProvider(providerID) &&
+        providerLimit.status === 'available' &&
+        currentAuthFailure &&
+        currentAuthFailure !== cachedAuthFailure &&
+        currentAuthFailure.credentialFingerprint === credentialFingerprint
+      ) {
+        return createProviderLimitLoadResult({
+          ...unsupportedProviderStatus(provider.id, modelID, checkedAt, currentAuthFailure.note),
+          failureKind: 'authentication',
+          retryAt: currentAuthFailure.retryAt,
+        });
+      }
       if (isAuthFailureProviderStatus(providerLimit)) {
+        if (isZaiProvider(providerID)) {
+          providerLimit = { ...providerLimit, failureKind: 'authentication' };
+          for (const key of this.providerLastKnownGoodCache.keys()) {
+            if (key.startsWith(`${providerID}:`)) this.providerLastKnownGoodCache.delete(key);
+          }
+          for (const key of this.providerLimitCache.keys()) {
+            if (key !== cacheKey && key.startsWith(`${providerID}:`)) {
+              this.providerLimitCache.delete(key);
+            }
+          }
+        }
         const backoffMs =
           currentAuthFailure?.credentialFingerprint === credentialFingerprint
             ? Math.min(
@@ -481,10 +553,14 @@ export class ProviderLimitService {
       }
     }
     if (providerLimit) {
-      return this.withLastKnownGoodFallback(cacheKey, {
-        ...providerLimit,
-        checkedAt: providerLimit.status === 'available' ? providerLimit.checkedAt : checkedAt,
-      });
+      return this.withLastKnownGoodFallback(
+        cacheKey,
+        {
+          ...providerLimit,
+          checkedAt: providerLimit.status === 'available' ? providerLimit.checkedAt : checkedAt,
+        },
+        credentialFingerprint
+      );
     }
 
     const direct = extractOpenCodeProviderLimit(provider, modelID, checkedAt);
@@ -514,24 +590,54 @@ export class ProviderLimitService {
 
   private withLastKnownGoodFallback(
     cacheKey: string,
-    status: ProviderLimitStatus
+    status: ProviderLimitStatus,
+    credentialFingerprint?: string
   ): ProviderLimitLoadResult {
+    const previous = this.providerLastKnownGoodCache.get(cacheKey);
+    const resets = previous?.status.usageLimitResets;
+    const resetCheckedAt = resets?.checkedAt ?? previous?.status.checkedAt;
+    const retainedResets =
+      resets &&
+      resetCheckedAt !== undefined &&
+      Date.now() - resetCheckedAt < PROVIDER_LIMIT_STALE_RETENTION_MS &&
+      (credentialFingerprint === undefined ||
+        credentialFingerprint === previous?.credentialFingerprint)
+        ? { ...resets, checkedAt: resetCheckedAt, stale: true }
+        : undefined;
     if (status.status === 'available') {
-      return createProviderLimitLoadResult(status, true);
+      if (
+        status.usageLimitResetsUnavailable &&
+        credentialFingerprint !== undefined &&
+        credentialFingerprint === previous?.credentialFingerprint &&
+        retainedResets
+      ) {
+        status = { ...status, usageLimitResets: retainedResets };
+      }
+      return { ...createProviderLimitLoadResult(status, true), credentialFingerprint };
     }
     if (status.status !== 'error' || status.source !== 'provider') {
       return createProviderLimitLoadResult(status);
     }
 
-    const lastKnownGood = this.providerLastKnownGoodCache.get(cacheKey);
-    if (!lastKnownGood || Date.now() - lastKnownGood.checkedAt > 15 * 60_000)
+    const lastKnownGood = previous?.status;
+    if (
+      !lastKnownGood ||
+      Date.now() - lastKnownGood.checkedAt >= PROVIDER_LIMIT_STALE_RETENTION_MS ||
+      (isZaiProvider(status.providerID) &&
+        (credentialFingerprint === undefined ||
+          credentialFingerprint !== previous?.credentialFingerprint))
+    )
       return createProviderLimitLoadResult(status);
 
+    const fallback = {
+      ...lastKnownGood,
+      note: formatLastKnownGoodNote(lastKnownGood.note, status.note),
+    };
+    if (isZaiProvider(status.providerID)) fallback.stale = true;
+    if (retainedResets) fallback.usageLimitResets = retainedResets;
+    else delete fallback.usageLimitResets;
     return {
-      status: {
-        ...lastKnownGood,
-        note: formatLastKnownGoodNote(lastKnownGood.note, status.note),
-      },
+      status: fallback,
       ttlStatus: status,
     };
   }
@@ -664,6 +770,7 @@ type ProviderLimitLoadResult = {
   status: ProviderLimitStatus;
   ttlStatus: ProviderLimitStatus;
   rememberLastKnownGood?: boolean;
+  credentialFingerprint?: string;
 };
 
 function createProviderLimitLoadResult(
@@ -684,7 +791,14 @@ function isRateLimitedProviderError(status: ProviderLimitStatus) {
 function isAuthFailureProviderStatus(
   status: ProviderLimitStatus
 ): status is ProviderLimitStatus & { status: 'unsupported'; note: string } {
-  return status.status === 'unsupported' && /rejected credentials/i.test(status.note);
+  return (
+    status.status === 'unsupported' &&
+    (status.failureKind === 'authentication' || /rejected credentials/i.test(status.note))
+  );
+}
+
+function isZaiProvider(providerID: string) {
+  return providerID === 'zai' || providerID === 'zai-coding-plan';
 }
 
 function unsupportedProviderStatus(
@@ -692,7 +806,7 @@ function unsupportedProviderStatus(
   modelID: string | null,
   checkedAt: number,
   note: string
-): ProviderLimitStatus {
+): Extract<ProviderLimitStatus, { status: 'unsupported' | 'error' }> {
   return {
     providerID,
     modelID,

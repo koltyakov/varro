@@ -334,6 +334,9 @@ export type ProviderLimitResetCredit = {
 export type ProviderLimitResetCredits = {
   availableCount: number;
   credits: ProviderLimitResetCredit[] | null;
+  /** Time of the last successful reset-credit request, not the latest quota refresh. */
+  checkedAt?: number;
+  stale?: boolean;
 };
 
 export type ProviderLimitStatus =
@@ -343,11 +346,17 @@ export type ProviderLimitStatus =
       status: 'available';
       source: 'opencode' | 'provider';
       checkedAt: number;
+      /** Earliest next provider poll; UI polling may run later. */
+      retryAt?: number;
+      /** Retained quota data, bounded from the original checkedAt timestamp. */
+      stale?: boolean;
       windows: ProviderLimitWindow[];
       planName?: string;
       creditBalance?: number;
       note?: string;
       usageLimitResets?: ProviderLimitResetCredits;
+      /** A failed reset-credit request must not be mistaken for confirmed zero credits. */
+      usageLimitResetsUnavailable?: boolean;
     }
   | {
       providerID: string;
@@ -355,6 +364,8 @@ export type ProviderLimitStatus =
       status: 'unsupported' | 'error';
       source: 'opencode' | 'provider';
       checkedAt: number;
+      retryAt?: number;
+      failureKind?: 'authentication';
       note: string;
       codexLoginRequired?: { connectionID: string };
     };

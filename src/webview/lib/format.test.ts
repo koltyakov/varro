@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ProviderLimitStatus } from '../../shared/protocol';
 import {
   formatAgentInitial,
   formatAgentLabel,
@@ -43,6 +44,68 @@ function availableLimit(
 }
 
 describe('format helpers', () => {
+  it.each(['zai', 'zai-coding-plan'])(
+    'keeps %s failures visible with a reason and retry time',
+    (providerID) => {
+      const limit: ProviderLimitStatus = {
+        providerID,
+        status: 'unsupported',
+        source: 'provider',
+        checkedAt: Date.now(),
+        failureKind: 'authentication',
+        retryAt: Date.parse('2026-11-17T10:05:00Z'),
+        note: 'Z.ai quota endpoint rejected credentials (401)',
+      };
+      expect(getProviderLimitCompactBadges(limit)).toEqual([
+        { label: 'Unavailable', tone: 'warning' },
+      ]);
+      const title = formatProviderLimitTitle(limit);
+      expect(title).toContain('Limits unavailable');
+      expect(title).toContain('Authentication failed');
+      expect(title).toContain('rejected credentials (401)');
+      expect(title).toContain('Retry available at');
+      expect(title).toContain(
+        new Intl.DateTimeFormat(undefined, {
+          dateStyle: 'short',
+          timeStyle: 'medium',
+        }).format(limit.retryAt!)
+      );
+      expect(getProviderLimitCompactBadges({ ...limit, providerID: 'unrelated-provider' })).toEqual(
+        []
+      );
+    }
+  );
+
+  it('labels retained quotas stale and removes expired quota values', () => {
+    const limit: ProviderLimitStatus = {
+      ...availableLimit([
+        {
+          id: 'five_hour',
+          label: '5-Hour Limit',
+          unit: 'unknown',
+          remaining: 75,
+          limit: 100,
+          resetAt: null,
+        },
+      ]),
+      providerID: 'zai',
+      checkedAt: Date.now(),
+      stale: true,
+      note: 'Invalid quota data',
+    };
+    expect(getProviderLimitCompactBadges(limit)).toEqual([
+      { label: '75%', tone: 'default' },
+      { label: 'Stale', tone: 'warning' },
+    ]);
+    expect(formatProviderLimitTitle(limit)).toContain('Quota data is stale');
+    const expired = { ...limit, checkedAt: Date.now() - 15 * 60_000 };
+    expect(getProviderLimitCompactBadges(expired)).toEqual([
+      { label: 'Unavailable', tone: 'warning' },
+    ]);
+    expect(getOrderedProviderLimitWindows(expired)).toEqual([]);
+    expect(formatProviderLimitTitle(expired)).toContain('Cached quota snapshot expired');
+  });
+
   it('formats variant labels across separators', () => {
     expect(formatVariantLabel('high_reasoning-mode')).toBe('High Reasoning Mode');
     expect(formatVariantLabel('double__dash--value')).toBe('Double  Dash  Value');

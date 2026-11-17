@@ -2991,6 +2991,94 @@ describe('ChatInput', () => {
     expect(state.providerLimits['openai:gpt-4o']?.checkedAt).toBe(checkedAt);
   });
 
+  it.each(['zai', 'zai-coding-plan'])(
+    'keeps the %s limits control accessible through failure and recovery',
+    async (providerID) => {
+      setState('providers', [
+        {
+          id: providerID,
+          name: 'Z.ai',
+          source: 'api',
+          models: {
+            'glm-4.5': {
+              id: 'glm-4.5',
+              name: 'GLM-4.5',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
+          },
+        },
+      ]);
+      setState('providerDefaults', { [providerID]: 'glm-4.5' });
+      setState('selectedModel', { providerID, modelID: 'glm-4.5' });
+      const key = `${providerID}:glm-4.5`;
+      const fresh = availableProviderLimit({
+        providerID,
+        modelID: 'glm-4.5',
+        checkedAt: Date.now(),
+      });
+      setState('providerLimits', { [key]: fresh });
+      cleanup = render(() => ChatInput(), container!);
+      const chip = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
+      expect(chip).not.toBeNull();
+      chip?.click();
+      await flushAsyncWork();
+      expect(chip?.getAttribute('aria-expanded')).toBe('true');
+
+      setState('providerLimits', {
+        [key]: {
+          ...fresh,
+          stale: true,
+          retryAt: Date.now() + 15_000,
+          note: 'Z.ai quota endpoint returned invalid quota data',
+        },
+      });
+      expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('Stale');
+      expect(container?.querySelector('.provider-limit-popup')?.textContent).toContain(
+        'Quota data is stale'
+      );
+
+      setState('providerLimits', {
+        [key]: {
+          providerID,
+          modelID: 'glm-4.5',
+          status: 'unsupported',
+          source: 'provider',
+          checkedAt: Date.now(),
+          failureKind: 'authentication',
+          retryAt: Date.now() + 5 * 60_000,
+          note: 'Z.ai quota endpoint rejected credentials (401)',
+        },
+      });
+      const unavailable = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
+      expect(unavailable?.textContent).toContain('Unavailable');
+      expect(unavailable?.disabled).toBe(false);
+      expect(unavailable?.getAttribute('aria-label')).toContain('Authentication failed');
+      expect(unavailable?.getAttribute('aria-expanded')).toBe('true');
+      const popup = container?.querySelector('.provider-limit-popup');
+      expect(popup?.textContent).toContain('rejected credentials (401)');
+      expect(popup?.textContent).toContain('Retry available at');
+      expect(popup?.querySelector('.provider-limit-row')).toBeNull();
+      unavailable?.click();
+      await flushAsyncWork();
+      expect(container?.querySelector('.provider-limit-popup')).toBeNull();
+      expect(unavailable?.getAttribute('aria-expanded')).toBe('false');
+      unavailable?.click();
+      await flushAsyncWork();
+      expect(container?.querySelector('.provider-limit-popup')).not.toBeNull();
+
+      setState('providerLimits', { [key]: fresh });
+      expect(container?.querySelector('.toolbar-limit-chip')?.textContent).not.toContain(
+        'Unavailable'
+      );
+      expect(container?.querySelector('.toolbar-limit-chip')?.textContent).not.toContain('Stale');
+      expect(container?.querySelector('.provider-limit-popup')?.textContent).not.toContain(
+        'Authentication failed'
+      );
+      expect(container?.querySelector('.provider-limit-row')).not.toBeNull();
+    }
+  );
+
   it('shows Z.ai quota windows and available resets', async () => {
     setState('providers', [
       {

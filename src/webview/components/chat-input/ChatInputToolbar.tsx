@@ -502,6 +502,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                 badges={props.providerLimitBadges}
                 title={props.showProviderLimitPopup ? null : props.providerLimitTitle}
                 ariaLabel={props.providerLimitTitle}
+                expanded={props.showProviderLimitPopup}
                 onClick={props.onToggleProviderLimitPopup}
               />
               <Show when={props.showProviderLimitPopup}>

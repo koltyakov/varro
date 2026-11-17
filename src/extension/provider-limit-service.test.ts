@@ -900,6 +900,339 @@ describe('ProviderLimitService', () => {
     await expect(service.get('openai', 'gpt-5.4')).resolves.toMatchObject({ status: 'error' });
   });
 
+  describe.each(['zai', 'zai-coding-plan'])('%s quota failure handling', (providerID) => {
+    const modelID = 'glm-4.5';
+    let service: ProviderLimitService;
+    let server: ReturnType<typeof createProviderServer>;
+    const available = (): Extract<ProviderLimitStatus, { status: 'available' }> => ({
+      providerID,
+      modelID,
+      status: 'available',
+      source: 'provider',
+      checkedAt: Date.now(),
+      windows: [
+        {
+          id: 'five_hour',
+          label: '5-Hour Limit',
+          unit: 'unknown',
+          remaining: 75,
+          limit: 100,
+          percent: 25,
+          resetAt: null,
+        },
+      ],
+    });
+    const error = (): ProviderLimitStatus => ({
+      providerID,
+      modelID,
+      status: 'error',
+      source: 'provider',
+      checkedAt: Date.now(),
+      note: 'Z.ai quota endpoint returned invalid quota data',
+    });
+    const seed = async () => {
+      const snapshot = available();
+      mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce(snapshot);
+      await service.get(providerID, modelID);
+      await vi.advanceTimersByTimeAsync(30_000);
+      return snapshot;
+    };
+
+    beforeEach(() => {
+      server = createProviderServer([{ id: providerID, models: {} }]);
+      service = new ProviderLimitService(server);
+      mocks.parseProviderAuthStoreMock.mockReturnValue({
+        [providerID]: { type: 'api', key: 'original-token' },
+      });
+      mocks.fetchProviderLimitFromAdapterMock.mockImplementation(async () => error());
+    });
+
+    afterEach(() => service.dispose());
+
+    it('marks same-identity retained quotas stale and reports the next retry', async () => {
+      const snapshot = await seed();
+      const failedAt = Date.now();
+      const stale = await service.get(providerID, modelID);
+      expect(stale).toMatchObject({
+        status: 'available',
+        checkedAt: snapshot.checkedAt,
+        windows: snapshot.windows,
+        stale: true,
+        retryAt: failedAt + 15_000,
+        note: expect.stringContaining('invalid quota data'),
+      });
+      expect(JSON.stringify(stale)).not.toContain('original-token');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await service.get(providerID, modelID)).toEqual(stale);
+      await vi.advanceTimersByTimeAsync(14_000);
+      const fresh = available();
+      mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce(fresh);
+      expect(await service.get(providerID, modelID)).toEqual(fresh);
+    });
+
+    it('reports a refresh error and retry time without a previous snapshot', async () => {
+      await expect(service.get(providerID, modelID)).resolves.toEqual({
+        ...error(),
+        retryAt: Date.now() + 15_000,
+      });
+    });
+
+    it('never extends the original quota retention deadline', async () => {
+      const snapshot = await seed();
+      await service.get(providerID, modelID);
+      await vi.advanceTimersByTimeAsync(15 * 60_000 - 31_000);
+      await expect(service.get(providerID, modelID)).resolves.toMatchObject({
+        status: 'available',
+        checkedAt: snapshot.checkedAt,
+        stale: true,
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      const expired = await service.get(providerID, modelID);
+      expect(expired).toMatchObject({ status: 'error', retryAt: Date.now() + 15_000 });
+      expect(expired).not.toHaveProperty('windows');
+      expect(expired).not.toHaveProperty('stale');
+    });
+
+    it.each([401, 403])(
+      'keeps %s explicit and invalidates old quotas across model keys',
+      async (code) => {
+        await seed();
+        const snapshot = available();
+        mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce({
+          ...snapshot,
+          modelID: 'glm-4.7',
+        });
+        await service.get(providerID, 'glm-4.7');
+        mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce({
+          providerID,
+          modelID,
+          status: 'unsupported',
+          source: 'provider',
+          checkedAt: Date.now(),
+          note: `Z.ai quota endpoint rejected credentials (${code})`,
+        });
+        const rejectedAt = Date.now();
+        const rejection = await service.get(providerID, modelID);
+        expect(rejection).toMatchObject({
+          status: 'unsupported',
+          failureKind: 'authentication',
+          note: `Z.ai quota endpoint rejected credentials (${code})`,
+          retryAt: rejectedAt + 5 * 60_000,
+        });
+        expect(rejection).not.toHaveProperty('windows');
+        await vi.advanceTimersByTimeAsync(60_000);
+        await expect(service.get(providerID, 'glm-4.7')).resolves.toMatchObject({
+          failureKind: 'authentication',
+          retryAt: rejectedAt + 5 * 60_000,
+        });
+        await vi.advanceTimersByTimeAsync(4 * 60_000);
+        expect(await service.get(providerID, 'glm-4.7')).toMatchObject({ status: 'error' });
+      }
+    );
+
+    it('does not retain quotas after credentials change within the old auth cache TTL', async () => {
+      await seed();
+      mocks.parseProviderAuthStoreMock.mockReturnValue({
+        [providerID]: { type: 'api', key: 'different-token' },
+      });
+      const status = await service.get(providerID, modelID);
+      expect(status).toMatchObject({ status: 'error' });
+      expect(status).not.toHaveProperty('windows');
+      expect(JSON.stringify(status)).not.toContain('token');
+    });
+
+    it('does not retain quotas after configured provider credentials change', async () => {
+      await seed();
+      server.request.mockResolvedValueOnce({
+        providers: [{ id: providerID, models: {}, options: { apiKey: 'different-token' } }],
+      });
+      expect(await service.get(providerID, modelID)).toMatchObject({ status: 'error' });
+    });
+
+    it('does not retain quotas when provider identity cannot be checked', async () => {
+      await seed();
+      server.request.mockRejectedValueOnce(new Error('catalog unavailable'));
+      const status = await service.get(providerID, modelID);
+      expect(status).toMatchObject({
+        status: 'error',
+        note: expect.stringContaining('catalog unavailable'),
+        retryAt: Date.now() + 15_000,
+      });
+      expect(status).not.toHaveProperty('windows');
+    });
+
+    it.each([false, true])(
+      'bounds timeouts with identity resolved=%s',
+      async (identityResolved) => {
+        const snapshot = await seed();
+        const pending = deferred<unknown>();
+        if (identityResolved) {
+          mocks.fetchProviderLimitFromAdapterMock.mockReturnValueOnce(pending.promise);
+        } else {
+          server.request.mockReturnValueOnce(pending.promise);
+        }
+        const loading = service.get(providerID, modelID);
+        await vi.advanceTimersByTimeAsync(12_000);
+        const status = await loading;
+        if (identityResolved) {
+          expect(status).toMatchObject({
+            status: 'available',
+            checkedAt: snapshot.checkedAt,
+            stale: true,
+            retryAt: Date.now() + 15_000,
+          });
+        } else {
+          expect(status).toMatchObject({ status: 'error', retryAt: Date.now() + 15_000 });
+          expect(status).not.toHaveProperty('windows');
+        }
+      }
+    );
+
+    it('does not reuse another model, workspace, or cleared snapshot', async () => {
+      await seed();
+      expect(await service.get(providerID, 'glm-4.7')).toMatchObject({ status: 'error' });
+      expect(await service.get(providerID, modelID, '/different-workspace')).toMatchObject({
+        status: 'error',
+      });
+      service.clearCache();
+      expect(await service.get(providerID, modelID)).toMatchObject({ status: 'error' });
+    });
+  });
+
+  describe.each(['zai', 'zai-coding-plan'])('%s reset-credit retention', (providerID) => {
+    let service: ProviderLimitService;
+    let resetCheckedAt: number;
+    const modelID = 'glm-4.5';
+    const resetCredits = () => ({
+      availableCount: 2,
+      credits: [{ title: 'Weekly quota reset', expiresAt: resetCheckedAt + 86400_000 }],
+      checkedAt: resetCheckedAt,
+    });
+    const available = (): Extract<ProviderLimitStatus, { status: 'available' }> => ({
+      providerID,
+      modelID,
+      status: 'available',
+      source: 'provider',
+      checkedAt: Date.now(),
+      windows: [],
+    });
+
+    beforeEach(async () => {
+      service = new ProviderLimitService(createProviderServer([{ id: providerID, models: {} }]));
+      resetCheckedAt = Date.now();
+      mocks.parseProviderAuthStoreMock.mockReturnValue({
+        [providerID]: { type: 'api', key: 'original-token' },
+      });
+      mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce({
+        ...available(),
+        usageLimitResets: resetCredits(),
+      });
+      await service.get(providerID, modelID);
+      await vi.advanceTimersByTimeAsync(30_000);
+      mocks.fetchProviderLimitFromAdapterMock.mockImplementation(async () => ({
+        ...available(),
+        usageLimitResetsUnavailable: true,
+      }));
+    });
+
+    afterEach(() => service.dispose());
+
+    it('retains stale reset credits without making fresh quotas stale', async () => {
+      await expect(service.get(providerID, modelID)).resolves.toMatchObject({
+        checkedAt: Date.now(),
+        usageLimitResetsUnavailable: true,
+        usageLimitResets: { ...resetCredits(), stale: true },
+      });
+    });
+
+    it('clears retained reset credits on a confirmed zero-credit result', async () => {
+      await service.get(providerID, modelID);
+      await vi.advanceTimersByTimeAsync(30_000);
+      mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce(available());
+      const empty = await service.get(providerID, modelID);
+      expect(empty).not.toHaveProperty('usageLimitResets');
+      expect(empty).not.toHaveProperty('usageLimitResetsUnavailable');
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await service.get(providerID, modelID)).not.toHaveProperty('usageLimitResets');
+    });
+
+    it('replaces retained credits and removes the stale marker after recovery', async () => {
+      await service.get(providerID, modelID);
+      await vi.advanceTimersByTimeAsync(30_000);
+      const refreshed = { ...resetCredits(), availableCount: 1, checkedAt: Date.now() };
+      mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce({
+        ...available(),
+        usageLimitResets: refreshed,
+      });
+      const status = await service.get(providerID, modelID);
+      expect(status).toMatchObject({ usageLimitResets: refreshed });
+      if (status.status !== 'available') throw new Error('Expected available quotas');
+      expect(status.usageLimitResets).not.toHaveProperty('stale');
+    });
+
+    it('does not extend retention across repeated failures or cached reads', async () => {
+      await service.get(providerID, modelID);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(service.get(providerID, modelID)).resolves.toMatchObject({
+        usageLimitResets: { checkedAt: resetCheckedAt, stale: true },
+      });
+      await vi.advanceTimersByTimeAsync(15 * 60_000 - 61_000);
+      await expect(service.get(providerID, modelID)).resolves.toMatchObject({
+        usageLimitResets: { checkedAt: resetCheckedAt, stale: true },
+      });
+      await vi.advanceTimersByTimeAsync(999);
+      await expect(service.get(providerID, modelID)).resolves.toMatchObject({
+        usageLimitResets: { stale: true },
+      });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await service.get(providerID, modelID)).not.toHaveProperty('usageLimitResets');
+      // A later failure of the main quota request must not restore expired reset data.
+      await vi.advanceTimersByTimeAsync(30_000);
+      mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce({
+        providerID,
+        modelID,
+        status: 'error',
+        source: 'provider',
+        checkedAt: Date.now(),
+        note: 'Quota unavailable',
+      });
+      expect(await service.get(providerID, modelID)).not.toHaveProperty('usageLimitResets');
+    });
+
+    it('does not retain credits after credentials change', async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+      mocks.parseProviderAuthStoreMock.mockReturnValue({
+        [providerID]: { type: 'api', key: 'different-token' },
+      });
+      expect(await service.get(providerID, modelID)).not.toHaveProperty('usageLimitResets');
+    });
+
+    it('does not restore expired credits when the main quota request also fails', async () => {
+      await vi.advanceTimersByTimeAsync(15 * 60_000 - 31_000);
+      await expect(service.get(providerID, modelID)).resolves.toMatchObject({
+        usageLimitResets: { checkedAt: resetCheckedAt, stale: true },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce({
+        providerID,
+        modelID,
+        status: 'error',
+        source: 'provider',
+        checkedAt: Date.now(),
+        note: 'Quota unavailable',
+      });
+      const status = await service.get(providerID, modelID);
+      expect(status).toMatchObject({ status: 'available' });
+      expect(status).not.toHaveProperty('usageLimitResets');
+    });
+
+    it('does not retain credits across a cache reset or a different model key', async () => {
+      expect(await service.get(providerID, 'glm-4.7')).not.toHaveProperty('usageLimitResets');
+      service.clearCache();
+      expect(await service.get(providerID, modelID)).not.toHaveProperty('usageLimitResets');
+    });
+  });
+
   it('prefers provider adapter snapshots over OpenCode metadata when available', async () => {
     const server = createProviderServer([{ id: 'zai', models: { 'glm-4.5': {} } }]);
     const service = new ProviderLimitService(server);
@@ -1183,7 +1516,10 @@ describe('ProviderLimitService', () => {
       );
       await service.get(providerID, 'glm-4.7');
       staleAdapter.resolve(available());
-      await stale;
+      await expect(stale).resolves.toMatchObject({
+        status: 'unsupported',
+        failureKind: 'authentication',
+      });
 
       await expect(service.get(providerID, 'glm-5')).resolves.toMatchObject({
         status: 'unsupported',

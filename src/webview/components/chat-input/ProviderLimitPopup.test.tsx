@@ -1,3 +1,4 @@
+import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
@@ -13,6 +14,7 @@ describe('ProviderLimitPopup', () => {
     container?.remove();
     Reflect.deleteProperty(window, '__sendToExtension');
     vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
   it.each([62_500, 0.5, 0, undefined])(
@@ -146,5 +148,133 @@ describe('ProviderLimitPopup', () => {
 
     toggle?.click();
     expect(container.querySelector('.provider-limit-reset-rows')).toBeNull();
+  });
+
+  it.each(['error', 'unsupported'] as const)('shows a quota %s reason and retry time', (status) => {
+    const retryAt = Date.parse('2026-11-17T10:05:00Z');
+    container = document.createElement('div');
+    document.body.append(container);
+    dispose = render(
+      () => (
+        <ProviderLimitPopup
+          providerName="Z.ai"
+          onClose={() => {}}
+          limit={{
+            providerID: 'zai',
+            status,
+            source: 'provider',
+            checkedAt: Date.now(),
+            retryAt,
+            failureKind: status === 'unsupported' ? 'authentication' : undefined,
+            note:
+              status === 'unsupported'
+                ? 'Z.ai quota endpoint rejected credentials (401)'
+                : 'Z.ai quota endpoint returned invalid quota data',
+          }}
+        />
+      ),
+      container
+    );
+    const message = container.querySelector('[role="status"]')?.textContent;
+    expect(message).toContain(
+      status === 'unsupported' ? 'Authentication failed' : 'invalid quota data'
+    );
+    expect(container.textContent).toContain('Retry available at');
+    expect(container.textContent).toContain(
+      new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'short',
+        timeStyle: 'medium',
+      }).format(retryAt)
+    );
+    expect(container.querySelector('.provider-limit-row')).toBeNull();
+  });
+
+  it('marks retained quotas stale and expires their rows without another response', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-17T10:00:00Z'));
+    const checkedAt = Date.now() - 15 * 60_000 + 1_000;
+    container = document.createElement('div');
+    document.body.append(container);
+    dispose = render(
+      () => (
+        <ProviderLimitPopup
+          providerName="Z.ai"
+          onClose={() => {}}
+          limit={{
+            providerID: 'zai',
+            status: 'available',
+            source: 'provider',
+            checkedAt,
+            stale: true,
+            retryAt: Date.now() + 15_000,
+            note: 'Invalid quota data',
+            windows: [
+              {
+                id: 'five_hour',
+                label: '5-Hour Limit',
+                unit: 'unknown',
+                remaining: 75,
+                limit: 100,
+                resetAt: null,
+              },
+            ],
+          }}
+        />
+      ),
+      container
+    );
+    expect(container.querySelector('.provider-limit-row')).not.toBeNull();
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'Quota data is stale'
+    );
+    expect(container.textContent).toContain('Invalid quota data');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(container.querySelector('.provider-limit-row')).toBeNull();
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('snapshot expired');
+  });
+
+  it.each([false, true])('marks retained reset credits stale, resetsOnly=%s', (resetsOnly) => {
+    const fresh: ProviderLimitStatus = {
+      providerID: 'zai',
+      status: 'available',
+      source: 'provider',
+      checkedAt: Date.now(),
+      windows: [],
+      usageLimitResets: {
+        availableCount: 1,
+        credits: [{ title: 'Weekly quota reset', expiresAt: null }],
+        checkedAt: Date.now(),
+      },
+    };
+    const [limit, setLimit] = createSignal(fresh);
+    container = document.createElement('div');
+    document.body.append(container);
+    dispose = render(
+      () => (
+        <ProviderLimitPopup
+          providerName="Z.ai"
+          onClose={() => {}}
+          limit={limit()}
+          resetsOnly={resetsOnly}
+        />
+      ),
+      container
+    );
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    setLimit({
+      ...fresh,
+      usageLimitResetsUnavailable: true,
+      usageLimitResets: { ...fresh.usageLimitResets!, stale: true },
+    });
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'Reset credits may be outdated'
+    );
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'latest refresh failed'
+    );
+    setLimit(fresh);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    setLimit({ ...fresh, usageLimitResets: undefined });
+    expect(container.querySelector('.provider-limit-reset-section')).toBeNull();
   });
 });
