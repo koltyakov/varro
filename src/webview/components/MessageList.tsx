@@ -2041,7 +2041,8 @@ export function MessageList() {
       // A post-render capture would remember the clamped destination instead of the reader.
       inlinePreviewLayoutAnchor =
         containerRef?.isConnected && !autoScroll()
-          ? captureDetachedVisibleScrollAnchor(containerRef.scrollTop)
+          ? (captureExactPaintedVisibleScrollAnchor() ??
+            captureDetachedVisibleScrollAnchor(containerRef.scrollTop))
           : null;
     })
   );
@@ -2054,6 +2055,12 @@ export function MessageList() {
     null
   );
   let changedLayoutAnchorInputEpoch = -1;
+  let resumeChangedLayoutAnchor: (() => void) | null = null;
+  function cancelDeferredLayoutAnchor() {
+    if (!resumeChangedLayoutAnchor) return;
+    resumeChangedLayoutAnchor = null;
+    setChangedLayoutAnchor(null);
+  }
   let inlinePreviewBottomFollow: {
     sessionId: string;
     inputEpoch: number;
@@ -2089,6 +2096,7 @@ export function MessageList() {
             // Waiting for ResizeObserver lets a remount overwrite it with the short summary.
             measureMountedRows([{ element: mountedRow, messageId }]);
           }
+          resumeChangedLayoutAnchor?.();
         });
         inlinePreviewBottomFollow?.resume();
       };
@@ -2153,6 +2161,62 @@ export function MessageList() {
       }
     }
   });
+
+  function settleChangedLayoutAnchor(
+    anchor: VisibleScrollAnchor,
+    sessionId: string | null,
+    ownershipEpoch: number,
+    inputEpoch: number
+  ) {
+    changedLayoutAnchorInputEpoch = inputEpoch;
+    setChangedLayoutAnchor(anchor);
+    let frameId = 0;
+    let attempts = 0;
+    let queued = false;
+    const finish = () => {
+      if (resumeChangedLayoutAnchor === resume) resumeChangedLayoutAnchor = null;
+      if (untrack(changedLayoutAnchor) === anchor) setChangedLayoutAnchor(null);
+    };
+    const settle = () => {
+      frameId = 0;
+      if (
+        disposed ||
+        state.activeSessionId !== sessionId ||
+        untrack(changedLayoutAnchor) !== anchor ||
+        userScrollOwnershipEpoch !== ownershipEpoch ||
+        directScrollInputEpoch !== inputEpoch ||
+        autoScroll() ||
+        pendingScrollToBottomRequest ||
+        editingMessage() ||
+        diffFocusPauseActive ||
+        pointerScrollOwnershipActive ||
+        stickyNavigationOwnsScroll() ||
+        pendingExpansionScrollAnchor
+      ) {
+        finish();
+        return;
+      }
+      restoreVisibleScrollAnchor(anchor, {
+        useMessageOffsetFallback: true,
+        reserveBottomOverflow: true,
+      });
+      if (++attempts < 12) frameId = requestAnimationFrame(settle);
+      // Keep the exact anchor while deferred previews load, without idle
+      // frame polling. Detail completion resumes a bounded pre-paint settle.
+      else if (pendingInlineDiffLoads.size === 0) finish();
+    };
+    const resume = () => {
+      attempts = 0;
+      if (frameId || queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        settle();
+      });
+    };
+    resumeChangedLayoutAnchor = resume;
+    resume();
+  }
 
   function scheduleChangedLayoutRowMeasurements(
     previous: ReadonlyMap<string, string>,
@@ -2292,30 +2356,12 @@ export function MessageList() {
               });
             }
           });
-          void (async () => {
-            try {
-              for (let attempt = 0; attempt < 12; attempt += 1) {
-                await waitForAnimationFrame();
-                if (
-                  disposed ||
-                  state.activeSessionId !== activeSessionId ||
-                  untrack(changedLayoutAnchor) !== invalidatedAnchor ||
-                  userScrollOwnershipEpoch !== invalidatedAnchorOwnershipEpoch ||
-                  directScrollInputEpoch !== invalidatedAnchorInputEpoch ||
-                  stickyNavigationOwnsScroll() ||
-                  pendingExpansionScrollAnchor
-                ) {
-                  return;
-                }
-                restoreVisibleScrollAnchor(invalidatedAnchor, {
-                  useMessageOffsetFallback: true,
-                  reserveBottomOverflow: true,
-                });
-              }
-            } finally {
-              if (untrack(changedLayoutAnchor) === invalidatedAnchor) setChangedLayoutAnchor(null);
-            }
-          })();
+          settleChangedLayoutAnchor(
+            invalidatedAnchor,
+            activeSessionId,
+            invalidatedAnchorOwnershipEpoch,
+            invalidatedAnchorInputEpoch
+          );
         } else if (untrack(changedLayoutAnchor) === invalidatedAnchor) {
           setChangedLayoutAnchor(null);
         }
@@ -3704,12 +3750,22 @@ export function MessageList() {
   ): VisibleScrollAnchor | null {
     if (!containerRef) return null;
     const containerRect = containerRef.getBoundingClientRect();
+    // A paragraph behind the sticky prompt is not a painted destination. Pinning it
+    // during deferred hydration lets its growing diff push the visible prose below it.
+    // The fade and collision safety margin still expose transcript content.
+    const stickySolidGap = containerRef.querySelector<HTMLElement>(
+      '.latest-user-message-sticky-overlay .latest-user-message-sticky-bottom-solid'
+    );
+    const visibleTop = Math.max(
+      containerRect.top + 8,
+      stickySolidGap?.getBoundingClientRect().bottom ?? containerRect.top
+    );
     const selector = 'p, h1, h2, h3, h4, h5, h6, pre, table, li';
     const selection: PaintedScrollAnchorSelection = { candidate: null };
     const consider = (element: HTMLElement, renderItem: HTMLElement | null) => {
       const rect = element.getBoundingClientRect();
       if (
-        rect.top - predictedMovement >= containerRect.top + 8 &&
+        rect.top - predictedMovement >= visibleTop &&
         rect.bottom - predictedMovement <= containerRect.bottom - 8 &&
         rect.height > 8 &&
         (!selection.candidate || rect.top < selection.candidate.rect.top)
@@ -6497,6 +6553,29 @@ export function MessageList() {
         rememberDetachedVisibleAnchor(captureDetachedVisibleScrollAnchor(top));
       }
       scheduleDetachedVisibleAnchorRefresh();
+      if (
+        pendingInlineDiffLoads.size > 0 &&
+        actualScrollMovement &&
+        userScrollInputActive &&
+        !layoutAnchorSettling &&
+        !historyAnchorSettling &&
+        !structuralAnchorSettling &&
+        !pointerScrollOwnershipActive &&
+        !diffFocusPauseActive &&
+        !pendingExpansionScrollAnchor
+      ) {
+        const anchor = captureExactPaintedVisibleScrollAnchor();
+        if (anchor) {
+          // The input cancelled the old view-change owner. Preserve its actual
+          // new painted destination through the still-pending detail arrivals.
+          settleChangedLayoutAnchor(
+            anchor,
+            state.activeSessionId,
+            userScrollOwnershipEpoch,
+            directScrollInputEpoch
+          );
+        }
+      }
     }
     if (
       top <= 24 &&
@@ -6638,6 +6717,7 @@ export function MessageList() {
     }
     lastWheelAt = performance.now();
     directScrollInputEpoch += 1;
+    cancelDeferredLayoutAnchor();
     virtualPlaceholderReleaseBlockedUntil = lastWheelAt + USER_SCROLL_IDLE_MS;
     if (deltaY > 0.5) lastWheelUpAt = Number.NEGATIVE_INFINITY;
     if (initialScrollRafId) {
@@ -6813,6 +6893,7 @@ export function MessageList() {
     }
     lastScrollInputAt = performance.now();
     directScrollInputEpoch += 1;
+    cancelDeferredLayoutAnchor();
     virtualPlaceholderReleaseBlockedUntil = lastScrollInputAt + USER_SCROLL_IDLE_MS;
     const metrics = shouldVirtualize() ? virtualMetrics() : null;
     const index = metrics
@@ -6954,6 +7035,7 @@ export function MessageList() {
     cancelAppendScrollTransition();
     lastScrollInputAt = performance.now();
     directScrollInputEpoch += 1;
+    cancelDeferredLayoutAnchor();
     virtualPlaceholderReleaseBlockedUntil = lastScrollInputAt + USER_SCROLL_IDLE_MS;
   }
 
@@ -6979,6 +7061,7 @@ export function MessageList() {
       return;
     lastScrollInputAt = performance.now();
     directScrollInputEpoch += 1;
+    cancelDeferredLayoutAnchor();
     virtualPlaceholderReleaseBlockedUntil = lastScrollInputAt + USER_SCROLL_IDLE_MS;
     // Release follow before the browser delivers movement, including after pointercancel
     // hands the gesture to native scrolling. Momentum must remain detached after touchend.

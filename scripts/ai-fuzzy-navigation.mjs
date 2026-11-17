@@ -16,26 +16,26 @@ export async function goToLatest(
   } = {}
 ) {
   if (!sessionId || !messageId) throw new Error('Latest navigation needs session and message IDs');
-  if (
-    !(await cdp.click('[aria-label="Scroll to latest message"]')) &&
-    !(await cdp.key('.interactive-list', 'End'))
-  ) {
-    throw new Error('Native latest navigation control unavailable');
-  }
   const deadline = now() + timeoutMs;
   const samples = [];
   let stableSince = null;
   let previous;
+  let dispatched = false;
   while (now() <= deadline) {
     const route = await cdp.snapshot();
     const geometry = await cdp.evaluate(`(() => {
       const list = document.querySelector('.interactive-list');
       if (!list) return null;
       const viewport = list.getBoundingClientRect();
+      let painted = viewport.width > 0 && viewport.height > 0;
+      for (let parent = list; parent && painted; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        painted = style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0;
+      }
       const rows = [...list.querySelectorAll('[data-msg-id]')];
       const visible = rows.filter(row => { const r = row.getBoundingClientRect();
         return r.bottom > viewport.top && r.top < viewport.bottom; });
-      return { top: list.scrollTop, height: list.scrollHeight, client: list.clientHeight,
+      return { top: list.scrollTop, height: list.scrollHeight, client: list.clientHeight, painted,
         visibleIds: visible.map(row => row.getAttribute('data-msg-id')) };
     })()`);
     const sample = { at: now(), route: route.routeSessionId, geometry };
@@ -45,8 +45,21 @@ export async function goToLatest(
     // visible latest row and a bounded 64px gap throughout the observation window.
     const arrived =
       sample.route === sessionId &&
+      geometry?.painted &&
       geometry?.visibleIds.includes(messageId) &&
       Math.abs(geometry.height - geometry.client - geometry.top) <= (streaming ? 64 : 2);
+    // A selected route can still be behind the transcript-positioning hold.
+    // Wait for painted readiness, then send at most one native navigation input.
+    // An already visible, settled destination needs no input at all.
+    if (!arrived && !dispatched && sample.route === sessionId && geometry?.painted) {
+      if (
+        !(await cdp.click('[aria-label="Scroll to latest message"]')) &&
+        !(await cdp.key('.interactive-list', 'End'))
+      ) {
+        throw new Error('Native latest navigation control unavailable');
+      }
+      dispatched = true;
+    }
     const stationary =
       arrived &&
       previous &&

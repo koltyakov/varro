@@ -112,6 +112,33 @@ test('composer replacement never submits a contaminated or restored draft', asyn
   );
 });
 
+for (const [key, virtualKeyCode] of [
+  ['Backspace', 8],
+  ['Escape', 27],
+  ['ArrowLeft', 37],
+  ['ArrowRight', 39],
+  ['Delete', 46],
+]) {
+  test(`native ${key} includes Chromium's Windows key codes`, async () => {
+    const controller = Object.create(CdpController.prototype);
+    const calls = [];
+    controller.call = async (method, params) => {
+      calls.push({ method, params });
+    };
+    assert.equal(await controller.key('', key), true);
+    assert.deepEqual(
+      calls.map((call) => call.params.type),
+      ['keyDown', 'keyUp']
+    );
+    for (const call of calls) {
+      assert.equal(call.method, 'Input.dispatchKeyEvent');
+      assert.equal(call.params.key, key);
+      assert.equal(call.params.windowsVirtualKeyCode, virtualKeyCode);
+      assert.equal(call.params.nativeVirtualKeyCode, virtualKeyCode);
+    }
+  });
+}
+
 test('awaits asynchronous frame observations before returning their values', async () => {
   const controller = Object.create(CdpController.prototype);
   controller.contextId = 7;
@@ -120,6 +147,82 @@ test('awaits asynchronous frame observations before returning their values', asy
     return { result: { value: params.awaitPromise ? await value : undefined } };
   };
   assert.deepEqual(await controller.evaluate('Promise.resolve(42)'), 42);
+});
+
+test('queue handoff readiness requires an enabled, exposed native steer control', async () => {
+  const dom = new JSDOM(
+    '<div data-queued-message-id="queue" data-queued-message-owner="sidebar"><button aria-label="Play queued message"></button><button aria-label="Send as Steer" hidden></button></div>'
+  );
+  try {
+    const controller = Object.create(CdpController.prototype);
+    controller.evaluate = async (expression) =>
+      vm.runInNewContext(expression, { document: dom.window.document });
+    const button = dom.window.document.querySelector('[aria-label="Send as Steer"]');
+    button.getBoundingClientRect = () => ({ width: 22 });
+    assert.equal((await controller.readQueueRow('queue')).steerAvailable, false);
+    button.hidden = false;
+    button.disabled = true;
+    assert.equal((await controller.readQueueRow('queue')).steerAvailable, false);
+    button.disabled = false;
+    const ready = await controller.readQueueRow('queue');
+    assert.equal(ready.steerAvailable, true);
+    assert.equal(ready.ownerViewId, 'sidebar');
+    assert.equal(ready.paused, true);
+    button.getBoundingClientRect = () => ({ width: 0 });
+    assert.equal((await controller.readQueueRow('queue')).steerAvailable, false);
+    assert.equal(await controller.readQueueRow('other'), null);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test('reveals an unmounted current-turn disclosure without substituting another turn', async () => {
+  const { revealRetainedActivity } = await import('./ai-fuzzy-live.mjs');
+  const scope = { messageIds: ['tool-message'] },
+    inputs = [];
+  let step = 0;
+  const cdp = {
+    snapshot: async () => ({ routeSessionId: 'session' }),
+    captureActionState: async (requested) => {
+      assert.equal(requested, scope);
+      return {
+        transcript: { scrollTop: 1000 - step * 420 },
+        disclosures: step === 2 ? [{ visible: true }] : [{ visible: false }],
+      };
+    },
+    wheel: async (selector, delta, edge) => {
+      inputs.push({ selector, delta, edge });
+      step++;
+      return true;
+    },
+  };
+  const result = await revealRetainedActivity(cdp, 'session', scope, { wait: async () => {} });
+  assert.equal(result.found, true);
+  assert.equal(inputs.length, 2);
+  assert.ok(inputs.every((input) => input.delta === -420 && input.edge === 'right'));
+});
+
+test('retained activity navigation stops on missing scope, another route, and its native-input bound', async () => {
+  const { revealRetainedActivity } = await import('./ai-fuzzy-live.mjs');
+  const cdp = {
+    snapshot: async () => ({ routeSessionId: 'other' }),
+    captureActionState: async () => ({ transcript: { scrollTop: 5000 }, disclosures: [] }),
+    wheel: async () => true,
+  };
+  assert.equal((await revealRetainedActivity(cdp, 'session', null)).actions.length, 0);
+  assert.equal(
+    (await revealRetainedActivity(cdp, 'session', { messageIds: ['tool'] })).actions.length,
+    0
+  );
+  cdp.snapshot = async () => ({ routeSessionId: 'session' });
+  const result = await revealRetainedActivity(
+    cdp,
+    'session',
+    { messageIds: ['tool'] },
+    { maxSteps: 2, wait: async () => {} }
+  );
+  assert.equal(result.found, false);
+  assert.equal(result.actions.length, 2);
 });
 
 test('live snapshots use the folder-scoped sidebar route in a fresh profile', async () => {
@@ -1778,6 +1881,16 @@ test('requires clean linked assistants and exact response markers for queued del
   assert.deepEqual(delivery.assistantCounts, [1, 1]);
   assert.deepEqual(delivery.assistantValid, [true, true]);
   assert.equal(delivery.ordered, true);
+  messages[1].parts.unshift({ type: 'reasoning', text: 'Reply with Q1-END' });
+  const reasoningEcho = summarizeQueuedDelivery(messages, turns);
+  assert.deepEqual(reasoningEcho.assistantValid, [true, true]);
+  assert.equal(reasoningEcho.assistantOutcomes[0][0].textMarkerCount, 1);
+  assert.equal(reasoningEcho.assistantOutcomes[0][0].reasoningMarkerCount, 1);
+  messages[1].parts[1].text = '';
+  assert.deepEqual(summarizeQueuedDelivery(messages, turns).assistantValid, [false, true]);
+  messages[1].parts[1].text = 'Q1-END Q1-END';
+  assert.deepEqual(summarizeQueuedDelivery(messages, turns).assistantValid, [false, true]);
+  messages[1].parts[1].text = 'Q1-END';
   messages[3].parts[0].text = 'wrong response';
   assert.deepEqual(summarizeQueuedDelivery(messages, turns).assistantValid, [true, false]);
 });
@@ -1817,6 +1930,40 @@ test('judges the AI-19 permission, queue handoff, steer, and draft lifecycle', (
       editor: { ...passing.editor, orphanedDraftCleared: false },
     })[0],
     /ordinary draft/
+  );
+
+  const turn = { promptMarker: '[LATE-STEER]', responseMarker: 'LATE-STEER-END' };
+  const messages = [
+    {
+      info: { id: 'late-user', role: 'user' },
+      parts: [{ type: 'text', text: turn.promptMarker }],
+    },
+  ];
+  const expiredDelivery = summarizeQueuedDelivery(messages, [turn]);
+  assert.deepEqual(expiredDelivery.assistantCounts, [0]);
+  assert.match(
+    lifecycleScenarioFailures({ ...passing, delivery: expiredDelivery })[0],
+    /canonical user\/assistant delivery/
+  );
+  messages.push({
+    info: {
+      id: 'late-assistant',
+      role: 'assistant',
+      parentID: 'late-user',
+      finish: 'stop',
+      time: { completed: 1 },
+    },
+    parts: [{ type: 'text', text: turn.responseMarker }],
+  });
+  // Waiting for idle does not update the earlier summary object. Recompute from
+  // the final canonical snapshot before judging the lifecycle.
+  assert.deepEqual(expiredDelivery.assistantCounts, [0]);
+  assert.deepEqual(
+    lifecycleScenarioFailures({
+      ...passing,
+      delivery: summarizeQueuedDelivery(messages, [turn]),
+    }),
+    []
   );
 });
 

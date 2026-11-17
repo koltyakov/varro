@@ -6,7 +6,23 @@ restoration, or webview bootstrap. These notes complement [server ownership](ser
 
 ## Why Windows needs an explicit contract
 
-Windows listener inspection uses `netstat.exe` and PowerShell/CIM. Starting PowerShell
+Windows listener inspection uses the persistent native helper's
+`GetExtendedTcpTable` listener-only tables for IPv4 and IPv6. Kernel table selection,
+not a row's `dwState` or localized text, establishes that a row is a listener.
+On Windows 11 build 26300.9818, an owned healthy listener repeatedly had zero
+`dwState`, null CIM state, and missing or misleading `netstat` rows. Never treat
+an established or merely bound socket as a listener to work around that behavior.
+Native table errors, changing buffer sizes, invalid lengths, and ambiguous owners
+retain fail-closed handling. Fresh `netstat.exe` and PowerShell/CIM observations
+remain the fallback if native inspection fails; an empty or ambiguous successful
+native snapshot is not replaced with a more convenient fallback.
+Explicit Windows AI-test endpoint verification uses the same native helper and
+still independently verifies the listener's database ownership with Restart Manager.
+Synthetic test profiles also set an absolute `PSModuleAnalysisCachePath` inside
+the profile. Windows can resolve the synthetic profile's known-folder cache root
+to an empty string; PowerShell otherwise writes `Microsoft/Windows/PowerShell`
+relative to the fixture and invalidates its clean baseline.
+Starting PowerShell
 can cost hundreds of milliseconds or multiple seconds under load. Serial ownership
 and account verification can expire each other's independent one-second caches;
 logical API operations can also authorize again for each underlying wire request.

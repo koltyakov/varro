@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import type { ChildProcessWithoutNullStreams } from 'child_process';
-import { asRecord, isString } from '../shared/type-utils';
+import { asRecord, isNumber, isString } from '../shared/type-utils';
 
 type WindowsProcessDetails = {
   executable: string;
@@ -35,6 +35,9 @@ public class VarroProcessDetails {
   public int ancestorPid;
 }
 public static class VarroProcessInspection {
+  [DllImport("iphlpapi.dll", SetLastError=true)]
+  static extern uint GetExtendedTcpTable(IntPtr table, ref int size, bool order,
+    int family, int tableClass, uint reserved);
   [DllImport("kernel32.dll", SetLastError=true)]
   static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
   [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
@@ -82,6 +85,50 @@ public static class VarroProcessInspection {
         return identity.User == null ? "" : identity.User.Value;
       }
     } finally { CloseHandle(token); }
+  }
+  public static int[] Listeners(int port) {
+    if (port < 1 || port > 65535) throw new ArgumentOutOfRangeException("port");
+    var owners = new HashSet<int>();
+    foreach (int family in new[] { 2, 23 }) {
+      int size = 0;
+      // OWNER_PID_LISTENER selects listeners in the kernel. Some Windows builds
+      // return zero dwState even here, so state/text is not the filtering authority.
+      uint error = GetExtendedTcpTable(IntPtr.Zero, ref size, false, family, 3, 0);
+      if (error != 0 && error != 122) throw new Win32Exception((int)error);
+      bool complete = false;
+      for (int attempt = 0; attempt < 3; attempt++) {
+        if (size < 4 || size > 16 * 1024 * 1024)
+          throw new InvalidOperationException("Invalid TCP listener table size");
+        int allocated = size;
+        IntPtr table = Marshal.AllocHGlobal(allocated);
+        try {
+          error = GetExtendedTcpTable(table, ref size, false, family, 3, 0);
+          if (error == 122) continue;
+          if (error != 0) throw new Win32Exception((int)error);
+          int rowSize = family == 2 ? 24 : 56;
+          int portOffset = family == 2 ? 8 : 20;
+          int pidOffset = family == 2 ? 20 : 52;
+          int count = Marshal.ReadInt32(table);
+          if (count < 0 || size < 4 || size > allocated || count > (size - 4) / rowSize)
+            throw new InvalidOperationException("Invalid TCP listener table length");
+          for (int index = 0; index < count; index++) {
+            IntPtr row = IntPtr.Add(table, 4 + index * rowSize);
+            int localPort = (Marshal.ReadByte(row, portOffset) << 8) |
+              Marshal.ReadByte(row, portOffset + 1);
+            if (localPort != port) continue;
+            int owner = Marshal.ReadInt32(row, pidOffset);
+            if (owner <= 0) throw new InvalidOperationException("Invalid TCP listener owner");
+            owners.Add(owner);
+          }
+          complete = true;
+          break;
+        } finally { Marshal.FreeHGlobal(table); }
+      }
+      if (!complete) throw new InvalidOperationException("TCP listener table kept changing");
+    }
+    var result = new int[owners.Count];
+    owners.CopyTo(result);
+    return result;
   }
   public static VarroProcessDetails Read(int pid, int hostPid, int ancestorPid) {
     IntPtr process = OpenProcess(ancestorPid == 0 ? 0x1000u : 0x1400u, false, pid);
@@ -164,6 +211,17 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
   $processId = 0
   $hostId = 0
   $ancestorId = 0
+  if ($fields.Length -eq 3 -and $fields[1] -eq 'listeners') {
+    $portNumber = 0
+    if (-not [int]::TryParse($fields[0], [ref]$id) -or
+        -not [int]::TryParse($fields[2], [ref]$portNumber)) { exit 1 }
+    try {
+      $response = @{ id = $id; listeners = @([VarroProcessInspection]::Listeners($portNumber)) }
+    } catch { $response = @{ id = $id; error = $_.Exception.Message } }
+    [Console]::Out.WriteLine(($response | ConvertTo-Json -Compress -Depth 3))
+    [Console]::Out.Flush()
+    continue
+  }
   if ($fields.Length -ne 4 -or
       -not [int]::TryParse($fields[0], [ref]$id) -or
       -not [int]::TryParse($fields[1], [ref]$processId) -or
@@ -183,13 +241,20 @@ export class WindowsProcessInspector {
   private worker: ChildProcessWithoutNullStreams | undefined;
   private sequence = 0;
   private readonly operations = new Map<string, Promise<WindowsProcessDetails>>();
+  private readonly listenerOperations = new Map<number, Promise<number[]>>();
   private readonly pending = new Map<
     number,
-    {
-      resolve: (details: WindowsProcessDetails) => void;
-      reject: (error: Error) => void;
-      ancestorPid: number;
-    }
+    | {
+        kind: 'process';
+        resolve: (details: WindowsProcessDetails) => void;
+        reject: (error: Error) => void;
+        ancestorPid: number;
+      }
+    | {
+        kind: 'listeners';
+        resolve: (listeners: number[]) => void;
+        reject: (error: Error) => void;
+      }
   >();
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private ready = false;
@@ -249,6 +314,42 @@ export class WindowsProcessInspector {
     this.stop(new Error('Windows process inspector stopped'));
   }
 
+  readListeners(port: number): Promise<number[]> {
+    if (!Number.isInteger(port) || port < 1 || port > 65535)
+      return Promise.reject(new Error('Invalid Windows listener port'));
+    const existing = this.listenerOperations.get(port);
+    if (existing) return existing;
+    const operation = this.inspectListeners(port).finally(() => {
+      if (this.listenerOperations.get(port) === operation) this.listenerOperations.delete(port);
+    });
+    this.listenerOperations.set(port, operation);
+    return operation;
+  }
+
+  private async inspectListeners(port: number): Promise<number[]> {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
+    const worker = this.worker ?? this.start();
+    const id = ++this.sequence;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await new Promise<number[]>((resolve, reject) => {
+        this.pending.set(id, { kind: 'listeners', resolve, reject });
+        timeout = setTimeout(() => {
+          if (this.worker === worker)
+            this.stop(new Error('Windows native listener inspection timed out after 5000ms'));
+        }, 5000);
+        worker.stdin.write(`${id} listeners ${port}\n`, (error) => {
+          if (error && this.worker === worker) this.stop(error);
+        });
+      });
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      this.pending.delete(id);
+      this.retireWhenIdle(worker);
+    }
+  }
+
   private async inspect(pid: number, ancestorPid: number): Promise<WindowsProcessDetails> {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = undefined;
@@ -257,7 +358,7 @@ export class WindowsProcessInspector {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       return await new Promise<WindowsProcessDetails>((resolve, reject) => {
-        this.pending.set(id, { resolve, reject, ancestorPid });
+        this.pending.set(id, { kind: 'process', resolve, reject, ancestorPid });
         timeout = setTimeout(() => {
           if (this.worker === worker)
             this.stop(new Error('Windows native process inspection timed out after 5000ms'));
@@ -342,6 +443,18 @@ export class WindowsProcessInspector {
           if (isString(response?.error)) {
             this.pending.delete(Number(response.id));
             pending.reject(new Error(response.error));
+            continue;
+          }
+          if (pending.kind === 'listeners') {
+            const listeners: unknown = response?.listeners;
+            if (
+              !Array.isArray(listeners) ||
+              !listeners.every(isNumber) ||
+              listeners.some((pid) => !Number.isSafeInteger(pid) || pid <= 0 || pid > 0x7fffffff)
+            )
+              throw new Error('Invalid Windows native listener inspection response');
+            this.pending.delete(Number(response?.id));
+            pending.resolve([...new Set(listeners)]);
             continue;
           }
           const details = asRecord(response?.details);

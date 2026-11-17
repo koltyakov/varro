@@ -6,6 +6,7 @@ import { mkdir, open, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { build } from 'esbuild';
 import { AiOpenCodeClient, aiServerHeaders } from './ai-opencode-client.mjs';
 
 import {
@@ -25,24 +26,61 @@ const WEIGHTS = {
   baseline_virtualization: 3,
 };
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+let windowsInspectorModule;
 
-async function readWindowsOwnership(database, execute) {
-  const { stdout } = await execute('netstat.exe', ['-ano'], { timeout: 5_000 }).catch((error) => {
-    throw new Error(`Cannot inspect Windows TCP listener ownership: ${error.message}`);
-  });
+async function readNativeWindowsListeners(port) {
+  windowsInspectorModule ??= build({
+    entryPoints: [
+      fileURLToPath(new URL('../src/extension/windows-process-inspector.ts', import.meta.url)),
+    ],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    write: false,
+  }).then(
+    (result) =>
+      import(
+        `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`
+      )
+  );
+  const { WindowsProcessInspector } = await windowsInspectorModule;
+  const inspector = new WindowsProcessInspector();
+  try {
+    await inspector.prepare();
+    return await inspector.readListeners(port);
+  } finally {
+    inspector.dispose();
+  }
+}
+
+async function readWindowsOwnership(database, execute, explicit, inspectListeners) {
   const listeners = [];
-  for (const line of stdout.split(/\r?\n/)) {
-    const columns = line.trim().split(/\s+/);
-    if (columns[0] !== 'TCP' || columns[3] !== 'LISTENING') continue;
-    const address = /^(?:\[([^\]]+)\]|([^:]+)):(\d+)$/.exec(columns[1]);
-    if (!address || columns.length !== 5 || !/^\d+$/.test(columns[4])) {
-      throw new Error('Invalid Windows listener ownership evidence');
-    }
-    listeners.push({
-      address: address[1] ?? address[2],
-      port: Number(address[3]),
-      pid: Number(columns[4]),
+  if (explicit) {
+    const port = Number(explicit.port || 80);
+    const pids = await inspectListeners(port).catch((error) => {
+      throw new Error(`Cannot inspect Windows TCP listener ownership: ${error.message}`);
     });
+    if (!Array.isArray(pids) || pids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0))
+      throw new Error('Invalid Windows listener ownership evidence');
+    for (const pid of pids)
+      listeners.push({ address: explicit.hostname.replace(/^\[|\]$/g, ''), port, pid });
+  } else {
+    const { stdout } = await execute('netstat.exe', ['-ano'], { timeout: 5_000 }).catch((error) => {
+      throw new Error(`Cannot inspect Windows TCP listener ownership: ${error.message}`);
+    });
+    for (const line of stdout.split(/\r?\n/)) {
+      const columns = line.trim().split(/\s+/);
+      if (columns[0] !== 'TCP' || columns[3] !== 'LISTENING') continue;
+      const address = /^(?:\[([^\]]+)\]|([^:]+)):(\d+)$/.exec(columns[1]);
+      if (!address || columns.length !== 5 || !/^\d+$/.test(columns[4])) {
+        throw new Error('Invalid Windows listener ownership evidence');
+      }
+      listeners.push({
+        address: address[1] ?? address[2],
+        port: Number(address[3]),
+        pid: Number(columns[4]),
+      });
+    }
   }
   const ownership = await execute(
     'powershell.exe',
@@ -81,6 +119,7 @@ export async function readActiveSessions(
     client,
     pid = process.env.OPENCODE_PID,
     platform = process.platform,
+    inspectWindowsListeners = readNativeWindowsListeners,
   },
   execute = promisify(execFile)
 ) {
@@ -103,7 +142,9 @@ export async function readActiveSessions(
   }
   const canonicalDatabase = await realpath(sourceDatabase);
   const windows =
-    platform === 'win32' ? await readWindowsOwnership(canonicalDatabase, execute) : undefined;
+    platform === 'win32'
+      ? await readWindowsOwnership(canonicalDatabase, execute, explicit, inspectWindowsListeners)
+      : undefined;
   const { stdout } = windows
     ? { stdout: '' }
     : await execute(

@@ -540,21 +540,13 @@ test('Windows status discovery requires one matching listener and database owner
     directory: '/workspace',
     serverUrl: f.serverUrl,
     platform: 'win32',
+    inspectWindowsListeners: async (port) => {
+      assert.equal(port, listener.port);
+      return evidence.listeners.map((row) => row.pid);
+    },
   };
   const evidence = { listeners: [listener], databaseOwners: [123] };
   const execute = async (command, args, executionOptions) => {
-    if (command === 'netstat.exe') {
-      assert.deepEqual(args, ['-ano']);
-      assert.equal(executionOptions.timeout, 5_000);
-      return {
-        stdout: evidence.listeners
-          .map(
-            ({ address, port, pid }) =>
-              `  TCP  ${address.includes(':') ? `[${address}]` : address}:${port}  0.0.0.0:0  LISTENING  ${pid}`
-          )
-          .join('\r\n'),
-      };
-    }
     assert.equal(command, 'powershell.exe');
     assert.equal(executionOptions.timeout, 90_000);
     assert.deepEqual(args, [
@@ -584,7 +576,8 @@ test('Windows status discovery requires one matching listener and database owner
   await assert.rejects(readPlatformActiveSessions(options, execute), /one listener owner/);
   evidence.listeners = [listener];
   evidence.listeners.push({ ...listener, address: '::1', pid: 456 });
-  assert.equal((await readPlatformActiveSessions(options, execute)).serverPid, 123);
+  // The native port-wide observation conservatively retains IPv4/IPv6 ambiguity.
+  await assert.rejects(readPlatformActiveSessions(options, execute), /one listener owner/);
   evidence.listeners = [{ ...listener, address: '0.0.0.0' }];
   assert.equal((await readPlatformActiveSessions(options, execute)).serverPid, 123);
   evidence.listeners = [{ ...listener, address: '::' }];
@@ -620,31 +613,34 @@ test('Windows ownership probes fail closed with phase-specific errors', async (t
     platform: 'win32',
   };
   await assert.rejects(
-    readPlatformActiveSessions(options, async () => {
-      throw new Error('probe timed out');
+    readPlatformActiveSessions({
+      ...options,
+      inspectWindowsListeners: async () => {
+        throw new Error('probe timed out');
+      },
     }),
     /Windows TCP listener ownership: probe timed out/
   );
   await assert.rejects(
-    readPlatformActiveSessions(options, async (command) => {
-      if (command === 'netstat.exe') return { stdout: '' };
-      throw new Error('probe timed out');
-    }),
+    readPlatformActiveSessions(
+      { ...options, inspectWindowsListeners: async () => [] },
+      async () => {
+        throw new Error('probe timed out');
+      }
+    ),
     /Windows Restart Manager database ownership: probe timed out/
   );
   await assert.rejects(
-    readPlatformActiveSessions(options, async () => ({
-      stdout: 'TCP invalid 0.0.0.0:0 LISTENING 123',
-    })),
+    readPlatformActiveSessions({ ...options, inspectWindowsListeners: async () => ['123'] }),
     /Invalid Windows listener ownership/
   );
   await assert.rejects(
-    readPlatformActiveSessions(options, async (command) => ({
-      stdout:
-        command === 'netstat.exe'
-          ? `TCP 127.0.0.1:${new URL(f.serverUrl).port} 127.0.0.1:80 ESTABLISHED 123\r\nUDP 0.0.0.0:53 *:* 123`
-          : JSON.stringify({ databaseOwners: [123] }),
-    })),
+    readPlatformActiveSessions(
+      { ...options, inspectWindowsListeners: async () => [] },
+      async () => ({
+        stdout: JSON.stringify({ databaseOwners: [123] }),
+      })
+    ),
     /one listener owner/
   );
 });

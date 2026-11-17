@@ -3,16 +3,18 @@ import { EventEmitter } from 'events';
 import { createServer } from 'net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { spawnMock, nativeReadMock, nativePrepareMock } = vi.hoisted(() => ({
+const { spawnMock, nativeReadMock, nativePrepareMock, nativeListenersMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
   nativeReadMock: vi.fn(),
   nativePrepareMock: vi.fn(),
+  nativeListenersMock: vi.fn(),
 }));
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 vi.mock('./windows-process-inspector', () => ({
   WindowsProcessInspector: class {
     read = nativeReadMock;
     prepare = nativePrepareMock;
+    readListeners = nativeListenersMock;
   },
 }));
 vi.mock('./logger', () => ({ logger: { warn: vi.fn() } }));
@@ -34,6 +36,9 @@ const listenerPid = 1_072_000_000 + process.pid;
 
 beforeEach(() => {
   nativeReadMock.mockRejectedValue(new Error('Native inspection unavailable'));
+  nativeListenersMock
+    .mockReset()
+    .mockRejectedValue(new Error('Native listener inspection unavailable'));
   nativePrepareMock.mockReset().mockResolvedValue(undefined);
 });
 
@@ -80,6 +85,24 @@ afterEach(() => {
 });
 
 describe('process inspection preparation', () => {
+  it('uses a fresh native listener table when text-based Windows state is unreliable', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    nativeListenersMock.mockResolvedValue([listenerPid]);
+    await expect(findListeningPids(4096)).resolves.toEqual([listenerPid]);
+    nativeListenersMock.mockResolvedValue([]);
+    await expect(findListeningPids(4096)).resolves.toEqual([]);
+    expect(nativeListenersMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('does not replace an ambiguous native listener set with a convenient legacy result', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    nativeListenersMock.mockResolvedValue([listenerPid, listenerPid + 1]);
+    await expect(inspectWindowsManagedListener(4096, 1234)).resolves.toBeNull();
+    expect(nativeReadMock).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it('starts the Windows helper without reading or trusting a process identity', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     await prepareProcessInspection();

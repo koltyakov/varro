@@ -105,9 +105,9 @@ the shared invariants below remain true.
   observer setup also measures its connected snapshot as a batch. While history owns an exact anchor,
   measurement publication must not queue a competing generic anchor after direct input becomes idle.
    Gesture-driven range updates collect mounted rows during the scroll handler's reactive batch, then
-   measure them together before saving the destination anchor. Coalesce mounted sticky-preview checks
-   at the same boundary. Other gesture-driven mounts still measure synchronously. Never defer height
-   compensation above the viewport until after the handler has remembered an already-shifted destination.
+    measure them together before saving the destination anchor. Coalesce mounted sticky-preview checks
+    at the same boundary. Other gesture-driven mounts still measure synchronously. Never defer height
+    compensation above the viewport until after the handler has remembered an already-shifted destination.
 
 ### Height Accounting
 
@@ -208,6 +208,20 @@ the shared invariants below remain true.
   may need a temporary bottom deficit reserve; its target must follow the retained marker when the
   trailing summary slot changes, even if the reserve's size is already sufficient. Native scroll
   detachment must cancel stale go-to-latest requests so they cannot block this anchor owner.
+  Prefer a fully painted prose block over the first row's virtual top. If that row exposes only the
+  tail of a diff, preserving its offscreen top while hiding the diff can scroll the next visible
+  paragraph out of view. Fall back to the row coordinate when no stable painted block exists.
+  `scroll-diff-preview.spec.ts` covers consecutive tool-step rows and samples the paragraph every frame.
+  Keep that detached anchor while deferred preview requests remain pending. Pause bounded settling
+  when waiting and wake it from detail completion before paint; do not expire it after twelve idle
+  frames or poll indefinitely. New direct input cancels the retained owner and pin.
+  Exact painted-anchor selection must exclude the sticky prompt's opaque card and solid gap.
+  A paragraph behind that overlay can enter the scrollport after a wheel tick without
+  becoming visible. Preserving it during hydration moves the genuinely visible prose
+  below its growing diff. Once earlier prose is actually exposed, it may own the new
+  destination. The deferred diff-tail regression covers both cases with native input.
+  Do not include the translucent fade or additional sticky collision safety margin in
+  this paint cutoff. Prose below the solid gap remains exposed through the fade.
 - Publish changed heights and the anchor's new virtual scroll coordinate in one batch. Range
   selection must not mount the old numeric destination against the new prefix and then discard it
   during anchor restoration. Read the mounted batch's rectangles before writing row corrections.

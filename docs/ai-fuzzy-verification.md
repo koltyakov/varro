@@ -220,9 +220,9 @@ OpenCode server with its database under `<varro-root>/artifacts/ai-test-data/`. 
 verification, live, cleanup, and editor-launch commands verify `/path` and inspect native ownership to confirm
 that the listener owns that database. They reject production storage and symlink/hard-link aliases.
 Port 4096 is no longer a default. Missing isolation is a blocked test, never permission to use the
-production server. Verification uses `lsof` on macOS/Linux. On Windows it uses PowerShell
-`Get-NetTCPConnection` for listener ownership and the read-only Restart Manager resource query for
-database ownership; it never invokes shutdown or restart APIs.
+production server. Verification uses `lsof` on macOS/Linux. On Windows it uses the shared native
+IPv4/IPv6 listener-only TCP-table helper for explicit endpoint ownership and the read-only Restart
+Manager resource query for database ownership; it never invokes shutdown or restart APIs.
 
 `npm run ai:vscode` now starts a dedicated server automatically when `VARRO_AI_SERVER_URL` is
 unset. It uses `VARRO_OPENCODE_TEST_BINARY`, or discovers `opencode2` then `opencode`, and copies

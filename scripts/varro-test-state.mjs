@@ -18,6 +18,9 @@ export async function isolateVarroTestState(environment, root) {
     HOME: home,
     USERPROFILE: home,
     LOCALAPPDATA: localAppData,
+    // A synthetic Windows profile can resolve the known-folder cache root to
+    // empty, making PowerShell create Microsoft/... relative to the workspace.
+    PSModuleAnalysisCachePath: path.join(localAppData, 'PowerShellModuleAnalysisCache'),
     XDG_STATE_HOME: state,
     TMPDIR: temporary,
     TMP: temporary,

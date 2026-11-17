@@ -45,6 +45,10 @@ test('isolates current and legacy editor state for independent AI profiles', asy
       assert.ok((await stat(environment[key])).isDirectory());
     }
     assert.equal(environment.VARRO_TEST_STATE_ROOT, path.join(profile, 'state/varro-test'));
+    assert.equal(
+      environment.PSModuleAnalysisCachePath,
+      path.join(profile, 'local-appdata/PowerShellModuleAnalysisCache')
+    );
     assert.equal(environment.OPENCODE_DB, original.OPENCODE_DB);
     assert.equal(environment.VARRO_TEST_SERVER_URL, original.VARRO_TEST_SERVER_URL);
     await mkdir(environment.VARRO_TEST_STATE_ROOT, { recursive: true });
@@ -53,6 +57,33 @@ test('isolates current and legacy editor state for independent AI profiles', asy
   assert.notEqual(environments[0].VARRO_TEST_STATE_ROOT, environments[1].VARRO_TEST_STATE_ROOT);
   assert.equal(original.HOME, '/host/home');
 });
+
+test(
+  'Windows PowerShell module discovery does not write into the fixture',
+  {
+    skip: process.platform !== 'win32',
+  },
+  async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'varro-powershell-cache-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const workspace = path.join(root, 'fixture');
+    await mkdir(workspace);
+    const environment = { ...process.env };
+    await isolateVarroTestState(environment, path.join(root, 'profile'));
+    const { stdout } = await promisify(execFile)(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        "$ErrorActionPreference = 'Stop'; Add-Type -TypeDefinition 'public class VarroCacheProbe { public static int Value() { return 1; } }'; Get-Process -Id $PID | Select-Object -ExpandProperty Id",
+      ],
+      { cwd: workspace, env: environment, timeout: 30_000 }
+    );
+    assert.ok(Number(stdout.trim()) > 0);
+    assert.deepEqual(await readdir(workspace), []);
+  }
+);
 
 test('rejects relative profile roots before changing the environment', async () => {
   const environment = { HOME: '/host/home' };

@@ -1208,12 +1208,15 @@ export class CdpController {
         (candidate) => candidate.getAttribute('data-queued-message-id') === itemId
       );
       if (!row) return null;
+      const steer = row.querySelector('button[aria-label="Send as Steer"]');
       return {
         id: itemId,
         ownerViewId: row.getAttribute('data-queued-message-owner'),
         sessionId: row.getAttribute('data-queued-message-session-id'),
         paused: !!row.querySelector('[aria-label="Play queued message"]'),
         editing: row.classList.contains('is-editing'),
+        steerAvailable: !!steer && !steer.disabled && !steer.hidden &&
+          steer.getBoundingClientRect().width > 0,
         text: row.textContent ?? '',
       };
     })()`);
@@ -1270,15 +1273,20 @@ export class CdpController {
     const normalized = shifted ? ' ' : key === 'Space' ? ' ' : key;
     const code = shifted || key === 'Space' ? 'Space' : key;
     const virtualKeyCode = {
+      Backspace: 8,
       Enter: 13,
       Tab: 9,
+      Escape: 27,
       ' ': 32,
       PageUp: 33,
       PageDown: 34,
       End: 35,
       Home: 36,
+      ArrowLeft: 37,
       ArrowUp: 38,
+      ArrowRight: 39,
       ArrowDown: 40,
+      Delete: 46,
     }[normalized];
     for (const type of ['keyDown', 'keyUp']) {
       const event = {
@@ -2570,7 +2578,7 @@ export function summarizeQueuedDelivery(messages, turns) {
     const responseMarker = turns[index]?.responseMarker ?? '';
     const text =
       assistant?.parts
-        ?.filter((part) => part?.type === 'text' || part?.type === 'reasoning')
+        ?.filter((part) => part?.type === 'text')
         .map((part) => part.text ?? '')
         .join('\n') ?? '';
     return (
@@ -2589,12 +2597,37 @@ export function summarizeQueuedDelivery(messages, turns) {
   const assistantIds = assistantEntries.map((entries) =>
     entries.length === 1 ? entries[0].info.id : null
   );
+  const assistantOutcomes = assistantEntries.map((entries, index) =>
+    entries.map((entry) => {
+      const text = (entry.parts ?? [])
+        .filter((part) => part?.type === 'text')
+        .map((part) => part.text ?? '')
+        .join('\n');
+      const reasoning = (entry.parts ?? [])
+        .filter((part) => part?.type === 'reasoning')
+        .map((part) => part.text ?? '')
+        .join('\n');
+      const marker = turns[index]?.responseMarker ?? '';
+      return {
+        id: entry.info.id,
+        parentID: entry.info.parentID,
+        finish: entry.info.finish,
+        completed: entry.info.time?.completed,
+        error: entry.info.error ?? null,
+        textLength: text.length,
+        textTail: text.slice(-2000),
+        textMarkerCount: marker ? text.split(marker).length - 1 : 0,
+        reasoningMarkerCount: marker ? reasoning.split(marker).length - 1 : 0,
+      };
+    })
+  );
   return {
     userCounts,
     assistantCounts,
     assistantValid,
     userIds,
     assistantIds,
+    assistantOutcomes,
     indexes,
     ordered:
       indexes.every((index) => index >= 0) &&
@@ -3745,6 +3778,27 @@ async function runLifecycleScenario({
       transferred?.ownerViewId === 'sidebar' && transferred.paused === true;
     evidence.queue.samples.push({ phase: 'hidden-transfer', row: transferred });
 
+    await executeVscodeCommand(launch.remoteDebuggingPort, 'View: Focus into Secondary Side Bar');
+    await sidebar.refreshContext();
+    const steerReady = await waitForObservation(
+      () => sidebar.readQueueRow(queued.item.id),
+      (row) => row?.ownerViewId === 'sidebar' && row.paused && !row.editing && row.steerAvailable,
+      15_000
+    );
+    evidence.queue.samples.push({ phase: 'sidebar-steer-ready', row: steerReady });
+    if (!steerReady) {
+      evidence.queue.steerReadinessFailure = await sidebar.evaluate(`(() => {
+        const row = [...document.querySelectorAll('[data-queued-message-id]')].find(
+          element => element.getAttribute('data-queued-message-id') === ${JSON.stringify(queued.item.id)}
+        );
+        return { focused: document.hasFocus(), rowClass: row?.className,
+          buttons: [...(row?.querySelectorAll('button') ?? [])].map(button => ({
+            label: button.getAttribute('aria-label'), disabled: button.disabled, hidden: button.hidden,
+            width: button.getBoundingClientRect().width, display: getComputedStyle(button).display,
+          })) };
+      })()`);
+      throw new Error('AI-19 sidebar steer control did not become actionable after handoff');
+    }
     evidence.queue.steerDispatched = await sidebar.clickQueueControl(
       queued.item.id,
       'Send as Steer'
@@ -3793,6 +3847,10 @@ async function runLifecycleScenario({
       timeoutMs * 3
     );
     evidence.delivery = queuedDelivery.delivery;
+    evidence.deliveryWait = {
+      settled: queuedDelivery.settled,
+      delivery: queuedDelivery.delivery,
+    };
     if (!(await waitForIdle(client, tracked.id, timeoutMs * 3))) {
       throw new Error('AI-19 streams did not settle');
     }
@@ -3805,6 +3863,9 @@ async function runLifecycleScenario({
     ).observed;
 
     const messages = await client.messages(tracked.id, 1000);
+    // The first delivery deadline can expire before the subsequent idle wait.
+    // Judge the canonical snapshot used below, not the earlier incomplete result.
+    evidence.delivery = summarizeQueuedDelivery(messages, [queueTurn]);
     const modelEvidence = promptModelFailures(
       messages,
       [streamMarker, queueTurn.promptMarker],
@@ -4048,6 +4109,35 @@ export async function executeActivityScenario({
     evidence.reason = error instanceof Error ? error.message : String(error);
   }
   return evidence;
+}
+
+export async function revealRetainedActivity(
+  cdp,
+  sessionId,
+  scope,
+  { maxSteps = 40, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}
+) {
+  const actions = [];
+  if (!scope?.messageIds?.length) return { found: false, actions, reason: 'No current-turn scope' };
+  for (let step = 0; step <= maxSteps; step++) {
+    if ((await cdp.snapshot()).routeSessionId !== sessionId)
+      return { found: false, actions, reason: 'Session route changed' };
+    const state = await cdp.captureActionState(scope);
+    if (state.disclosures?.some((disclosure) => disclosure.visible))
+      return { found: true, actions, state };
+    if (step === maxSteps || !state.transcript || state.transcript.scrollTop <= 1)
+      return {
+        found: false,
+        actions,
+        state,
+        reason: 'No visible current-turn retained disclosure',
+      };
+    const action = { input: 'wheel', delta: -420, before: state };
+    actions.push(action);
+    action.dispatched = await cdp.wheel('.interactive-list', action.delta, 'right');
+    if (!action.dispatched) return { found: false, actions, reason: 'Native wheel unavailable' };
+    await wait(100);
+  }
 }
 
 async function runLive(options) {
@@ -4510,19 +4600,34 @@ async function runLive(options) {
       }
       const settled = await waitForIdle(client, tracked.id, timeoutMs);
       let activityObservation = null;
-      if (activityObservationStarted) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        activityObservation = await cdp.evaluate('globalThis.varroAiStreamingObserver.stop()');
-        activityObservationStarted = false;
-      }
       if (activityExecution) {
         activityExecution.settled = settled;
         activityExecution.finalSnapshot = await cdp.captureActionState(scope);
-        if (!settled || !activityExecution.finalSnapshot.disclosures?.length) {
+        if (settled && !activityExecution.finalSnapshot.disclosures?.some((item) => item.visible)) {
+          // Long final prose can unmount the earlier tool rows. Verify their
+          // retained projection by native navigation, not bottom-range membership.
+          activityExecution.retainedDisclosure = await revealRetainedActivity(
+            cdp,
+            tracked.id,
+            scope
+          );
+        }
+        if (
+          !settled ||
+          !(
+            activityExecution.finalSnapshot.disclosures?.some((item) => item.visible) ||
+            activityExecution.retainedDisclosure?.found
+          )
+        ) {
           activityExecution.executed = false;
           activityExecution.failurePhase ??= 'settled-projection';
           activityExecution.reason ??= 'Stream did not settle into a retained activity disclosure';
         }
+      }
+      if (activityObservationStarted) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        activityObservation = await cdp.evaluate('globalThis.varroAiStreamingObserver.stop()');
+        activityObservationStarted = false;
       }
       const fixtureAfterPreparation = await fixtureStatus(manifest.workspace);
       const actionFailure = actions.find((action) => !action.executed);

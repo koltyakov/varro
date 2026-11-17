@@ -12,6 +12,25 @@ import {
   waitForAnimationFrames,
 } from './helpers';
 
+type PartialDiffProbe = {
+  gate: boolean;
+  pending: Map<string, () => void>;
+  events: Array<{
+    type: string;
+    at: number;
+    part?: string;
+    trusted?: boolean;
+    top: number;
+    markerTop: number;
+    precedingHold: number;
+    precedingPreviews: number;
+  }>;
+  release: (step: number, file: number) => void;
+  record: (type: string, part?: string, trusted?: boolean) => void;
+};
+
+type PartialDiffWindow = typeof window & { partialDiffProbe: PartialDiffProbe };
+
 async function updateDiffPreview(
   page: Page,
   messageId: string,
@@ -106,6 +125,577 @@ async function updateDiffPreviewWithPatch(
 }
 
 test.describe('diff preview anchoring', () => {
+  for (const partialOlderResponse of [false, true]) {
+    test(`preserves the native prose destination with ${partialOlderResponse ? 'one older detail already loaded' : 'all details still pending'}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 486, height: 794 });
+      await page.clock.install();
+      await page.goto(
+        '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1&diffPreviewCompleted=1'
+      );
+      await expect(page.locator('.interactive-list')).toBeVisible();
+      await page.evaluate(() => {
+        const sessionID = 'session-diff-preview-large-transcript';
+        const host = window as PartialDiffWindow & {
+          __sendToExtension: (message: WebviewMessage) => void;
+          __varroE2E: {
+            getSessionMessages: (id: string) => Array<{ info: Record<string, unknown> }>;
+            updateMessageInfo: (info: Record<string, unknown>) => void;
+            updateMessagePart: (part: unknown) => void;
+          };
+        };
+        const list = document.querySelector<HTMLElement>('.interactive-list')!;
+        const probe: PartialDiffProbe = {
+          gate: false,
+          pending: new Map(),
+          events: [],
+          release(step, file) {
+            const key = `${step}/${file}`;
+            const respond = this.pending.get(key);
+            if (!respond) throw new Error(`Missing pending detail ${key}`);
+            this.pending.delete(key);
+            respond();
+          },
+          record(type, part, trusted) {
+            const preceding = list.querySelector<HTMLElement>(
+              '[data-msg-id="message-partial-diff-1"]'
+            );
+            const marker = list.querySelector('[data-msg-id="message-partial-diff-2"] p');
+            this.events.push({
+              type,
+              at: performance.now(),
+              part,
+              trusted,
+              top: list.scrollTop,
+              markerTop: marker
+                ? marker.getBoundingClientRect().top - list.getBoundingClientRect().top
+                : 0,
+              precedingHold: Number.parseFloat(preceding?.style.minHeight ?? '') || 0,
+              precedingPreviews:
+                preceding?.querySelectorAll('.file-change-inline-diffs').length ?? 0,
+            });
+          },
+        };
+        host.partialDiffProbe = probe;
+        const details = new Map<string, { key: string; part: unknown }>();
+        const originalSend = host.__sendToExtension;
+        host.__sendToExtension = (rawMessage: unknown) => {
+          const message = rawMessage as WebviewMessage;
+          if (message.type !== 'api/request') return originalSend(message);
+          const detail = details.get(message.payload.path);
+          if (!detail) return originalSend(message);
+          const respond = () =>
+            window.postMessage(
+              { type: 'api/response', payload: { id: message.payload.id, data: detail.part } },
+              '*'
+            );
+          if (probe.gate) probe.pending.set(detail.key, respond);
+          else respond();
+        };
+        window.addEventListener(
+          'message',
+          (event: MessageEvent<{ type?: string; payload?: { data?: { id?: string } } }>) => {
+            if (probe.gate && event.data?.type === 'api/response') {
+              const id = event.data.payload?.data?.id;
+              if (id?.startsWith('message-partial-diff-')) probe.record('response', id);
+            }
+          },
+          true
+        );
+        list.addEventListener(
+          'wheel',
+          (event) => {
+            if (probe.gate) probe.record('wheel', undefined, event.isTrusted);
+          },
+          { capture: true, passive: true }
+        );
+        list.addEventListener('scroll', (event) => {
+          if (probe.gate) probe.record('scroll', undefined, event.isTrusted);
+        });
+        const template = host.__varroE2E.getSessionMessages(sessionID).at(-1)!.info;
+        const emit = (type: string, properties: Record<string, unknown>) =>
+          window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
+        for (let step = 0; step < 4; step++) {
+          const messageID = `message-partial-diff-${step}`;
+          const info = { ...template, id: messageID, time: { created: Date.now() + step } };
+          host.__varroE2E.updateMessageInfo(info);
+          emit('message.updated', { info });
+          const parts: unknown[] = [
+            {
+              id: `${messageID}-text`,
+              messageID,
+              sessionID,
+              type: 'text',
+              text: `Retained partial step ${step}.`,
+            },
+          ];
+          for (let file = 0; file < 3; file++) {
+            const filePath = `src/partial-${step}-${file}.ts`;
+            const part = {
+              id: `${messageID}-edit-${file}`,
+              messageID,
+              sessionID,
+              type: 'tool',
+              tool: 'edit',
+              callID: `${messageID}-call-${file}`,
+              state: {
+                status: 'completed',
+                input: {
+                  filePath,
+                  oldString: 'export const value = 0;',
+                  newString: 'export const value = 1;',
+                },
+                output: 'Done',
+                metadata: {},
+                time: { start: 1, end: 2 },
+              },
+            };
+            const deferred = `/partial-diff/${step}/${file}`;
+            details.set(deferred, { key: `${step}/${file}`, part });
+            parts.push({
+              ...part,
+              deferred,
+              state: {
+                ...part.state,
+                input: {},
+                metadata: {
+                  files: [{ filePath, type: 'update', additions: 1, deletions: 1 }],
+                },
+              },
+            });
+          }
+          for (const part of parts) {
+            host.__varroE2E.updateMessagePart(part);
+            emit('message.part.updated', { part });
+          }
+        }
+      });
+      const marker = page.locator('[data-msg-id="message-partial-diff-2"] p').first();
+      const preceding = page.locator('[data-msg-id="message-partial-diff-1"]');
+      await expect(
+        page.locator('[data-msg-id="message-partial-diff-3"] .diff-view-file')
+      ).toHaveCount(3);
+      await waitForAnimationFrames(page, 20);
+      const list = page.locator('.interactive-list');
+      const box = await list.boundingBox();
+      const markerBox = await marker.boundingBox();
+      if (!box || !markerBox) throw new Error('Missing partial-response marker');
+      await page.mouse.move(box.x + box.width - 4, box.y + box.height / 2);
+      await page.mouse.wheel(0, markerBox.y - box.y - 113);
+      await waitForAnimationFrames(page, 30);
+      const position = () =>
+        marker.evaluate(
+          (element) =>
+            element.getBoundingClientRect().top -
+            document.querySelector('.interactive-list')!.getBoundingClientRect().top
+        );
+      const before = await position();
+      expect(Math.abs(before - 113)).toBeLessThanOrEqual(2);
+      const showDiffs = (showFileDiffs: boolean) =>
+        page.evaluate(
+          (value) =>
+            window.postMessage(
+              {
+                type: 'config/update',
+                payload: {
+                  desktopSessionPaneSide: 'left',
+                  defaultPermissionMode: 'default',
+                  chatFontSize: 13,
+                  chatEditorFontSize: 12,
+                  chatFontFamily: 'default',
+                  showFileDiffs: value,
+                },
+              },
+              '*'
+            ),
+          showFileDiffs
+        );
+      await showDiffs(false);
+      await waitForAnimationFrames(page, 30);
+      expect(Math.abs((await position()) - before)).toBeLessThanOrEqual(2);
+      await page.evaluate(() => {
+        (window as PartialDiffWindow).partialDiffProbe.gate = true;
+      });
+      await showDiffs(true);
+      await expect
+        .poll(() =>
+          page.evaluate(() => (window as PartialDiffWindow).partialDiffProbe.pending.size)
+        )
+        .toBe(12);
+      await expect(preceding.locator('.file-change-inline-diffs')).toHaveCount(0);
+      // Freeze the next presentation callback, not response delivery or native input.
+      // This makes the recorded response-between-frames ordering deterministic.
+      const now = await page.evaluate(() => Date.now());
+      await page.clock.pauseAt(now + 16);
+      expect(Math.abs((await position()) - before)).toBeLessThanOrEqual(2);
+      const inputScrollTop = await list.evaluate((element) => element.scrollTop);
+      await page.evaluate(() => {
+        (window as PartialDiffWindow).partialDiffProbe.events.length = 0;
+      });
+      if (partialOlderResponse) {
+        await page.evaluate(() => (window as PartialDiffWindow).partialDiffProbe.release(0, 0));
+        await expect(
+          page.locator('[data-msg-id="message-partial-diff-0"] .file-change-inline-diffs')
+        ).toHaveCount(1);
+      }
+      await page.mouse.wheel(0, -96);
+      await expect
+        .poll(() => list.evaluate((element) => element.scrollTop))
+        .toBe(inputScrollTop - 96);
+      await page.clock.runFor(17);
+      const afterInput = await position();
+      // Never add another 96 to the passive wheel listener's already-scrolled rectangle.
+      const expectedTop = before + 96;
+      await page.evaluate(() => {
+        (window as PartialDiffWindow).partialDiffProbe.record('after-input');
+      });
+      const samples = [afterInput];
+      for (let step = 0; step < 4; step++) {
+        for (let file = 0; file < 3; file++) {
+          if (partialOlderResponse && step === 0 && file === 0) continue;
+          await page.evaluate(
+            ({ row, part }) => (window as PartialDiffWindow).partialDiffProbe.release(row, part),
+            { row: step, part: file }
+          );
+          await expect(
+            page.locator(`[data-msg-id="message-partial-diff-${step}"] .file-change-inline-diffs`)
+          ).toHaveCount(file + 1);
+          await page.clock.runFor(17);
+          samples.push(await position());
+        }
+      }
+      await page.clock.runFor(300);
+      samples.push(await position());
+      const events = await page.evaluate(
+        () => (window as PartialDiffWindow).partialDiffProbe.events
+      );
+      await test.info().attach('partial-response-input-order', {
+        body: JSON.stringify(
+          { partialOlderResponse, before, expectedTop, samples, events },
+          null,
+          2
+        ),
+        contentType: 'application/json',
+      });
+      const wheel = events.find((event) => event.type === 'wheel' && event.trusted);
+      const wheelIndex = events.findIndex((event) => event === wheel);
+      const inputIndex = events.findIndex((event) => event.type === 'after-input');
+      expect(wheel).toBeDefined();
+      expect(wheel!.top).toBe(inputScrollTop - 96);
+      expect(wheel!.precedingHold).toBeGreaterThan(0);
+      expect(wheel!.precedingPreviews).toBe(0);
+      expect(
+        events
+          .slice(wheelIndex + 1, inputIndex)
+          .some((event) => event.type === 'scroll' && event.trusted)
+      ).toBe(true);
+      expect(events.slice(0, wheelIndex).filter((event) => event.type === 'response')).toEqual(
+        partialOlderResponse
+          ? [expect.objectContaining({ part: 'message-partial-diff-0-edit-0' })]
+          : []
+      );
+      const precedingResponses = events
+        .map((event, index) => ({ event, index }))
+        .filter(
+          ({ event }) =>
+            event.type === 'response' && event.part?.startsWith('message-partial-diff-1-')
+        );
+      expect(precedingResponses).toHaveLength(3);
+      expect(precedingResponses.every(({ index }) => index > inputIndex)).toBe(true);
+      expect(await preceding.evaluate((element) => element.style.minHeight)).toBe('');
+      await page.clock.resume();
+      if (partialOlderResponse) {
+        await test.info().attach('partial-response-settled', {
+          body: await page.screenshot(),
+          contentType: 'image/png',
+        });
+      }
+      expect(
+        samples.every((top) => Math.abs(top - expectedTop) <= 2),
+        JSON.stringify({ expectedTop, samples })
+      ).toBe(true);
+    });
+  }
+
+  for (const input of [
+    { delay: 100, delta: -32 },
+    { delay: 0, delta: -96 },
+    { delay: 100, delta: -96 },
+    { delay: 100, delta: -180 },
+    { delay: 100, delta: -96, edge: 'overlay' },
+    { delay: 100, delta: -96, edge: 'solid' },
+  ]) {
+    test(`preserves painted prose when the preceding visible diff tail is removed, wheel ${input.delta} after ${input.delay}ms${'edge' in input ? ` at the painted ${input.edge} edge` : ''}`, async ({
+      page,
+    }) => {
+      const edge = 'edge' in input ? input.edge : undefined;
+      const edgeSelector =
+        edge === 'solid'
+          ? '.latest-user-message-sticky-bottom-solid'
+          : '.latest-user-message-sticky-overlay';
+      await page.setViewportSize({ width: 486, height: 794 });
+      await page.goto(
+        '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1&diffPreviewCompleted=1'
+      );
+      await expect(page.locator('.interactive-list')).toBeVisible();
+      await page.evaluate((extraTail) => {
+        const sessionID = 'session-diff-preview-large-transcript';
+        const host = window as typeof window & {
+          __sendToExtension: (message: WebviewMessage) => void;
+          __diffTailPending: number;
+          __diffTailGate: boolean;
+          __releaseDiffTailResponses: () => void;
+          __varroE2E: {
+            getSessionMessages: (id: string) => Array<{ info: Record<string, unknown> }>;
+            updateMessageInfo: (info: Record<string, unknown>) => void;
+            updateMessagePart: (part: unknown) => void;
+          };
+        };
+        const originalSend = host.__sendToExtension;
+        const details = new Map<string, { part: unknown; delay: number }>();
+        host.__diffTailPending = 0;
+        host.__diffTailGate = false;
+        const queuedResponses: Array<() => void> = [];
+        host.__releaseDiffTailResponses = () => {
+          host.__diffTailGate = false;
+          for (const respond of queuedResponses.splice(0)) respond();
+        };
+        host.__sendToExtension = (rawMessage: unknown) => {
+          const message = rawMessage as WebviewMessage;
+          if (message.type !== 'api/request') return originalSend(message);
+          const detail = details.get(message.payload.path);
+          if (!detail) return originalSend(message);
+          host.__diffTailPending++;
+          setTimeout(() => {
+            const respond = () => {
+              host.__diffTailPending--;
+              window.postMessage(
+                {
+                  type: 'api/response',
+                  payload: { id: message.payload.id, data: detail.part },
+                },
+                '*'
+              );
+            };
+            if (host.__diffTailGate) queuedResponses.push(respond);
+            else respond();
+          }, detail.delay);
+        };
+        const template = host.__varroE2E.getSessionMessages(sessionID).at(-1)!.info;
+        const emit = (type: string, properties: Record<string, unknown>) =>
+          window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
+        for (let step = 0; step < (extraTail ? 5 : 4); step++) {
+          const messageID = `message-diff-tail-step-${step}`;
+          const info = { ...template, id: messageID, time: { created: Date.now() + step } };
+          host.__varroE2E.updateMessageInfo(info);
+          emit('message.updated', { info });
+          const text = {
+            id: `${messageID}-text`,
+            messageID,
+            sessionID,
+            type: 'text',
+            text: `Retained step ${step}.`,
+          };
+          const patch = {
+            id: `${messageID}-patch`,
+            messageID,
+            sessionID,
+            type: 'tool',
+            tool: 'apply_patch',
+            callID: `${messageID}-call`,
+            state: {
+              status: 'completed',
+              input: {
+                patchText: [
+                  '*** Begin Patch',
+                  ...Array.from({ length: 3 }, (_, file) =>
+                    [
+                      `*** Update File: src/tail-${file}.ts`,
+                      '@@',
+                      '-export const oldValue = 0;',
+                      '+export const newValue = 1;',
+                    ].join('\n')
+                  ),
+                  '*** End Patch',
+                ].join('\n'),
+              },
+              output: 'Done',
+              metadata: {},
+              time: { start: 1, end: 2 },
+            },
+          };
+          const deferred = `/diff-tail/${step}`;
+          details.set(deferred, { part: patch, delay: 350 + step * 35 });
+          const summary = {
+            ...patch,
+            deferred,
+            state: {
+              ...patch.state,
+              input: {},
+              metadata: {
+                files: Array.from({ length: 3 }, (_, file) => ({
+                  filePath: `src/tail-${file}.ts`,
+                  type: 'update',
+                  additions: 1,
+                  deletions: 1,
+                })),
+              },
+            },
+          };
+          for (const part of [text, summary]) {
+            host.__varroE2E.updateMessagePart(part);
+            emit('message.part.updated', { part });
+          }
+        }
+      }, !!edge);
+      const marker = page.locator('[data-msg-id="message-diff-tail-step-2"] p').first();
+      await expect(
+        page.locator(`[data-msg-id="message-diff-tail-step-${edge ? 4 : 3}"] .diff-view-file`)
+      ).toHaveCount(3);
+      await waitForAnimationFrames(page, 20);
+      const list = page.locator('.interactive-list');
+      const box = await list.boundingBox();
+      const markerBox = await marker.boundingBox();
+      if (!box || !markerBox) throw new Error('Missing retained diff-tail marker');
+      let targetTop = 113;
+      if (edge) {
+        const overlay = await page.locator(edgeSelector).boundingBox();
+        if (!overlay) throw new Error('Missing sticky overlay edge');
+        targetTop = Math.ceil(overlay.y + overlay.height - box.y) + 2;
+      }
+      await page.mouse.move(edge ? box.x + box.width - 4 : box.x + 8, box.y + box.height / 2);
+      await page.mouse.wheel(0, markerBox.y - box.y - targetTop);
+      await waitForAnimationFrames(page, 30);
+      if (edge) {
+        // Native scrolling can first change the sticky prompt's measured height.
+        // Establish the edge against that settled overlay, not its prior geometry.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const markerTop = await marker.evaluate((element) => element.getBoundingClientRect().top);
+          const overlay = await page.locator(edgeSelector).boundingBox();
+          if (!overlay) throw new Error('Missing sticky overlay after native scroll');
+          const clearance = markerTop - overlay.y - overlay.height;
+          if (clearance > 0 && clearance < 8) break;
+          await page.mouse.wheel(0, clearance - 2);
+          await waitForAnimationFrames(page, 20);
+        }
+      }
+      const before = await marker.evaluate((element) => element.getBoundingClientRect().top);
+      expect(before - box.y).toBeGreaterThan(8);
+      expect(before - box.y).toBeLessThan(box.height - 40);
+      if (edge) {
+        const overlay = await page.locator(edgeSelector).boundingBox();
+        if (!overlay) throw new Error('Missing settled sticky overlay');
+        const clearance = before - overlay.y - overlay.height;
+        expect(clearance).toBeGreaterThan(0);
+        expect(clearance).toBeLessThan(8);
+        if (edge === 'solid') {
+          const fade = await page.locator('.latest-user-message-sticky-bottom-fade').boundingBox();
+          if (!fade) throw new Error('Missing translucent sticky fade');
+          expect(before).toBeLessThan(fade.y + fade.height);
+        }
+        await test.info().attach('painted-sticky-edge', {
+          body: JSON.stringify({ edge, before, overlay, clearance }),
+          contentType: 'application/json',
+        });
+      }
+      for (const [index, showFileDiffs] of [false, true, false, true].entries()) {
+        if (index === 3) {
+          await page.evaluate(() => {
+            (window as typeof window & { __diffTailGate: boolean }).__diffTailGate = true;
+          });
+        }
+        await page.evaluate(
+          (value) =>
+            window.postMessage(
+              {
+                type: 'config/update',
+                payload: {
+                  desktopSessionPaneSide: 'left',
+                  defaultPermissionMode: 'default',
+                  chatFontSize: 13,
+                  chatEditorFontSize: 12,
+                  chatFontFamily: 'default',
+                  showFileDiffs: value,
+                },
+              },
+              '*'
+            ),
+          showFileDiffs
+        );
+        let expectedTop = before;
+        let trackedMarker = marker;
+        let wheelEvidence: string | undefined;
+        if (index === 3) {
+          // A newer native destination must win while the same details are pending.
+          if (input.delay > 0) await page.waitForTimeout(input.delay);
+          expect(
+            await page.evaluate(
+              () => (window as typeof window & { __diffTailPending: number }).__diffTailPending
+            )
+          ).toBeGreaterThan(0);
+          await expect(
+            page.locator('[data-msg-id="message-diff-tail-step-1"] .file-change-inline-diffs')
+          ).toHaveCount(0);
+          await page.mouse.wheel(0, input.delta);
+          await waitForAnimationFrames(page, 2);
+          const nativeTop = await marker.evaluate((element) => element.getBoundingClientRect().top);
+          expect(Math.abs(nativeTop - before + input.delta)).toBeLessThanOrEqual(2);
+          const precedingMarker = page
+            .locator('[data-msg-id="message-diff-tail-step-1"] p')
+            .first();
+          const visibility = await precedingMarker.evaluate((element) => {
+            const list = document.querySelector('.interactive-list')!;
+            const sticky = list.querySelector('.latest-user-message-sticky-overlay')!;
+            return {
+              precedingTop: element.getBoundingClientRect().top,
+              stickyBottom: sticky.getBoundingClientRect().bottom,
+            };
+          });
+          if (input.delta === -180) {
+            // Once genuinely exposed, the earlier paragraph may own the new destination.
+            expect(visibility.precedingTop).toBeGreaterThan(visibility.stickyBottom + 8);
+            trackedMarker = precedingMarker;
+          } else if (input.delta === -96) {
+            expect(visibility.precedingTop).toBeLessThan(visibility.stickyBottom);
+          }
+          expectedTop = await trackedMarker.evaluate(
+            (element) => element.getBoundingClientRect().top
+          );
+          wheelEvidence = JSON.stringify({ input, before, nativeTop, expectedTop, visibility });
+        }
+        const samples = await trackedMarker.evaluate(async (element, release) => {
+          const tops: number[] = [element.getBoundingClientRect().top];
+          if (release) {
+            (
+              window as typeof window & { __releaseDiffTailResponses: () => void }
+            ).__releaseDiffTailResponses();
+          }
+          for (let frame = 0; frame < 60; frame++) {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            tops.push(element.getBoundingClientRect().top);
+          }
+          return tops;
+        }, index === 3);
+        if (wheelEvidence) {
+          await test.info().attach('pending-wheel-anchor', {
+            body: wheelEvidence,
+            contentType: 'application/json',
+          });
+        }
+        expect(
+          samples.every((top) => Math.abs(top - expectedTop) <= 2),
+          JSON.stringify(samples)
+        ).toBe(true);
+        const previews = page.locator(
+          '[data-msg-id="message-diff-tail-step-2"] .file-change-inline-diffs'
+        );
+        if (showFileDiffs) await expect(previews).not.toHaveCount(0);
+        else await expect(previews).toHaveCount(0);
+      }
+    });
+  }
+
   test('keeps the painted running diff through deferred completion hydration', async ({ page }) => {
     await page.setViewportSize({ width: 486, height: 794 });
     await page.goto(

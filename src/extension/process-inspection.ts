@@ -156,10 +156,27 @@ export async function inspectWindowsManagedListener(
   port: number,
   ancestorPid: number
 ): Promise<WindowsManagedListenerInspection | null> {
-  const netstat = await runProcess('netstat.exe', ['-ano'], WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS);
   let listenerExpression: string;
-  if (netstat.code === 0) {
-    const listenerPids = parseWindowsNetstatListeningPids(netstat.stdout, port);
+  let listenerPids: number[] | undefined;
+  try {
+    listenerPids = (await windowsInspector.readListeners(port)).filter(
+      (pid) => pid !== process.pid
+    );
+  } catch {
+    // A failed native read supplies no evidence. Obtain a fresh legacy observation.
+    const netstat = await runProcess(
+      'netstat.exe',
+      ['-ano'],
+      WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
+    );
+    if (netstat.code === 0) listenerPids = parseWindowsNetstatListeningPids(netstat.stdout, port);
+    else {
+      logger.warn(
+        `Windows listener inspection with netstat failed: ${netstat.stderr.trim() || `exit code ${String(netstat.code)}`}`
+      );
+    }
+  }
+  if (listenerPids) {
     if (listenerPids.length === 0) return null;
     // Never select one side of an ambiguous IPv4/IPv6 listener set as ownership proof.
     if (listenerPids.length !== 1) return null;
@@ -179,9 +196,6 @@ export async function inspectWindowsManagedListener(
     }
     listenerExpression = `@(${listenerPids.join(',')})`;
   } else {
-    logger.warn(
-      `Windows listener inspection with netstat failed: ${netstat.stderr.trim() || `exit code ${String(netstat.code)}`}`
-    );
     listenerExpression = `@(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)`;
   }
 
@@ -429,6 +443,11 @@ export async function findListeningPids(port: number, procRoot = '/proc') {
 
 async function findListeningPidsOnce(port: number, procRoot: string): Promise<number[]> {
   if (process.platform === 'win32') {
+    try {
+      return (await windowsInspector.readListeners(port)).filter((pid) => pid !== process.pid);
+    } catch {
+      // Native failure is not proof of absence or ownership. Inspect afresh below.
+    }
     // Avoid loading PowerShell's networking module on every admission/ownership check.
     const netstat = await runProcess(
       'netstat.exe',

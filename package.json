@@ -129,7 +129,7 @@
       "@azure/msal-node": "7.2.2"
     },
     "@vscode/vsce": {
-      "minimatch": "11.0.8"
+      "minimatch": "11.0.9"
     },
     "mermaid": {
       "katex": "0.19.1"

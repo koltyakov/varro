@@ -53,6 +53,55 @@ afterEach(() => {
 });
 
 describe('Windows native process inspector', () => {
+  it('reads fresh listener-only snapshots and shares only the in-flight request', async () => {
+    const { inspector, children } = setup();
+    const first = inspector.readListeners(4096);
+    expect(inspector.readListeners(4096)).toBe(first);
+    expect(children[0]!.stdin.read()?.toString()).toBe('1 listeners 4096\n');
+    children[0]!.stdout.write('{"id":1,"listeners":[1234,1234,5678]}\n');
+    await expect(first).resolves.toEqual([1234, 5678]);
+    const next = inspector.readListeners(4096);
+    expect(children[0]!.stdin.read()?.toString()).toBe('2 listeners 4096\n');
+    children[0]!.stdout.write('{"id":2,"listeners":[]}\n');
+    await expect(next).resolves.toEqual([]);
+    expect(spawnMock).toHaveBeenCalledOnce();
+    // SAFETY: The recorded helper launch above supplies a string argument array.
+    const args = spawnMock.mock.calls[0]![1] as string[];
+    const script = Buffer.from(args.at(-1)!, 'base64').toString('utf16le');
+    expect(script).toContain('GetExtendedTcpTable');
+    expect(script).toContain('family, 3, 0');
+    expect(script).toContain('Marshal.FreeHGlobal(table)');
+  });
+
+  it.each([null, '1234', [0], [-1], ['1234'], [1.5], [0x80000000]])(
+    'rejects invalid listener evidence: %j',
+    async (listeners) => {
+      const { inspector, children } = setup();
+      const rejected = expect(inspector.readListeners(4096)).rejects.toThrow(
+        'listener inspection response'
+      );
+      children[0]!.stdout.write(JSON.stringify({ id: 1, listeners }) + '\n');
+      await rejected;
+      expect(children[0]!.kill).toHaveBeenCalledOnce();
+    }
+  );
+
+  it('bounds a stalled listener read and rejects concurrent process reads', async () => {
+    vi.useFakeTimers();
+    const { inspector, children } = setup();
+    const listeners = expect(inspector.readListeners(4096)).rejects.toThrow('timed out');
+    const identity = expect(inspector.read(1234)).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(5000);
+    await Promise.all([listeners, identity]);
+    expect(children[0]!.kill).toHaveBeenCalledOnce();
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, 65536])('rejects invalid listener port: %s', async (port) => {
+    const { inspector } = setup();
+    await expect(inspector.readListeners(port)).rejects.toThrow('Invalid Windows listener port');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it('prepares one helper through slow compilation without reading process identity', async () => {
     vi.useFakeTimers();
     const { inspector, children } = setup();

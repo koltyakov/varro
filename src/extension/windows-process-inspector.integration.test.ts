@@ -1,8 +1,11 @@
 import { execFile, spawn } from 'child_process';
 import { once } from 'events';
+import { createConnection, createServer } from 'net';
+import type { Socket } from 'net';
 import { promisify } from 'util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WindowsProcessInspector } from './windows-process-inspector';
+import { isString } from '../shared/type-utils';
 
 describe.skipIf(process.platform !== 'win32')('native Windows process inspection', () => {
   const inspector = new WindowsProcessInspector();
@@ -15,6 +18,52 @@ describe.skipIf(process.platform !== 'win32')('native Windows process inspection
   }, 40_000);
 
   afterAll(() => inspector.dispose());
+
+  it.each(['127.0.0.1', '::1'])('identifies only live listeners on %s', async (host) => {
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, host, resolve));
+    const address = server.address();
+    if (!address || isString(address)) throw new Error('Fixture port is unavailable');
+    const client = createConnection({ host, port: address.port });
+    const accepted = await new Promise<Socket>((resolve) => server.once('connection', resolve));
+    try {
+      await expect(inspector.readListeners(address.port)).resolves.toEqual([process.pid]);
+      if (!client.localPort) throw new Error('Fixture client port is unavailable');
+      await expect(inspector.readListeners(client.localPort)).resolves.toEqual([]);
+      await expect(inspector.readListeners(address.port)).resolves.toEqual([process.pid]);
+    } finally {
+      client.destroy();
+      accepted.destroy();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+    await expect(inspector.readListeners(address.port)).resolves.toEqual([]);
+  });
+
+  it('does not classify a bound socket as a listener', async () => {
+    const child = spawn(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        '$socket = New-Object System.Net.Sockets.Socket([System.Net.Sockets.AddressFamily]::InterNetwork, [System.Net.Sockets.SocketType]::Stream, [System.Net.Sockets.ProtocolType]::Tcp); try { $socket.Bind([System.Net.IPEndPoint]::new([System.Net.IPAddress]::Loopback, 0)); [Console]::Out.WriteLine($socket.LocalEndPoint.Port); [Console]::Out.Flush(); [Console]::In.ReadLine() | Out-Null } finally { $socket.Dispose() }',
+      ],
+      { windowsHide: true }
+    );
+    try {
+      if (!child.stdout) throw new Error('Fixture stdout unavailable');
+      const [data] = await once(child.stdout, 'data');
+      const port = Number(String(data).trim());
+      expect(port).toBeGreaterThan(0);
+      await expect(inspector.readListeners(port)).resolves.toEqual([]);
+    } finally {
+      const exited = once(child, 'exit');
+      child.stdin?.end('\n');
+      await exited;
+    }
+  }, 20_000);
 
   it('verifies a live child ancestry and rejects an unrelated ancestor', async () => {
     const child = spawn(

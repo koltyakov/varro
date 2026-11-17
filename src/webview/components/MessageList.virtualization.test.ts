@@ -1141,70 +1141,79 @@ describe('MessageList history pagination', () => {
     harness.animationFrames.restore();
   });
 
-  it('bounds geometry reads during a native scroll remount before saving its destination', async () => {
-    const messages = Array.from({ length: 200 }, (_, index) => {
-      const messageId = `current-${index}`;
-      return {
-        info: index % 2 === 0 ? userMessage(messageId) : assistantMessage(messageId),
-        parts: [{ ...textPart(`${messageId}-text`, 'History row'), messageID: messageId }],
-      };
-    });
-    let growth = 0;
-    const harness = await mountDeferredHistory(messages, (messageId) => {
-      const index = Number(messageId.slice('current-'.length));
-      return Math.max(0, Math.min(10, index - 90)) * growth;
-    });
-    Object.defineProperty(harness.list, 'scrollHeight', { configurable: true, value: 20_000 });
-    await measureTranscriptRows(harness.list, harness.animationFrames);
-    for (let frame = 0; frame < 4; frame += 1) {
-      await Promise.resolve();
-      harness.animationFrames.flush();
-    }
-    expect(container?.querySelector('.interactive-list-track.virtualized')).not.toBeNull();
-    expect(container?.querySelector('[data-msg-id="current-100"]')).toBeNull();
-    harness.list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -10_000 }));
-    harness.setScrollTop(10_000);
-    const rectSpy = vi.mocked(HTMLElement.prototype.getBoundingClientRect);
-    const originalRect = rectSpy.getMockImplementation()!;
-    const mutations = new MutationObserver(() => {});
-    mutations.observe(harness.list, { childList: true, subtree: true, attributes: true });
-    const measuredRows = new Set<string>();
-    let interleavedWrites = 0;
-    rectSpy.mockImplementation(function (this: HTMLElement) {
-      if (this.dataset.msgId && !measuredRows.has(this.dataset.msgId)) {
-        const writes = mutations.takeRecords();
-        if (measuredRows.size && writes.length) interleavedWrites += 1;
-        measuredRows.add(this.dataset.msgId);
+  it.each([false, true])(
+    'bounds native scroll remount geometry with held pointer %s',
+    async (held) => {
+      const messages = Array.from({ length: 200 }, (_, index) => {
+        const messageId = `current-${index}`;
+        return {
+          info: index % 2 === 0 ? userMessage(messageId) : assistantMessage(messageId),
+          parts: [{ ...textPart(`${messageId}-text`, 'History row'), messageID: messageId }],
+        };
+      });
+      let growth = 0;
+      const harness = await mountDeferredHistory(messages, (messageId) => {
+        const index = Number(messageId.slice('current-'.length));
+        return Math.max(0, Math.min(10, index - 90)) * growth;
+      });
+      Object.defineProperty(harness.list, 'scrollHeight', { configurable: true, value: 20_000 });
+      await measureTranscriptRows(harness.list, harness.animationFrames);
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        harness.animationFrames.flush();
       }
-      const rect = originalRect.call(this);
-      const index = Number(this.dataset.msgId?.slice('current-'.length));
-      return index >= 90 && index < 100
-        ? new DOMRect(rect.x, rect.y, rect.width, rect.height + growth)
-        : rect;
-    });
-    growth = 30;
-    rectSpy.mockClear();
-    harness.list.dispatchEvent(new Event('scroll'));
+      expect(container?.querySelector('.interactive-list-track.virtualized')).not.toBeNull();
+      expect(container?.querySelector('[data-msg-id="current-100"]')).toBeNull();
+      if (held) {
+        harness.list.dispatchEvent(
+          new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 499 })
+        );
+      }
+      harness.list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -10_000 }));
+      harness.setScrollTop(10_000);
+      const rectSpy = vi.mocked(HTMLElement.prototype.getBoundingClientRect);
+      const originalRect = rectSpy.getMockImplementation()!;
+      const mutations = new MutationObserver(() => {});
+      mutations.observe(harness.list, { childList: true, subtree: true, attributes: true });
+      const measuredRows = new Set<string>();
+      let interleavedWrites = 0;
+      rectSpy.mockImplementation(function (this: HTMLElement) {
+        if (this.dataset.msgId && !measuredRows.has(this.dataset.msgId)) {
+          const writes = mutations.takeRecords();
+          if (measuredRows.size && writes.length) interleavedWrites += 1;
+          measuredRows.add(this.dataset.msgId);
+        }
+        const rect = originalRect.call(this);
+        const index = Number(this.dataset.msgId?.slice('current-'.length));
+        return index >= 90 && index < 100
+          ? new DOMRect(rect.x, rect.y, rect.width, rect.height + growth)
+          : rect;
+      });
+      growth = 30;
+      rectSpy.mockClear();
+      harness.list.dispatchEvent(new Event('scroll'));
 
-    expect(container?.querySelector('[data-msg-id="current-100"]')).not.toBeNull();
-    expect(rectSpy.mock.calls.length).toBeLessThan(150);
-    mutations.disconnect();
-    // Allow anchor capture and a correction-driven range update, not a write/read per row.
-    expect(interleavedWrites).toBeLessThanOrEqual(4);
-    const destination = harness.getScrollTop();
-    expect(destination).toBeGreaterThan(10_000);
-    const marker = container!.querySelector('[data-msg-id="current-100"]')!;
-    const markerTop = marker.getBoundingClientRect().top;
-    for (let frame = 0; frame < 4; frame += 1) {
-      await Promise.resolve();
-      harness.animationFrames.flush();
+      expect(container?.querySelector('[data-msg-id="current-100"]')).not.toBeNull();
+      expect(rectSpy.mock.calls.length).toBeLessThan(150);
+      mutations.disconnect();
+      // Allow anchor capture and a correction-driven range update, not a write/read per row.
+      expect(interleavedWrites).toBeLessThanOrEqual(4);
+      const destination = harness.getScrollTop();
+      expect(destination).toBeGreaterThan(10_000);
+      const marker = container!.querySelector('[data-msg-id="current-100"]')!;
+      const markerTop = marker.getBoundingClientRect().top;
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        harness.animationFrames.flush();
+      }
+      expect(harness.getScrollTop()).toBe(destination);
+      expect(marker.isConnected).toBe(true);
+      expect(marker.getBoundingClientRect().top).toBe(markerTop);
+      expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(40);
+      if (held) document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+      harness.animationFrames.restore();
     }
-    expect(harness.getScrollTop()).toBe(destination);
-    expect(marker.isConnected).toBe(true);
-    expect(marker.getBoundingClientRect().top).toBe(markerTop);
-    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(40);
-    harness.animationFrames.restore();
-  });
+  );
 
   it('does not publish a cached history prepend inside the native scroll event', async () => {
     // SAFETY: The fixture provides the complete domain shape read by this statement.
