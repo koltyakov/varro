@@ -214,6 +214,7 @@ export type TextPart = {
   subagentResult?: {
     sessionID: string;
     state: 'completed' | 'error' | 'cancelled';
+    backgroundPending?: boolean;
     description?: string;
     agent?: string;
   };

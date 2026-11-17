@@ -261,7 +261,7 @@ describe('ToolCall', () => {
 
     it.each([
       { error: true },
-      { error: false, toolCalls: [{ tool: 'docs.lookup', status: 'error' }] },
+      { error: true, toolCalls: [{ tool: 'docs.lookup', status: 'error' }] },
     ])('styles completed execute failures from metadata %j', (metadata) => {
       const part = executePart(metadata);
       cleanup = render(() => ToolCall({ part }), container!);
@@ -388,7 +388,7 @@ describe('ToolCall', () => {
       );
     });
 
-    it('updates nested calls in place during streaming and marks the completed outer call failed', () => {
+    it('keeps the outer result successful when the script handles a nested error', () => {
       const initial = executePart();
       const [part, setPart] = createSignal<ToolPart>({
         ...initial,
@@ -459,13 +459,15 @@ describe('ToolCall', () => {
       setPart(executePart(metadata));
       expect(container?.querySelector('.tool-invocation-header')).toBe(header);
       expect(container?.querySelector('.code-mode-tool-call')).toBe(first);
-      expect(header.querySelector('.tool-call-icon')?.classList).toContain('tool-status-error');
-      expect(container?.querySelector('.structured-tool-row-result')?.classList).toContain(
-        'structured-tool-row-error'
+      expect(header.querySelector('.tool-call-icon')?.classList).toContain('tool-status-completed');
+      expect(second.querySelector('[role="status"]')?.textContent).toBe('Error');
+      expect(container?.querySelector('.structured-tool-row-error')).toBeNull();
+      expect(container?.querySelector('.structured-tool-row-result')?.textContent).toContain(
+        'Result'
       );
       header.click();
       expect(container?.querySelector('.code-mode-tool-calls')).toBeNull();
-      expect(header.querySelector('.tool-invocation-error-label')?.textContent).toBe('failed');
+      expect(header.querySelector('.tool-invocation-error-label')).toBeNull();
     });
 
     it('makes nested-only execute metadata expandable', () => {
@@ -2077,18 +2079,18 @@ describe('ToolCall', () => {
       cleanup = render(() => ToolCall({ part }), container!);
       const icon = () => container?.querySelector<HTMLElement>('.tool-call-icon-task');
       const label = () => container?.querySelector('.tool-invocation-task-status')?.textContent;
-      expect(label()).toBe('Launched');
-      expect(icon()?.classList).toContain('tool-status-launched');
-      expect(icon()?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(cableTagIcon));
-      expect(container?.querySelector('.tool-invocation-duration')).toBeNull();
+      expect(label()).toBeUndefined();
+      expect(icon()?.classList).toContain('tool-call-spinner');
+      expect(icon()?.classList).not.toContain('tool-status-completed');
       container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
-      container?.querySelector<HTMLButtonElement>('.tool-invocation-subagent-link')?.click();
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-subagent-running')?.click();
       expect(selectSessionMock).toHaveBeenCalledExactlyOnceWith('subagent-session-1');
       selectSessionMock.mockClear();
 
       // The status can arrive after history, without changing the completed tool part.
       setState('sessionStatus', { 'subagent-session-1': { type: 'busy' } });
-      expect(label()).toBe('Running');
+      expect(label()).toBeUndefined();
+      expect(icon()?.getAttribute('aria-label')).toBe('Running');
       expect(icon()?.classList).toContain('tool-call-spinner');
       expect(icon()?.classList).not.toContain('tool-status-completed');
       const elapsed = container?.querySelector('.tool-invocation-duration');
@@ -2119,7 +2121,8 @@ describe('ToolCall', () => {
       );
 
       setState('sessionStatus', 'subagent-session-1', { type: 'idle' });
-      expect(label()).toBe('Completed');
+      expect(label()).toBeUndefined();
+      expect(icon()?.getAttribute('aria-label')).toBe('Completed');
       expect(icon()?.classList).toContain('tool-status-completed');
       expect(icon()?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(checkCircleIcon));
       expect(icon()?.classList).not.toContain('tool-call-spinner');
@@ -2132,7 +2135,7 @@ describe('ToolCall', () => {
     }
   );
 
-  it('does not complete a native follow-up using the previous round’s idle status', () => {
+  it('keeps a native follow-up running across idle until the current result arrives', () => {
     const childID = 'subagent-session-1';
     setState('sessionStatus', { [childID]: { type: 'idle' } });
     const part: ToolPart = {
@@ -2151,13 +2154,20 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
     const label = () => container?.querySelector('.tool-invocation-task-status')?.textContent;
 
-    expect(label()).toBe('Launched');
+    expect(label()).toBeUndefined();
+    expect(container?.querySelector('.tool-call-spinner')).not.toBeNull();
     expect(container?.querySelector('.tool-status-completed')).toBeNull();
     setState('sessionStatus', childID, { type: 'busy' });
-    expect(label()).toBe('Running');
+    expect(label()).toBeUndefined();
+    expect(container?.querySelector('.tool-call-spinner')?.getAttribute('aria-label')).toBe(
+      'Running'
+    );
     setState('sessionStatus', childID, { type: 'idle' });
-    expect(label()).toBe('Completed');
-    expect(container?.querySelector('.tool-status-completed')).not.toBeNull();
+    expect(label()).toBeUndefined();
+    expect(container?.querySelector('.tool-status-completed')).toBeNull();
+    expect(container?.querySelector('.tool-call-spinner')?.getAttribute('aria-label')).toBe(
+      'Running'
+    );
   });
 
   it('restores completed status from verified parent history without a child status', () => {
@@ -2175,7 +2185,7 @@ describe('ToolCall', () => {
         time: { start: 1_000, end: 2_000 },
       },
     };
-    const result = (id: string, created: number) => ({
+    const result = (id: string, created: number, backgroundPending?: boolean) => ({
       info: {
         id,
         sessionID: part.sessionID,
@@ -2192,17 +2202,35 @@ describe('ToolCall', () => {
           type: 'text' as const,
           text: 'Review complete',
           synthetic: true,
-          subagentResult: { sessionID: childID, state: 'completed' as const },
+          subagentResult: { sessionID: childID, state: 'completed' as const, backgroundPending },
         },
       ],
     });
     setState('messages', [result('earlier-round', 900)]);
     cleanup = render(() => ToolCall({ part }), container!);
     const label = () => container?.querySelector('.tool-invocation-task-status')?.textContent;
-    expect(label()).toBe('Launched');
-    setState('messages', [result('earlier-round', 900), result('current-round', 2_100)]);
-    expect(label()).toBe('Completed');
-    expect(container?.querySelector('.tool-status-completed')).not.toBeNull();
+    expect(label()).toBeUndefined();
+    expect(container?.querySelector('.tool-call-spinner')).not.toBeNull();
+    setState('sessionStatus', childID, { type: 'idle' });
+    expect(label()).toBeUndefined();
+    expect(container?.querySelector('.tool-call-spinner')).not.toBeNull();
+    const interim = result('interim-result', 2_100, true);
+    setState('messages', [result('earlier-round', 900), interim]);
+    expect(container?.querySelector('.tool-call-spinner')).not.toBeNull();
+    expect(container?.querySelector('.tool-status-completed')).toBeNull();
+    setState('sessionStatus', childID, {
+      type: 'busy',
+      background: true,
+      backgroundCommand: 'go test -race',
+    });
+    setState('messages', [result('earlier-round', 900), interim, result('final-result', 2_200)]);
+    expect(container?.querySelector('.tool-call-spinner')).not.toBeNull();
+    expect(container?.querySelector('.tool-status-completed')).toBeNull();
+    setState('sessionStatus', childID, { type: 'idle' });
+    expect(label()).toBeUndefined();
+    expect(container?.querySelector('.tool-status-completed')?.getAttribute('aria-label')).toBe(
+      'Completed'
+    );
   });
 
   it.each(['completed', 'error'] as const)(

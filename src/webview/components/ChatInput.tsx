@@ -119,7 +119,6 @@ import {
   isSessionCompacting,
   isSessionAwaitingInput,
   isSessionStatusWorking,
-  isSessionTreeStatusWorking,
   replaceClipboardImages,
   replaceNativePdfs,
   setNativePdfContextFile,
@@ -483,6 +482,7 @@ type QueuedSessionDispatchPhase = {
   phase: 'dispatching' | 'admitted' | 'running';
   admittedAt?: number;
   completedBeforeAdmission?: boolean;
+  snapshotTreeWorking?: boolean;
   statusCheckAfter?: number;
   statusCheckInFlight?: boolean;
   statusCheckOwner?: symbol;
@@ -4019,11 +4019,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     sessionId !== state.activeSessionId
       ? (getAuthoritativeQueuedSessionStatus(sessionId) ?? state.sessionStatus[sessionId]?.type)
       : state.sessionStatus[sessionId]?.type;
+  const isOtherQueuedTreeSessionWorking = (sessionId: string) =>
+    getSessionTreeIdsForSession(sessionId).some(
+      (id) => id !== sessionId && isSessionStatusWorking(state.sessionStatus[id])
+    );
   const isQueuedSessionTreeWorking = (sessionId: string) => {
-    const authoritativeStatus = getAuthoritativeQueuedSessionStatus(sessionId);
-    return authoritativeStatus
-      ? authoritativeStatus === 'busy'
-      : isSessionTreeStatusWorking(sessionId);
+    const status = getQueuedSessionStatusType(sessionId);
+    return status === 'busy' || status === 'retry' || isOtherQueuedTreeSessionWorking(sessionId);
   };
 
   createEffect(() => {
@@ -4142,6 +4144,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       scheduleQueuedStatusReconciliation();
       return false;
     }
+    if (dispatch.snapshotTreeWorking || isOtherQueuedTreeSessionWorking(sessionId)) {
+      scheduleQueuedStatusReconciliation();
+      return false;
+    }
     if (dispatch.admittedAt === undefined) {
       if (dispatch.phase === 'running') dispatch.completedBeforeAdmission = true;
       return false;
@@ -4223,8 +4229,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         dispatch.statusCheckOwner = undefined;
         return;
       }
-      const status = statuses[sessionId];
-      if (status?.type === 'busy' || status?.type === 'retry') {
+      const tree = getSessionTreeIdsForSession(sessionId);
+      dispatch.snapshotTreeWorking = tree.some(
+        (id) => id !== sessionId && isSessionStatusWorking(statuses[id])
+      );
+      if (
+        isSessionStatusWorking(statuses[sessionId]) ||
+        dispatch.snapshotTreeWorking ||
+        isOtherQueuedTreeSessionWorking(sessionId)
+      ) {
         dispatch.statusCheckInFlight = false;
         dispatch.statusCheckOwner = undefined;
         observeQueuedSessionStatus(sessionId, 'busy', 'reconciliation');

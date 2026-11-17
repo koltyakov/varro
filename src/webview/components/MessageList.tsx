@@ -936,26 +936,41 @@ export function MessageList() {
     const notice = getActiveUsageLimitNotice(state.activeSessionId);
     return notice && shouldDisplayUsageLimitNotice(notice) ? notice : null;
   });
-  const activeSessionWorking = createMemo(() => isActiveSessionWorking());
+  const isManagedChild = createMemo(() =>
+    state.sessions.some((session) => session.id === state.activeSessionId && !!session.parentID)
+  );
+  const managedChildWorking = createMemo(() => {
+    const id = state.activeSessionId;
+    if (!id || !isManagedChild()) return false;
+    return (
+      isSessionStatusWorking(state.sessionStatus[id]) ||
+      getSessionTreeIds(id).some((childId) => isSessionStatusWorking(state.sessionStatus[childId]))
+    );
+  });
+  // The global loading flag follows the orchestration tree, including the parent
+  // and siblings. A child transcript must only reflect its own work.
+  const activeSessionWorking = createMemo(() =>
+    isManagedChild() ? managedChildWorking() || isSessionCompacting() : isActiveSessionWorking()
+  );
   const subagentsWorking = createMemo(() =>
     getSessionTreeIds(state.activeSessionId).some(
       (id) => id !== state.activeSessionId && isSessionStatusWorking(state.sessionStatus[id])
     )
   );
-  const backgroundWorkPending = createMemo(() => {
+  const backgroundScopeIds = createMemo(() => {
     const sessionId = state.activeSessionId;
-    if (!sessionId) return false;
-    const rootId = getSessionTreeRootId(sessionId) || sessionId;
-    return [rootId, sessionId, ...getSessionTreeIds(rootId)].some((id) => {
+    if (!sessionId) return [];
+    const scopeId = isManagedChild() ? sessionId : getSessionTreeRootId(sessionId) || sessionId;
+    return [...new Set([sessionId, scopeId, ...getSessionTreeIds(scopeId)])];
+  });
+  const backgroundWorkPending = createMemo(() =>
+    backgroundScopeIds().some((id) => {
       const status = state.sessionStatus[id];
       return status?.type === 'busy' && status.background === true;
-    });
-  });
+    })
+  );
   const backgroundWorkStartedAt = createMemo(() => {
-    const sessionId = state.activeSessionId;
-    if (!sessionId) return undefined;
-    const rootId = getSessionTreeRootId(sessionId) || sessionId;
-    const starts = [rootId, sessionId, ...getSessionTreeIds(rootId)].flatMap((id) => {
+    const starts = backgroundScopeIds().flatMap((id) => {
       const status = state.sessionStatus[id];
       return status?.type === 'busy' &&
         status.background &&
@@ -966,10 +981,7 @@ export function MessageList() {
     return starts.length > 0 ? Math.min(...starts) : undefined;
   });
   const backgroundWorkCommand = createMemo(() => {
-    const sessionId = state.activeSessionId;
-    if (!sessionId) return undefined;
-    const rootId = getSessionTreeRootId(sessionId) || sessionId;
-    for (const id of [sessionId, rootId, ...getSessionTreeIds(rootId)]) {
+    for (const id of backgroundScopeIds()) {
       const status = state.sessionStatus[id];
       if (status?.type === 'busy' && status.background && status.backgroundCommand)
         return status.backgroundCommand;
@@ -2782,10 +2794,11 @@ export function MessageList() {
   const shouldShowLoadingRow = createMemo(
     () =>
       loadingRowEligible() &&
-      !visibleBlockingStreamingPart() &&
-      !committedTextBlocksReappear() &&
-      !visibleRunningInlineFileEdit() &&
-      !hasVisibleActivityTrayRows()
+      (managedChildWorking() ||
+        (!visibleBlockingStreamingPart() &&
+          !committedTextBlocksReappear() &&
+          !visibleRunningInlineFileEdit() &&
+          !hasVisibleActivityTrayRows()))
   );
 
   createEffect(() => {
@@ -2841,7 +2854,7 @@ export function MessageList() {
       return;
     }
 
-    if (waitingForBackground()) {
+    if (managedChildWorking() || waitingForBackground()) {
       clearLoadingRowReappearTimer();
       clearLoadingRowCommittedTextTimer();
       clearLoadingRowReserveReleaseTimer();
@@ -10854,6 +10867,7 @@ export function MessageList() {
                 <LoadingRow
                   compacting={isSessionCompacting()}
                   waiting={waitingForBackground()}
+                  keepThinking={managedChildWorking()}
                   toolsRunning={waitingForTools()}
                   waitingStartedAt={backgroundWorkStartedAt()}
                   waitingCommand={backgroundWorkCommand()}

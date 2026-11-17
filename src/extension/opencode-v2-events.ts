@@ -62,7 +62,13 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     return emit('session.deleted', { sessionID, info: { id: sessionID } });
   if (event.type === 'session.archived' || event.type === 'session.unarchived')
     return emit(event.type);
-  if (event.type === 'session.status.updated') return emit('session.status');
+  if (event.type === 'session.status.updated') {
+    // Native idle describes model execution, not a session waiting on its jobs.
+    if (context.backgroundPending && asRecord(data.status)?.type === 'idle') {
+      return emit('session.status', { ...properties, status: backgroundStatus });
+    }
+    return emit('session.status');
+  }
   if (event.type === 'session.execution.started')
     return emit('session.status', {
       sessionID,

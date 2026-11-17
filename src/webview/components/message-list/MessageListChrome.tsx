@@ -493,6 +493,7 @@ export function LoadingRow(props: {
   waiting?: boolean;
   toolsRunning?: boolean;
   waitingStartedAt?: number;
+  keepThinking?: boolean;
   waitingCommand?: string;
   turnStartedAt?: number;
   elapsedStartedAt?: number;
@@ -553,7 +554,7 @@ export function LoadingRow(props: {
       onCleanup(() => observer.disconnect());
     });
   });
-  const waiting = () => props.waiting && !props.compacting;
+  const waiting = () => props.waiting && !props.compacting && !props.keepThinking;
   const waitingClock = createMemo<{
     sessionId: string | null;
     startedAt: number;
@@ -572,7 +573,7 @@ export function LoadingRow(props: {
   }, null);
 
   const isStale = () => {
-    if (props.waiting) return false;
+    if (props.waiting || props.keepThinking) return false;
     const currentNow = now();
     const startedAt = loadingStartedAt();
     if (startedAt === null || currentNow - startedAt < STALE_LOADING_TOTAL_MS) return false;
@@ -625,7 +626,11 @@ export function LoadingRow(props: {
           >
             <Show
               when={!props.compacting && isStale()}
-              fallback={<ThinkingIndicator label={props.compacting ? 'Compacting' : verb()} />}
+              fallback={
+                <ThinkingIndicator
+                  label={props.compacting ? 'Compacting' : props.keepThinking ? 'Thinking' : verb()}
+                />
+              }
             >
               <span>Session may be stale</span>
             </Show>

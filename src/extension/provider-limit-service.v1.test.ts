@@ -202,6 +202,57 @@ describe('ProviderLimitService with only V1 credentials', () => {
       await expectNoV2Store();
     });
 
+    it.each([
+      { code: 401, transport: 'HTTP' },
+      { code: 403, transport: 'HTTP' },
+      { code: 401, transport: 'body' },
+      { code: 403, transport: 'body' },
+    ])(
+      'drops retained reset cards after $transport $code without dropping quotas',
+      async ({ code, transport }) => {
+        await writeAuth({ [providerID]: { type: 'api', key: 'v1-zai-token' } });
+        createService({ id: providerID, models: {} });
+        vi.mocked(fetch)
+          .mockResolvedValueOnce(zaiQuotaResponse(now))
+          .mockResolvedValueOnce(
+            Response.json({
+              code: 200,
+              data: {
+                weekResets: [{ available: true, expireTime: '2026-11-01T00:00:00Z' }],
+                fiveHourResets: [],
+              },
+            })
+          );
+        await expect(service.get(providerID, null)).resolves.toMatchObject({
+          usageLimitResets: { availableCount: 1 },
+        });
+
+        now += 30_000;
+        vi.mocked(fetch)
+          .mockResolvedValueOnce(zaiQuotaResponse(now))
+          .mockResolvedValueOnce(
+            transport === 'HTTP'
+              ? new Response('', { status: code })
+              : Response.json({ code, success: false })
+          );
+        const denied = await service.get(providerID, null);
+        expect(denied).toMatchObject({
+          status: 'available',
+          checkedAt: now,
+          windows: expect.arrayContaining([expect.objectContaining({ id: 'five_hour' })]),
+        });
+        expect(denied).not.toHaveProperty('usageLimitResets');
+
+        now += 30_000;
+        vi.mocked(fetch)
+          .mockResolvedValueOnce(zaiQuotaResponse(now))
+          .mockResolvedValueOnce(new Response('', { status: 503 }));
+        const unavailable = await service.get(providerID, null);
+        expect(unavailable).toMatchObject({ usageLimitResetsUnavailable: true });
+        expect(unavailable).not.toHaveProperty('usageLimitResets');
+      }
+    );
+
     it.each(['unavailable', 'api-error'] as const)(
       'keeps quota windows when reset cards are %s',
       async (failure) => {

@@ -32,6 +32,32 @@ afterEach(async () => {
 });
 
 describe('v2 background completion', () => {
+  it('does not let a model-idle update clear a child’s pending background command', () => {
+    const adapter = new OpenCodeV2Adapter(async () => ({ data: {} }));
+    const sessionID = 'ses_child';
+    adapter.observe('shell.created', { info: { ...shell, metadata: { sessionID } } });
+    adapter.observe('session.execution.succeeded', { sessionID });
+    const update = {
+      type: 'session.status.updated',
+      data: { sessionID, status: { type: 'idle' } },
+    };
+    expect(projectV2Event(update, adapter.eventContext(sessionID))).toMatchObject([
+      {
+        type: 'session.status',
+        properties: {
+          sessionID,
+          status: { type: 'busy', background: true, backgroundCommand: shell.command },
+        },
+      },
+    ]);
+    adapter.observe('shell.exited', { id: shell.id });
+    adapter.observe('session.step.started', { sessionID });
+    adapter.observe('session.execution.succeeded', { sessionID });
+    expect(projectV2Event(update, adapter.eventContext(sessionID))).toMatchObject([
+      { type: 'session.status', properties: { sessionID, status: { type: 'idle' } } },
+    ]);
+  });
+
   it('drops old process state on reconnect when the canonical shell snapshot is empty', async () => {
     const adapter = new OpenCodeV2Adapter(async () => ({ data: {} }));
     adapter.observe('shell.created', { info: shell }, undefined, '/repo');

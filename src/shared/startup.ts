@@ -63,6 +63,12 @@ export async function measureStartupPhase<T>(
   }
 }
 
+export class StartupDeadlineError extends Error {
+  constructor(phase: string, timeoutMs: number) {
+    super(`${phase} timed out after ${timeoutMs}ms`);
+  }
+}
+
 /** Bound read-only waits and cancel supported operations. Owned mutations must settle separately. */
 export async function withStartupDeadline<T>(
   operation: (signal: AbortSignal) => PromiseLike<T>,
@@ -81,7 +87,7 @@ export async function withStartupDeadline<T>(
       rejectAbort = () => reject(controller.signal.reason);
       controller.signal.addEventListener('abort', rejectAbort, { once: true });
       timer = setTimeout(
-        () => controller.abort(new Error(`${phase} timed out after ${timeoutMs}ms`)),
+        () => controller.abort(new StartupDeadlineError(phase, timeoutMs)),
         timeoutMs
       );
     });

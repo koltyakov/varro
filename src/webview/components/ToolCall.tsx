@@ -312,8 +312,7 @@ function isCodeModeFailure(toolName: string, state: ToolPart['state']): boolean 
   return (
     normalizeToolName(toolName) === 'execute' &&
     state.status === 'completed' &&
-    (state.metadata.error === true ||
-      getCodeModeToolCalls(toolName, state).some((call) => call.status === 'error'))
+    state.metadata.error === true
   );
 }
 
@@ -1546,43 +1545,57 @@ function GenericToolCall(props: {
         props.fullOutput.startsWith('The subagent is working in the background'))
     );
   });
-  const isRunning = createMemo(() => {
-    if (props.state.status === 'running') return true;
-    if (!isTask() || props.state.status !== 'completed') return false;
-    // A background launch completes before its child does, including native
-    // foreground calls handed off to the background after launch.
-    return isSessionStatusWorking(taskChildStatus());
+  const isNativeBackgroundLaunch = () => {
+    const state = props.state;
+    return (
+      isBackgroundLaunch() && state.status === 'completed' && state.metadata.status === 'running'
+    );
+  };
+  const childWorking = createMemo(() => {
+    if (isSessionStatusWorking(taskChildStatus())) return true;
+    const sessionId = taskSessionId();
+    return (
+      isBackgroundLaunch() &&
+      !!sessionId &&
+      getSessionTreeIds(sessionId).some((id) => isSessionStatusWorking(appState.sessionStatus[id]))
+    );
   });
   const observedChildWork = createMemo<string | null>((previous) => {
     const sessionId = taskSessionId();
     const state = props.state;
     if (!sessionId || (state.status !== 'running' && state.status !== 'completed')) return null;
     const run = `${sessionId}:${state.time.start}`;
-    return isSessionStatusWorking(taskChildStatus()) || previous === run ? run : null;
+    return childWorking() || previous === run ? run : null;
   }, null);
-  const isLaunched = createMemo(() => {
-    if (!isBackgroundLaunch() || isRunning()) return false;
+  const taskResultNotice = createMemo(() => {
+    if (!isBackgroundLaunch() || childWorking()) return undefined;
     const state = props.state;
-    if (state.status !== 'completed') return false;
+    if (state.status !== 'completed') return undefined;
     const sessionId = taskSessionId();
-    if (!sessionId) return true;
-    const isFollowUp = state.input.sessionID === sessionId || state.input.task_id === sessionId;
-    // A follow-up may still have the idle status from the previous run.
-    if (taskChildStatus()?.type === 'idle' && (!isFollowUp || observedChildWork())) return false;
-    // On history reload the active-session snapshot may omit idle children.
-    // A verified result in the parent transcript can confirm completion instead.
+    if (!sessionId) return undefined;
     const entries = getMessageLookup().bySessionId.get(props.tool.sessionID) ?? [];
-    return !entries.some(
-      ({ info, parts }) =>
-        info.role === 'user' &&
-        info.time.created >= state.time.start &&
-        parts.some(
-          (part) =>
-            part.type === 'text' &&
-            part.synthetic &&
-            part.subagentResult?.sessionID === sessionId &&
-            part.subagentResult.state === 'completed'
-        )
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const { info, parts } = entries[i]!;
+      if (info.role !== 'user' || info.time.created < state.time.start) continue;
+      for (const part of parts) {
+        if (part.type === 'text' && part.synthetic && part.subagentResult?.sessionID === sessionId)
+          return part.subagentResult;
+      }
+    }
+    return undefined;
+  });
+  const isRunning = createMemo(() => {
+    if (props.state.status === 'running') return true;
+    if (!isTask() || props.state.status !== 'completed') return false;
+    if (childWorking()) return true;
+    const notice = taskResultNotice();
+    // Native idle only ends an execution period. Wait for the child result,
+    // which can itself report that background work is still pending.
+    return (
+      !!notice?.backgroundPending ||
+      (isBackgroundLaunch() &&
+        !notice &&
+        (isNativeBackgroundLaunch() || taskChildStatus()?.type !== 'idle' || !observedChildWork()))
     );
   });
   const taskExecutionEntries = createMemo<Array<[string, unknown]>>(() => {
@@ -1718,9 +1731,11 @@ function GenericToolCall(props: {
       ? 'tool-status-pending'
       : isRunning()
         ? 'tool-status-running'
-        : isLaunched()
-          ? 'tool-status-launched'
-          : props.statusClass;
+        : taskResultNotice()?.state === 'error'
+          ? 'tool-status-error'
+          : taskResultNotice()?.state === 'cancelled'
+            ? 'tool-status-aborted'
+            : props.statusClass;
   const openTaskSession = () => {
     const sessionId = taskSessionId();
     if (!sessionId) return;
@@ -1776,7 +1791,7 @@ function GenericToolCall(props: {
   };
   const completedDurationMs = () => {
     const state = props.state;
-    if (state.status !== 'completed' || isRunning() || isLaunched()) return null;
+    if (state.status !== 'completed' || isRunning()) return null;
     return Math.max(0, state.time.end - state.time.start);
   };
   const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
@@ -1868,7 +1883,15 @@ function GenericToolCall(props: {
           <ToolCallIcon
             toolName={props.tool.tool}
             statusClass={statusClass()}
-            statusLabel={waitingForPermission() ? 'Waiting for permission' : undefined}
+            statusLabel={
+              waitingForPermission()
+                ? 'Waiting for permission'
+                : isBackgroundLaunch() && isRunning() && !taskRetryStatus()
+                  ? 'Running'
+                  : isBackgroundLaunch() && statusClass() === 'tool-status-completed'
+                    ? 'Completed'
+                    : undefined
+            }
             waiting={waitingForPermission()}
           />
           <span
@@ -1876,15 +1899,9 @@ function GenericToolCall(props: {
           >
             {props.title}
           </span>
-          <Show when={isBackgroundLaunch() && !taskRetryStatus()}>
+          <Show when={isBackgroundLaunch() && waitingForPermission() && !taskRetryStatus()}>
             <span class="tool-invocation-task-status" role="status">
-              {waitingForPermission()
-                ? 'Waiting for permission'
-                : isRunning()
-                  ? 'Running'
-                  : isLaunched()
-                    ? 'Launched'
-                    : 'Completed'}
+              Waiting for permission
             </span>
           </Show>
           <Show when={visibleTaskTokenUsage()}>

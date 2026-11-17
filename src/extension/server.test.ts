@@ -573,22 +573,53 @@ describe('managed runtime Ask recovery', () => {
     }
   );
 
-  it('bounds startup config inspection without a late recovery after timeout', async () => {
-    const { state, needed, stop, launch } = fixture();
-    const inspection = deferred<boolean>();
-    needed.mockImplementation(() => inspection.promise);
-    const operation = state.restoreManagedRuntimeConfigAtStartup(
-      state.disposeGeneration,
-      new AbortController().signal
-    );
-    const rejected = expect(operation).rejects.toThrow(
-      'OpenCode runtime config inspection timed out after 2000ms'
-    );
-    await vi.advanceTimersByTimeAsync(2000);
+  it.each(['config inspection', 'Ask catalog'])(
+    'attaches to the existing server when %s times out, without a late restart',
+    async (phase) => {
+      const { server, state, needed, wire, idle, claim, stop, launch } = fixture();
+      state._status = { state: 'stopped' };
+      vi.mocked(state.processManager.refreshStartupRegistration).mockResolvedValue(true);
+      const stream = vi.spyOn(state, 'startEventStream').mockResolvedValue(undefined);
+      const inspection = deferred<boolean>();
+      const catalog = deferred<Array<{ name: string }>>();
+      if (phase === 'config inspection') needed.mockReturnValue(inspection.promise);
+      else wire.mockReturnValueOnce(catalog.promise);
+
+      const operation = server.start();
+      const attached = expect(operation).resolves.toBe(server.url);
+      await vi.advanceTimersByTimeAsync(2000);
+      await attached;
+      expect(stream).toHaveBeenCalledOnce();
+      expect(server.status).toMatchObject({ state: 'running', url: server.url });
+      if (phase === 'Ask catalog') expect(wire.mock.calls[0]?.[3]?.signal?.aborted).toBe(true);
+
+      inspection.resolve(true);
+      catalog.resolve([{ name: 'build' }]);
+      await flushMicrotasks();
+      expect(state.runtimeAskRecoveryPending).toBe(false);
+      expect(idle).not.toHaveBeenCalled();
+      expect(claim).not.toHaveBeenCalled();
+      expect(stop).not.toHaveBeenCalled();
+      expect(launch).not.toHaveBeenCalled();
+      await server.disconnect();
+    }
+  );
+
+  it('propagates caller cancellation during optional Ask catalog recovery', async () => {
+    const { state, wire, claim, stop, launch } = fixture();
+    const catalog = deferred<Array<{ name: string }>>();
+    wire.mockReturnValueOnce(catalog.promise);
+    const controller = new AbortController();
+    const rejected = expect(
+      state.restoreManagedRuntimeConfigAtStartup(state.disposeGeneration, controller.signal)
+    ).rejects.toThrow('Startup cancelled by caller');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(wire).toHaveBeenCalledOnce();
+    controller.abort(new Error('Startup cancelled by caller'));
     await rejected;
-    inspection.resolve(true);
+    catalog.resolve([{ name: 'build' }]);
     await flushMicrotasks();
-    expect(state.processManager.prepareForHealthyExistingServer).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
     expect(stop).not.toHaveBeenCalled();
     expect(launch).not.toHaveBeenCalled();
   });

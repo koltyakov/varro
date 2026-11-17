@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionLookup } from '../../shared/protocol';
 import { client } from './client';
 import { lookupSessionReference, lookupSessionReferences } from './session-reference-lookups';
+import { splitSessionReferenceText } from './session-reference';
 import { resetDefaultAppState, setState, state } from './state';
 
 function reference(id: string): SessionLookup {
@@ -17,6 +18,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
   resetDefaultAppState();
 });
 
@@ -40,6 +42,51 @@ describe('session reference lookups', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(state.sessionLookups).toEqual({});
   });
+
+  it('removes a rendered title on a confirmed 404 and caches the miss', async () => {
+    vi.useFakeTimers();
+    const id = 'ses_removed';
+    const fetch = vi
+      .spyOn(client.varro.session, 'reference')
+      .mockResolvedValueOnce(reference(id))
+      .mockRejectedValueOnce(new Error('404 Session not found'));
+    await lookupSessionReference(id);
+    expect(splitSessionReferenceText(id)).toMatchObject([
+      { type: 'session', reference: { title: reference(id).title } },
+    ]);
+
+    vi.setSystemTime(Date.now() + 60_000);
+    await expect(lookupSessionReference(id)).resolves.toBeNull();
+    expect(state.sessionLookups[id]).toBeUndefined();
+    expect(splitSessionReferenceText(id)).toEqual([{ type: 'text', content: id }]);
+    await expect(lookupSessionReference(id)).resolves.toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['503 Service unavailable', '404 Location not found'])(
+    'preserves cached titles on %s and retries after the cooldown',
+    async (message) => {
+      vi.useFakeTimers();
+      const id = 'ses_retained';
+      const original = reference(id);
+      const updated = { ...original, title: 'Renamed' };
+      const fetch = vi
+        .spyOn(client.varro.session, 'reference')
+        .mockResolvedValueOnce(original)
+        .mockRejectedValueOnce(new Error(message))
+        .mockResolvedValueOnce(updated);
+      await lookupSessionReference(id);
+
+      vi.setSystemTime(Date.now() + 60_000);
+      await expect(lookupSessionReference(id)).resolves.toEqual(original);
+      expect(state.sessionLookups[id]).toEqual(original);
+      await expect(lookupSessionReference(id)).resolves.toEqual(original);
+      expect(fetch).toHaveBeenCalledTimes(2);
+
+      vi.setSystemTime(Date.now() + 60_000);
+      await expect(lookupSessionReference(id)).resolves.toEqual(updated);
+    }
+  );
 
   it('limits concurrent requests and drains queued IDs', async () => {
     const releases: Array<() => void> = [];

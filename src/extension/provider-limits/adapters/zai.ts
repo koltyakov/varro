@@ -107,7 +107,7 @@ export function createZaiAdapter(): ProviderLimitAdapter {
         const resetResult = await fetchZaiResetCredits(token);
         if (resetResult.kind === 'error') {
           status.usageLimitResetsUnavailable = true;
-        } else if (resetResult.credits.availableCount > 0) {
+        } else if (resetResult.kind === 'available' && resetResult.credits.availableCount > 0) {
           status.usageLimitResets = { ...resetResult.credits, checkedAt };
         }
         return status;
@@ -125,6 +125,7 @@ export function createZaiAdapter(): ProviderLimitAdapter {
 
 type ZaiResetCreditsResult =
   | { kind: 'available'; credits: ProviderLimitResetCredits }
+  | { kind: 'denied' }
   | { kind: 'error' };
 
 async function fetchZaiResetCredits(token: string): Promise<ZaiResetCreditsResult> {
@@ -138,10 +139,14 @@ async function fetchZaiResetCredits(token: string): Promise<ZaiResetCreditsResul
       },
       signal: AbortSignal.timeout(10_000),
     });
+    // Access denial must not opt in to reuse of the previous balance.
+    if (response.status === 401 || response.status === 403) return { kind: 'denied' };
     if (!response.ok) return { kind: 'error' };
 
     const payload = asRecord(await readBoundedResponseJson(response));
-    if (parseFiniteNumber(payload?.code) !== 200 || payload?.success === false) {
+    const code = parseFiniteNumber(payload?.code);
+    if (code === 401 || code === 403) return { kind: 'denied' };
+    if (code !== 200 || payload?.success === false) {
       return { kind: 'error' };
     }
 

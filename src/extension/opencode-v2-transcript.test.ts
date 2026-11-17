@@ -610,6 +610,21 @@ describe('V2 generated transcript records', () => {
     }
   );
 
+  it.each(['ses_child', 'ses_wrong'])('checks the native running envelope for %s', (childID) => {
+    const projected = projectV2Message(
+      {
+        ...base,
+        type: 'synthetic',
+        text: `<subagent sessionID="${childID}" state="running" description="Audit">\nPartial result\n</subagent>`,
+        metadata: { source: 'subagent', childID: 'ses_child', state: 'completed' },
+      },
+      'ses_one'
+    );
+    const result = expect(projected.parts[0]);
+    if (childID === 'ses_child') result.toHaveProperty('subagentResult.backgroundPending', true);
+    else result.not.toHaveProperty('subagentResult.backgroundPending');
+  });
+
   it.each([
     undefined,
     { source: 'other', childID: 'ses_child', state: 'completed' },

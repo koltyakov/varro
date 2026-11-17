@@ -28,6 +28,7 @@ import {
   measureStartupPhase,
   STARTUP_CREDENTIAL_TIMEOUT_MS,
   STARTUP_HEALTH_TIMEOUT_MS,
+  StartupDeadlineError,
   withStartupDeadline,
 } from '../shared/startup';
 import type { StartupPhase } from '../shared/startup';
@@ -1044,24 +1045,31 @@ export class OpenCodeServer extends EventEmitter {
     // Restore the runtime before publishing running state and routing catalogs.
     // Ordinary reuse keeps the background ownership-preparation fast path.
     if (this.isAttachOnly) return;
-    const candidate = await withStartupDeadline(
-      () => this.processManager.hasRuntimeConfigRecoveryCandidate(),
-      2000,
-      'OpenCode runtime config inspection',
-      signal
-    );
-    this.throwIfStartCancelled(disposeGeneration, signal);
-    if (!candidate) return;
-    this.startExistingServerPreparation(disposeGeneration, signal);
-    await this.existingServerPreparationOperation;
-    this.throwIfStartCancelled(disposeGeneration, signal);
-    const missingAsk = await withStartupDeadline(
-      (recoverySignal) => this.hasMissingRuntimeAskAgent(recoverySignal),
-      2000,
-      'OpenCode Ask agent preparation',
-      signal
-    );
-    if (!missingAsk) return;
+    try {
+      const candidate = await withStartupDeadline(
+        () => this.processManager.hasRuntimeConfigRecoveryCandidate(),
+        2000,
+        'OpenCode runtime config inspection',
+        signal
+      );
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      if (!candidate) return;
+      this.startExistingServerPreparation(disposeGeneration, signal);
+      await this.existingServerPreparationOperation;
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      const missingAsk = await withStartupDeadline(
+        (recoverySignal) => this.hasMissingRuntimeAskAgent(recoverySignal),
+        2000,
+        'OpenCode Ask agent preparation',
+        signal
+      );
+      if (!missingAsk) return;
+    } catch (error) {
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      if (!(error instanceof StartupDeadlineError)) throw error;
+      logger.warn(`${error.message}; deferring runtime config recovery`);
+      return;
+    }
     this.throwIfStartCancelled(disposeGeneration, signal);
     if ((await this.readRestartBlockers()).totalSessionCount > 0) return;
     this.throwIfStartCancelled(disposeGeneration, signal);

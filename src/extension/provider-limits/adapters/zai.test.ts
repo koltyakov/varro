@@ -282,7 +282,7 @@ describe('createZaiAdapter', () => {
               ? new Response('not json')
               : Response.json(
                   failure === 'api-error'
-                    ? { code: 401, success: false }
+                    ? { code: 500, success: false }
                     : {
                         code: 200,
                         success: true,

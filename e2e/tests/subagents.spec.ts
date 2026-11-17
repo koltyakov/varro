@@ -89,6 +89,75 @@ test('keeps a parent turn pending and shows the waiting block only for off-scree
   await expect(page.locator('.trailing-assistant-summary-row')).toBeVisible();
 });
 
+test('keeps Thinking visible in a working child with visible tool activity', async ({ page }) => {
+  await page.goto(
+    '/e2e/harness/index.html?scenario=subagent-sessions&childTaskState=running&nestedChildTask'
+  );
+  const parentCard = page.locator('.tool-invocation-task .tool-invocation-header');
+  await expect(parentCard.locator('.tool-call-spinner')).toBeVisible();
+  await expect(parentCard).not.toContainText(/Launched|Completed|Running/);
+  await parentCard.click();
+  await page.getByTitle('Open subagent session').click();
+  await expect(page.locator('.chat-header-title-text').first()).toHaveText('Inspect API routes');
+  await expect(page.locator('.tool-invocation-task .tool-call-spinner')).toBeVisible();
+  const thinking = page.locator('.interactive-loading-row:not(.is-reserved) .loading-verb');
+  await expect(thinking).toHaveText('Thinking');
+  await expect(thinking).toBeVisible();
+});
+
+test('does not show parent or sibling work inside a completed child', async ({ page }) => {
+  await page.goto(
+    '/e2e/harness/index.html?scenario=subagent-sessions&childTaskState=completed&subagentResult=1'
+  );
+  const card = page.locator('.tool-invocation-task .tool-invocation-header');
+  await expect(card.locator('.tool-status-completed')).toBeVisible();
+  await card.click();
+  await page.getByRole('button', { name: 'Open subagent session', exact: true }).click();
+  await expect(page.locator('.chat-header-title-text').first()).toHaveText('Inspect API routes');
+  await expect(page.locator('.managed-subagent-footer')).toBeVisible();
+  const loading = page.locator('.interactive-loading-row:not(.is-reserved)').filter({
+    has: page.locator('.loading-indicator, .background-process'),
+  });
+  await expect(loading).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const harness = (
+      window as typeof window & {
+        __varroE2E: { replayServerEvent(event: ServerEvent): void };
+      }
+    ).__varroE2E;
+    for (const id of ['session-parent', 'session-child-b']) {
+      harness.replayServerEvent({
+        type: 'session.status',
+        properties: {
+          sessionID: id,
+          status: { type: 'busy', background: true, backgroundCommand: 'other session check' },
+        },
+      });
+    }
+    // The same child can start another round while its parent remains busy.
+    harness.replayServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-child-a', status: { type: 'busy' } },
+    });
+  });
+  await expect(loading.locator('.loading-verb')).toHaveText('Thinking');
+  await page.evaluate(() => {
+    const harness = (
+      window as typeof window & {
+        __varroE2E: { replayServerEvent(event: ServerEvent): void };
+      }
+    ).__varroE2E;
+    harness.replayServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-child-a', status: { type: 'idle' } },
+    });
+  });
+  await expect(loading).toHaveCount(0);
+  await page.getByLabel('Back to parent session').click();
+  await expect(card.locator('.tool-status-completed')).toBeVisible();
+});
+
 test('keeps a completed background launch running until its child is idle', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions&childTaskState=running');
   const header = page.locator('.tool-invocation-task .tool-invocation-header');

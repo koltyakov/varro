@@ -6515,6 +6515,59 @@ describe('ChatInput', () => {
     expect(sendMessageMock).toHaveBeenCalledTimes(2);
   });
 
+  it.each(['snapshot', 'local', 'both'])(
+    'keeps an inactive parent queue blocked by a busy descendant in %s status',
+    async (observedBy) => {
+      vi.useFakeTimers();
+      setState('activeSessionId', 'session-2');
+      setState('sessions', [
+        session('session-1', 1_000),
+        session('session-2', 1_000),
+        session('child', 2_000, { parentID: 'session-1' }),
+        session('grandchild', 3_000, { parentID: 'child' }),
+      ]);
+      setState('sessionStatus', { 'session-1': { type: 'idle' } });
+      setState('queuedMessages', [
+        { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
+        { id: 'q2', sessionId: 'session-1', text: 'After the child settles' },
+      ]);
+      sendMessageMock.mockResolvedValue(true);
+      vi.mocked(client.session.status)
+        .mockResolvedValueOnce(
+          observedBy === 'local'
+            ? { 'session-1': { type: 'idle' } }
+            : { 'session-1': { type: 'idle' }, grandchild: { type: 'busy' } }
+        )
+        .mockResolvedValue({
+          'session-1': { type: 'idle' },
+          grandchild: { type: 'idle' },
+          'session-2': { type: 'busy' },
+        });
+
+      cleanup = render(() => ChatInput(), container!);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(sendMessageMock).toHaveBeenCalledOnce();
+      postQueuedSessionStatus('session-1', 'busy');
+      if (observedBy !== 'snapshot') setState('sessionStatus', 'grandchild', { type: 'busy' });
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(client.session.status).toHaveBeenCalledOnce();
+      expect(sendMessageMock).toHaveBeenCalledOnce();
+      expect(state.queuedMessages.map(({ id }) => id)).toEqual(['q2']);
+      postQueuedSessionStatus('session-1', 'idle');
+      await vi.advanceTimersByTimeAsync(300);
+      expect(sendMessageMock).toHaveBeenCalledOnce();
+
+      setState('sessionStatus', 'grandchild', { type: 'idle' });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+        'First prompt',
+        'After the child settles',
+      ]);
+      expect(state.queuedMessages).toEqual([]);
+    }
+  );
+
   it('retries an unresolved status reconciliation after remounting', async () => {
     vi.useFakeTimers();
     setState('activeSessionId', 'session-2');

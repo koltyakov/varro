@@ -367,8 +367,9 @@ function parseUserMessageParts(parts: Part[]): ParsedUserMessageContent {
 
     if (part.synthetic && part.subagentResult) {
       const result = part.subagentResult;
-      const outcome =
-        result.state === 'completed'
+      const outcome = result.backgroundPending
+        ? 'progress'
+        : result.state === 'completed'
           ? 'completed'
           : result.state === 'error'
             ? 'failed'
