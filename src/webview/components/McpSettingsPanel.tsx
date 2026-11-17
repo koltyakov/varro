@@ -67,19 +67,10 @@ export function McpSettingsPanel() {
     if (saving()) return 'Saving...';
     return loading() && hasDefaults() ? 'Refreshing...' : '';
   };
-  const sessionsWorking = createMemo(() =>
-    Object.values(state.sessionStatus).some(
-      (status) => status?.type === 'busy' || status?.type === 'retry'
-    )
-  );
   // Attached servers expose only effective values, which the project scope shows.
   const activeScope = () => (state.mcpDefaults?.editable ? scope() : 'project');
   const canEditConfig = () =>
-    ready() &&
-    !loading() &&
-    !saving() &&
-    state.mcpDefaults?.editable === true &&
-    !sessionsWorking();
+    ready() && !loading() && !saving() && state.mcpDefaults?.editable === true;
   const canChangeDefault = (name: string, target: McpScope) =>
     canEditConfig() && (target !== 'global' || isBoolean(state.mcpDefaults?.global[name]));
 
@@ -316,17 +307,7 @@ export function McpSettingsPanel() {
             </div>
           </Show>
           <Show when={hasDefaults()}>
-            <Show
-              when={!state.mcpDefaults?.editable}
-              fallback={
-                <Show when={sessionsWorking()}>
-                  <p class="mcp-settings-notice" role="status">
-                    Defaults can be changed when running sessions finish. Session toggles remain
-                    available in the picker.
-                  </p>
-                </Show>
-              }
-            >
+            <Show when={!state.mcpDefaults?.editable}>
               <p class="mcp-settings-notice">
                 This server is managed elsewhere. Edit its MCP defaults on the OpenCode server host.
               </p>

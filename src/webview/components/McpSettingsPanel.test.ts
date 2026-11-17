@@ -186,14 +186,11 @@ describe('McpSettingsPanel', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('already configured');
   });
 
-  it('does not submit invalid JSON or import while a session is working', async () => {
+  it('does not submit invalid JSON', async () => {
     cleanup = render(() => McpSettingsPanel(), container);
     await flush();
     pasteJson('{oops');
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Invalid MCP JSON');
-    expect(button('Add MCP servers').disabled).toBe(true);
-    pasteJson('{"docs":{"url":"https://example.com"}}');
-    setState('sessionStatus', 'current', { type: 'busy' });
     expect(button('Add MCP servers').disabled).toBe(true);
     button('Add MCP servers').click();
     expect(mocks.addConfig).not.toHaveBeenCalled();
@@ -383,16 +380,79 @@ describe('McpSettingsPanel', () => {
     }
   );
 
-  it('disables configuration changes while shared sessions are running', async () => {
-    setState('sessionStatus', { background: { type: 'busy' } });
-    cleanup = render(() => McpSettingsPanel(), container);
-    await flush();
-    openTab('This project');
-    expect(checkbox('rare').disabled).toBe(true);
-    expect(useGlobalButton('rare')?.disabled).toBe(true);
-    expect(container.textContent).toContain('when running sessions finish');
-    setState('sessionStatus', { background: { type: 'idle' } });
-    expect(checkbox('rare').disabled).toBe(false);
+  describe.each(['current', 'background'])('while session %s is working', (sessionId) => {
+    beforeEach(() => {
+      setState('sessionStatus', sessionId, { type: 'busy' });
+      setState('sessionStatus', 'retrying', {
+        type: 'retry',
+        attempt: 1,
+        message: 'Retrying',
+        next: 8_000,
+      });
+    });
+
+    it.each(['Global', 'This project'] as const)(
+      'saves %s defaults without waiting for sessions',
+      async (label) => {
+        mocks.setDefault.mockResolvedValue({
+          ...defaults,
+          global: { ...defaults.global, docs: false },
+          effective: { ...defaults.effective, docs: false },
+        });
+        cleanup = render(() => McpSettingsPanel(), container);
+        await flush();
+        openTab(label);
+        expect(checkbox('docs').disabled).toBe(false);
+        expect(container.textContent).not.toContain('when running sessions finish');
+        toggle('docs');
+        await flush();
+        expect(mocks.setDefault).toHaveBeenCalledWith(
+          'docs',
+          label === 'Global' ? 'global' : 'project',
+          false
+        );
+        expect(checkbox('docs').checked).toBe(false);
+        expect(checkbox('docs').disabled).toBe(false);
+        expect(mocks.refreshSessionMcps).toHaveBeenCalledWith('current');
+        expect(state.sessionStatus[sessionId]?.type).toBe('busy');
+        expect(state.sessionStatus.retrying?.type).toBe('retry');
+      }
+    );
+
+    it('clears a project override without waiting for sessions', async () => {
+      mocks.setDefault.mockResolvedValue({
+        ...defaults,
+        project: {},
+        effective: { ...defaults.global },
+      });
+      cleanup = render(() => McpSettingsPanel(), container);
+      await flush();
+      openTab('This project');
+      expect(useGlobalButton('rare')?.disabled).toBe(false);
+      useGlobalButton('rare')!.click();
+      await flush();
+      expect(mocks.setDefault).toHaveBeenCalledWith('rare', 'project', null);
+      expect(useGlobalButton('rare')).toBeNull();
+      expect(checkbox('rare').checked).toBe(false);
+    });
+
+    it('imports MCP servers without waiting for sessions', async () => {
+      mocks.addConfig.mockResolvedValue({
+        ...defaults,
+        global: { ...defaults.global, added: true },
+        effective: { ...defaults.effective, added: true },
+      });
+      cleanup = render(() => McpSettingsPanel(), container);
+      await flush();
+      const json = '{"added":{"url":"https://example.com/mcp"}}';
+      pasteJson(json);
+      expect(button('Add MCP servers').disabled).toBe(false);
+      button('Add MCP servers').click();
+      await flush();
+      expect(mocks.addConfig).toHaveBeenCalledWith('global', json, undefined);
+      expect(checkbox('added').checked).toBe(true);
+      expect(container.textContent).toContain('Added added to Global.');
+    });
   });
 
   it('shows attached-server configuration as a read-only list without tabs', async () => {
