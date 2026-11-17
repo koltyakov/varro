@@ -1542,6 +1542,12 @@ kbd {
   color: var(--color-vscode-warning);
 }
 
+.chat-tool-invocation-part .tool-invocation-task-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-vscode-fg-muted);
+}
+
 .chat-tool-invocation-part .tool-invocation-chevron {
   width: 10px;
   height: 10px;

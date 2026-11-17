@@ -2075,18 +2075,26 @@ describe('ToolCall', () => {
         },
       };
       cleanup = render(() => ToolCall({ part }), container!);
-      const icon = () => container?.querySelector('.tool-call-icon-task');
-      expect(icon()?.classList).toContain('tool-status-completed');
+      const icon = () => container?.querySelector<HTMLElement>('.tool-call-icon-task');
+      const label = () => container?.querySelector('.tool-invocation-task-status')?.textContent;
+      expect(label()).toBe('Launched');
+      expect(icon()?.classList).toContain('tool-status-launched');
+      expect(icon()?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(cableTagIcon));
+      expect(container?.querySelector('.tool-invocation-duration')).toBeNull();
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-subagent-link')?.click();
+      expect(selectSessionMock).toHaveBeenCalledExactlyOnceWith('subagent-session-1');
+      selectSessionMock.mockClear();
 
       // The status can arrive after history, without changing the completed tool part.
       setState('sessionStatus', { 'subagent-session-1': { type: 'busy' } });
+      expect(label()).toBe('Running');
       expect(icon()?.classList).toContain('tool-call-spinner');
       expect(icon()?.classList).not.toContain('tool-status-completed');
       const elapsed = container?.querySelector('.tool-invocation-duration');
       expect(elapsed?.textContent).toBe('9s');
       expect(elapsed?.getAttribute('title')).toBe('Elapsed time');
 
-      container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
       const working = () => container?.querySelector('.tool-invocation-subagent-running');
       expect(working()?.textContent).toContain('General subagent is working');
       expect(container?.querySelector('.tool-invocation-subagent-link')).toBeNull();
@@ -2102,6 +2110,7 @@ describe('ToolCall', () => {
         message: 'rate limit exceeded',
         next: 15_000,
       });
+      expect(label()).toBeUndefined();
       expect(icon()?.classList).toContain('tool-call-spinner');
       expect(working()?.textContent).toContain('General subagent is retrying');
       expect(working()?.textContent).toContain('Attempt 2 · rate limit exceeded');
@@ -2110,7 +2119,9 @@ describe('ToolCall', () => {
       );
 
       setState('sessionStatus', 'subagent-session-1', { type: 'idle' });
+      expect(label()).toBe('Completed');
       expect(icon()?.classList).toContain('tool-status-completed');
+      expect(icon()?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(checkCircleIcon));
       expect(icon()?.classList).not.toContain('tool-call-spinner');
       expect(container?.querySelector('.tool-invocation-subagent-link')?.textContent).toBe(
         'Open subagent session'
@@ -2120,6 +2131,79 @@ describe('ToolCall', () => {
       expect(part.state.status).toBe('completed');
     }
   );
+
+  it('does not complete a native follow-up using the previous round’s idle status', () => {
+    const childID = 'subagent-session-1';
+    setState('sessionStatus', { [childID]: { type: 'idle' } });
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        ...completedState({ sessionID: childID }, 'Continue review', '(no preview)'),
+        metadata: { sessionID: childID, status: 'running' },
+        time: { start: 1_000, end: 2_000 },
+      },
+    };
+    cleanup = render(() => ToolCall({ part }), container!);
+    const label = () => container?.querySelector('.tool-invocation-task-status')?.textContent;
+
+    expect(label()).toBe('Launched');
+    expect(container?.querySelector('.tool-status-completed')).toBeNull();
+    setState('sessionStatus', childID, { type: 'busy' });
+    expect(label()).toBe('Running');
+    setState('sessionStatus', childID, { type: 'idle' });
+    expect(label()).toBe('Completed');
+    expect(container?.querySelector('.tool-status-completed')).not.toBeNull();
+  });
+
+  it('restores completed status from verified parent history without a child status', () => {
+    const childID = 'subagent-session-1';
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        ...completedState({ sessionID: childID }, 'Continue review', '(no preview)'),
+        metadata: { sessionID: childID, status: 'running' },
+        time: { start: 1_000, end: 2_000 },
+      },
+    };
+    const result = (id: string, created: number) => ({
+      info: {
+        id,
+        sessionID: part.sessionID,
+        role: 'user' as const,
+        agent: 'build',
+        model: { providerID: 'test', modelID: 'parent' },
+        time: { created },
+      },
+      parts: [
+        {
+          id: `${id}:text`,
+          messageID: id,
+          sessionID: part.sessionID,
+          type: 'text' as const,
+          text: 'Review complete',
+          synthetic: true,
+          subagentResult: { sessionID: childID, state: 'completed' as const },
+        },
+      ],
+    });
+    setState('messages', [result('earlier-round', 900)]);
+    cleanup = render(() => ToolCall({ part }), container!);
+    const label = () => container?.querySelector('.tool-invocation-task-status')?.textContent;
+    expect(label()).toBe('Launched');
+    setState('messages', [result('earlier-round', 900), result('current-round', 2_100)]);
+    expect(label()).toBe('Completed');
+    expect(container?.querySelector('.tool-status-completed')).not.toBeNull();
+  });
 
   it.each(['completed', 'error'] as const)(
     'does not mark a %s task running because another child is busy',
@@ -2135,7 +2219,7 @@ describe('ToolCall', () => {
         state:
           status === 'completed'
             ? {
-                ...completedState({ background: true }, 'Audit', 'Done'),
+                ...completedState({}, 'Audit', 'Done'),
                 metadata: { sessionID: 'subagent-session-1' },
               }
             : {

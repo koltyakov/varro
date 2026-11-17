@@ -1518,7 +1518,7 @@ function GenericToolCall(props: {
     const label = type.trim();
     return `${label.charAt(0).toUpperCase()}${label.slice(1)} subagent`;
   };
-  const taskSessionId = () => {
+  const taskSessionId = createMemo(() => {
     if (!isTask()) return null;
     if (
       props.state.status !== 'running' &&
@@ -1531,14 +1531,59 @@ function GenericToolCall(props: {
     // Only the tool's first matching parent message is read from the transcript.
     const parent = getMessageLookup().byId.get(props.tool.messageID);
     return resolveTaskSessionId(props.tool, parent ? [parent] : [], appState.sessions);
+  });
+  const taskChildStatus = () => {
+    const sessionId = taskSessionId();
+    return sessionId ? appState.sessionStatus[sessionId] : undefined;
   };
+  const isBackgroundLaunch = createMemo(() => {
+    const state = props.state;
+    return (
+      isTask() &&
+      state.status === 'completed' &&
+      (state.metadata.status === 'running' ||
+        state.input.background === true ||
+        props.fullOutput.startsWith('The subagent is working in the background'))
+    );
+  });
   const isRunning = createMemo(() => {
     if (props.state.status === 'running') return true;
     if (!isTask() || props.state.status !== 'completed') return false;
     // A background launch completes before its child does, including native
     // foreground calls handed off to the background after launch.
+    return isSessionStatusWorking(taskChildStatus());
+  });
+  const observedChildWork = createMemo<string | null>((previous) => {
     const sessionId = taskSessionId();
-    return !!sessionId && isSessionStatusWorking(appState.sessionStatus[sessionId]);
+    const state = props.state;
+    if (!sessionId || (state.status !== 'running' && state.status !== 'completed')) return null;
+    const run = `${sessionId}:${state.time.start}`;
+    return isSessionStatusWorking(taskChildStatus()) || previous === run ? run : null;
+  }, null);
+  const isLaunched = createMemo(() => {
+    if (!isBackgroundLaunch() || isRunning()) return false;
+    const state = props.state;
+    if (state.status !== 'completed') return false;
+    const sessionId = taskSessionId();
+    if (!sessionId) return true;
+    const isFollowUp = state.input.sessionID === sessionId || state.input.task_id === sessionId;
+    // A follow-up may still have the idle status from the previous run.
+    if (taskChildStatus()?.type === 'idle' && (!isFollowUp || observedChildWork())) return false;
+    // On history reload the active-session snapshot may omit idle children.
+    // A verified result in the parent transcript can confirm completion instead.
+    const entries = getMessageLookup().bySessionId.get(props.tool.sessionID) ?? [];
+    return !entries.some(
+      ({ info, parts }) =>
+        info.role === 'user' &&
+        info.time.created >= state.time.start &&
+        parts.some(
+          (part) =>
+            part.type === 'text' &&
+            part.synthetic &&
+            part.subagentResult?.sessionID === sessionId &&
+            part.subagentResult.state === 'completed'
+        )
+    );
   });
   const taskExecutionEntries = createMemo<Array<[string, unknown]>>(() => {
     const sessionId = taskSessionId();
@@ -1673,7 +1718,9 @@ function GenericToolCall(props: {
       ? 'tool-status-pending'
       : isRunning()
         ? 'tool-status-running'
-        : props.statusClass;
+        : isLaunched()
+          ? 'tool-status-launched'
+          : props.statusClass;
   const openTaskSession = () => {
     const sessionId = taskSessionId();
     if (!sessionId) return;
@@ -1729,7 +1776,7 @@ function GenericToolCall(props: {
   };
   const completedDurationMs = () => {
     const state = props.state;
-    if (state.status !== 'completed' || isRunning()) return null;
+    if (state.status !== 'completed' || isRunning() || isLaunched()) return null;
     return Math.max(0, state.time.end - state.time.start);
   };
   const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
@@ -1829,6 +1876,17 @@ function GenericToolCall(props: {
           >
             {props.title}
           </span>
+          <Show when={isBackgroundLaunch() && !taskRetryStatus()}>
+            <span class="tool-invocation-task-status" role="status">
+              {waitingForPermission()
+                ? 'Waiting for permission'
+                : isRunning()
+                  ? 'Running'
+                  : isLaunched()
+                    ? 'Launched'
+                    : 'Completed'}
+            </span>
+          </Show>
           <Show when={visibleTaskTokenUsage()}>
             {(tokens) => (
               <span class="tool-invocation-token-stats" title="Subagent tokens">
@@ -1867,7 +1925,9 @@ function GenericToolCall(props: {
           </Show>
           <Show when={taskRetryStatus()}>
             {(retry) => (
-              <span class="tool-invocation-retry-label">retrying #{retry().attempt}</span>
+              <span class="tool-invocation-retry-label" role="status">
+                retrying #{retry().attempt}
+              </span>
             )}
           </Show>
           <Show when={isFailed() && !isExpanded()}>
