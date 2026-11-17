@@ -511,6 +511,15 @@ Direct input acquires ownership only when it can affect the transcript:
   final answer's visible bounds, not only bottom distance. `scroll-hidden-completion.spec.ts` completes
   a turn with suspended frames and checks short and virtualized histories, with and without visibility
   events, while retaining detached reading positions.
+- Activity-summary settling and bottom-follow share the pending-frame clock. Cancelling or replacing
+  the follower must not reset a rendering gap while its summary owner still has a pending frame.
+  Both owners detect resumed rendering and release obsolete reserves before restoring an old target.
+  Reset the clock when settling becomes idle, on direct scroll cancellation, and on session replacement;
+  ordinary idle time is not evidence of suspended rendering. Repeated tray collapses reserve only the
+  actual target shortfall after accounting for replacement growth, even before frames resume.
+  Do not restore a summary against a zero-height scrollport. `scroll-hidden-activity.spec.ts` checks
+  busy activity, completion just before reveal, and detached reading at narrow and desktop widths
+  without a visibility event or inflated tool heights.
 - Keep the transcript hidden behind its loading indicator through initial positioning and any initial
   viewport-filling history fetch. Reaching the end of the first page is not a ready-to-paint state when
   compact tool rows leave that page shorter than the viewport. Reveal only after the final bottom

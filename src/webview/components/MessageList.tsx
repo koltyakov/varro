@@ -815,6 +815,7 @@ export function MessageList() {
   let bottomFollowObservedStreaming = false;
   let bottomFollowPreservesNearBottomOffset = false;
   let bottomFollowResumePending = false;
+  let lastBottomScrollFrameAt: number | null = null;
   const activeOlderHistoryLoads = new Map<
     string,
     { generation: number; windowVersion: number; promise: Promise<void> }
@@ -5087,7 +5088,8 @@ export function MessageList() {
   function startActivityExitSummarySettle(anchor: ActivityExitSummaryAnchor) {
     activityExitSummarySettleFrames = Math.max(activityExitSummarySettleFrames, 30);
     if (activityExitSummarySettleRafId) return;
-    const settle = () => {
+    lastBottomScrollFrameAt ??= performance.now();
+    const settle = (frameTime: number) => {
       activityExitSummarySettleRafId = 0;
       if (
         disposed ||
@@ -5095,6 +5097,12 @@ export function MessageList() {
         state.activeSessionId !== anchor.sessionId ||
         activityExitSummaryAnchor !== anchor
       ) {
+        return;
+      }
+      observeBottomScrollFrame(frameTime);
+      if (releaseSuspendedBottomReserve()) {
+        performScroll({ force: true, immediate: true });
+        startFollowLoop(anchor.sessionId);
         return;
       }
       restoreActivityExitSummaryAnchor(anchor);
@@ -5109,8 +5117,10 @@ export function MessageList() {
         // Keep ownership without a hot frame loop until completion or response content arrives.
         activityExitSummarySettleFrames = 0;
         activityExitHeldResponseContentSignature = getResponseContentSignature();
+        if (!initialScrollRafId) lastBottomScrollFrameAt = null;
       } else {
         clearActivityExitSummaryAnchor();
+        if (!initialScrollRafId) lastBottomScrollFrameAt = null;
       }
     };
     activityExitSummarySettleRafId = requestAnimationFrame(settle);
@@ -5119,6 +5129,7 @@ export function MessageList() {
   function restoreActivityExitSummaryAnchor(anchor: ActivityExitSummaryAnchor) {
     if (
       !containerRef ||
+      containerRef.clientHeight <= 0 ||
       state.activeSessionId !== anchor.sessionId ||
       activityExitSummaryAnchor !== anchor
     )
@@ -5225,7 +5236,13 @@ export function MessageList() {
       }
     }
     appendBottomReserveTarget = collapseTarget;
-    setAppendBottomReserve((current) => current + reserve);
+    // Replacement trays may grow and collapse without a painted reconciliation between them.
+    // Keep only the range this collapse would remove below the existing target, not its full height.
+    const shortfall = Math.max(
+      0,
+      collapseTarget - (containerRef.scrollHeight - containerRef.clientHeight - reserve)
+    );
+    if (shortfall > 0.5) setAppendBottomReserve((current) => current + shortfall);
     activityExitBottomTarget = collapseTarget;
     if (activityCollapseSettleRafId) cancelAnimationFrame(activityCollapseSettleRafId);
     activityCollapseSettleRafId = requestAnimationFrame(() => {
@@ -5877,6 +5894,7 @@ export function MessageList() {
   }
 
   function cancelPendingScroll() {
+    lastBottomScrollFrameAt = null;
     if (stickyPreviewDebounceTimer) {
       clearTimeout(stickyPreviewDebounceTimer);
       stickyPreviewDebounceTimer = 0;
@@ -6023,6 +6041,18 @@ export function MessageList() {
     if (autoScroll()) setAutoScroll(false);
   }
 
+  function observeBottomScrollFrame(frameTime: number) {
+    const elapsedMs = Math.max(1, frameTime - (lastBottomScrollFrameAt ?? frameTime));
+    lastBottomScrollFrameAt = frameTime;
+    // The summary owner can cancel and restart the follower while the document is occluded.
+    // Both owners must keep the same pending-frame clock until a frame actually runs.
+    if (elapsedMs >= BOTTOM_FOLLOW_RESUME_GAP_MS) {
+      bottomFollowResumePending = true;
+      bottomFollowMotion.reset();
+    }
+    return elapsedMs;
+  }
+
   function startFollowLoop(
     sessionId: string,
     options?: {
@@ -6048,7 +6078,7 @@ export function MessageList() {
 
     activeFollowLoopSessionId = sessionId;
     bottomFollowMotion.reset();
-    let lastFollowFrameAt = performance.now();
+    lastBottomScrollFrameAt ??= performance.now();
     bottomFollowObservedStreaming = currentlyStreaming || !!options?.observedStreaming;
     bottomFollowPreservesNearBottomOffset = !!options?.preserveNearBottomOffset;
 
@@ -6062,8 +6092,6 @@ export function MessageList() {
     function tick(frameTime = performance.now()) {
       initialScrollRafId = 0;
       const now = frameTime;
-      const elapsedMs = Math.max(1, now - lastFollowFrameAt);
-      lastFollowFrameAt = now;
       if (!containerRef || !trackRef || stickyNavigationOwnsScroll()) {
         activeFollowLoopSessionId = null;
         return;
@@ -6077,12 +6105,7 @@ export function MessageList() {
         return;
       }
 
-      // An occluded editor can suspend frames without changing document visibility.
-      // Catch up before its first paint instead of replaying the accumulated growth.
-      if (elapsedMs >= BOTTOM_FOLLOW_RESUME_GAP_MS) {
-        bottomFollowResumePending = true;
-        bottomFollowMotion.reset();
-      }
+      const elapsedMs = observeBottomScrollFrame(now);
       const releasedSuspendedReserve = releaseSuspendedBottomReserve();
 
       ignoreScrollUntil = Math.max(
@@ -6162,6 +6185,7 @@ export function MessageList() {
         if (shouldFillInitialViewport) {
           const generation = activeSessionGeneration;
           activeFollowLoopSessionId = null;
+          if (!activityExitSummarySettleRafId) lastBottomScrollFrameAt = null;
           void handleLoadOlderHistory({ requireExactFill: true })?.then(() => {
             if (
               generation !== activeSessionGeneration ||
@@ -6179,6 +6203,7 @@ export function MessageList() {
         expectedScrollTop = -1;
         followModeLocked = false;
         activeFollowLoopSessionId = null;
+        if (!activityExitSummarySettleRafId) lastBottomScrollFrameAt = null;
         setInitialPositioningSessionId(null);
         return;
       }
@@ -8385,7 +8410,12 @@ export function MessageList() {
         if (activityReserveOwnsCompletion) {
           let attempts = 0;
           const settle = () => {
-            if (disposed || !containerRef || state.activeSessionId !== sessionId) {
+            if (
+              disposed ||
+              !containerRef ||
+              state.activeSessionId !== sessionId ||
+              activityExitSummaryAnchor !== summaryAnchor
+            ) {
               return;
             }
             const summaries = containerRef.querySelectorAll<HTMLElement>(
