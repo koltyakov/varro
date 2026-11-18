@@ -1,4 +1,5 @@
 import type { ProviderLimitStatus, ProviderLimitUnit } from '../../shared/protocol';
+import { isAbortedAssistantError } from '../../shared/error-classification';
 import type { MessageEntry, SessionStatus } from '../types';
 import { asRecord, isString, type UnknownRecord, isObject } from './runtime-values';
 
@@ -132,7 +133,12 @@ export function deriveUsageLimitNotice(params: {
 
   for (let messageIndex = params.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
     const entry = params.messages[messageIndex]!;
-    if (entry.info.sessionID !== sessionID || entry.info.role !== 'assistant') continue;
+    if (entry.info.sessionID !== sessionID) continue;
+    if (entry.info.role === 'user') {
+      if (entry.info.pendingDelivery) continue;
+      return null;
+    }
+    if (isAbortedAssistantError(entry.info.error)) return null;
 
     const assistantNotice = parseUsageLimitNotice(
       entry.info.error?.data?.message || entry.info.error?.name,
@@ -147,7 +153,9 @@ export function deriveUsageLimitNotice(params: {
       };
     }
 
-    if (!entry.info.error) {
+    // A terminal error supersedes retry history. Only use retry parts when the
+    // assistant error has no message of its own.
+    if (!entry.info.error || entry.info.error.data?.message?.trim()) {
       return null;
     }
 
@@ -166,6 +174,8 @@ export function deriveUsageLimitNotice(params: {
         };
       }
     }
+    // The latest delivered message owns the notice, not an earlier failed turn.
+    return null;
   }
 
   return null;

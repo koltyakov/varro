@@ -92,11 +92,9 @@ export function createMountBridgeOperations(deps: {
             if (available) delete draft.transferredSessions[sessionId];
             else draft.transferredSessions[sessionId] = directory;
           });
-          if (appStore.state.activeSessionId !== sessionId) {
-            void deps.reloadSessionCatalog?.();
-            return;
-          }
-          // Refresh in place. The host admits history reads, not execution in a closed folder.
+          void deps.reloadSessionCatalog?.();
+          if (appStore.state.activeSessionId !== sessionId) return;
+          // Refresh in place without clearing the transcript or draft.
           uiStore.setError(null);
           deps.openSession?.(sessionId, directory, true);
         },

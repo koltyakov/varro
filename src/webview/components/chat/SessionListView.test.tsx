@@ -28,6 +28,7 @@ import {
   SessionListView,
 } from './SessionListView';
 import { SessionActionFeedback } from './SessionActionFeedback';
+import { SessionLocationIndicator } from './SessionLocationIndicator';
 import {
   applySessionShareOverride,
   resetSessionShareOverridesForTests,
@@ -557,6 +558,55 @@ describe('SessionListView keyboard recovery', () => {
 });
 
 describe('SessionListView model details', () => {
+  it('shares the header worktree verification with the sessions list', async () => {
+    const directory = '/worktrees/feature';
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
+    setSessions([
+      session('worktree', Date.now(), {
+        directory,
+        transfer: { originDirectory: '/repo', available: true },
+      }),
+    ]);
+    flushSolid();
+    const location = vi.spyOn(client.varro.session, 'location').mockResolvedValue({
+      directory,
+      isGitWorktree: true,
+    });
+    cleanup = render(
+      () => (
+        <>
+          <SessionListView />
+          <SessionLocationIndicator
+            sessionId="worktree"
+            directory={directory}
+            isGitWorktree={appState.sessions[0]?.isGitWorktree}
+            moved={true}
+          />
+        </>
+      ),
+      container
+    );
+    flushSolid();
+
+    await vi.waitFor(() => {
+      flushSolid();
+      expect(container.querySelector('.chat-header-location')?.getAttribute('aria-label')).toBe(
+        'Session Git worktree'
+      );
+    });
+    expect(location).toHaveBeenCalledExactlyOnceWith('worktree', { directory });
+    expect(appState.sessions[0]?.isGitWorktree).toBe(true);
+    const label = container.querySelector('.session-item-folder')!;
+    expect(label.textContent).toBe('feature');
+    expect(
+      label
+        .querySelector<HTMLElement>('.session-item-folder-meta-icon')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(gitIcon));
+    expect(container.querySelector('[aria-label="Git worktree"]')).not.toBeNull();
+  });
+
   it.each([false, true])(
     'offers location actions from a moved row icon, worktree=%s',
     (worktree) => {

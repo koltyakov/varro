@@ -5902,14 +5902,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
 
   const hasPendingApproval = () => composerHasActiveQuestion() || composerHasActivePermission();
-  const transferredDirectory = () => {
-    if (props.newSession || !state.activeSessionId) return undefined;
-    const session = state.sessions.find((entry) => entry.id === state.activeSessionId);
-    return (
-      state.transferredSessions[state.activeSessionId] ??
-      (session?.transfer?.available === false ? session.directory : undefined)
-    );
-  };
   const isSideQuestionDraft = createMemo(() => getSideQuestionText(inputText()) !== null);
   const canAskSideQuestion = () =>
     !props.newSession &&
@@ -5923,7 +5915,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
   const canSend = () =>
     connectionInitialized() &&
-    !transferredDirectory() &&
     !state.messagesLoading &&
     (isSideQuestionDraft()
       ? !sideQuestionSendUnavailableReason()
@@ -5945,8 +5936,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   // A silently disabled send button is undebuggable in the field; when the user
   // tries to send actual content, name the global gate that is blocking it.
   const getSendBlockedReason = () => {
-    const directory = transferredDirectory();
-    if (directory) return `Conversation moved to ${directory}. Open its folder to continue.`;
     const hasContent =
       getSendableInputText().trim().length > 0 ||
       state.droppedFiles.length > 0 ||

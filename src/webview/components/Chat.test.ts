@@ -311,49 +311,44 @@ function session(id: string, updated: number, overrides: Partial<Session> = {}):
   };
 }
 
-it('keeps a transferred conversation visible with an explicit open-folder action', () => {
-  setState(storePath('sessions', [session('session-1', 500)]));
-  flushSolid();
-  setState(storePath('activeSessionId', 'session-1'));
-  flushSolid();
-  setState(storePath('transferredSessions', { 'session-1': '/outside' }));
-  flushSolid();
-  setConnectionInitialized(true);
-  flushSolid();
-  setInputText('Unsent draft');
-  flushSolid();
-  setState(storePath('selectedModel', { providerID: 'openai', modelID: 'test-model' }));
-  flushSolid();
-  const sent: WebviewMessage[] = [];
-  // SAFETY: This fixture owns the extension transport callback and restores it below.
-  const bridgeWindow = window as { __sendToExtension?: (message: WebviewMessage) => void };
-  const previous = bridgeWindow.__sendToExtension;
-  bridgeWindow.__sendToExtension = (message) => sent.push(message);
-  try {
-    cleanup = render(() => Chat(), container!);
+it.each([false, true])(
+  'keeps a moved conversation writable without a warning, worktree=%s',
+  (isGitWorktree) => {
+    const directory = isGitWorktree ? '/worktrees/feature' : '/outside';
+    setState(
+      storePath('sessions', [
+        session('session-1', 500, {
+          directory,
+          isGitWorktree,
+          transfer: { originDirectory: '/repo', available: false },
+        }),
+      ])
+    );
     flushSolid();
-    const banner = container!.querySelector('.chat-transport-banner');
-    expect(banner?.textContent).toContain('Conversation moved');
-    expect(banner?.textContent).toContain('/outside');
-    const open = banner?.querySelector('button');
-    expect(open?.textContent).toBe('Open folder');
-    open?.click();
+    setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    expect(sent).toContainEqual({
-      type: 'session/open-transferred',
-      payload: { sessionId: 'session-1' },
-    });
-    expect(state.activeSessionId).toBe('session-1');
-    const send = container!.querySelector<HTMLButtonElement>('button[aria-label="Send (Enter)"]');
-    expect(send).not.toBeNull();
-    expect(send!.disabled).toBe(true);
-  } finally {
-    if (previous) bridgeWindow.__sendToExtension = previous;
-    else delete bridgeWindow.__sendToExtension;
-    setInputText('');
+    setState(storePath('transferredSessions', { 'session-1': directory }));
     flushSolid();
+    setConnectionInitialized(true);
+    flushSolid();
+    setInputText('Unsent draft');
+    flushSolid();
+    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'test-model' }));
+    flushSolid();
+    try {
+      cleanup = render(() => Chat(), container!);
+      flushSolid();
+      expect(container!.querySelector('.chat-transport-banner')).toBeNull();
+      expect(state.activeSessionId).toBe('session-1');
+      const send = container!.querySelector<HTMLButtonElement>('button[aria-label="Send (Enter)"]');
+      expect(send).not.toBeNull();
+      expect(send!.disabled).toBe(false);
+    } finally {
+      setInputText('');
+      flushSolid();
+    }
   }
-});
+);
 
 it.each([false, true])(
   'reconciles a verified worktree snapshot without clearing a newer move, newerMove=%s',
@@ -385,10 +380,10 @@ it.each([false, true])(
     });
     cleanup = render(() => Chat(), container!);
     flushSolid();
-    expect(container!.querySelector('.chat-transport-banner')).not.toBeNull();
+    expect(container!.querySelector('.chat-transport-banner')).toBeNull();
     expect(
       container!.querySelector<HTMLButtonElement>('button[aria-label="Send (Enter)"]')?.disabled
-    ).toBe(true);
+    ).toBe(false);
 
     operations.upsertSession({
       ...moved,
@@ -396,10 +391,11 @@ it.each([false, true])(
     });
     flushSolid();
 
-    expect(container!.querySelector('.chat-transport-banner') !== null).toBe(newerMove);
+    expect(container!.querySelector('.chat-transport-banner')).toBeNull();
     expect(
       container!.querySelector<HTMLButtonElement>('button[aria-label="Send (Enter)"]')?.disabled
-    ).toBe(newerMove);
+    ).toBe(false);
+    expect(state.transferredSessions[moved.id]).toBe(newerMove ? '/outside' : undefined);
     expect(inputText()).toBe('Continue from here');
   }
 );

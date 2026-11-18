@@ -270,6 +270,86 @@ async function installPartialDiffTail(page: Page, stepCount: number, linesPerEdi
 }
 
 test.describe('diff preview anchoring', () => {
+  test('keeps bottom follow through individually delayed sibling diff previews', async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 486, height: 794 });
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1&diffPreviewCompleted=1'
+    );
+    await expect(page.locator('.interactive-list')).toBeVisible();
+    await installPartialDiffTail(page, 4);
+    await expect(
+      page.locator('[data-msg-id="message-partial-diff-3"] .file-change-inline-diffs')
+    ).toHaveCount(3);
+    await waitForAnimationFrames(page, 30);
+    const toggle = (showFileDiffs: boolean) =>
+      page.evaluate(
+        (value) =>
+          window.postMessage(
+            {
+              type: 'config/update',
+              payload: {
+                desktopSessionPaneSide: 'left',
+                defaultPermissionMode: 'default',
+                chatFontSize: 13,
+                chatEditorFontSize: 12,
+                chatFontFamily: 'default',
+                showFileDiffs: value,
+              },
+            },
+            '*'
+          ),
+        showFileDiffs
+      );
+    await toggle(false);
+    await expect(page.locator('.file-change-inline-diffs')).toHaveCount(0);
+    await waitForAnimationFrames(page, 30);
+    await page.evaluate(() => {
+      (window as PartialDiffWindow).partialDiffProbe.gate = true;
+    });
+    await toggle(true);
+    await expect
+      .poll(() => page.evaluate(() => (window as PartialDiffWindow).partialDiffProbe.pending.size))
+      .toBe(12);
+    await page.waitForTimeout(400);
+    const samples = await page.evaluate(async () => {
+      const probe = (window as PartialDiffWindow).partialDiffProbe;
+      const list = document.querySelector<HTMLElement>('.interactive-list')!;
+      const keys = [...probe.pending.keys()];
+      keys.forEach((key, index) => {
+        setTimeout(() => {
+          const [step, file] = key.split('/').map(Number);
+          probe.release(step!, file!);
+        }, index * 40);
+      });
+      const result: Array<{ gap: number; previews: number; reserve: number }> = [];
+      for (let frame = 0; frame < 90; frame++) {
+        await new Promise(requestAnimationFrame);
+        result.push({
+          gap: list.scrollHeight - list.clientHeight - list.scrollTop,
+          previews: list.querySelectorAll(
+            '[data-msg-id^="message-partial-diff-"] .file-change-inline-diffs'
+          ).length,
+          reserve:
+            list.querySelector<HTMLElement>('.append-scroll-bottom-reserve')?.offsetHeight ?? 0,
+        });
+      }
+      return result;
+    });
+    await testInfo.attach('staggered-preview-follow', {
+      body: JSON.stringify(samples),
+      contentType: 'application/json',
+    });
+    expect(samples.some((sample) => sample.previews > 0 && sample.previews < 12)).toBe(true);
+    expect(samples.at(-1)?.previews).toBe(12);
+    expect(
+      samples.every((sample) => sample.gap <= 1),
+      JSON.stringify(samples)
+    ).toBe(true);
+    expect(samples.every((sample) => sample.reserve === 0)).toBe(true);
+  });
+
   for (const gesture of [
     'wheel',
     'wheel twice',

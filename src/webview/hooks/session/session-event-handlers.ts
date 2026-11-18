@@ -1576,9 +1576,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           sessionID,
           !!partialMessage.error && !isAbortedAssistantError(partialMessage.error)
         );
-        const notice = parseUsageLimitNotice(
-          partialMessage.error?.data?.message || partialMessage.error?.name
-        );
+        const notice = isAbortedAssistantError(partialMessage.error)
+          ? null
+          : parseUsageLimitNotice(
+              partialMessage.error?.data?.message || partialMessage.error?.name
+            );
         if (notice) {
           deps.applyUsageLimitNotice(sessionID, {
             ...notice,

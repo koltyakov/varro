@@ -172,6 +172,25 @@ function createDeps(overrides?: {
 }
 
 describe('session-lifecycle helpers', () => {
+  it.each([false, true])(
+    'applies older catalog location metadata without regressing the conversation, worktree=%s',
+    (isGitWorktree) => {
+      const live = {
+        ...session('moved', '/worktrees/feature', 110),
+        title: 'Live conversation',
+        transfer: { originDirectory: '/repo', available: true },
+      };
+      const setup = createDeps({ sessions: [live] });
+      const annotated = { ...live, time: { created: 100, updated: 100 }, isGitWorktree };
+
+      applySessions(setup.deps, [annotated]);
+
+      expect(setup.current.sessions[0]?.title).toBe('Live conversation');
+      expect(setup.current.sessions[0]?.time.updated).toBe(110);
+      expect(setup.current.sessions[0]?.isGitWorktree).toBe(isGitWorktree);
+    }
+  );
+
   it('preserves verified worktree presentation across same-directory events but not a move', () => {
     const worktree = { ...session('moved', '/worktrees/feature', 100), isGitWorktree: true };
     const setup = createDeps({ sessions: [worktree] });

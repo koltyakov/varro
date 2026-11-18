@@ -44,32 +44,43 @@ describe('sendMessage', () => {
     flushSolid();
   }, 15_000);
 
-  it.each([undefined, 'queued'] as const)(
-    'blocks sends to an unavailable transferred session including %s targets',
-    async (target) => {
+  it.each([
+    ['/outside', undefined],
+    ['/outside', 'queued'],
+    ['/worktrees/feature', undefined],
+    ['/worktrees/feature', 'queued'],
+  ] as const)(
+    'sends to a moved session in %s with target=%s despite stale availability metadata',
+    async (directory, target) => {
       const { stateModule, hookModule } = await loadModules();
       flushSolid();
+      const moved = {
+        ...session(),
+        directory,
+        transfer: { originDirectory: '/repo', available: false },
+      };
       stateModule.setState(storePath('activeSessionId', target ? 'other-session' : 'session-1'));
       flushSolid();
-      stateModule.setState(storePath('transferredSessions', { 'session-1': '/outside' }));
+      stateModule.setState(storePath('sessions', [moved]));
+      flushSolid();
+      stateModule.setState(storePath('transferredSessions', { 'session-1': directory }));
       flushSolid();
       stateModule.setInputText('Unsent draft');
       flushSolid();
-      const messages = [{ info: userMessage('user-1'), parts: [] }];
-      stateModule.replaceMessages(messages);
-      flushSolid();
+      clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+      clientMocks.sessionGet.mockResolvedValue(moved);
+      clientMocks.sessionMessages.mockResolvedValue([]);
       expect(
         await hookModule.sendMessage(
-          'Do not dispatch',
+          'Continue here',
           target ? { targetSessionId: 'session-1' } : undefined
         )
-      ).toBe(false);
+      ).toBe(true);
       flushSolid();
-      expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
+      expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', expect.anything(), {
+        directory,
+      });
       expect(clientMocks.sessionCreate).not.toHaveBeenCalled();
-      expect(stateModule.inputText()).toBe('Unsent draft');
-      expect(stateModule.state.messages).toEqual(messages);
-      expect(stateModule.error()).toContain('Conversation moved to /outside');
     }
   );
 

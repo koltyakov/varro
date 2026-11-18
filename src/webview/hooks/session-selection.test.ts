@@ -167,7 +167,7 @@ describe('selection outcomes', () => {
     expect(deps.requestMessageListScrollToBottom).not.toHaveBeenCalled();
   });
   it('reports a missed transfer without removing the session as unavailable', async () => {
-    const message = 'Conversation moved to /outside. Open its folder to continue.';
+    const message = 'Conversation moved to /outside. Try again.';
     const deps = createSelectionDependencies({
       getActiveSessionId: () => 'session-1',
       loadSession: async () => {

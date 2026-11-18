@@ -3,6 +3,7 @@ import { createEffect, Show, createSignal } from 'solid-js';
 import { Portal } from '@solidjs/web';
 import { postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
+import { setState } from '../../lib/state';
 import { clampPopupToViewport } from '../../lib/popup-position';
 import { folderIcon, gitIcon } from '../../lib/ui-icons';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
@@ -28,9 +29,15 @@ export function SessionLocationIndicator(props: {
   const close = () => setPosition(null);
 
   createEffect(
+    () => [props.sessionId, props.directory] as const,
+    () => {
+      close();
+    }
+  );
+
+  createEffect(
     () => [props.sessionId, props.directory, props.isGitWorktree] as const,
     ([sessionId, directory, knownWorktree]) => {
-      close();
       setIsGitWorktree(false);
       if (knownWorktree !== undefined) {
         setIsGitWorktree(knownWorktree);
@@ -42,6 +49,12 @@ export function SessionLocationIndicator(props: {
         .then((location) => {
           if (!cancelled && isSameWorkspacePath(location.directory, directory)) {
             setIsGitWorktree(location.isGitWorktree);
+            setState((draft) => {
+              const session = draft.sessions.find(
+                (entry) => entry.id === sessionId && isSameWorkspacePath(entry.directory, directory)
+              );
+              if (session) session.isGitWorktree = location.isGitWorktree;
+            });
           }
         })
         .catch(() => {
