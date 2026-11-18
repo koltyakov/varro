@@ -201,6 +201,10 @@
   flex-shrink: 0;
 }
 
+.inline-chip .chip-icon {
+  flex-shrink: 0;
+}
+
 .inline-chip .file-type-icon {
   width: 11px;
   height: 11px;
@@ -3171,6 +3175,10 @@ kbd {
   --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
 }
 
+.user-message-card-wrapperless > .rendered-markdown > .user-message-text-scroll {
+  text-align: right;
+}
+
 .user-message-card:hover .user-message-text-scroll {
   --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 16%, transparent);
 }
@@ -3456,6 +3464,7 @@ kbd {
   margin: 0;
   padding: 0;
   border: none;
+  justify-content: flex-end;
 }
 
 .message-file-attachments .message-attachment-chip {
