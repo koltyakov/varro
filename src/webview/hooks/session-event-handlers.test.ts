@@ -1331,6 +1331,31 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
+  it('does not treat an aborted message update with retained limit text as a new limit', () => {
+    const handlers = installHandlers();
+    const applyUsageLimitNotice = vi.fn();
+    const cleanups = registerSessionEventHandlers(createDefaultDeps({ applyUsageLimitNotice }));
+    setSessionUsageLimit.mockClear();
+
+    try {
+      emitServerEvent(handlers, 'message.updated', {
+        properties: {
+          info: createAssistantEntry({
+            error: {
+              name: 'MessageAbortedError',
+              data: { message: 'The usage limit has been reached' },
+            },
+          }).info,
+        },
+      });
+
+      expect(applyUsageLimitNotice).not.toHaveBeenCalled();
+      expect(setSessionUsageLimit).toHaveBeenCalledWith('session-1', null);
+    } finally {
+      for (const cleanup of cleanups) cleanup();
+    }
+  });
+
   it('rejects malformed user message.updated payloads with parent ids', () => {
     const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {

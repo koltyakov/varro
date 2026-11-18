@@ -3375,19 +3375,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       validateBeforeSend?: () => Promise<boolean>;
     }
   ): Promise<boolean> {
-    const sessionId =
-      options?.targetSessionId === undefined
-        ? appStore.state.activeSessionId
-        : options.targetSessionId;
-    const transfer = appStore.state.sessions.find((session) => session.id === sessionId);
-    const directory =
-      sessionId &&
-      (appStore.state.transferredSessions[sessionId] ??
-        (transfer?.transfer?.available === false ? transfer.directory : undefined));
-    if (directory) {
-      uiStore.setError(`Conversation moved to ${directory}. Open its folder to continue.`);
-      return false;
-    }
     return await sessionSendOperations.sendMessage(text, options);
   }
 

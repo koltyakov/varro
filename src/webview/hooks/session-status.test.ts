@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
-import type { Message, MessageEntry, SessionStatus } from '../types';
+import type { AssistantMessage, Message, MessageEntry, SessionStatus } from '../types';
 
 // SAFETY: The fixture provides the complete domain shape read by this statement.
 const { setSessionUsageLimitState, setState, startLoading, stopLoading, state } = vi.hoisted(
@@ -33,7 +33,7 @@ vi.mock('../lib/state', async () => {
   };
 });
 
-function completedAssistantMessage(): Message {
+function completedAssistantMessage(): AssistantMessage {
   return {
     id: 'assistant-1',
     sessionID: 'session-1',
@@ -239,6 +239,69 @@ describe('session status helpers', () => {
       }),
       { preserveExistingOnNull: false }
     );
+  });
+
+  it.each(['MessageAbortedError', 'APIError'])(
+    'clears a cached idle limit when the latest assistant has a non-limit %s',
+    (name) => {
+      const setSessionUsageLimit = vi.fn();
+      updateUsageLimitStateWithDependencies(
+        {
+          deriveUsageLimitNoticeContext: () => null,
+          applyUsageLimitNotice: (sessionId, notice, options) =>
+            applyUsageLimitNoticeWithDependencies(
+              { setSessionUsageLimit, refreshProviderLimit: vi.fn(async () => {}) },
+              sessionId,
+              notice,
+              options
+            ),
+        },
+        'session-1',
+        { type: 'idle' },
+        [
+          {
+            info: {
+              ...completedAssistantMessage(),
+              error: { name, data: { message: 'Connection closed' } },
+            },
+            parts: [],
+          },
+        ]
+      );
+
+      expect(setSessionUsageLimit).toHaveBeenCalledWith('session-1', null);
+    }
+  );
+
+  it('preserves cached idle limits when no authoritative session messages were loaded', () => {
+    const applyUsageLimitNotice = vi.fn();
+    updateUsageLimitStateWithDependencies(
+      { deriveUsageLimitNoticeContext: () => null, applyUsageLimitNotice },
+      'session-1',
+      { type: 'idle' },
+      []
+    );
+
+    expect(applyUsageLimitNotice).toHaveBeenCalledWith('session-1', null, {
+      preserveExistingOnNull: true,
+    });
+  });
+
+  it('preserves an idle limit received before the current assistant message is loaded', () => {
+    const applyUsageLimitNotice = vi.fn();
+    updateUsageLimitStateWithDependencies(
+      { deriveUsageLimitNoticeContext: () => null, applyUsageLimitNotice },
+      'session-1',
+      { type: 'idle' },
+      [
+        { info: completedAssistantMessage(), parts: [] },
+        { info: { ...userMessage(), id: 'user-2', time: { created: 3 } }, parts: [] },
+      ]
+    );
+
+    expect(applyUsageLimitNotice).toHaveBeenCalledWith('session-1', null, {
+      preserveExistingOnNull: true,
+    });
   });
 
   it('rechecks status by resyncing idle sessions and starting loading for busy ones', async () => {

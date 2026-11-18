@@ -29,6 +29,11 @@ afterEach(() => {
 });
 
 describe('side-question prompt compatibility and context', () => {
+  it('allows side questions after a move despite stale availability metadata', () => {
+    setState('sessions', 0, 'transfer', { originDirectory: '/origin', available: false });
+    expect(sideQuestionUnavailableReason()).toBeNull();
+  });
+
   it.each([
     ['/btw @explore Why?', 'subagents'],
     ['/btw $[docs] Why?', 'skills'],

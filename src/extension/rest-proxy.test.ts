@@ -776,7 +776,7 @@ describe('getOpenCodeDirectoryHeaders', () => {
   );
 });
 
-describe('transferred Git worktree authorization', () => {
+describe('transferred session authorization', () => {
   type WorktreeAuthorizationState = {
     canonical: Session;
     projectID: string;
@@ -838,6 +838,30 @@ describe('transferred Git worktree authorization', () => {
     );
     return { proxy, callbacks, serverRequest, state, moved };
   }
+
+  it.each([1, 2] as const)(
+    'sends to a moved non-Git folder on v%s without opening or listing that folder',
+    async (apiVersion) => {
+      const { proxy, callbacks, serverRequest, state, moved } = createWorktreeProxy(apiVersion);
+      moved.directory = '/outside';
+      state.canonical = { ...moved };
+      state.worktrees = [];
+      await proxy.handleRequest(
+        makePayload(9044, 'POST', '/session/moved/prompt_async?directory=%2Foutside', {
+          parts: [],
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 9044, data: true });
+      expect(serverRequest).toHaveBeenCalledWith(
+        'POST',
+        expect.stringContaining('/session/moved/prompt_async'),
+        expect.objectContaining({ parts: [] }),
+        expect.objectContaining({ directory: '/outside' })
+      );
+      expect(serverRequest.mock.calls.some(([, path]) => path.startsWith('/session?'))).toBe(false);
+      expect(proxy.isSessionCatalogEventAuthorized('foreign', '/outside')).toBe(false);
+    }
+  );
 
   it.each([1, 2] as const)(
     'follows only the known session into a saved Git worktree on v%s without widening history',
@@ -961,40 +985,55 @@ describe('transferred Git worktree authorization', () => {
     'path prefix',
     'custom strategy',
     'malformed inventory',
-    'wrong session',
-    'stale destination',
-    'canonical project mismatch',
-    'unknown transfer',
     'global project',
-  ])('keeps %s unapproved', async (failure) => {
-    const { proxy, callbacks, serverRequest, state, moved } = createWorktreeProxy();
-    if (failure === 'unrelated project') state.projectID = 'project-2';
-    if (failure === 'not Git') state.projects = [{ id: 'project-1' }];
-    if (failure === 'missing inventory') state.worktrees = [];
-    if (failure === 'path prefix') state.worktrees = [{ directory: `${moved.directory}-other` }];
-    if (failure === 'custom strategy')
+  ])('allows a known moved session despite %s', async (condition) => {
+    const { proxy, state, moved } = createWorktreeProxy();
+    if (condition === 'unrelated project') state.projectID = 'project-2';
+    if (condition === 'not Git') state.projects = [{ id: 'project-1' }];
+    if (condition === 'missing inventory') state.worktrees = [];
+    if (condition === 'path prefix') state.worktrees = [{ directory: `${moved.directory}-other` }];
+    if (condition === 'custom strategy')
       state.worktrees = [{ directory: moved.directory, strategy: 'copy' }];
-    if (failure === 'malformed inventory') state.worktrees = [{ directory: 42 }];
-    if (failure === 'wrong session') state.canonical.id = 'foreign';
-    if (failure === 'stale destination') state.canonical.directory = '/outside';
-    if (failure === 'canonical project mismatch') state.canonical.projectID = 'project-2';
-    if (failure === 'unknown transfer') state.known = false;
-    if (failure === 'global project') state.projectID = 'global';
-    await expect(proxy.authorizeSessionDirectory(moved.id, moved.directory)).resolves.toBe(false);
-    expect(proxy.isSessionCatalogEventAuthorized(moved.id, moved.directory)).toBe(false);
-    if (state.known) {
-      await proxy.handleRequest(
-        makePayload(9033, 'POST', '/session/moved/prompt_async?directory=%2Fworktrees%2Ffeature', {
-          parts: [],
-        })
-      );
-      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
-        id: 9033,
-        error: `Conversation moved to ${moved.directory}. Open its folder to continue.`,
-      });
+    if (condition === 'malformed inventory') state.worktrees = [{ directory: 42 }];
+    if (condition === 'global project') {
+      moved.projectID = 'global';
+      state.canonical.projectID = 'global';
     }
-    expect(serverRequest.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+    await expect(proxy.authorizeSessionDirectory(moved.id, moved.directory)).resolves.toBe(true);
+    expect(proxy.isSessionCatalogEventAuthorized(moved.id, moved.directory)).toBe(true);
+    expect(proxy.isSessionCatalogEventAuthorized('foreign', moved.directory)).toBe(false);
   });
+
+  it.each(['wrong session', 'stale destination', 'canonical project mismatch', 'unknown transfer'])(
+    'keeps %s unapproved',
+    async (failure) => {
+      const { proxy, callbacks, serverRequest, state, moved } = createWorktreeProxy();
+      if (failure === 'wrong session') state.canonical.id = 'foreign';
+      if (failure === 'stale destination') state.canonical.directory = '/outside';
+      if (failure === 'canonical project mismatch') state.canonical.projectID = 'project-2';
+      if (failure === 'unknown transfer') state.known = false;
+      await expect(proxy.authorizeSessionDirectory(moved.id, moved.directory)).resolves.toBe(false);
+      expect(proxy.isSessionCatalogEventAuthorized(moved.id, moved.directory)).toBe(false);
+      if (state.known) {
+        await proxy.handleRequest(
+          makePayload(
+            9033,
+            'POST',
+            '/session/moved/prompt_async?directory=%2Fworktrees%2Ffeature',
+            {
+              parts: [],
+            }
+          )
+        );
+        expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+          id: 9033,
+          error:
+            'Could not verify the current location of this conversation. Refresh and try again.',
+        });
+      }
+      expect(serverRequest.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+    }
+  );
 
   it('rechecks a saved link after invalidation and admits a rename in its verified worktree', async () => {
     const { proxy, callbacks, serverRequest, moved } = createWorktreeProxy();
@@ -1082,17 +1121,22 @@ describe('transferred Git worktree authorization', () => {
     expect(proxy.isSessionCatalogEventAuthorized(moved.id, moved.directory)).toBe(false);
   });
 
-  it.each(['invalidation', 'closed root', 'unavailable inventory'])(
+  it.each(['invalidation', 'closed root', 'unavailable session'])(
     'fails closed during %s',
     async (failure) => {
       const { proxy, serverRequest, state, moved } = createWorktreeProxy();
-      const inventory = deferred<unknown>();
-      state.worktrees = inventory.promise;
+      const canonical = deferred<unknown>();
+      const original = serverRequest.getMockImplementation()!;
+      serverRequest.mockImplementation((method, path, body, options) =>
+        new URL(path, 'http://localhost').pathname === '/session/moved'
+          ? canonical.promise
+          : original(method, path, body, options)
+      );
       const pending = proxy.authorizeSessionDirectory(moved.id, moved.directory);
       await vi.waitFor(() =>
         expect(serverRequest).toHaveBeenCalledWith(
           'GET',
-          '/experimental/worktree?projectID=project-1',
+          '/session/moved',
           undefined,
           expect.anything()
         )
@@ -1102,9 +1146,7 @@ describe('transferred Git worktree authorization', () => {
         state.roots = [];
         state.known = false;
       }
-      inventory.resolve(
-        failure === 'unavailable inventory' ? undefined : [{ directory: moved.directory }]
-      );
+      canonical.resolve(failure === 'unavailable session' ? undefined : state.canonical);
       await expect(pending).resolves.toBe(false);
       expect(proxy.isSessionCatalogEventAuthorized(moved.id, moved.directory)).toBe(false);
     }
@@ -1128,7 +1170,7 @@ describe('transferred Git worktree authorization', () => {
     expect(proxy.isSessionCatalogEventAuthorized(moved.id, '/outside')).toBe(false);
   });
 
-  it('keeps history readable when worktree verification fails without authorizing a mutation', async () => {
+  it('keeps a verified moved session writable when optional worktree metadata is unavailable', async () => {
     const { proxy, callbacks, serverRequest, moved } = createWorktreeProxy();
     const original = serverRequest.getMockImplementation()!;
     serverRequest.mockImplementation((method, path, body, options) => {
@@ -1142,19 +1184,24 @@ describe('transferred Git worktree authorization', () => {
       id: 9035,
       data: expect.objectContaining({
         id: moved.id,
-        transfer: expect.objectContaining({ available: false }),
+        transfer: expect.objectContaining({ available: true }),
       }),
     });
     await proxy.handleRequest(
       makePayload(9036, 'PATCH', '/session/moved?directory=%2Fworktrees%2Ffeature', {
-        title: 'Blocked',
+        title: 'Renamed',
       })
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 9036,
-      error: `Conversation moved to ${moved.directory}. Open its folder to continue.`,
+      data: expect.objectContaining({ id: moved.id, title: 'Renamed' }),
     });
-    expect(serverRequest.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+    expect(serverRequest).toHaveBeenCalledWith(
+      'PATCH',
+      expect.stringContaining('/session/moved'),
+      { title: 'Renamed' },
+      expect.objectContaining({ directory: moved.directory })
+    );
   });
 });
 
@@ -1722,7 +1769,7 @@ describe('RestProxy handleRequest', () => {
     expect(proxy.isSessionCatalogEventAuthorized('moved', '/outside')).toBe(false);
   });
 
-  it('admits session-scoped history reads for a retained transfer but rejects mutations and unrelated directories', async () => {
+  it('admits session-scoped reads and sends for a verified retained transfer but rejects unrelated directories', async () => {
     const moved = {
       id: 'moved',
       projectID: 'project-1',
@@ -1749,17 +1796,18 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(
       makePayload(9012, 'POST', '/session/moved/prompt_async?directory=%2Foutside', { parts: [] })
     );
-    expect(
-      serverRequest.mock.calls.every(
-        ([method, path]) => method === 'GET' && path === '/project/current'
-      )
-    ).toBe(true);
+    expect(serverRequest).toHaveBeenCalledWith(
+      'POST',
+      expect.stringContaining('/session/moved/prompt_async'),
+      expect.objectContaining({ parts: [] }),
+      expect.objectContaining({ directory: '/outside' })
+    );
     serverRequest.mockClear();
     await proxy.handleRequest(makePayload(9013, 'GET', '/session/moved?directory=%2Funrelated'));
     expect(serverRequest).not.toHaveBeenCalled();
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 9012,
-      error: 'Conversation moved to /outside. Open its folder to continue.',
+      data: moved,
     });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 9013,
@@ -1905,7 +1953,8 @@ describe('RestProxy handleRequest', () => {
     });
     await proxy.handleRequest(makePayload(9025, 'GET', '/session/moved?directory=%2Foutside'));
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 9025, data: moved });
-    expect(proxy.isSessionCatalogEventAuthorized('moved', '/outside')).toBe(false);
+    expect(proxy.isSessionCatalogEventAuthorized('moved', '/outside')).toBe(true);
+    expect(proxy.isSessionCatalogEventAuthorized('foreign', '/outside')).toBe(false);
   });
   it('detects a missed transfer when a session read returns a different directory', async () => {
     const sessionTransferred = vi.fn(async () => {});
@@ -1921,7 +1970,7 @@ describe('RestProxy handleRequest', () => {
     expect(sessionTransferred).toHaveBeenCalledExactlyOnceWith('session-1', '/outside', '/repo');
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 9001,
-      error: 'Conversation moved to /outside. Open its folder to continue.',
+      error: 'Conversation moved to /outside. Try again.',
     });
     expect(serverRequest.mock.calls.every(([method]) => method === 'GET')).toBe(true);
   });

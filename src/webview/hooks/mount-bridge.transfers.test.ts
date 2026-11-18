@@ -39,6 +39,36 @@ afterEach(() => {
 });
 
 describe('session transfer bridge', () => {
+  it('refreshes location metadata after an active move without clearing the transcript', () => {
+    const { operations, openSession, reloadSessionCatalog } = createOperations();
+    appStore.setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        title: 'Active chat',
+        version: '2',
+        directory: '/repo',
+        isGitWorktree: false,
+        time: { created: 1, updated: 2 },
+      },
+    ]);
+    appStore.setState('activeSessionId', 'session-1');
+
+    operations.handleExtensionMessage({
+      type: 'session/transferred',
+      payload: { sessionId: 'session-1', directory: '/worktrees/feature', available: true },
+    });
+
+    expect(appStore.state.sessions[0]?.directory).toBe('/worktrees/feature');
+    expect(appStore.state.sessions[0]?.transfer).toEqual({
+      originDirectory: '/repo',
+      available: true,
+    });
+    expect(appStore.state.sessions[0]?.isGitWorktree).toBeUndefined();
+    expect(openSession).toHaveBeenCalledExactlyOnceWith('session-1', '/worktrees/feature', true);
+    expect(reloadSessionCatalog).toHaveBeenCalledOnce();
+  });
+
   it('clears stale worktree metadata immediately when the chat returns to its origin', () => {
     const { operations, openSession } = createOperations();
     appStore.setState('sessions', [
@@ -111,7 +141,7 @@ describe('session transfer bridge', () => {
     expect(composerStore.inputText()).toBe('Unsent draft');
     expect(appStore.state.transferredSessions['session-1']).toBe('/outside');
     expect(openSession).toHaveBeenCalledExactlyOnceWith('session-1', '/outside', true);
-    expect(reloadSessionCatalog).not.toHaveBeenCalled();
+    expect(reloadSessionCatalog).toHaveBeenCalledOnce();
   });
 
   it('follows the same active session into a verified worktree when its destination becomes available', () => {

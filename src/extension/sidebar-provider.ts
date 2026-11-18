@@ -1056,9 +1056,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ) {
           if (session?.id === sessionID && typeof session.directory === 'string') {
             await this.handleSessionTransfer(sessionID, session.directory);
-            throw new Error(
-              `Conversation moved to ${session.directory}. Open its folder to continue.`
-            );
+            throw new Error(`Conversation moved to ${session.directory}. Try again.`);
           }
           throw new Error('404 Session not found');
         }

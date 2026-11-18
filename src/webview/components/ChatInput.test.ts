@@ -11161,7 +11161,7 @@ describe('ChatInput', () => {
   });
 
   it.each([1, 2] as const)(
-    'never sends an unavailable /btw as chat or a custom command on API %s',
+    'handles /btw in a moved session without sending chat or a custom command on API %s',
     async (apiVersion) => {
       setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion });
       setState('activeSessionId', 'session-1');
@@ -11177,8 +11177,13 @@ describe('ChatInput', () => {
         ?.querySelector('.rich-composer')
         ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       await flushAsyncWork();
-      expect(sideQuestionView()).toBeNull();
-      expect(inputText()).toBe('/btw Why?');
+      if (apiVersion === 2) {
+        expect(sideQuestionView()).toMatchObject({ sessionID: 'session-1', question: 'Why?' });
+        expect(inputText()).toBe('');
+      } else {
+        expect(sideQuestionView()).toBeNull();
+        expect(inputText()).toBe('/btw Why?');
+      }
       expect(state.queuedMessages).toEqual([]);
       expect(sendMessageMock).not.toHaveBeenCalled();
       expect(runSlashCommandByNameMock).not.toHaveBeenCalled();

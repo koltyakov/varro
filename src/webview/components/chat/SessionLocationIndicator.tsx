@@ -1,7 +1,8 @@
-import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { Show, createEffect, createSignal, on, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
+import { setState } from '../../lib/state';
 import { clampPopupToViewport } from '../../lib/popup-position';
 import { folderIcon, gitIcon } from '../../lib/ui-icons';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
@@ -26,10 +27,11 @@ export function SessionLocationIndicator(props: {
   let menu: HTMLDivElement | undefined;
   const close = () => setPosition(null);
 
+  createEffect(on(() => [props.sessionId, props.directory], close));
+
   createEffect(() => {
     const sessionId = props.sessionId;
     const directory = props.directory;
-    close();
     setIsGitWorktree(false);
     if (props.isGitWorktree !== undefined) {
       setIsGitWorktree(props.isGitWorktree);
@@ -41,6 +43,13 @@ export function SessionLocationIndicator(props: {
       .then((location) => {
         if (!cancelled && isSameWorkspacePath(location.directory, directory)) {
           setIsGitWorktree(location.isGitWorktree);
+          setState(
+            'sessions',
+            (session) =>
+              session.id === sessionId && isSameWorkspacePath(session.directory, directory),
+            'isGitWorktree',
+            location.isGitWorktree
+          );
         }
       })
       .catch(() => {

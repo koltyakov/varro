@@ -188,11 +188,15 @@ function isPlaceholderSessionTitle(title: string | null | undefined) {
 function mergeFreshSession(existing: Session | undefined, incoming: Session) {
   if (!existing) return incoming;
   if (
-    incoming.isGitWorktree === undefined &&
-    existing.isGitWorktree !== undefined &&
+    existing.projectID === incoming.projectID &&
     isSameWorkspacePath(existing.directory, incoming.directory)
   ) {
-    incoming = { ...incoming, isGitWorktree: existing.isGitWorktree };
+    // Location metadata is verified separately from the conversation timestamp.
+    if (incoming.isGitWorktree !== undefined) {
+      existing = { ...existing, isGitWorktree: incoming.isGitWorktree };
+    } else if (existing.isGitWorktree !== undefined) {
+      incoming = { ...incoming, isGitWorktree: existing.isGitWorktree };
+    }
   }
   let transfer = incoming.transfer ?? existing.transfer;
   if (transfer && existing.transfer?.hiddenOrigins?.length && incoming.transfer) {

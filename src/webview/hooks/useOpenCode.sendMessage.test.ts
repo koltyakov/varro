@@ -42,26 +42,37 @@ describe('sendMessage', () => {
     await loadModules();
   }, 15_000);
 
-  it.each([undefined, 'queued'] as const)(
-    'blocks sends to an unavailable transferred session including %s targets',
-    async (target) => {
+  it.each([
+    ['/outside', undefined],
+    ['/outside', 'queued'],
+    ['/worktrees/feature', undefined],
+    ['/worktrees/feature', 'queued'],
+  ] as const)(
+    'sends to a moved session in %s with target=%s despite stale availability metadata',
+    async (directory, target) => {
       const { stateModule, hookModule } = await loadModules();
+      const moved = {
+        ...session(),
+        directory,
+        transfer: { originDirectory: '/repo', available: false },
+      };
       stateModule.setState('activeSessionId', target ? 'other-session' : 'session-1');
-      stateModule.setState('transferredSessions', { 'session-1': '/outside' });
+      stateModule.setState('sessions', [moved]);
+      stateModule.setState('transferredSessions', { 'session-1': directory });
       stateModule.setInputText('Unsent draft');
-      const messages = [{ info: userMessage('user-1'), parts: [] }];
-      stateModule.replaceMessages(messages);
+      clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+      clientMocks.sessionGet.mockResolvedValue(moved);
+      clientMocks.sessionMessages.mockResolvedValue([]);
       expect(
         await hookModule.sendMessage(
-          'Do not dispatch',
+          'Continue here',
           target ? { targetSessionId: 'session-1' } : undefined
         )
-      ).toBe(false);
-      expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
+      ).toBe(true);
+      expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', expect.anything(), {
+        directory,
+      });
       expect(clientMocks.sessionCreate).not.toHaveBeenCalled();
-      expect(stateModule.inputText()).toBe('Unsent draft');
-      expect(stateModule.state.messages).toEqual(messages);
-      expect(stateModule.error()).toContain('Conversation moved to /outside');
     }
   );
 
