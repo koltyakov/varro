@@ -589,6 +589,11 @@ test('aligns visible link icons in tables and prose', async ({ page }, testInfo)
         const lastPixel = data.findLastIndex((alpha, index) => index % 4 === 3 && alpha >= 128);
         if (lastPixel < 0) throw new Error('Link icon has no visible pixels');
         const inkBottom = Math.floor(lastPixel / (canvas.width * 4)) + 1;
+        let inkRight = 0;
+        for (let index = 3; index < data.length; index += 4) {
+          if ((data[index] ?? 0) >= 128)
+            inkRight = Math.max(inkRight, ((index - 3) / 4) % canvas.width);
+        }
         // A zero-size inline block sits on the label's first baseline.
         const marker = document.createElement('span');
         marker.style.cssText = 'display: inline-block; width: 0; height: 0;';
@@ -598,6 +603,10 @@ test('aligns visible link icons in tables and prose', async ({ page }, testInfo)
         marker.remove();
         measurements.push({
           offset: iconBox.top + (iconBox.height * inkBottom) / canvas.height - baseline,
+          gap: icon.classList.contains('file-path-icon')
+            ? label.getBoundingClientRect().left -
+              (iconBox.left + (iconBox.width * (inkRight + 1)) / canvas.width)
+            : null,
           label: label.textContent,
           context: wrapper.closest('td') ? 'table cell' : 'prose',
         });
@@ -605,6 +614,12 @@ test('aligns visible link icons in tables and prose', async ({ page }, testInfo)
       return measurements;
     });
     await markdown.screenshot({ path: testInfo.outputPath(`inline-icons-${size}px.png`) });
+    // File artwork ends at different widths; the margin keeps the visible gap uniform.
+    const gaps = offsets.flatMap(({ gap }) => (gap === null ? [] : [gap]));
+    expect(gaps.length).toBeGreaterThan(1);
+    expect(Math.max(...gaps) - Math.min(...gaps), JSON.stringify(offsets)).toBeLessThanOrEqual(
+      0.15
+    );
     for (const { offset, label, context } of offsets) {
       expect(
         Math.abs(offset),

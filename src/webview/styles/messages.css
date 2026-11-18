@@ -2412,6 +2412,11 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   margin-right: 0.5px;
 }
 
+.rendered-markdown .file-path-icon {
+  /* File artwork ends between 3/4 and the full box width; keep the visible gap constant. */
+  margin-right: calc(0.175em - (1 - var(--file-icon-ink-right, 0.844)) * 0.875em);
+}
+
 .rendered-markdown a.file-path-link,
 .rendered-markdown a.session-reference-link {
   color: var(--color-vscode-link);

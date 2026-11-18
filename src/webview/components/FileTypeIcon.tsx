@@ -176,34 +176,71 @@ const FILE_EXTENSION_ICONS = new Map<string, string>(
   })
 );
 
-// Lowest ink as a fraction of the icon height, for artwork drawn below the usual 14/16 frame.
-const LOW_INK_BOTTOMS = new Map<string, number>([
-  ...[
-    audioIcon,
-    dartIcon,
-    graphqlIcon,
-    imageIcon,
-    licenseIcon,
-    lockIcon,
-    luaIcon,
-    makefileIcon,
-    perlIcon,
-    pythonMiscIcon,
-    readmeIcon,
-    rustIcon,
-    sassIcon,
-    svgIcon,
-    terraformIcon,
-    tomlIcon,
-    tsconfigIcon,
-  ].map((icon): [string, number] => [icon, 0.9375]),
-  ...[fileIcon, mavenIcon, pdfIcon, pythonIcon, svelteIcon, xmlIcon, yamlIcon].map(
-    (icon): [string, number] => [icon, 0.917]
-  ),
-  [gitIcon, 0.948],
-  [nodeIcon, 0.969],
-  [gemfileIcon, 1],
+// Right and bottom ink edges as fractions of each icon box. The artwork insets vary,
+// so link icons use them to keep the same visible gap and baseline.
+const ICON_INK_EDGES = new Map<string, readonly [right: number, bottom: number]>([
+  [audioIcon, [0.938, 0.938]],
+  [cIcon, [0.75, 0.875]],
+  [contributingIcon, [0.875, 0.875]],
+  [cppIcon, [1, 0.875]],
+  [csharpIcon, [0.938, 0.875]],
+  [cssIcon, [0.875, 0.875]],
+  [dartIcon, [0.938, 0.938]],
+  [databaseIcon, [0.813, 0.875]],
+  [dockerIcon, [0.917, 0.799]],
+  [editorconfigIcon, [0.913, 0.899]],
+  [fileIcon, [0.833, 0.917]],
+  [gemfileIcon, [0.938, 1]],
+  [gitIcon, [0.948, 0.948]],
+  [goIcon, [1, 0.719]],
+  [goModIcon, [1, 0.719]],
+  [gradleIcon, [0.938, 0.875]],
+  [graphqlIcon, [0.875, 0.938]],
+  [htmlIcon, [0.875, 0.875]],
+  [imageIcon, [0.844, 0.938]],
+  [javaIcon, [0.938, 0.875]],
+  [javascriptIcon, [0.875, 0.875]],
+  [jsonIcon, [0.917, 0.833]],
+  [kotlinIcon, [0.876, 0.876]],
+  [lessIcon, [0.875, 0.875]],
+  [licenseIcon, [0.844, 0.938]],
+  [lockIcon, [0.813, 0.938]],
+  [luaIcon, [0.938, 0.938]],
+  [makefileIcon, [0.93, 0.938]],
+  [markdownIcon, [0.938, 0.75]],
+  [mavenIcon, [0.917, 0.917]],
+  [nodeIcon, [0.875, 0.969]],
+  [npmIcon, [0.875, 0.875]],
+  [pdfIcon, [0.833, 0.917]],
+  [perlIcon, [0.833, 0.933]],
+  [phpIcon, [1, 0.753]],
+  [powershellIcon, [0.938, 0.813]],
+  [pythonIcon, [0.917, 0.917]],
+  [pythonMiscIcon, [1, 0.938]],
+  [reactIcon, [0.938, 0.89]],
+  [reactTsIcon, [0.938, 0.89]],
+  [readmeIcon, [0.938, 0.938]],
+  [rIcon, [0.93, 0.834]],
+  [rubyIcon, [0.87, 0.868]],
+  [rustIcon, [0.938, 0.938]],
+  [sassIcon, [0.875, 0.938]],
+  [shellIcon, [0.938, 0.875]],
+  [svelteIcon, [0.849, 0.919]],
+  [svgIcon, [0.938, 0.937]],
+  [swiftIcon, [0.917, 0.873]],
+  [terraformIcon, [0.938, 0.938]],
+  [tomlIcon, [0.938, 0.938]],
+  [tsconfigIcon, [0.938, 0.938]],
+  [typescriptIcon, [0.875, 0.875]],
+  [videoIcon, [0.938, 0.813]],
+  [vueIcon, [0.925, 0.895]],
+  [xmlIcon, [0.833, 0.917]],
+  [yamlIcon, [0.833, 0.917]],
+  [zipIcon, [0.875, 0.875]],
 ]);
+
+// Artwork drawn below the usual 14/16 frame needs sub-pixel baseline placement.
+const LOW_INK_BOTTOM = 0.9;
 
 export function hasRecognizedFileType(path: string): boolean {
   const filename = getLeafPathName(path).toLowerCase();
@@ -234,10 +271,14 @@ export function createFileTypeIconElement(
   icon.className = `file-type-icon ${className}`;
   const src = getFileTypeIcon(path);
   icon.src = src;
-  const inkBottom = LOW_INK_BOTTOMS.get(src);
-  if (inkBottom !== undefined) {
-    icon.classList.add('low-ink-icon');
-    icon.style.setProperty('--file-icon-ink-bottom', String(inkBottom));
+  const inkEdges = ICON_INK_EDGES.get(src);
+  if (inkEdges) {
+    const [right, bottom] = inkEdges;
+    icon.style.setProperty('--file-icon-ink-right', String(right));
+    if (bottom > LOW_INK_BOTTOM) {
+      icon.classList.add('low-ink-icon');
+      icon.style.setProperty('--file-icon-ink-bottom', String(bottom));
+    }
   }
   icon.alt = '';
   icon.setAttribute('aria-hidden', 'true');
