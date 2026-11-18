@@ -11,6 +11,7 @@ import { attachmentIcon, hourglassIcon, mediaImageIcon } from '../../lib/ui-icon
 import { toCssUrl } from '../UiIcon';
 import type { Permission, QuestionRequest } from '../../types';
 import type { StickyUserMessagePreview } from './sticky-preview';
+import type { StatusSlotActivity } from './MessageListChrome';
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise chrome integration with permission and question prompts. */
 vi.mock('../QuestionPrompt', () => ({
@@ -93,6 +94,68 @@ describe('MessageListChrome', () => {
     vi.advanceTimersByTime(10_000);
     flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
+  });
+
+  it('replaces Thinking with one keyed tool inside the same status row', () => {
+    const initial: StatusSlotActivity = {
+      key: 'message\u0000read',
+      info: {
+        id: 'message',
+        sessionID: 'session',
+        parentID: 'prompt',
+        role: 'assistant',
+        agent: 'build',
+        mode: 'build',
+        providerID: 'test',
+        modelID: 'test',
+        path: { cwd: '/workspace', root: '/workspace' },
+        time: { created: Date.now() },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      part: {
+        id: 'read',
+        messageID: 'message',
+        sessionID: 'session',
+        type: 'tool',
+        tool: 'grep',
+        callID: 'call-read',
+        state: {
+          status: 'running',
+          input: { filePath: '/workspace/source.ts' },
+          time: { start: Date.now() },
+        },
+      },
+      retained: false,
+    };
+    const [activity, setActivity] = createSignal<StatusSlotActivity | null>(null);
+    cleanup = render(
+      () => <LoadingRow compacting={false} visible={!activity()} activity={activity()} />,
+      container!
+    );
+    flushSolid();
+    const row = container!.querySelector('.interactive-loading-row');
+    expect(row?.querySelector('.loading-indicator')).not.toBeNull();
+
+    setActivity(initial);
+    flushSolid();
+    const header = row?.querySelector('.tool-invocation-header');
+    expect(header).not.toBeNull();
+    expect(row?.querySelector('.loading-indicator')).toBeNull();
+    expect(row?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
+    expect(row?.getAttribute('aria-hidden')).toBeNull();
+    expect(row?.querySelector('[data-activity-source-message-id="message"]')).not.toBeNull();
+
+    setActivity({ ...initial, retained: true });
+    flushSolid();
+    expect(row?.querySelector('.tool-invocation-header')).toBe(header);
+    expect(row?.querySelector('.status-slot-tool')?.classList.contains('is-completed')).toBe(true);
+
+    setActivity(null);
+    flushSolid();
+    expect(container!.querySelector('.interactive-loading-row')).toBe(row);
+    expect(row?.querySelector('.loading-indicator')).not.toBeNull();
+    expect(row?.querySelector('.tool-invocation-header')).toBeNull();
   });
 
   it('shows the background process card with its elapsed duration and no stale-session warning', () => {

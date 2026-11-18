@@ -51,6 +51,7 @@ import {
   isAssistantActivityPart,
   isAssistantActivityPartRunning,
   isAssistantEditActivityPart,
+  isAssistantActiveInlineToolPart,
   preserveAssistantActivityGroupKeys,
   shouldCompactAssistantActivityPart,
   type AssistantActivityGroupInfo,
@@ -134,6 +135,7 @@ import {
   StickyUserMessagePreviewCard,
   TurnNavigationRail,
 } from './message-list/MessageListChrome';
+import type { StatusSlotActivity } from './message-list/MessageListChrome';
 import { Tooltip } from './Tooltip';
 import { UiIcon } from './UiIcon';
 import { StarterLogo } from './message-list/StarterLogo';
@@ -3302,6 +3304,45 @@ export function MessageList() {
     return key ? (permissionRequestsByToolCall().get(key) ?? null) : null;
   }
 
+  const statusSlotActivity = createMemo<StatusSlotActivity | null>(() => {
+    if (
+      (!loadingRowEligible() && !presentation.pending()) ||
+      hasActiveQuestion() ||
+      hasActivePermission() ||
+      activeUsageLimit() ||
+      state.messagesLoading ||
+      editingMessage() ||
+      isSessionCompacting() ||
+      waitingForBackground() ||
+      managedChildWorking()
+    ) {
+      return null;
+    }
+    const keys = new Set([...visibleActiveActivityPartKeys(), ...retainedActivityPartKeys()]);
+    if (keys.size !== 1 || exitingActivityPartKeys().size > 0) return null;
+    const key = keys.values().next().value;
+    if (!key) return null;
+    const separator = key.lastIndexOf('\u0000');
+    const messageId = key.slice(0, separator);
+    if (!trailingAssistantTurn()?.assistantMessageIds.has(messageId)) return null;
+    const index = messageIndexById().get(messageId);
+    const message = index === undefined ? undefined : messages()[index];
+    if (!message || !isAssistantMessage(message.info)) return null;
+    const part = message.parts.find((candidate) => candidate.id === key.slice(separator + 1));
+    if (
+      part?.type !== 'tool' ||
+      !isAssistantActivityPart(part) ||
+      isAssistantEditActivityPart(part) ||
+      isAssistantActiveInlineToolPart(part) ||
+      getQuestionRequestForTool(part) ||
+      getPermissionMatchForTool(part)
+    ) {
+      return null;
+    }
+    return { key, info: message.info, part, retained: retainedActivityPartKeys().has(key) };
+  });
+  const statusSlotActivityPartKey = createMemo(() => statusSlotActivity()?.key ?? null);
+
   const getCompactActivityLayoutSegment = (
     entries: readonly MessageEntry[],
     visibleActive: Accessor<ReadonlySet<string>>,
@@ -3318,6 +3359,7 @@ export function MessageList() {
           return `permission:${permission.permission.id}:${permission.isActive ? 'active' : 'queued'}`;
         }
       }
+      if (key === statusSlotActivityPartKey()) return 'status-slot';
       if (visibleActive().has(key)) return 'active';
       if (retained().has(key)) return 'retained';
       if (exiting().has(key)) return 'exiting';
@@ -5090,7 +5132,8 @@ export function MessageList() {
     };
 
     const tray = item.closest<HTMLElement>('.assistant-active-activity-tray');
-    const gap = tray ? Number.parseFloat(getComputedStyle(tray).rowGap) || 0 : 0;
+    const trayStyles = tray ? getComputedStyle(tray) : null;
+    const gap = Number.parseFloat(trayStyles?.rowGap || '') || 0;
     const summary = tray?.querySelector<HTMLElement>('.assistant-active-activity-summary');
     const itemViewport = tray?.querySelector<HTMLElement>('.assistant-active-activity-items');
     const remainingItems = tray?.querySelectorAll(
@@ -5121,6 +5164,13 @@ export function MessageList() {
     }
 
     let reserve = item.getBoundingClientRect().height + gap;
+    if (trayStyles && remainingItems?.length === 1 && remainingItems[0] === item) {
+      // The wrapper disappears after its last item finishes exiting. Its own padding is
+      // outside the measured item and must be reserved once, before publishing exit membership.
+      reserve +=
+        (Number.parseFloat(trayStyles.paddingTop) || 0) +
+        (Number.parseFloat(trayStyles.paddingBottom) || 0);
+    }
     // The CSS sibling selector drops the next surviving item's leading padding when the first
     // non-exiting item leaves. Measure that space BEFORE changing exiting membership: subsequent
     // completions otherwise see already-shrunken siblings and permanently under-reserve the tray.
@@ -5186,25 +5236,27 @@ export function MessageList() {
     });
   }
 
-  function captureActivityExitSummaryAnchor() {
-    const sessionId = state.activeSessionId;
-    if (!containerRef || !sessionId) return;
-    if (activityExitSummaryAnchor?.sessionId === sessionId) return;
-    const summaries = containerRef.querySelectorAll<HTMLElement>('.assistant-activity-summary');
-    const summary = summaries[summaries.length - 1];
-    if (!summary) return;
+  function hasActivityTrayBeforeSummary(summary: HTMLElement) {
     // A tray collapsing above a separate summary moves that summary up while the bottom reserve
     // holds the viewport. Anchoring its old top would scroll the transcript back by the tray.
-    const flow = summary.closest('.assistant-message-flow');
-    const trayAboveSummary = [
-      ...(flow?.querySelectorAll<HTMLElement>(':scope > .assistant-active-activity-tray') ?? []),
+    // The tray can belong to an earlier assistant step, outside the summary's own flow.
+    return [
+      ...(containerRef?.querySelectorAll<HTMLElement>('.assistant-active-activity-tray') ?? []),
     ].some(
       (tray) =>
         tray.getClientRects().length > 0 &&
         !tray.contains(summary) &&
         (tray.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
     );
-    if (trayAboveSummary) return;
+  }
+
+  function captureActivityExitSummaryAnchor() {
+    const sessionId = state.activeSessionId;
+    if (!containerRef || !sessionId) return;
+    if (activityExitSummaryAnchor?.sessionId === sessionId) return;
+    const summaries = containerRef.querySelectorAll<HTMLElement>('.assistant-activity-summary');
+    const summary = summaries[summaries.length - 1];
+    if (!summary || hasActivityTrayBeforeSummary(summary)) return;
     activityExitSummaryAnchor = {
       sessionId,
       element: summary,
@@ -5248,6 +5300,7 @@ export function MessageList() {
   }
 
   function startActivityExitSummarySettle(anchor: ActivityExitSummaryAnchor) {
+    if (activityExitSummaryAnchor !== anchor) return;
     activityExitSummarySettleFrames = Math.max(activityExitSummarySettleFrames, 30);
     if (activityExitSummarySettleRafId) return;
     lastBottomScrollFrameAt ??= performance.now();
@@ -5268,6 +5321,7 @@ export function MessageList() {
         return;
       }
       restoreActivityExitSummaryAnchor(anchor);
+      if (activityExitSummaryAnchor !== anchor) return;
       activityExitSummarySettleFrames = Math.max(0, activityExitSummarySettleFrames - 1);
       if (
         activityExitSummarySettleFrames > 0 ||
@@ -5317,6 +5371,15 @@ export function MessageList() {
           )
         : null;
     if (!summary) return;
+    if (hasActivityTrayBeforeSummary(summary)) {
+      // A newly admitted earlier preview must spend the existing reserve, not move the
+      // viewport to hold a later summary. Keep the painted scroll target while it grows.
+      clearActivityExitSummaryAnchor();
+      reconcileAppendBottomReserve();
+      performScroll({ force: true });
+      startFollowLoop(anchor.sessionId, { observedStreaming: true });
+      return;
+    }
     anchor.element = summary;
     const currentTop =
       summary.getBoundingClientRect().top - containerRef.getBoundingClientRect().top;
@@ -5845,8 +5908,11 @@ export function MessageList() {
     if (reserve <= 0) {
       // Replacement growth can consume the last reserve before the next rounding write.
       // Keep the painted bottom reachable even when there is no existing spacer to grow.
+      // At zero, rounding cannot clamp the viewport backward. Track min-height can mask
+      // unused room, so reserving there would accumulate a pixel on each tool collapse.
       if (
         pendingHeightReduction <= 0 ||
+        containerRef.scrollTop <= 0 ||
         !autoScroll() ||
         !pinnedToBottom ||
         stickyNavigationOwnsScroll() ||
@@ -7544,7 +7610,9 @@ export function MessageList() {
       control.matches('.assistant-activity-summary') &&
       control.getAttribute('aria-expanded') === 'false';
     const activityItem = control.closest<HTMLElement>('[data-activity-part-id]');
-    const activityMessageId = activityItem?.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+    const activityMessageId =
+      activityItem?.dataset.activitySourceMessageId ??
+      activityItem?.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
     const activityKey =
       activityMessageId && activityItem?.dataset.activityPartId
         ? `${activityMessageId}\u0000${activityItem.dataset.activityPartId}`
@@ -10040,6 +10108,7 @@ export function MessageList() {
         visibleActive: segment.visibleActive(),
         retained: segment.retained(),
         exiting: segment.exiting(),
+        statusSlotActivityPartKey: statusSlotActivityPartKey(),
       },
       segment.streaming()
     );
@@ -10149,6 +10218,7 @@ export function MessageList() {
       trailingPermissionMessageIds,
       exitingActivityPartKeys: segment.exiting(),
       waitingActivityPartKeys,
+      statusSlotActivityPartKey: statusSlotActivityPartKey(),
       modelChangeMessageIds: rowIds.modelChanges,
       dialogSummaryMessageIds: rowIds.dialogSummaries,
     });
@@ -11185,6 +11255,7 @@ export function MessageList() {
               exitingActivityPartKeys={renderedExitingActivityPartKeys()}
               visibleActiveActivityPartKeys={renderedVisibleActiveActivityPartKeys()}
               groupedActiveActivityPartKeys={visibleActiveActivityPartKeys()}
+              statusSlotActivityPartKey={statusSlotActivityPartKey()}
               inlineThinkingMessageIds={inlineThinkingMessageIds()}
               expandedThinkingMessageIds={expandedThinkingMessageIds()}
               hasBuildAgent={hasBuildAgent()}
@@ -11230,7 +11301,13 @@ export function MessageList() {
           <Show
             when={!editingMessage() ? trailingAssistantDialogSummary() : null}
             fallback={
-              <Show when={reserveLoadingRow() && !editingMessage() && !!state.activeSessionId}>
+              <Show
+                when={
+                  (reserveLoadingRow() || statusSlotActivity()) &&
+                  !editingMessage() &&
+                  !!state.activeSessionId
+                }
+              >
                 <LoadingRow
                   compacting={isSessionCompacting()}
                   waiting={waitingForBackground()}
@@ -11241,6 +11318,7 @@ export function MessageList() {
                   turnStartedAt={loadingTurnStartedAt()}
                   elapsedStartedAt={loadingElapsedStartedAt()}
                   visible={!state.messagesLoading && showLoadingRow()}
+                  activity={statusSlotActivity()}
                 />
               </Show>
             }

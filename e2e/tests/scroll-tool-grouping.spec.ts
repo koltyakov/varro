@@ -184,17 +184,29 @@ for (const virtualized of [false, true]) {
 // Replays of v2 and v1 sessions clamped the bottom-pinned transcript by 1 px whenever a tool
 // tray with a fractional height grouped: its row lost a whole-pixel correction under the fixed
 // collapse target, but the reserve covered only the fractional tray height.
-for (const trayFraction of [0.1, 0.3, 0.6]) {
-  test(`tool grouping keeps a fractional row pinned: ${trayFraction}px tray fraction`, async ({
+for (const { target, side, trayFraction } of [
+  ...[0.1, 0.3, 0.6].map((fraction) => ({
+    target: 'item',
+    side: 'bottom',
+    trayFraction: fraction,
+  })),
+  ...[0.1, 0.3, 0.6, 1.6].map((fraction) => ({
+    target: 'wrapper',
+    side: 'bottom',
+    trayFraction: fraction,
+  })),
+  { target: 'wrapper', side: 'top', trayFraction: 0.6 },
+]) {
+  test(`grouping row-local reasoning keeps a measured row pinned: ${trayFraction}px ${target} ${side} fraction`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 486, height: 800 });
     await page.goto(
-      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69&activeTrayCount=1'
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69&activeTrayCount=1&activeTrayReasoning=1'
     );
     // Artificial stress changes only fixture geometry; production trays have fractional heights.
     await page.addStyleTag({
-      content: `.assistant-active-activity-tray { padding-bottom: ${trayFraction}px; }`,
+      content: `.assistant-active-activity-tray${target === 'item' ? ' .assistant-active-activity-item-content' : ''} { padding-${side}: ${trayFraction}px; }`,
     });
     await expect(page.locator('.assistant-active-activity-item')).toHaveCount(1);
     const bottomDistance = () =>
@@ -225,32 +237,34 @@ for (const trayFraction of [0.1, 0.3, 0.6]) {
       const marker = list?.querySelector<HTMLElement>(
         '[data-msg-id="message-tool-cards-user-69"] .user-message-card'
       );
+      const row = list?.querySelector<HTMLElement>(
+        '[data-msg-id="message-tool-cards-assistant-69"]',
+      );
       const initial = harness
         ?.getSessionMessages('session-tool-cards-large-transcript')
         .find((entry) => entry.info.id === 'message-tool-cards-assistant-69');
-      if (!harness || !list || !marker || !initial) throw new Error('Missing tool fixture');
+      if (!harness || !list || !marker || !row || !initial)
+        throw new Error('Missing tool fixture');
       const sample = () => ({
         scrollTop: list.scrollTop,
         top: marker.getBoundingClientRect().top,
+        rowHeight: row.getBoundingClientRect().height,
+        appendReserve:
+          list.querySelector('.append-scroll-bottom-reserve')?.getBoundingClientRect().height ?? 0,
+        exitReserve:
+          list.querySelector('.activity-exit-bottom-reserve')?.getBoundingClientRect().height ?? 0,
         active: list.querySelectorAll('.assistant-active-activity-item').length,
       });
       const result = [sample()];
       for (const part of initial.parts) {
-        if (part.type !== 'tool' || part.state.status !== 'running') continue;
+        if (part.type !== 'reasoning') continue;
         harness.replayServerEvent({
           type: 'message.part.updated',
           properties: {
             part: {
               ...part,
-              state: {
-                status: 'completed',
-                input: part.state.input,
-                output: 'Done',
-                title: 'Inspected',
-                metadata: {},
-                time: { start: Date.now() - 1000, end: Date.now() },
-              },
-            } satisfies ToolPart,
+              time: { start: part.time.start, end: Date.now() },
+            },
           },
         });
       }
@@ -275,6 +289,16 @@ for (const trayFraction of [0.1, 0.3, 0.6]) {
       .slice(1)
       .filter((sample, index) => sample.top > samples[index]!.top + 0.1);
     expect(reversals, JSON.stringify(samples.slice(0, 6))).toEqual([]);
+    expect(samples.some((sample) => sample.exitReserve > 0)).toBe(true);
+    expect(
+      samples.every((sample) => Math.abs(sample.top - samples[0]!.top) <= 0.1),
+      JSON.stringify(samples),
+    ).toBe(true);
+    const last = samples.at(-1)!;
+    expect(last.appendReserve + last.exitReserve).toBeCloseTo(
+      samples[0]!.rowHeight - last.rowHeight,
+      1,
+    );
   });
 }
 
@@ -297,7 +321,10 @@ for (const virtualized of [false, true]) {
         : '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCount=1'
     );
     await expect(page.locator('.assistant-active-activity-item')).toHaveCount(1);
-    await expect(page.locator('.interactive-loading-row.is-reserved')).toHaveCount(1);
+    await expect(
+      page.locator('.interactive-loading-row:not(.is-reserved) > .status-slot-tool')
+    ).toHaveCount(1);
+    await expect(page.locator('.interactive-loading-row .loading-verb')).toHaveCount(0);
     await page.waitForTimeout(700);
 
     const samples = await page.evaluate(

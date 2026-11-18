@@ -43,6 +43,7 @@ import {
 } from '../../lib/ui-icons';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import { getSmoothBottomFollowTop } from '../message-list/scrolling';
+import { slotToolOwnsRowSummary } from '../message-list/row-layout';
 import { modalFocus } from '../../lib/modal-focus';
 import {
   getFinalAssistantTextPartId,
@@ -474,6 +475,7 @@ export function AssistantMessageContent(props: {
   retainedActivityPartKeys?: ReadonlySet<string>;
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
+  statusSlotActivityPartKey?: string | null;
   groupedActiveActivityPartKeys?: ReadonlySet<string>;
   keepReasoningInline?: boolean;
   expandReasoning?: boolean;
@@ -586,6 +588,7 @@ export function AssistantMessageContent(props: {
   const isActiveActivityTrayPart = (part: Part) => {
     if (!isLocallyCompactActivityCandidate(part)) return false;
     const key = getAssistantActivityPartKey(part);
+    if (key === props.statusSlotActivityPartKey) return false;
     return (
       // Completion can reach projection before the lifecycle assigns retention.
       (props.visibleActiveActivityPartKeys
@@ -716,6 +719,17 @@ export function AssistantMessageContent(props: {
     for (let index = 0; index < parts.length; index += 1) {
       const part = parts[index]!;
       if (!isLocallyCompactActivityCandidate(part)) activityBoundary = part.id;
+      if (
+        part.type === 'tool' &&
+        getAssistantActivityPartKey(part) === props.statusSlotActivityPartKey &&
+        !slotToolOwnsRowSummary(
+          part,
+          compactActivityGroupByPartKey().get(getAssistantActivityPartKey(part)),
+          props.retainedActivityPartKeys
+        )
+      ) {
+        continue;
+      }
 
       if (
         isLocallyCompactActivityCandidate(part) &&
@@ -1073,6 +1087,8 @@ export function AssistantMessageContent(props: {
           <AssistantActivityGroup
             info={props.info}
             parts={item().parts.filter((part) => {
+              if (getAssistantActivityPartKey(part) === props.statusSlotActivityPartKey)
+                return false;
               const activePartKeys =
                 props.groupedActiveActivityPartKeys ?? props.visibleActiveActivityPartKeys;
               return (
@@ -1082,6 +1098,7 @@ export function AssistantMessageContent(props: {
             })}
             summaryParts={activityGroup().parts.filter((part) => {
               const key = getAssistantActivityPartKey(part);
+              if (key === props.statusSlotActivityPartKey) return false;
               const activePartKeys =
                 props.groupedActiveActivityPartKeys ?? props.visibleActiveActivityPartKeys;
               return (

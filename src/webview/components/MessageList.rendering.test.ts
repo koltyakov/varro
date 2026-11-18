@@ -2228,14 +2228,14 @@ describe('MessageList compact activity', () => {
     await vi.advanceTimersByTimeAsync(500);
     flushSolid();
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(1);
-    expect(container?.querySelector('.assistant-active-activity-tray')).not.toBeNull();
+    expect(container?.querySelector('.interactive-loading-row .status-slot-tool')).not.toBeNull();
     expect(
       container
         ?.querySelector('[data-activity-part-id="command-running"]')
         ?.closest('.assistant-activity-details')
     ).toBeNull();
     flushSolid();
-    expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).not.toContain(
+    expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).toContain(
       'interactive-item-render-empty'
     );
   });
@@ -2695,9 +2695,11 @@ describe('MessageList compact activity', () => {
 
     const followerRow = container?.querySelector('[data-msg-id="assistant-2"]');
     expect(
-      followerRow?.querySelector('[data-activity-part-id="command-running"].is-completed')
+      container?.querySelector(
+        '.interactive-loading-row [data-activity-part-id="command-running"].is-completed'
+      )
     ).not.toBeNull();
-    expect(followerRow?.classList).not.toContain('interactive-item-render-empty');
+    expect(followerRow?.classList).toContain('interactive-item-render-empty');
 
     await vi.advanceTimersByTimeAsync(2_000);
     flushSolid();
@@ -2863,8 +2865,10 @@ describe('MessageList compact activity', () => {
     flushSolid();
     await vi.advanceTimersByTimeAsync(3_000);
     flushSolid();
-    expect(toolRow()?.classList).not.toContain('interactive-item-render-empty');
-    expect(container?.querySelector('[data-activity-part-id="command-1"]')).not.toBeNull();
+    expect(toolRow()?.classList).toContain('interactive-item-render-empty');
+    expect(
+      container?.querySelector('.interactive-loading-row [data-activity-part-id="command-1"]')
+    ).not.toBeNull();
   });
 
   it('keeps stale running tools in completed history compact while the latest turn works', async () => {
@@ -3060,7 +3064,7 @@ describe('MessageList compact activity', () => {
     );
   });
 
-  it('reserves an inert Exploring row before the first tool can be summarized', async () => {
+  it('uses only the status slot before the first tool can be summarized', async () => {
     const command = toolPart('command-1', 'assistant-1', 'call-command-1');
     command.state = {
       status: 'running',
@@ -3108,11 +3112,10 @@ describe('MessageList compact activity', () => {
       '.assistant-activity-summary-placeholder'
     );
     const activeItem = container?.querySelector<HTMLElement>('[data-activity-part-id="command-1"]');
-    expect(placeholder?.textContent).toBe('Exploring');
-    expect(placeholder?.querySelector('.assistant-activity-chevron')).toBeNull();
-    expect(placeholder?.getAttribute('aria-expanded')).toBeNull();
-    expect(placeholder?.compareDocumentPosition(activeItem!)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING
+    expect(placeholder).toBeNull();
+    expect(activeItem?.closest('.interactive-loading-row')).not.toBeNull();
+    expect(container?.querySelector('[data-msg-id="assistant-1"]')?.classList).toContain(
+      'interactive-item-render-empty'
     );
 
     replaceMessages([
@@ -3126,7 +3129,7 @@ describe('MessageList compact activity', () => {
     await Promise.resolve();
     flushSolid();
 
-    expect(container?.querySelector('.assistant-activity-summary-placeholder')).not.toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary-placeholder')).toBeNull();
     expect(container?.querySelector('button.assistant-activity-summary')).toBeNull();
 
     await vi.advanceTimersByTimeAsync(2_000);
@@ -5177,7 +5180,7 @@ describe('MessageList loading row', () => {
     }
   );
 
-  it('hides the loading row once a running tool timer mounts', async () => {
+  it('replaces Thinking inside the loading row once a running tool timer mounts', async () => {
     vi.setSystemTime(64_000);
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
@@ -5223,7 +5226,7 @@ describe('MessageList loading row', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     flushSolid();
     expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('1m 5s');
-    expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
+    expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
       'is-reserved'
     );
     vi.setSystemTime(65_001);
@@ -5231,7 +5234,7 @@ describe('MessageList loading row', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     flushSolid();
     expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('1m 6s');
-    expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
+    expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
       'is-reserved'
     );
     expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
@@ -5884,6 +5887,7 @@ describe('MessageList loading row', () => {
     expect(row).toBeInstanceOf(HTMLDivElement);
     expect(row?.classList).toContain('is-reserved');
     expect(row?.getAttribute('aria-hidden')).toBe('true');
+    expect(row?.querySelector('.status-slot-tool')).toBeNull();
     expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
   });
 
@@ -5976,9 +5980,10 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('[data-activity-part-id="tool-active"]')).not.toBeNull();
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
-    expect(row?.classList).toContain('is-reserved');
-    expect(row?.getAttribute('aria-hidden')).toBe('true');
-    expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
+    expect(row?.classList).not.toContain('is-reserved');
+    expect(row?.getAttribute('aria-hidden')).toBeNull();
+    expect(row?.querySelector('.status-slot-tool')).not.toBeNull();
+    expect(container?.querySelector('.loading-verb')).toBeNull();
   });
 
   it('re-shows the loading row only after a sustained visible-stream gap', async () => {
