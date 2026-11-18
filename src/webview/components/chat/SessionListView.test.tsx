@@ -231,6 +231,8 @@ describe('deriveSessionIndicators', () => {
 beforeEach(() => {
   resetSessionShareOverridesForTests();
   resetSessionDiffSummaryStateForTests();
+  setState('failedSessionIds', []);
+  setState('failedSessionUpdatedAt', reconcile({}));
   setState('sessions', []);
   setState('providers', []);
   setState('sessionSelectedModels', reconcile({}));
@@ -1027,30 +1029,50 @@ describe('SessionListView model details', () => {
     expect(container.querySelector('.session-item-indicator.is-completed')).not.toBeNull();
   });
 
-  it.each(['build', 'plan'])('shows a red marker for an unread interrupted %s session', (agent) => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('lastSeenSessions', { 'session-1': 100 });
-    setState('sessionSelectedAgents', { 'session-1': agent });
-    markSessionResponseInterrupted('session-1', 500);
+  it.each(['build', 'plan'])(
+    'does not mark an unread interrupted %s session as failed',
+    (agent) => {
+      setState('sessions', [session('session-1', 500)]);
+      setState('lastSeenSessions', { 'session-1': 100 });
+      setState('sessionSelectedAgents', { 'session-1': agent });
+      markSessionResponseInterrupted('session-1', 500);
 
-    cleanup = render(() => <SessionListView />, container);
+      cleanup = render(() => <SessionListView />, container);
 
-    const marker = container.querySelector('.session-item-indicator.is-failed');
-    expect(marker?.getAttribute('aria-label')).toBe('Interrupted');
-    expect(container.querySelector('.session-item-indicator.is-completed')).toBeNull();
-    expect(container.querySelector('.session-item-indicator.is-plan-completed')).toBeNull();
+      expect(deriveSessionIndicators(appState.sessions).failedIds.size).toBe(0);
+      expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
+      expect(container.querySelector('.session-item-indicator.is-completed')).toBeNull();
+      expect(container.querySelector('.session-item-indicator.is-plan-completed')).toBeNull();
 
-    markSessionSeen('session-1', 500);
-    expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
-  });
+      markSessionSeen('session-1', 500);
+      expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
+    }
+  );
 
-  it('replaces an unread interrupted marker with a later completion', () => {
+  it.each([100, 450])(
+    'keeps genuine failure status separate from an interruption when last seen at %s',
+    (seenAt) => {
+      setState('sessions', [session('session-1', 500)]);
+      setState('lastSeenSessions', { 'session-1': seenAt });
+      setState('failedSessionIds', ['session-1']);
+      setState('failedSessionUpdatedAt', { 'session-1': 400 });
+      markSessionResponseInterrupted('session-1', 500);
+      cleanup = render(() => <SessionListView />, container);
+
+      expect(deriveSessionIndicators(appState.sessions).failedIds.has('session-1')).toBe(true);
+      const marker = container.querySelector('.session-item-indicator.is-failed');
+      if (seenAt < 400) expect(marker?.getAttribute('aria-label')).toBe('Failed');
+      else expect(marker).toBeNull();
+    }
+  );
+
+  it('shows a completion marker after a previously unread interruption', () => {
     setState('sessions', [session('session-1', 500)]);
     setState('lastSeenSessions', { 'session-1': 100 });
     setState('sessionSelectedAgents', { 'session-1': 'build' });
     markSessionResponseInterrupted('session-1', 500);
     cleanup = render(() => <SessionListView />, container);
-    expect(container.querySelector('.session-item-indicator.is-failed')).not.toBeNull();
+    expect(container.querySelector('.session-item-indicator')).toBeNull();
 
     markSessionResponseCompleted('session-1', 600);
 
@@ -1079,16 +1101,15 @@ describe('SessionListView model details', () => {
     }
   );
 
-  it('shows an unread child interruption on its parent and acknowledges it on parent read', () => {
+  it('does not classify an unread child interruption or its parent as failed', () => {
     setSessions([session('root', 500), session('child', 500, { parentID: 'root' })]);
     setState('sessionStatus', { root: { type: 'idle' }, child: { type: 'idle' } });
     setState('lastSeenSessions', { root: 100, child: 100 });
     markSessionResponseInterrupted('child', 500);
     cleanup = render(() => <SessionListView />, container);
 
-    expect(
-      container.querySelector('.session-item-indicator.is-failed')?.getAttribute('aria-label')
-    ).toBe('Interrupted');
+    expect(deriveSessionIndicators(appState.sessions).failedIds.size).toBe(0);
+    expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
     markSessionSeen('root', 500);
     expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
   });

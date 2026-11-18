@@ -461,11 +461,7 @@ async function listCompleteSessionPage(
 function getSessionTreeFailedUpdated(sessionId: string): number | undefined {
   let updated: number | undefined;
   for (const treeSessionId of getSessionTreeIds(sessionId)) {
-    const failedAt =
-      Math.max(
-        state.failedSessionUpdatedAt[treeSessionId] ?? 0,
-        state.interruptedSessionResponses[treeSessionId] ?? 0
-      ) || undefined;
+    const failedAt = state.failedSessionUpdatedAt[treeSessionId];
     if (failedAt !== undefined) updated = Math.max(updated ?? 0, failedAt);
   }
   return updated;
@@ -2405,12 +2401,6 @@ function SessionListItem(props: {
       isCompleted: hasUnreadCompletion(),
     });
   const indicatorTitle = (kind: SessionStatusIndicatorKind) => {
-    if (
-      kind === 'failed' &&
-      getSessionTreeIds(props.session.id).some(isSessionInterruptedResponseUnread)
-    ) {
-      return 'Interrupted';
-    }
     if (kind === 'attention') {
       if (props.hasPermissionRequest && props.hasQuestionRequest) return 'Attention needed';
       if (props.hasPermissionRequest) return 'Permission request pending';
@@ -2921,13 +2911,7 @@ export function deriveSessionIndicators(
     return (
       state.sessionStatus[sessionId]?.type !== 'busy' &&
       !compactingSessionIds.has(sessionId) &&
-      (failedSessionIds.has(sessionId) ||
-        (state.sessionStatus[sessionId]?.type !== 'retry' &&
-          !permissionIds.has(rootSessionId(sessionId)) &&
-          !questionIds.has(rootSessionId(sessionId)) &&
-          !questionResponsePendingIds.has(rootSessionId(sessionId)) &&
-          !editorSessionIds.has(rootSessionId(sessionId)) &&
-          isSessionInterruptedResponseUnread(sessionId)))
+      failedSessionIds.has(sessionId)
     );
   };
   const isRunning = (sessionId: string, rootId: string) => {
