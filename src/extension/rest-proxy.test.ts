@@ -99,7 +99,6 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       apiVersion: 1,
       getWorkspaceCwd: vi.fn(() => '/repo'),
       request: vi.fn(() => Promise.resolve(undefined)),
-      readRestartBlockers: vi.fn(async () => ({ totalSessionCount: 0, directories: [] })),
     },
     contextProvider: {
       context: {
@@ -129,8 +128,6 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     },
     activateSession: vi.fn(() => Promise.resolve()),
     sessionState: {
-      busy: new Set<string>(),
-      pending: new Map(),
       handleServerEvent: vi.fn(),
       getSessionWorkspaceMatch: vi.fn(() => true),
       isSessionInWorkspace: vi.fn(() => true),

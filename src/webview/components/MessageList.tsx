@@ -2054,7 +2054,7 @@ export function MessageList() {
       // A post-render capture would remember the clamped destination instead of the reader.
       inlinePreviewLayoutAnchor =
         containerRef?.isConnected && !autoScroll()
-          ? (captureExactPaintedVisibleScrollAnchor() ??
+          ? (captureExactPaintedVisibleScrollAnchor(0, false, true) ??
             captureDetachedVisibleScrollAnchor(containerRef.scrollTop))
           : null;
     })
@@ -3790,16 +3790,21 @@ export function MessageList() {
 
   function captureExactPaintedVisibleScrollAnchor(
     predictedMovement = 0,
-    skipThinking = false
+    skipThinking = false,
+    belowStickyPrompt = false
   ): VisibleScrollAnchor | null {
     if (!containerRef) return null;
     const containerRect = containerRef.getBoundingClientRect();
     // A paragraph behind the sticky prompt is not a painted destination. Pinning it
     // during deferred hydration lets its growing diff push the visible prose below it.
     // The fade and collision safety margin still expose transcript content.
-    const stickySolidGap = containerRef.querySelector<HTMLElement>(
-      '.latest-user-message-sticky-overlay .latest-user-message-sticky-bottom-solid'
-    );
+    // Only diff-preview owners opt in: width reflow and thinking anchors must keep the
+    // topmost transcript block, or a resize after PageDown moves the reader's text.
+    const stickySolidGap = belowStickyPrompt
+      ? containerRef.querySelector<HTMLElement>(
+          '.latest-user-message-sticky-overlay .latest-user-message-sticky-bottom-solid'
+        )
+      : null;
     const visibleTop = Math.max(
       containerRect.top + 8,
       stickySolidGap?.getBoundingClientRect().bottom ?? containerRect.top
@@ -6684,10 +6689,10 @@ export function MessageList() {
                 targetTop
             ) <= 0.5
           ) {
-            anchor = captureExactPaintedVisibleScrollAnchor() ?? anchor;
+            anchor = captureExactPaintedVisibleScrollAnchor(0, false, true) ?? anchor;
           }
         } else {
-          anchor = captureExactPaintedVisibleScrollAnchor();
+          anchor = captureExactPaintedVisibleScrollAnchor(0, false, true);
         }
         if (anchor) {
           if (movedLayoutAnchor) {

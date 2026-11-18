@@ -17,7 +17,6 @@ import { isScalarConfigPermission } from '../shared/permission-rules';
 import type { McpDefaults, OpenCodeModelRouting } from '../shared/protocol';
 import { parseMcpConfigSnippet } from '../shared/mcp-config';
 import type { McpConfigScope } from '../shared/mcp-config';
-import { withStartupDeadline } from '../shared/startup';
 import { VARRO_VISION_AGENT_DESCRIPTION, VARRO_VISION_AGENT_PROMPT } from '../shared/vision-agent';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
@@ -478,15 +477,10 @@ export class OpenCodeConfigService {
           if (Object.hasOwn(configuredServer, legacyKey))
             raw = applyJsoncChange(raw, [...path, legacyKey], undefined);
         } else raw = applyJsoncChange(raw, path, server);
-        // OpenCode watches this file and can close live connections on reload,
-        // even if no webview sends an explicit disconnect.
-        const blockers = await withStartupDeadline(
-          (signal) => this.callbacks.server.readRestartBlockers(signal),
-          5_000,
-          'MCP default change session check'
-        );
-        const runningSessionsMessage = 'MCP defaults can be changed when running sessions finish.';
-        if (blockers.totalSessionCount > 0) throw new Error(runningSessionsMessage);
+        // Product decision: MCP defaults are configurable at any time, including while
+        // sessions run, retry, or wait for a permission or question, in this or any other
+        // project. Do not add a running-session gate here or in McpSettingsPanel; one was
+        // reverted after briefly returning. Session MCP toggles cover the current turn.
         if (!this.areConfigStatsEqual(initialStat, await this.readConfigStat(target.uri))) {
           throw new Error(`${target.path} changed while updating MCP defaults; please retry`);
         }
@@ -494,9 +488,6 @@ export class OpenCodeConfigService {
           await vscode.workspace.fs.createDirectory(
             vscode.Uri.file(getOpenCodePathApi(target.path).dirname(target.path))
           );
-        // A turn can start while the status check or file preparation is in flight.
-        if (this.callbacks.sessionState.busy.size || this.callbacks.sessionState.pending.size)
-          throw new Error(runningSessionsMessage);
         await vscode.workspace.fs.writeFile(target.uri, new TextEncoder().encode(raw));
         if (scope === 'global') await this.callbacks.refreshOpenCodeGlobalConfig?.();
         else

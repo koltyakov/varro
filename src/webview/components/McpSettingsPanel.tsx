@@ -16,7 +16,6 @@ import { isBoolean } from '../lib/runtime-values';
 import {
   getAvailableMcpNames,
   getEffectiveComposerSessionId,
-  isSessionStatusWorking,
   requestComposerFocus,
   setMcpDefaults,
   setShowMcpSettings,
@@ -70,15 +69,12 @@ export function McpSettingsPanel() {
   };
   // Attached servers expose only effective values, which the project scope shows.
   const activeScope = () => (state.mcpDefaults?.editable ? scope() : 'project');
+  // Product decision: MCP configuration is available at any time. Never gate it on running,
+  // retrying, or waiting sessions; a "when running sessions finish" lock was reverted twice.
   const canEditConfig = () =>
     ready() && !loading() && !saving() && state.mcpDefaults?.editable === true;
-  const sessionsWorking = createMemo(() =>
-    Object.values(state.sessionStatus).some(isSessionStatusWorking)
-  );
   const canChangeDefault = (name: string, target: McpScope) =>
-    canEditConfig() &&
-    !sessionsWorking() &&
-    (target !== 'global' || isBoolean(state.mcpDefaults?.global[name]));
+    canEditConfig() && (target !== 'global' || isBoolean(state.mcpDefaults?.global[name]));
 
   const configPreview = createMemo(() => {
     if (!configJson().trim()) return null;
@@ -319,11 +315,6 @@ export function McpSettingsPanel() {
               </p>
             </Show>
             <Show when={state.mcpDefaults?.editable}>
-              <Show when={sessionsWorking()}>
-                <p class="mcp-settings-notice" role="status">
-                  You can change MCP defaults when running sessions finish.
-                </p>
-              </Show>
               <div
                 ref={(element) => {
                   tabList = element;

@@ -5646,7 +5646,7 @@ describe('OpenCodeProcess server ownership leases', () => {
 });
 
 describe('OpenCodeProcess config ownership', () => {
-  it.each([
+  it.for([
     'missing-owner',
     'matching-owner',
     'current-child',
@@ -5660,7 +5660,7 @@ describe('OpenCodeProcess config ownership', () => {
     'symlink-config',
     'unsafe-path',
     'unreadable',
-  ])('inspects recorded runtime config before recovery: %s', async (scenario) => {
+  ])('inspects recorded runtime config before recovery: %s', async (scenario, context) => {
     const root = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const configDirectory = await mkdtemp(join(tmpdir(), 'varro-opencode-config-'));
     const manager = new OpenCodeProcess(4096, true, 'opencode', false, join(root, 'lease.json'));
@@ -5698,10 +5698,11 @@ describe('OpenCodeProcess config ownership', () => {
     if (scenario === 'symlink-owner') {
       const target = join(root, 'owner.json');
       await writeFile(target, ownerContent);
-      await symlink(target, ownerPath);
+      await requireFileSymlink(context, target, ownerPath);
     }
     if (scenario === 'present') await writeFile(configPath, '{"agent":{"ask":{}}}');
-    if (scenario === 'symlink-config') await symlink(join(root, 'missing.json'), configPath);
+    if (scenario === 'symlink-config')
+      await requireFileSymlink(context, join(root, 'missing.json'), configPath);
     const leasePath = join(root, 'lease.json');
     const originalLease = JSON.stringify(lease);
     await writeFile(leasePath, originalLease);
@@ -5740,6 +5741,9 @@ describe('OpenCodeProcess config ownership', () => {
   it.each(['matching-owner', 'wrong-owner', 'wrong-pid', 'malformed-owner'])(
     'revalidates missing runtime config during same-host adoption and restart: %s',
     async (scenario) => {
+      // The lease and identity mocks below model a Linux process. On Windows hosts the
+      // native identity path would ignore those mocks and reject the fixture PID.
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       const root = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
       const configDirectory = await mkdtemp(join(tmpdir(), 'varro-opencode-config-'));
       const leasePath = join(root, 'lease.json');

@@ -1762,6 +1762,12 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   gap: var(--assistant-bordered-block-gap, 9px);
 }
 
+/* The stack gap owns spacing; the note's standalone margin would make one gap wider. */
+.assistant-file-edit-stack:not(:has(.file-change-inline-diffs-unwrapped))
+  > .file-change-truncated-summary {
+  margin-top: 0;
+}
+
 .assistant-file-edit-stack:has(.file-change-inline-diffs-unwrapped) {
   gap: 12px;
 }

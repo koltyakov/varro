@@ -6,6 +6,7 @@ import {
   getVscodeMock,
 } from './sidebar-provider.test-support';
 import { getOpenCodeConfigPaths } from './open-code-process';
+import type { SessionStateManager } from './session-state-manager';
 
 const vscodeMock = getVscodeMock();
 const endpoint = '/varro/mcp-defaults';
@@ -111,42 +112,55 @@ describe('MCP defaults configuration', () => {
     expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
   });
 
-  it('does not write MCP defaults while another location has a running session', async () => {
+  // Product decision: MCP defaults stay configurable at any time. Running, retrying, or
+  // waiting sessions here or in other projects must never block or defer this write.
+  it('writes MCP defaults while sessions run here and in other locations', async () => {
     const path = '/repo/opencode.json';
     const contents = '{"mcp":{"servers":{"docs":{"type":"local","command":["docs"]}}}}';
     const files = new Map([[path, contents]]);
     mockConfigFiles(files);
     const server = createServer({ apiVersion: 2 });
-    server.readRestartBlockers.mockResolvedValueOnce({
-      totalSessionCount: 1,
-      directories: [{ directory: '/other', sessionCount: 1 }],
+    server.readRestartBlockers.mockResolvedValue({
+      totalSessionCount: 2,
+      directories: [
+        { directory: '/repo', sessionCount: 1 },
+        { directory: '/other', sessionCount: 1 },
+      ],
     });
     const { provider } = await createSidebarProviderInstance({ server });
     const { posted } = attachTestView(provider);
-    const change = {
-      method: 'POST',
-      path: endpoint,
-      body: {
-        name: 'docs',
-        scope: 'project',
-        enabled: false,
+    // SAFETY: The provider fixture owns this private SessionStateManager; the test drives it
+    // directly to create running and retrying sessions without a webview round trip.
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.markSessionBusy('running-here');
+    sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: {
+        sessionID: 'retrying-here',
+        status: { type: 'retry', attempt: 1, message: 'Retrying', next: 8_000 },
       },
-    };
-
-    await provider.handleMessage({ type: 'api/request', payload: { id: 91, ...change } });
-    expect(posted).toContainEqual({
-      type: 'api/response',
-      payload: { id: 91, error: expect.stringContaining('running sessions finish') },
     });
-    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
-    expect(files.get(path)).toBe(contents);
 
-    await provider.handleMessage({ type: 'api/request', payload: { id: 92, ...change } });
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 91,
+        method: 'POST',
+        path: endpoint,
+        body: { name: 'docs', scope: 'project', enabled: false },
+      },
+    });
+
     expect(posted).toContainEqual({
       type: 'api/response',
-      payload: { id: 92, data: expect.objectContaining({ effective: { docs: false } }) },
+      payload: { id: 91, data: expect.objectContaining({ effective: { docs: false } }) },
     });
     expect(vscodeMock.workspace.fs.writeFile).toHaveBeenCalledOnce();
+    expect(files.get(path)).not.toBe(contents);
+    expect(server.readRestartBlockers).not.toHaveBeenCalled();
+    expect(sessionState.busy.has('running-here')).toBe(true);
   });
 
   it('persists global on-demand mode while preserving comments and project overrides', async () => {

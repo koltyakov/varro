@@ -836,7 +836,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       get isAttachOnly() {
         return server.isAttachOnly;
       },
-      readRestartBlockers: (signal?: AbortSignal) => server.readRestartBlockers(signal),
       getWorkspaceCwd: () =>
         endpointRef.endpoint
           ? (endpointRef.endpoint.workspacePath ?? undefined)

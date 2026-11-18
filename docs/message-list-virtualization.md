@@ -220,7 +220,10 @@ the shared invariants below remain true.
   hydration against that destination before recapturing genuinely exposed earlier prose. A passive
   wheel callback may already see native movement and unpresented growth; neither its live rectangle
   nor an additional predicted wheel delta describes the presented destination.
-  Exact painted-anchor selection must exclude the sticky prompt's opaque card and solid gap.
+  Exact painted-anchor selection for diff-preview owners must exclude the sticky prompt's opaque
+  card and solid gap. Width reflow and thinking anchors share the selector but keep the topmost
+  block: excluding the overlay there moves the reader's text after PageDown and a resize, which the
+  `performance.spec.ts` width-reflow cases cover.
   A paragraph behind that overlay can enter the scrollport after a wheel tick without
   becoming visible. Preserving it during hydration moves the genuinely visible prose
   below its growing diff. Once earlier prose is actually exposed, it may own the new

@@ -170,7 +170,7 @@ test('renders each completed file edit as a separate row', async ({ page }) => {
   expect(rowGap).toBe(activityGap);
 });
 
-test('scales only bordered pairs in compact file-edit stacks', async ({ page }) => {
+test('uses one bordered-block gap throughout compact file-edit stacks', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-cards');
   await expect(page.locator('.assistant-message-flow')).toBeVisible();
 
@@ -216,12 +216,13 @@ test('scales only bordered pairs in compact file-edit stacks', async ({ page }) 
     return result;
   });
 
+  // Collapsed edit cards, notes, and error details share the bordered-block rhythm.
   expect(gaps).toEqual({
-    bordered: 1.5,
-    borderedToNote: 4.5,
-    noteToBordered: 1.5,
-    borderedToDetail: 2,
-    detailToBordered: 2,
+    bordered: 9,
+    borderedToNote: 9,
+    noteToBordered: 9,
+    borderedToDetail: 9,
+    detailToBordered: 9,
   });
 });
 
