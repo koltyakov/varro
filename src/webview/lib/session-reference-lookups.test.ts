@@ -197,8 +197,10 @@ describe('session reference lookups', () => {
   it('bounds the metadata cache', async () => {
     vi.spyOn(client.varro.session, 'reference').mockImplementation(async (id) => reference(id));
     for (let i = 0; i < 260; i++) await lookupSessionReference(`ses_${i}`);
+    flushSolid();
     expect(Object.keys(state.sessionLookups)).toHaveLength(256);
     expect(state.sessionLookups.ses_0).toBeUndefined();
+    expect(state.sessionLookups.ses_259).toEqual(reference('ses_259'));
     await lookupSessionReference('ses_0');
     flushSolid();
     expect(state.sessionLookups.ses_0).toEqual(reference('ses_0'));

@@ -458,29 +458,25 @@ export function setSessionFailed(sessionId: string, failed: boolean) {
 export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice | null) {
   if (!sessionId) return;
 
+  // Update through the draft: store reads stay stale until flush, and one tick can touch
+  // several sessions in a tree or set and clear the same session.
   if (notice === null) {
-    if (state.sessionUsageLimits[sessionId] === undefined) return;
-    const nextLimits = { ...state.sessionUsageLimits };
-    delete nextLimits[sessionId];
-    sessionTreeIndex.invalidate();
+    let removed = false;
     setState((draft) => {
-      const current = draft['sessionUsageLimits'];
-      const incoming = nextLimits satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionUsageLimits'] = incoming;
-      else reconcile(incoming)(current);
+      if (draft.sessionUsageLimits[sessionId] === undefined) return;
+      delete draft.sessionUsageLimits[sessionId];
+      removed = true;
     });
+    if (!removed) return;
+    sessionTreeIndex.invalidate();
     setSessionUsageLimitVersion((value) => value + 1);
     return;
   }
 
   sessionTreeIndex.invalidate();
-  setState(
-    storePath('sessionUsageLimits', {
-      ...state.sessionUsageLimits,
-      [sessionId]: notice,
-    })
-  );
+  setState((draft) => {
+    draft.sessionUsageLimits[sessionId] = notice;
+  });
   setSessionUsageLimitVersion((value) => value + 1);
 }
 

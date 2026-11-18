@@ -1478,6 +1478,33 @@ describe('getSessionTreeIds', () => {
     expect(hasActiveUsageLimit('child-1')).toBe(false);
   });
 
+  it('applies every usage limit change made in the same tick', () => {
+    const notice = (sessionID: string) => ({
+      source: 'status' as const,
+      statusCode: 429 as const,
+      message: '429 usage limit reached',
+      unit: 'messages' as const,
+      retryAt: 4_000,
+      attempt: 2,
+      sessionID,
+    });
+
+    setSessionUsageLimit('session-1', notice('session-1'));
+    setSessionUsageLimit('child-1', notice('child-1'));
+    flushSolid();
+    expect(Object.keys(state.sessionUsageLimits).toSorted()).toEqual(['child-1', 'session-1']);
+
+    setSessionUsageLimit('session-1', null);
+    setSessionUsageLimit('child-1', null);
+    flushSolid();
+    expect(Object.keys(state.sessionUsageLimits)).toEqual([]);
+
+    setSessionUsageLimit('session-1', notice('session-1'));
+    setSessionUsageLimit('session-1', null);
+    flushSolid();
+    expect(Object.keys(state.sessionUsageLimits)).toEqual([]);
+  });
+
   it('treats child-session prompts as active on the root session', () => {
     setState(
       storePath('sessions', [

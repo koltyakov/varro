@@ -868,18 +868,20 @@ describe('mount bridge helpers', () => {
   });
 
   it('applies committed pins independently of an expired API response', () => {
-    setState.mockClear();
     const deps = createMessageDependencies();
     handleExtensionMessageWithDependencies(deps, {
       type: 'pinned-sessions/sync',
       payload: { sessionIds: ['session-2', 'session-1'] },
     });
+    flushSolid();
+    expect([...state.pinnedSessionIds]).toEqual(['session-2', 'session-1']);
+
     handleExtensionMessageWithDependencies(deps, {
       type: 'pinned-sessions/sync',
       payload: { sessionIds: [] },
     });
-    expect(setState).toHaveBeenNthCalledWith(1, 'pinnedSessionIds', ['session-2', 'session-1']);
-    expect(setState).toHaveBeenNthCalledWith(2, 'pinnedSessionIds', []);
+    flushSolid();
+    expect([...state.pinnedSessionIds]).toEqual([]);
     expect(deps.ensureConnectionInitialized).not.toHaveBeenCalled();
     expect(deps.clearError).not.toHaveBeenCalled();
   });

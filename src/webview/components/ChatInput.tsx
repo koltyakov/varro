@@ -1252,7 +1252,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [showFileSearchHint, setShowFileSearchHint] = createSignal(false);
   const [suppressCompletion, setSuppressCompletion] = createSignal(false);
   const [toolbarCompactMode, setToolbarCompactMode] = createSignal<ToolbarCompactMode>('full');
-  const [sendComposerMinHeight, setSendComposerMinHeight] = createSignal(0);
+  const [sendComposerMinHeight, publishSendComposerMinHeight] = createSignal(0);
+  // Queueing holds and releases in one tick, before the signal publishes the held height.
+  let heldSendComposerMinHeight = 0;
+  const setSendComposerMinHeight = (height: number) => {
+    heldSendComposerMinHeight = height;
+    publishSendComposerMinHeight(height);
+  };
   let latestFileSearchRequestId = 0;
   let latestFileSearchQuery = '';
   let latestFileSearchScope = untrack(getFileSearchScopeKey);
@@ -1351,7 +1357,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   function releaseHeldComposerHeight(animate = false) {
     heldComposerSessionId = null;
     heldComposerMessageCount = 0;
-    if (animate && sendComposerMinHeight() > 0) {
+    if (animate && heldSendComposerMinHeight > 0) {
       if (composerCollapseFrame) return;
       // Wait for both the text and attachment clears to reach the DOM before measuring.
       composerCollapseFrame = requestAnimationFrame((startedAt) => {
@@ -3214,7 +3220,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   async function requestWorkspaceProblems(): Promise<boolean> {
-    if (!state.autoAttachProblems || pendingProblems()) return false;
+    // A scope change clears the request in the same tick, before pendingProblems() publishes.
+    if (!state.autoAttachProblems || problemsRequest) return false;
     const scope = getFileSearchScopeKey();
     const sessionId = composerSessionId();
     const generation = getNewChatDraftGeneration();

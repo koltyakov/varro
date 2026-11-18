@@ -14663,6 +14663,32 @@ describe('ChatInput', () => {
     expect(state.attachedDiagnostics).toBeNull();
   });
 
+  it('requests workspace problems again when the picker scope changes mid-request', async () => {
+    vi.mocked(client.varro.workspaceProblems).mockImplementationOnce(
+      () => new Promise(() => undefined)
+    );
+    setInputText('/problems');
+    flushSolid();
+    cleanup = render(() => ChatInput(), container!);
+    flushSolid();
+    const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
+    editor.focus();
+    flushSolid();
+    await flushAsyncWork();
+    flushSolid();
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    flushSolid();
+    await flushAsyncWork();
+    flushSolid();
+    expect(client.varro.workspaceProblems).toHaveBeenCalledOnce();
+
+    setState(storePath('editorContext', 'workspacePath', '/other-repo'));
+    flushSolid();
+    await flushAsyncWork();
+    flushSolid();
+    expect(client.varro.workspaceProblems).toHaveBeenCalledTimes(2);
+  });
+
   it('attaches an individual problem without sending the command text', async () => {
     const diagnostics = [
       { path: '/repo/a.ts', line: 1, severity: 'error' as const, message: 'First error' },

@@ -103,24 +103,12 @@ function lookupSessionReferenceInScope(
       if (!isCurrent()) return null;
       const session = await client.varro.session.reference(id);
       if (!isCurrent()) return null;
-      setState(storePath('sessionLookups', id, session));
+      setState((draft) => {
+        draft.sessionLookups[id] = session;
+        const ids = Object.keys(draft.sessionLookups);
+        if (ids.length > CACHE_LIMIT) delete draft.sessionLookups[ids[0]!];
+      });
       outcome = 'found';
-      const ids = Object.keys(state.sessionLookups);
-      if (ids.length > CACHE_LIMIT) {
-        const { [ids[0]!]: _oldest, ...remaining } = state.sessionLookups;
-        setState((draft) => {
-          const current = draft['sessionLookups'];
-          const incoming = remaining satisfies typeof current;
-          if (
-            incoming === null ||
-            incoming === undefined ||
-            current === null ||
-            current === undefined
-          )
-            draft['sessionLookups'] = incoming;
-          else reconcile(incoming)(current);
-        });
-      }
       return session;
     } catch (error) {
       if (!isCurrent()) return null;
