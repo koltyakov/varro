@@ -7,7 +7,10 @@ export class PinnedSessionManager {
   private ids: string[];
   private mutationQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly persistence: Persistence) {
+  constructor(
+    private readonly persistence: Persistence,
+    private readonly onChanged?: (sessionIds: string[]) => void
+  ) {
     const stored = persistence.get<unknown>(PINNED_SESSION_IDS_KEY);
     this.ids = Array.isArray(stored)
       ? [...new Set(stored.filter((id): id is string => typeof id === 'string' && id.length > 0))]
@@ -24,6 +27,7 @@ export class PinnedSessionManager {
       if (pinned) next.unshift(sessionID);
       await this.persistence.set(PINNED_SESSION_IDS_KEY, next);
       this.ids = next;
+      this.onChanged?.(this.list());
       return this.list();
     });
   }
@@ -40,6 +44,7 @@ export class PinnedSessionManager {
       next.splice(targetIndex, 0, sourceID!);
       await this.persistence.set(PINNED_SESSION_IDS_KEY, next);
       this.ids = next;
+      this.onChanged?.(this.list());
       return this.list();
     });
   }

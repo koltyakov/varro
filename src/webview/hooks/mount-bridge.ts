@@ -479,6 +479,9 @@ export function handleExtensionMessageWithDependencies(
     case 'providers/status':
       deps.setProviderRefreshPending?.(msg.payload.pending);
       break;
+    case 'pinned-sessions/sync':
+      appStore.setState('pinnedSessionIds', [...msg.payload.sessionIds]);
+      break;
     case 'queued-messages/sync':
       applyQueuedMessagesSnapshot(msg.payload.messages, msg.payload.mutationId);
       break;

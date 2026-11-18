@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { isEditorContext, parseExtensionMessage } from './extension-message';
 
 describe('parseExtensionMessage', () => {
+  it('validates authoritative pinned-session snapshots', () => {
+    for (const sessionIds of [[], ['session-1', 'session-2']]) {
+      const message = { type: 'pinned-sessions/sync', payload: { sessionIds } };
+      expect(parseExtensionMessage(message)).toEqual(message);
+    }
+    for (const sessionIds of [null, 'session-1', [1], [''], ['session-1', null]]) {
+      expect(
+        parseExtensionMessage({ type: 'pinned-sessions/sync', payload: { sessionIds } })
+      ).toBeNull();
+    }
+  });
   it('validates dictation results and provider names', () => {
     const message = {
       type: 'dictation/result',

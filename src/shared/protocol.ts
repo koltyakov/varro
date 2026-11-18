@@ -1086,6 +1086,7 @@ export type ExtensionMessage =
         deniedReason?: 'missing';
       };
     }
+  | { type: 'pinned-sessions/sync'; payload: { sessionIds: string[] } }
   | {
       type: 'permission-modes/sync';
       payload: { modes: Record<string, PermissionMode>; recoveringSessionIds?: string[] };

@@ -2,6 +2,7 @@
 import { describe, expect, it, vi, type Mock } from 'vitest';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { join, resolve as resolvePath } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -67,6 +68,7 @@ import type { OpenCodeServerMemoryPermission, Session } from '../shared/opencode
 import type { Persistence } from '../shared/persistence';
 import type { RecycleBinEntry } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
+import { readLocalSessionSummary as readLocalSummary } from './local-session-summary';
 
 type SanitizedMessageResponse = {
   id: number;
@@ -5446,6 +5448,123 @@ describe('RestProxy handleRequest', () => {
           ],
         }),
       });
+    }
+  );
+
+  it.each(['stored', 'malformed', 'fork', 'revert'])(
+    'uses the real local v2 reader for %s parts and falls back only when required',
+    async (scenario) => {
+      const parent = resolvePath('artifacts/ai-test-data');
+      await mkdir(parent, { recursive: true });
+      const directory = await mkdtemp(join(parent, 'local-summary-proxy-'));
+      try {
+        const databasePath = join(directory, 'opencode.db');
+        const database = new DatabaseSync(databasePath);
+        try {
+          database.exec(`
+            CREATE TABLE session_v2 (
+              id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT, revert TEXT,
+              tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
+              tokens_cache_read INTEGER, tokens_cache_write INTEGER
+            );
+            CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, data TEXT);
+            CREATE TABLE session_part (message_id TEXT, session_id TEXT, ordinal INTEGER, type TEXT, data TEXT);
+          `);
+          database
+            .prepare('INSERT INTO session_v2 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(
+              'session-1',
+              null,
+              scenario === 'fork' ? 'source' : null,
+              scenario === 'revert' ? '{}' : null,
+              10,
+              3,
+              0,
+              0,
+              0
+            );
+          database.prepare('INSERT INTO session_message VALUES (?, ?, ?, ?, ?)').run(
+            'reply',
+            'session-1',
+            'assistant',
+            1,
+            JSON.stringify({
+              time: { created: 1_000, completed: 4_000 },
+              tokens: { input: 10, output: 3 },
+              content: [],
+            })
+          );
+          database.prepare('INSERT INTO session_part VALUES (?, ?, ?, ?, ?)').run(
+            'reply',
+            'session-1',
+            0,
+            'tool',
+            scenario === 'malformed'
+              ? '{invalid'
+              : JSON.stringify({
+                  type: 'tool',
+                  name: 'edit',
+                  state: {
+                    status: 'completed',
+                    input: { filePath: 'src/probe.ts' },
+                    metadata: { additions: 4, deletions: 1 },
+                    content: [{ type: 'text', text: 'saved' }],
+                  },
+                })
+          );
+        } finally {
+          database.close();
+        }
+        const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(
+          async (_method, path) =>
+            path.endsWith('/message')
+              ? [
+                  {
+                    info: {
+                      role: 'assistant',
+                      time: { created: 1_000, completed: 4_000 },
+                      tokens: { total: 500 },
+                    },
+                    parts: [],
+                  },
+                ]
+              : []
+        );
+        const localReader = vi.fn((sessionID: string) =>
+          readLocalSummary(sessionID, databasePath, 2)
+        );
+        const { proxy, callbacks } = createProxy({
+          server: { ...createCallbacks().server, apiVersion: 2, request: serverRequest } as never,
+          readLocalSessionSummary: localReader,
+        });
+
+        await proxy.handleRequest(makePayload(829, 'GET', '/varro/session/session-1/diff-summary'));
+
+        expect(localReader).toHaveBeenCalledExactlyOnceWith('session-1');
+        if (scenario === 'stored') {
+          expect(serverRequest).not.toHaveBeenCalled();
+        } else {
+          expect(serverRequest).toHaveBeenCalledTimes(4);
+          expect(serverRequest).toHaveBeenCalledWith('GET', '/session/session-1/diff', undefined, {
+            directory: '/repo',
+          });
+          expect(serverRequest).toHaveBeenCalledWith('GET', '/session/session-1', undefined, {
+            directory: '/repo',
+          });
+        }
+        expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+          id: 829,
+          data: expect.objectContaining({
+            files: scenario === 'stored' ? 1 : 0,
+            additions: scenario === 'stored' ? 4 : 0,
+            deletions: scenario === 'stored' ? 1 : 0,
+            tokens: scenario === 'stored' ? 13 : 500,
+            durationMs: 3_000,
+          }),
+        });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
     }
   );
 

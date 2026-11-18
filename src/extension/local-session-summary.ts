@@ -305,30 +305,84 @@ const readV2 = (database) => {
     : null;
   const metadata = metadataJSON === null ? undefined : parseData({ data: metadataJSON });
   const sessionIDs = sessions.map((session) => session.id);
-  // V2.2.2 can read assistant content from session_part instead of the message envelope.
-  // Let the API hydrate those rows rather than returning incomplete context or tool totals.
-  const hasParts = database.prepare('PRAGMA table_info(session_part)').all().length > 0;
-  if (hasParts && database.prepare(
-    'SELECT 1 FROM session_part WHERE session_id IN (' + sessionIDs.map(() => '?').join(',') + ') LIMIT 1'
-  ).get(...sessionIDs)) {
-    return { fallbackReason: 'OpenCode v2 separately stored parts require the API' };
+  const partColumns = new Set(database.prepare('PRAGMA table_info(session_part)').all().map((row) => row.name));
+  if (partColumns.size && !['message_id', 'session_id', 'ordinal', 'type', 'data'].every((column) => partColumns.has(column))) {
+    return { fallbackReason: 'Unsupported OpenCode v2 stored-part schema' };
   }
   const messagesBySession = new Map(sessionIDs.map((id) => [id, []]));
   const contexts = new Map(sessionIDs.map((id) => [id, contextCharacters()]));
   const inputTokens = new Map();
   const parents = new Map();
+  let bytes = typeof metadataJSON === 'string' ? Buffer.byteLength(metadataJSON) : 0;
+  let parts = 0;
+  const readData = (row) => {
+    bytes += typeof row.data === 'string' ? Buffer.byteLength(row.data) : 0;
+    if (bytes > workerData.maxDataBytes) throw new Error('Local session exceeds the data limit');
+    return parseData(row);
+  };
+  const addContent = (content, context, projected) => {
+    if (++parts > workerData.maxParts) throw new Error('Local session exceeds the part limit');
+    if (content.type === 'text' || content.type === 'reasoning') {
+      context.assistant += typeof content.text === 'string' ? content.text.length : 0;
+      return;
+    }
+    if (content.type !== 'tool') return;
+    const state = content.state ?? {};
+    const input = state.input && typeof state.input === 'object' ? Object.keys(state.input).length * 16 : 0;
+    context.tool += input;
+    if (state.status === 'streaming') context.tool += typeof state.input === 'string' ? state.input.length : 0;
+    if (state.status === 'error') context.tool += state.error?.message?.length || 0;
+    for (const output of Array.isArray(state.content) ? state.content : []) {
+      if (output.type === 'text' && typeof output.text === 'string') context.tool += output.text.length;
+    }
+    if (projected) projected.push(projectPart({
+      type: 'tool', tool: content.name === 'shell' ? 'bash' : content.name === 'subagent' ? 'task' : content.name,
+      state,
+    }));
+  };
+  // Project stored parts immediately, retaining neither text nor tool output in the worker result.
+  const storedByMessage = new Map();
+  if (partColumns.size) {
+    const storedRows = database.prepare(
+      'SELECT message_id,session_id,ordinal,type,data FROM session_part WHERE session_id IN (' +
+      sessionIDs.map(() => '?').join(',') + ') ORDER BY message_id,ordinal LIMIT ?'
+    ).iterate(...sessionIDs, workerData.maxParts + 1);
+    for (const row of storedRows) {
+      const content = readData(row);
+      if (content.type !== row.type || !['text', 'reasoning', 'tool'].includes(row.type)) {
+        throw new Error('Malformed or unsupported OpenCode v2 stored part');
+      }
+      if ((row.type === 'text' || row.type === 'reasoning') && typeof content.text !== 'string') {
+        throw new Error('Malformed OpenCode v2 stored text part');
+      }
+      if (row.type === 'tool' && (typeof content.name !== 'string' || !content.state || typeof content.state !== 'object' || Array.isArray(content.state))) {
+        throw new Error('Malformed OpenCode v2 stored tool part');
+      }
+      let stored = storedByMessage.get(row.message_id);
+      if (!stored) {
+        stored = { sessionID: row.session_id, ordinal: -1, parts: [] };
+        storedByMessage.set(row.message_id, stored);
+      }
+      if (stored.sessionID !== row.session_id || !Number.isSafeInteger(row.ordinal) || row.ordinal < 0 || row.ordinal <= stored.ordinal) {
+        throw new Error('Malformed OpenCode v2 stored part ownership or ordinal');
+      }
+      stored.ordinal = row.ordinal;
+      addContent(content, contexts.get(row.session_id), row.session_id === workerData.sessionID ? stored.parts : undefined);
+    }
+  }
   const rows = database.prepare(
     'SELECT id,session_id,type,data FROM session_message WHERE session_id IN (' +
     sessionIDs.map(() => '?').join(',') + ') ORDER BY session_id,seq LIMIT ?'
   ).iterate(...sessionIDs, workerData.maxMessages + 1);
   let count = 0;
-  let bytes = typeof metadataJSON === 'string' ? Buffer.byteLength(metadataJSON) : 0;
-  let parts = 0;
   for (const row of rows) {
     if (++count > workerData.maxMessages) throw new Error('Local session exceeds the message limit');
-    bytes += typeof row.data === 'string' ? Buffer.byteLength(row.data) : 0;
-    if (bytes > workerData.maxDataBytes) throw new Error('Local session exceeds the data limit');
-    const data = parseData(row);
+    const data = readData(row);
+    const stored = storedByMessage.get(row.id);
+    if (stored && (row.type !== 'assistant' || stored.sessionID !== row.session_id)) {
+      throw new Error('OpenCode v2 stored part does not belong to its assistant message');
+    }
+    storedByMessage.delete(row.id);
     const context = contexts.get(row.session_id);
     const user = row.type === 'user' || row.type === 'synthetic' || row.type === 'compaction';
     const assistant = row.type === 'assistant' || row.type === 'shell' || row.type === 'skill' ||
@@ -349,31 +403,14 @@ const readV2 = (database) => {
     if (row.type === 'assistant' && Number.isFinite(data.tokens?.input) && data.tokens.input > 0) {
       inputTokens.set(row.session_id, data.tokens.input);
     }
-    const message = { info, parts: [] };
+    // Match OpenCode hydration: stored parts precede any inline content from older writers.
+    const message = { info, parts: stored?.parts ?? [] };
     for (const content of row.type === 'assistant' && Array.isArray(data.content) ? data.content : []) {
-      if (++parts > workerData.maxParts) throw new Error('Local session exceeds the part limit');
-      if (content.type === 'text' || content.type === 'reasoning') {
-        context.assistant += typeof content.text === 'string' ? content.text.length : 0;
-        continue;
-      }
-      if (content.type !== 'tool') continue;
-      const state = content.state ?? {};
-      const input = state.input && typeof state.input === 'object' ? Object.keys(state.input).length * 16 : 0;
-      context.tool += input;
-      if (state.status === 'streaming') context.tool += typeof state.input === 'string' ? state.input.length : 0;
-      if (state.status === 'error') context.tool += state.error?.message?.length || 0;
-      for (const output of Array.isArray(state.content) ? state.content : []) {
-        if (output.type === 'text' && typeof output.text === 'string') context.tool += output.text.length;
-      }
-      if (row.session_id === workerData.sessionID) {
-        message.parts.push(projectPart({
-          type: 'tool', tool: content.name === 'shell' ? 'bash' : content.name === 'subagent' ? 'task' : content.name,
-          state,
-        }));
-      }
+      addContent(content, context, row.session_id === workerData.sessionID ? message.parts : undefined);
     }
     messagesBySession.get(row.session_id).push(message);
   }
+  if (storedByMessage.size) throw new Error('OpenCode v2 stored part has no assistant message');
   return {
     messages: messagesBySession.get(workerData.sessionID),
     metadata,

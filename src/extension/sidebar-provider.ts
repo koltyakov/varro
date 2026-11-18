@@ -397,7 +397,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
     this.bridge = new SidebarProviderBridge(extensionUri);
     this.sessionTrash = new SessionTrashManager(persistence);
-    this.pinnedSessions = new PinnedSessionManager(persistence);
+    this.pinnedSessions = new PinnedSessionManager(persistence, (sessionIds) => {
+      // A timed-out RPC can still finish persisting. Keep every view authoritative
+      // independently of whether its original response is still being awaited.
+      this.post({ type: 'pinned-sessions/sync', payload: { sessionIds } });
+    });
     this.queuedMessages = new QueuedMessageStore(persistence);
     this.sessionPermissionModes = new SessionPermissionModeStore(persistence);
     this.sessionSelectedModels = new SessionModelSelectionStore(persistence);

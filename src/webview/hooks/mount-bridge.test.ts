@@ -867,6 +867,23 @@ describe('mount bridge helpers', () => {
     expect(openExternal).toHaveBeenCalledWith('https://mcp.example.com/authorize');
   });
 
+  it('applies committed pins independently of an expired API response', () => {
+    setState.mockClear();
+    const deps = createMessageDependencies();
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'pinned-sessions/sync',
+      payload: { sessionIds: ['session-2', 'session-1'] },
+    });
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'pinned-sessions/sync',
+      payload: { sessionIds: [] },
+    });
+    expect(setState).toHaveBeenNthCalledWith(1, 'pinnedSessionIds', ['session-2', 'session-1']);
+    expect(setState).toHaveBeenNthCalledWith(2, 'pinnedSessionIds', []);
+    expect(deps.ensureConnectionInitialized).not.toHaveBeenCalled();
+    expect(deps.clearError).not.toHaveBeenCalled();
+  });
+
   it('binds extension message handling to shared webview state', () => {
     setState((draft) => {
       draft.remoteImages = 'off';
