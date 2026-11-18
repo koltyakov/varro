@@ -1141,9 +1141,9 @@ describe('MessageList history pagination', () => {
     harness.animationFrames.restore();
   });
 
-  it.each([false, true])(
-    'bounds native scroll remount geometry with held pointer %s',
-    async (held) => {
+  it.each(['wheel', 'touch', 'scrollbar'] as const)(
+    'bounds native scroll remount geometry with %s ownership',
+    async (owner) => {
       const messages = Array.from({ length: 200 }, (_, index) => {
         const messageId = `current-${index}`;
         return {
@@ -1164,10 +1164,16 @@ describe('MessageList history pagination', () => {
       }
       expect(container?.querySelector('.interactive-list-track.virtualized')).not.toBeNull();
       expect(container?.querySelector('[data-msg-id="current-100"]')).toBeNull();
-      if (held) {
-        harness.list.dispatchEvent(
-          new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 499 })
-        );
+      if (owner !== 'wheel') {
+        const pointer = new MouseEvent('pointerdown', {
+          bubbles: true,
+          button: 0,
+          clientX: 499,
+        });
+        Object.defineProperty(pointer, 'pointerType', {
+          value: owner === 'touch' ? 'touch' : 'mouse',
+        });
+        harness.list.dispatchEvent(pointer);
       }
       harness.list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -10_000 }));
       harness.setScrollTop(10_000);
@@ -1199,7 +1205,13 @@ describe('MessageList history pagination', () => {
       // Allow anchor capture and a correction-driven range update, not a write/read per row.
       expect(interleavedWrites).toBeLessThanOrEqual(4);
       const destination = harness.getScrollTop();
-      expect(destination).toBeGreaterThan(10_000);
+      if (owner === 'scrollbar') {
+        // Chromium retains the native thumb's destination. A JS prefix correction competes
+        // with that destination and is reversed by the next native scrollbar reconciliation.
+        expect(destination).toBe(10_000);
+      } else {
+        expect(destination).toBeGreaterThan(10_000);
+      }
       const marker = container!.querySelector('[data-msg-id="current-100"]')!;
       const markerTop = marker.getBoundingClientRect().top;
       for (let frame = 0; frame < 4; frame += 1) {
@@ -1210,7 +1222,7 @@ describe('MessageList history pagination', () => {
       expect(marker.isConnected).toBe(true);
       expect(marker.getBoundingClientRect().top).toBe(markerTop);
       expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(40);
-      if (held) document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+      if (owner !== 'wheel') document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
       harness.animationFrames.restore();
     }
   );

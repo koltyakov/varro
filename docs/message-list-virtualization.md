@@ -149,6 +149,11 @@ the shared invariants below remain true.
   remain valid.
 - A row measurement correction above the visible anchor must preserve that anchor's viewport
   position.
+- A held native scrollbar owns its numeric destination. Do not apply inferred prefix-height scroll
+  corrections or generic measurement-anchor restoration against that destination, including after the
+  input-intent timeout. Chromium reconciles the thumb on its next move and reverses competing writes.
+  Continue measuring and publishing the bounded mounted range. Wheel and touch retain above-viewport
+  compensation. `scroll-scrollbar-activity.spec.ts` covers cold remounts, a long hold, and release.
 - Content below the anchor may change `scrollHeight`, but it must not move the anchor.
 - Completing a short new turn must retain any bottom reserve needed by the current viewport.
   Clearing the new-turn reserve outright can shrink the scroll range and clamp already-painted
@@ -252,6 +257,10 @@ the shared invariants below remain true.
   a boundary row, replacing its cached diff height with its shorter summary on each pass.
   Coalesce completion/unmount wakeups with an executing settle pass or its scheduled animation frame.
   Replacing that frame with another microtask can starve paint indefinitely during range churn.
+- While diff-view bottom-follow owns replacement, departing summaries must not acquire an activity
+  collapse target or append reserve. Those owners block immediate physical-bottom correction until a
+  later frame. Delayed sibling-preview checks must release details separately and check every frame
+  for a bottom gap of at most 1 px and no reserve.
 - Width reflow owns a stable visible message captured before the first changed-height batch is
   applied. Deferring prefix publication must not make later resize batches classify rows against an
   already-adjusted `scrollTop` and stale prefixes.

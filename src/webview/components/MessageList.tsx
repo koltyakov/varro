@@ -842,6 +842,7 @@ export function MessageList() {
     observer: MutationObserver | null;
   } | null = null;
   let pointerScrollOwnershipActive = false;
+  let nativeScrollbarActive = false;
   let scrollTouch: { identifier: number; x: number; y: number } | null = null;
   let pointerScrollRange = 0;
   let wheelListenerPassive = true;
@@ -3574,7 +3575,16 @@ export function MessageList() {
     );
     let firstVisibleIndex: number | null = null;
     let mountedDetachedAnchorAlreadyPreserved = false;
-    if (metricsBefore && containerRef && !autoScroll() && !historyOwnsAnchor) {
+    // Chromium keeps its own thumb destination until release. Prefix compensation writes
+    // fight that destination and the next native move reverses them. Touch and wheel
+    // scrolling still need compensation for newly measured content above their destination.
+    if (
+      metricsBefore &&
+      containerRef &&
+      !autoScroll() &&
+      !historyOwnsAnchor &&
+      !nativeScrollbarActive
+    ) {
       const detachedAnchorElement = lastDetachedVisibleAnchor
         ? getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
         : null;
@@ -4493,6 +4503,7 @@ export function MessageList() {
     // slow mount outlives the direct-input window. Explicit owners above still win.
     if (
       options?.skipGenericAnchor ||
+      nativeScrollbarActive ||
       capturedAutoScroll ||
       stickyNavigationOwnsScroll() ||
       userScrollRecentlyActive()
@@ -4506,7 +4517,7 @@ export function MessageList() {
     setMeasurementVersion((version) => version + 1);
 
     queueMicrotask(() => {
-      if (!stickyNavigationOwnsScroll() && !userScrollRecentlyActive()) {
+      if (!nativeScrollbarActive && !stickyNavigationOwnsScroll() && !userScrollRecentlyActive()) {
         restoreVisibleScrollAnchor(pendingThinkingLayoutAnchor ?? anchor);
       }
     });
@@ -7227,6 +7238,7 @@ export function MessageList() {
     if (activityCollapseSettleRafId) cancelAnimationFrame(activityCollapseSettleRafId);
     activityCollapseSettleRafId = 0;
     pointerScrollOwnershipActive = true;
+    nativeScrollbarActive = event.pointerType !== 'touch';
     pointerScrollRange = bottomScrollTop();
     containerRef.dataset.pointerScrollOwned = '';
     // Browser anchoring can otherwise adjust a detached, non-virtualized list
@@ -7289,6 +7301,7 @@ export function MessageList() {
     const ownedScroll = pointerScrollOwnershipActive;
     releaseEmptyPointerScrollRange();
     pointerScrollOwnershipActive = false;
+    nativeScrollbarActive = false;
     pointerScrollRange = 0;
     containerRef?.style.removeProperty('overflow-anchor');
     if (containerRef) delete containerRef.dataset.pointerScrollOwned;
@@ -7705,7 +7718,11 @@ export function MessageList() {
             !containerRef.contains(element) ||
             state.messagesLoading ||
             diffFocusPauseActive ||
-            stickyNavigationOwnsScroll()
+            stickyNavigationOwnsScroll() ||
+            // Diff-view replacement follows its new physical bottom. A departing
+            // summary must not arm a collapse owner or reserve its old geometry.
+            (inlinePreviewBottomFollow?.sessionId === state.activeSessionId &&
+              inlinePreviewBottomFollow.inputEpoch === directScrollInputEpoch)
           )
             return;
           const bounds = element.getBoundingClientRect();

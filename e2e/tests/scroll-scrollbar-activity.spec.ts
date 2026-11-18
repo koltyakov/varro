@@ -15,6 +15,75 @@ type ScrollSample = { top: number; height: number };
 // Headless Chromium hides native scrollbars by default, making thumb drags inert.
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
+test('cold virtual measurements yield scroll writes to the held native thumb', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 486, height: 794 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1&diffPreviewTurns=110&diffPreviewCompleted=1'
+  );
+  const list = page.locator('.interactive-list');
+  await expect(list).toBeVisible();
+  await expect
+    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+    .toBeLessThanOrEqual(1);
+  await waitForAnimationFrames(page, 12);
+  const initialIds = await list
+    .locator('[data-msg-id]')
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-msg-id')));
+  const writes: Array<{ top: number; held: boolean }> = [];
+  await page.exposeFunction('recordThumbScrollWrite', (top: number, held: boolean) =>
+    writes.push({ top, held })
+  );
+  await list.evaluate((element) => {
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
+    Object.defineProperty(element, 'scrollTop', {
+      configurable: true,
+      get() {
+        return descriptor.get!.call(this);
+      },
+      set(value: number) {
+        // SAFETY: exposeFunction installed this test-owned binding before this setter.
+        const host = window as typeof window & {
+          recordThumbScrollWrite: (top: number, held: boolean) => Promise<void>;
+        };
+        void host.recordThumbScrollWrite(value, element.hasAttribute('data-pointer-scroll-owned'));
+        descriptor.set!.call(this, value);
+      },
+    });
+  });
+  const thumb = await getThumb(list);
+  await page.mouse.move(thumb.x, thumb.y);
+  await page.mouse.down();
+  await expect(list).toHaveAttribute('data-pointer-scroll-owned', '');
+  try {
+    await page.waitForTimeout(400);
+    await page.mouse.move(thumb.x, thumb.y - 160, { steps: 16 });
+    await page.waitForTimeout(1_050);
+    const destination = await getScrollMetrics(page, '.interactive-list');
+    expect(destination.scrollTop).toBeLessThan(thumb.top - 1_000);
+    const currentIds = await list
+      .locator('[data-msg-id]')
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-msg-id')));
+    expect(currentIds.some((id) => !initialIds.includes(id))).toBe(true);
+    const anchor = await getVisibleMessageAnchor(list);
+    const heldSamples = await sampleMessageTopAcrossFrames(list, anchor.id, 12);
+    expect(heldSamples.every((top) => top !== null && Math.abs(top - anchor.top) <= 1)).toBe(true);
+    await testInfo.attach('native-thumb-writes', {
+      body: JSON.stringify({ initialIds, currentIds, writes, anchor, heldSamples }),
+      contentType: 'application/json',
+    });
+    expect(writes.filter((write) => write.held)).toEqual([]);
+  } finally {
+    await page.mouse.up();
+  }
+  const released = await getVisibleMessageAnchor(list);
+  const releasedSamples = await sampleMessageTopAcrossFrames(list, released.id, 12);
+  expect(releasedSamples.every((top) => top !== null && Math.abs(top - released.top) <= 1)).toBe(
+    true
+  );
+});
+
 for (const destination of ['top', 'bottom'] as const) {
   test(`releasing a thumb at the ${destination} drops obsolete range reserve before the next drag`, async ({
     page,
