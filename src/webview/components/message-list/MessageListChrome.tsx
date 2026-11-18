@@ -14,7 +14,8 @@ import {
   navArrowDownIcon,
   navArrowRightIcon,
 } from '../../lib/ui-icons';
-import type { Part, Permission, QuestionRequest } from '../../types';
+import type { AssistantMessage, Part, Permission, QuestionRequest, ToolPart } from '../../types';
+import { MessagePart } from '../MessagePart';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
 import { UiIcon } from '../UiIcon';
@@ -487,6 +488,13 @@ export function PendingActionRows(props: {
   );
 }
 
+export type StatusSlotActivity = {
+  key: string;
+  info: AssistantMessage;
+  part: ToolPart;
+  retained: boolean;
+};
+
 export function LoadingRow(props: {
   compacting: boolean;
   visible: boolean;
@@ -497,6 +505,7 @@ export function LoadingRow(props: {
   waitingCommand?: string;
   turnStartedAt?: number;
   elapsedStartedAt?: number;
+  activity?: StatusSlotActivity | null;
 }) {
   // A reserved, hidden row shows no elapsed time or stale state.
   const now = useSecondClock(() => props.visible);
@@ -614,94 +623,125 @@ export function LoadingRow(props: {
     <div
       ref={row}
       class={`interactive-item-container interactive-response interactive-loading-row${
-        props.visible ? '' : ' is-reserved'
+        props.visible || props.activity ? '' : ' is-reserved'
       }${waiting() ? ' is-background-waiting' : ''}`}
-      aria-hidden={props.visible ? undefined : true}
+      aria-hidden={props.visible || props.activity ? undefined : true}
     >
       <Show
-        when={waiting()}
+        keyed
+        when={props.activity?.key}
         fallback={
-          <div
-            class={`loading-indicator ${isStale() ? 'stale' : ''} ${props.compacting ? 'is-compacting' : ''}`}
+          <Show
+            when={waiting()}
+            fallback={
+              <div
+                class={`loading-indicator ${isStale() ? 'stale' : ''} ${props.compacting ? 'is-compacting' : ''}`}
+              >
+                <Show
+                  when={!props.compacting && isStale()}
+                  fallback={
+                    <ThinkingIndicator
+                      label={
+                        props.compacting ? 'Compacting' : props.keepThinking ? 'Thinking' : verb()
+                      }
+                    />
+                  }
+                >
+                  <span>Session may be stale</span>
+                </Show>
+                <Show when={visibleElapsed()}>
+                  <span class="loading-elapsed" title="Time since the last completed event">
+                    {visibleElapsed()}
+                  </span>
+                </Show>
+                <Show when={isStale()}>
+                  <button
+                    class="loading-action"
+                    onClick={() => {
+                      const sessionId = state.activeSessionId;
+                      if (!sessionId) return;
+                      void recheckSessionStatus(sessionId).catch((err) =>
+                        logError('Failed to recheck session status', err)
+                      );
+                    }}
+                    title="Check if session is still running"
+                  >
+                    Recheck
+                  </button>
+                  <button
+                    class="loading-action"
+                    onClick={() => stopLoading()}
+                    title="Dismiss loading indicator"
+                  >
+                    Dismiss
+                  </button>
+                </Show>
+              </div>
+            }
           >
-            <Show
-              when={!props.compacting && isStale()}
-              fallback={
-                <ThinkingIndicator
-                  label={props.compacting ? 'Compacting' : props.keepThinking ? 'Thinking' : verb()}
-                />
-              }
+            <div
+              class="chat-tool-invocation-part background-process"
+              role="status"
+              aria-label="Background process running"
+              aria-live="off"
             >
-              <span>Session may be stale</span>
-            </Show>
-            <Show when={visibleElapsed()}>
-              <span class="loading-elapsed" title="Time since the last completed event">
-                {visibleElapsed()}
-              </span>
-            </Show>
-            <Show when={isStale()}>
               <button
-                class="loading-action"
+                type="button"
+                class="tool-invocation-header"
+                aria-label="View background process details"
+                aria-haspopup="dialog"
+                title="View commands, status, and output"
                 onClick={() => {
-                  const sessionId = state.activeSessionId;
-                  if (!sessionId) return;
-                  void recheckSessionStatus(sessionId).catch((err) =>
-                    logError('Failed to recheck session status', err)
-                  );
+                  const sessionID = state.activeSessionId;
+                  if (sessionID)
+                    openBackgroundProcessView(
+                      sessionID,
+                      state.sessions.find((session) => session.id === sessionID)?.directory
+                    );
                 }}
-                title="Check if session is still running"
               >
-                Recheck
+                <UiIcon
+                  source={hourglassIcon}
+                  class="tool-call-icon tool-call-wait-icon tool-status-running"
+                  width="16"
+                  height="16"
+                  aria-hidden="true"
+                />
+                <span
+                  class="tool-invocation-title shimmer-progress"
+                  title={waitingClock()?.command}
+                >
+                  Background process
+                  <Show when={waitingClock()?.command}>{(command) => <>: {command()}</>}</Show>
+                </span>
+                <span class="tool-invocation-duration" title="Background process elapsed time">
+                  {formatElapsed()}
+                </span>
+                <UiIcon source={navArrowRightIcon} width="14" height="14" aria-hidden="true" />
               </button>
-              <button
-                class="loading-action"
-                onClick={() => stopLoading()}
-                title="Dismiss loading indicator"
-              >
-                Dismiss
-              </button>
-            </Show>
-          </div>
+            </div>
+          </Show>
         }
       >
-        <div
-          class="chat-tool-invocation-part background-process"
-          role="status"
-          aria-label="Background process running"
-          aria-live="off"
-        >
-          <button
-            type="button"
-            class="tool-invocation-header"
-            aria-label="View background process details"
-            aria-haspopup="dialog"
-            title="View commands, status, and output"
-            onClick={() => {
-              const sessionID = state.activeSessionId;
-              if (sessionID)
-                openBackgroundProcessView(
-                  sessionID,
-                  state.sessions.find((session) => session.id === sessionID)?.directory
-                );
-            }}
-          >
-            <UiIcon
-              source={hourglassIcon}
-              class="tool-call-icon tool-call-wait-icon tool-status-running"
-              width="16"
-              height="16"
-              aria-hidden="true"
-            />
-            <span class="tool-invocation-title shimmer-progress" title={waitingClock()?.command}>
-              Background process
-              <Show when={waitingClock()?.command}>{(command) => <>: {command()}</>}</Show>
-            </span>
-            <span class="tool-invocation-duration" title="Background process elapsed time">
-              {formatElapsed()}
-            </span>
-            <UiIcon source={navArrowRightIcon} width="14" height="14" aria-hidden="true" />
-          </button>
-        </div>
+        {(key) => {
+          const activity = createMemo<StatusSlotActivity>(
+            (previous) => (props.activity?.key === key ? props.activity : previous),
+            props.activity!
+          );
+          return (
+            <div
+              class={`assistant-active-activity-item status-slot-tool${activity().retained ? ' is-completed' : ''}`}
+              data-activity-part-id={activity().part.id}
+              data-activity-source-message-id={activity().info.id}
+            >
+              <MessagePart
+                part={activity().part}
+                messageInfo={activity().info}
+                renderPermissionPrompt={false}
+              />
+            </div>
+          );
+        }}
       </Show>
     </div>
   );

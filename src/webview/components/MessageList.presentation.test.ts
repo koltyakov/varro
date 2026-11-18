@@ -169,13 +169,14 @@ describe('streaming presentation handoff', () => {
     batch(() => tools.forEach(upsertPart));
     await vi.advanceTimersByTimeAsync(2_999);
     expect(container?.querySelector('[data-activity-part-id="long"]')).not.toBeNull();
-    const tray = container?.querySelector('.assistant-active-activity-tray');
+    const slot = container?.querySelector('.interactive-loading-row');
+    expect(slot).not.toBeNull();
     for (const expected of ['two', 'long', 'three', 'long']) {
       for (let frame = 0; frame < 70; frame += 1) {
         await vi.advanceTimersByTimeAsync(16);
         expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
-        expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
-        expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
+        expect(container?.querySelector('.loading-verb')).toBeNull();
+        expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
           'is-reserved'
         );
         expect(container?.querySelector('.assistant-active-activity-item.is-exiting')).toBeNull();
@@ -183,7 +184,9 @@ describe('streaming presentation handoff', () => {
         if (container?.querySelector(`[data-activity-part-id="${expected}"]`)) break;
       }
       expect(container?.querySelector(`[data-activity-part-id="${expected}"]`)).not.toBeNull();
-      expect(container?.querySelector('.assistant-active-activity-tray')).toBe(tray);
+      expect(container?.querySelector('.interactive-loading-row')).toBe(slot);
+      expect(slot?.querySelector(`[data-activity-part-id="${expected}"]`)).not.toBeNull();
+      expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
       expect(container?.querySelector('.assistant-active-activity-item.is-entering')).toBeNull();
     }
     expect(
@@ -194,7 +197,7 @@ describe('streaming presentation handoff', () => {
     ).toBe(true);
   });
 
-  it('hides the existing status row during a tool preview and restores it when tools finish', async () => {
+  it('replaces Thinking inside the existing status row and restores it when tools finish', async () => {
     vi.setSystemTime(1);
     openChat();
     const row = container?.querySelector('.interactive-loading-row');
@@ -203,9 +206,10 @@ describe('streaming presentation handoff', () => {
     upsertPart(running);
     await vi.advanceTimersByTimeAsync(600);
     expect(container?.querySelector('.interactive-loading-row')).toBe(row);
-    expect(row?.classList).toContain('is-reserved');
-    expect(row?.getAttribute('aria-hidden')).toBe('true');
-    expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
+    expect(row?.classList).not.toContain('is-reserved');
+    expect(row?.getAttribute('aria-hidden')).toBeNull();
+    expect(row?.querySelector('.status-slot-tool')).not.toBeNull();
+    expect(container?.querySelector('.loading-verb')).toBeNull();
     upsertPart(completeSearch(running));
     await vi.advanceTimersByTimeAsync(3_000);
     expect(container?.querySelector('.interactive-loading-row')).toBe(row);
@@ -221,10 +225,11 @@ describe('streaming presentation handoff', () => {
     pending.state = { status: 'pending', input: { pattern: 'queue' }, raw: '' };
     upsertPart(pending);
     await vi.advanceTimersByTimeAsync(600);
-    expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
+    expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
       'is-reserved'
     );
-    expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
+    expect(container?.querySelector('.interactive-loading-row .status-slot-tool')).not.toBeNull();
+    expect(container?.querySelector('.loading-verb')).toBeNull();
     upsertPart({
       ...pending,
       state: {
@@ -258,7 +263,8 @@ describe('streaming presentation handoff', () => {
       await vi.advanceTimersByTimeAsync(1_299);
       expect(container?.querySelector('[data-activity-part-id="search"]')).not.toBeNull();
       expect(container?.querySelector('[data-activity-part-id="replacement"]')).toBeNull();
-      const tray = container?.querySelector('.assistant-active-activity-tray');
+      const slot = container?.querySelector('.interactive-loading-row');
+      expect(slot).not.toBeNull();
       for (let frame = 0; frame < 20; frame += 1) {
         await vi.advanceTimersByTimeAsync(16);
         expect(container?.querySelector('.assistant-active-activity-item.is-exiting')).toBeNull();
@@ -267,7 +273,9 @@ describe('streaming presentation handoff', () => {
       }
       expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
       expect(container?.querySelector('[data-activity-part-id="replacement"]')).not.toBeNull();
-      expect(container?.querySelector('.assistant-active-activity-tray')).toBe(tray);
+      expect(container?.querySelector('.interactive-loading-row')).toBe(slot);
+      expect(slot?.querySelector('[data-activity-part-id="replacement"]')).not.toBeNull();
+      expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
       expect(container?.querySelector('.assistant-active-activity-item.is-entering')).toBeNull();
       expect(container?.querySelector('.assistant-active-activity-item.is-exiting')).toBeNull();
       expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(

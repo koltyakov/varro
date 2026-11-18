@@ -80,6 +80,7 @@ import { InlineCodeText } from './InlineCodeText';
 import { UiIcon } from './UiIcon';
 import { isPlanImplementationMessage } from './message-list/plan-actions';
 import { getPresentationPartKey } from './message-list/streaming-presentation';
+import { slotToolOwnsRowSummary } from './message-list/row-layout';
 import type { StreamingPresentation } from './message-list/streaming-presentation';
 import type { AssistantRetryState } from './message-list/assistant-retry';
 
@@ -157,6 +158,7 @@ export function Message(props: {
   retainedActivityPartKeys?: ReadonlySet<string>;
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
+  statusSlotActivityPartKey?: string | null;
   groupedActiveActivityPartKeys?: ReadonlySet<string>;
   keepReasoningInline?: boolean;
   expandReasoning?: boolean;
@@ -442,6 +444,16 @@ export function Message(props: {
   });
   const hasVisibleAssistantOutput = () => {
     const visibleParts = visibleAssistantParts().filter((part) => {
+      if (
+        part.type === 'tool' &&
+        getAssistantActivityPartKey(part) === props.statusSlotActivityPartKey
+      ) {
+        return slotToolOwnsRowSummary(
+          part,
+          compactActivityPartKeys().get(getAssistantActivityPartKey(part)),
+          props.retainedActivityPartKeys
+        );
+      }
       if (
         !props.visibleActiveActivityPartKeys ||
         !isAssistantActivityPart(part) ||
@@ -820,6 +832,7 @@ export function Message(props: {
                   retainedActivityPartKeys={props.retainedActivityPartKeys}
                   exitingActivityPartKeys={props.exitingActivityPartKeys}
                   visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
+                  statusSlotActivityPartKey={props.statusSlotActivityPartKey}
                   groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
                   keepReasoningInline={props.keepReasoningInline}
                   expandReasoning={props.expandReasoning}

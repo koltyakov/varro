@@ -4,7 +4,11 @@ import { render } from 'solid-js/web';
 import { getAssistantActivityPartKey } from '../../lib/assistant-activity';
 import { resetDefaultAppState, setIsLoading, setShowFileDiffs } from '../../lib/state';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
-import { getInlinePreviewLayoutSignatures } from '../message-list/row-layout';
+import {
+  getInlinePreviewLayoutSignatures,
+  getMessageBlockBoundaryMap,
+  getRenderEmptyMessageIds,
+} from '../message-list/row-layout';
 import { emptyPageIcon, searchIcon, terminalIcon } from '../../lib/ui-icons';
 import type { AssistantMessage, Part, ReasoningPart, TextPart, ToolPart } from '../../types';
 import { toCssUrl } from '../UiIcon';
@@ -582,6 +586,105 @@ describe('AssistantMessageContent', () => {
     );
     expect(container?.querySelector('[data-part-id="grep-running"]')).toBeNull();
     expect(container?.querySelector('.assistant-activity-group-settling')).not.toBeNull();
+  });
+
+  it('projects a retained slot tool to zero and restores the same part when ownership clears', () => {
+    const tool = toolPart('slot-tool', 'read');
+    const info = createAssistantMessage();
+    const key = getAssistantActivityPartKey(tool);
+    const group = {
+      key: 'slot-group',
+      ownerMessageId: info.id,
+      ownerPartId: tool.id,
+      parts: [tool],
+    };
+    const groups = new Map([[info.id, [group]]]);
+    const message = { info, parts: [tool] };
+    const retained = new Set([key]);
+    const [slot, setSlot] = createSignal<string | null>(key);
+    cleanup = render(
+      () => (
+        <AssistantMessageContent
+          info={info}
+          parts={message.parts}
+          textForPart={() => null}
+          compactActivityGroups={[group]}
+          retainedActivityPartKeys={retained}
+          statusSlotActivityPartKey={slot()}
+        />
+      ),
+      container!
+    );
+    const project = () => {
+      const empty = getRenderEmptyMessageIds([message], groups, () => false, {
+        visibleActive: new Set(),
+        retained,
+        exiting: new Set(),
+        delayed: new Set(),
+        statusSlotActivityPartKey: slot(),
+      });
+      return getMessageBlockBoundaryMap([message], groups, {
+        expandedActivityGroup: () => false,
+        renderEmptyMessageIds: empty,
+        retainedActivityPartKeys: retained,
+        showThinking: true,
+        statusSlotActivityPartKey: slot(),
+      }).get(info.id);
+    };
+
+    expect(container?.querySelector('[data-assistant-render-key]')).toBeNull();
+    expect(project()?.signature).toBe('empty');
+    setSlot(null);
+    expect(
+      container?.querySelector('.assistant-active-activity-item [data-part-id="slot-tool"]')
+    ).not.toBeNull();
+    expect(project()?.endsBordered).toBe(true);
+    expect(messagePartMock.mock.lastCall?.[0].part).toBe(tool);
+  });
+
+  it('leaves the real group summary and expanded history at the slot tool’s source', () => {
+    const tool = toolPart('slot-owner', 'bash');
+    const completed = toolPart('history', 'grep');
+    const prose = textPart('intro', 'Earlier answer');
+    const group = {
+      key: 'group-with-history',
+      ownerMessageId: tool.messageID,
+      ownerPartId: tool.id,
+      parts: [tool, completed],
+    };
+    const retained = new Set([getAssistantActivityPartKey(tool)]);
+    const slot = getAssistantActivityPartKey(tool);
+    const message = { info: createAssistantMessage(), parts: [prose, tool, completed] };
+    renderAssistantMessageContent({
+      parts: message.parts,
+      compactActivityGroups: [group],
+      retainedActivityPartKeys: retained,
+      statusSlotActivityPartKey: slot,
+    });
+    const groups = new Map([[tool.messageID, [group]]]);
+    const empty = getRenderEmptyMessageIds([message], groups, () => false, {
+      visibleActive: new Set(),
+      retained,
+      exiting: new Set(),
+      delayed: new Set(),
+      statusSlotActivityPartKey: slot,
+    });
+    expect(empty.size).toBe(0);
+    const boundaries = getMessageBlockBoundaryMap([message], groups, {
+      expandedActivityGroup: () => false,
+      renderEmptyMessageIds: empty,
+      retainedActivityPartKeys: retained,
+      showThinking: true,
+      statusSlotActivityPartKey: slot,
+    });
+    expect(boundaries.get(tool.messageID)?.endsBordered).toBe(false);
+    expect(container?.textContent).toContain('Earlier answer');
+    expect(container?.querySelector('.assistant-activity-summary-placeholder')).toBeNull();
+    const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+    expect(summary?.textContent).toContain('Explored: 1 search');
+    summary?.click();
+    expect(container?.querySelector('[data-part-id="history"]')).not.toBeNull();
+    expect(container?.querySelector('[data-part-id="slot-owner"]')).toBeNull();
   });
 
   it('keeps a titled active patch outside Explored without active lifecycle keys', () => {

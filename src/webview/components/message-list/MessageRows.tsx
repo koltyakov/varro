@@ -90,6 +90,7 @@ export type MessageRowSharedProps = {
   retainedActivityPartKeys?: ReadonlySet<string>;
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
+  statusSlotActivityPartKey?: string | null;
   groupedActiveActivityPartKeys?: ReadonlySet<string>;
   inlineThinkingMessageIds?: ReadonlySet<string>;
   expandedThinkingMessageIds?: ReadonlySet<string>;
@@ -358,6 +359,7 @@ export function MessageRow(
             retainedActivityPartKeys={props.retainedActivityPartKeys}
             exitingActivityPartKeys={props.exitingActivityPartKeys}
             visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
+            statusSlotActivityPartKey={props.statusSlotActivityPartKey}
             groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
             keepReasoningInline={props.inlineThinkingMessageIds?.has(props.msg.info.id)}
             expandReasoning={props.expandedThinkingMessageIds?.has(props.msg.info.id)}

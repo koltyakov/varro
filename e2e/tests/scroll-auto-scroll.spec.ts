@@ -1,5 +1,7 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- Playwright serializes these browser callbacks, which deliberately inject partial harness and server-event payloads across the page boundary. */
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import type { ServerEvent } from '../../src/shared/protocol';
+import type { MessageEntry } from '../../src/webview/types';
 import {
   getScrollMetrics,
   getVisibleMessageAnchor,
@@ -8,6 +10,33 @@ import {
   waitForAnimationFrames,
 } from './helpers';
 import { appendDeltaToLastLargeAssistant, appendDeltaToRapidStreaming } from './scroll-helpers';
+
+async function seedTrailingExplored(page: Page) {
+  await page.evaluate(() => {
+    const part = {
+      type: 'tool' as const,
+      tool: 'read',
+      id: 'seed-completed-read',
+      callID: 'seed-read',
+      sessionID: 'session-tool-cards-large-transcript',
+      messageID: 'message-tool-cards-assistant-69',
+      state: {
+        status: 'completed' as const,
+        input: { filePath: 'seed.ts' },
+        title: 'Seed read',
+        output: 'Done',
+        metadata: {},
+        time: { start: Date.now() - 100, end: Date.now() },
+      },
+    };
+    (
+      window as typeof window & { __varroE2E: { replayServerEvent(e: ServerEvent): void } }
+    ).__varroE2E.replayServerEvent({ type: 'message.part.updated', properties: { part } });
+  });
+  await expect(
+    page.locator('[data-msg-id="message-tool-cards-assistant-69"] .assistant-activity-summary')
+  ).toContainText('1 file');
+}
 
 test.describe('auto-scroll', () => {
   for (const scenario of ['mixed-small-transcript', 'large-transcript', 'rapid-streaming-jitter']) {
@@ -1812,7 +1841,9 @@ test.describe('auto-scroll', () => {
     ).toBe(true);
   });
 
-  test('keeps trailing active-tool space until streamed content replaces it', async ({ page }) => {
+  test('keeps a compact tool handoff stationary before following streamed content', async ({
+    page,
+  }) => {
     await page.goto(
       '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69'
     );
@@ -1822,6 +1853,7 @@ test.describe('auto-scroll', () => {
     const loadingRow = page.locator('.interactive-loading-row');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
     await expect(activeItem).toBeVisible();
+    await seedTrailingExplored(page);
     await activeItem.evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
@@ -1848,6 +1880,16 @@ test.describe('auto-scroll', () => {
         return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
       });
 
+    const slotGap = () =>
+      loadingRow.evaluate((slot) => {
+        const summary = slot
+          .closest('.interactive-list')!
+          .querySelector(
+            '[data-msg-id="message-tool-cards-assistant-69"] .assistant-activity-summary'
+          )!;
+        return slot.getBoundingClientRect().top - summary.getBoundingClientRect().bottom;
+      });
+    const beforeGap = await slotGap();
     const { exitSamples, exploredSamples, sawExit, remainingItems } = await page
       .locator('.interactive-list')
       .evaluate(async (element, anchorId) => {
@@ -1913,26 +1955,10 @@ test.describe('auto-scroll', () => {
     await expect(activeItem).toHaveCount(0, { timeout: 5_000 });
     await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
     const appendReserve = page.locator('.append-scroll-bottom-reserve');
-    await expect(appendReserve).toBeVisible();
-    expect(
-      await appendReserve.evaluate((element) => element.getBoundingClientRect().height)
-    ).toBeGreaterThan(5);
+    await expect(appendReserve).toHaveCount(0);
 
-    const settledGap = await page
-      .locator('.assistant-activity-summary')
-      .last()
-      .evaluate(
-        (summary, loading) => {
-          const summaryBox = summary.getBoundingClientRect();
-          const loadingBox = (loading as HTMLElement)
-            .querySelector<HTMLElement>('.loading-verb')!
-            .getBoundingClientRect();
-          return loadingBox.top - summaryBox.bottom;
-        },
-        await loadingRow.elementHandle()
-      );
-    expect(settledGap).toBeGreaterThanOrEqual(10);
-    expect(settledGap).toBeLessThanOrEqual(14.5);
+    await expect(loadingRow.locator('.loading-verb')).toBeVisible();
+    expect(await slotGap()).toBe(beforeGap);
 
     await page.evaluate(() => {
       const part = {
@@ -1974,6 +2000,12 @@ test.describe('auto-scroll', () => {
       );
     });
 
+    await expect(
+      page.locator('[data-msg-id="message-tool-cards-assistant-69"] .rendered-markdown').last()
+    ).toContainText('Streamed replacement line 12.');
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(2);
     await expect(appendReserve).toHaveCount(0);
   });
 
@@ -2346,7 +2378,12 @@ test.describe('auto-scroll', () => {
       ).toBe(true);
       await expect(activeItems).toHaveCount(0);
 
-      const reserve = page.locator('.append-scroll-bottom-reserve');
+      const reserveBeforeCompletion = await list.evaluate(
+        (element) =>
+          element
+            .querySelector<HTMLElement>('.append-scroll-bottom-reserve')
+            ?.getBoundingClientRect().height ?? 0,
+      );
       await testInfo.attach('first-turn-reserve-geometry', {
         body: JSON.stringify(
           await list.evaluate((element) => ({
@@ -2363,7 +2400,6 @@ test.describe('auto-scroll', () => {
         ),
         contentType: 'application/json',
       });
-      if (promptLines === 30) await expect(reserve).toBeVisible();
 
       const samples = await list.evaluate(async (element) => {
         const harnessWindow = window as typeof window & {
@@ -2425,16 +2461,16 @@ test.describe('auto-scroll', () => {
         samples.every((sample) => sample.top !== null && Math.abs(sample.top - before) <= 1),
         JSON.stringify({ before, samples })
       ).toBe(true);
-      if (promptLines === 30) {
-        expect(
-          samples.every((sample) => sample.reserveHeight > 0.5),
-          JSON.stringify(samples)
-        ).toBe(true);
-      }
+      expect(
+        samples.every((sample) => Math.abs(sample.reserveHeight - reserveBeforeCompletion) <= 0.5),
+        JSON.stringify({ reserveBeforeCompletion, samples }),
+      ).toBe(true);
     });
   }
 
-  test('uses trailing activity reserve for the next active tool', async ({ page }) => {
+  test('reuses the trailing Thinking slot for the next active tool without reserve', async ({
+    page,
+  }) => {
     await page.goto(
       '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69'
     );
@@ -2514,8 +2550,14 @@ test.describe('auto-scroll', () => {
     });
 
     await expect(activeItems).toHaveCount(0, { timeout: 5_000 });
-    const reserve = page.locator('.append-scroll-bottom-reserve');
-    await expect(reserve).toBeVisible();
+    const reserve = page.locator('.append-scroll-bottom-reserve, .activity-exit-bottom-reserve');
+    await expect(reserve).toHaveCount(0);
+    await expect(
+      page.locator('.interactive-loading-row:not(.is-reserved) .loading-verb')
+    ).toBeVisible();
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(1);
     await waitForAnimationFrames(page, 3);
     const summary = page.locator('.assistant-activity-summary').last();
     const loadingRow = page.locator('.interactive-loading-row');
@@ -2527,10 +2569,8 @@ test.describe('auto-scroll', () => {
       const containerTop = element.getBoundingClientRect().top;
       return {
         scrollTop: element.scrollTop,
-        reserveHeight: Number.parseFloat(
-          getComputedStyle(element.querySelector<HTMLElement>('.append-scroll-bottom-reserve')!)
-            .height
-        ),
+        scrollHeight: element.scrollHeight,
+        slotHeight: loading.getBoundingClientRect().height,
         summaryTop: summaryElement.getBoundingClientRect().top - containerTop,
         loadingTop: loading.getBoundingClientRect().top - containerTop,
       };
@@ -2574,7 +2614,7 @@ test.describe('auto-scroll', () => {
       return tops;
     });
     const nextItem = page.locator(
-      '[data-activity-part-id="message-tool-cards-assistant-69-next-tool"]'
+      '.interactive-loading-row > [data-activity-part-id="message-tool-cards-assistant-69-next-tool"]'
     );
     await expect(nextItem).toBeVisible();
     expect(
@@ -2586,13 +2626,15 @@ test.describe('auto-scroll', () => {
     ).toBeLessThan(1.5);
     const summaryBox = (await summary.boundingBox())!;
     const nextItemBox = (await nextItem.boundingBox())!;
-    expect(before.reserveHeight).toBeGreaterThanOrEqual(nextItemBox.height);
+    expect(await list.evaluate((el) => el.scrollHeight)).toBe(before.scrollHeight);
+    expect((await loadingRow.boundingBox())?.height).toBe(before.slotHeight);
+    await expect(reserve).toHaveCount(0);
     expect(nextItemBox.y).toBeGreaterThanOrEqual(summaryBox.y + summaryBox.height - 1);
     const loadingTop = await loadingRow.evaluate((element) => {
       const container = element.closest<HTMLElement>('.interactive-list')!;
       return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
     });
-    expect(loadingTop).toBeGreaterThan(before.loadingTop);
+    expect(loadingTop).toBe(before.loadingTop);
   });
 
   test('keeps the transcript fixed when every active tool moves into Explored', async ({
@@ -2604,6 +2646,7 @@ test.describe('auto-scroll', () => {
     const list = page.locator('.interactive-list');
     const activeItems = page.locator('.assistant-active-activity-item');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await seedTrailingExplored(page);
 
     await page.evaluate(() => {
       const harnessWindow = window as typeof window & {
@@ -2749,30 +2792,37 @@ test.describe('auto-scroll', () => {
     ).toBe(true);
     await expect(activeItems).toHaveCount(0);
     await expect(page.locator('.assistant-activity-summary').last()).toContainText('Explored');
-    await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
+    await expect(
+      page.locator('.append-scroll-bottom-reserve, .activity-exit-bottom-reserve')
+    ).toHaveCount(0);
   });
 
-  test('reserves an empty follower row when an earlier message owns Explored', async ({ page }) => {
+  test('keeps the follower row empty when an earlier message owns Explored', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=tool-cards-large-transcript');
     const list = page.locator('.interactive-list');
     const follower = page.locator('[data-msg-id="tool-follower-assistant"]');
     const activeItem = page.locator('[data-activity-part-id="tool-follower-running"]');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
 
-    await page.evaluate(() => {
+    const running = await page.evaluate(() => {
       const sessionID = 'session-tool-cards-large-transcript';
+      const harness = (
+        window as typeof window & {
+          __varroE2E: {
+            getSessionMessages(id: string): MessageEntry[];
+            replayServerEvent(e: ServerEvent): void;
+          };
+        }
+      ).__varroE2E;
+      const previous = harness
+        .getSessionMessages(sessionID)
+        .find((entry) => entry.info.id === 'message-tool-cards-assistant-69')?.info;
+      if (previous?.role !== 'assistant') throw new Error('Missing previous assistant step');
       const info = {
+        ...previous,
         id: 'tool-follower-assistant',
-        sessionID,
-        role: 'assistant' as const,
-        parentID: 'message-tool-cards-user-69',
+        finish: undefined,
         time: { created: Date.now() },
-        modelID: 'model-test',
-        providerID: 'provider-test',
-        mode: 'primary' as const,
-        path: { cwd: '/workspace', root: '/workspace' },
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
       };
       const part = {
         id: 'tool-follower-running',
@@ -2788,36 +2838,13 @@ test.describe('auto-scroll', () => {
           time: { start: Date.now() },
         },
       };
-      const harnessWindow = window as typeof window & {
-        __varroE2E?: {
-          updateSessionStatus?: (id: string, status: { type: 'busy' }) => void;
-        };
-      };
-      harnessWindow.__varroE2E?.updateSessionStatus?.(sessionID, { type: 'busy' });
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: {
-            type: 'session.status',
-            properties: { sessionID, status: { type: 'busy' } },
-          },
-        },
-        '*'
-      );
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: { type: 'message.updated', properties: { info } },
-        },
-        '*'
-      );
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: { type: 'message.part.updated', properties: { part } },
-        },
-        '*'
-      );
+      harness.replayServerEvent({
+        type: 'session.status',
+        properties: { sessionID, status: { type: 'busy' } },
+      });
+      harness.replayServerEvent({ type: 'message.updated', properties: { info } });
+      harness.replayServerEvent({ type: 'message.part.updated', properties: { part } });
+      return part;
     });
 
     await expect(activeItem).toBeVisible();
@@ -2828,15 +2855,12 @@ test.describe('auto-scroll', () => {
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(2);
     await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
-    const sourceGeometry = await follower.evaluate((element) => {
-      const tray = element.querySelector<HTMLElement>('.assistant-active-activity-tray');
-      return {
-        rowHeight: element.getBoundingClientRect().height,
-        trayHeight: tray?.getBoundingClientRect().height ?? null,
-        hasSummary: !!tray?.querySelector('.assistant-active-activity-summary'),
-        flowItems: tray?.parentElement?.children.length ?? null,
-      };
-    });
+    await expect(activeItem).toHaveAttribute(
+      'data-activity-source-message-id',
+      'tool-follower-assistant'
+    );
+    expect(await follower.evaluate((el) => el.getBoundingClientRect().height)).toBe(0);
+    const range = await list.evaluate((el) => el.scrollHeight);
     const anchor = await getVisibleMessageAnchor(list);
     const exploredTop = await page
       .locator('.assistant-activity-summary')
@@ -2847,29 +2871,31 @@ test.describe('auto-scroll', () => {
         return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
       });
 
-    await page.evaluate(() => {
-      const sessionID = 'session-tool-cards-large-transcript';
-      const harnessWindow = window as typeof window & {
-        __varroE2E?: { updateSessionStatus?: (id: string, status: { type: 'idle' }) => void };
-      };
-      harnessWindow.__varroE2E?.updateSessionStatus?.(sessionID, { type: 'idle' });
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: {
-            type: 'session.status',
-            properties: { sessionID, status: { type: 'idle' } },
+    await page.evaluate((part) => {
+      (
+        window as typeof window & { __varroE2E: { replayServerEvent(e: ServerEvent): void } }
+      ).__varroE2E.replayServerEvent({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            ...part,
+            state: {
+              ...part.state,
+              status: 'completed' as const,
+              metadata: {},
+              output: 'Done',
+              time: { ...part.state.time, end: Date.now() },
+            },
           },
         },
-        '*'
-      );
-    });
+      });
+    }, running);
 
     const [samples, exploredSamples] = await Promise.all([
-      sampleMessageTopAcrossFrames(list, anchor.id, 12),
+      sampleMessageTopAcrossFrames(list, anchor.id, 120),
       list.evaluate(async (element) => {
         const tops: Array<number | null> = [];
-        for (let frame = 0; frame < 12; frame += 1) {
+        for (let frame = 0; frame < 120; frame += 1) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
           const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
           const summary = summaries[summaries.length - 1];
@@ -2883,19 +2909,19 @@ test.describe('auto-scroll', () => {
       }),
     ]);
     await expect(activeItem).toHaveCount(0);
-    const reserveHeight = await page
-      .locator('.append-scroll-bottom-reserve')
-      .evaluate((element) => element.getBoundingClientRect().height);
+    await expect(
+      page.locator('.append-scroll-bottom-reserve, .activity-exit-bottom-reserve')
+    ).toHaveCount(0);
     expect(
       samples.every((top) => top !== null && Math.abs(top - anchor.top) <= 1.5),
-      JSON.stringify({ anchor, samples, reserveHeight, sourceGeometry })
+      JSON.stringify({ anchor, samples })
     ).toBe(true);
     expect(
       exploredSamples.every((top) => top !== null && Math.abs(top - exploredTop) <= 0.1),
-      JSON.stringify({ exploredTop, exploredSamples, reserveHeight, sourceGeometry })
+      JSON.stringify({ exploredTop, exploredSamples })
     ).toBe(true);
-    // Reconciliation may consume one whole CSS pixel while preserving the painted anchors above.
-    expect(reserveHeight).toBeGreaterThanOrEqual(sourceGeometry.rowHeight - 1);
+    expect(await follower.evaluate((el) => el.getBoundingClientRect().height)).toBe(0);
+    expect(await list.evaluate((el) => el.scrollHeight)).toBe(range);
   });
 
   test('keeps a bottom-pinned Explored summary fixed while it expands downward', async ({
