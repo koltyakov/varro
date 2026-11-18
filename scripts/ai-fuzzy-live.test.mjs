@@ -164,10 +164,10 @@ test('queue handoff readiness requires an enabled, exposed native steer control'
     button.disabled = true;
     assert.equal((await controller.readQueueRow('queue')).steerAvailable, false);
     button.disabled = false;
-    const ready = await controller.readQueueRow('queue');
-    assert.equal(ready.steerAvailable, true);
-    assert.equal(ready.ownerViewId, 'sidebar');
-    assert.equal(ready.paused, true);
+    const queueRow = await controller.readQueueRow('queue');
+    assert.equal(queueRow.steerAvailable, true);
+    assert.equal(queueRow.ownerViewId, 'sidebar');
+    assert.equal(queueRow.paused, true);
     button.getBoundingClientRect = () => ({ width: 0 });
     assert.equal((await controller.readQueueRow('queue')).steerAvailable, false);
     assert.equal(await controller.readQueueRow('other'), null);

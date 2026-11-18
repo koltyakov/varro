@@ -538,9 +538,9 @@ test.describe('diff preview anchoring', () => {
         const sessionID = 'session-diff-preview-large-transcript';
         const host = window as typeof window & {
           __sendToExtension: (message: WebviewMessage) => void;
-          __diffTailPending: number;
-          __diffTailGate: boolean;
-          __releaseDiffTailResponses: () => void;
+          diffTailPending: number;
+          diffTailGate: boolean;
+          releaseDiffTailResponses: () => void;
           __varroE2E: {
             getSessionMessages: (id: string) => Array<{ info: Record<string, unknown> }>;
             updateMessageInfo: (info: Record<string, unknown>) => void;
@@ -549,11 +549,11 @@ test.describe('diff preview anchoring', () => {
         };
         const originalSend = host.__sendToExtension;
         const details = new Map<string, { part: unknown; delay: number }>();
-        host.__diffTailPending = 0;
-        host.__diffTailGate = false;
+        host.diffTailPending = 0;
+        host.diffTailGate = false;
         const queuedResponses: Array<() => void> = [];
-        host.__releaseDiffTailResponses = () => {
-          host.__diffTailGate = false;
+        host.releaseDiffTailResponses = () => {
+          host.diffTailGate = false;
           for (const respond of queuedResponses.splice(0)) respond();
         };
         host.__sendToExtension = (rawMessage: unknown) => {
@@ -561,10 +561,10 @@ test.describe('diff preview anchoring', () => {
           if (message.type !== 'api/request') return originalSend(message);
           const detail = details.get(message.payload.path);
           if (!detail) return originalSend(message);
-          host.__diffTailPending++;
+          host.diffTailPending++;
           setTimeout(() => {
             const respond = () => {
-              host.__diffTailPending--;
+              host.diffTailPending--;
               window.postMessage(
                 {
                   type: 'api/response',
@@ -573,7 +573,7 @@ test.describe('diff preview anchoring', () => {
                 '*'
               );
             };
-            if (host.__diffTailGate) queuedResponses.push(respond);
+            if (host.diffTailGate) queuedResponses.push(respond);
             else respond();
           }, detail.delay);
         };
@@ -697,7 +697,7 @@ test.describe('diff preview anchoring', () => {
       for (const [index, showFileDiffs] of [false, true, false, true].entries()) {
         if (index === 3) {
           await page.evaluate(() => {
-            (window as typeof window & { __diffTailGate: boolean }).__diffTailGate = true;
+            (window as typeof window & { diffTailGate: boolean }).diffTailGate = true;
           });
         }
         await page.evaluate(
@@ -726,7 +726,7 @@ test.describe('diff preview anchoring', () => {
           if (input.delay > 0) await page.waitForTimeout(input.delay);
           expect(
             await page.evaluate(
-              () => (window as typeof window & { __diffTailPending: number }).__diffTailPending
+              () => (window as typeof window & { diffTailPending: number }).diffTailPending
             )
           ).toBeGreaterThan(0);
           await expect(
@@ -740,8 +740,8 @@ test.describe('diff preview anchoring', () => {
             .locator('[data-msg-id="message-diff-tail-step-1"] p')
             .first();
           const visibility = await precedingMarker.evaluate((element) => {
-            const list = document.querySelector('.interactive-list')!;
-            const sticky = list.querySelector('.latest-user-message-sticky-overlay')!;
+            const listElement = document.querySelector('.interactive-list')!;
+            const sticky = listElement.querySelector('.latest-user-message-sticky-overlay')!;
             return {
               precedingTop: element.getBoundingClientRect().top,
               stickyBottom: sticky.getBoundingClientRect().bottom,
@@ -763,8 +763,8 @@ test.describe('diff preview anchoring', () => {
           const tops: number[] = [element.getBoundingClientRect().top];
           if (release) {
             (
-              window as typeof window & { __releaseDiffTailResponses: () => void }
-            ).__releaseDiffTailResponses();
+              window as typeof window & { releaseDiffTailResponses: () => void }
+            ).releaseDiffTailResponses();
           }
           for (let frame = 0; frame < 60; frame++) {
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
