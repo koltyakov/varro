@@ -51,7 +51,6 @@ import {
   isAssistantActivityPart,
   isAssistantActivityPartRunning,
   isAssistantEditActivityPart,
-  isAssistantActiveInlineToolPart,
   preserveAssistantActivityGroupKeys,
   shouldCompactAssistantActivityPart,
   type AssistantActivityGroupInfo,
@@ -135,7 +134,6 @@ import {
   StickyUserMessagePreviewCard,
   TurnNavigationRail,
 } from './message-list/MessageListChrome';
-import type { StatusSlotActivity } from './message-list/MessageListChrome';
 import { Tooltip } from './Tooltip';
 import { UiIcon } from './UiIcon';
 import { StarterLogo } from './message-list/StarterLogo';
@@ -495,25 +493,7 @@ export function MessageList() {
     },
     beforeLastExit: () => preserveActivityExitReserve(),
     afterShow: (painted) => queueMicrotask(() => requestAnimationFrame(painted)),
-    afterExit: (key, complete) => {
-      queueMicrotask(() => {
-        const partId = key.slice(key.lastIndexOf('\u0000') + 1);
-        const item = containerRef?.querySelector<HTMLElement>(
-          `[data-activity-part-id="${CSS.escape(partId)}"]`
-        );
-        const animation =
-          globalThis.CSSAnimation === undefined
-            ? undefined
-            : item
-                ?.getAnimations()
-                .find(
-                  (candidate) =>
-                    candidate instanceof CSSAnimation &&
-                    candidate.animationName === 'assistant-active-activity-out'
-                );
-        if (animation) void animation.finished.then(complete, complete);
-      });
-    },
+    afterExit: (_key, complete) => queueMicrotask(complete),
   });
   onCleanup(() => presentation.dispose());
   onCleanup(
@@ -3304,45 +3284,6 @@ export function MessageList() {
     return key ? (permissionRequestsByToolCall().get(key) ?? null) : null;
   }
 
-  const statusSlotActivity = createMemo<StatusSlotActivity | null>(() => {
-    if (
-      (!loadingRowEligible() && !presentation.pending()) ||
-      hasActiveQuestion() ||
-      hasActivePermission() ||
-      activeUsageLimit() ||
-      state.messagesLoading ||
-      editingMessage() ||
-      isSessionCompacting() ||
-      waitingForBackground() ||
-      managedChildWorking()
-    ) {
-      return null;
-    }
-    const keys = new Set([...visibleActiveActivityPartKeys(), ...retainedActivityPartKeys()]);
-    if (keys.size !== 1 || exitingActivityPartKeys().size > 0) return null;
-    const key = keys.values().next().value;
-    if (!key) return null;
-    const separator = key.lastIndexOf('\u0000');
-    const messageId = key.slice(0, separator);
-    if (!trailingAssistantTurn()?.assistantMessageIds.has(messageId)) return null;
-    const index = messageIndexById().get(messageId);
-    const message = index === undefined ? undefined : messages()[index];
-    if (!message || !isAssistantMessage(message.info)) return null;
-    const part = message.parts.find((candidate) => candidate.id === key.slice(separator + 1));
-    if (
-      part?.type !== 'tool' ||
-      !isAssistantActivityPart(part) ||
-      isAssistantEditActivityPart(part) ||
-      isAssistantActiveInlineToolPart(part) ||
-      getQuestionRequestForTool(part) ||
-      getPermissionMatchForTool(part)
-    ) {
-      return null;
-    }
-    return { key, info: message.info, part, retained: retainedActivityPartKeys().has(key) };
-  });
-  const statusSlotActivityPartKey = createMemo(() => statusSlotActivity()?.key ?? null);
-
   const getCompactActivityLayoutSegment = (
     entries: readonly MessageEntry[],
     visibleActive: Accessor<ReadonlySet<string>>,
@@ -3359,7 +3300,6 @@ export function MessageList() {
           return `permission:${permission.permission.id}:${permission.isActive ? 'active' : 'queued'}`;
         }
       }
-      if (key === statusSlotActivityPartKey()) return 'status-slot';
       if (visibleActive().has(key)) return 'active';
       if (retained().has(key)) return 'retained';
       if (exiting().has(key)) return 'exiting';
@@ -7610,9 +7550,7 @@ export function MessageList() {
       control.matches('.assistant-activity-summary') &&
       control.getAttribute('aria-expanded') === 'false';
     const activityItem = control.closest<HTMLElement>('[data-activity-part-id]');
-    const activityMessageId =
-      activityItem?.dataset.activitySourceMessageId ??
-      activityItem?.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+    const activityMessageId = activityItem?.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
     const activityKey =
       activityMessageId && activityItem?.dataset.activityPartId
         ? `${activityMessageId}\u0000${activityItem.dataset.activityPartId}`
@@ -10108,7 +10046,6 @@ export function MessageList() {
         visibleActive: segment.visibleActive(),
         retained: segment.retained(),
         exiting: segment.exiting(),
-        statusSlotActivityPartKey: statusSlotActivityPartKey(),
       },
       segment.streaming()
     );
@@ -10218,7 +10155,6 @@ export function MessageList() {
       trailingPermissionMessageIds,
       exitingActivityPartKeys: segment.exiting(),
       waitingActivityPartKeys,
-      statusSlotActivityPartKey: statusSlotActivityPartKey(),
       modelChangeMessageIds: rowIds.modelChanges,
       dialogSummaryMessageIds: rowIds.dialogSummaries,
     });
@@ -11255,7 +11191,6 @@ export function MessageList() {
               exitingActivityPartKeys={renderedExitingActivityPartKeys()}
               visibleActiveActivityPartKeys={renderedVisibleActiveActivityPartKeys()}
               groupedActiveActivityPartKeys={visibleActiveActivityPartKeys()}
-              statusSlotActivityPartKey={statusSlotActivityPartKey()}
               inlineThinkingMessageIds={inlineThinkingMessageIds()}
               expandedThinkingMessageIds={expandedThinkingMessageIds()}
               hasBuildAgent={hasBuildAgent()}
@@ -11301,13 +11236,7 @@ export function MessageList() {
           <Show
             when={!editingMessage() ? trailingAssistantDialogSummary() : null}
             fallback={
-              <Show
-                when={
-                  (reserveLoadingRow() || statusSlotActivity()) &&
-                  !editingMessage() &&
-                  !!state.activeSessionId
-                }
-              >
+              <Show when={reserveLoadingRow() && !editingMessage() && !!state.activeSessionId}>
                 <LoadingRow
                   compacting={isSessionCompacting()}
                   waiting={waitingForBackground()}
@@ -11318,7 +11247,7 @@ export function MessageList() {
                   turnStartedAt={loadingTurnStartedAt()}
                   elapsedStartedAt={loadingElapsedStartedAt()}
                   visible={!state.messagesLoading && showLoadingRow()}
-                  activity={statusSlotActivity()}
+                  collapsed={hasVisibleActivityTrayRows()}
                 />
               </Show>
             }

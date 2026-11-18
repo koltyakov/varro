@@ -42,6 +42,7 @@ import { modalFocus } from '../lib/modal-focus';
 import { mixRgb, parseThemeColor } from '../lib/theme';
 import { getExternalLinkContext, isSafeExternalHref } from '../lib/external-link';
 import { parseRemoteImageUrl } from '../../shared/remote-images';
+import { parseLocalImagePath } from '../../shared/local-images';
 import { getLinkContext } from '../lib/link-context';
 import { asRecord, getString } from '../lib/runtime-values';
 import { parseCitationSymbol } from '../../shared/citation-symbol';
@@ -52,6 +53,7 @@ import { createMaterialChipIconElement } from './MaterialChipIcon';
 import { createUiIconElement, UiIcon } from './UiIcon';
 import { Tooltip } from './Tooltip';
 import { RemoteMarkdownImage } from './RemoteMarkdownImage';
+import { LocalMarkdownImage } from './LocalMarkdownImage';
 import { MarkdownCitationLinks } from './markdown-citation-links';
 import { markdownCitationSelection } from './markdown-citation-selection';
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
@@ -123,6 +125,7 @@ type MarkdownHydrationFlags = {
   copyButtons: boolean;
   mermaid: boolean;
   remoteImages: boolean;
+  localImages: boolean;
 };
 
 type RenderMarkdownContext = {
@@ -203,6 +206,7 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'data-highlight-lang',
   'data-mermaid-source',
   'data-remote-image',
+  'data-local-image',
   'data-varro-generated',
   'd',
   'fill',
@@ -314,6 +318,7 @@ const MERMAID_SVG_CACHE_LIMIT = 20;
 const TRUSTED_RENDERER_ATTRIBUTE = 'data-varro-generated';
 const PRIVATE_RENDERER_ATTRIBUTES = [
   'data-remote-image',
+  'data-local-image',
   'data-copy',
   'data-copy-text',
   'data-external',
@@ -706,6 +711,8 @@ renderer.link = function ({ href, text: rawText, title, tokens }) {
 };
 
 renderer.image = function ({ href, text }: { href: string; text: string; title?: string | null }) {
+  if (parseLocalImagePath(href))
+    return `<span ${TRUSTED_RENDERER_ATTRIBUTE} data-local-image="${escapeHtml(encodeURIComponent(href))}" alt="${escapeHtml(text)}">${escapeHtml(text)}</span>`;
   const url = parseRemoteImageUrl(href);
   if (!url) return escapeHtml(text);
   return `<span ${TRUSTED_RENDERER_ATTRIBUTE} data-remote-image="${escapeHtml(encodeURIComponent(url.href))}" alt="${escapeHtml(text)}">${escapeHtml(text)}</span>`;
@@ -2045,6 +2052,7 @@ function getMarkdownHydrationFlags(html: string): MarkdownHydrationFlags {
     copyButtons: html.includes('data-copy'),
     mermaid: html.includes('data-mermaid-source'),
     remoteImages: html.includes('data-remote-image'),
+    localImages: html.includes('data-local-image'),
   };
 }
 
@@ -2526,6 +2534,31 @@ export function MarkdownRenderer(props: MarkdownProps) {
     }
   }
 
+  function hydrateLocalImages(root?: HTMLElement) {
+    if (!root || disposed) return;
+    for (const element of root.querySelectorAll<HTMLElement>('[data-local-image]')) {
+      if (remoteImageDisposers.has(element)) continue;
+      const source = decodeCopyPayload(element.dataset.localImage ?? '');
+      if (!parseLocalImagePath(source)) continue;
+      const alt = element.getAttribute('alt') ?? '';
+      element.replaceChildren();
+      remoteImageDisposers.set(
+        element,
+        render(
+          () => (
+            <LocalMarkdownImage
+              source={source}
+              alt={alt}
+              directory={sessionDirectory() || state.editorContext.workspacePath || undefined}
+              sessionID={(props.sessionID ?? state.activeSessionId) || undefined}
+            />
+          ),
+          element
+        )
+      );
+    }
+  }
+
   function loadAllRemoteImages() {
     const response = ref?.closest('[data-msg-id]') ?? ref;
     for (const button of response?.querySelectorAll<HTMLButtonElement>(
@@ -2600,6 +2633,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     if (disposed) return;
     hydrateRenderedMarkdown(root, flags);
     if (flags.remoteImages) hydrateRemoteImages(root);
+    if (flags.localImages) hydrateLocalImages(root);
     citationLinks.hydrate(
       root,
       {

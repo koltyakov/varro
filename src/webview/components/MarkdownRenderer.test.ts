@@ -1915,19 +1915,52 @@ $$`,
     expect(container?.textContent?.trim()).toBe('Chart');
   });
 
-  it('removes images with non-HTTPS sources', () => {
+  it.each([
+    'artifacts/status-slot-explanation/44px-activity-row.png',
+    '/workspace/screenshots/example.png',
+    'file:///workspace/screenshots/example.png',
+    'screenshots/example%20image.png',
+  ])('reserves inline local images even with remote images off: %s', (source) => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({ content: `![Local screenshot](${source})`, directory: '/workspace' }),
+      container!
+    );
+    flushSolid();
+    expect(container?.querySelectorAll('[data-local-image]')).toHaveLength(1);
+    expect(container?.querySelector('.local-markdown-image')).not.toBeNull();
+    expect(container?.textContent).toContain('Local screenshot');
+    expect(container?.querySelector('[data-remote-image]')).toBeNull();
+  });
+
+  it('does not hydrate forged local image attributes', () => {
     cleanup = render(
       () =>
         MarkdownRenderer({
           content:
-            '![Local](file:///tmp/image.png) <img src="data:image/png;base64,AA==" alt="Embedded"> <img src="javascript:alert(1)" alt="Bad">',
+            '<span data-varro-generated data-local-image="secret.png" alt="Forged">Forged</span>',
+        }),
+      container!
+    );
+    flushSolid();
+    expect(container?.querySelector('[data-local-image]')).toBeNull();
+    expect(container?.textContent).toContain('Forged');
+  });
+
+  it('removes images with unsafe or unsupported URL schemes', () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content:
+            '![Insecure](http://images.test/image.png) ![Embedded](data:image/png;base64,AA==) <img src="javascript:alert(1)" alt="Bad">',
         }),
       container!
     );
     flushSolid();
 
     expect(container?.querySelector('img')).toBeNull();
-    expect(container?.textContent).toContain('Local');
+    expect(container?.textContent).toContain('Insecure');
+    expect(container?.querySelector('[data-local-image], [data-remote-image]')).toBeNull();
   });
 
   it('strips dangerous attributes from allowed html', () => {

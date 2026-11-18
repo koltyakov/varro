@@ -1,7 +1,6 @@
 import {
   getAssistantActivityPartKey,
   isAssistantActivityPart,
-  isAssistantActivityPartRunning,
   type AssistantActivityGroupInfo,
   type AssistantActivityPart,
 } from '../../lib/assistant-activity';
@@ -68,30 +67,11 @@ type MessageBlockBoundaryOptions = {
   renderEmptyMessageIds: ReadonlySet<string>;
   retainedActivityPartKeys?: ReadonlySet<string>;
   showThinking: boolean;
-  statusSlotActivityPartKey?: string | null;
   streaming?: StreamingLayoutProjection;
   trailingPermissionMessageIds?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
   waitingActivityPartKeys?: ReadonlySet<string>;
 };
-
-/** A tool in the status slot leaves only its real group header at its original position. */
-export function slotToolOwnsRowSummary(
-  part: AssistantActivityPart,
-  group: AssistantActivityGroupInfo | undefined,
-  retainedKeys?: ReadonlySet<string>
-) {
-  return (
-    group?.ownerMessageId === part.messageID &&
-    group.ownerPartId === part.id &&
-    group.parts.some(
-      (other) =>
-        (other.messageID !== part.messageID || other.id !== part.id) &&
-        !isAssistantActivityPartRunning(other) &&
-        !retainedKeys?.has(getAssistantActivityPartKey(other))
-    )
-  );
-}
 
 function orderBoundaryParts(
   parts: readonly Part[],
@@ -188,12 +168,6 @@ export function getMessageBlockBoundaryMap(
 
       const partKey = getAssistantActivityPartKey(part);
       if (options.delayedActivityPartKeys?.has(partKey)) continue;
-      if (partKey === options.statusSlotActivityPartKey) {
-        const group = groupByPartKey.get(partKey);
-        if (slotToolOwnsRowSummary(part, group, options.retainedActivityPartKeys))
-          blocks.push(false);
-        continue;
-      }
       if (
         options.visibleActiveActivityPartKeys?.has(partKey) ||
         options.retainedActivityPartKeys?.has(partKey) ||
@@ -443,7 +417,6 @@ export function getRenderEmptyMessageIds(
     visibleActive: ReadonlySet<string>;
     retained: ReadonlySet<string>;
     exiting: ReadonlySet<string>;
-    statusSlotActivityPartKey?: string | null;
   },
   streaming?: StreamingLayoutProjection
 ) {
@@ -497,19 +470,6 @@ export function getRenderEmptyMessageIds(
 
       const partKey = getAssistantActivityPartKey(part);
       if (transitionActivityPartKeys?.delayed.has(partKey)) continue;
-      if (partKey === transitionActivityPartKeys?.statusSlotActivityPartKey) {
-        if (
-          slotToolOwnsRowSummary(
-            part,
-            groupByPartKey.get(partKey),
-            transitionActivityPartKeys.retained
-          )
-        ) {
-          hasVisibleRowContent = true;
-          break;
-        }
-        continue;
-      }
       if (
         transitionActivityPartKeys?.visibleActive.has(partKey) ||
         transitionActivityPartKeys?.retained.has(partKey) ||

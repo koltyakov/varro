@@ -5985,6 +5985,24 @@ async function handleApiRequest(
     return state.recycleBinEntries;
   }
 
+  if (method === 'POST' && path === '/varro/local-image') {
+    // Deterministic local media response; never read the host filesystem in the harness.
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 350));
+    const canvas = document.createElement('canvas');
+    const original = asRecord(body)?.original === true;
+    canvas.width = original ? 960 : 384;
+    canvas.height = original ? 540 : 216;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas unavailable');
+    context.fillStyle = '#4080c0';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    return {
+      url: canvas.toDataURL('image/png'),
+      path: `${WORKSPACE_PATH}/chart.png`,
+      mime: 'image/png',
+    };
+  }
+
   if (method === 'POST' && path === '/varro/remote-image') {
     // Deterministic host response only. This fixture never contacts the supplied URL.
     await new Promise<void>((resolve) => window.setTimeout(resolve, 300));

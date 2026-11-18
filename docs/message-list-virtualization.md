@@ -172,6 +172,11 @@ the shared invariants below remain true.
   preserving detached anchoring. `remote-images.spec.ts` checks consent, frame geometry, preview opening,
   virtual remounts, and setting changes above a detached viewport. Raw HTML images remain blocked
   and the webview CSP does not admit remote sources.
+- Local Markdown image paths load automatically near the viewport, independently of the remote-image
+  setting. Relative paths resolve against the message's session directory; absolute paths and `file://`
+  URLs use the same canonical, open-workspace checks as file reads. Reserve the same 384 px-wide,
+  16:9 frame before loading, keep its geometry on failures and thumbnail arrival, and request original
+  raster bytes only while opening the image preview. Raw HTML image elements remain blocked.
 - History file parts carry scoped content references. Request bounded image thumbnails only near the
   viewport, and request the original only for an open preview or an edit draft. Single thumbnails reserve
   a 384 px frame, capped by the available width, with the existing 16:9 aspect ratio. Their intrinsic
@@ -426,8 +431,7 @@ the shared invariants below remain true.
   A summary below a separate active tray cannot own that tray's geometry, including when the tray
   belongs to an earlier assistant step. Release an already-retained summary owner before restoring
   it against that preview's growth, and do not recapture it on collapse. Preserve the painted scroll
-  target and consume existing reserve instead. `scroll-activity-cross-step.spec.ts` checks the same
-  preceding paragraph through repeated tool/Thinking handoffs above and below a later summary.
+  target and consume existing reserve instead.
 - Reaching the physical bottom during an exit that began while detached reserves the remaining
   animated tray height. Otherwise the shrinking scroll range reverses the just-completed gesture.
 - Transcript-scrolling keys release the old activity-exit target and summary anchor while handing its
@@ -601,8 +605,6 @@ Direct input acquires ownership only when it can affect the transcript:
   when replacement growth has already consumed the spacer completely.
   Do not seed a rounding reserve at scroll position zero. Track minimum height can hide unused room,
   so repeated fractional tool corrections otherwise accumulate a pixel per collapse despite that room.
-  `scroll-thinking-tool-reserve.spec.ts` checks ranged reads through repeated Thinking handoffs
-  without reserve in both fitting and overflowing transcripts.
   `scroll-auto-scroll.spec.ts` checks the same anchor every frame
   through this replacement and the subsequent full collapse.
 - A fixed collapse target does not consume reserve, but it still reserves pending row-rounding
@@ -615,25 +617,17 @@ Direct input acquires ownership only when it can affect the transcript:
   When the last non-exiting item leaves a tray, reserve the tray wrapper's own block padding once.
   Padding inside the measured item is already included; wrapper padding is not. Fractional wrapper
   padding must not leave the scroll range a pixel short when the wrapper is finally removed.
-  Shared-slot tools have no row-local tray and must not gain this reserve.
   `scroll-reasoning-exit.spec.ts` checks the pre-exit budget and a painted marker through the handoff.
 - Automatic todo completion and removal announce their disappearing block, margins, and parent gap
   before changing the layout. A later ResizeObserver correction is insufficient: the September 11
   editor replay briefly clamped the transcript backward by 139 px when its todo panel disappeared.
   `scroll-auto-scroll.spec.ts` checks automatic completion and clearing at removal and frame boundaries.
-- The trailing Thinking, normal compact tool preview, loading, empty-reserve, and Worked states share
-  one post-message slot. Thinking and the admitted or retained compact tool replace each other inside
-  the same box, with a 32 px collapsed occupant and 6 px padding above and below. A swap must not add
-  a second row, an Exploring placeholder, append reserve, exit reserve, or scroll movement.
-  Project the slot-owned tool out of its source row without removing its canonical part or real
-  completed Explored summaries. A source row with no other content contributes exactly zero height;
-  clearing ownership must invalidate that zero so the row can render again.
-  Keep disclosure identity across streamed updates. An expanded tool grows below its header, retains
-  normal output scrolling, and holds its original message/part inspection key against rotation.
-  Explicitly expanded details and newly committed history are real content, not a compact-slot swap.
-  Inline edits, reasoning trays, permission/question prompts, compaction, and background work retain
-  their existing presentation paths. Do not show a tool-specific Waiting indicator.
-  The normal Thinking verb cycle resumes when eligible.
+- The trailing Thinking, loading, empty-reserve, and Worked states share one post-message slot. The
+  slot stays invisibly reserved while inline edits replace its label, and takes no height while an
+  active tool is visible so no space opens below the tool. Active tools appear and leave immediately,
+  without a fold animation. Content never scrolls backward at these swaps, and Thinking keeps its
+  normal distance from the content above it. Do not show a tool-specific Waiting indicator. The
+  normal Thinking verb cycle resumes when eligible.
   Its elapsed time counts from the latest completed
   text, reasoning, tool, or assistant event in the current turn, falling back to the turn's loading start.
   Ordinary streaming activity does not reset it. Verb rotation and the initial 1-second elapsed-label
@@ -641,10 +635,10 @@ Direct input acquires ownership only when it can affect the transcript:
   Completions do not restart the verb cycle or hide an elapsed label after that initial delay.
   The loading row also omits the elapsed label when the immediately
   preceding rendered active tool displays its own duration, regardless of the timer values. Completed
-  tool durations do not suppress the loading timer. Preserve its shimmer and dots;
-  compaction and the Background process card retain their existing priority. Historical
+  tool durations do not suppress the loading timer. Preserve its shimmer, dots, and
+  24 px slot; compaction and the Background process card retain their existing priority. Historical
   running parts must not affect the current turn's loading indicator. The slot may also remain
-  invisibly reserved while streaming text or inline edits replace its label. Debounce
+  invisibly reserved while streaming text or retained previews replace its label. Debounce
   label reappearance and reserve release so short transitions do not collapse and regrow the bottom.
 - V2 background shell work keeps that slot in a Background process card after a terminal assistant response. A completed
   tool call only confirms that the process was launched. Suppress Worked until the process finishes

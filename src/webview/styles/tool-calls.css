@@ -3047,28 +3047,25 @@ kbd {
 }
 
 .interactive-loading-row {
-  --activity-status-header-height: 32px;
-
-  min-height: calc(var(--activity-status-header-height) + 12px);
+  height: 24px;
+  min-height: 24px;
   flex-shrink: 0;
   box-sizing: border-box;
-  padding: 6px 0;
+  padding: 6px 0 0;
+  overflow: hidden;
   overflow-anchor: none;
 }
 
 .interactive-loading-row .loading-indicator {
-  min-height: var(--activity-status-header-height);
+  height: auto;
   box-sizing: border-box;
   padding-top: 0;
-  padding-bottom: 0;
 }
 
-.status-slot-tool .chat-tool-invocation-part .tool-invocation-header,
-.status-slot-tool .chat-tool-invocation-part .file-read-card-header {
-  height: calc(var(--activity-status-header-height) - 2px);
-  min-height: calc(var(--activity-status-header-height) - 2px);
-  box-sizing: border-box;
-  padding-block: 0;
+.interactive-loading-row.is-reserved.is-collapsed {
+  height: 0;
+  min-height: 0;
+  padding: 0;
 }
 
 .interactive-loading-row.is-reserved .loading-indicator {
@@ -3077,8 +3074,6 @@ kbd {
 
 .interactive-loading-row.is-background-waiting {
   height: auto;
-  min-height: 24px;
-  padding: 6px 0 0;
   overflow: visible;
 }
 
@@ -3098,17 +3093,14 @@ kbd {
 
 .interactive-loading-row.trailing-assistant-summary-row {
   height: auto;
+  min-height: 24px;
+  padding: 0;
   overflow: visible;
 }
 
 .trailing-assistant-summary-row .assistant-dialog-summary {
   margin-top: 0;
-  min-height: var(--activity-status-header-height);
   width: 100%;
-}
-
-.trailing-assistant-summary-row .assistant-dialog-summary-content {
-  min-height: var(--activity-status-header-height);
 }
 
 .user-message-text {

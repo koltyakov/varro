@@ -56,6 +56,8 @@ import { diagnosticTimeline } from './diagnostics';
 import { projectDeferredPart, projectPartAttachments } from './message-content';
 import { ImageThumbnails } from './image-thumbnails';
 import { RemoteImages } from './remote-images';
+import { LocalImages } from './local-images';
+import { parseLocalImagePath } from '../shared/local-images';
 import {
   readExtensionConfigState,
   readFollowupModel,
@@ -477,6 +479,7 @@ export interface RestProxyCallbacks {
 export class RestProxy {
   private readonly imageThumbnails = new ImageThumbnails();
   private readonly remoteImages = new RemoteImages();
+  private readonly localImages: LocalImages;
   private readonly modelPricing = new ModelPricingCatalog();
   private readonly requestWorkspaceDirectory = new AsyncLocalStorage<string | undefined>();
   private sessionDirectories = new Map<string, string>();
@@ -527,6 +530,7 @@ export class RestProxy {
   private readonly remoteImageConfigSubscription: vscode.Disposable | undefined;
 
   constructor(private readonly callbacks: RestProxyCallbacks) {
+    this.localImages = new LocalImages(callbacks.contextProvider);
     this.remoteImageConfigSubscription = vscode.workspace.onDidChangeConfiguration?.((event) => {
       if (
         event.affectsConfiguration('varro.chat.followupModel') ||
@@ -822,6 +826,7 @@ export class RestProxy {
     this.promptCompletion.invalidate();
     this.imageThumbnails.dispose();
     this.remoteImages.dispose();
+    this.localImages.dispose();
     this.remoteImageConfigSubscription?.dispose();
   }
 
@@ -1119,6 +1124,37 @@ export class RestProxy {
         this.callbacks.server.apiVersion !== 2
       ) {
         throw new Error('Native forms require OpenCode V2');
+      }
+      if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.localImage) {
+        const body = asRecord(payload.body);
+        const source = body?.path;
+        const path = typeof source === 'string' ? parseLocalImagePath(source) : null;
+        if (!path) throw new Error('Invalid local image path');
+        const requestedDirectory = body?.directory;
+        if (
+          requestedDirectory !== undefined &&
+          (typeof requestedDirectory !== 'string' ||
+            !requestedDirectory.trim() ||
+            requestedDirectory.length > 4096)
+        )
+          throw new Error('Invalid local image directory');
+        const sessionID = body?.sessionID;
+        if (sessionID !== undefined && !isSafePersistedSessionId(sessionID))
+          throw new Error('Invalid local image session');
+        const directory = requestedDirectory ?? this.getCurrentWorkspaceResolutionRoot();
+        if (typeof directory !== 'string') throw new Error('No open workspace for local image');
+        if (typeof sessionID === 'string') {
+          if (!(await this.authorizeSessionDirectory(sessionID, directory)))
+            throw new Error('Session workspace folder is not open');
+        } else this.requireOpenWorkspaceRoot(directory);
+        const data = await this.localImages.load(
+          path,
+          directory,
+          request?.controller.signal ?? new AbortController().signal,
+          body?.original === true
+        );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
       }
       if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.remoteImage) {
         const mode = readExtensionConfigState().remoteImages;

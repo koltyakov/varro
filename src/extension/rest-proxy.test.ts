@@ -53,6 +53,7 @@ import {
 import type { RestProxyCallbacks } from './rest-proxy';
 import { SharedThumbnailClient } from './image-thumbnail-shared-client';
 import { RemoteImages } from './remote-images';
+import { LocalImages } from './local-images';
 import * as workspaceProblems from './workspace-problems';
 import { OpenCodeResponseTooLargeError } from './open-code-transport';
 import { OpenCodeV2Adapter } from './opencode-v2-adapter';
@@ -1208,6 +1209,52 @@ describe('transferred session authorization', () => {
 });
 
 describe('RestProxy handleRequest', () => {
+  it('loads local images independently of remote-image settings without contacting the server', async () => {
+    const { proxy, callbacks } = createProxy();
+    const data = {
+      url: 'data:image/webp;base64,AAAA',
+      path: '/repo/chart.png',
+      mime: 'image/webp',
+    };
+    const load = vi.spyOn(LocalImages.prototype, 'load').mockResolvedValue(data);
+    try {
+      await proxy.handleRequest(
+        makePayload(99100, 'POST', '/varro/local-image', {
+          path: 'file:///repo/chart.png',
+          directory: '/repo',
+          original: true,
+        })
+      );
+      expect(load).toHaveBeenCalledWith('/repo/chart.png', '/repo', expect.any(AbortSignal), true);
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 99100, data });
+      expect(callbacks.server.request).not.toHaveBeenCalled();
+    } finally {
+      load.mockRestore();
+      proxy.dispose();
+    }
+  });
+
+  it.each([
+    { path: 'https://images.test/chart.png' },
+    { path: 'file://network-host/chart.png' },
+    { path: 'chart.png', directory: 42 },
+    { path: 'chart.png', sessionID: 42 },
+  ])('rejects malformed local-image requests before reading files: %j', async (body) => {
+    const { proxy, callbacks } = createProxy();
+    const load = vi.spyOn(LocalImages.prototype, 'load');
+    try {
+      await proxy.handleRequest(makePayload(99101, 'POST', '/varro/local-image', body));
+      expect(load).not.toHaveBeenCalled();
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 99101,
+        error: expect.stringContaining('Invalid local image'),
+      });
+    } finally {
+      load.mockRestore();
+      proxy.dispose();
+    }
+  });
+
   it('refuses remote-image requests when disabled without network or server access', async () => {
     const { proxy, callbacks } = createProxy();
     mocks.vscode.workspace.getConfiguration.mockReturnValueOnce({
