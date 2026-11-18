@@ -1,4 +1,5 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- Playwright serializes these browser callbacks, which deliberately inject partial harness and server-event payloads across the page boundary. */
+import { writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import {
   getScrollMetrics,
@@ -10,6 +11,40 @@ import {
 import { appendDeltaToLastLargeAssistant, appendDeltaToRapidStreaming } from './scroll-helpers';
 
 test.describe('auto-scroll', () => {
+  test.afterEach(async ({ page }, testInfo) => {
+    if (
+      testInfo.title !==
+        'does not push a full transcript backward when send-time panels collapse' ||
+      testInfo.status === testInfo.expectedStatus ||
+      page.isClosed()
+    )
+      return;
+    const geometry = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>('.interactive-list');
+      const snapshot = (element: Element) => ({
+        className: element.className,
+        style: element.getAttribute('style'),
+        rect: element.getBoundingClientRect().toJSON(),
+        height: getComputedStyle(element).height,
+      });
+      return {
+        top: list?.scrollTop,
+        height: list?.scrollHeight,
+        client: list?.clientHeight,
+        reserves: [...document.querySelectorAll('.append-scroll-bottom-reserve')].map(snapshot),
+        composer: [...document.querySelectorAll('.chat-input-container')].map(snapshot),
+        rows: [...document.querySelectorAll<HTMLElement>('[data-msg-id]')].slice(-4).map((row) => ({
+          id: row.dataset.msgId,
+          ...snapshot(row),
+        })),
+      };
+    });
+    const path = testInfo.outputPath('send-collapse-geometry.json');
+    await writeFile(path, JSON.stringify(geometry, null, 2));
+    await testInfo.attach('send-collapse-geometry', { path, contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath('send-collapse.png') });
+  });
+
   test('eases new streaming growth after a native wheel returns to the physical bottom', async ({
     page,
   }) => {

@@ -317,8 +317,9 @@ describe('SidebarProvider editor panels', () => {
   });
   it.each([
     ['/other', true],
-    ['/outside', false],
+    ['/outside', true],
     ['/worktrees/feature', true],
+    ['/unverified', false],
   ] as const)(
     'handles an active conversation moving to %s without treating it as deleted',
     async (directory, available) => {
@@ -327,7 +328,7 @@ describe('SidebarProvider editor panels', () => {
         path === '/repo' || path === '/other' ? path : null
       );
       const server = createServer({
-        request: vi.fn(async (_method, path) => {
+        request: vi.fn(async (_method, path, _body, options) => {
           if (path === '/project/current') return { id: 'project-1', worktree: '/repo' };
           if (path === '/project') return [{ id: 'project-1', vcs: 'git' }];
           if (path.startsWith('/experimental/worktree'))
@@ -335,7 +336,10 @@ describe('SidebarProvider editor panels', () => {
           return {
             id: 'session-1',
             directory,
-            projectID: 'project-1',
+            projectID:
+              directory === '/unverified' && options?.directory === '/repo'
+                ? 'different-project'
+                : 'project-1',
             title: 'Transferred chat',
             version: '2',
             time: { created: 1, updated: 2 },
@@ -381,6 +385,17 @@ describe('SidebarProvider editor panels', () => {
           })
         );
         expect(editor.panel.dispose).not.toHaveBeenCalled();
+        if (directory === '/outside' || directory === '/unverified') {
+          expect(server.request).toHaveBeenCalledWith(
+            'GET',
+            '/session/session-1',
+            undefined,
+            expect.objectContaining({ directory: '/repo' })
+          );
+          expect(
+            server.request.mock.calls.some(([, , , options]) => options?.directory === directory)
+          ).toBe(false);
+        }
         expect(getVscodeMock().commands.executeCommand).not.toHaveBeenCalledWith(
           'vscode.openFolder',
           expect.anything(),
@@ -392,7 +407,7 @@ describe('SidebarProvider editor panels', () => {
         expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(
           expect.objectContaining({ type: 'session/transferred' })
         );
-        if (!available) {
+        if (directory === '/outside' || !available) {
           await provider.handleMessage({
             type: 'session/open-transferred',
             payload: { sessionId: 'foreign' },
