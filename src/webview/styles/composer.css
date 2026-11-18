@@ -3060,7 +3060,7 @@
   object-fit: contain;
 }
 
-.chat-attachment-chip .chip-label {
+:is(.chat-attachment-chip, .inline-chip) .chip-label {
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3092,18 +3092,18 @@
   color: var(--color-vscode-fg-muted);
 }
 
-.chat-attachment-chip .chip-label-with-extension {
+:is(.chat-attachment-chip, .inline-chip) .chip-label-with-extension {
   display: flex;
   text-overflow: clip;
 }
 
-.chat-attachment-chip .chip-label-stem {
+:is(.chat-attachment-chip, .inline-chip) .chip-label-stem {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-attachment-chip .chip-label-extension {
+:is(.chat-attachment-chip, .inline-chip) .chip-label-extension {
   flex-shrink: 0;
 }
 
