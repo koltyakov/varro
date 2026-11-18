@@ -9,6 +9,30 @@ import {
   shouldDisplayUsageLimitNotice,
 } from './usage-limit';
 import type { UsageLimitNotice } from './usage-limit';
+import type { AssistantMessage, MessageEntry } from '../types';
+
+function assistantEntry(
+  id: string,
+  error?: AssistantMessage['error']
+): MessageEntry<AssistantMessage> {
+  return {
+    info: {
+      id,
+      sessionID: 'session-1',
+      role: 'assistant',
+      time: { created: 1, completed: 2 },
+      error,
+      parentID: 'user-1',
+      modelID: 'model-1',
+      providerID: 'provider-1',
+      mode: 'default',
+      path: { cwd: '/repo', root: '/repo' },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    parts: [],
+  };
+}
 
 describe('usage limit helpers', () => {
   it('detects 429 usage-limit messages and infers message units', () => {
@@ -344,6 +368,122 @@ describe('usage limit helpers', () => {
   });
 
   // -- deriveUsageLimitNotice edge cases --
+
+  it.each(['MessageAbortedError', 'AbortError', 'aborted'])(
+    'does not restore retry-part limits after %s',
+    (name) => {
+      const entry = assistantEntry('latest', { name, data: { message: 'Aborted' } });
+      entry.parts.push({
+        id: 'retry-1',
+        sessionID: 'session-1',
+        messageID: 'latest',
+        type: 'retry',
+        attempt: 1,
+        error: { name: 'APIError', data: { message: 'The usage limit has been reached' } },
+        time: { created: 1 },
+      });
+
+      expect(
+        deriveUsageLimitNotice({
+          sessionID: 'session-1',
+          status: { type: 'idle' },
+          messages: [entry],
+        })
+      ).toBeNull();
+    }
+  );
+
+  it('does not classify an aborted error using its retained limit message', () => {
+    expect(
+      deriveUsageLimitNotice({
+        sessionID: 'session-1',
+        status: { type: 'idle' },
+        messages: [
+          assistantEntry('latest', {
+            name: 'MessageAbortedError',
+            data: { message: 'The usage limit has been reached' },
+          }),
+        ],
+      })
+    ).toBeNull();
+  });
+
+  it.each(['Aborted', 'Proxy connection closed'])(
+    'does not restore an older assistant limit after a newer error: %s',
+    (message) => {
+      expect(
+        deriveUsageLimitNotice({
+          sessionID: 'session-1',
+          status: { type: 'idle' },
+          messages: [
+            assistantEntry('older', {
+              name: 'APIError',
+              data: { message: 'The usage limit has been reached' },
+            }),
+            assistantEntry('latest', { name: 'UnknownError', data: { message } }),
+          ],
+        })
+      ).toBeNull();
+    }
+  );
+
+  it('does not replace a terminal proxy error with an earlier retry-part limit', () => {
+    const entry = assistantEntry('latest', {
+      name: 'APIError',
+      data: { message: 'Proxy connection closed', statusCode: 502 },
+    });
+    entry.parts.push({
+      id: 'retry-1',
+      sessionID: 'session-1',
+      messageID: 'latest',
+      type: 'retry',
+      attempt: 1,
+      error: { name: 'APIError', data: { message: '429 usage limit reached' } },
+      time: { created: 1 },
+    });
+
+    expect(
+      deriveUsageLimitNotice({
+        sessionID: 'session-1',
+        status: { type: 'idle' },
+        messages: [entry],
+      })
+    ).toBeNull();
+  });
+
+  it.each([undefined, 'queue', 'steer'] as const)(
+    'only keeps an older limit behind a user message when pendingDelivery=%s',
+    (pendingDelivery) => {
+      const notice = deriveUsageLimitNotice({
+        sessionID: 'session-1',
+        status: { type: 'idle' },
+        messages: [
+          assistantEntry('older', {
+            name: 'APIError',
+            data: { message: 'The usage limit has been reached' },
+          }),
+          {
+            info: {
+              id: 'user-2',
+              sessionID: 'session-1',
+              role: 'user',
+              time: { created: 3 },
+              agent: 'build',
+              model: { providerID: 'provider-1', modelID: 'model-1' },
+              pendingDelivery,
+            },
+            parts: [],
+          },
+        ],
+      });
+
+      if (pendingDelivery) {
+        expect(notice?.message).toBe('The usage limit has been reached');
+      } else {
+        expect(notice).toBeNull();
+      }
+    }
+  );
 
   it('returns null when sessionID is null', () => {
     const notice = deriveUsageLimitNotice({
