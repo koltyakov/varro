@@ -567,6 +567,10 @@ Direct input acquires ownership only when it can affect the transcript:
 - Send-time composer collapse eases its held minimum height over 220 ms. Before each shrinking frame,
   reserve only the scroll-range shortfall at the current painted scroll position. Reserving the whole
   height delta makes bottom-follow chase temporary space and leaves an unnecessary trailing reserve.
+  Predict the integer `clientHeight` from the borderless scrollport's fractional height plus the
+  disappearing slice. Rounding each slice up can create a persistent 1 px reserve even when the
+  scrollport's integer height does not change. Keep genuine rounded shortfalls until content consumes
+  them; do not clear other owners' reserves when the composer finishes.
   Keep the toolbar against the bottom border throughout the hold and collapse. Measure natural height
   by subtracting the divider's auto-margin space without releasing the hold. Reduced motion releases
   immediately; session replacement and disposal cancel the frame loop.

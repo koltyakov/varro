@@ -17,7 +17,7 @@ import {
 import { MessageList } from './MessageList';
 import { setSessionHistoryCursor } from '../lib/message-window';
 import { setExpandedDiffOverlay } from '../lib/diff-overlay-state';
-import { trackInlineDiffLoad } from '../lib/message-list-layout';
+import { prepareForComposerCollapse, trackInlineDiffLoad } from '../lib/message-list-layout';
 import { onBeforeShowThinkingPreferenceChange } from '../lib/state-ui-preferences';
 import {
   assistantMessage,
@@ -52,6 +52,103 @@ installMessageListTestEnvironment({
 });
 
 describe('MessageList auto-scroll', () => {
+  it.each([
+    { collapse: 0.125, reserve: 0 },
+    { collapse: 0.875, reserve: 1 },
+    { collapse: 2.25, reserve: 2 },
+  ])(
+    'reserves only the rounded scrollport loss for a $collapse px composer collapse',
+    async ({ collapse, reserve }) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      let viewportHeight = 400.75;
+      let contentHeight = 1200;
+      const observers: Array<{ callback: ResizeObserverCallback; targets: Element[] }> = [];
+      class TestResizeObserver {
+        readonly targets: Element[] = [];
+        constructor(callback: ResizeObserverCallback) {
+          observers.push({ callback, targets: this.targets });
+        }
+        observe(target: Element) {
+          this.targets.push(target);
+        }
+        unobserve() {}
+        disconnect() {}
+      }
+      // SAFETY: This observer implements the methods used by MessageList.
+      globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+      const reserveHeight = () =>
+        Number.parseFloat(
+          container?.querySelector<HTMLElement>('.append-scroll-bottom-reserve')?.style.height ??
+            '0'
+        );
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          this.classList.contains('interactive-list-track')
+            ? contentHeight + reserveHeight()
+            : viewportHeight
+        );
+      });
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      const track = list.querySelector<HTMLElement>('.interactive-list-track')!;
+      Object.defineProperty(list, 'clientHeight', {
+        configurable: true,
+        get: () => Math.round(viewportHeight),
+      });
+      Object.defineProperty(list, 'scrollHeight', {
+        configurable: true,
+        get: () => contentHeight + reserveHeight(),
+      });
+      const observer = observers.find((candidate) => candidate.targets.includes(list))!;
+      const notifyResize = (targets: Element[]) =>
+        observer.callback(
+          targets.map((target) => fixture<ResizeObserverEntry>({ target })),
+          fixture<ResizeObserver>({})
+        );
+      for (let frame = 0; frame < 4; frame++) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+      expect(list.scrollTop).toBe(799);
+      notifyResize([list]);
+      animationFrames.flush();
+      const composer = document.createElement('div');
+      container!.append(composer);
+      prepareForComposerCollapse(composer, collapse);
+      viewportHeight += collapse;
+      expect(reserveHeight()).toBe(reserve);
+      expect(list.scrollTop).toBe(799);
+      notifyResize([list, track]);
+      for (let frame = 0; frame < 4; frame++) {
+        animationFrames.flush();
+      }
+      expect(reserveHeight()).toBe(reserve);
+      expect(list.scrollTop).toBe(799);
+
+      // Genuine appended content consumes the protected range without retaining a
+      // rounded extra pixel from the composer's last fractional slice.
+      contentHeight += 100;
+      notifyResize([track]);
+      const startedAt = performance.now();
+      for (let frame = 1; frame <= 120; frame++) {
+        animationFrames.flush(startedAt + frame * 16);
+      }
+      expect(reserveHeight()).toBe(0);
+      expect(list.scrollTop).toBe(contentHeight - list.clientHeight);
+      animationFrames.restore();
+    }
+  );
+
   it.each(['touchend', 'touchcancel'])(
     'yields to a native touch pan through pointer cancellation and %s',
     async (endEvent) => {

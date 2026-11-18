@@ -1,4 +1,5 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- Playwright serializes these browser callbacks, which deliberately inject partial harness and server-event payloads across the page boundary. */
+import { writeFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry } from '../../src/webview/types';
@@ -39,6 +40,40 @@ async function seedTrailingExplored(page: Page) {
 }
 
 test.describe('auto-scroll', () => {
+  test.afterEach(async ({ page }, testInfo) => {
+    if (
+      testInfo.title !==
+        'does not push a full transcript backward when send-time panels collapse' ||
+      testInfo.status === testInfo.expectedStatus ||
+      page.isClosed()
+    )
+      return;
+    const geometry = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>('.interactive-list');
+      const snapshot = (element: Element) => ({
+        className: element.className,
+        style: element.getAttribute('style'),
+        rect: element.getBoundingClientRect().toJSON(),
+        height: getComputedStyle(element).height,
+      });
+      return {
+        top: list?.scrollTop,
+        height: list?.scrollHeight,
+        client: list?.clientHeight,
+        reserves: [...document.querySelectorAll('.append-scroll-bottom-reserve')].map(snapshot),
+        composer: [...document.querySelectorAll('.chat-input-container')].map(snapshot),
+        rows: [...document.querySelectorAll<HTMLElement>('[data-msg-id]')].slice(-4).map((row) => ({
+          id: row.dataset.msgId,
+          ...snapshot(row),
+        })),
+      };
+    });
+    const path = testInfo.outputPath('send-collapse-geometry.json');
+    await writeFile(path, JSON.stringify(geometry, null, 2));
+    await testInfo.attach('send-collapse-geometry', { path, contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath('send-collapse.png') });
+  });
+
   for (const scenario of ['mixed-small-transcript', 'large-transcript', 'rapid-streaming-jitter']) {
     for (const detached of [false, true]) {
       test(`restores hidden bottom-follow instantly in ${scenario}, detached=${detached}`, async ({
@@ -2382,7 +2417,7 @@ test.describe('auto-scroll', () => {
         (element) =>
           element
             .querySelector<HTMLElement>('.append-scroll-bottom-reserve')
-            ?.getBoundingClientRect().height ?? 0,
+            ?.getBoundingClientRect().height ?? 0
       );
       await testInfo.attach('first-turn-reserve-geometry', {
         body: JSON.stringify(
@@ -2463,7 +2498,7 @@ test.describe('auto-scroll', () => {
       ).toBe(true);
       expect(
         samples.every((sample) => Math.abs(sample.reserveHeight - reserveBeforeCompletion) <= 0.5),
-        JSON.stringify({ reserveBeforeCompletion, samples }),
+        JSON.stringify({ reserveBeforeCompletion, samples })
       ).toBe(true);
     });
   }

@@ -7683,7 +7683,14 @@ export function MessageList() {
             return;
           if (height <= 0 || !autoScroll() || !pinnedToBottom || stickyNavigationOwnsScroll())
             return;
-          const shortfall = containerRef.scrollTop - (bottomScrollTop() - height);
+          // The borderless scrollport's clientHeight is integer-rounded. A fractional
+          // composer slice may not change it at all; rounding the slice up instead can
+          // create a pixel of reserve which the follower then treats as real growth.
+          const projectedClientHeight = Math.round(
+            containerRef.getBoundingClientRect().height + height
+          );
+          const shortfall =
+            containerRef.scrollTop - (containerRef.scrollHeight - projectedClientHeight);
           if (shortfall <= 0) return;
           appendBottomReserveTarget = containerRef.scrollTop;
           setAppendBottomReserve((reserve) => reserve + Math.ceil(shortfall));
