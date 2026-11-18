@@ -1,4 +1,5 @@
-import { batch, createSignal } from 'solid-js';
+import { storePath } from '@solidjs/signals';
+import { createSignal } from 'solid-js';
 import { getDefaultPrimaryAgentName } from '../hooks/routing-state';
 import {
   clearMessages,
@@ -46,10 +47,10 @@ export function detachDiscardableActiveBlankSession(): string | false {
   if (!sessionId) return false;
 
   newChatDraftGeneration += 1;
-  batch(() => {
-    setState('activeSessionId', null);
+  (() => {
+    setState(storePath('activeSessionId', null));
     persistActiveSessionId(null);
-  });
+  })();
   return sessionId;
 }
 
@@ -64,7 +65,7 @@ export function startNewChatDraft() {
   const blankSessionId = getDiscardableActiveBlankSessionId();
   const deferTranscriptClear = !blankSessionId && state.messages.length > 0;
   const craftedText = inputText();
-  batch(() => {
+  (() => {
     setNewChatDraftKey(draftGeneration);
     resetMessageEditState();
     setInputText(craftedText);
@@ -73,10 +74,10 @@ export function startNewChatDraft() {
     // backing entries disappear. Clearing both in one reactive flush can leave
     // rows and streaming effects reading entries that were just removed.
     if (!deferTranscriptClear) clearMessages();
-    setState('messagesLoading', false);
-    setState('pendingSessionSelectionId', null);
+    setState(storePath('messagesLoading', false));
+    setState(storePath('pendingSessionSelectionId', null));
     if (!blankSessionId) {
-      setState('activeSessionId', null);
+      setState(storePath('activeSessionId', null));
       persistActiveSessionId(null);
     }
     setError(null);
@@ -90,7 +91,7 @@ export function startNewChatDraft() {
       persistGlobal: false,
     });
     requestComposerFocus();
-  });
+  })();
 
   if (deferTranscriptClear) {
     requestAnimationFrame(() => {

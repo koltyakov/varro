@@ -1,5 +1,7 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createComponent, render } from 'solid-js/web';
+import { createComponent, render } from '@solidjs/web';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import { setState } from '../lib/state';
 import type { QuestionRequest } from '../types';
@@ -53,16 +55,19 @@ describe('native QuestionPrompt', () => {
     const element = control(key);
     if (element.getAttribute('role') === 'combobox') {
       element.click();
+      flushSolid();
       const list = document.getElementById(element.getAttribute('aria-controls')!);
       const option = Array.from(list!.querySelectorAll<HTMLButtonElement>('[role="option"]')).find(
         (item) => item.dataset.value === value
       );
       if (!option) throw new Error(`Missing option: ${value}`);
       option.click();
+      flushSolid();
       return;
     }
     element.value = value;
     element.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
   }
   async function submitNative() {
     container!
@@ -89,6 +94,7 @@ describe('native QuestionPrompt', () => {
       true
     );
     renderQuestionPrompt(active);
+    flushSolid();
     expect(container!.querySelector('[role="combobox"]')).toBeNull();
     const group = container!.querySelector('[role="radiogroup"]')!;
     expect(group.getAttribute('aria-label')).toBe('Choose a region');
@@ -98,11 +104,14 @@ describe('native QuestionPrompt', () => {
     expect(container!.textContent).toContain('East region description');
     expect(container!.textContent).toContain('West region description');
     await submitNative();
+    flushSolid();
     expect(document.activeElement).toBe(radios[0]);
     radios[1]!.click();
+    flushSolid();
     expect(radios[1]!.checked).toBe(true);
     expect(radios[0]!.checked).toBe(false);
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       { kind: 'native-form', sessionID: 'ses_child', answer: { choice: 'west' } },
@@ -127,8 +136,10 @@ describe('native QuestionPrompt', () => {
       ],
       true
     );
-    setState('questions', [active]);
+    setState(storePath('questions', [active]));
+    flushSolid();
     renderQuestionPrompt(active);
+    flushSolid();
     const custom = container!.querySelector<HTMLTextAreaElement>(
       '[aria-label="Rollout: custom answer"]'
     )!;
@@ -141,21 +152,28 @@ describe('native QuestionPrompt', () => {
     expect(customRadio.checked).toBe(true);
     const canary = container!.querySelector<HTMLInputElement>('input[aria-label="Canary"]')!;
     canary.click();
+    flushSolid();
     expect(canary.checked).toBe(true);
     expect(customRadio.checked).toBe(false);
     customRadio.click();
+    flushSolid();
     expect(document.activeElement).toBe(custom);
     expect(custom.value).toBe('initial custom answer');
     custom.value = 'Custom plan\nwith monitoring';
     custom.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     canary.click();
+    flushSolid();
     expect(canary.checked).toBe(true);
     expect(customRadio.checked).toBe(false);
     expect(custom.value).toBe('Custom plan\nwith monitoring');
     customRadio.click();
+    flushSolid();
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     renderQuestionPrompt(active);
+    flushSolid();
     expect(
       container!.querySelector<HTMLTextAreaElement>('[aria-label="Rollout: custom answer"]')!.value
     ).toBe('Custom plan\nwith monitoring');
@@ -163,6 +181,7 @@ describe('native QuestionPrompt', () => {
       container!.querySelector<HTMLInputElement>('input[aria-label="Custom answer"]')!.checked
     ).toBe(true);
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       {
@@ -204,15 +223,20 @@ describe('native QuestionPrompt', () => {
       true
     );
     renderQuestionPrompt(active);
+    flushSolid();
     const radio = (name: string) =>
       container!.querySelector<HTMLInputElement>(`input[type="radio"][aria-label="${name}"]`)!;
     radio('No').click();
+    flushSolid();
     radio('First A').click();
+    flushSolid();
     radio('Second B').click();
+    flushSolid();
     expect(radio('First A').checked).toBe(true);
     expect(radio('Second B').checked).toBe(true);
     expect(container!.querySelector('[data-field-key="url"]')).toBeNull();
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       {
@@ -232,8 +256,10 @@ describe('native QuestionPrompt', () => {
       ],
       true
     );
-    setState('questions', [active]);
+    setState(storePath('questions', [active]));
+    flushSolid();
     renderQuestionPrompt(active);
+    flushSolid();
     expect(container!.querySelector('[role="radiogroup"]')).toBeNull();
     expect(container!.querySelector('input[type="radio"]')).toBeNull();
     expect(container!.querySelector('.question-option-custom')).toBeNull();
@@ -241,15 +267,19 @@ describe('native QuestionPrompt', () => {
     expect(notes.tagName).toBe('TEXTAREA');
     expect(notes.rows).toBe(1);
     await submitNative();
+    flushSolid();
     expect(document.activeElement).toBe(notes);
     change('notes', 'First line\nSecond line');
     change('empty', 'Another answer');
     expect(control('notes')).toBe(notes);
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     renderQuestionPrompt(active);
+    flushSolid();
     expect(control('notes').value).toBe('First line\nSecond line');
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       {
@@ -272,8 +302,10 @@ describe('native QuestionPrompt', () => {
         when: [{ key: 'proxy', op: 'eq', value: true }],
       },
     ]);
-    setState('questions', [active]);
+    setState(storePath('questions', [active]));
+    flushSolid();
     renderQuestionPrompt(active);
+    flushSolid();
     expect(container!.querySelector('[data-field-key="url"]')).toBeNull();
     change('proxy', 'true');
     change('url', 'https://proxy.test');
@@ -282,6 +314,7 @@ describe('native QuestionPrompt', () => {
     expect(control('url').value).toBe('https://proxy.test');
     change('proxy', 'false');
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       { kind: 'native-form', sessionID: 'ses_child', answer: { proxy: false } },
@@ -302,9 +335,11 @@ describe('native QuestionPrompt', () => {
       },
     ]);
     renderQuestionPrompt(active);
+    flushSolid();
     change('n', '0');
     change('choice', 'value:b');
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       { kind: 'native-form', sessionID: 'ses_child', answer: { n: 0, choice: 'b' } },
@@ -320,14 +355,18 @@ describe('native QuestionPrompt', () => {
       true
     );
     renderQuestionPrompt(active);
+    flushSolid();
     container!
       .querySelector<HTMLInputElement>('input[type="radio"][aria-label="Option A"]')!
       .click();
+    flushSolid();
     container!
       .querySelector<HTMLInputElement>('input[type="checkbox"][aria-label="Search"]')!
       .click();
+    flushSolid();
     expect(container!.querySelector('.native-form-clear')).toBeNull();
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       { kind: 'native-form', sessionID: 'ses_child', answer: { choice: 'a', tags: ['search'] } },
@@ -340,13 +379,17 @@ describe('native QuestionPrompt', () => {
       { key: 'count', type: 'integer', title: 'Retry count', default: 0 },
     ]);
     renderQuestionPrompt(active);
+    flushSolid();
     const clear = container!.querySelector<HTMLButtonElement>('[aria-label="Clear Retry count"]')!;
     expect(clear.closest('.native-form-field-heading')).not.toBeNull();
+    flushSolid();
     expect(container!.textContent).not.toContain('Leave unanswered');
     clear.click();
+    flushSolid();
     expect(control('count').value).toBe('');
     expect(respondQuestionMock).not.toHaveBeenCalled();
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       { kind: 'native-form', sessionID: 'ses_child', answer: {} },
@@ -357,6 +400,7 @@ describe('native QuestionPrompt', () => {
     renderQuestionPrompt(
       nativeRequest([{ key: 'confirm', type: 'boolean', title: 'Confirm', required: true }])
     );
+    flushSolid();
     const marker = container!.querySelector('.native-form-required')!;
     expect(marker.textContent?.trim()).toBe('*');
     expect(marker.getAttribute('aria-hidden')).toBe('true');
@@ -365,6 +409,7 @@ describe('native QuestionPrompt', () => {
     );
     expect(control('confirm').getAttribute('aria-required')).toBe('true');
     await submitNative();
+    flushSolid();
     expect(container!.querySelector('.native-form-error')!.textContent).toBe('Answer required');
   });
   it('preserves required multiselect defaults, original option values, and custom selections', async () => {
@@ -384,6 +429,7 @@ describe('native QuestionPrompt', () => {
       },
     ]);
     renderQuestionPrompt(active);
+    flushSolid();
     const choices = container!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
     expect(choices[0]!.checked).toBe(false);
     expect(choices[1]!.checked).toBe(true);
@@ -392,14 +438,18 @@ describe('native QuestionPrompt', () => {
     )!;
     custom.value = 'custom value';
     custom.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     container!
       .querySelector<HTMLInputElement>('[aria-label="Selections: select custom value 1"]')!
       .click();
+    flushSolid();
     custom.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
     );
+    flushSolid();
     expect(respondQuestionMock).not.toHaveBeenCalled();
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       { kind: 'native-form', sessionID: 'ses_child', answer: { choices: ['b', 'custom value'] } },
@@ -421,9 +471,11 @@ describe('native QuestionPrompt', () => {
       true
     );
     renderQuestionPrompt(active);
+    flushSolid();
     const checkbox = container!.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
     expect(checkbox.getAttribute('aria-describedby')).toContain('-option-0-description');
     expect(checkbox.closest('label')!.textContent).toContain('Search files');
+    flushSolid();
     const custom = container!.querySelector<HTMLTextAreaElement>(
       '[aria-label="Selections: custom option"]'
     )!;
@@ -435,8 +487,10 @@ describe('native QuestionPrompt', () => {
     expect(container!.querySelector('[data-custom-remove]')).toBeNull();
     expect(container!.querySelector('.native-multiselect-add')).toBeNull();
     custom.focus();
+    flushSolid();
     custom.value = 'Line one\nLine two';
     custom.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     expect(firstCheckbox.disabled).toBe(false);
     expect(firstCheckbox.checked).toBe(false);
     expect(container!.querySelector('[aria-label="Selections: custom option"]')).toBe(custom);
@@ -450,19 +504,23 @@ describe('native QuestionPrompt', () => {
         ...modifiers,
       });
       custom.dispatchEvent(event);
+      flushSolid();
       expect(event.defaultPrevented).toBe(false);
       expect(container!.querySelectorAll('[data-custom-row]')).toHaveLength(2);
     }
     firstCheckbox.click();
+    flushSolid();
     expect(firstCheckbox.checked).toBe(true);
     custom.value = 'Edited selected value';
     custom.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     expect(firstCheckbox.checked).toBe(true);
     const second = container!.querySelector<HTMLTextAreaElement>(
       '[aria-label="Selections: custom option 2"]'
     )!;
     second.value = 'Keep unchecked';
     second.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     expect(container!.querySelectorAll('[data-custom-row]')).toHaveLength(3);
     expect(
       container!.querySelector<HTMLInputElement>(
@@ -472,14 +530,18 @@ describe('native QuestionPrompt', () => {
     expect(container!.querySelector('[data-custom-row] button')).toBeNull();
     second.value = '';
     second.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container!.querySelectorAll('[data-custom-row]')).toHaveLength(2);
     expect(document.activeElement).toBe(
       container!.querySelector('[aria-label="Selections: custom option 2"]')
     );
     checkbox.click();
+    flushSolid();
     expect(respondQuestionMock).not.toHaveBeenCalled();
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       {
@@ -493,12 +555,14 @@ describe('native QuestionPrompt', () => {
 
   it('keeps decimal input editable and focuses the first invalid answer', async () => {
     renderQuestionPrompt(nativeRequest([{ key: 'n', type: 'number', minimum: 1 }]));
+    flushSolid();
     change('n', '1.');
     expect(control('n').value).toBe('1.');
     change('n', '1.5');
     expect(control('n').value).toBe('1.5');
     change('n', '-');
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(control('n'));
     expect(control('n').getAttribute('aria-invalid')).toBe('true');
@@ -514,7 +578,9 @@ describe('native QuestionPrompt', () => {
       values: { choices: ['Saved value'] },
       custom: { choices: 'Previously unfinished' },
     });
+    flushSolid();
     renderQuestionPrompt(active);
+    flushSolid();
     const rows = container!.querySelectorAll('[data-custom-row]');
     expect(rows).toHaveLength(3);
     expect(rows[0]!.querySelector<HTMLInputElement>('input')!.checked).toBe(true);
@@ -523,9 +589,11 @@ describe('native QuestionPrompt', () => {
     );
     expect(rows[1]!.querySelector<HTMLInputElement>('input')!.checked).toBe(true);
     container!.querySelector<HTMLButtonElement>('[aria-label="Clear Selections"]')!.click();
+    flushSolid();
     expect(container!.querySelectorAll('[data-custom-row]')).toHaveLength(1);
     expect(container!.querySelector<HTMLTextAreaElement>('[data-custom-input]')!.value).toBe('');
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       { kind: 'native-form', sessionID: 'ses_child', answer: {} },
@@ -538,17 +606,22 @@ describe('native QuestionPrompt', () => {
       { key: 'choices', type: 'multiselect', title: 'Selections', options: [], custom: true },
     ]);
     renderQuestionPrompt(active);
+    flushSolid();
     const input = container!.querySelector<HTMLTextAreaElement>('[data-custom-input]')!;
     input.value = 'Temporary';
     input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     const checkbox = container!.querySelector<HTMLInputElement>(
       '[aria-label="Selections: select custom value 1"]'
     )!;
     checkbox.click();
+    flushSolid();
     expect(checkbox.checked).toBe(true);
     input.value = '';
     input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container!.querySelectorAll('[data-custom-row]')).toHaveLength(1);
     expect(container!.contains(input)).toBe(false);
     const blankCheckbox = container!.querySelector<HTMLInputElement>(
@@ -559,9 +632,11 @@ describe('native QuestionPrompt', () => {
     const blank = container!.querySelector<HTMLTextAreaElement>('[data-custom-input]')!;
     expect(document.activeElement).toBe(blank);
     blank.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     expect(container!.querySelectorAll('[data-custom-row]')).toHaveLength(1);
     expect(container!.querySelector('[data-custom-input]')).toBe(blank);
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       { kind: 'native-form', sessionID: 'ses_child', answer: { choices: [] } },
@@ -583,7 +658,9 @@ describe('native QuestionPrompt', () => {
         },
       ])
     );
+    flushSolid();
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(container!.querySelector('[data-custom-input]'));
   });
@@ -593,28 +670,36 @@ describe('native QuestionPrompt', () => {
       { key: 'choices', type: 'multiselect', title: 'Selections', options: [], custom: true },
     ]);
     renderQuestionPrompt(active);
+    flushSolid();
     const first = container!.querySelector<HTMLTextAreaElement>('[data-custom-input]')!;
     first.value = 'First';
     first.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     const second = container!.querySelectorAll<HTMLTextAreaElement>('[data-custom-input]')[1]!;
     second.value = 'Keep this';
     second.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     const secondCheckbox = container!.querySelector<HTMLInputElement>(
       '[aria-label="Selections: select custom value 2"]'
     )!;
     secondCheckbox.click();
+    flushSolid();
     first.value = '';
     first.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container!.querySelectorAll('[data-custom-row]')).toHaveLength(2);
     expect(container!.querySelector('[data-custom-input]')).toBe(second);
     expect(document.activeElement).toBe(second);
     expect(secondCheckbox.checked).toBe(true);
     expect(second.value).toBe('Keep this');
     secondCheckbox.click();
+    flushSolid();
     expect(second.value).toBe('Keep this');
     expect(container!.querySelectorAll('[data-custom-row]')).toHaveLength(2);
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       { kind: 'native-form', sessionID: 'ses_child', answer: { choices: [] } },
@@ -623,46 +708,61 @@ describe('native QuestionPrompt', () => {
   });
   it('retains typed values after server rejection and virtual remount', async () => {
     const active = nativeRequest([{ key: 'answer', type: 'string', required: true }]);
-    setState('questions', [active]);
+    setState(storePath('questions', [active]));
+    flushSolid();
     respondQuestionMock.mockRejectedValueOnce(
       new Error('400 Invalid option for form field: answer')
     );
     renderQuestionPrompt(active);
+    flushSolid();
     change('answer', 'keep this');
     await submitNative();
+    flushSolid();
     expect(container!.textContent).toContain('server did not accept');
     expect(document.activeElement).toBe(control('answer'));
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     await Promise.resolve();
+    flushSolid();
     renderQuestionPrompt(active);
+    flushSolid();
     expect(control('answer').value).toBe('keep this');
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledTimes(2);
   });
   it('retains unchecked custom rows across remount without submitting their text', async () => {
     const active = nativeRequest([
       { key: 'choices', type: 'multiselect', title: 'Selections', options: [], custom: true },
     ]);
-    setState('questions', [active]);
+    setState(storePath('questions', [active]));
+    flushSolid();
     renderQuestionPrompt(active);
+    flushSolid();
     const custom = container!.querySelector<HTMLTextAreaElement>(
       '[aria-label="Selections: custom option"]'
     )!;
     custom.value = 'pending value';
     custom.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     const second = container!.querySelector<HTMLTextAreaElement>(
       '[aria-label="Selections: custom option 2"]'
     )!;
     second.value = 'selected value';
     second.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     container!
       .querySelector<HTMLInputElement>('[aria-label="Selections: select custom value 2"]')!
       .click();
+    flushSolid();
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     await Promise.resolve();
+    flushSolid();
     renderQuestionPrompt(active);
+    flushSolid();
     expect(
       container!.querySelector<HTMLTextAreaElement>('[aria-label="Selections: custom option"]')!
         .value
@@ -678,6 +778,7 @@ describe('native QuestionPrompt', () => {
       )!.checked
     ).toBe(true);
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       active.id,
       { kind: 'native-form', sessionID: 'ses_child', answer: { choices: ['selected value'] } },
@@ -690,21 +791,29 @@ describe('native QuestionPrompt', () => {
       { key: 'answer', type: 'string', required: true },
       { key: 'choices', type: 'multiselect', title: 'Selections', options: [], custom: true },
     ]);
-    setState('questions', [active]);
+    setState(storePath('questions', [active]));
+    flushSolid();
     renderQuestionPrompt(active);
+    flushSolid();
     change('answer', 'keep this');
     const custom = container!.querySelector<HTMLTextAreaElement>(
       '[aria-label="Selections: custom option"]'
     )!;
     custom.value = 'unfinished';
     custom.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
 
-    setState('questions', []);
+    setState(storePath('questions', []));
+    flushSolid();
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     await Promise.resolve();
-    setState('questions', [active]);
+    flushSolid();
+    setState(storePath('questions', [active]));
+    flushSolid();
     renderQuestionPrompt(active);
+    flushSolid();
 
     expect(control('answer').value).toBe('keep this');
     expect(
@@ -715,9 +824,10 @@ describe('native QuestionPrompt', () => {
     expect(rejectQuestionMock).not.toHaveBeenCalled();
   });
 
-  it('prevents duplicate submission across remount while awaiting acknowledgment', async () => {
+  it('claims a reply before a same-turn skip and retains the claim across remount until acknowledgment', async () => {
     const active = nativeRequest([{ key: 'answer', type: 'boolean', default: false }]);
-    setState('questions', [active]);
+    setState(storePath('questions', [active]));
+    flushSolid();
     let resolve!: () => void;
     respondQuestionMock.mockImplementationOnce(
       () =>
@@ -726,44 +836,61 @@ describe('native QuestionPrompt', () => {
         })
     );
     renderQuestionPrompt(active);
-    await submitNative();
+    flushSolid();
+    const submitting = submitNative();
+    container!.querySelector<HTMLButtonElement>('.question-btn-secondary')!.click();
+    await submitting;
+    expect(rejectQuestionMock).not.toHaveBeenCalled();
+    flushSolid();
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     renderQuestionPrompt(active);
+    flushSolid();
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledTimes(1);
     expect(container!.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(
       true
     );
     resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
   });
   it('never auto-acknowledges external actions and blocks unsupported types without hiding skip', async () => {
     const external = nativeRequest([
       { key: 'setup', type: 'external', url: 'javascript:alert(1)' },
     ]);
     renderQuestionPrompt(external);
+    flushSolid();
     expect(container!.textContent).toContain('unsafe or unsupported URL');
     expect(container!.textContent).not.toContain('Open external action');
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).not.toHaveBeenCalled();
     const checkbox = control<HTMLInputElement>('setup');
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSolid();
     await submitNative();
+    flushSolid();
     expect(respondQuestionMock).toHaveBeenCalledWith(
       external.id,
       { kind: 'native-form', sessionID: 'ses_child', answer: { setup: true } },
       { rethrow: true }
     );
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     renderQuestionPrompt(
       nativeRequest([
         { key: 'new', type: 'unsupported', nativeType: 'password', raw: { type: 'password' } },
       ])
     );
+    flushSolid();
     expect(container!.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(
       true
     );
@@ -771,7 +898,9 @@ describe('native QuestionPrompt', () => {
       (button) => button.textContent === 'Skip'
     )!;
     skip.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(rejectQuestionMock).toHaveBeenCalled();
   });
 });
@@ -798,7 +927,8 @@ beforeEach(() => {
   consoleWarn = vi.spyOn(console, 'warn');
   container = document.createElement('div');
   document.body.appendChild(container);
-  setState('questions', []);
+  setState(storePath('questions', []));
+  flushSolid();
   rejectQuestionMock.mockReset();
   rejectQuestionMock.mockResolvedValue(undefined);
   respondQuestionMock.mockReset();
@@ -807,10 +937,13 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container?.remove();
+  flushSolid();
   container = null;
-  setState('questions', []);
+  setState(storePath('questions', []));
+  flushSolid();
   try {
     expect(consoleWarn).not.toHaveBeenCalledWith(
       'computations created outside a `createRoot` or `render` will never be disposed'
@@ -823,21 +956,27 @@ afterEach(() => {
 describe('QuestionPrompt draft retention', () => {
   it('keeps drafts while the question is still active', async () => {
     const activeRequest = request();
-    setState('questions', [activeRequest]);
+    setState(storePath('questions', [activeRequest]));
+    flushSolid();
 
     renderQuestionPrompt(activeRequest);
+    flushSolid();
 
     const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
     expect(input).not.toBeNull();
 
     input!.value = 'Keep this draft';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     await Promise.resolve();
+    flushSolid();
 
     renderQuestionPrompt(activeRequest);
+    flushSolid();
 
     expect(container?.querySelector<HTMLTextAreaElement>('.question-custom-input')?.value).toBe(
       'Keep this draft'
@@ -846,22 +985,29 @@ describe('QuestionPrompt draft retention', () => {
 
   it('drops drafts once the question is no longer present', async () => {
     const activeRequest = request();
-    setState('questions', [activeRequest]);
+    setState(storePath('questions', [activeRequest]));
+    flushSolid();
 
     renderQuestionPrompt(activeRequest);
+    flushSolid();
 
     const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
     expect(input).not.toBeNull();
 
     input!.value = 'Discard this draft';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
 
-    setState('questions', []);
+    setState(storePath('questions', []));
+    flushSolid();
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     await Promise.resolve();
+    flushSolid();
 
     renderQuestionPrompt(activeRequest);
+    flushSolid();
 
     expect(container?.querySelector<HTMLTextAreaElement>('.question-custom-input')?.value).toBe('');
   });
@@ -870,25 +1016,34 @@ describe('QuestionPrompt draft retention', () => {
     const activeRequests = Array.from({ length: 101 }, (_, index) =>
       request(`bounded-draft-${index}`)
     );
-    setState('questions', activeRequests);
+    setState(storePath('questions', activeRequests));
+    flushSolid();
 
     for (const [index, activeRequest] of activeRequests.entries()) {
       renderQuestionPrompt(activeRequest);
+      flushSolid();
       const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
       input!.value = `Draft ${index}`;
       input!.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSolid();
       cleanup?.();
+      flushSolid();
       cleanup = undefined;
       await Promise.resolve();
+      flushSolid();
     }
 
     renderQuestionPrompt(activeRequests[0]!);
+    flushSolid();
     expect(container?.querySelector<HTMLTextAreaElement>('.question-custom-input')?.value).toBe('');
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     await Promise.resolve();
+    flushSolid();
     renderQuestionPrompt(activeRequests.at(-1)!);
+    flushSolid();
     expect(container?.querySelector<HTMLTextAreaElement>('.question-custom-input')?.value).toBe(
       'Draft 100'
     );
@@ -896,18 +1051,24 @@ describe('QuestionPrompt draft retention', () => {
 
   it('keeps the answer draft and restores controls when answering fails', async () => {
     const activeRequest = request('failed-answer');
-    setState('questions', [activeRequest]);
+    setState(storePath('questions', [activeRequest]));
+    flushSolid();
     respondQuestionMock.mockRejectedValueOnce(new Error('answer failed'));
     renderQuestionPrompt(activeRequest);
+    flushSolid();
 
     const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
     input!.value = 'Retry this answer';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     container
       ?.querySelector<HTMLButtonElement>('.question-btn-primary')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(respondQuestionMock).toHaveBeenCalledWith(activeRequest.id, [['Retry this answer']], {
       rethrow: true,
@@ -919,9 +1080,12 @@ describe('QuestionPrompt draft retention', () => {
     expect(skipButton().disabled).toBe(false);
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     await Promise.resolve();
+    flushSolid();
     renderQuestionPrompt(activeRequest);
+    flushSolid();
     expect(container?.querySelector<HTMLTextAreaElement>('.question-custom-input')?.value).toBe(
       'Retry this answer'
     );
@@ -929,16 +1093,22 @@ describe('QuestionPrompt draft retention', () => {
 
   it('keeps the draft and restores controls when skipping fails', async () => {
     const activeRequest = request('failed-skip');
-    setState('questions', [activeRequest]);
+    setState(storePath('questions', [activeRequest]));
+    flushSolid();
     rejectQuestionMock.mockRejectedValueOnce(new Error('skip failed'));
     renderQuestionPrompt(activeRequest);
+    flushSolid();
 
     const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
     input!.value = 'Do not discard this';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     click(skipButton());
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(rejectQuestionMock).toHaveBeenCalledWith(activeRequest.id, { rethrow: true });
     expect(input?.value).toBe('Do not discard this');
@@ -1038,20 +1208,26 @@ function pressKey(element: HTMLElement, key: string) {
 describe('QuestionPrompt single-select', () => {
   it('disables the primary action until an option is chosen', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     expect(primaryButton().disabled).toBe(true);
 
     click(optionByLabel('Option A'));
+    flushSolid();
 
     expect(primaryButton().disabled).toBe(false);
   });
 
   it('submits the chosen option', async () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     click(optionByLabel('Option A'));
+    flushSolid();
     click(primaryButton());
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(respondQuestionMock).toHaveBeenCalledWith('question-1', [['Option A']], {
       rethrow: true,
@@ -1060,9 +1236,12 @@ describe('QuestionPrompt single-select', () => {
 
   it('deselects an option when it is clicked twice', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     click(optionByLabel('Option A'));
+    flushSolid();
     click(optionByLabel('Option A'));
+    flushSolid();
 
     expect(optionByLabel('Option A').getAttribute('aria-checked')).toBe('false');
     expect(primaryButton().disabled).toBe(true);
@@ -1070,8 +1249,10 @@ describe('QuestionPrompt single-select', () => {
 
   it('toggles an option with the keyboard', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     const event = pressKey(optionByLabel('Option A'), 'Enter');
+    flushSolid();
 
     expect(event.defaultPrevented).toBe(true);
     expect(optionByLabel('Option A').getAttribute('aria-checked')).toBe('true');
@@ -1079,14 +1260,17 @@ describe('QuestionPrompt single-select', () => {
 
   it('ignores keys other than Enter and Space on an option', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     pressKey(optionByLabel('Option A'), 'Tab');
+    flushSolid();
 
     expect(optionByLabel('Option A').getAttribute('aria-checked')).toBe('false');
   });
 
   it('renders options as radios when only one answer is allowed', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     expect(optionByLabel('Option A').getAttribute('role')).toBe('radio');
     expect(container!.querySelector('.question-prompt-options')?.getAttribute('role')).toBe(
@@ -1098,10 +1282,14 @@ describe('QuestionPrompt single-select', () => {
 describe('QuestionPrompt custom answers', () => {
   it('submits a typed answer in place of the listed options', async () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     type(customInput(), 'Something else\nWith more detail');
+    flushSolid();
     click(primaryButton());
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(respondQuestionMock).toHaveBeenCalledWith(
       'question-1',
@@ -1112,46 +1300,60 @@ describe('QuestionPrompt custom answers', () => {
 
   it('clears a typed answer when a listed option is picked instead', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     type(customInput(), 'Something else');
+    flushSolid();
     click(optionByLabel('Option A'));
+    flushSolid();
 
     expect(customInput().value).toBe('');
   });
 
   it('clears the selected option when a custom answer is typed', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     click(optionByLabel('Option A'));
+    flushSolid();
     type(customInput(), 'Something else');
+    flushSolid();
 
     expect(optionByLabel('Option A').getAttribute('aria-checked')).toBe('false');
   });
 
   it('ignores a whitespace-only custom answer', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     type(customInput(), '   ');
+    flushSolid();
 
     expect(primaryButton().disabled).toBe(true);
   });
 
   it('marks the custom row as checked once it holds text', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     expect(customOption().getAttribute('aria-checked')).toBe('false');
 
     type(customInput(), 'Something else');
+    flushSolid();
 
     expect(customOption().getAttribute('aria-checked')).toBe('true');
   });
 
   it('submits a custom answer on Enter', async () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     type(customInput(), 'Something else\nWith more detail');
+    flushSolid();
     const event = pressKey(customInput(), 'Enter');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(event.defaultPrevented).toBe(true);
     expect(respondQuestionMock).toHaveBeenCalledWith(
@@ -1163,8 +1365,10 @@ describe('QuestionPrompt custom answers', () => {
 
   it('allows Shift+Enter to add a new line in the custom input', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     type(customInput(), 'Something else');
+    flushSolid();
     const event = new KeyboardEvent('keydown', {
       key: 'Enter',
       shiftKey: true,
@@ -1172,6 +1376,7 @@ describe('QuestionPrompt custom answers', () => {
       cancelable: true,
     });
     customInput().dispatchEvent(event);
+    flushSolid();
 
     expect(event.defaultPrevented).toBe(false);
     expect(respondQuestionMock).not.toHaveBeenCalled();
@@ -1179,8 +1384,10 @@ describe('QuestionPrompt custom answers', () => {
 
   it('submits from the custom input with Ctrl+Enter', async () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     type(customInput(), 'Something else');
+    flushSolid();
     const event = new KeyboardEvent('keydown', {
       key: 'Enter',
       ctrlKey: true,
@@ -1188,7 +1395,9 @@ describe('QuestionPrompt custom answers', () => {
       cancelable: true,
     });
     customInput().dispatchEvent(event);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(event.defaultPrevented).toBe(true);
     expect(respondQuestionMock).toHaveBeenCalledOnce();
@@ -1196,8 +1405,10 @@ describe('QuestionPrompt custom answers', () => {
 
   it('does not submit on Enter while composing', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     type(customInput(), 'Something else');
+    flushSolid();
     const event = new KeyboardEvent('keydown', {
       key: 'Enter',
       isComposing: true,
@@ -1205,6 +1416,7 @@ describe('QuestionPrompt custom answers', () => {
       cancelable: true,
     });
     customInput().dispatchEvent(event);
+    flushSolid();
 
     expect(event.defaultPrevented).toBe(false);
     expect(respondQuestionMock).not.toHaveBeenCalled();
@@ -1223,6 +1435,7 @@ describe('QuestionPrompt custom answers', () => {
         },
       ],
     });
+    flushSolid();
 
     expect(container!.querySelector('.question-option-custom')).toBeNull();
   });
@@ -1231,16 +1444,22 @@ describe('QuestionPrompt custom answers', () => {
 describe('QuestionPrompt multi-step flow', () => {
   it('advances and submits custom answers with Enter', async () => {
     renderQuestionPrompt(multiQuestionRequest());
+    flushSolid();
 
     type(customInput(), 'Zig');
+    flushSolid();
     pressKey(customInput(), 'Enter');
+    flushSolid();
 
     expect(stepIndicator()).toBe('2 / 2');
     expect(respondQuestionMock).not.toHaveBeenCalled();
 
     type(customInput(), 'Deno');
+    flushSolid();
     pressKey(customInput(), 'Enter');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(respondQuestionMock).toHaveBeenCalledWith('question-multi', [['Zig'], ['Deno']], {
       rethrow: true,
@@ -1249,12 +1468,15 @@ describe('QuestionPrompt multi-step flow', () => {
 
   it('shows a step indicator and advances instead of submitting', () => {
     renderQuestionPrompt(multiQuestionRequest());
+    flushSolid();
 
     expect(stepIndicator()).toBe('1 / 2');
     expect(primaryButton().textContent).toBe('Next');
 
     click(optionByLabel('TypeScript'));
+    flushSolid();
     click(primaryButton());
+    flushSolid();
 
     expect(stepIndicator()).toBe('2 / 2');
     expect(primaryButton().textContent).toBe('Submit');
@@ -1263,9 +1485,12 @@ describe('QuestionPrompt multi-step flow', () => {
 
   it('accumulates several picks on a multi-select question', () => {
     renderQuestionPrompt(multiQuestionRequest());
+    flushSolid();
 
     click(optionByLabel('TypeScript'));
+    flushSolid();
     click(optionByLabel('Rust'));
+    flushSolid();
 
     expect(optionByLabel('TypeScript').getAttribute('aria-checked')).toBe('true');
     expect(optionByLabel('Rust').getAttribute('aria-checked')).toBe('true');
@@ -1274,6 +1499,7 @@ describe('QuestionPrompt multi-step flow', () => {
 
   it('renders multi-select options as checkboxes in a group', () => {
     renderQuestionPrompt(multiQuestionRequest());
+    flushSolid();
 
     expect(optionByLabel('TypeScript').getAttribute('role')).toBe('checkbox');
     expect(container!.querySelector('.question-prompt-options')?.getAttribute('role')).toBe(
@@ -1283,13 +1509,20 @@ describe('QuestionPrompt multi-step flow', () => {
 
   it('keeps a custom answer alongside listed picks when multiple are allowed', async () => {
     renderQuestionPrompt(multiQuestionRequest());
+    flushSolid();
 
     click(optionByLabel('TypeScript'));
+    flushSolid();
     type(customInput(), 'Zig');
+    flushSolid();
     click(primaryButton());
+    flushSolid();
     click(optionByLabel('Node'));
+    flushSolid();
     click(primaryButton());
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(respondQuestionMock).toHaveBeenCalledWith(
       'question-multi',
@@ -1300,11 +1533,14 @@ describe('QuestionPrompt multi-step flow', () => {
 
   it('uses the same secondary style for Back and Skip while keeping Submit primary', () => {
     renderQuestionPrompt(multiQuestionRequest());
+    flushSolid();
 
     expect(skipButton().className).toBe('question-btn question-btn-secondary');
 
     click(optionByLabel('TypeScript'));
+    flushSolid();
     click(primaryButton());
+    flushSolid();
 
     expect(backButton()!.className).toBe(skipButton().className);
     expect(primaryButton().className).toBe('question-btn question-btn-primary');
@@ -1313,14 +1549,18 @@ describe('QuestionPrompt multi-step flow', () => {
 
   it('offers Back only after the first step and restores the earlier answer', () => {
     renderQuestionPrompt(multiQuestionRequest());
+    flushSolid();
 
     expect(backButton()).toBeNull();
 
     click(optionByLabel('TypeScript'));
+    flushSolid();
     click(primaryButton());
+    flushSolid();
     expect(backButton()).not.toBeNull();
 
     click(backButton()!);
+    flushSolid();
 
     expect(stepIndicator()).toBe('1 / 2');
     expect(optionByLabel('TypeScript').getAttribute('aria-checked')).toBe('true');
@@ -1328,15 +1568,18 @@ describe('QuestionPrompt multi-step flow', () => {
 
   it('does not advance while the current step has no answer', () => {
     renderQuestionPrompt(multiQuestionRequest());
+    flushSolid();
 
     expect(primaryButton().disabled).toBe(true);
     click(primaryButton());
+    flushSolid();
 
     expect(stepIndicator()).toBe('1 / 2');
   });
 
   it('omits the step indicator for a single question', () => {
     renderQuestionPrompt(request());
+    flushSolid();
 
     expect(container!.querySelector('.question-prompt-step')).toBeNull();
   });

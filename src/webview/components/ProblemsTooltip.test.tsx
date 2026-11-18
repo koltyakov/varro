@@ -1,5 +1,5 @@
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { flush as flushSolid, createSignal } from 'solid-js';
+import { render } from '@solidjs/web';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { formatAttachedDiagnostics, formatEditorProblems } from '../lib/editor-problems';
 import { ProblemsTooltip } from './ProblemsTooltip';
@@ -15,8 +15,10 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container.remove();
+  flushSolid();
   vi.useRealTimers();
 });
 
@@ -53,9 +55,12 @@ it('shows selected diagnostics first, bounds highlights, and hides on Escape', a
     ),
     container
   );
+  flushSolid();
   const trigger = container.querySelector('button')!;
   trigger.dispatchEvent(new MouseEvent('mouseenter'));
+  flushSolid();
   await vi.advanceTimersByTimeAsync(400);
+  flushSolid();
   const tooltip = document.querySelector('[role="tooltip"]')!;
   expect(tooltip.textContent).toContain('5 errors, 1 warning');
   const highlights = tooltip.querySelectorAll('.problems-tooltip-item');
@@ -67,6 +72,7 @@ it('shows selected diagnostics first, bounds highlights, and hides on Escape', a
   expect(tooltip.textContent).toContain('3 more problems');
   expect(tooltip.textContent).not.toContain('Editor diagnostics are context');
   trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  flushSolid();
   expect(document.querySelector('[role="tooltip"]')).toBeNull();
 });
 
@@ -95,12 +101,16 @@ it('previews explicit snapshots on focus and updates disabled-state guidance', a
     ),
     container
   );
+  flushSolid();
   container.querySelector('button')!.dispatchEvent(new FocusEvent('focusin'));
+  flushSolid();
   await vi.advanceTimersByTimeAsync(400);
+  flushSolid();
   const tooltip = document.querySelector('[role="tooltip"]')!;
   expect(tooltip.textContent).toContain('app.ts:12');
   expect(tooltip.textContent).toContain('<script>unsafe markup</script>');
   expect(tooltip.querySelector('script')).toBeNull();
   setEnabled(false);
+  flushSolid();
   expect(tooltip.textContent).toContain('Not included in context. Click to enable.');
 });

@@ -1,4 +1,5 @@
-import { createRoot } from 'solid-js';
+import { flush as flushSolid, createRoot } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
 import type { ServerEventName } from '../../shared/protocol';
 import type { onMessage } from '../lib/bridge';
@@ -29,6 +30,7 @@ Object.assign(clientMocks, { serverEventsOn });
 describe('useOpenCode session control flows', () => {
   it('stops a captured child without using tree abort or modifying parent and sibling status', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const root = session('root');
     const child = { ...session('child-a'), parentID: 'root' };
     const sibling = { ...session('child-b'), parentID: 'root' };
@@ -43,14 +45,20 @@ describe('useOpenCode session control flows', () => {
     clientMocks.interruptChild.mockResolvedValue({ interrupted: true });
     clientMocks.permissionList.mockResolvedValue([]);
     clientMocks.questionList.mockResolvedValue([]);
-    stateModule.setState('sessions', [root, child, sibling]);
-    stateModule.setState('activeSessionId', 'root');
-    stateModule.setState('sessionStatus', {
-      root: { type: 'busy' },
-      'child-a': { type: 'busy' },
-      'child-b': { type: 'busy' },
-    });
+    stateModule.setState(storePath('sessions', [root, child, sibling]));
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'root'));
+    flushSolid();
+    stateModule.setState(
+      storePath('sessionStatus', {
+        root: { type: 'busy' },
+        'child-a': { type: 'busy' },
+        'child-b': { type: 'busy' },
+      })
+    );
+    flushSolid();
     await hookModule.manageChildTask('child-a', 'stop');
+    flushSolid();
     expect(clientMocks.interruptChild).toHaveBeenCalledWith('child-a', child.directory);
     expect(clientMocks.sessionAbort).not.toHaveBeenCalled();
     expect(stateModule.state.sessionStatus.root).toEqual({ type: 'busy' });
@@ -76,26 +84,35 @@ describe('useOpenCode session control flows', () => {
     clientMocks.sessionAbort.mockRejectedValue(new Error('abort failed'));
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
-      stateModule.setState('sessions', [session('session-1')]);
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+      flushSolid();
+      stateModule.setState(storePath('sessions', [session('session-1')]));
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+      flushSolid();
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
 
       bridgeHandler({ type: 'command/abort' });
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(stateModule.error()).toBe('Failed to stop the run: abort failed')
       );
+      flushSolid();
       expect(stateModule.state.sessionStatus['session-1']).toEqual({ type: 'busy' });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -129,32 +146,43 @@ describe('useOpenCode session control flows', () => {
     clientMocks.sessionAbort.mockResolvedValue(undefined);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ]);
-      stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('sessionStatus', 'session-1', {
-        type: 'retry',
-        attempt: 2,
-        message: '429 usage limit reached',
-        next: 3,
-      });
+      stateModule.setState(
+        storePath('providers', [
+          provider('openai', {
+            'gpt-4o': {
+              id: 'gpt-4o',
+              name: 'GPT-4o',
+              capabilities: { toolcall: true, vision: true },
+              cost: { input: 0, output: 0 },
+            },
+          }),
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('sessionStatus', 'session-1', {
+          type: 'retry',
+          attempt: 2,
+          message: '429 usage limit reached',
+          next: 3,
+        })
+      );
+      flushSolid();
       stateModule.setSessionUsageLimit('session-1', {
         source: 'status',
         statusCode: 429,
@@ -165,8 +193,10 @@ describe('useOpenCode session control flows', () => {
         providerID: 'openai',
         modelID: 'gpt-4o',
       });
+      flushSolid();
 
       await hookModule.abortSession();
+      flushSolid();
 
       handlers.get('session.status')?.({
         properties: {
@@ -179,6 +209,7 @@ describe('useOpenCode session control flows', () => {
           },
         },
       });
+      flushSolid();
 
       expect(stateModule.state.sessionStatus['session-1']).toEqual({ type: 'idle' });
       expect(stateModule.state.sessionUsageLimits['session-1']).toMatchObject({
@@ -188,6 +219,7 @@ describe('useOpenCode session control flows', () => {
       });
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+      flushSolid();
       handlers.get('session.status')?.({
         properties: {
           sessionID: 'session-1',
@@ -199,6 +231,7 @@ describe('useOpenCode session control flows', () => {
           },
         },
       });
+      flushSolid();
 
       expect(stateModule.state.sessionStatus['session-1']).toEqual({
         type: 'retry',
@@ -208,6 +241,7 @@ describe('useOpenCode session control flows', () => {
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -229,18 +263,24 @@ describe('useOpenCode session control flows', () => {
     clientMocks.sessionAbort.mockResolvedValue(true);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('sessions', [session('session-1')]);
-      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState(storePath('sessions', [session('session-1')]));
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
 
       await hookModule.abortSession();
+      flushSolid();
 
       handlers.get('session.created')?.({
         properties: {
@@ -250,6 +290,7 @@ describe('useOpenCode session control flows', () => {
           },
         },
       });
+      flushSolid();
 
       expect(clientMocks.sessionAbort).toHaveBeenCalledTimes(2);
       expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1', {
@@ -260,6 +301,7 @@ describe('useOpenCode session control flows', () => {
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -273,25 +315,35 @@ describe('useOpenCode session control flows', () => {
     clientMocks.sessionAbort.mockResolvedValue(true);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('sessions', [
-        session('session-1'),
-        { ...session('child-1'), parentID: 'session-1' },
-        { ...session('child-2'), parentID: 'child-1' },
-      ]);
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('sessionStatus', {
-        'session-1': { type: 'retry', attempt: 1, message: '429 usage limit reached', next: 3 },
-        'child-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 4 },
-        'child-2': { type: 'busy' },
-      });
+      stateModule.setState(
+        storePath('sessions', [
+          session('session-1'),
+          { ...session('child-1'), parentID: 'session-1' },
+          { ...session('child-2'), parentID: 'child-1' },
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('sessionStatus', {
+          'session-1': { type: 'retry', attempt: 1, message: '429 usage limit reached', next: 3 },
+          'child-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 4 },
+          'child-2': { type: 'busy' },
+        })
+      );
+      flushSolid();
       stateModule.setSessionUsageLimit('session-1', {
         source: 'status',
         statusCode: 429,
@@ -303,6 +355,7 @@ describe('useOpenCode session control flows', () => {
         providerID: 'openai',
         modelID: 'gpt-4o',
       });
+      flushSolid();
       stateModule.setSessionUsageLimit('child-1', {
         source: 'status',
         statusCode: 429,
@@ -314,8 +367,10 @@ describe('useOpenCode session control flows', () => {
         providerID: 'openai',
         modelID: 'gpt-4o',
       });
+      flushSolid();
 
       await hookModule.abortSession();
+      flushSolid();
 
       expect(clientMocks.sessionAbort).toHaveBeenCalledTimes(3);
       expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1', {
@@ -340,6 +395,7 @@ describe('useOpenCode session control flows', () => {
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -353,22 +409,30 @@ describe('useOpenCode session control flows', () => {
     clientMocks.sessionAbort.mockResolvedValue(true);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('sessions', [
-        session('session-1'),
-        { ...session('child-1'), parentID: 'session-1' },
-        { ...session('child-2'), parentID: 'session-1' },
-      ]);
-      stateModule.setState('activeSessionId', 'child-1');
+      stateModule.setState(
+        storePath('sessions', [
+          session('session-1'),
+          { ...session('child-1'), parentID: 'session-1' },
+          { ...session('child-2'), parentID: 'session-1' },
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'child-1'));
+      flushSolid();
 
       await hookModule.abortSession();
+      flushSolid();
 
       expect(clientMocks.sessionAbort).toHaveBeenCalledTimes(3);
       expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1', {
@@ -382,6 +446,7 @@ describe('useOpenCode session control flows', () => {
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -395,25 +460,33 @@ describe('useOpenCode session control flows', () => {
     clientMocks.sessionAbort.mockResolvedValue(true);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('sessions', [
-        { ...session('session-1'), time: { created: 0, updated: 200 } },
-      ]);
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('sessionSelectedAgents', { 'session-1': 'plan' });
+      stateModule.setState(
+        storePath('sessions', [{ ...session('session-1'), time: { created: 0, updated: 200 } }])
+      );
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('sessionSelectedAgents', { 'session-1': 'plan' }));
+      flushSolid();
 
       await hookModule.abortSession();
+      flushSolid();
 
       expect(stateModule.state.skippedPlanSessions['session-1']).toBe(200);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -446,26 +519,34 @@ describe('useOpenCode session control flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ]);
-      stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
-      stateModule.setState('activeSessionId', 'child-1');
+      stateModule.setState(
+        storePath('providers', [
+          provider('openai', {
+            'gpt-4o': {
+              id: 'gpt-4o',
+              name: 'GPT-4o',
+              capabilities: { toolcall: true, vision: true },
+              cost: { input: 0, output: 0 },
+            },
+          }),
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'child-1'));
+      flushSolid();
 
       handlers.get('session.status')?.({
         properties: {
@@ -478,6 +559,7 @@ describe('useOpenCode session control flows', () => {
           },
         },
       });
+      flushSolid();
 
       expect(stateModule.state.sessionUsageLimits['child-1']).toMatchObject({
         sessionID: 'child-1',
@@ -486,6 +568,7 @@ describe('useOpenCode session control flows', () => {
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -526,38 +609,49 @@ describe('useOpenCode session control flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-        provider('anthropic', {
-          claude: {
-            id: 'claude',
-            name: 'Claude',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ]);
-      stateModule.setState('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' });
-      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState(
+        storePath('providers', [
+          provider('openai', {
+            'gpt-4o': {
+              id: 'gpt-4o',
+              name: 'GPT-4o',
+              capabilities: { toolcall: true, vision: true },
+              cost: { input: 0, output: 0 },
+            },
+          }),
+          provider('anthropic', {
+            claude: {
+              id: 'claude',
+              name: 'Claude',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
+          }),
+        ])
+      );
+      flushSolid();
+      stateModule.setState(
+        storePath('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' })
+      );
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       stateModule.setSelectedModel(
         { providerID: 'anthropic', modelID: 'claude' },
         { sessionId: 'session-1', persistGlobal: false }
       );
+      flushSolid();
 
       handlers.get('session.status')?.({
         properties: {
@@ -570,6 +664,7 @@ describe('useOpenCode session control flows', () => {
           },
         },
       });
+      flushSolid();
 
       expect(stateModule.state.sessionUsageLimits['session-1']).toMatchObject({
         providerID: 'anthropic',
@@ -579,6 +674,7 @@ describe('useOpenCode session control flows', () => {
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 });

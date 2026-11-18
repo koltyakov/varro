@@ -1,4 +1,4 @@
-import { Portal } from 'solid-js/web';
+import { Portal } from '@solidjs/web';
 import { shareIosIcon } from '../../lib/ui-icons';
 import { UiIcon } from '../UiIcon';
 

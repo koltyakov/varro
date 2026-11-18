@@ -1,4 +1,4 @@
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { startHostExtension } from './host/extensions';
 import { AppRoot } from './App';
 import { cleanupBridge, initializeBridge, postMessage } from './lib/bridge';

@@ -1,5 +1,5 @@
-import { ErrorBoundary, Show, Suspense, createSignal, lazy } from 'solid-js';
-import { render } from 'solid-js/web';
+import { flush as flushSolid, Errored, Show, Loading, createSignal, lazy } from 'solid-js';
+import { render } from '@solidjs/web';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { postMessage } from '../../lib/bridge';
 import { SettingsPanelBoundary } from './SettingsPanelBoundary';
@@ -11,6 +11,7 @@ let cleanup: (() => void) | undefined;
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   vi.mocked(postMessage).mockClear();
 });
@@ -27,7 +28,7 @@ describe('SettingsPanelBoundary', () => {
     const LazyPanel = lazy(() => Promise.reject(new TypeError(message)));
     cleanup = render(
       () => (
-        <ErrorBoundary fallback={outerFallback}>
+        <Errored fallback={outerFallback}>
           <input aria-label="Draft" value="Keep this draft" />
           <Show when={open()}>
             <SettingsPanelBoundary
@@ -35,15 +36,16 @@ describe('SettingsPanelBoundary', () => {
               panelClass="models-panel"
               onClose={() => setOpen(false)}
             >
-              <Suspense fallback="Loading models">
+              <Loading fallback="Loading models">
                 <LazyPanel />
-              </Suspense>
+              </Loading>
             </SettingsPanelBoundary>
           </Show>
-        </ErrorBoundary>
+        </Errored>
       ),
       document.body
     );
+    flushSolid();
     const draft = document.body.querySelector('input');
     expect(document.body.textContent).toContain('Loading models');
     await vi.waitFor(() => {
@@ -51,6 +53,7 @@ describe('SettingsPanelBoundary', () => {
         'Models could not load'
       );
     });
+    flushSolid();
     expect(document.body.querySelector('.models-panel')?.textContent).toContain(
       'updated or reinstalled'
     );
@@ -70,15 +73,19 @@ describe('SettingsPanelBoundary', () => {
       (button) => button.textContent === 'Back to chat'
     );
     back?.click();
+    flushSolid();
     expect(open()).toBe(false);
+    flushSolid();
     expect(document.body.querySelector('.models-panel')).toBeNull();
     expect(document.body.querySelector('input')).toBe(draft);
 
     // Browsers can cache a rejected import. Reopening must remain contained too.
     setOpen(true);
+    flushSolid();
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain('Models could not load');
     });
+    flushSolid();
     expect(outerFallback).not.toHaveBeenCalled();
   });
 
@@ -95,6 +102,7 @@ describe('SettingsPanelBoundary', () => {
       ),
       document.body
     );
+    flushSolid();
     expect(document.body.textContent).toContain('Invalid model catalog');
     expect(document.body.textContent).not.toContain('updated or reinstalled');
     expect(document.body.querySelector('.settings-panel-error-description')?.textContent).toContain(
@@ -117,6 +125,7 @@ describe('SettingsPanelBoundary', () => {
       (button) => button.textContent === 'Reload sidebar'
     );
     reload?.click();
+    flushSolid();
     expect(postMessage).toHaveBeenCalledWith({ type: 'webview/reload' });
   });
 });

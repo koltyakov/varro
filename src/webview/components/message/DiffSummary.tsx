@@ -1,4 +1,5 @@
-import { Show, createEffect, createMemo, createSignal } from 'solid-js';
+import { ariaBoolean } from '../../lib/aria';
+import { createEffect, Show, createMemo, createSignal } from 'solid-js';
 import {
   getMessageBlockExpanded,
   setMessageBlockExpanded,
@@ -18,12 +19,14 @@ export function DiffSummary(props: { diffs: FileDiff[]; stateKey: string }) {
     })
   );
 
-  createEffect(() => {
-    const nextStateKey = props.stateKey;
-    if (nextStateKey === currentStateKey) return;
-    currentStateKey = nextStateKey;
-    setExpanded(getMessageBlockExpanded(nextStateKey) ?? false);
-  });
+  createEffect(
+    () => props.stateKey,
+    (nextStateKey) => {
+      if (nextStateKey === currentStateKey) return;
+      currentStateKey = nextStateKey;
+      setExpanded(getMessageBlockExpanded(nextStateKey) ?? false);
+    }
+  );
 
   const toggleExpanded = () => {
     const nextExpanded = !expanded();
@@ -33,7 +36,11 @@ export function DiffSummary(props: { diffs: FileDiff[]; stateKey: string }) {
 
   return (
     <div class="diff-summary">
-      <button onClick={toggleExpanded} class="diff-summary-btn" aria-expanded={expanded()}>
+      <button
+        onClick={toggleExpanded}
+        class="diff-summary-btn"
+        aria-expanded={ariaBoolean(expanded())}
+      >
         <UiIcon
           source={navArrowRightIcon}
           class={`transition-transform ${expanded() ? 'rotate-90' : ''}`}

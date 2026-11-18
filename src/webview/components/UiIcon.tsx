@@ -1,5 +1,6 @@
-import { splitProps } from 'solid-js';
-import type { JSX } from 'solid-js';
+import { ariaBoolean } from '../lib/aria';
+import { omit } from 'solid-js';
+import { type JSX } from '@solidjs/web';
 
 export type UiIconSize = number | string;
 
@@ -8,7 +9,7 @@ export interface UiIconProps extends Omit<
   'children' | 'class' | 'style'
 > {
   source: string;
-  class?: string;
+  class?: JSX.HTMLAttributes<HTMLSpanElement>['class'];
   width?: UiIconSize;
   height?: UiIconSize;
   style?: JSX.CSSProperties;
@@ -61,15 +62,17 @@ export function createUiIconElement(
 }
 
 export function UiIcon(props: UiIconProps) {
-  const [local, rest] = splitProps(props, [
+  const local = props;
+  const rest = omit(
+    props,
     'source',
     'class',
     'width',
     'height',
     'style',
     'aria-hidden',
-    'aria-label',
-  ]);
+    'aria-label'
+  );
   const style = (): JSX.CSSProperties => {
     const result: JSX.CSSProperties & {
       '--ui-icon-mask': string;
@@ -89,10 +92,10 @@ export function UiIcon(props: UiIconProps) {
   return (
     <span
       {...rest}
-      class={local.class ? `ui-icon ${local.class}` : 'ui-icon'}
+      class={['ui-icon', local.class]}
       style={style()}
       aria-label={local['aria-label']}
-      aria-hidden={local['aria-hidden'] ?? (local['aria-label'] ? undefined : 'true')}
+      aria-hidden={ariaBoolean(local['aria-hidden'] ?? (local['aria-label'] ? undefined : 'true'))}
     />
   );
 }

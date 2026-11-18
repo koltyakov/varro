@@ -1,6 +1,6 @@
+import { flush as flushSolid, createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { ChatTextAnnotation } from './ChatTextAnnotation';
 
 let root: HTMLDivElement;
@@ -15,9 +15,12 @@ beforeEach(() => {
 
 afterEach(() => {
   dispose?.();
+  flushSolid();
   dispose = undefined;
   root.remove();
+  flushSolid();
   window.getSelection()?.removeAllRanges();
+  flushSolid();
   vi.unstubAllGlobals();
 });
 
@@ -47,6 +50,7 @@ function contextMenu(element: Element) {
     clientY: 120,
   });
   element.dispatchEvent(event);
+  flushSolid();
   return event;
 }
 
@@ -62,6 +66,7 @@ async function openEditor() {
 function enterNote(textarea: HTMLTextAreaElement, text: string) {
   textarea.value = text;
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSolid();
 }
 
 describe('chat text annotation', () => {
@@ -71,6 +76,7 @@ describe('chat text annotation', () => {
       const writeText = vi.fn().mockResolvedValue(undefined);
       vi.stubGlobal('navigator', { clipboard: { writeText } });
       const onSave = mount();
+      flushSolid();
       const row = root.querySelector('.interactive-item-container')!;
       row.innerHTML =
         '<div class="rendered-markdown"><p>A <strong>selected</strong> passage</p><p>Not selected</p></div>';
@@ -78,6 +84,7 @@ describe('chat text annotation', () => {
       select(passage);
       contextMenu(passage);
       await Promise.resolve();
+      flushSolid();
       const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
       expect(buttons.map((button) => button.textContent)).toEqual([
         'Annotate',
@@ -87,8 +94,11 @@ describe('chat text annotation', () => {
       // Streaming can replace the selected DOM, and virtual rows can unmount before the click.
       passage.innerHTML = 'Changed while streaming';
       row.remove();
+      flushSolid();
       window.getSelection()?.removeAllRanges();
+      flushSolid();
       buttons.find((button) => button.textContent === action)!.click();
+      flushSolid();
       expect(writeText).toHaveBeenCalledExactlyOnceWith(
         action === 'Copy' ? 'A selected passage' : 'A **selected** passage'
       );
@@ -99,6 +109,7 @@ describe('chat text annotation', () => {
 
   it('does not offer Copy markdown for plain message selections', () => {
     mount();
+    flushSolid();
     const passage = root.querySelector('p')!;
     select(passage);
     contextMenu(passage);
@@ -113,6 +124,7 @@ describe('chat text annotation', () => {
       const writeText = vi.fn().mockResolvedValue(undefined);
       vi.stubGlobal('navigator', { clipboard: { writeText } });
       mount();
+      flushSolid();
       const passage = root.querySelector('p')!;
       passage.className = 'rendered-markdown';
       if (selection === 'whole') {
@@ -122,29 +134,37 @@ describe('chat text annotation', () => {
         const range = document.createRange();
         range.selectNodeContents(passage.lastChild!);
         window.getSelection()?.addRange(range);
+        flushSolid();
       }
+      flushSolid();
       contextMenu(passage);
       const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
       expect(buttons.map((button) => button.textContent)).toEqual(['Annotate', 'Copy']);
       buttons.find((button) => button.textContent === 'Copy')!.click();
+      flushSolid();
       expect(writeText).toHaveBeenCalledExactlyOnceWith('Selected chat passage');
     }
   );
 
   it('includes Copy markdown in keyboard menu navigation', async () => {
     mount();
+    flushSolid();
     const passage = root.querySelector('p')!;
     passage.className = 'rendered-markdown';
     passage.innerHTML = '<strong>Selected chat passage</strong>';
     select(passage);
     contextMenu(passage);
     await Promise.resolve();
+    flushSolid();
     const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    flushSolid();
     expect(document.activeElement?.textContent).toBe('Copy markdown');
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    flushSolid();
     expect(document.activeElement?.textContent).toBe('Annotate');
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    flushSolid();
     expect(document.activeElement?.textContent).toBe('Copy markdown');
   });
 
@@ -162,19 +182,25 @@ describe('chat text annotation', () => {
         }
       );
       mount();
+      flushSolid();
       const textarea = await openEditor();
+      flushSolid();
       expect(document.querySelectorAll('style[data-chat-annotation-highlight]')).toHaveLength(1);
       const highlight = highlights.get('varro-chat-annotation-selection');
       expect([...highlight!][0]!.toString()).toBe('Selected chat passage');
       window.getSelection()?.removeAllRanges();
+      flushSolid();
       enterNote(textarea, 'My note');
       expect(highlights.size).toBe(1);
       if (action === 'Escape') {
         textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        flushSolid();
       } else {
         dispose?.();
+        flushSolid();
         dispose = undefined;
       }
+      flushSolid();
       expect(highlights.size).toBe(0);
       expect(document.querySelector('style[data-chat-annotation-highlight]')).toBeNull();
     }
@@ -182,15 +208,19 @@ describe('chat text annotation', () => {
 
   it('opens a selected-text menu and saves the captured passage with a note', async () => {
     const onSave = mount();
+    flushSolid();
     const passage = root.querySelector('p')!;
     select(passage);
     expect(contextMenu(passage).defaultPrevented).toBe(true);
     await Promise.resolve();
+    flushSolid();
     const annotate = document.querySelector<HTMLButtonElement>('[role="menuitem"]')!;
     expect(annotate.textContent).toBe('Annotate');
     expect(document.activeElement).toBe(annotate);
     annotate.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     const textarea = document.querySelector<HTMLTextAreaElement>('textarea')!;
     expect(document.activeElement).toBe(textarea);
     expect(document.querySelector('.chat-annotation-hint')?.textContent).toBe('Esc to cancel');
@@ -201,6 +231,7 @@ describe('chat text annotation', () => {
     expect(save.disabled).toBe(true);
     enterNote(textarea, "I don't agree");
     save.click();
+    flushSolid();
     expect(onSave).toHaveBeenCalledOnce();
     expect(onSave.mock.calls[0]![0]).toMatchObject({
       pastedText:
@@ -211,18 +242,24 @@ describe('chat text annotation', () => {
 
   it('retains a text snapshot when selection changes and the virtual row unmounts', async () => {
     const onSave = mount();
+    flushSolid();
     const textarea = await openEditor();
+    flushSolid();
     root.querySelector('.interactive-item-container')!.remove();
+    flushSolid();
     window.getSelection()?.removeAllRanges();
+    flushSolid();
     enterNote(textarea, 'Keep this context');
     textarea.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true })
     );
+    flushSolid();
     expect(onSave.mock.calls[0]![0].pastedText).toContain('> Selected chat passage');
   });
 
   it('leaves the native menu alone without a selection, outside message rows, or in the composer', () => {
     mount();
+    flushSolid();
     const passage = root.querySelector('p')!;
     expect(contextMenu(passage).defaultPrevented).toBe(false);
     const composer = root.querySelector('.composer-mount')!;
@@ -237,13 +274,17 @@ describe('chat text annotation', () => {
 
   it('rejects a selection spanning the transcript and the composer', () => {
     mount();
+    flushSolid();
     const passage = root.querySelector('p')!;
     const composer = root.querySelector('.composer-mount')!;
     composer.append(document.createTextNode('Draft'));
     const range = document.createRange();
     range.setStart(passage.firstChild!, 0);
+    flushSolid();
     range.setEnd(composer.lastChild!, 5);
+    flushSolid();
     window.getSelection()?.addRange(range);
+    flushSolid();
     expect(contextMenu(passage).defaultPrevented).toBe(false);
   });
 
@@ -251,16 +292,22 @@ describe('chat text annotation', () => {
     'dismisses with %s without adding an attachment',
     async (action) => {
       const onSave = mount();
+      flushSolid();
       await openEditor();
+      flushSolid();
       if (action === 'Cancel') {
         Array.from(document.querySelectorAll('button'))
           .find((button) => button.textContent === 'Cancel')!
           .click();
+        flushSolid();
       } else if (action === 'Escape') {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        flushSolid();
       } else {
         root.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+        flushSolid();
       }
+      flushSolid();
       expect(document.querySelector('.chat-annotation-popup')).toBeNull();
       expect(onSave).not.toHaveBeenCalled();
     }
@@ -273,8 +320,11 @@ describe('chat text annotation', () => {
         return session();
       },
     });
+    flushSolid();
     await openEditor();
+    flushSolid();
     setSession('session-2');
+    flushSolid();
     expect(document.querySelector('.chat-annotation-popup')).toBeNull();
     expect(onSave).not.toHaveBeenCalled();
   });
@@ -284,9 +334,12 @@ describe('chat text annotation', () => {
       throw new Error('Draft attachment budget exceeded');
     });
     mount({ onSave });
+    flushSolid();
     const textarea = await openEditor();
+    flushSolid();
     enterNote(textarea, 'My note');
     document.querySelector<HTMLButtonElement>('.chat-annotation-save')!.click();
+    flushSolid();
     expect(document.querySelector('[role="alert"]')?.textContent).toBe(
       'Draft attachment budget exceeded'
     );

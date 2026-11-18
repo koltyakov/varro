@@ -12,6 +12,79 @@ import { appendDeltaToRapidStreaming } from './scroll-helpers';
 
 type ScrollSample = { top: number; height: number };
 
+test('reveals new streamed parts once without replaying entrances when reopening busy sessions', async ({
+  page,
+}) => {
+  const starts: string[] = [];
+  await page.exposeFunction('recordStreamedEntrance', (key: string) => starts.push(key));
+  await page.addInitScript(() => {
+    document.addEventListener(
+      'animationstart',
+      (event) => {
+        if (
+          event.animationName !== 'streamed-assistant-item-in' ||
+          !(event.target instanceof Element)
+        )
+          return;
+        const key = event.target.closest<HTMLElement>('[data-assistant-render-key]')?.dataset
+          .assistantRenderKey;
+        if (!key) return;
+        // SAFETY: Playwright installed this callback before navigation.
+        void (window as Window & { recordStreamedEntrance?(key: string): Promise<void> })
+          .recordStreamedEntrance!(key);
+      },
+      true
+    );
+  });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter&secondBusySession=1');
+  const list = page.locator('.interactive-list');
+  const first = [
+    'session-rapid-streaming-jitter',
+    'message-rapid-assistant-streaming',
+    'message-rapid-assistant-streaming-text-1',
+  ] as const;
+  const second = ['session-rapid-second', 'second-assistant', 'second-assistant-part-1'] as const;
+  for (const [index, session] of [first, second, first].entries()) {
+    const [sessionID, messageID, initialPartID] = session;
+    if (index) {
+      await page.getByLabel('Back to sessions').click();
+      await expect(list).toHaveCount(0);
+      await page.locator(`[data-session-id="${sessionID}"] .session-item-main`).click();
+    }
+    const row = list.locator(`[data-msg-id="${messageID}"]`);
+    await expect(row).toContainText('Starting...');
+    await waitForAnimationFrames(page, 4);
+    const partID = `new-part-${index}`;
+    await page.evaluate(
+      (part) => {
+        // SAFETY: The isolated E2E harness installs the production-event replay helper.
+        const harness = (
+          window as Window & {
+            __varroE2E?: { replayServerEvent(event: ServerEvent): void };
+          }
+        ).__varroE2E!;
+        harness.replayServerEvent({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: part.partID,
+              sessionID: part.sessionID,
+              messageID: part.messageID,
+              type: 'text',
+              text: `Fresh content: ${part.partID}`,
+            },
+          },
+        });
+      },
+      { sessionID, messageID, partID }
+    );
+    await expect(row).toContainText(partID);
+    await expect.poll(() => starts.filter((key) => key === `part:${partID}`).length).toBe(1);
+    expect(starts).not.toContain(`part:${initialPartID}`);
+  }
+  expect(starts.filter((key) => key === 'part:new-part-0')).toHaveLength(1);
+});
+
 // Headless Chromium hides native scrollbars by default, making thumb drags inert.
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 

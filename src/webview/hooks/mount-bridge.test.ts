@@ -1,15 +1,14 @@
+import { flush as flushSolid } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
 import type {
   ExtensionMessage,
   WebviewMessage,
   WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
-import type { MockedObject } from 'vitest';
-import type * as StateModule from '../lib/state';
+import { setState, state } from '../lib/state';
 import { sessionStore } from '../lib/stores/session-store';
 
 const {
-  setState,
   setError,
   setTheme,
   addContextFiles,
@@ -35,7 +34,6 @@ const {
   applySessionPlanStateUpdate,
   setProviderLimit,
 } = vi.hoisted(() => ({
-  setState: vi.fn(),
   setError: vi.fn(),
   setTheme: vi.fn(),
   addContextFiles: vi.fn(),
@@ -63,16 +61,10 @@ const {
 }));
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise mount-bridge integration with state and client modules. */
-vi.mock('../lib/state', async () => {
-  // SAFETY: The test installs the typed mock implementation before this statement.
-  const actual = (await vi.importActual('../lib/state')) as MockedObject<typeof StateModule>;
+vi.mock(import('../lib/state'), async (importOriginal) => {
+  const actual = await importOriginal();
   return {
     ...actual,
-    state: {
-      ...actual.state,
-      editorContext: { ...actual.state.editorContext, activeFile: null },
-    },
-    setState,
     setProviderLimit,
     setError,
     setTheme,
@@ -876,6 +868,10 @@ describe('mount bridge helpers', () => {
   });
 
   it('binds extension message handling to shared webview state', () => {
+    setState((draft) => {
+      draft.remoteImages = 'off';
+    });
+    flushSolid();
     const ensureConnectionInitialized = vi.fn();
     const applyTheme = vi.fn();
     const operations = createMountBridgeOperations({
@@ -923,25 +919,26 @@ describe('mount bridge helpers', () => {
       },
     });
 
+    flushSolid();
     expect(setTheme).toHaveBeenCalledWith('light');
     expect(applyTheme).toHaveBeenCalledWith('light');
-    expect(setState).toHaveBeenCalledWith('serverStatus', {
+    expect(state.serverStatus).toEqual({
       state: 'running',
       url: 'http://127.0.0.1:4096',
     });
     expect(setError).not.toHaveBeenCalled();
     expect(ensureConnectionInitialized).toHaveBeenCalledTimes(1);
     expect(setDefaultPermissionModePreference).toHaveBeenCalledWith('full');
-    expect(setState).toHaveBeenCalledWith('remoteImages', 'ask');
+    expect(state.remoteImages).toBe('ask');
     expect(setShowFileDiffs).toHaveBeenCalledWith(true);
     expect(setExpandThinking).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
     expect(setShowTurnTimer).toHaveBeenCalledWith(true);
     expect(setShowEmptyStateHistogram).toHaveBeenCalledWith(true);
-    expect(setState).toHaveBeenCalledWith('followupsEnabled', false);
-    expect(setState).toHaveBeenCalledWith('debugShowQuotaWarning', true);
-    expect(setState).toHaveBeenCalledWith('autoAttachProblems', false);
-    expect(setState).toHaveBeenCalledWith('autoAttachActiveFile', false);
+    expect(state.followupsEnabled).toBe(false);
+    expect(state.debugShowQuotaWarning).toBe(true);
+    expect(state.autoAttachProblems).toBe(false);
+    expect(state.autoAttachActiveFile).toBe(false);
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-size')).toBe('16px');
     expect(document.documentElement.style.getPropertyValue('--varro-chat-editor-font-size')).toBe(
       '15px'
@@ -975,9 +972,12 @@ describe('mount bridge helpers', () => {
       },
     });
     expect(setShowEmptyStateHistogram).toHaveBeenLastCalledWith(false);
-    expect(setState).toHaveBeenCalledWith('followupsEnabled', true);
+    flushSolid();
+    expect(state.followupsEnabled).toBe(true);
     document.documentElement.style.removeProperty('--varro-chat-font-size');
+    flushSolid();
     document.documentElement.style.removeProperty('--varro-chat-editor-font-size');
+    flushSolid();
   });
 
   it('marks visible editor session trees seen as visibility changes', () => {
@@ -1123,8 +1123,11 @@ describe('mount bridge helpers', () => {
         value: 'visible',
       });
       document.dispatchEvent(new Event('visibilitychange'));
+      flushSolid();
       window.dispatchEvent(new Event('focus'));
+      flushSolid();
       window.dispatchEvent(new Event('blur'));
+      flushSolid();
 
       expect(setDocumentVisible).toHaveBeenCalledWith(true);
       expect(postFocusState).toHaveBeenCalledTimes(3);
@@ -1133,6 +1136,7 @@ describe('mount bridge helpers', () => {
       expect(refreshProviders).toHaveBeenCalledTimes(2);
     } finally {
       dispose();
+      flushSolid();
       Object.defineProperty(document, 'visibilityState', {
         configurable: true,
         value: originalVisibility,
@@ -1163,10 +1167,12 @@ describe('mount bridge helpers', () => {
         value: 'visible',
       });
       document.dispatchEvent(new Event('visibilitychange'));
+      flushSolid();
 
       expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     } finally {
       dispose();
+      flushSolid();
       Object.defineProperty(document, 'visibilityState', {
         configurable: true,
         value: originalVisibility,

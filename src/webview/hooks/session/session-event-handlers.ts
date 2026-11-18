@@ -1,4 +1,3 @@
-import { batch } from 'solid-js';
 import { BACKGROUND_COMMAND_SUMMARY_CHARS } from '../../../shared/background-process';
 import {
   isAbortedAssistantError,
@@ -130,7 +129,7 @@ function isSessionNotFoundError<T>(error: T) {
 type EventHandlerDependencies = {
   getActiveSessionId(): string | null;
   getSessionStatus(sessionId: string): SessionStatus | null | undefined;
-  isSessionTreeStatusWorking(sessionId: string): boolean;
+  isSessionTreeStatusWorking?(sessionId: string): boolean;
   isSessionInActiveTree?(sessionId: string): boolean;
   getMessages(): MessageEntry[];
   userMessageUpdated?(message: Message): void;
@@ -184,7 +183,7 @@ type EventHandlerDependencies = {
   ): Promise<void | boolean | object>;
   respondAutomaticPermission?: EventHandlerDependencies['respondPermission'];
   setDiffs(diffs: FileDiff[]): void;
-  abortRemoteSession(sessionId: string): Promise<void | boolean | object>;
+  abortRemoteSession(sessionId: string, directory?: string): Promise<void | boolean | object>;
   continueInterruptedSession?(
     sessionId: string,
     options?: { messageID: string }
@@ -245,7 +244,6 @@ export class SessionEventHandlerOperations {
     return registerSessionEventHandlers({
       getActiveSessionId: () => appStore.state.activeSessionId,
       getSessionStatus: (sessionId) => appStore.state.sessionStatus[sessionId],
-      isSessionTreeStatusWorking,
       isSessionInActiveTree: (sessionId) => {
         const activeSessionId = appStore.state.activeSessionId;
         if (!activeSessionId) return false;
@@ -442,7 +440,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
   const isActiveTreeWorking = () => {
     const activeSessionId = deps.getActiveSessionId();
-    return activeSessionId ? deps.isSessionTreeStatusWorking(activeSessionId) : false;
+    if (!activeSessionId) return false;
+    if (deps.isSessionTreeStatusWorking) return deps.isSessionTreeStatusWorking(activeSessionId);
+    // The status event and loading indicator publish together. The committed store
+    // still has the previous status here, including for other events in this batch.
+    let working = false;
+    appStore.setState((draft) => {
+      working = isSessionTreeStatusWorking(activeSessionId, draft.sessionStatus);
+    });
+    return working;
   };
   const messagesForSession = (sessionId: string) =>
     deps.getMessages().filter((entry) => entry.info.sessionID === sessionId);
@@ -703,7 +709,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
     settledIdleSessions.add(sessionId);
     const hadActiveAssistantReply = hasActiveAssistantReply(deps.getMessages());
-    batch(() => {
+    (() => {
       if (!alreadySettled) settleLatestAssistantOnIdle(sessionId, Date.now());
       deps.clearPendingAbort(sessionId);
       sessionStore.setSessionCompacting(sessionId, false);
@@ -715,7 +721,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       } else if (isSessionInActiveTree(sessionId) && !isActiveTreeWorking()) {
         uiStore.stopLoading();
       }
-    });
+    })();
     if (alreadySettled) return;
     deps
       .syncSession(sessionId)
@@ -997,7 +1003,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     deps.setSessionStatusEntry(info.id, { type: 'idle' });
     if (alreadyPending) return;
 
-    void deps.abortRemoteSession(info.id).catch((err) => {
+    void deps.abortRemoteSession(info.id, info.directory).catch((err) => {
       deps.clearPendingAbort(info.id);
       deps.logError('abortSession', err);
     });
@@ -1528,7 +1534,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
 
       if (isSessionInActiveTree(sessionID)) {
-        batch(() => {
+        (() => {
           if (!assistantFinished) markSessionProgress(sessionID);
           uiStore.markLoadingActivity();
           if (message) {
@@ -1563,7 +1569,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
               if (settledMessageId) recordSessionMessageSnapshotMutation(sessionID);
             }
           }
-        });
+        })();
       }
       if (partialMessage?.role === 'assistant') {
         sessionStore.setSessionFailed(

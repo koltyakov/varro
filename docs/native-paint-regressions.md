@@ -14,6 +14,16 @@ an existing capture read-only against an already-built extension:
 node scripts/ai-native-paint.mjs --capture <capture.json> --checkpoint <event-count>
 ```
 
+Use `--extension-root <built-worktree>` to run the same current driver and paint
+oracles against a frozen baseline build. The selected worktree supplies the isolated
+launcher and replay server. Results record its commit, working-tree status, webview
+asset version and extension bundle hash. Build it first; this option never rebuilds
+or modifies the selected source.
+`firstDragWork` records target-scoped Chromium performance counters around the first
+drag. Compare work counts only with the same driver and capture. Tracing, screenshots
+and geometry probes add overhead, so these counts do not establish an uninstrumented
+latency or streaming-performance pass.
+
 Each invocation creates a new directory under `artifacts/ai-streaming/native-paint-*`.
 An explicit `--output` must name a directory that does not exist. Captures and images can
 contain private text; do not commit these artifacts.
@@ -29,6 +39,12 @@ contain private text; do not commit these artifacts.
   Compare the same message and exact paragraph text at stable, fully visible bounds, with at most
   2 CSS px displacement. Correct DOM text does not clear missing painted glyphs.
   The mask comparison penalizes extra bright pixels as well as missing glyphs.
+  Both bracketing samples must record the actual opaque sticky top, shell and solid-gap
+  rectangles. Text overlapping either footprint, including its 2 px comparison margin,
+  is excluded and recorded as `sticky-occluded`, not reported as missing glyphs.
+  Hit testing alone cannot establish exposure because the solid gap ignores pointer events.
+  The translucent fade is not treated as opaque. Older captures without measured sticky
+  coverage cannot establish retained-text eligibility and remain unverified.
   Record message IDs at the replay server, before the bootstrap proxy streams the page.
   Mark prepend when the oldest loaded message first changes to an ID from a completed page,
   even if that page was fetched before recording or the banner stays visible.

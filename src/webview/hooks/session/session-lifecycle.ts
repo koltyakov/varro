@@ -1,5 +1,6 @@
-import { batch } from 'solid-js';
-import { reconcile } from 'solid-js/store';
+import { storePath } from '@solidjs/signals';
+
+import { reconcile } from 'solid-js';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
@@ -92,7 +93,18 @@ export class SessionLifecycleOperations {
           ([id, directory]) => !isSameWorkspacePath(available.get(id), directory)
         );
         if (pending.length !== entries.length) {
-          appStore.setState('transferredSessions', reconcile(Object.fromEntries(pending)));
+          appStore.setState((draft) => {
+            const current = draft['transferredSessions'];
+            const incoming = Object.fromEntries(pending) satisfies typeof current;
+            if (
+              incoming === null ||
+              incoming === undefined ||
+              current === null ||
+              current === undefined
+            )
+              draft['transferredSessions'] = incoming;
+            else reconcile(incoming)(current);
+          });
         }
       },
       clearSessionStatusEntry: sessionStore.clearSessionStatusEntry,
@@ -110,12 +122,12 @@ export class SessionLifecycleOperations {
       setSessionFailed: sessionStore.setSessionFailed,
       clearQueuedMessagesForSession,
       filterQuestions: (predicate: (sessionId: string) => boolean) =>
-        appStore.setState('questions', (items) =>
-          items.filter((item) => predicate(item.sessionID))
+        appStore.setState(
+          storePath('questions', (items) => items.filter((item) => predicate(item.sessionID)))
         ),
       filterPermissions: (predicate: (sessionId: string) => boolean) =>
-        appStore.setState('permissions', (items) =>
-          items.filter((item) => predicate(item.sessionID))
+        appStore.setState(
+          storePath('permissions', (items) => items.filter((item) => predicate(item.sessionID)))
         ),
       clearActiveSessionState: this.clearActiveSessionState,
       markSessionSeen: sessionStore.markSessionSeen,
@@ -123,15 +135,15 @@ export class SessionLifecycleOperations {
   }
 
   readonly clearActiveSessionState = () => {
-    batch(() => {
+    (() => {
       this.deps.resetTodoSync();
       this.deps.resetToolCallExpansionState();
       sessionStore.setActiveSessionId(null);
       sessionStore.persistActiveSessionId(null);
       sessionStore.clearMessages();
-      appStore.setState('messagesLoading', false);
+      appStore.setState(storePath('messagesLoading', false));
       uiStore.stopLoading();
-    });
+    })();
   };
 
   readonly applySessions = (sessions: Session[], complete = false) =>
@@ -250,7 +262,7 @@ export function applySessions(deps: LifecycleDependencies, sessions: Session[], 
       .filter((session) => !isNumber(session.time.archived))
       .map((session) => mergeFreshSession(existingById.get(session.id), session))
   );
-  batch(() => {
+  (() => {
     deps.setSessions(nextSessions, complete);
     deps.reconcileTransferredSessions?.(nextSessions);
 
@@ -261,11 +273,11 @@ export function applySessions(deps: LifecycleDependencies, sessions: Session[], 
     ) {
       deps.clearActiveSessionState();
     }
-  });
+  })();
 }
 
 export function clearDeletedSessionState(deps: LifecycleDependencies, id: string) {
-  batch(() => {
+  (() => {
     deps.clearPendingAbort(id);
     deps.removePermissionModeForSession(id);
     deps.clearCurrentDocumentStateForSession(id);
@@ -286,7 +298,7 @@ export function clearDeletedSessionState(deps: LifecycleDependencies, id: string
     if (deps.getState().activeSessionId === id) {
       deps.clearActiveSessionState();
     }
-  });
+  })();
 }
 
 export function hideDeletedSessionTree(
@@ -296,12 +308,12 @@ export function hideDeletedSessionTree(
 ) {
   const deletedIds = getDeletedSessionTreeIds(id, sessions);
 
-  batch(() => {
+  (() => {
     for (const deletedId of deletedIds) {
       clearDeletedSessionState(deps, deletedId);
     }
     deps.setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
-  });
+  })();
 
   return deletedIds;
 }
@@ -321,12 +333,12 @@ export function removeDeletedSessionTree(
 ) {
   const deletedIds = getDeletedSessionTreeIds(id, sessions);
 
-  batch(() => {
+  (() => {
     for (const deletedId of deletedIds) {
       clearDeletedSessionState(deps, deletedId);
     }
     deps.setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
-  });
+  })();
 
   return deletedIds;
 }
@@ -347,11 +359,11 @@ export function upsertSession(deps: LifecycleDependencies, session: Session) {
     return;
   }
 
-  batch(() => {
+  (() => {
     applySessions(deps, [session, ...sessions.filter((item) => item.id !== session.id)]);
 
     if (session.id === activeSessionId && !showSessionPicker) {
       deps.markSessionSeen(session.id, session.time.updated);
     }
-  });
+  })();
 }

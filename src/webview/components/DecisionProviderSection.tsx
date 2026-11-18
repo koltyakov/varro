@@ -1,3 +1,4 @@
+import { ariaBoolean } from '../lib/aria';
 import { Show, createSignal } from 'solid-js';
 import type { DecisionProviderRequest, DecisionProviderStatus } from '../../shared/protocol';
 import { client } from '../lib/client';
@@ -35,7 +36,7 @@ export function DecisionProviderSection(props: {
         <button
           type="button"
           class="decision-provider-toggle"
-          aria-expanded={expanded()}
+          aria-expanded={ariaBoolean(expanded())}
           onClick={() => setExpanded((open) => !open)}
         >
           <UiIcon

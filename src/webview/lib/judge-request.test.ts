@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createStore } from 'solid-js/store';
+import { createStore } from 'solid-js';
 import type { Permission } from '../types';
 import type { SelectedModel } from './app-state-types';
 import { toApprovedPermissionReference, toPlainJudgeModel } from './judge-request';

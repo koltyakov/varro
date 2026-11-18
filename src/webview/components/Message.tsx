@@ -1,13 +1,5 @@
-import {
-  Show,
-  createEffect,
-  createMemo,
-  createResource,
-  createSignal,
-  onCleanup,
-  on,
-  untrack,
-} from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js';
+import { ariaBoolean } from '../lib/aria';
 import {
   getProviderErrorDetailRows,
   formatProviderErrorMessage,
@@ -166,33 +158,38 @@ export function Message(props: {
   let wasCompleted = props.info.role === 'assistant' && props.info.time.completed !== undefined;
   let finalMarkPulsePending = false;
 
-  createEffect(() => {
-    const completed = props.info.role === 'assistant' && props.info.time.completed !== undefined;
-    if (!completed) {
-      wasCompleted = false;
-      finalMarkPulsePending = false;
-      setPulseFinalMark(false);
-      return;
-    }
+  createEffect(
+    () => ({
+      completed: props.info.role === 'assistant' && props.info.time.completed !== undefined,
+      highlighted: props.highlightFinalAnswer,
+    }),
+    ({ completed, highlighted }) => {
+      if (!completed) {
+        wasCompleted = false;
+        finalMarkPulsePending = false;
+        setPulseFinalMark(false);
+        return;
+      }
 
-    if (!wasCompleted) {
-      wasCompleted = true;
-      finalMarkPulsePending = true;
-    }
+      if (!wasCompleted) {
+        wasCompleted = true;
+        finalMarkPulsePending = true;
+      }
 
-    if (finalMarkPulsePending && props.highlightFinalAnswer) {
-      finalMarkPulsePending = false;
-      setPulseFinalMark(true);
-      return;
-    }
+      if (finalMarkPulsePending && highlighted) {
+        finalMarkPulsePending = false;
+        setPulseFinalMark(true);
+        return;
+      }
 
-    if (!props.highlightFinalAnswer) {
-      setPulseFinalMark(false);
+      if (!highlighted) {
+        setPulseFinalMark(false);
+      }
     }
-  });
+  );
 
-  createEffect(() => {
-    if (!pulseFinalMark()) {
+  createEffect(pulseFinalMark, (pulse) => {
+    if (!pulse) {
       turnRef?.style.removeProperty(FINAL_MARK_PULSE_DURATION_PROPERTY);
       return;
     }
@@ -245,21 +242,27 @@ export function Message(props: {
       onUserMessageHoverChange?.(messageId, true);
     }, HOVER_INTENT_DELAY_MS);
   };
-  createEffect(() => {
-    if (timestampTransitionTimer) {
-      clearTimeout(timestampTransitionTimer);
-      timestampTransitionTimer = undefined;
+  createEffect(
+    () => {
+      const visible = timestampVisible();
+      return { visible, active: !visible && timestampTransitionActive() };
+    },
+    ({ visible, active }) => {
+      if (timestampTransitionTimer) {
+        clearTimeout(timestampTransitionTimer);
+        timestampTransitionTimer = undefined;
+      }
+      if (visible) {
+        setTimestampTransitionActive(true);
+        return;
+      }
+      if (!active) return;
+      timestampTransitionTimer = setTimeout(() => {
+        timestampTransitionTimer = undefined;
+        setTimestampTransitionActive(false);
+      }, TIMESTAMP_TRANSITION_RETAIN_MS);
     }
-    if (timestampVisible()) {
-      setTimestampTransitionActive(true);
-      return;
-    }
-    if (!timestampTransitionActive()) return;
-    timestampTransitionTimer = setTimeout(() => {
-      timestampTransitionTimer = undefined;
-      setTimestampTransitionActive(false);
-    }, TIMESTAMP_TRANSITION_RETAIN_MS);
-  });
+  );
   onCleanup(() => {
     if (hoverIntentTimer) clearTimeout(hoverIntentTimer);
     if (timestampTransitionTimer) clearTimeout(timestampTransitionTimer);
@@ -295,13 +298,18 @@ export function Message(props: {
     const errorProviderID = data && 'providerID' in data ? data.providerID : undefined;
     return isString(errorProviderID) && errorProviderID.trim() ? errorProviderID : info.providerID;
   });
-  createEffect(() => {
-    const info = assistant();
-    const providerID = providerAuthProviderID();
-    if (info && providerID && providerAuthRequired()) {
-      markProviderAuthFailure(providerID, info.id, info.time.created);
+  createEffect(
+    () => {
+      const info = assistant();
+      const providerID = providerAuthProviderID();
+      return info && providerID && providerAuthRequired()
+        ? { providerID, id: info.id, created: info.time.created }
+        : null;
+    },
+    (failure) => {
+      if (failure) markProviderAuthFailure(failure.providerID, failure.id, failure.created);
     }
-  });
+  );
   const providerAuthRestored = createMemo(() => {
     const info = assistant();
     const providerID = providerAuthProviderID();
@@ -476,15 +484,39 @@ export function Message(props: {
     return request ? `${request.sessionID}\u0000${request.messageID}` : null;
   });
 
-  const [diffs] = createResource(diffRequest, async (requestKey) => {
-    const [sessionID, messageID] = requestKey.split('\u0000');
-    // SAFETY: The surrounding shape or discriminator check establishes the FileDiff contract used below.
-    return client.session
-      .diff(sessionID!, messageID!, {
+  const [diffs, setDiffs] = createSignal<FileDiff[]>();
+  const [diffsLoading, setDiffsLoading] = createSignal(false);
+  createEffect(
+    () => {
+      const key = diffRequest();
+      const [sessionID, messageID] = key?.split('\u0000') ?? [];
+      return {
+        sessionID,
+        messageID,
         directory: state.sessions.find((session) => session.id === sessionID)?.directory,
-      })
-      .catch(() => [] as FileDiff[]);
-  });
+      };
+    },
+    ({ sessionID, messageID, directory }) => {
+      if (!sessionID || !messageID) {
+        setDiffs(undefined);
+        setDiffsLoading(false);
+        return;
+      }
+      let cancelled = false;
+      setDiffsLoading(true);
+      void client.session
+        .diff(sessionID, messageID, { directory })
+        .catch((): FileDiff[] => [])
+        .then((value) => {
+          if (cancelled) return;
+          setDiffs(value);
+          setDiffsLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+  );
   const visibleDiffs = createMemo(() => (diffRequest() ? diffs() || [] : []));
   let emptyDiffSettlementEpoch = 0;
   const compactionDivider = createMemo<CompactionPart | null>(() => {
@@ -504,25 +536,30 @@ export function Message(props: {
     if (isUser()) return hasUserContent() || hasVisibleAutomaticActions() || hasOmittedDiffs();
     return !!assistantErrorMessage() || hasVisibleAssistantOutput() || visibleDiffs().length > 0;
   };
-  createEffect(() => {
-    const requestKey = diffRequest();
-    const epoch = ++emptyDiffSettlementEpoch;
-    if (!requestKey || diffs.loading) return;
-    const settledDiffs = diffs();
-    if (!settledDiffs || settledDiffs.length > 0 || shouldRender()) return;
-    queueMicrotask(() => {
-      if (
-        epoch !== emptyDiffSettlementEpoch ||
-        diffRequest() !== requestKey ||
-        diffs.loading ||
-        diffs()?.length !== 0 ||
-        shouldRender()
-      ) {
-        return;
-      }
-      untrack(() => props.onAssistantDiffSettledEmpty?.(props.info.id));
-    });
-  });
+  createEffect(
+    () => {
+      const requestKey = diffRequest();
+      if (!requestKey || diffsLoading()) return null;
+      const settledDiffs = diffs();
+      return !settledDiffs || settledDiffs.length > 0 || shouldRender() ? null : requestKey;
+    },
+    (requestKey) => {
+      const epoch = ++emptyDiffSettlementEpoch;
+      if (!requestKey) return;
+      queueMicrotask(() => {
+        if (
+          epoch !== emptyDiffSettlementEpoch ||
+          diffRequest() !== requestKey ||
+          diffsLoading() ||
+          diffs()?.length !== 0 ||
+          shouldRender()
+        ) {
+          return;
+        }
+        untrack(() => props.onAssistantDiffSettledEmpty?.(props.info.id));
+      });
+    }
+  );
   onCleanup(() => {
     emptyDiffSettlementEpoch += 1;
   });
@@ -615,16 +652,20 @@ export function Message(props: {
   const [editContentError, setEditContentError] = createSignal('');
   let editContentController: AbortController | undefined;
   createEffect(
-    on(
-      () => [props.info.id, state.activeSessionId, editingMessageId()],
-      () => {
-        onCleanup(() => {
-          editContentController?.abort();
-          editContentController = undefined;
-          setEditContentLoading(false);
-        });
-      }
-    )
+    () => [props.info.id, state.activeSessionId, editingMessageId()],
+    () => {
+      const cleanups: Array<() => void> = [];
+
+      cleanups.push(() => {
+        editContentController?.abort();
+        editContentController = undefined;
+        setEditContentLoading(false);
+      });
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    }
   );
   const handleUserCardClick = (event: MouseEvent) => {
     if (props.info.role !== 'user' || !hasUserContent() || isCompactUserAction()) return;
@@ -840,8 +881,8 @@ export function Message(props: {
           <Show when={isUser() && hasUserContent() && !isCompactUserAction()}>
             <time
               class={`message-sent-time${timestampVisible() ? ' is-visible' : ''}${timestampTransitionActive() ? ' is-transition-active' : ''}${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}
-              dateTime={new Date(props.info.time.created).toISOString()}
-              aria-hidden={!timestampVisible()}
+              datetime={new Date(props.info.time.created).toISOString()}
+              aria-hidden={ariaBoolean(!timestampVisible())}
             >
               {sentTimestamp()}
             </time>

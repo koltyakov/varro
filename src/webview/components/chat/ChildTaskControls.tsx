@@ -1,4 +1,4 @@
-import { Show, createResource, createSignal, onCleanup } from 'solid-js';
+import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { client } from '../../lib/client';
 import { state } from '../../lib/state';
 import { manageChildTask } from '../../hooks/useOpenCode';
@@ -11,13 +11,34 @@ export function ChildTaskControls(props: { sessionId: string }) {
     disposed = true;
     controller?.abort();
   });
-  const [controls, { refetch }] = createResource(
-    () => props.sessionId,
-    async (id) => {
+  const [controls, setControls] =
+    createSignal<Awaited<ReturnType<typeof client.session.childTaskControls>>>();
+  const [controlsFailed, setControlsFailed] = createSignal(false);
+  const [controlsRefresh, setControlsRefresh] = createSignal(0);
+  createEffect(
+    () => {
+      controlsRefresh();
+      const id = props.sessionId;
+      return { id, directory: state.sessions.find((session) => session.id === id)?.directory };
+    },
+    ({ id, directory }) => {
+      let cancelled = false;
       controller?.abort();
-      controller = new AbortController();
-      const directory = state.sessions.find((session) => session.id === id)?.directory;
-      return client.session.childTaskControls(id, directory, controller.signal);
+      const request = new AbortController();
+      controller = request;
+      setControlsFailed(false);
+      void client.session.childTaskControls(id, directory, request.signal).then(
+        (value) => {
+          if (!cancelled) setControls(value);
+        },
+        () => {
+          if (!cancelled) setControlsFailed(true);
+        }
+      );
+      return () => {
+        cancelled = true;
+        request.abort();
+      };
     }
   );
   const [busy, setBusy] = createSignal(false);
@@ -42,17 +63,17 @@ export function ChildTaskControls(props: { sessionId: string }) {
     } finally {
       if (!disposed && props.sessionId === id) {
         setBusy(false);
-        void refetch();
+        setControlsRefresh((value) => value + 1);
       }
     }
   };
   return (
     <>
-      <Show when={controls.error || controls()?.stopChild || controls()?.backgroundEligible}>
+      <Show when={controlsFailed() || controls()?.stopChild || controls()?.backgroundEligible}>
         <div class="structured-tool-row child-task-controls">
           <span class="structured-tool-label">actions</span>
           <div class="structured-tool-value-line child-task-control-actions">
-            <Show when={!controls.error && controls()?.stopChild}>
+            <Show when={!controlsFailed() && controls()?.stopChild}>
               <button
                 type="button"
                 disabled={busy() || !childWorking()}
@@ -62,7 +83,7 @@ export function ChildTaskControls(props: { sessionId: string }) {
                 Stop task
               </button>
             </Show>
-            <Show when={!controls.error && controls()?.backgroundEligible && childWorking()}>
+            <Show when={!controlsFailed() && controls()?.backgroundEligible && childWorking()}>
               <button
                 type="button"
                 disabled={busy()}
@@ -72,7 +93,7 @@ export function ChildTaskControls(props: { sessionId: string }) {
                 Background
               </button>
             </Show>
-            <Show when={controls.error}>
+            <Show when={controlsFailed()}>
               <span role="alert">Could not load actions. Reopen details to retry.</span>
             </Show>
           </div>

@@ -39,6 +39,7 @@ describe('session-actions helpers', () => {
 
     expect(applySelectedAgent).toHaveBeenCalledWith('build', 'session-1');
     expect(sendMessage).toHaveBeenCalledWith('Implement it', {
+      agent: 'build',
       queuedAttachments: {
         droppedFiles: [],
         clipboardImages: [],

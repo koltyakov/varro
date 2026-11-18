@@ -1,5 +1,6 @@
+import { flush as flushSolid, createStore } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createStore } from 'solid-js/store';
 import type { MessageEntry, Part } from '../types';
 import {
   advanceSessionHistoryCursor,
@@ -46,6 +47,7 @@ function entry(id: string, sessionID = 'session-1'): MessageEntry {
 
 beforeEach(() => {
   resetMessageWindowState();
+  flushSolid();
 });
 
 describe('message snapshot mutation revisions', () => {
@@ -53,8 +55,11 @@ describe('message snapshot mutation revisions', () => {
     const windowRevision = getSessionMessageWindowRevision('session-1');
 
     recordSessionMessageSnapshotMutation('session-1');
+    flushSolid();
     recordSessionMessageSnapshotMutation('session-2');
+    flushSolid();
     recordSessionMessageSnapshotMutation('session-1');
+    flushSolid();
 
     expect(getSessionMessageSnapshotMutationRevision('session-1')).toBeGreaterThan(
       getSessionMessageSnapshotMutationRevision('session-2')
@@ -64,7 +69,9 @@ describe('message snapshot mutation revisions', () => {
 
   it('resets with message window state', () => {
     recordSessionMessageSnapshotMutation('session-1');
+    flushSolid();
     resetMessageWindowState();
+    flushSolid();
     expect(getSessionMessageSnapshotMutationRevision('session-1')).toBe(0);
   });
 });
@@ -110,6 +117,35 @@ describe('mergeWindowedHistory', () => {
 });
 
 describe('history window state', () => {
+  it('retains the replacement cursor after a same-turn history reset', () => {
+    setSessionHistoryCursor('session-1', 'first-cursor');
+    flushSolid();
+    clearSessionMessageWindowState('session-1');
+    setSessionHistoryCursor('session-1', 'replacement-cursor');
+    flushSolid();
+    expect(getSessionHistoryCursor('session-1')).toBe('replacement-cursor');
+    expect(isSessionHistoryTruncated('session-1')).toBe(true);
+  });
+
+  it('combines same-turn history flags and prompt updates across sessions', () => {
+    markSessionHistoryTruncated('session-1', true);
+    markSessionHistoryTruncated('session-2', true);
+    markSessionHistoryLoadFailed('session-1', true);
+    markSessionHistoryLoadFailed('session-2', true);
+    setSessionHistoryPrompts('session-1', [entry('one', 'session-1')]);
+    setSessionHistoryPrompts('session-2', [entry('two', 'session-2')]);
+    flushSolid();
+    expect(isSessionHistoryTruncated('session-1')).toBe(true);
+    expect(isSessionHistoryTruncated('session-2')).toBe(true);
+    expect(isSessionHistoryLoadFailed('session-1')).toBe(true);
+    expect(isSessionHistoryLoadFailed('session-2')).toBe(true);
+    expect(getSessionHistoryPrompts('session-1').map((message) => message.info.id)).toEqual([
+      'one',
+    ]);
+    expect(getSessionHistoryPrompts('session-2').map((message) => message.info.id)).toEqual([
+      'two',
+    ]);
+  });
   it('bounds cached transcript bytes across sessions and pages without clearing cursors', () => {
     const large = (id: string): MessageEntry => ({
       ...entry(id),
@@ -124,22 +160,28 @@ describe('history window state', () => {
       ],
     });
     setSessionHistoryCursor('session-1', 'older');
+    flushSolid();
     setCachedSessionMessages('session-1', [large('first')]);
+    flushSolid();
     cacheSessionHistoryPage('session-2', 'page', [large('second')]);
+    flushSolid();
     expect(getCachedSessionMessages('session-1')).toEqual([]);
     expect(getSessionHistoryCursor('session-1')).toBe('older');
     expect(takeCachedSessionHistoryPage('session-2', 'page')).toHaveLength(1);
     setCachedSessionMessages('session-1', [large('third')]);
+    flushSolid();
     expect(getCachedSessionMessages('session-1')).toHaveLength(1);
   });
 
   it('tracks truncated sessions', () => {
     expect(isSessionHistoryTruncated('session-1')).toBe(false);
     markSessionHistoryTruncated('session-1', true);
+    flushSolid();
     expect(isSessionHistoryTruncated('session-1')).toBe(true);
     expect(isSessionHistoryTruncated('session-2')).toBe(false);
     expect(isSessionHistoryTruncated(null)).toBe(false);
     markSessionHistoryTruncated('session-1', false);
+    flushSolid();
     expect(isSessionHistoryTruncated('session-1')).toBe(false);
   });
 
@@ -148,16 +190,22 @@ describe('history window state', () => {
     message.parts = [
       { id: 'p1', sessionID: 'session-1', messageID: 'm1', type: 'text', text: 'Short' },
     ];
+    flushSolid();
     const [store, setStore] = createStore({ messages: [message] });
     const snapshot = [...store.messages];
     const proxy = store.messages[0];
     setCachedSessionMessages('session-1', snapshot);
+    flushSolid();
     expect(getCachedSessionMessages('session-1')[0]).toBe(proxy);
-    setStore('messages', 0, 'parts', 0, (part) => {
-      if (part.type !== 'text') throw new Error('Expected text fixture');
-      return { ...part, text: 'x'.repeat(13 * 1024 * 1024) };
-    });
+    setStore(
+      storePath('messages', 0, 'parts', 0, (part) => {
+        if (part.type !== 'text') throw new Error('Expected text fixture');
+        return { ...part, text: 'x'.repeat(13 * 1024 * 1024) };
+      })
+    );
+    flushSolid();
     setCachedSessionMessages('session-1', snapshot);
+    flushSolid();
     expect(getCachedSessionMessages('session-1')).toEqual([]);
     expect(snapshot[0]).toBe(proxy);
     expect(store.messages[0]!.parts[0]).toHaveProperty('text', 'x'.repeat(13 * 1024 * 1024));
@@ -166,23 +214,29 @@ describe('history window state', () => {
   it('tracks opaque history cursors until reset', () => {
     expect(getSessionHistoryCursor('session-1')).toBeUndefined();
     setSessionHistoryCursor('session-1', 'cursor-1');
+    flushSolid();
     expect(getSessionHistoryCursor('session-1')).toBe('cursor-1');
     expect(isSessionHistoryTruncated('session-1')).toBe(true);
     resetMessageWindowState();
+    flushSolid();
     expect(getSessionHistoryCursor('session-1')).toBeUndefined();
     expect(isSessionHistoryTruncated('session-1')).toBe(false);
   });
 
   it('clears truncation when the cursor reaches the final page', () => {
     setSessionHistoryCursor('session-1', 'cursor-1');
+    flushSolid();
     setSessionHistoryCursor('session-1');
+    flushSolid();
     expect(getSessionHistoryCursor('session-1')).toBeUndefined();
     expect(isSessionHistoryTruncated('session-1')).toBe(false);
   });
 
   it('terminates opaque history and prompt cursor cycles across separate advances', () => {
     setSessionHistoryCursor('session-1', 'cursor-a');
+    flushSolid();
     setSessionHistoryPromptCursor('session-1', 'prompt-a');
+    flushSolid();
 
     expect(advanceSessionHistoryCursor('session-1', 'cursor-a', 'cursor-b')).toBe('cursor-b');
     expect(advanceSessionHistoryPromptCursor('session-1', 'prompt-a', 'prompt-b')).toBe('prompt-b');
@@ -195,15 +249,18 @@ describe('history window state', () => {
   it('tracks user prompts fetched from behind the visible history boundary', () => {
     const prompts = [entry('user-1')];
     setSessionHistoryPrompts('session-1', prompts);
+    flushSolid();
 
     expect(getSessionHistoryPrompts('session-1')).toEqual(prompts);
     resetMessageWindowState();
+    flushSolid();
     expect(getSessionHistoryPrompts('session-1')).toEqual([]);
   });
 
   it('stores prefetched history pages until the visible history consumes them', () => {
     const page = [entry('user-1')];
     cacheSessionHistoryPage('session-1', 'cursor-1', page);
+    flushSolid();
 
     expect(takeCachedSessionHistoryPage('session-1', 'cursor-1')).toBe(page);
     expect(takeCachedSessionHistoryPage('session-1', 'cursor-1')).toBeUndefined();
@@ -212,6 +269,7 @@ describe('history window state', () => {
   it('keeps a bounded cache of loaded session windows', () => {
     for (let index = 1; index <= 4; index += 1) {
       setCachedSessionMessages(`session-${index}`, [entry(`message-${index}`, `session-${index}`)]);
+      flushSolid();
     }
 
     expect(getCachedSessionMessages('session-1')).toEqual([]);
@@ -219,12 +277,15 @@ describe('history window state', () => {
       'message-2',
     ]);
     clearSessionMessageWindowState('session-2');
+    flushSolid();
     expect(getCachedSessionMessages('session-2')).toEqual([]);
   });
 
   it('returns prefetched pages in chronological order', () => {
     cacheSessionHistoryPage('session-1', 'cursor-1', [entry('m3'), entry('m4')]);
+    flushSolid();
     cacheSessionHistoryPage('session-1', 'cursor-2', [entry('m1'), entry('m2')]);
+    flushSolid();
 
     expect(getPrefetchedSessionHistory('session-1').map((item) => item.info.id)).toEqual([
       'm1',
@@ -234,6 +295,7 @@ describe('history window state', () => {
     ]);
 
     takeCachedSessionHistoryPage('session-1', 'cursor-1');
+    flushSolid();
     expect(getPrefetchedSessionHistory('session-1').map((item) => item.info.id)).toEqual([
       'm1',
       'm2',
@@ -243,7 +305,9 @@ describe('history window state', () => {
   it('deduplicates overlapping prefetched pages while preserving the newer cached entry', () => {
     const newerM2 = entry('m2');
     cacheSessionHistoryPage('session-1', 'cursor-newer', [newerM2, entry('m3')]);
+    flushSolid();
     cacheSessionHistoryPage('session-1', 'cursor-older', [entry('m1'), entry('m2')]);
+    flushSolid();
 
     const history = getPrefetchedSessionHistory('session-1');
     expect(history.map((item) => item.info.id)).toEqual(['m1', 'm2', 'm3']);
@@ -252,13 +316,20 @@ describe('history window state', () => {
 
   it('clears every cached value for one session', () => {
     setSessionHistoryCursor('session-1', 'history-cursor');
+    flushSolid();
     setSessionHistoryPromptCursor('session-1', 'prompt-cursor');
+    flushSolid();
     setSessionHistoryPrompts('session-1', [entry('prompt-1')]);
+    flushSolid();
     cacheSessionHistoryPage('session-1', 'page-cursor', [entry('message-1')]);
+    flushSolid();
     markSessionHistoryLoadFailed('session-1', true);
+    flushSolid();
     setSessionHistoryCursor('session-2', 'other-cursor');
+    flushSolid();
 
     clearSessionMessageWindowState('session-1');
+    flushSolid();
 
     expect(getSessionHistoryCursor('session-1')).toBeUndefined();
     expect(getSessionHistoryPromptCursor('session-1')).toBeUndefined();
@@ -272,10 +343,12 @@ describe('history window state', () => {
   it('evicts the least recently used inactive session state', () => {
     for (let index = 0; index < MESSAGE_HISTORY_CACHE_SESSION_LIMIT; index += 1) {
       setSessionHistoryCursor(`session-${index}`, `cursor-${index}`);
+      flushSolid();
     }
     expect(getSessionHistoryCursor('session-0')).toBe('cursor-0');
 
     setSessionHistoryCursor('session-overflow', 'cursor-overflow');
+    flushSolid();
 
     expect(getSessionHistoryCursor('session-0')).toBe('cursor-0');
     expect(getSessionHistoryCursor('session-1')).toBeUndefined();
@@ -285,6 +358,7 @@ describe('history window state', () => {
   it('bounds prefetched history pages across cursors', () => {
     for (let index = 0; index <= MESSAGE_HISTORY_PAGE_CACHE_LIMIT; index += 1) {
       cacheSessionHistoryPage('session-1', `cursor-${index}`, [entry(`message-${index}`)]);
+      flushSolid();
     }
 
     expect(takeCachedSessionHistoryPage('session-1', 'cursor-0')).toBeUndefined();
@@ -301,6 +375,7 @@ describe('mergeOlderHistory', () => {
     const olderDuplicate = entry('m2');
     // SAFETY: The fixture provides the Part fields read by this statement.
     olderDuplicate.parts = [{ id: 'old-part' } as Part];
+    flushSolid();
 
     const merged = mergeOlderHistory(current, [entry('m1'), olderDuplicate]);
 

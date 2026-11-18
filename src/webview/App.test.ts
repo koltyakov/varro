@@ -1,5 +1,7 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 
 // SAFETY: The fixture provides the Error | null fields read by this statement.
 const appMocks = vi.hoisted(() => ({
@@ -77,47 +79,72 @@ function mountAppRoot() {
 describe('AppRoot', () => {
   beforeEach(() => {
     resetDefaultAppState();
+    flushSolid();
     resetProviderConnectionState();
+    flushSolid();
     appMocks.ralphError.current = null;
+    flushSolid();
     ralphStore.setShowRalphForm(false);
+    flushSolid();
     appMocks.cleanupBridge.mockReset();
+    flushSolid();
     appMocks.logError.mockReset();
+    flushSolid();
     appMocks.postMessage.mockReset().mockReturnValue(true);
+    flushSolid();
     appMocks.useOpenCode.mockReset();
+    flushSolid();
     appMocks.chatMountCount = 0;
+    flushSolid();
     container = document.createElement('div');
+    flushSolid();
     document.body.appendChild(container);
+    flushSolid();
   });
 
   afterEach(() => {
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
+    flushSolid();
     container?.remove();
+    flushSolid();
     container = null;
+    flushSolid();
     resetDefaultAppState();
+    flushSolid();
     resetProviderConnectionState();
+    flushSolid();
     vi.useRealTimers();
+    flushSolid();
   });
 
   it('does not reset singleton state during render', () => {
     mountAppRoot();
+    flushSolid();
 
-    setState('serverStatus', { state: 'error', message: 'boom' });
-    setState('activeSessionId', 'session-1');
-    setState('messages', [
-      {
-        info: {
-          id: 'message-1',
-          sessionID: 'session-1',
-          role: 'user',
-          time: { created: 0 },
-          agent: 'build',
-          model: { providerID: 'openai', modelID: 'gpt-5' },
+    setState(storePath('serverStatus', { state: 'error', message: 'boom' }));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('messages', [
+        {
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            role: 'user',
+            time: { created: 0 },
+            agent: 'build',
+            model: { providerID: 'openai', modelID: 'gpt-5' },
+          },
+          parts: [],
         },
-        parts: [],
-      },
-    ]);
+      ])
+    );
+    flushSolid();
     setError('test error');
+    flushSolid();
 
     expect(state.serverStatus).toEqual({ state: 'error', message: 'boom' });
     expect(state.serverStatus.state).toBe('error');
@@ -126,8 +153,11 @@ describe('AppRoot', () => {
     const dispose = cleanup;
     if (!dispose) throw new Error('Expected AppRoot to be mounted');
     dispose();
+    flushSolid();
     cleanup = undefined;
+    flushSolid();
     mountAppRoot();
+    flushSolid();
 
     expect(state.serverStatus).toEqual({ state: 'error', message: 'boom' });
     expect(state.activeSessionId).toBe('session-1');
@@ -136,17 +166,22 @@ describe('AppRoot', () => {
 
   it('cleans up the bridge only when the Solid root is disposed', () => {
     mountAppRoot();
+    flushSolid();
 
     expect(appMocks.cleanupBridge).not.toHaveBeenCalled();
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
+    flushSolid();
 
     expect(appMocks.cleanupBridge).toHaveBeenCalledOnce();
   });
 
   it('shows a loading screen until the recent view is restored', () => {
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
     mountAppRoot();
+    flushSolid();
 
     expect(container?.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe(
       'Loading workspace'
@@ -161,22 +196,28 @@ describe('AppRoot', () => {
     expect(container?.textContent).not.toContain('New Chat');
 
     setConnectionInitialized(true);
+    flushSolid();
 
     expect(container?.querySelector('[role="status"]')).toBeNull();
     expect(container?.textContent).toContain('New Chat');
   });
 
   it('opens provider management and add dialog only after empty-provider startup is ready', () => {
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
-    setState('providersLoaded', true);
-    setState('providers', []);
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
+    setState(storePath('providersLoaded', true));
+    flushSolid();
+    setState(storePath('providers', []));
+    flushSolid();
     mountAppRoot();
+    flushSolid();
 
     expect(showModels()).toBe(false);
     expect(providerConnectionRequest()).toBeNull();
     expect(appMocks.chatMountCount).toBe(0);
 
     setConnectionInitialized(true);
+    flushSolid();
 
     expect(appMocks.chatMountCount).toBe(1);
     expect(container?.textContent).not.toContain('No providers configured');
@@ -185,47 +226,66 @@ describe('AppRoot', () => {
     expect(request).not.toBeNull();
 
     setShowModels(false);
-    setState('serverReconnecting', true);
+    flushSolid();
+    setState(storePath('serverReconnecting', true));
+    flushSolid();
     setConnectionInitialized(false);
+    flushSolid();
     setConnectionInitialized(true);
-    setState('serverReconnecting', false);
+    flushSolid();
+    setState(storePath('serverReconnecting', false));
+    flushSolid();
     expect(showModels()).toBe(false);
     expect(providerConnectionRequest()).toBe(request);
     expect(appMocks.chatMountCount).toBe(1);
   });
 
   it('shows plugin activation waiting without exposing an uninitialized chat', () => {
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
     mountAppRoot();
+    flushSolid();
     setStartupWaitingForPlugins(true);
+    flushSolid();
     expect(container?.querySelector('[role="status"]')?.textContent).toContain(
       'Waiting for OpenCode plugins to activate'
     );
     expect(appMocks.chatMountCount).toBe(0);
     setStartupWaitingForPlugins(false);
+    flushSolid();
     setConnectionInitialized(true);
+    flushSolid();
     expect(container?.textContent).not.toContain('Waiting for OpenCode plugins to activate');
     expect(appMocks.chatMountCount).toBe(1);
   });
 
   it('shows OpenCode-reported addon failures separately from the unknown activation cause', () => {
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
     mountAppRoot();
+    flushSolid();
     setStartupWaitingForPlugins(true);
+    flushSolid();
     expect(container?.textContent).toContain('OpenCode has not identified which addon');
     setStartupAddonWarning(
       'OpenCode also reports: MCP "atlassian" timed out. These failures may be separate from plugin activation.'
     );
+    flushSolid();
     expect(container?.textContent).toContain('MCP "atlassian" timed out');
     expect(container?.textContent).toContain('may be separate');
   });
 
   it('does not open provider setup for configured providers', () => {
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
-    setState('providersLoaded', true);
-    setState('providers', [{ id: 'openai', name: 'OpenAI', source: 'api', models: {} }]);
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
+    setState(storePath('providersLoaded', true));
+    flushSolid();
+    setState(storePath('providers', [{ id: 'openai', name: 'OpenAI', source: 'api', models: {} }]));
+    flushSolid();
     setConnectionInitialized(true);
+    flushSolid();
     mountAppRoot();
+    flushSolid();
 
     expect(showModels()).toBe(false);
     expect(providerConnectionRequest()).toBeNull();
@@ -233,15 +293,21 @@ describe('AppRoot', () => {
   });
 
   it('keeps the mounted chat visible while a running server reconnects', () => {
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
     setConnectionInitialized(true);
+    flushSolid();
     mountAppRoot();
+    flushSolid();
 
     expect(appMocks.chatMountCount).toBe(1);
 
-    setState('serverReconnecting', true);
-    setState('serverStatus', { state: 'starting' });
+    setState(storePath('serverReconnecting', true));
+    flushSolid();
+    setState(storePath('serverStatus', { state: 'starting' }));
+    flushSolid();
     setConnectionInitialized(false);
+    flushSolid();
 
     expect(container?.textContent).toContain('New Chat');
     const reconnectToast = document.body.querySelector<HTMLElement>('.session-action-feedback');
@@ -255,35 +321,44 @@ describe('AppRoot', () => {
     ).toContain(wifiIcon);
     expect(appMocks.chatMountCount).toBe(1);
 
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
     setConnectionInitialized(true);
-    setState('serverReconnecting', false);
+    flushSolid();
+    setState(storePath('serverReconnecting', false));
+    flushSolid();
 
     expect(document.body.querySelector('.session-action-feedback')).toBeNull();
     expect(appMocks.chatMountCount).toBe(1);
   });
 
   it('shows the animated logo, then loading, then the restored chat', () => {
-    setState('serverStatus', { state: 'stopped' });
-    setState('emptyStateLogoUri', 'https://example.test/varro.png');
+    setState(storePath('serverStatus', { state: 'stopped' }));
+    flushSolid();
+    setState(storePath('emptyStateLogoUri', 'https://example.test/varro.png'));
+    flushSolid();
     mountAppRoot();
+    flushSolid();
 
     expect(container?.querySelector('.server-status-detecting-logo')?.classList).toContain(
       'animate-pulse-soft'
     );
     expect(appMocks.chatMountCount).toBe(0);
 
-    setState('serverStatus', { state: 'starting' });
+    setState(storePath('serverStatus', { state: 'starting' }));
+    flushSolid();
     expect(container?.querySelector('.server-status-detecting-logo')).toBeNull();
     expect(container?.textContent).toContain('Connecting to OpenCode...');
     expect(appMocks.chatMountCount).toBe(0);
 
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
     expect(container?.querySelector('[aria-label="Loading workspace"]')).not.toBeNull();
     expect(container?.querySelector('.server-status-detecting-logo')).toBeNull();
     expect(appMocks.chatMountCount).toBe(0);
 
     setConnectionInitialized(true);
+    flushSolid();
     expect(container?.querySelector('[aria-label="Loading workspace"]')).toBeNull();
     expect(appMocks.chatMountCount).toBe(1);
   });
@@ -291,53 +366,75 @@ describe('AppRoot', () => {
   it.each([null, '/varro/scratch'])(
     'shows chat with no open folder and working directory %s',
     (workspacePath) => {
-      setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+      setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+      flushSolid();
       setConnectionInitialized(true);
-      setState('editorContext', {
-        ...state.editorContext,
-        workspacePath,
-        workspaceDirectory: workspacePath,
-        workspaceFolders: [],
-      });
+      flushSolid();
+      setState(
+        storePath('editorContext', {
+          ...state.editorContext,
+          workspacePath,
+          workspaceDirectory: workspacePath,
+          workspaceFolders: [],
+        })
+      );
+      flushSolid();
       mountAppRoot();
+      flushSolid();
 
       expect(container?.textContent).not.toContain('Open a folder to use Varro');
       expect(container?.textContent).toContain('New Chat');
       expect(appMocks.chatMountCount).toBe(1);
-      setState('editorContext', {
-        ...state.editorContext,
-        workspacePath: '/repo',
-        workspaceDirectory: '/repo',
-        workspaceFolders: [{ name: 'repo', path: '/repo' }],
-      });
+      setState(
+        storePath('editorContext', {
+          ...state.editorContext,
+          workspacePath: '/repo',
+          workspaceDirectory: '/repo',
+          workspaceFolders: [{ name: 'repo', path: '/repo' }],
+        })
+      );
+      flushSolid();
       expect(appMocks.chatMountCount).toBe(1);
-      setState('editorContext', {
-        ...state.editorContext,
-        workspacePath: '/varro/scratch',
-        workspaceDirectory: '/varro/scratch',
-        workspaceFolders: [],
-      });
+      setState(
+        storePath('editorContext', {
+          ...state.editorContext,
+          workspacePath: '/varro/scratch',
+          workspaceDirectory: '/varro/scratch',
+          workspaceFolders: [],
+        })
+      );
+      flushSolid();
       expect(container?.textContent).toContain('New Chat');
       expect(appMocks.chatMountCount).toBe(1);
     }
   );
 
   it('keeps normal startup and recovery screens available without an open folder', () => {
-    setState('editorContext', {
-      ...state.editorContext,
-      workspacePath: '/varro/scratch',
-      workspaceDirectory: '/varro/scratch',
-      workspaceFolders: [],
-    });
-    setState('serverStatus', { state: 'starting' });
+    setState(
+      storePath('editorContext', {
+        ...state.editorContext,
+        workspacePath: '/varro/scratch',
+        workspaceDirectory: '/varro/scratch',
+        workspaceFolders: [],
+      })
+    );
+    flushSolid();
+    setState(storePath('serverStatus', { state: 'starting' }));
+    flushSolid();
     mountAppRoot();
+    flushSolid();
     expect(container?.textContent).toContain('Connecting to OpenCode...');
-    setState('serverStatus', { state: 'error', message: 'Failed to bind local server port' });
+    setState(
+      storePath('serverStatus', { state: 'error', message: 'Failed to bind local server port' })
+    );
+    flushSolid();
     expect(container?.textContent).toContain('Failed to bind local server port');
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
     expect(container?.querySelector('[aria-label="Loading workspace"]')).not.toBeNull();
     expect(appMocks.chatMountCount).toBe(0);
     setConnectionInitialized(true);
+    flushSolid();
     expect(container?.textContent).toContain('New Chat');
     expect(appMocks.chatMountCount).toBe(1);
   });
@@ -346,6 +443,7 @@ describe('AppRoot', () => {
     appMocks.useOpenCode.mockImplementationOnce(() => {
       throw new Error('initialization failed');
     });
+    flushSolid();
 
     expect(() => mountAppRoot()).not.toThrow();
     expect(container?.textContent).toContain('Something went wrong');
@@ -367,9 +465,12 @@ describe('AppRoot', () => {
       (button) => button.textContent?.trim() === 'Reload sidebar'
     );
     reloadButton?.click();
+    flushSolid();
     expect(appMocks.postMessage).toHaveBeenCalledWith({ type: 'webview/reload' });
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
+    flushSolid();
     expect(appMocks.cleanupBridge).toHaveBeenCalledOnce();
   });
 
@@ -377,6 +478,7 @@ describe('AppRoot', () => {
     appMocks.useOpenCode.mockImplementationOnce(() => {
       throw { reason: 'invalid startup state' };
     });
+    flushSolid();
 
     expect(() => mountAppRoot()).not.toThrow();
     expect(container?.textContent).toContain('{"reason":"invalid startup state"}');
@@ -391,6 +493,7 @@ describe('AppRoot', () => {
     appMocks.useOpenCode.mockImplementationOnce(() => {
       throw undefined;
     });
+    flushSolid();
 
     expect(() => mountAppRoot()).not.toThrow();
     expect(container?.textContent).toContain('Something went wrongundefined');
@@ -405,6 +508,7 @@ describe('AppRoot', () => {
     appMocks.useOpenCode.mockImplementationOnce(() => {
       throw Promise.resolve();
     });
+    flushSolid();
 
     expect(() => mountAppRoot()).not.toThrow();
     expect(container?.textContent).toContain('[object Promise]');
@@ -416,28 +520,37 @@ describe('AppRoot', () => {
 
   it('keeps RalphForm failures inside the root boundary', async () => {
     appMocks.ralphError.current = new Error('ralph failed');
+    flushSolid();
     ralphStore.setShowRalphForm(true);
+    flushSolid();
 
     expect(() => mountAppRoot()).not.toThrow();
     await vi.waitFor(() => {
       expect(container?.textContent).toContain('Something went wrong');
       expect(container?.textContent).toContain('ralph failed');
     });
+    flushSolid();
   });
 
   it('renders RalphForm synchronously the first time it is opened', () => {
     ralphStore.setShowRalphForm(true);
+    flushSolid();
 
     mountAppRoot();
+    flushSolid();
 
     expect(container?.textContent).toContain('Ralph Form');
   });
 
   it('shows app errors in a toast and runs its retry action', () => {
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
     setConnectionInitialized(true);
+    flushSolid();
     setError('Failed to send message');
+    flushSolid();
     mountAppRoot();
+    flushSolid();
 
     const errorToast = document.body.querySelector<HTMLElement>('.session-action-feedback');
     expect(errorToast?.textContent).toContain('Failed to send message');
@@ -448,27 +561,35 @@ describe('AppRoot', () => {
 
     const retry = vi.fn();
     setErrorRetry(retry);
+    flushSolid();
     const retryButton = Array.from(errorToast?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent?.trim() === 'Retry'
     );
     expect(retryButton).toBeDefined();
 
     retryButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(retry).toHaveBeenCalledTimes(1);
 
     errorToast
       ?.querySelector<HTMLButtonElement>('[aria-label="Dismiss error"]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(document.body.querySelector('.session-action-feedback')).toBeNull();
   });
 
   it('shows transient warnings with warning semantics', () => {
     vi.useFakeTimers();
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    flushSolid();
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
     setConnectionInitialized(true);
+    flushSolid();
     mountAppRoot();
+    flushSolid();
 
     showSessionActionFeedback('This image is already attached', 'warning');
+    flushSolid();
 
     const warningToast = document.body.querySelector<HTMLElement>('.session-action-feedback');
     expect(warningToast?.textContent).toContain('This image is already attached');
@@ -481,41 +602,52 @@ describe('AppRoot', () => {
     expect(warningToast?.querySelector('.session-action-feedback-glyph')).toBeNull();
 
     vi.advanceTimersByTime(1_600);
+    flushSolid();
     expect(document.body.querySelector('.session-action-feedback')).not.toBeNull();
 
     vi.advanceTimersByTime(3_400);
+    flushSolid();
     expect(warningToast?.classList.contains('is-leaving')).toBe(true);
 
     vi.advanceTimersByTime(160);
+    flushSolid();
     expect(document.body.querySelector('.session-action-feedback')).toBeNull();
   });
 
   it('anchors image feedback above the input without moving other feedback', () => {
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
     setConnectionInitialized(true);
+    flushSolid();
     mountAppRoot();
+    flushSolid();
     const inputShell = document.createElement('div');
     container?.appendChild(inputShell);
+    flushSolid();
 
     showSessionActionFeedback('This image is already attached', 'warning', inputShell);
+    flushSolid();
 
     const warningToast = inputShell.querySelector<HTMLElement>('.session-action-feedback');
     expect(warningToast?.textContent).toContain('This image is already attached');
     expect(warningToast?.classList.contains('is-input-anchored')).toBe(true);
     expect(warningToast?.getAttribute('role')).toBe('status');
-    expect(warningToast?.parentElement?.style.display).toBe('contents');
+    expect(warningToast?.parentElement).toBe(inputShell);
     expect(document.body.querySelectorAll('.session-action-feedback')).toHaveLength(1);
 
     setError('Failed to send message');
+    flushSolid();
     expect(inputShell.querySelector('.session-action-feedback')).toBeNull();
     const errorToast = document.body.querySelector<HTMLElement>('.session-action-feedback');
     expect(errorToast?.textContent).toContain('Failed to send message');
     expect(errorToast?.classList.contains('is-input-anchored')).toBe(false);
 
     setError(null);
+    flushSolid();
     expect(inputShell.querySelector('.session-action-feedback')).not.toBeNull();
 
     showSessionActionFeedback('Session renamed');
+    flushSolid();
     expect(inputShell.querySelector('.session-action-feedback')).toBeNull();
     const successToast = document.body.querySelector<HTMLElement>('.session-action-feedback');
     expect(successToast?.textContent).toContain('Session renamed');
@@ -524,9 +656,11 @@ describe('AppRoot', () => {
 
   it('clears the retry action whenever the error changes', () => {
     setErrorRetry(vi.fn());
+    flushSolid();
     expect(errorRetry()).not.toBeNull();
 
     setError('another failure');
+    flushSolid();
     expect(errorRetry()).toBeNull();
   });
 });

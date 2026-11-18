@@ -1,4 +1,4 @@
-import { onCleanup, onMount } from 'solid-js';
+import { onSettled } from 'solid-js';
 import { observePopupViewport } from '../../lib/popup-position';
 
 export function FollowupActionsMenu(props: {
@@ -11,8 +11,10 @@ export function FollowupActionsMenu(props: {
 }) {
   let menu!: HTMLDivElement;
   const previousFocus = document.activeElement;
-  onMount(() => {
-    onCleanup(
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
+    cleanups.push(
       observePopupViewport(menu, () => {
         const rect = menu.getBoundingClientRect();
         menu.style.left = `${Math.max(8, Math.min(props.x, window.innerWidth - rect.width - 8))}px`;
@@ -31,13 +33,22 @@ export function FollowupActionsMenu(props: {
     window.addEventListener('pointerdown', outside, true);
     window.addEventListener('contextmenu', outside, true);
     window.addEventListener('focusin', outside);
-    onCleanup(() => {
+    cleanups.push(() => {
       window.removeEventListener('pointerdown', outside, true);
       window.removeEventListener('contextmenu', outside, true);
       window.removeEventListener('focusin', outside);
-      if (menu.contains(document.activeElement) && previousFocus instanceof HTMLElement)
+      const lostFocusOnRemoval = !menu.isConnected && document.activeElement === document.body;
+      if (
+        (menu.contains(document.activeElement) || lostFocusOnRemoval) &&
+        previousFocus instanceof HTMLElement &&
+        previousFocus.isConnected
+      )
         previousFocus.focus({ preventScroll: true });
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
   return (
     <div

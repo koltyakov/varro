@@ -1,4 +1,3 @@
-import { batch } from 'solid-js';
 import type { QuestionAnswer, PermissionMode } from '../../../shared/protocol';
 import type { Permission, QuestionRequest, Session } from '../../types';
 
@@ -15,7 +14,7 @@ type PermissionModeFreshness = {
   isDraftCurrent(): boolean;
   applyOptimistic?: boolean;
   getConfirmedMode?(): PermissionMode;
-  onConfirmed?(session: Session): void;
+  onConfirmed?(session: Session): boolean | void;
 };
 
 function isMissingPermissionRequestError<T>(error: T): boolean {
@@ -31,11 +30,11 @@ function applyPermissionModeSelection(
   sessionId: string | null | undefined,
   mode: PermissionMode
 ) {
-  batch(() => {
+  (() => {
     deps.setPermissionModeForSession(sessionId, mode);
     deps.setDraftPermissionMode(mode);
     deps.saveProjectPermissionMode(mode);
-  });
+  })();
 }
 
 export async function respondPermissionWithDependencies(
@@ -182,7 +181,7 @@ export async function updatePermissionModeForSessionWithDependencies(
     const session = await deps.updateSessionPermission(sessionId, mode, {
       permission: permissionRules,
     });
-    freshness.onConfirmed?.(session);
+    if (freshness.onConfirmed?.(session) === false) return;
     if (!freshness.isSessionCurrent()) return;
     deps.upsertSession(session);
   } catch (err) {
@@ -190,7 +189,7 @@ export async function updatePermissionModeForSessionWithDependencies(
     const draftCurrent = freshness.isDraftCurrent();
     if (!sessionCurrent && !draftCurrent) return;
     const confirmedMode = freshness.getConfirmedMode?.();
-    batch(() => {
+    (() => {
       if (sessionCurrent) {
         deps.setPermissionModeForSession(sessionId, confirmedMode ?? previousMode);
       }
@@ -199,7 +198,7 @@ export async function updatePermissionModeForSessionWithDependencies(
         deps.setDraftPermissionMode(rollbackMode);
         deps.saveProjectPermissionMode(rollbackMode);
       }
-    });
+    })();
     deps.setError(err instanceof Error ? err.message : 'Failed to update permissions');
     return;
   }
@@ -257,7 +256,8 @@ type SessionApprovalDependencies = {
   setPendingSessionPermissionMode?(
     sessionId: string,
     mode: PermissionMode | null,
-    generation?: number
+    generation?: number,
+    outcome?: 'confirmed'
   ): number | null;
 };
 
@@ -400,15 +400,20 @@ export class SessionApprovalOperations {
           getConfirmedMode: () => queue.confirmedMode,
           onConfirmed: () => {
             queue.confirmedMode = mode;
-            if (this.permissionModeGenerationBySession.get(sessionKey) === generation) {
-              this.deps.setPendingSessionPermissionMode?.(
-                sessionId,
-                null,
-                pendingGeneration ?? undefined
+            if (this.permissionModeGenerationBySession.get(sessionKey) !== generation) return false;
+            pendingCleared = true;
+            if (pendingGeneration != null) {
+              return (
+                this.deps.setPendingSessionPermissionMode?.(
+                  sessionId,
+                  null,
+                  pendingGeneration,
+                  'confirmed'
+                ) === pendingGeneration
               );
-              this.deps.setPermissionModeForSession(sessionId, mode);
-              pendingCleared = true;
             }
+            this.deps.setPermissionModeForSession(sessionId, mode);
+            return true;
           },
         }
       )

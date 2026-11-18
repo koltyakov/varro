@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { HostActions } from './HostActions';
 import { registerHostExtension } from '../host/extensions';
 import { error, setError } from '../lib/state';

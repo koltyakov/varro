@@ -1,4 +1,4 @@
-import { batch, createSignal } from 'solid-js';
+import { createSignal } from 'solid-js';
 import type { MessageEntry } from '../types';
 import { HistoryCacheBudget } from './history-cache-budget';
 
@@ -52,10 +52,12 @@ export function getSessionHistoryPromptEntries(
 }
 
 export function setSessionHistoryPrompts(sessionId: string, prompts: MessageEntry[]) {
-  const next = new Map(historyPromptsBySession());
-  if (prompts.length > 0) next.set(sessionId, prompts);
-  else next.delete(sessionId);
-  setHistoryPromptsBySession(next);
+  setHistoryPromptsBySession((current) => {
+    const next = new Map(current);
+    if (prompts.length > 0) next.set(sessionId, prompts);
+    else next.delete(sessionId);
+    return next;
+  });
   if (prompts.length > 0) touchHistorySession(sessionId);
 }
 
@@ -181,12 +183,13 @@ export function isSessionHistoryTruncated(sessionId: string | null | undefined):
 }
 
 export function markSessionHistoryTruncated(sessionId: string, truncated: boolean) {
-  const current = truncatedSessionIds();
-  if (current.has(sessionId) === truncated) return;
-  const next = new Set(current);
-  if (truncated) next.add(sessionId);
-  else next.delete(sessionId);
-  setTruncatedSessionIds(next);
+  setTruncatedSessionIds((current) => {
+    if (current.has(sessionId) === truncated) return current;
+    const next = new Set(current);
+    if (truncated) next.add(sessionId);
+    else next.delete(sessionId);
+    return next;
+  });
   if (truncated) touchHistorySession(sessionId);
 }
 
@@ -196,12 +199,13 @@ export function isSessionHistoryLoadFailed(sessionId: string | null | undefined)
 }
 
 export function markSessionHistoryLoadFailed(sessionId: string, failed: boolean) {
-  const current = historyLoadFailedSessionIds();
-  if (current.has(sessionId) === failed) return;
-  const next = new Set(current);
-  if (failed) next.add(sessionId);
-  else next.delete(sessionId);
-  setHistoryLoadFailedSessionIds(next);
+  setHistoryLoadFailedSessionIds((current) => {
+    if (current.has(sessionId) === failed) return current;
+    const next = new Set(current);
+    if (failed) next.add(sessionId);
+    else next.delete(sessionId);
+    return next;
+  });
   if (failed) touchHistorySession(sessionId);
 }
 
@@ -238,14 +242,14 @@ function updateSessionHistoryCursor(sessionId: string, cursor?: string) {
 }
 
 export function clearSessionMessageWindowState(sessionId: string) {
-  batch(() => clearSessionMessageWindowStateInternal(sessionId));
+  (() => clearSessionMessageWindowStateInternal(sessionId))();
 }
 
 export function resetSessionMessageWindowForRefetch(sessionId: string) {
-  batch(() => {
+  (() => {
     clearSessionMessageWindowStateInternal(sessionId);
     pendingMessageWindowResets.add(sessionId);
-  });
+  })();
 }
 
 export function isSessionMessageWindowResetPending(sessionId: string): boolean {
@@ -358,24 +362,24 @@ function clearSessionMessageWindowStateInternal(sessionId: string) {
   historyCacheBudget.delete(sessionId);
   clearHistoryPageRecency(sessionId);
 
-  const prompts = historyPromptsBySession();
-  if (prompts.has(sessionId)) {
+  setHistoryPromptsBySession((prompts) => {
+    if (!prompts.has(sessionId)) return prompts;
     const next = new Map(prompts);
     next.delete(sessionId);
-    setHistoryPromptsBySession(next);
-  }
-  const truncated = truncatedSessionIds();
-  if (truncated.has(sessionId)) {
+    return next;
+  });
+  setTruncatedSessionIds((truncated) => {
+    if (!truncated.has(sessionId)) return truncated;
     const next = new Set(truncated);
     next.delete(sessionId);
-    setTruncatedSessionIds(next);
-  }
-  const failed = historyLoadFailedSessionIds();
-  if (failed.has(sessionId)) {
+    return next;
+  });
+  setHistoryLoadFailedSessionIds((failed) => {
+    if (!failed.has(sessionId)) return failed;
     const next = new Set(failed);
     next.delete(sessionId);
-    setHistoryLoadFailedSessionIds(next);
-  }
+    return next;
+  });
   if (removedPages) setPrefetchedHistoryVersion((version) => version + 1);
 }
 

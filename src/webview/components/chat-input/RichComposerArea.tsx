@@ -1,14 +1,5 @@
-import {
-  For,
-  Show,
-  batch,
-  createEffect,
-  createMemo,
-  createSignal,
-  onMount,
-  onCleanup,
-} from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { createEffect, For, Show, createMemo, createSignal, onSettled, onCleanup } from 'solid-js';
+import { Portal } from '@solidjs/web';
 import { splitExternalLinkText } from '../../lib/external-link';
 import { emptyPageIcon, folderIcon, gymIcon, messageTextIcon } from '../../lib/ui-icons';
 import { getFileTypeIcon } from '../FileTypeIcon';
@@ -99,7 +90,10 @@ export function RichComposerArea(props: {
   onInput: (text: string, cursorOffset: number) => void;
   onKeyDown: (e: KeyboardEvent) => void;
   onPaste: (e: ClipboardEvent) => void;
-  onPasteInsertion?: (e: ClipboardEvent, insertion: RichComposerPasteInsertion | null) => void;
+  onPasteInsertion?: (
+    e: ClipboardEvent,
+    insertion: RichComposerPasteInsertion | null
+  ) => RichComposerPasteInsertion | void;
   onFocus: () => void;
   onBlur: () => void;
   onClick: (cursorOffset: number, selectionEnd: number) => void;
@@ -115,7 +109,14 @@ export function RichComposerArea(props: {
 }) {
   let editorEl: HTMLDivElement | undefined;
   const [isComposing, setIsComposing] = createSignal(false);
-  createEffect(() => props.onCompositionChange?.(isComposing()));
+  let composing = false;
+  function setComposing(value: boolean) {
+    composing = value;
+    setIsComposing(value);
+  }
+  createEffect(isComposing, (active) => {
+    props.onCompositionChange?.(active);
+  });
   const promptSuggestion = () =>
     props.isFocused && !isComposing() && !props.showCompletionMenu
       ? (props.promptSuggestion ?? '')
@@ -144,33 +145,39 @@ export function RichComposerArea(props: {
   let chipMenuRef: HTMLDivElement | undefined;
   const closeChipMenu = () => setChipMenu(null);
 
-  createEffect(() => {
-    const menu = chipMenu();
-    if (!menu) return;
-    if (!props.chips.some((chip) => chip.id === menu.chipId)) {
-      closeChipMenu();
-      return;
+  createEffect(
+    () => {
+      const menu = chipMenu();
+      return menu && props.chips.some((chip) => chip.id === menu.chipId);
+    },
+    (valid) => {
+      if (valid === null) return;
+      if (!valid) {
+        closeChipMenu();
+        return;
+      }
+      const closeIfOutside = (event: Event) => {
+        if (event.target instanceof Node && chipMenuRef?.contains(event.target)) return;
+        closeChipMenu();
+      };
+      window.addEventListener('contextmenu', closeIfOutside, true);
+      window.addEventListener('pointerdown', closeIfOutside, true);
+      window.addEventListener('focusin', closeIfOutside);
+      const unregisterDismiss = registerComposerOverlayDismiss(closeChipMenu);
+      queueMicrotask(() => {
+        if (!chipMenuRef) return;
+        clampPopupToViewport(chipMenuRef);
+        chipMenuRef.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+      });
+
+      return () => {
+        window.removeEventListener('contextmenu', closeIfOutside, true);
+        window.removeEventListener('pointerdown', closeIfOutside, true);
+        window.removeEventListener('focusin', closeIfOutside);
+        unregisterDismiss();
+      };
     }
-    const closeIfOutside = (event: Event) => {
-      if (event.target instanceof Node && chipMenuRef?.contains(event.target)) return;
-      closeChipMenu();
-    };
-    window.addEventListener('contextmenu', closeIfOutside, true);
-    window.addEventListener('pointerdown', closeIfOutside, true);
-    window.addEventListener('focusin', closeIfOutside);
-    const unregisterDismiss = registerComposerOverlayDismiss(closeChipMenu);
-    onCleanup(() => {
-      window.removeEventListener('contextmenu', closeIfOutside, true);
-      window.removeEventListener('pointerdown', closeIfOutside, true);
-      window.removeEventListener('focusin', closeIfOutside);
-      unregisterDismiss();
-    });
-    queueMicrotask(() => {
-      if (!chipMenuRef) return;
-      clampPopupToViewport(chipMenuRef);
-      chipMenuRef.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
-    });
-  });
+  );
 
   function handleContextMenu(event: MouseEvent) {
     const chipId =
@@ -196,38 +203,55 @@ export function RichComposerArea(props: {
   };
   onCleanup(hidePreview);
 
-  createEffect(() => {
-    const current = preview();
-    if (!current) return;
-    const image = props.chips.find((chip) => chip.id === current.chipId)?.previewImage;
-    if (!image) hidePreview();
-    else if (image.url !== current.image.url || image.alt !== current.image.alt)
-      setPreview({ ...current, image });
-  });
+  createEffect(
+    () => {
+      const current = preview();
+      if (!current) return;
+      const image = props.chips.find((chip) => chip.id === current.chipId)?.previewImage;
+      if (!image) return null;
+      if (image.url !== current.image.url || image.alt !== current.image.alt)
+        return { ...current, image };
+      return undefined;
+    },
+    (update) => {
+      if (update === null) hidePreview();
+      else if (update) setPreview(update);
+    }
+  );
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     if (editorEl) {
       props.editorRef(editorEl);
       if (props.centerCaret) {
         const observer = new ResizeObserver(scheduleCenteredCaret);
         observer.observe(editorEl);
-        onCleanup(() => observer.disconnect());
+        cleanups.push(() => observer.disconnect());
       }
     }
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
   onCleanup(() => {
     if (centeredCaretFrame !== undefined) cancelAnimationFrame(centeredCaretFrame);
   });
 
-  function getChipMap(): Map<string, RichComposerChip> {
+  function getChipMap(chips = props.chips): Map<string, RichComposerChip> {
     const map = new Map<string, RichComposerChip>();
-    for (const chip of props.chips) {
+    for (const chip of chips) {
       map.set(chip.textMarker, chip);
     }
     return map;
   }
 
-  function buildDom(text: string, chips: Map<string, RichComposerChip>): DocumentFragment {
+  function buildDom(
+    text: string,
+    chips: Map<string, RichComposerChip>,
+    pending: RichComposerPasteInsertion | undefined
+  ): DocumentFragment {
     const frag = document.createDocumentFragment();
     const tooltipTargets: Array<{ element: HTMLElement; text: string }> = [];
     const annotationTargets: Array<{ element: HTMLElement; annotation: ChatAnnotation }> = [];
@@ -239,7 +263,6 @@ export function RichComposerArea(props: {
     const pattern = sortedMarkers.length
       ? new RegExp(`(${sortedMarkers.map((m) => escapeRegex(m)).join('|')})`, 'g')
       : null;
-    const pending = props.pendingPaste;
     const segments =
       pending?.value === text ? [text.slice(0, pending.start), text.slice(pending.end)] : [text];
     for (const [segmentIndex, segment] of segments.entries()) {
@@ -816,22 +839,23 @@ export function RichComposerArea(props: {
     }
   }
 
-  function revealCaret(controlledCursorUpdate = false) {
-    if (
-      (!revealCaretAfterControlledInput && !controlledCursorUpdate && !props.centerCaret) ||
-      !editorEl
-    )
+  function revealCaret(center: boolean | undefined, controlledCursorUpdate = false) {
+    if ((!revealCaretAfterControlledInput && !controlledCursorUpdate && !center) || !editorEl)
       return;
     revealCaretAfterControlledInput = false;
-    if (props.centerCaret) {
-      scheduleCenteredCaret();
+    if (center) {
+      requestCenteredCaretFrame();
       return;
     }
     scrollCaretIntoView();
   }
 
   function scheduleCenteredCaret() {
-    if (!props.centerCaret || centeredCaretFrame !== undefined) return;
+    if (props.centerCaret) requestCenteredCaretFrame();
+  }
+
+  function requestCenteredCaretFrame() {
+    if (centeredCaretFrame !== undefined) return;
     centeredCaretFrame = requestAnimationFrame(() => {
       centeredCaretFrame = undefined;
       scrollCaretIntoView(true);
@@ -874,6 +898,7 @@ export function RichComposerArea(props: {
   }
 
   let lastSyncedValue = '';
+  let lastSyncedRequestedCursor: number | undefined;
   let lastSyncedChips: ReturnType<typeof chipSnapshot> | undefined;
   let lastSyncedPendingPaste: RichComposerPasteInsertion | undefined;
   // Compare image URLs by identity/value without serializing their base64 payload on each keypress.
@@ -900,7 +925,6 @@ export function RichComposerArea(props: {
           chip.compressible,
           chip.compressionHint,
         ]),
-    undefined,
     {
       equals: (previous, next) =>
         previous.length === next.length &&
@@ -910,101 +934,135 @@ export function RichComposerArea(props: {
     }
   );
 
-  createEffect(() => {
-    const text = props.value;
-    const pendingPaste = props.pendingPaste;
-    const pendingPasteChanged = pendingPaste !== lastSyncedPendingPaste;
-    const requestedCursor = props.cursorOffset;
-    const chips = chipSnapshot();
-    const isFocused = props.isFocused || document.activeElement === editorEl;
-    // The browser owns the DOM and selection until composition has been flushed.
-    // Keep tracking controlled props so deferred updates run when composition ends.
-    if (!editorEl || isComposing()) return;
+  createEffect(
+    () => {
+      const chipDefinitions = props.chips;
+      return {
+        text: props.value,
+        pendingPaste: props.pendingPaste,
+        requestedCursor: props.cursorOffset,
+        chips: chipSnapshot(),
+        chipDefinitions,
+        links: chipDefinitions
+          .filter((chip) => chip.type === 'external-link')
+          .map((chip) => chip.textMarker),
+        focused: props.isFocused,
+        centerCaret: props.centerCaret,
+        composing: isComposing(),
+      };
+    },
+    ({
+      text,
+      pendingPaste,
+      requestedCursor,
+      chips,
+      chipDefinitions,
+      links,
+      focused,
+      centerCaret,
+      composing: compositionActive,
+    }) => {
+      const pendingPasteChanged = pendingPaste !== lastSyncedPendingPaste;
+      const isFocused = focused || document.activeElement === editorEl;
+      // The browser owns the DOM and selection until composition has been flushed.
+      // Keep tracking controlled props so deferred updates run when composition ends.
+      if (!editorEl || compositionActive) return;
+      const requestedCursorChanged = requestedCursor !== lastSyncedRequestedCursor;
+      lastSyncedRequestedCursor = requestedCursor;
 
-    const textChanged = text !== lastSyncedValue;
-    const chipsChanged = chips !== lastSyncedChips;
-    const externalLinksOutOfSync = externalLinksNeedResync(editorEl, text, props.chips);
-    const hasExpectedExternalLinks = props.chips.some((chip) => chip.type === 'external-link');
-    const preserveEditedExternalLinks =
-      isFocused &&
-      hasExpectedExternalLinks &&
-      editorEl.querySelector('.composer-external-link') !== null;
-    const nativeInputAcknowledged =
-      nativeInputSync?.value === text &&
-      (requestedCursor == null || nativeInputSync.cursorOffset === requestedCursor);
-    nativeInputSync = undefined;
-    if (
-      nativeInputAcknowledged &&
-      !chipsChanged &&
-      !pendingPasteChanged &&
-      (!externalLinksOutOfSync || preserveEditedExternalLinks)
-    ) {
-      lastSyncedValue = text;
-      pendingControlledCursorReveal = false;
-      revealCaret();
-      return;
-    }
-
-    const textNeedsResync = needsResync(editorEl, text);
-    const domNeedsResync =
-      textNeedsResync || (externalLinksOutOfSync && !preserveEditedExternalLinks);
-
-    if (!textChanged && !chipsChanged && !pendingPasteChanged && !domNeedsResync) {
-      let cursorUpdated = false;
-      if (isFocused && requestedCursor != null && getCursorOffset() !== requestedCursor) {
-        setCursorOffset(Math.min(requestedCursor, text.length));
-        cursorUpdated = true;
+      const textChanged = text !== lastSyncedValue;
+      const chipsChanged = chips !== lastSyncedChips;
+      const externalLinksOutOfSync = externalLinksNeedResync(editorEl, text, links);
+      const hasExpectedExternalLinks = links.length > 0;
+      const preserveEditedExternalLinks =
+        isFocused &&
+        hasExpectedExternalLinks &&
+        editorEl.querySelector('.composer-external-link') !== null;
+      const nativeInputAcknowledged =
+        nativeInputSync?.value === text &&
+        (requestedCursor == null || nativeInputSync.cursorOffset === requestedCursor);
+      nativeInputSync = undefined;
+      if (
+        nativeInputAcknowledged &&
+        !chipsChanged &&
+        !pendingPasteChanged &&
+        (!externalLinksOutOfSync || preserveEditedExternalLinks)
+      ) {
+        lastSyncedValue = text;
+        pendingControlledCursorReveal = false;
+        revealCaret(centerCaret);
+        return;
       }
-      revealCaret(cursorUpdated && pendingControlledCursorReveal);
-      if (cursorUpdated) pendingControlledCursorReveal = false;
-      return;
-    }
 
-    lastSyncedValue = text;
-    lastSyncedChips = chips;
-    lastSyncedPendingPaste = pendingPaste;
-    if (pendingPasteChanged && isFocused) revealCaretAfterControlledInput = true;
-    const cursorOff =
-      textChanged && requestedCursor != null
-        ? requestedCursor
-        : isFocused
-          ? getCursorOffset()
-          : text.length;
-    const chipMap = getChipMap();
-    const frag = buildDom(text, chipMap);
-    editorEl.textContent = '';
-    editorEl.appendChild(frag);
-    syncEmptyState();
-    if (isFocused) {
-      setCursorOffset(Math.min(cursorOff, text.length));
+      const textNeedsResync = needsResync(editorEl, text);
+      const domNeedsResync =
+        textNeedsResync || (externalLinksOutOfSync && !preserveEditedExternalLinks);
+
+      if (!textChanged && !chipsChanged && !pendingPasteChanged && !domNeedsResync) {
+        let cursorUpdated = false;
+        const selection = getSelectionOffsets();
+        const canMoveCursor =
+          requestedCursorChanged || !selection || selection.start === selection.end;
+        if (
+          isFocused &&
+          requestedCursor != null &&
+          canMoveCursor &&
+          getCursorOffset() !== requestedCursor
+        ) {
+          setCursorOffset(Math.min(requestedCursor, text.length));
+          cursorUpdated = true;
+        }
+        revealCaret(centerCaret, cursorUpdated && pendingControlledCursorReveal);
+        if (cursorUpdated) pendingControlledCursorReveal = false;
+        return;
+      }
+
+      lastSyncedValue = text;
+      lastSyncedChips = chips;
+      lastSyncedPendingPaste = pendingPaste;
+      if (pendingPasteChanged && isFocused) revealCaretAfterControlledInput = true;
+      const cursorOff =
+        textChanged && requestedCursor != null
+          ? requestedCursor
+          : isFocused
+            ? getCursorOffset()
+            : text.length;
+      const chipMap = getChipMap(chipDefinitions);
+      const frag = buildDom(text, chipMap, pendingPaste);
+      editorEl.textContent = '';
+      editorEl.appendChild(frag);
+      syncEmptyState();
+      if (isFocused) {
+        setCursorOffset(Math.min(cursorOff, text.length));
+      }
+      // Deferred paste resolution can supply the new text before its cursor offset.
+      pendingControlledCursorReveal = textChanged && isFocused && !revealCaretAfterControlledInput;
+      revealCaret(centerCaret);
     }
-    // Deferred paste resolution can supply the new text before its cursor offset.
-    pendingControlledCursorReveal = textChanged && isFocused && !revealCaretAfterControlledInput;
-    revealCaret();
-  });
+  );
 
   function finishComposition(event?: InputEvent) {
     // Do not let the sync effect restore stale controlled text before onInput
     // publishes the browser's committed value.
-    batch(() => {
-      setIsComposing(false);
+    (() => {
+      setComposing(false);
       handleInput(event);
-    });
+    })();
   }
 
   function handleInput(event?: InputEvent) {
     if (event?.isComposing) {
-      setIsComposing(true);
+      setComposing(true);
       return;
     }
-    if (isComposing()) {
+    if (composing) {
       // Chromium can omit compositionend after a dead-key composition is aborted.
       if (event?.isComposing === false) finishComposition(event);
       return;
     }
     if (!editorEl) return;
     if (event?.inputType === 'historyUndo' || event?.inputType === 'historyRedo') {
-      const frag = buildDom(props.value, getChipMap());
+      const frag = buildDom(props.value, getChipMap(), props.pendingPaste);
       editorEl.textContent = '';
       editorEl.appendChild(frag);
       lastSyncedValue = props.value;
@@ -1071,15 +1129,22 @@ export function RichComposerArea(props: {
     e.preventDefault();
     const nextValue = `${props.value.slice(0, insertionRange.start)}${text}${props.value.slice(insertionRange.end)}`;
     revealCaretAfterControlledInput = true;
-    batch(() => {
-      props.onInput(nextValue, insertionRange.start + text.length);
-      props.onPasteInsertion?.(e, {
-        start: insertionRange.start,
-        end: insertionRange.start + text.length,
-        text,
-        value: nextValue,
-      });
+    const end = insertionRange.start + text.length;
+    props.onInput(nextValue, end);
+    const pending = props.onPasteInsertion?.(e, {
+      start: insertionRange.start,
+      end,
+      text,
+      value: nextValue,
     });
+    // The native paste was prevented. Publish the editable text or the pending
+    // selection placeholder before returning control to the browser.
+    if (editorEl) {
+      editorEl.replaceChildren(buildDom(nextValue, getChipMap(), pending ?? undefined));
+      lastSyncedValue = nextValue;
+      syncEmptyState();
+      setCursorOffset(end);
+    }
   }
 
   function handleCopy(e: ClipboardEvent) {
@@ -1177,15 +1242,21 @@ export function RichComposerArea(props: {
     });
   }
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const handleSelectionChange = () => {
-      if (isComposing()) return;
+      if (composing) return;
       const selection = document.activeElement === editorEl ? getSelectionOffsets() : null;
       updateSelectedChips(selection);
       if (selection) props.onSelect(selection.start, selection.end);
     };
     document.addEventListener('selectionchange', handleSelectionChange);
-    onCleanup(() => document.removeEventListener('selectionchange', handleSelectionChange));
+    cleanups.push(() => document.removeEventListener('selectionchange', handleSelectionChange));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (
@@ -1197,7 +1268,7 @@ export function RichComposerArea(props: {
           props.editorRef(el);
         }}
         class="rich-composer"
-        contentEditable={true}
+        contenteditable="true"
         role="textbox"
         aria-label={props.ariaLabel ?? 'Message composer'}
         aria-multiline="true"
@@ -1214,7 +1285,7 @@ export function RichComposerArea(props: {
         onInput={handleInput}
         onContextMenu={handleContextMenu}
         onBeforeInput={(e) => {
-          if (isComposing() || e.isComposing) return;
+          if (composing || e.isComposing) return;
           // The editor DOM is rebuilt programmatically, so the browser's
           // native undo stack is unreliable; route history edits (context
           // menu / Edit menu undo) to the composer history instead.
@@ -1283,7 +1354,7 @@ export function RichComposerArea(props: {
           // Read the legacy field explicitly because modern key/code cannot identify it.
           const { keyCode }: { keyCode: number } = e;
           if (e.isComposing || keyCode === 229 || e.key === 'Dead') return;
-          if (isComposing()) finishComposition();
+          if (composing) finishComposition();
           if (moveToLineStart(e) || moveAcrossAtomicReference(e)) return;
           const removedTrailingLineBreak =
             e.key === 'Backspace' &&
@@ -1319,12 +1390,12 @@ export function RichComposerArea(props: {
           hidePreview();
         }}
         onFocus={() => {
-          if (isComposing()) finishComposition();
+          if (composing) finishComposition();
           props.onFocus();
           scheduleCenteredCaret();
         }}
         onBlur={() => {
-          if (isComposing()) finishComposition();
+          if (composing) finishComposition();
           props.onBlur();
         }}
         onClick={(e) => {
@@ -1339,14 +1410,14 @@ export function RichComposerArea(props: {
         }}
         onKeyUp={(e) => {
           historyHandledByKeydown = false;
-          if (isComposing() || e.isComposing) return;
+          if (composing || e.isComposing) return;
           const selection = getSelectionOffsets();
           if (selection) props.onKeyUp(selection.start, selection.end);
           scheduleCenteredCaret();
         }}
         onCompositionStart={() => {
           nativeInputSync = undefined;
-          setIsComposing(true);
+          setComposing(true);
         }}
         onCompositionEnd={() => finishComposition()}
         spellcheck={false}
@@ -1612,16 +1683,8 @@ function needsResync(el: HTMLElement, text: string): boolean {
   return extractText(el) !== text;
 }
 
-function externalLinksNeedResync(
-  editor: HTMLElement,
-  text: string,
-  chips: RichComposerChip[]
-): boolean {
-  const externalLinks = new Map(
-    chips
-      .filter((chip) => chip.type === 'external-link')
-      .map((chip) => [chip.textMarker, chip] as const)
-  );
+function externalLinksNeedResync(editor: HTMLElement, text: string, markers: string[]): boolean {
+  const externalLinks = new Set(markers);
   const actualMarkers = Array.from(
     editor.querySelectorAll<HTMLElement>('.composer-external-link'),
     (element) => element.textContent ?? ''

@@ -1,5 +1,5 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { createEffect, For, Show, createMemo, createSignal, untrack } from 'solid-js';
+import { Portal } from '@solidjs/web';
 import type {
   FollowupAction,
   FollowupSource,
@@ -167,11 +167,13 @@ export function FollowupSuggestions(props: {
     let optimisticPublished = false;
     const showSendError = () => {
       if (scope() !== sendScope || sourceKey() !== value.key) return;
-      if (optimisticPublished && !ready()) setReady(value);
-      if (ready() === value)
+      setReady((current) => {
+        if (current !== value && (!optimisticPublished || current !== null)) return current;
         setError(
           `Could not ${destination === 'queue' ? 'queue' : destination === 'new-session' ? 'run' : 'send'} this follow-up. Your main draft has not changed.`
         );
+        return value;
+      });
     };
     const validateBeforeSend = async () => {
       const latest = await client.varro.followups(value.sessionId, value.source, {
@@ -292,143 +294,167 @@ export function FollowupSuggestions(props: {
     }
   }
 
-  createEffect(() => {
-    const currentScope = scope();
-    const working = props.working;
-    const currentTurnId = turnId();
-    const loading = state.messagesLoading;
-    const key = sourceKey();
-    const opening = state.followupOpening;
-    observedMessages();
-    const scopeChanged = previousScope !== currentScope;
-    if (scopeChanged) {
-      previousScope = currentScope;
-      armedTurn = null;
-      attempted.clear();
-      historicalAssistantIds = new Set<string>();
-      historicalUserIds = new Set<string>();
-    }
-    // Record every hydrated completed answer, not just the messages present at scope change.
-    // A stale busy status is not evidence that completed history streamed in this view.
-    const messages = untrack(() =>
-      state.messages.filter((entry) => entry.info.sessionID === state.activeSessionId)
-    );
-    if (scopeChanged || loading) {
-      untrack(() => {
-        for (const entry of messages) {
-          if (entry.info.role === 'user') historicalUserIds.add(entry.info.id);
-          else if (entry.info.time.completed) historicalAssistantIds.add(entry.info.id);
-        }
-      });
-    }
-    if (working && !loading && state.followupsEnabled && currentTurnId) {
-      untrack(() => {
-        const answers = messages.filter(
-          (entry) => entry.info.role === 'assistant' && entry.info.parentID === currentTurnId
-        );
-        const terminal = answers.some(
-          (entry) =>
-            entry.info.role === 'assistant' &&
-            !!entry.info.time.completed &&
-            (entry.info.finish === 'stop' || entry.info.finish === 'end_turn')
-        );
-        const unfinished = answers.some(
-          (entry) => entry.info.role === 'assistant' && !entry.info.time.completed
-        );
-        const newPrompt = messages.some(
-          (entry) =>
-            entry.info.id === currentTurnId &&
-            entry.info.role === 'user' &&
-            !historicalUserIds.has(entry.info.id)
-        );
-        if (!terminal && (unfinished || newPrompt)) armedTurn = currentTurnId;
-      });
-    }
-    if (sendPending && !scopeChanged) return;
-    untrack(clear);
-    const source = key ? parseFollowupSource(JSON.parse(key)) : null;
-    const sessionId = state.activeSessionId;
-    const completedAt = untrack(() => {
-      const answer = messages.find((entry) => entry.info.id === source?.assistantMessageId);
-      return answer?.info.role === 'assistant' ? answer.info.time.completed : undefined;
-    });
-    const unreadOpening =
-      opening?.sessionId === sessionId && !!completedAt && completedAt > opening.seenAt;
-    const liveTurn =
-      !!source &&
-      source.userMessageId === armedTurn &&
-      !historicalAssistantIds.has(source.assistantMessageId);
-    const allowGenerate = liveTurn || unreadOpening;
-    const attemptKey = `${currentScope}:${source?.userMessageId ?? ''}:${allowGenerate}`;
-    if (!source || !sessionId || attempted.has(attemptKey)) return;
-    attempted.add(attemptKey);
-    if (attempted.size > 64) attempted.delete(attempted.values().next().value!);
-    const controller = new AbortController();
-    onCleanup(() => controller.abort());
-    const directory = untrack(
-      () => state.sessions.find((session) => session.id === sessionId)?.directory
-    );
-    const model = untrack(sessionModel);
-    let finishRestore = !liveTurn ? untrack(() => props.onRestoreStart?.()) : undefined;
-    const releaseRestore = () => {
-      const finish = finishRestore;
-      finishRestore = undefined;
-      finish?.();
-    };
-    const publish = (suggestions: FollowupSuggestionSet) => {
-      if (controller.signal.aborted || scope() !== currentScope || sourceKey() !== key)
-        return false;
-      // Treat bridge output as inert plain text and enforce the same bounds as the host.
-      const validated = parseFollowupSuggestions(JSON.stringify(suggestions), {
-        allowSessionId: true,
-      });
-      if (!validated.actions.length) return false;
-      setReady({ key, source, sessionId, directory, ...validated });
-      return true;
-    };
-    const load = async () => {
-      if (finishRestore) {
-        const cacheController = new AbortController();
-        const timer = setTimeout(() => {
-          cacheController.abort();
-          releaseRestore();
-        }, INITIAL_CACHE_LOOKUP_TIMEOUT_MS);
-        onCleanup(() => {
-          clearTimeout(timer);
-          cacheController.abort();
-          releaseRestore();
-        });
-        try {
-          const cached = await client.varro.followups(sessionId, source, {
-            signal: AbortSignal.any([controller.signal, cacheController.signal]),
-            directory,
-            allowGenerate: false,
-            cacheOnly: true,
-            model,
-          });
-          if (!cacheController.signal.aborted && publish(cached)) return;
-        } catch {
-          // A failed or slow cache probe falls back to normal suggestions without holding reveal.
-        } finally {
-          clearTimeout(timer);
-          releaseRestore();
-        }
+  createEffect(
+    () => {
+      const currentScope = scope();
+      const working = props.working;
+      const currentTurnId = turnId();
+      const loading = state.messagesLoading;
+      const key = sourceKey();
+      const opening = state.followupOpening;
+      observedMessages();
+      return {
+        currentScope,
+        currentTurnId,
+        loading,
+        key,
+        opening: opening ? { sessionId: opening.sessionId, seenAt: opening.seenAt } : null,
+        canArm: working && !loading && state.followupsEnabled && !!currentTurnId,
+        sessionId: state.activeSessionId,
+      };
+    },
+    ({ currentScope, currentTurnId, loading, key, opening, canArm, sessionId }) => {
+      const cleanups: Array<() => void> = [];
+
+      const scopeChanged = previousScope !== currentScope;
+      if (scopeChanged) {
+        previousScope = currentScope;
+        armedTurn = null;
+        attempted.clear();
+        historicalAssistantIds = new Set<string>();
+        historicalUserIds = new Set<string>();
       }
-      if (controller.signal.aborted) return;
-      const suggestions = await client.varro.followups(sessionId, source, {
-        signal: controller.signal,
-        directory,
-        allowGenerate,
-        model,
+      // Record every hydrated completed answer, not just the messages present at scope change.
+      // A stale busy status is not evidence that completed history streamed in this view.
+      const messages = untrack(() =>
+        state.messages.filter((entry) => entry.info.sessionID === state.activeSessionId)
+      );
+      if (scopeChanged || loading) {
+        untrack(() => {
+          for (const entry of messages) {
+            if (entry.info.role === 'user') historicalUserIds.add(entry.info.id);
+            else if (entry.info.time.completed) historicalAssistantIds.add(entry.info.id);
+          }
+        });
+      }
+      if (canArm && currentTurnId) {
+        untrack(() => {
+          const answers = messages.filter(
+            (entry) => entry.info.role === 'assistant' && entry.info.parentID === currentTurnId
+          );
+          const terminal = answers.some(
+            (entry) =>
+              entry.info.role === 'assistant' &&
+              !!entry.info.time.completed &&
+              (entry.info.finish === 'stop' || entry.info.finish === 'end_turn')
+          );
+          const unfinished = answers.some(
+            (entry) => entry.info.role === 'assistant' && !entry.info.time.completed
+          );
+          const newPrompt = messages.some(
+            (entry) =>
+              entry.info.id === currentTurnId &&
+              entry.info.role === 'user' &&
+              !historicalUserIds.has(entry.info.id)
+          );
+          if (!terminal && (unfinished || newPrompt)) armedTurn = currentTurnId;
+        });
+      }
+      if (sendPending && !scopeChanged)
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+      untrack(clear);
+      const source = key ? parseFollowupSource(JSON.parse(key)) : null;
+      const completedAt = untrack(() => {
+        const answer = messages.find((entry) => entry.info.id === source?.assistantMessageId);
+        return answer?.info.role === 'assistant' ? answer.info.time.completed : undefined;
       });
-      publish(suggestions);
-    };
-    void load().catch(() => {
-      // Optional inference must not change chat completion or log conversation text.
-      if (!controller.signal.aborted)
-        logWarn('Follow-ups request failed; check Varro output for generation diagnostics');
-    });
-  });
+      const unreadOpening =
+        opening?.sessionId === sessionId && !!completedAt && completedAt > opening.seenAt;
+      const liveTurn =
+        !!source &&
+        source.userMessageId === armedTurn &&
+        !historicalAssistantIds.has(source.assistantMessageId);
+      const allowGenerate = liveTurn || unreadOpening;
+      const attemptKey = `${currentScope}:${source?.userMessageId ?? ''}:${allowGenerate}`;
+      if (!source || !sessionId || attempted.has(attemptKey))
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+      attempted.add(attemptKey);
+      if (attempted.size > 64) attempted.delete(attempted.values().next().value!);
+      const controller = new AbortController();
+      cleanups.push(() => controller.abort());
+      const directory = untrack(
+        () => state.sessions.find((session) => session.id === sessionId)?.directory
+      );
+      const model = untrack(sessionModel);
+      let finishRestore = !liveTurn ? untrack(() => props.onRestoreStart?.()) : undefined;
+      const releaseRestore = () => {
+        const finish = finishRestore;
+        finishRestore = undefined;
+        finish?.();
+      };
+      const publish = (suggestions: FollowupSuggestionSet) => {
+        if (controller.signal.aborted || scope() !== currentScope || sourceKey() !== key)
+          return false;
+        // Treat bridge output as inert plain text and enforce the same bounds as the host.
+        const validated = parseFollowupSuggestions(JSON.stringify(suggestions), {
+          allowSessionId: true,
+        });
+        if (!validated.actions.length) return false;
+        setReady({ key, source, sessionId, directory, ...validated });
+        return true;
+      };
+      const load = async () => {
+        if (finishRestore) {
+          const cacheController = new AbortController();
+          const timer = setTimeout(() => {
+            cacheController.abort();
+            releaseRestore();
+          }, INITIAL_CACHE_LOOKUP_TIMEOUT_MS);
+          cleanups.push(() => {
+            clearTimeout(timer);
+            cacheController.abort();
+            releaseRestore();
+          });
+          try {
+            const cached = await client.varro.followups(sessionId, source, {
+              signal: AbortSignal.any([controller.signal, cacheController.signal]),
+              directory,
+              allowGenerate: false,
+              cacheOnly: true,
+              model,
+            });
+            if (!cacheController.signal.aborted && publish(cached)) return;
+          } catch {
+            // A failed or slow cache probe falls back to normal suggestions without holding reveal.
+          } finally {
+            clearTimeout(timer);
+            releaseRestore();
+          }
+        }
+        if (controller.signal.aborted) return;
+        const suggestions = await client.varro.followups(sessionId, source, {
+          signal: controller.signal,
+          directory,
+          allowGenerate,
+          model,
+        });
+        publish(suggestions);
+      };
+      void load().catch(() => {
+        // Optional inference must not change chat completion or log conversation text.
+        if (!controller.signal.aborted)
+          logWarn('Follow-ups request failed; check Varro output for generation diagnostics');
+      });
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    }
+  );
 
   const current = () => {
     const value = ready();

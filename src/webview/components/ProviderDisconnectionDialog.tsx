@@ -1,10 +1,10 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { createEffect, For, Show, createMemo, createSignal, onSettled } from 'solid-js';
 import { hostMetadata } from '../host/extensions';
-import { Portal } from 'solid-js/web';
+import { Portal } from '@solidjs/web';
 import type { Provider } from '../types';
 import { postMessage } from '../lib/bridge';
 import { client } from '../lib/client';
-import { trapModalFocus } from '../lib/modal-focus';
+import { modalFocus } from '../lib/modal-focus';
 import { openProviderLogout } from '../lib/provider-setup';
 import { arrowLeftIcon, xmarkIcon } from '../lib/ui-icons';
 import { UiIcon } from './UiIcon';
@@ -64,19 +64,32 @@ export function ProviderDisconnectionDialog(props: {
     () => props.providerConfigPaths?.[selectedProviderID() ?? ''] ?? []
   );
 
-  createEffect(() => {
-    if (props.isLoadingProviders || !selectedProviderID()) return;
-    if (!selectedProvider()) setSelectedProviderID(null);
-  });
+  createEffect(
+    () => ({
+      loading: props.isLoadingProviders,
+      id: selectedProviderID(),
+      provider: selectedProvider(),
+    }),
+    ({ loading, id, provider }) => {
+      if (loading || !id) return;
+      if (!provider) setSelectedProviderID(null);
+    }
+  );
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       props.onClose();
     };
     document.addEventListener('keydown', onKeyDown);
-    onCleanup(() => document.removeEventListener('keydown', onKeyDown));
+    cleanups.push(() => document.removeEventListener('keydown', onKeyDown));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   async function disconnect() {
@@ -105,7 +118,7 @@ export function ProviderDisconnectionDialog(props: {
     <Portal>
       <div class="provider-connect-overlay">
         <div
-          ref={(element) => onCleanup(trapModalFocus(element))}
+          ref={modalFocus()}
           class="provider-connect-dialog"
           role="dialog"
           aria-modal="true"
@@ -130,10 +143,7 @@ export function ProviderDisconnectionDialog(props: {
             </button>
           </div>
 
-          <div
-            class="provider-connect-body"
-            classList={{ 'is-provider-list': !selectedProviderID() }}
-          >
+          <div class={['provider-connect-body', { 'is-provider-list': !selectedProviderID() }]}>
             <Show
               when={selectedProvider()}
               fallback={

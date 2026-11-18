@@ -1,4 +1,4 @@
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WarningIcon } from './WarningIcon';
 import { warningTriangleSolidIcon } from '../lib/ui-icons';

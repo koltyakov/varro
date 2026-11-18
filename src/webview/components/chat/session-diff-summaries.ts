@@ -1,6 +1,5 @@
 import { createSignal, untrack } from 'solid-js';
 import type { SessionDiffSummary } from '../../../shared/protocol';
-import type { Session } from '../../types';
 import { client } from '../../lib/client';
 import { getSessionTreeUpdated, state } from '../../lib/state';
 import { readSessionPauses } from '../../../shared/session-pauses';
@@ -120,7 +119,8 @@ function updateRelevantSessions(owner: symbol, sessionIds: Set<string> | null) {
 function isCurrentDiffSummaryRequest(request: SessionDiffSummaryRequest) {
   return (
     relevantDiffSummarySessionIds.has(request.sessionId) &&
-    getRevision(request.sessionId) === request.updated
+    // Check the revision at dispatch and settlement, independently of the row that queued it.
+    untrack(() => getRevision(request.sessionId)) === request.updated
   );
 }
 
@@ -131,21 +131,22 @@ function getRevision(sessionId: string): number {
   return Math.max(getSessionTreeUpdated(sessionId), ...pauses.map((pause) => pause.pausedAt));
 }
 
-function enqueue(session: Session, updated = getRevision(session.id)) {
-  const cached = untrack(cache)[session.id];
+function enqueue(request: SessionDiffSummaryRequest) {
+  const { sessionId, updated } = request;
+  const cached = untrack(cache)[sessionId];
   // A matching failure is settled for this revision. Retrying from this reactive
   // effect would otherwise form a tight request loop until the server recovers.
   if (cached?.updated === updated && (cached.status === 'ready' || cached.status === 'error')) {
     return;
   }
 
-  const key = getDiffSummaryKey(session.id, updated);
+  const key = getDiffSummaryKey(sessionId, updated);
   if (queuedDiffSummaryKeys.has(key) || activeDiffSummaryKeys.has(key)) return;
   if (diffSummaryQueue.length >= SESSION_DIFF_SUMMARY_QUEUE_LIMIT) return;
 
   queuedDiffSummaryKeys.add(key);
-  diffSummaryQueue.push({ sessionId: session.id, directory: session.directory, updated });
-  setDiffSummaryCacheEntry(session.id, {
+  diffSummaryQueue.push(request);
+  setDiffSummaryCacheEntry(sessionId, {
     status: 'loading',
     updated,
     stats: cached?.stats ?? null,

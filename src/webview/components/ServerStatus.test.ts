@@ -1,5 +1,7 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { resetDefaultAppState, setState } from '../lib/state';
 import { statusIcons } from '../lib/status-icons';
 import { terminalIcon } from '../lib/ui-icons';
@@ -25,6 +27,14 @@ function renderServerStatus() {
 
 describe('ServerStatus', () => {
   beforeEach(() => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class implements ResizeObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    );
     container = document.createElement('div');
     document.body.appendChild(container);
     resetDefaultAppState();
@@ -33,14 +43,17 @@ describe('ServerStatus', () => {
 
   afterEach(() => {
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     container?.remove();
     container = null;
     resetDefaultAppState();
+    flushSolid();
+    vi.unstubAllGlobals();
   });
 
   it('renders connection progress without assuming a server is being spawned', () => {
-    setState('serverStatus', { state: 'starting' });
+    setState(storePath('serverStatus', { state: 'starting' }));
 
     renderServerStatus();
 
@@ -51,8 +64,8 @@ describe('ServerStatus', () => {
   });
 
   it('shows a pulsing Varro logo while server detection is pending', () => {
-    setState('serverStatus', { state: 'stopped' });
-    setState('emptyStateLogoUri', 'https://example.test/varro.png');
+    setState(storePath('serverStatus', { state: 'stopped' }));
+    setState(storePath('emptyStateLogoUri', 'https://example.test/varro.png'));
 
     renderServerStatus();
 
@@ -71,7 +84,7 @@ describe('ServerStatus', () => {
   });
 
   it('renders trimmed generic errors', () => {
-    setState('serverStatus', { state: 'error', message: '  failed to bind port  ' });
+    setState(storePath('serverStatus', { state: 'error', message: '  failed to bind port  ' }));
 
     renderServerStatus();
 
@@ -101,11 +114,13 @@ describe('ServerStatus', () => {
   });
 
   it('puts the server connection failure reason on its own line', () => {
-    setState('serverStatus', {
-      state: 'error',
-      message:
-        'Could not connect to OpenCode at http://127.0.0.1:4096. The server did not respond before the connection timed out.',
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'error',
+        message:
+          'Could not connect to OpenCode at http://127.0.0.1:4096. The server did not respond before the connection timed out.',
+      })
+    );
 
     renderServerStatus();
 
@@ -135,10 +150,10 @@ describe('ServerStatus', () => {
     { name: 'generic error', status: { state: 'error', message: 'Connection failed' } },
     { name: 'provider setup', status: { state: 'running', url: 'http://127.0.0.1:4096' } },
   ] as const)('uses a standalone 24px icon for $name', ({ status }) => {
-    setState('serverStatus', status);
+    setState(storePath('serverStatus', status));
     if (status.state === 'running') {
-      setState('providersLoaded', true);
-      setState('providers', []);
+      setState(storePath('providersLoaded', true));
+      setState(storePath('providers', []));
     }
 
     renderServerStatus();
@@ -153,11 +168,13 @@ describe('ServerStatus', () => {
   it.each(['legacy', 'structured'])(
     'shows simplified install guidance for %s missing CLI errors',
     (format) => {
-      setState('serverStatus', {
-        state: 'error',
-        message: '  OpenCode CLI not found on PATH  ',
-        detail: format === 'structured' ? { kind: 'cli-missing' } : undefined,
-      });
+      setState(
+        storePath('serverStatus', {
+          state: 'error',
+          message: '  OpenCode CLI not found on PATH  ',
+          detail: format === 'structured' ? { kind: 'cli-missing' } : undefined,
+        })
+      );
 
       renderServerStatus();
 
@@ -192,7 +209,9 @@ describe('ServerStatus', () => {
   );
 
   it('runs install from the inline play button without a separate terminal install button', () => {
-    setState('serverStatus', { state: 'error', message: 'OpenCode CLI not found on PATH' });
+    setState(
+      storePath('serverStatus', { state: 'error', message: 'OpenCode CLI not found on PATH' })
+    );
 
     renderServerStatus();
 
@@ -213,7 +232,9 @@ describe('ServerStatus', () => {
   });
 
   it('copies the setup command to the clipboard', async () => {
-    setState('serverStatus', { state: 'error', message: 'OpenCode CLI not found on PATH' });
+    setState(
+      storePath('serverStatus', { state: 'error', message: 'OpenCode CLI not found on PATH' })
+    );
     const writeText = vi.fn(async () => {});
     Object.assign(navigator, { clipboard: { writeText } });
 
@@ -230,11 +251,13 @@ describe('ServerStatus', () => {
   });
 
   it('shows actionable guidance when OpenCode must be updated', () => {
-    setState('serverStatus', {
-      state: 'error',
-      message:
-        'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the running server is 1.15.13.',
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'error',
+        message:
+          'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the running server is 1.15.13.',
+      })
+    );
 
     renderServerStatus();
 
@@ -248,16 +271,18 @@ describe('ServerStatus', () => {
   });
 
   it('recommends the install-specific command when an update has already failed', () => {
-    setState('serverStatus', {
-      state: 'error',
-      message:
-        'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the installed CLI is 1.15.13. The automatic update failed. Windows could not replace opencode.exe because it is still running. Update it manually with: npm install -g opencode-ai@latest',
-      detail: {
-        kind: 'update-failed',
-        installMethod: 'npm',
-        suggestedCommand: 'npm install -g opencode-ai@latest',
-      },
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'error',
+        message:
+          'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the installed CLI is 1.15.13. The automatic update failed. Windows could not replace opencode.exe because it is still running. Update it manually with: npm install -g opencode-ai@latest',
+        detail: {
+          kind: 'update-failed',
+          installMethod: 'npm',
+          suggestedCommand: 'npm install -g opencode-ai@latest',
+        },
+      })
+    );
 
     renderServerStatus();
 
@@ -295,12 +320,14 @@ describe('ServerStatus', () => {
   });
 
   it('presents an update deferred by active sessions as a wait, not a failure', () => {
-    setState('serverStatus', {
-      state: 'error',
-      message:
-        'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the running server is 1.15.13. The old server has active sessions and was not stopped to avoid interrupting work.',
-      detail: { kind: 'update-blocked', blockedBy: 'active-sessions' },
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'error',
+        message:
+          'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the running server is 1.15.13. The old server has active sessions and was not stopped to avoid interrupting work.',
+        detail: { kind: 'update-blocked', blockedBy: 'active-sessions' },
+      })
+    );
 
     renderServerStatus();
 
@@ -327,12 +354,14 @@ describe('ServerStatus', () => {
   });
 
   it('names a failed update as failed rather than required', () => {
-    setState('serverStatus', {
-      state: 'error',
-      message:
-        'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the installed CLI is 1.15.13. The automatic update failed.',
-      detail: { kind: 'update-failed', installMethod: 'npm' },
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'error',
+        message:
+          'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the installed CLI is 1.15.13. The automatic update failed.',
+        detail: { kind: 'update-failed', installMethod: 'npm' },
+      })
+    );
 
     renderServerStatus();
 
@@ -341,18 +370,20 @@ describe('ServerStatus', () => {
   });
 
   it('offers manual update without a settings button when automatic updates are disabled', () => {
-    setState('serverStatus', {
-      state: 'error',
-      message:
-        'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the installed CLI is 1.15.13. Automatic updates are disabled.',
-      detail: {
-        kind: 'update-blocked',
-        blockedBy: 'auto-update-disabled',
-        settingId: 'varro.server.autoUpdate',
-        installMethod: 'brew',
-        suggestedCommand: 'brew upgrade opencode',
-      },
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'error',
+        message:
+          'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the installed CLI is 1.15.13. Automatic updates are disabled.',
+        detail: {
+          kind: 'update-blocked',
+          blockedBy: 'auto-update-disabled',
+          settingId: 'varro.server.autoUpdate',
+          installMethod: 'brew',
+          suggestedCommand: 'brew upgrade opencode',
+        },
+      })
+    );
 
     renderServerStatus();
 
@@ -376,15 +407,17 @@ describe('ServerStatus', () => {
   });
 
   it('allows restart from a different Varro host without offering a duplicate update', () => {
-    setState('serverStatus', {
-      state: 'error',
-      message: 'The running server is actively owned by another Varro extension host.',
-      detail: {
-        kind: 'update-blocked',
-        blockedBy: 'foreign-owner',
-        suggestedCommand: 'opencode upgrade',
-      },
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'error',
+        message: 'The running server is actively owned by another Varro extension host.',
+        detail: {
+          kind: 'update-blocked',
+          blockedBy: 'foreign-owner',
+          suggestedCommand: 'opencode upgrade',
+        },
+      })
+    );
 
     renderServerStatus();
 
@@ -395,14 +428,16 @@ describe('ServerStatus', () => {
   });
 
   it('uses a scrollable status surface and keeps long commands in a single command field', () => {
-    setState('serverStatus', {
-      state: 'error',
-      message: 'OpenCode CLI not found at the configured path.',
-      detail: {
-        kind: 'cli-path-invalid',
-        configuredCommand: '/a/very/long/path/that/must/remain/readable/opencode',
-      },
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'error',
+        message: 'OpenCode CLI not found at the configured path.',
+        detail: {
+          kind: 'cli-path-invalid',
+          configuredCommand: '/a/very/long/path/that/must/remain/readable/opencode',
+        },
+      })
+    );
 
     renderServerStatus();
 
@@ -415,16 +450,18 @@ describe('ServerStatus', () => {
   });
 
   it('distinguishes a bad configured path from a missing install', () => {
-    setState('serverStatus', {
-      state: 'error',
-      message:
-        'OpenCode CLI not found at the configured path: /opt/nope/opencode. Update varro.server.command to point at your OpenCode executable, or clear it to let Varro search PATH.',
-      detail: {
-        kind: 'cli-path-invalid',
-        configuredCommand: '/opt/nope/opencode',
-        settingId: 'varro.server.command',
-      },
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'error',
+        message:
+          'OpenCode CLI not found at the configured path: /opt/nope/opencode. Update varro.server.command to point at your OpenCode executable, or clear it to let Varro search PATH.',
+        detail: {
+          kind: 'cli-path-invalid',
+          configuredCommand: '/opt/nope/opencode',
+          settingId: 'varro.server.command',
+        },
+      })
+    );
 
     renderServerStatus();
 
@@ -467,7 +504,7 @@ describe('ServerStatus', () => {
   });
 
   it('restarts the server from a generic error state', () => {
-    setState('serverStatus', { state: 'error', message: 'failed to bind port' });
+    setState(storePath('serverStatus', { state: 'error', message: 'failed to bind port' }));
 
     renderServerStatus();
 
@@ -486,10 +523,10 @@ describe('ServerStatus', () => {
       default: {},
       connected: [],
     });
-    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
-    setState('providersLoaded', true);
-    setState('providers', []);
-    setState('providerAuthMethods', { openai: [{ type: 'api', label: 'API key' }] });
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    setState(storePath('providersLoaded', true));
+    setState(storePath('providers', []));
+    setState(storePath('providerAuthMethods', { openai: [{ type: 'api', label: 'API key' }] }));
 
     renderServerStatus();
 

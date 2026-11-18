@@ -1,4 +1,4 @@
-import { createMemo, For, onCleanup, onMount } from 'solid-js';
+import { createMemo, For, onSettled } from 'solid-js';
 import type { LspStatus } from '../../shared/protocol';
 import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
 
@@ -13,13 +13,19 @@ export function LspPicker(props: {
     props.items.toSorted((left, right) => left.name.localeCompare(right.name))
   );
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const reposition = () => {
       if (anchorRef && menuRef) placeDropdownAnchor(anchorRef, menuRef, 10, 8);
     };
 
     menuRef?.focus();
-    if (menuRef) onCleanup(observePopupViewport(menuRef, reposition));
+    if (menuRef) cleanups.push(observePopupViewport(menuRef, reposition));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (
@@ -37,7 +43,7 @@ export function LspPicker(props: {
           props.popoverRef?.(el);
         }}
         class="dropdown-menu w-full"
-        tabIndex={-1}
+        tabindex={-1}
         onKeyDown={(event) => {
           if (event.key !== 'Escape') return;
           event.preventDefault();
@@ -53,7 +59,7 @@ export function LspPicker(props: {
               <div class="dropdown-item lsp-picker-item">
                 <span class="dropdown-name-wrap">
                   <span class="dropdown-name">{item.name}</span>
-                  <span class="dropdown-hint" classList={{ 'lsp-workspace-root': !item.root }}>
+                  <span class={['dropdown-hint', { 'lsp-workspace-root': !item.root }]}>
                     {item.root || 'workspace root'}
                   </span>
                 </span>

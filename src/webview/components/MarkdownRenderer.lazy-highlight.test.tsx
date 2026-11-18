@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { MarkdownRenderer } from './MarkdownRenderer';

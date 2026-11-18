@@ -1,4 +1,4 @@
-import { $RAW } from 'solid-js/store';
+import { snapshot } from 'solid-js';
 import { isObject, isString } from './runtime-values';
 import type { MessageEntry } from '../types';
 
@@ -7,17 +7,12 @@ const MAX_HISTORY_CACHE_BYTES = 24 * 1024 * 1024;
 // Conservative retained-size estimate, without serializing payloads or allocating string copies.
 // Count shared values separately across snapshots; live transcript ownership is outside this cache.
 function estimateBytes(value: readonly MessageEntry[]): number {
-  const pending: unknown[] = [value];
+  const pending: unknown[] = [snapshot(value)];
   const seen = new Set<object>();
   let bytes = 0;
   while (pending.length && bytes <= MAX_HISTORY_CACHE_BYTES) {
-    const candidate = pending.pop();
-    // Counting a store snapshot must not create proxies and reactive nodes for every
-    // historical field. Read its backing object without changing the cached entries.
-    // SAFETY: isObject narrows to an object; Solid's optional $RAW value remains unknown.
-    const item = isObject(candidate)
-      ? ((candidate as { [$RAW]?: unknown })[$RAW] ?? candidate)
-      : candidate;
+    // A plain snapshot does not allocate reactive nodes for every historical field.
+    const item = pending.pop();
     if (isString(item)) bytes += item.length * 2;
     else if (isObject(item) && !seen.has(item)) {
       seen.add(item);

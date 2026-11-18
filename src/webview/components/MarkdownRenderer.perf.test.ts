@@ -1,5 +1,5 @@
 import { createComponent, createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/core';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';

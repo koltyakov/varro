@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { AttachmentLabel } from './AttachmentLabel';
 
 let container: HTMLDivElement;

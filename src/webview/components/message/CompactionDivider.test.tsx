@@ -1,5 +1,6 @@
+import { flush as flushSolid } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { formatClockTime } from '../../lib/message-time';
 import { compressIcon } from '../../lib/ui-icons';
 import type { CompactionPart } from '../../types';
@@ -16,9 +17,11 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   vi.useRealTimers();
   container?.remove();
+  flushSolid();
   container = null;
 });
 
@@ -51,6 +54,7 @@ describe('CompactionDivider', () => {
         }),
       container!
     );
+    flushSolid();
     expect(container?.textContent).toContain(label);
   });
 
@@ -59,6 +63,7 @@ describe('CompactionDivider', () => {
       () => CompactionDivider({ part: compactionPart(), timestamp: 1_000 }),
       container!
     );
+    flushSolid();
 
     expect(container?.textContent).toContain('Context compacted manually');
     const action = container?.querySelector('.manual-compaction-action');
@@ -86,6 +91,7 @@ describe('CompactionDivider', () => {
         }),
       container!
     );
+    flushSolid();
     expect(container?.querySelector('.manual-compaction-action')?.textContent).toContain(label);
   });
 
@@ -94,6 +100,7 @@ describe('CompactionDivider', () => {
       () => CompactionDivider({ part: compactionPart({ auto: true }), timestamp: 1_000 }),
       container!
     );
+    flushSolid();
 
     expect(container?.textContent).toContain('Context compacted (auto)');
   });
@@ -107,6 +114,7 @@ describe('CompactionDivider', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.textContent).toContain('Context compacted (auto, after overflow)');
   });
@@ -123,6 +131,7 @@ describe('CompactionDivider', () => {
         }),
       container!
     );
+    flushSolid();
 
     const divider = container?.querySelector<HTMLElement>('.chat-turn-manual-compaction');
     const time = divider?.querySelector<HTMLTimeElement>('.message-sent-time');
@@ -131,12 +140,16 @@ describe('CompactionDivider', () => {
     expect(time?.classList.contains('is-visible')).toBe(false);
 
     divider?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     vi.advanceTimersByTime(299);
+    flushSolid();
     expect(time?.classList.contains('is-visible')).toBe(false);
     vi.advanceTimersByTime(1);
+    flushSolid();
     expect(time?.classList.contains('is-visible')).toBe(true);
 
     divider?.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     expect(time?.classList.contains('is-visible')).toBe(false);
   });
 
@@ -150,6 +163,7 @@ describe('CompactionDivider', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(
       container

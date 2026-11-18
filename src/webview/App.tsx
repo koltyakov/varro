@@ -1,4 +1,12 @@
-import { ErrorBoundary, Show, createEffect, onCleanup, onMount } from 'solid-js';
+import {
+  Errored,
+  Show,
+  createEffect,
+  createMemo,
+  onCleanup,
+  onSettled,
+  type Accessor,
+} from 'solid-js';
 import { useOpenCode } from './hooks/useOpenCode';
 import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/runtime/useOpenCode.runtime';
 import { connectionInitialized, defaultAppState } from './lib/state';
@@ -21,9 +29,9 @@ import { requestProviderConnection } from './lib/provider-connection-state';
 export function AppRoot() {
   onCleanup(cleanupBridge);
   return (
-    <ErrorBoundary fallback={renderErrorFallback}>
+    <Errored fallback={(error) => <AppErrorFallback error={error} />}>
       <InitializedApp />
-    </ErrorBoundary>
+    </Errored>
   );
 }
 
@@ -45,9 +53,15 @@ const isRestoringWorkspace = () =>
 
 const isReconnecting = () => defaultAppState.state.serverReconnecting && !connectionInitialized();
 
-function renderErrorFallback(err: Error) {
-  logError('app:error-boundary', describeError(err));
-  return <ErrorFallback err={err} />;
+function AppErrorFallback(props: { error: Accessor<unknown> }) {
+  const error = createMemo(() => {
+    const value = props.error();
+    return value instanceof Error ? value : new Error('Unknown error', { cause: value });
+  });
+  createEffect(error, (err) => {
+    logError('app:error-boundary', describeError(err));
+  });
+  return <ErrorFallback err={error()} />;
 }
 
 function describeError(err: Error): string {
@@ -87,30 +101,46 @@ export function App() {
   useOpenCode();
 
   let providerSetupOpened = false;
-  createEffect(() => {
-    if (defaultAppState.state.providers.length > 0) {
-      providerSetupOpened = false;
-      return;
+  createEffect(
+    () => ({
+      hasProviders: defaultAppState.state.providers.length > 0,
+      initialized: connectionInitialized(),
+      status: defaultAppState.state.serverStatus.state,
+      reconnecting: defaultAppState.state.serverReconnecting,
+      blocked: defaultAppState.state.restartBlocked,
+      loaded: defaultAppState.state.providersLoaded,
+    }),
+    ({ hasProviders, initialized, status, reconnecting, blocked, loaded }) => {
+      if (hasProviders) {
+        providerSetupOpened = false;
+        return;
+      }
+      if (
+        providerSetupOpened ||
+        !initialized ||
+        status !== 'running' ||
+        reconnecting ||
+        blocked ||
+        !loaded
+      ) {
+        return;
+      }
+      providerSetupOpened = true;
+      defaultAppState.setShowModels(true);
+      requestProviderConnection();
     }
-    if (
-      providerSetupOpened ||
-      !connectionInitialized() ||
-      defaultAppState.state.serverStatus.state !== 'running' ||
-      defaultAppState.state.serverReconnecting ||
-      defaultAppState.state.restartBlocked ||
-      !defaultAppState.state.providersLoaded
-    ) {
-      return;
-    }
-    providerSetupOpened = true;
-    defaultAppState.setShowModels(true);
-    requestProviderConnection();
-  });
+  );
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     ralphRunner.reattachAll();
     const stopObservingSurfaceContrast = observeSurfaceContrast();
-    onCleanup(stopObservingSurfaceContrast);
+    cleanups.push(stopObservingSurfaceContrast);
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (

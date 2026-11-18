@@ -10,6 +10,7 @@ let messageBlockRemovalHandler: ((element: HTMLElement) => void) | null = null;
 let inlineDiffLoadHandler:
   | ((sessionId: string, messageId: string) => (() => void) | undefined)
   | null = null;
+let inlineDiffMountHandler: ((element: HTMLElement, messageId: string) => void) | undefined;
 const permissionRemovalIntents = new Map<string, { removeGroup: boolean; token: object }>();
 
 export function registerTodoCollapseHandler(handler: (element: HTMLElement) => void) {
@@ -48,12 +49,21 @@ export function prepareForMessageBlockRemoval(element: HTMLElement) {
 }
 
 export function registerInlineDiffLoadHandler(
-  handler: (sessionId: string, messageId: string) => (() => void) | undefined
+  handler: (sessionId: string, messageId: string) => (() => void) | undefined,
+  onMount: (element: HTMLElement, messageId: string) => void
 ) {
   inlineDiffLoadHandler = handler;
+  inlineDiffMountHandler = onMount;
   return () => {
-    if (inlineDiffLoadHandler === handler) inlineDiffLoadHandler = null;
+    if (inlineDiffLoadHandler === handler) {
+      inlineDiffLoadHandler = null;
+      inlineDiffMountHandler = undefined;
+    }
   };
+}
+
+export function notifyInlineDiffMount(element: HTMLElement, messageId: string) {
+  inlineDiffMountHandler?.(element, messageId);
 }
 
 export function trackInlineDiffLoad(sessionId: string, messageId: string) {

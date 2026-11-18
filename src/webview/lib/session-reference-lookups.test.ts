@@ -1,3 +1,5 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionLookup } from '../../shared/protocol';
 import { client } from './client';
@@ -13,13 +15,17 @@ let testScope = 0;
 
 beforeEach(() => {
   resetDefaultAppState();
-  setState('serverStatus', { state: 'running', url: `http://localhost/${++testScope}` });
+  flushSolid();
+  setState(storePath('serverStatus', { state: 'running', url: `http://localhost/${++testScope}` }));
+  flushSolid();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  flushSolid();
   vi.useRealTimers();
   resetDefaultAppState();
+  flushSolid();
 });
 
 describe('session reference lookups', () => {
@@ -29,7 +35,9 @@ describe('session reference lookups', () => {
       .mockImplementation(async (id) => reference(id));
     lookupSessionReferences('See ses_other and session:ses_other');
     await expect(lookupSessionReference('ses_other')).resolves.toEqual(reference('ses_other'));
+    flushSolid();
     await lookupSessionReference('ses_other');
+    flushSolid();
     expect(fetch).toHaveBeenCalledExactlyOnceWith('ses_other');
     expect(state.sessionLookups.ses_other).toEqual(reference('ses_other'));
     expect(state.sessions).toEqual([]);
@@ -38,7 +46,9 @@ describe('session reference lookups', () => {
   it('caches misses and leaves unknown IDs as ordinary text', async () => {
     const fetch = vi.spyOn(client.varro.session, 'reference').mockRejectedValue(new Error('404'));
     await expect(lookupSessionReference('ses_missing')).resolves.toBeNull();
+    flushSolid();
     await expect(lookupSessionReference('ses_missing')).resolves.toBeNull();
+    flushSolid();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(state.sessionLookups).toEqual({});
   });
@@ -51,15 +61,19 @@ describe('session reference lookups', () => {
       .mockResolvedValueOnce(reference(id))
       .mockRejectedValueOnce(new Error('404 Session not found'));
     await lookupSessionReference(id);
+    flushSolid();
     expect(splitSessionReferenceText(id)).toMatchObject([
       { type: 'session', reference: { title: reference(id).title } },
     ]);
 
     vi.setSystemTime(Date.now() + 60_000);
+    flushSolid();
     await expect(lookupSessionReference(id)).resolves.toBeNull();
+    flushSolid();
     expect(state.sessionLookups[id]).toBeUndefined();
     expect(splitSessionReferenceText(id)).toEqual([{ type: 'text', content: id }]);
     await expect(lookupSessionReference(id)).resolves.toBeNull();
+    flushSolid();
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
@@ -76,15 +90,21 @@ describe('session reference lookups', () => {
         .mockRejectedValueOnce(new Error(message))
         .mockResolvedValueOnce(updated);
       await lookupSessionReference(id);
+      flushSolid();
 
       vi.setSystemTime(Date.now() + 60_000);
+      flushSolid();
       await expect(lookupSessionReference(id)).resolves.toEqual(original);
+      flushSolid();
       expect(state.sessionLookups[id]).toEqual(original);
       await expect(lookupSessionReference(id)).resolves.toEqual(original);
+      flushSolid();
       expect(fetch).toHaveBeenCalledTimes(2);
 
       vi.setSystemTime(Date.now() + 60_000);
+      flushSolid();
       await expect(lookupSessionReference(id)).resolves.toEqual(updated);
+      flushSolid();
     }
   );
 
@@ -102,9 +122,11 @@ describe('session reference lookups', () => {
     const requests = Array.from({ length: 12 }, (_, i) => lookupSessionReference(`ses_${i}`));
     for (let round = 0; round < 3; round++) {
       await vi.waitFor(() => expect(releases).toHaveLength(4));
+      flushSolid();
       releases.splice(0).forEach((release) => release());
     }
     await Promise.all(requests);
+    flushSolid();
     expect(maximum).toBe(4);
     expect(Object.keys(state.sessionLookups)).toHaveLength(12);
   });
@@ -121,10 +143,14 @@ describe('session reference lookups', () => {
       .mockResolvedValue(reference('ses_new'));
     const old = lookupSessionReference('ses_old');
     await Promise.resolve();
-    setState('serverStatus', { state: 'running', url: 'http://localhost/replaced' });
+    flushSolid();
+    setState(storePath('serverStatus', { state: 'running', url: 'http://localhost/replaced' }));
+    flushSolid();
     await lookupSessionReference('ses_new');
+    flushSolid();
     release(reference('ses_old'));
     await expect(old).resolves.toBeNull();
+    flushSolid();
     expect(state.sessionLookups.ses_old).toBeUndefined();
     expect(state.sessionLookups.ses_new).toEqual(reference('ses_new'));
   });
@@ -144,19 +170,27 @@ describe('session reference lookups', () => {
       .mockResolvedValue(local);
     const root = { name: 'repo', path: '/repo' };
     const added = { name: 'other', path: external.directory };
-    setState('editorContext', 'workspacePath', root.path);
-    setState('editorContext', 'workspaceFolders', [root]);
+    setState(storePath('editorContext', 'workspacePath', root.path));
+    flushSolid();
+    setState(storePath('editorContext', 'workspaceFolders', [root]));
+    flushSolid();
     const old = lookupSessionReference(external.id);
     await Promise.resolve();
+    flushSolid();
 
-    setState('editorContext', 'workspaceFolders', [root, added]);
+    setState(storePath('editorContext', 'workspaceFolders', [root, added]));
+    flushSolid();
     await expect(lookupSessionReference(external.id)).resolves.toEqual(local);
+    flushSolid();
     release(external);
     await expect(old).resolves.toBeNull();
+    flushSolid();
     expect(state.sessionLookups[external.id]).toEqual(local);
 
-    setState('editorContext', 'workspaceFolders', [added, root]);
+    setState(storePath('editorContext', 'workspaceFolders', [added, root]));
+    flushSolid();
     await expect(lookupSessionReference(external.id)).resolves.toEqual(local);
+    flushSolid();
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
@@ -166,6 +200,7 @@ describe('session reference lookups', () => {
     expect(Object.keys(state.sessionLookups)).toHaveLength(256);
     expect(state.sessionLookups.ses_0).toBeUndefined();
     await lookupSessionReference('ses_0');
+    flushSolid();
     expect(state.sessionLookups.ses_0).toEqual(reference('ses_0'));
   });
 });

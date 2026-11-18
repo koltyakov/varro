@@ -1,4 +1,5 @@
-import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { ariaBoolean } from '../../lib/aria';
+import { createSignal, For, onSettled, Show } from 'solid-js';
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
 import {
   alignPopupToBoundary,
@@ -67,22 +68,31 @@ export function ProviderLimitPopup(props: {
     if (isFunction(forwarded)) forwarded(el);
   };
 
-  onMount(() => {
-    if (!popupEl) return;
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
+    if (!popupEl)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     const reposition = () => {
       if (!popupEl) return;
       if (props.boundaryRef)
         alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'right');
       clampPopupToViewport(popupEl);
     };
-    onCleanup(observePopupViewport(popupEl, reposition));
+    cleanups.push(observePopupViewport(popupEl, reposition));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (
     <div
       ref={setRef}
-      class="provider-limit-popup"
-      classList={{ 'provider-limit-popup-resets': props.resetsOnly }}
+
+      class={['provider-limit-popup', { 'provider-limit-popup-resets': props.resetsOnly }]}
       onClick={(e) => e.stopPropagation()}
     >
       <Show when={!props.resetsOnly}>
@@ -137,7 +147,7 @@ export function ProviderLimitPopup(props: {
                 <button
                   type="button"
                   class="provider-limit-reset-toggle"
-                  aria-expanded={resetCreditsExpanded()}
+                  aria-expanded={ariaBoolean(resetCreditsExpanded())}
                   onClick={() => setResetCreditsExpanded((expanded) => !expanded)}
                 >
                   <span>Usage limit resets ({resets().availableCount})</span>

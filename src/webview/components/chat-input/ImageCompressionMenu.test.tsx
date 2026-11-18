@@ -1,4 +1,4 @@
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ImageCompressionMenu } from './ImageCompressionMenu';
 import { dismissComposerOverlays } from './composer-overlay-dismiss';

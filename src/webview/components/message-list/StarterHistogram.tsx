@@ -1,4 +1,4 @@
-import { onCleanup, onMount } from 'solid-js';
+import { onSettled } from 'solid-js';
 import { getTileWaveProfile, TILE_WAVE_SPACING, TileWaves } from './TileWaves';
 
 const HEIGHT = 112;
@@ -58,9 +58,14 @@ export function StarterHistogram(props: { onClick: () => void }) {
   let leave: (() => void) | undefined;
   let burst: ((event: MouseEvent) => void) | undefined;
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const canvas = canvasRef;
-    if (!canvas) return;
+    if (!canvas)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     const motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     // Keep this chat's generated profile and texture unchanged by pointer input.
     const targetHeights: number[] = [];
@@ -414,12 +419,16 @@ export function StarterHistogram(props: { onClick: () => void }) {
     };
     document.addEventListener('visibilitychange', pauseInteraction);
     motionQuery?.addEventListener('change', pauseInteraction);
-    onCleanup(() => {
+    cleanups.push(() => {
       observer.disconnect();
       document.removeEventListener('visibilitychange', pauseInteraction);
       motionQuery?.removeEventListener('change', pauseInteraction);
       waves?.dispose();
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (

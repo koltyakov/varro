@@ -5158,6 +5158,21 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 600;
+    if (new URLSearchParams(window.location.search).get('secondBusySession') === '1') {
+      const second = makeSession('session-rapid-second', 'Second busy session', BASE_TIME);
+      const user = makeUserMessage(second.id, 'second-user', ['Continue working'], BASE_TIME);
+      const reply = makeAssistantMessage(
+        second.id,
+        'second-assistant',
+        user.info.id,
+        'Starting...',
+        BASE_TIME + 1
+      );
+      markAssistantInProgress(reply);
+      state.sessions.push(second);
+      state.sessionStatuses[second.id] = { type: 'busy' };
+      state.messagesBySessionId[second.id] = [user, reply];
+    }
     return state;
   }
 

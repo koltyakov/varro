@@ -1,7 +1,8 @@
+import { flush as flushSolid, reconcile } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
-import { batch } from 'solid-js';
-import { render } from 'solid-js/web';
-import { reconcile } from 'solid-js/store';
+
+import { render } from '@solidjs/web';
 import { SESSION_RESUME_PROMPT } from '../../shared/session-pauses';
 import {
   composerFocusKey,
@@ -72,8 +73,10 @@ describe.each(['history', 'live'] as const)('subagent result notifications (%s)'
   it.each(['completed', 'error', 'cancelled'] as const)(
     'groups %s notifications into Explored without duplicating the subagent card',
     async (resultState) => {
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       setSessions([session('session-1'), session('child-1', { parentID: 'session-1' })]);
+      flushSolid();
       const task: ToolPart = {
         ...toolPart('task-part', 'task-message'),
         tool: 'task',
@@ -101,14 +104,21 @@ describe.each(['history', 'live'] as const)('subagent result notifications (%s)'
           ? [{ info: userMessage('native-result'), parts: [result] }]
           : []),
       ]);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       const originalCard = container!.querySelector('.tool-invocation-task');
       if (delivery === 'live') {
         upsertMessageInfo(userMessage('native-result'));
+        flushSolid();
         upsertPart(result);
+        flushSolid();
         await Promise.resolve();
+        flushSolid();
       }
+      flushSolid();
 
       expect(container!.querySelectorAll('.tool-invocation-task')).toHaveLength(1);
       expect(container!.querySelector('.tool-invocation-task')).toBe(originalCard);
@@ -118,12 +128,14 @@ describe.each(['history', 'live'] as const)('subagent result notifications (%s)'
         resultState === 'cancelled' ? 'Explored: 1 tool aborted' : 'Explored: 1 action'
       );
       summary!.click();
+      flushSolid();
       const notification = container!.querySelector('[data-msg-id="native-result"]');
       expect(notification?.querySelector('.tool-invocation-title')?.textContent).toContain(
         `Subagent ${resultState === 'error' ? 'failed' : resultState}: Audit auth`
       );
       expect(notification?.querySelector('.tool-invocation-task')).toBeNull();
       notification?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      flushSolid();
       expect(notification?.textContent).toContain('Audit result');
       expect(notification?.querySelector('.user-message-card-editable')).toBeNull();
       expect(state.messages[1]?.parts[0]).toMatchObject(result);
@@ -133,9 +145,18 @@ describe.each(['history', 'live'] as const)('subagent result notifications (%s)'
 
 describe('manual compaction actions', () => {
   it('keeps the completed turn summary before the manual compaction action', async () => {
-    setState('activeSessionId', 'session-1');
-    setState('sessions', [session('session-1')]);
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('sessions', [session('session-1')]));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Fix the layout')] },
       {
@@ -162,8 +183,11 @@ describe('manual compaction actions', () => {
         ],
       },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const summary = container?.querySelector(
       '[data-msg-id="response"] > .assistant-dialog-summary'
@@ -188,18 +212,28 @@ describe('manual compaction actions', () => {
 describe('session pause dividers', () => {
   it('keeps an otherwise empty pause row measured and updates it in place on continuation', () => {
     const frames = installQueuedAnimationFrameMocks();
-    setState('activeSessionId', 'session-1');
-    setState('serverStatus', { state: 'running', url: 'mock://opencode', apiVersion: 2 });
-    setState('sessions', [
-      session('session-1', {
-        metadata: { varro: { pauses: [{ messageId: 'paused', pausedAt: 100 }] } },
-      }),
-    ]);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('serverStatus', { state: 'running', url: 'mock://opencode', apiVersion: 2 })
+    );
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        session('session-1', {
+          metadata: { varro: { pauses: [{ messageId: 'paused', pausedAt: 100 }] } },
+        }),
+      ])
+    );
+    flushSolid();
     replaceMessages([
       { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Work on this')] },
       { info: assistantMessage('paused', { time: { created: 1 } }), parts: [] },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     const row = container!.querySelector('[data-msg-id="paused"]');
     const divider = row?.querySelector('.session-pause-divider');
     expect(divider?.textContent).toContain('Paused');
@@ -212,21 +246,31 @@ describe('session pause dividers', () => {
       info: userMessage('continue'),
       parts: [textPart('continue-text', 'Continue')],
     });
+    flushSolid();
     expect(row?.querySelector('.session-pause-divider')).toBe(divider);
     expect(divider?.querySelector('.model-change-label')?.textContent).toBe('Paused and resumed');
     expect(divider?.querySelector('[aria-label="Resume"]')).toBeNull();
     frames.restore();
+    flushSolid();
   });
 
   it('hides the resume prompt through the trailing-to-history handoff and history reload', () => {
     const frames = installQueuedAnimationFrameMocks();
-    setState('activeSessionId', 'session-1');
-    setState('serverStatus', { state: 'running', url: 'mock://opencode', apiVersion: 2 });
-    setState('sessions', [
-      session('session-1', {
-        metadata: { varro: { pauses: [{ messageId: 'paused', pausedAt: 100 }] } },
-      }),
-    ]);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('serverStatus', { state: 'running', url: 'mock://opencode', apiVersion: 2 })
+    );
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        session('session-1', {
+          metadata: { varro: { pauses: [{ messageId: 'paused', pausedAt: 100 }] } },
+        }),
+      ])
+    );
+    flushSolid();
     replaceMessages([
       { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Review the code')] },
       {
@@ -236,7 +280,9 @@ describe('session pause dividers', () => {
         parts: [textPart('partial-text', 'Review in progress')],
       },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     const divider = container!.querySelector(
       '.trailing-assistant-summary-row .session-pause-divider'
     );
@@ -253,6 +299,7 @@ describe('session pause dividers', () => {
       info: userMessage('continue'),
       parts: [textPart('continue-text', SESSION_RESUME_PROMPT)],
     });
+    flushSolid();
     expect(container!.querySelectorAll('.session-pause-divider')).toHaveLength(1);
     const historical = container!.querySelector('[data-msg-id="paused"] .session-pause-divider');
     expect(historical?.querySelector('.model-change-label')?.textContent).toBe(
@@ -270,10 +317,14 @@ describe('session pause dividers', () => {
     expectHiddenResume();
     const history: MessageEntry[] = JSON.parse(JSON.stringify(state.messages));
     cleanup();
+    flushSolid();
     replaceMessages(history);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expectHiddenResume();
     frames.restore();
+    flushSolid();
   });
 });
 
@@ -281,8 +332,10 @@ describe('final assistant markers', () => {
   it.each(['busy', 'retry', 'loading', 'child-busy', 'streaming'] as const)(
     'waits for %s to settle before marking a completed terminal response',
     async (workingState) => {
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       setSessions([session('session-1'), session('child-1', { parentID: 'session-1' })]);
+      flushSolid();
       replaceMessages([
         {
           info: userMessage('previous-prompt'),
@@ -306,22 +359,29 @@ describe('final assistant markers', () => {
           parts: [{ ...textPart('answer-text', 'Response so far'), messageID: 'answer' }],
         },
       ]);
+      flushSolid();
       if (workingState === 'loading') startLoading(3);
       else if (workingState === 'streaming') {
-        setState('streamingPartId', 'answer-text');
-        setState('streamingText', 'Response so far');
+        setState(storePath('streamingPartId', 'answer-text'));
+        flushSolid();
+        setState(storePath('streamingText', 'Response so far'));
+        flushSolid();
       } else if (workingState === 'child-busy')
-        setState('sessionStatus', 'child-1', { type: 'busy' });
+        setState(storePath('sessionStatus', 'child-1', { type: 'busy' }));
       else
         setState(
-          'sessionStatus',
-          'session-1',
-          workingState === 'busy'
-            ? { type: 'busy' }
-            : { type: 'retry', attempt: 1, message: 'Retrying', next: 10_000 }
+          storePath(
+            'sessionStatus',
+            'session-1',
+            workingState === 'busy'
+              ? { type: 'busy' }
+              : { type: 'retry', attempt: 1, message: 'Retrying', next: 10_000 }
+          )
         );
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       upsertMessageInfo({
         ...assistantMessage('answer', {
           parentID: 'prompt',
@@ -329,7 +389,9 @@ describe('final assistant markers', () => {
         }),
         finish: 'stop',
       });
+      flushSolid();
       await vi.advanceTimersByTimeAsync(3_000);
+      flushSolid();
 
       expect(
         container?.querySelector(
@@ -345,13 +407,25 @@ describe('final assistant markers', () => {
       expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
       expect(container?.querySelectorAll('.assistant-dialog-summary')).toHaveLength(1);
 
-      batch(() => {
+      (() => {
         stopLoading();
-        setState('streamingPartId', null);
-        setState('streamingText', '');
-        setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
-      });
+        setState(storePath('streamingPartId', null));
+        setState(storePath('streamingText', ''));
+        setState((draft) => {
+          const current = draft['sessionStatus'];
+          const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+          if (
+            incoming === null ||
+            incoming === undefined ||
+            current === null ||
+            current === undefined
+          )
+            draft['sessionStatus'] = incoming;
+          else reconcile(incoming)(current);
+        });
+      })();
       await vi.advanceTimersByTimeAsync(3_000);
+      flushSolid();
       expect(
         container?.querySelector('[data-msg-id="answer"] .assistant-message-flow-item-final')
       ).not.toBeNull();
@@ -361,8 +435,10 @@ describe('final assistant markers', () => {
   );
 
   it('clears the marker on resumed work and marks only the settled continuation', async () => {
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', 'session-1', { type: 'idle' });
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+    flushSolid();
     replaceMessages([
       { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Run the checks')] },
       {
@@ -376,14 +452,19 @@ describe('final assistant markers', () => {
         parts: [{ ...textPart('answer-text', 'Checks passed.'), messageID: 'answer' }],
       },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(3_000);
+    flushSolid();
     expect(container?.querySelector('.assistant-message-flow-item-final')).not.toBeNull();
 
-    setState('sessionStatus', 'session-1', { type: 'busy' });
+    setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+    flushSolid();
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
     // An automatic notice can arrive as metadata first, then synthetic text.
     upsertMessage({ info: userMessage('notice'), parts: [] });
+    flushSolid();
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
     upsertPart({
       ...textPart('notice-text', '<shell id="check" state="failed">Failed</shell>', {
@@ -391,6 +472,7 @@ describe('final assistant markers', () => {
       }),
       messageID: 'notice',
     });
+    flushSolid();
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
     upsertMessage({
       info: assistantMessage('continuation', { parentID: 'prompt', time: { created: 3 } }),
@@ -398,7 +480,9 @@ describe('final assistant markers', () => {
         { ...textPart('continuation-text', 'The process failed.'), messageID: 'continuation' },
       ],
     });
+    flushSolid();
     await vi.advanceTimersByTimeAsync(3_000);
+    flushSolid();
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
     upsertMessageInfo({
       ...assistantMessage('continuation', {
@@ -407,11 +491,15 @@ describe('final assistant markers', () => {
       }),
       finish: 'stop',
     });
+    flushSolid();
     await vi.advanceTimersByTimeAsync(3_000);
+    flushSolid();
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
 
-    setState('sessionStatus', 'session-1', { type: 'idle' });
+    setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(3_000);
+    flushSolid();
     expect(container?.querySelectorAll('.assistant-message-flow-item-final')).toHaveLength(1);
     expect(
       container?.querySelector('[data-msg-id="continuation"] .assistant-message-flow-item-final')
@@ -424,7 +512,9 @@ describe('automatic retry notices', () => {
     'hides the previous %s action as soon as a new prompt is sent',
     (name) => {
       const frames = installQueuedAnimationFrameMocks();
-      setState('activeSessionId', 'session-1');
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('prompt', 'First request')] },
         {
@@ -440,15 +530,19 @@ describe('automatic retry notices', () => {
           parts: [],
         },
       ]);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       expect(container!.querySelector('.assistant-message-flow-item-error-action')).not.toBeNull();
       upsertMessage({
         info: userMessage('user-2'),
         parts: [textPart('next-prompt', 'New request')],
       });
+      flushSolid();
       expect(container!.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
       expect(container!.querySelector('.assistant-message-flow-item-error')).not.toBeNull();
       frames.restore();
+      flushSolid();
     }
   );
 
@@ -456,14 +550,19 @@ describe('automatic retry notices', () => {
     'keeps partial failed attempts out of Worked while %s',
     (status) => {
       const frames = installQueuedAnimationFrameMocks();
-      setState('activeSessionId', 'session-1');
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       setState(
-        'sessionStatus',
-        'session-1',
-        status === 'busy'
-          ? { type: 'busy' }
-          : { type: 'retry', attempt: 2, next: 3000, message: 'Connection lost' }
+        storePath(
+          'sessionStatus',
+          'session-1',
+          status === 'busy'
+            ? { type: 'busy' }
+            : { type: 'retry', attempt: 2, next: 3000, message: 'Connection lost' }
+        )
       );
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('prompt', 'Continue working')] },
         {
@@ -484,24 +583,31 @@ describe('automatic retry notices', () => {
           ],
         },
       ]);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       expect(
         container!.querySelector('.assistant-message-flow-item-error-notice')?.textContent
       ).toContain('Retrying automatically');
       expect(container!.querySelector('.trailing-assistant-summary-row')).toBeNull();
       expect(container!.querySelector('.loading-indicator')).not.toBeNull();
 
-      setState('sessionStatus', 'session-1', { type: 'idle' });
+      setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+      flushSolid();
       expect(container!.querySelector('.trailing-assistant-summary-row')).not.toBeNull();
       expect(container!.querySelector('.loading-indicator')).toBeNull();
       frames.restore();
+      flushSolid();
     }
   );
 
   it('updates from retrying to recovered live and preserves diagnostics after reopening', async () => {
     const frames = installQueuedAnimationFrameMocks();
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', 'session-1', { type: 'busy' });
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+    flushSolid();
     const failed = {
       ...assistantMessage('interrupted', { parentID: 'user-1' }),
       finish: 'error',
@@ -515,8 +621,11 @@ describe('automatic retry notices', () => {
       { info: userMessage('user-1'), parts: [] },
       { info: failed, parts: [] },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     const notice = () => container!.querySelector('.assistant-message-flow-item-error-notice');
     expect(notice()?.textContent).toContain('Retrying automatically');
     expect(container!.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
@@ -526,49 +635,63 @@ describe('automatic retry notices', () => {
       time: { created: 4 },
     });
     upsertMessage({ info: continuation, parts: [] });
+    flushSolid();
     expect(notice()?.textContent).toContain('Retrying automatically');
     upsertMessageInfo({
       ...continuation,
       time: { created: 4, completed: 5 },
       finish: 'tool-calls',
     });
+    flushSolid();
     expect(notice()?.textContent).toContain('Recovered after an automatic retry. Work continued.');
     notice()?.querySelector<HTMLButtonElement>('button')?.click();
+    flushSolid();
     expect(
       notice()?.querySelector('.assistant-message-flow-item-error-details')?.textContent
     ).toContain('WebSocket closed with code 1006');
 
     cleanup();
+    flushSolid();
     container!.replaceChildren();
-    setState('sessionStatus', 'session-1', { type: 'idle' });
+    flushSolid();
+    setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(notice()?.textContent).toContain('Recovered after an automatic retry. Work continued.');
     expect(
       notice()?.querySelector('.assistant-message-flow-item-error-details')?.textContent
     ).toContain('provider.transport');
     frames.restore();
+    flushSolid();
   });
 });
 
 describe('MessageList keyboard navigation', () => {
   it('makes the transcript focusable for native scrolling keys', () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Focusable transcript')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((container?.querySelector('.interactive-list') as HTMLElement | null)?.tabIndex).toBe(0);
   });
 
   it('moves the focused transcript for native page keys', () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Keyboard scrolling')] },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperties(list, {
@@ -583,6 +706,7 @@ describe('MessageList keyboard navigation', () => {
     });
 
     list.dispatchEvent(event);
+    flushSolid();
 
     expect(event.defaultPrevented).toBe(true);
     expect(list.scrollTop).toBe(600);
@@ -592,11 +716,16 @@ describe('MessageList keyboard navigation', () => {
 describe('MessageList entrance animation', () => {
   it('shows a transcript instantly when it loads after switching to an existing chat', async () => {
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     replaceMessages([
       {
@@ -604,7 +733,9 @@ describe('MessageList entrance animation', () => {
         parts: [textPart('text-1', 'Loaded history')],
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[data-msg-id="message-1"]')?.classList).not.toContain(
       'interactive-item-entering'
@@ -615,11 +746,15 @@ describe('MessageList entrance animation', () => {
   it('shows existing unfinished chat content immediately and reveals only later streamed parts', async () => {
     const info = assistantMessage('message-1', { time: { created: 1 } });
     const initialPart = textPart('text-1', 'Already loaded');
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([{ info, parts: [initialPart] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       container?.querySelector('[data-assistant-render-key="part:text-1"]')?.classList
@@ -631,7 +766,9 @@ describe('MessageList entrance animation', () => {
         parts: [initialPart, textPart('text-2', 'Streamed after opening')],
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       container?.querySelector('[data-assistant-render-key="part:text-2"]')?.classList
@@ -640,14 +777,20 @@ describe('MessageList entrance animation', () => {
 
   it('reveals the first part streamed into an assistant row that opened empty', async () => {
     const info = assistantMessage('message-1', { time: { created: 1 } });
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([{ info, parts: [] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     replaceMessages([{ info, parts: [textPart('text-1', 'First streamed content')] }]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       container?.querySelector('[data-assistant-render-key="part:text-1"]')?.classList
@@ -655,20 +798,28 @@ describe('MessageList entrance animation', () => {
   });
 
   it('does not collapse a newly appended user message during canonical replacement', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     startLoading(1);
+    flushSolid();
     requestMessageListScrollToBottom();
     await Promise.resolve();
+    flushSolid();
 
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] },
       { info: userMessage('user-2'), parts: [textPart('text-2', 'Second prompt')] },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[data-msg-id="user-2"]')?.classList).not.toContain(
       'interactive-item-entering'
@@ -679,7 +830,9 @@ describe('MessageList entrance animation', () => {
       { info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] },
       { info: userMessage('user-2'), parts: [textPart('text-2', 'Second prompt')] },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const appendedRow = container?.querySelector('[data-msg-id="user-2"]');
     expect(appendedRow?.classList).not.toContain('measured-entrance-active');
@@ -687,11 +840,15 @@ describe('MessageList entrance animation', () => {
   });
 
   it('shows newly appended image messages immediately', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] },
@@ -700,7 +857,9 @@ describe('MessageList entrance animation', () => {
         parts: [textPart('text-2', 'Prompt with image'), filePart('image-1', 'Image')],
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const imageRow = container?.querySelector('[data-msg-id="user-2"]');
     expect(imageRow?.querySelector('.user-message-image-tile')).not.toBeNull();
@@ -714,14 +873,20 @@ describe('MessageList entrance animation', () => {
         parts: [{ ...textPart(`text-${index}`, `Prompt ${index}`), messageID: `user-${index}` }],
       }));
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(buildMessages(50));
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     replaceMessages(buildMessages(51));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[data-msg-id="user-50"]')?.classList).not.toContain(
       'interactive-item-entering'
@@ -729,11 +894,15 @@ describe('MessageList entrance animation', () => {
   });
 
   it('does not mark appends as entering while scrolled away from the bottom', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First')] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
@@ -743,18 +912,24 @@ describe('MessageList entrance animation', () => {
 
     requestMessageListScrollToBottom();
     await Promise.resolve();
+    flushSolid();
     expect(list.scrollTop).toBe(6800);
 
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    flushSolid();
     list.scrollTop = 6400;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'First')] },
       { info: userMessage('user-2'), parts: [textPart('text-2', 'Second')] },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const appendedRow = container?.querySelector('[data-msg-id="user-2"]');
     expect(appendedRow).not.toBeNull();
@@ -763,6 +938,7 @@ describe('MessageList entrance animation', () => {
 
   it('does not animate a message that was appended while scrolled up when it mounts later', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
 
     const buildMessages = (count: number) =>
       Array.from({ length: count }, (_, index) => ({
@@ -771,10 +947,13 @@ describe('MessageList entrance animation', () => {
       }));
 
     try {
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages(buildMessages(60));
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
 
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const list = container?.querySelector('.interactive-list') as HTMLDivElement;
@@ -802,41 +981,59 @@ describe('MessageList entrance animation', () => {
       });
 
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       // Virtualization is active and pinned to the bottom.
       expect(container?.querySelector('[data-msg-id="user-0"]')).toBeNull();
 
       // Scroll up: new appends must not be marked as entering.
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+      flushSolid();
       scrollTopValue = 0;
       list.dispatchEvent(new Event('scroll'));
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       rowCount = 61;
       replaceMessages(buildMessages(61));
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector('[data-msg-id="user-60"]')).toBeNull();
 
       // Scroll back down: the row mounts now, without an entrance animation.
       scrollTopValue = rowCount * 120 - 400;
       list.dispatchEvent(new Event('scroll'));
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       const appendedRow = container?.querySelector('[data-msg-id="user-60"]');
       expect(appendedRow).not.toBeNull();
       expect(appendedRow?.classList).not.toContain('interactive-item-entering');
     } finally {
       animationFrames.restore();
+      flushSolid();
     }
   });
 });
@@ -844,14 +1041,20 @@ describe('MessageList entrance animation', () => {
 describe('MessageList loading states', () => {
   it('keeps loading visible through populated hydration on consecutive session openings', async () => {
     const frames = installQueuedAnimationFrameMocks();
+    flushSolid();
     setSessions([
       session('session-1', { time: { created: 1, updated: 2 } }),
       session('session-2', { time: { created: 1, updated: 2 } }),
     ]);
-    setState('activeSessionId', 'session-1');
-    setState('messagesLoading', true);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
     replaceMessages([]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     const expectVisibleLoading = () => {
       const indicators = container!.querySelectorAll(
@@ -863,12 +1066,13 @@ describe('MessageList loading states', () => {
     };
 
     for (const sessionId of ['session-1', 'session-2']) {
-      batch(() => {
-        setState('activeSessionId', sessionId);
-        setState('messagesLoading', true);
+      (() => {
+        setState(storePath('activeSessionId', sessionId));
+        setState(storePath('messagesLoading', true));
         replaceMessages([]);
-      });
+      })();
       await Promise.resolve();
+      flushSolid();
       expectVisibleLoading();
 
       // AI-08: rows arrive before messagesLoading clears. They must stay hidden,
@@ -886,29 +1090,42 @@ describe('MessageList loading states', () => {
           ],
         },
       ]);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       const row = container!.querySelector(`[data-msg-id="${messageId}"]`);
       expect(row).not.toBeNull();
       expect(row!.closest('.is-session-hydrating')).not.toBeNull();
+      flushSolid();
       expectVisibleLoading();
 
-      setState('messagesLoading', false);
+      setState(storePath('messagesLoading', false));
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(container!.querySelector(`[data-msg-id="${messageId}"]`)).toBe(row);
       expect(row!.closest('.is-session-hydrating')).not.toBeNull();
+      flushSolid();
       expectVisibleLoading();
       frames.flush();
+      flushSolid();
       frames.flush();
+      flushSolid();
       expect(row!.closest('.is-session-hydrating')).toBeNull();
+      flushSolid();
       expect(container!.querySelector('[aria-label="Loading messages"]')).toBeNull();
     }
     frames.restore();
+    flushSolid();
   });
 
   it('reveals an active restored turn without waiting for streaming to settle', async () => {
     const frames = installQueuedAnimationFrameMocks();
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', 'session-1', { type: 'busy' });
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+    flushSolid();
     replaceMessages([
       { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Continue working')] },
       {
@@ -916,13 +1133,18 @@ describe('MessageList loading states', () => {
         parts: [textPart('reply-text', 'Work in progress')],
       },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(container!.querySelector('.is-session-hydrating')).not.toBeNull();
     await Promise.resolve();
+    flushSolid();
     frames.flush();
+    flushSolid();
     expect(container!.querySelector('.is-session-hydrating')).toBeNull();
     expect(container!.querySelector('[aria-label="Loading messages"]')).toBeNull();
     frames.restore();
+    flushSolid();
   });
 
   it('hides the previous transcript while a cross-workspace session activation is pending', async () => {
@@ -930,15 +1152,20 @@ describe('MessageList loading states', () => {
       session('session-1', { time: { created: 1, updated: 2 } }),
       session('session-2', { time: { created: 1, updated: 2 } }),
     ]);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([{ info: userMessage('message-1'), parts: [] }]);
-    batch(() => {
-      setState('pendingSessionSelectionId', 'session-2');
-      setState('messagesLoading', true);
-    });
+    flushSolid();
+    (() => {
+      setState(storePath('pendingSessionSelectionId', 'session-2'));
+      setState(storePath('messagesLoading', true));
+    })();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[data-msg-id="message-1"]')).toBeNull();
     expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
@@ -947,12 +1174,18 @@ describe('MessageList loading states', () => {
 
   it('shows a loading indicator instead of a blank transcript while messages load', async () => {
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    setState('activeSessionId', 'session-1');
-    setState('messagesLoading', true);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
     replaceMessages([]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
     expect(container?.querySelector('.chat-empty-state')).toBeNull();
@@ -960,18 +1193,26 @@ describe('MessageList loading states', () => {
       'is-reserved'
     );
 
-    setState('messagesLoading', false);
+    setState(storePath('messagesLoading', false));
+    flushSolid();
   });
 
   it('does not show Thinking while a busy session is still loading messages', async () => {
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', 'session-1', { type: 'busy' });
-    setState('messagesLoading', true);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
     replaceMessages([]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
     const thinkingRow = container?.querySelector('.interactive-loading-row');
@@ -1002,13 +1243,20 @@ describe('MessageList loading states', () => {
               },
             };
       setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-      setState('activeSessionId', 'session-1');
-      setState('questions', [question]);
-      setState('messagesLoading', true);
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState(storePath('questions', [question]));
+      flushSolid();
+      setState(storePath('messagesLoading', true));
+      flushSolid();
       replaceMessages([]);
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
       expect(container?.querySelector('.question-prompt-card')).toBeNull();
@@ -1019,14 +1267,18 @@ describe('MessageList loading states', () => {
           parts: [{ ...toolPart('tool-1'), tool: 'question' }],
         },
       ]);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector('[data-msg-id="message-1"]')).not.toBeNull();
       expect(container?.querySelector('.question-prompt-card')).toBeNull();
       expect(state.questions.map((request) => request.id)).toEqual([question.id]);
 
-      setState('messagesLoading', false);
+      setState(storePath('messagesLoading', false));
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       const messageRow = container?.querySelector('[data-msg-id="message-1"]');
       expect(messageRow?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
@@ -1036,19 +1288,27 @@ describe('MessageList loading states', () => {
 
   it('waits to render an unlinked survey until the chat loads', async () => {
     const frames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const question: QuestionRequest = {
       id: 'question-1',
       sessionID: 'session-1',
       questions: [{ question: 'Choose one', header: 'Survey', options: [] }],
     };
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    setState('activeSessionId', 'session-1');
-    setState('questions', [question]);
-    setState('messagesLoading', true);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('questions', [question]));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
     replaceMessages([]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
     expect(container?.querySelector('.question-prompt-card')).toBeNull();
@@ -1056,26 +1316,37 @@ describe('MessageList loading states', () => {
     replaceMessages([
       { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Review this')] },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.question-prompt-card')).toBeNull();
     expect(state.questions.map((request) => request.id)).toEqual([question.id]);
 
-    setState('messagesLoading', false);
+    setState(storePath('messagesLoading', false));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     const prompt = container?.querySelector('.question-prompt-card');
     expect(prompt).not.toBeNull();
     expect(prompt?.closest('.is-session-hydrating')).not.toBeNull();
+    flushSolid();
     frames.flush();
+    flushSolid();
     frames.flush();
+    flushSolid();
     expect(prompt?.closest('.is-session-hydrating')).toBeNull();
+    flushSolid();
     expect(container?.querySelector('.chat-messages-loading')).toBeNull();
     expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
     frames.restore();
+    flushSolid();
   });
 
   it('replaces an unlinked pending question tool with its standalone survey', async () => {
     setSessions([session('session-1')]);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Review this')] },
       {
@@ -1083,25 +1354,34 @@ describe('MessageList loading states', () => {
         parts: [{ ...toolPart('tool-1'), tool: 'question' }],
       },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
 
-    setState('questions', [
-      {
-        id: 'question-1',
-        sessionID: 'session-1',
-        questions: [{ question: 'Choose one', header: 'Survey', options: [] }],
-      },
-    ]);
+    setState(
+      storePath('questions', [
+        {
+          id: 'question-1',
+          sessionID: 'session-1',
+          questions: [{ question: 'Choose one', header: 'Survey', options: [] }],
+        },
+      ])
+    );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-header')).toBeNull();
     expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
     expect(container?.querySelector('[data-msg-id="message-1"] .question-prompt-card')).toBeNull();
 
-    setState('questions', []);
+    setState(storePath('questions', []));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.question-prompt-card')).toBeNull();
     expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
   });
@@ -1116,18 +1396,27 @@ describe('MessageList loading states', () => {
       };
       if (linked) question.tool = { messageID: 'message-1', callID: 'call-1' };
       setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-      setState('activeSessionId', 'session-1');
-      setState('questions', [question]);
-      setState('messagesLoading', true);
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState(storePath('questions', [question]));
+      flushSolid();
+      setState(storePath('messagesLoading', true));
+      flushSolid();
       replaceMessages([]);
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector('.question-prompt-card')).toBeNull();
 
-      setState('messagesLoading', false);
+      setState(storePath('messagesLoading', false));
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector('.chat-messages-loading')).toBeNull();
       expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
@@ -1147,13 +1436,20 @@ describe('MessageList loading states', () => {
       time: { created: 1 },
     };
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    setState('activeSessionId', 'session-1');
-    setState('permissions', [permission]);
-    setState('messagesLoading', true);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('permissions', [permission]));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
     replaceMessages([]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
     expect(container?.querySelector('.permission-prompt')).toBeNull();
@@ -1177,19 +1473,24 @@ describe('MessageList loading states', () => {
         ],
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[data-msg-id="message-1"]')).not.toBeNull();
     expect(container?.querySelector('.permission-prompt')).toBeNull();
 
-    setState('messagesLoading', false);
+    setState(storePath('messagesLoading', false));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const messageRow = container?.querySelector('[data-msg-id="message-1"]');
     const activitySummary = messageRow?.querySelector('.assistant-activity-summary');
     const waitingTool = messageRow
       ?.querySelector('.tool-call-wait-icon')
       ?.closest('.tool-invocation-header');
+    flushSolid();
     const permissionPrompt = messageRow?.querySelector('.permission-prompt');
     expect(permissionPrompt).not.toBeNull();
     expect(activitySummary).not.toBeNull();
@@ -1208,6 +1509,7 @@ describe('MessageList loading states', () => {
 
   it('waits for restored permissions before performing the initial bottom scroll', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const permission: Permission = {
       id: 'permission-1',
       type: 'bash',
@@ -1219,17 +1521,23 @@ describe('MessageList loading states', () => {
       time: { created: 1 },
     };
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    setState('activeSessionId', 'session-1');
-    setState('permissions', [permission]);
-    setState('messagesLoading', true);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('permissions', [permission]));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('message-1'),
         parts: [toolPart('tool-1')],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollTopValue = 0;
@@ -1246,21 +1554,27 @@ describe('MessageList loading states', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     expect(container?.querySelector('.permission-prompt')).toBeNull();
     expect(list?.classList).toContain('is-session-hydrating');
     expect(scrollWrites).toBe(0);
 
-    setState('messagesLoading', false);
+    setState(storePath('messagesLoading', false));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     expect(container?.querySelector('.permission-prompt')).not.toBeNull();
     expect(list?.classList).not.toContain('is-session-hydrating');
     expect(scrollTopValue).toBe(800);
     expect(scrollWrites).toBeGreaterThan(0);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('reveals a retained permission when message loading ends without content', async () => {
@@ -1275,31 +1589,47 @@ describe('MessageList loading states', () => {
       time: { created: 1 },
     };
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    setState('activeSessionId', 'session-1');
-    setState('permissions', [permission]);
-    setState('messagesLoading', true);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('permissions', [permission]));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
     replaceMessages([]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.permission-prompt')).toBeNull();
 
-    setState('messagesLoading', false);
+    setState(storePath('messagesLoading', false));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(1);
   });
 
   it('shows a retry action in the history banner when loading earlier messages failed', async () => {
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([{ info: assistantMessage('message-1', { time: { created: 1 } }), parts: [] }]);
+    flushSolid();
     setSessionHistoryCursor('session-1', 'cursor-1');
+    flushSolid();
     markSessionHistoryLoadFailed('session-1', true);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const banner = container?.querySelector('.message-history-banner.is-error');
     expect(banner?.textContent).toContain("Couldn't load earlier messages");
@@ -1309,12 +1639,18 @@ describe('MessageList loading states', () => {
 
   it('keeps the decorative wave banner when earlier history loads normally', async () => {
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([{ info: assistantMessage('message-1', { time: { created: 1 } }), parts: [] }]);
+    flushSolid();
     setSessionHistoryCursor('session-1', 'cursor-1');
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const banner = container?.querySelector('.message-history-banner');
     expect(banner?.classList.contains('is-error')).toBe(false);
@@ -1430,8 +1766,16 @@ describe('MessageList compact activity', () => {
       messageID: 'assistant-2',
       callID: 'call-edit-2',
     };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Edit the file')] },
       {
@@ -1452,9 +1796,12 @@ describe('MessageList compact activity', () => {
         ],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const firstRow = container?.querySelector('[data-msg-id="assistant-1"]');
     const secondRow = container?.querySelector('[data-msg-id="assistant-2"]');
@@ -1464,8 +1811,10 @@ describe('MessageList compact activity', () => {
   });
 
   it('marks an assistant response that follows a visible user request', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setShowThinkingPreference(true);
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Research this')] },
       {
@@ -1478,9 +1827,12 @@ describe('MessageList compact activity', () => {
         ],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const assistantRow = container?.querySelector('[data-msg-id="assistant-1"]');
     expect(assistantRow?.classList).toContain('interactive-response-follows-request');
@@ -1504,7 +1856,8 @@ describe('MessageList compact activity', () => {
       type: 'text',
       text: '',
     };
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect the code')] },
       {
@@ -1516,13 +1869,16 @@ describe('MessageList compact activity', () => {
         parts: [streamedText],
       },
     ]);
-    batch(() => {
-      setState('streamingPartId', streamedText.id);
-      setState('streamingText', 'I found the relevant implementation.');
-    });
+    flushSolid();
+    (() => {
+      setState(storePath('streamingPartId', streamedText.id));
+      setState(storePath('streamingText', 'I found the relevant implementation.'));
+    })();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file'
@@ -1532,12 +1888,13 @@ describe('MessageList compact activity', () => {
       'interactive-item-render-empty'
     );
 
-    batch(() => {
+    (() => {
       upsertPart({ ...streamedText, text: 'I found the relevant implementation.' });
-      setState('streamingPartId', null);
-      setState('streamingText', '');
-    });
+      setState(storePath('streamingPartId', null));
+      setState(storePath('streamingText', ''));
+    })();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).not.toContain(
       'interactive-item-render-empty'
@@ -1562,7 +1919,8 @@ describe('MessageList compact activity', () => {
       text: 'Verifying results',
       time: { start: 3, end: 4 },
     };
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the checks')] },
       { info: assistantMessage('assistant-1', { parentID: 'user-1' }), parts: [command] },
@@ -1577,9 +1935,12 @@ describe('MessageList compact activity', () => {
         ],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const summaries = container?.querySelectorAll<HTMLButtonElement>('.assistant-activity-summary');
     expect(summaries).toHaveLength(1);
@@ -1590,6 +1951,7 @@ describe('MessageList compact activity', () => {
     );
 
     summaries?.[0]?.click();
+    flushSolid();
 
     expect(summaries?.[0]?.getAttribute('aria-expanded')).toBe('true');
     expect(container?.querySelectorAll('.assistant-activity-details')).toHaveLength(2);
@@ -1617,16 +1979,29 @@ describe('MessageList compact activity', () => {
     };
     const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] };
     const info = assistantMessage('assistant-1', { parentID: 'user-1' });
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([user, { info, parts: [read, search] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(499);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file'
@@ -1652,7 +2027,9 @@ describe('MessageList compact activity', () => {
         ],
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file'
@@ -1662,20 +2039,24 @@ describe('MessageList compact activity', () => {
     ).not.toBeNull();
 
     await vi.advanceTimersByTimeAsync(1_999);
+    flushSolid();
     expect(
       container?.querySelector('[data-activity-part-id="search-1"].is-completed')
     ).not.toBeNull();
     expect(container?.querySelector('[data-activity-part-id="search-1"].is-exiting')).toBeNull();
 
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file, 1 search'
     );
 
     await vi.advanceTimersByTimeAsync(420);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(250);
+    flushSolid();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file, 1 search'
     );
@@ -1684,6 +2065,7 @@ describe('MessageList compact activity', () => {
 
   it('disconnects the reasoning exit summary observer on unmount', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const observers: MutationObserver[] = [];
     vi.spyOn(globalThis, 'MutationObserver').mockImplementation(function TestMutationObserver() {
       const observer = fixture<MutationObserver>({
@@ -1723,11 +2105,21 @@ describe('MessageList compact activity', () => {
       parts: [textPart('prompt-teardown', 'Search the code')],
     };
     const info = assistantMessage('assistant-teardown', { parentID: 'user-teardown' });
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([user, { info, parts: [read, thought] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // Exit anchoring is only needed when collapsing activity can clamp a scrolled viewport.
     const list = container!.querySelector<HTMLElement>('.interactive-list')!;
     Object.defineProperties(list, {
@@ -1736,6 +2128,7 @@ describe('MessageList compact activity', () => {
     });
     list.scrollTop = 200;
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
     replaceMessages([
       user,
       {
@@ -1749,8 +2142,11 @@ describe('MessageList compact activity', () => {
         ],
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(2_000);
+    flushSolid();
 
     const track = container?.querySelector('.interactive-list-track');
     const activityObserver = observers.find((observer) =>
@@ -1760,9 +2156,11 @@ describe('MessageList compact activity', () => {
     expect(activityObserver?.disconnect).not.toHaveBeenCalled();
 
     cleanup();
+    flushSolid();
     cleanup = undefined;
     expect(activityObserver?.disconnect).toHaveBeenCalledOnce();
     animationFrames.restore();
+    flushSolid();
   });
 
   it('keeps running activity outside an expanded Explored group', async () => {
@@ -1791,20 +2189,34 @@ describe('MessageList compact activity', () => {
       info: assistantMessage('assistant-2', { parentID: 'user-1', time: { created: 3 } }),
       parts: [running],
     };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([user, first]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
     summary?.click();
+    flushSolid();
     expect(summary?.getAttribute('aria-expanded')).toBe('true');
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(1);
 
     replaceMessages([user, first, second]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(1);
     expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
@@ -1814,6 +2226,7 @@ describe('MessageList compact activity', () => {
     );
 
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(1);
     expect(container?.querySelector('.assistant-active-activity-tray')).not.toBeNull();
     expect(
@@ -1821,6 +2234,7 @@ describe('MessageList compact activity', () => {
         ?.querySelector('[data-activity-part-id="command-running"]')
         ?.closest('.assistant-activity-details')
     ).toBeNull();
+    flushSolid();
     expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).not.toContain(
       'interactive-item-render-empty'
     );
@@ -1852,25 +2266,39 @@ describe('MessageList compact activity', () => {
     };
     const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] };
     const info = assistantMessage('assistant-1', { parentID: 'user-1' });
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([user, { info, parts: [search] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).not.toBeNull();
 
-    batch(() => {
+    (() => {
       replaceMessages([user, { info, parts: [completedSearch, response] }]);
-      setState('streamingPartId', response.id);
-      setState('streamingText', 'Streaming response');
-    });
+      setState(storePath('streamingPartId', response.id));
+      setState(storePath('streamingText', 'Streaming response'));
+    })();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).toBeNull();
     expect(container?.textContent).not.toContain('Streaming response');
     await vi.advanceTimersByTimeAsync(32);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).toBeNull();
     expect(container?.textContent).toContain('Streaming response');
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -1913,8 +2341,16 @@ describe('MessageList compact activity', () => {
       ...(textPart('response-streaming', '') as TextPart),
       messageID: 'assistant-2',
     };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] },
       {
@@ -1930,21 +2366,27 @@ describe('MessageList compact activity', () => {
         parts: [laterRunning],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
     const runningSearch = container?.querySelector(
       '[data-activity-part-id="search-before-stream"]'
     );
     expect(runningSearch).not.toBeNull();
     expect(runningSearch?.closest('.assistant-activity-details')).toBeNull();
+    flushSolid();
 
-    batch(() => {
-      setState('streamingPartId', response.id);
-      setState('streamingText', 'I found the relevant implementation.');
-    });
+    (() => {
+      setState(storePath('streamingPartId', response.id));
+      setState(storePath('streamingText', 'I found the relevant implementation.'));
+    })();
     await vi.advanceTimersByTimeAsync(300);
+    flushSolid();
 
     expect(
       container?.querySelector('[data-activity-part-id="search-before-stream"]')
@@ -1961,6 +2403,7 @@ describe('MessageList compact activity', () => {
     ].find((summary) => summary.textContent?.includes('Explored: 1 file'));
     expect(explored).toBeDefined();
     explored?.click();
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-details')?.textContent).not.toContain(
       'Search: activity'
@@ -1970,13 +2413,15 @@ describe('MessageList compact activity', () => {
         ?.querySelector('[data-activity-part-id="search-before-stream"]')
         ?.closest('.assistant-activity-details')
     ).toBeNull();
+    flushSolid();
 
-    batch(() => {
+    (() => {
       upsertPart({ ...response, text: 'I found the relevant implementation.' });
-      setState('streamingPartId', null);
-      setState('streamingText', '');
-    });
+      setState(storePath('streamingPartId', null));
+      setState(storePath('streamingText', ''));
+    })();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       container?.querySelector('[data-activity-part-id="search-before-stream"]')
@@ -1993,7 +2438,9 @@ describe('MessageList compact activity', () => {
         time: { start: 1, end: 1_001 },
       },
     });
+    flushSolid();
     await vi.advanceTimersByTimeAsync(300);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search-before-stream"]')).toBeNull();
     expect(
       container?.querySelector('[data-activity-part-id="command-after-stream"]')
@@ -2034,8 +2481,16 @@ describe('MessageList compact activity', () => {
       ...(textPart('response-after-patch', '') as TextPart),
       messageID: 'assistant-2',
     };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Update the file')] },
       {
@@ -2047,27 +2502,35 @@ describe('MessageList compact activity', () => {
         parts: [response],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(500);
-    batch(() => {
-      setState('streamingPartId', response.id);
-      setState('streamingText', 'Applying the requested change.');
-    });
+    flushSolid();
+    (() => {
+      setState(storePath('streamingPartId', response.id));
+      setState(storePath('streamingText', 'Applying the requested change.'));
+    })();
     await Promise.resolve();
+    flushSolid();
 
     const patchTitle = [...container!.querySelectorAll<HTMLElement>('.tool-invocation-title')].find(
       (element) => element.textContent === 'apply_patch'
     );
     expect(patchTitle).toBeDefined();
     expect(patchTitle?.closest('.assistant-activity-details')).toBeNull();
+    flushSolid();
     expect(
       patchTitle?.closest('.chat-tool-invocation-part')?.querySelector('.tool-status-running')
     ).not.toBeNull();
+    flushSolid();
     const explored = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
     expect(explored?.textContent).toContain('Explored: 1 thought, 1 search');
     explored?.click();
+    flushSolid();
     expect(patchTitle?.closest('.assistant-activity-details')).toBeNull();
+    flushSolid();
     expect(container?.querySelector('.assistant-activity-details')?.textContent).not.toContain(
       'apply_patch'
     );
@@ -2077,7 +2540,9 @@ describe('MessageList compact activity', () => {
       tool: 'functions.apply_patch',
       state: { ...patch.state, title: 'apply_patch' },
     });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const storedPatch = state.messages
       .flatMap((message) => message.parts)
@@ -2089,6 +2554,7 @@ describe('MessageList compact activity', () => {
     const identifiedPatch = container?.querySelector<HTMLElement>('.file-change-card');
     expect(identifiedPatch).not.toBeNull();
     expect(identifiedPatch?.closest('.assistant-activity-details')).toBeNull();
+    flushSolid();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
       'tool call'
     );
@@ -2118,8 +2584,16 @@ describe('MessageList compact activity', () => {
       text: '',
       time: { start: 2 },
     };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] },
       {
@@ -2131,16 +2605,21 @@ describe('MessageList compact activity', () => {
         parts: [reasoning],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
 
-    batch(() => {
-      setState('streamingPartId', reasoning.id);
-      setState('streamingText', 'Considering the relevant implementation.');
-    });
+    (() => {
+      setState(storePath('streamingPartId', reasoning.id));
+      setState(storePath('streamingText', 'Considering the relevant implementation.'));
+    })();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       container?.querySelector('[data-activity-part-id="search-before-reasoning"]')
@@ -2188,17 +2667,31 @@ describe('MessageList compact activity', () => {
       info: assistantMessage('assistant-3', { parentID: 'user-1' }),
       parts: [{ ...textPart('response-1', 'Checks passed.'), messageID: 'assistant-3' }],
     };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([user, first, { info: secondInfo, parts: [running] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="command-running"]')).not.toBeNull();
 
     replaceMessages([user, first, { info: secondInfo, parts: [completedRunning] }]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const followerRow = container?.querySelector('[data-msg-id="assistant-2"]');
     expect(
@@ -2207,19 +2700,24 @@ describe('MessageList compact activity', () => {
     expect(followerRow?.classList).not.toContain('interactive-item-render-empty');
 
     await vi.advanceTimersByTimeAsync(2_000);
+    flushSolid();
     expect(followerRow?.querySelector('[data-activity-part-id="command-running"]')).toBeNull();
     expect(followerRow?.classList).toContain('interactive-item-render-empty');
 
     await vi.advanceTimersByTimeAsync(420);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="command-running"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(250);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="command-running"]')).toBeNull();
     expect(followerRow?.classList).toContain('interactive-item-render-empty');
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 2 commands'
     );
     replaceMessages([user, first, { info: secondInfo, parts: [completedRunning] }, response]);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(32);
+    flushSolid();
     expect(container?.textContent).toContain('Checks passed.');
   });
 
@@ -2257,26 +2755,44 @@ describe('MessageList compact activity', () => {
       parentID: 'user-1',
       time: { created: 1 },
     });
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([user, { info, parts: [read] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     replaceMessages([user, { info, parts: [read, command] }]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(40);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="command-fast"]')).toBeNull();
 
     replaceMessages([user, { info, parts: [read, completedCommand] }]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(400);
+    flushSolid();
 
     expect(container?.querySelector('[data-activity-part-id="command-fast"]')).not.toBeNull();
     expect(
       container?.querySelector('[data-activity-part-id="command-fast"] .tool-status-running')
     ).toBeNull();
     await vi.advanceTimersByTimeAsync(2_000);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="command-fast"]')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file, 1 command'
@@ -2304,31 +2820,49 @@ describe('MessageList compact activity', () => {
       info: assistantMessage('assistant-2', { parentID: 'user-1' }),
       parts: [running],
     };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([user, reasoningMessage]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
     expect(container?.textContent).toContain('Ruminating');
 
     replaceMessages([user, reasoningMessage, toolMessage]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const toolRow = () => container?.querySelector('[data-msg-id="assistant-2"]');
     expect(toolRow()?.classList).toContain('interactive-item-render-empty');
     expect(toolRow()?.classList).not.toContain('measured-entrance-active');
     expect(container?.querySelector('[data-activity-part-id="command-1"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(99);
+    flushSolid();
     expect(toolRow()?.classList).toContain('interactive-item-render-empty');
 
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(toolRow()?.classList).toContain('interactive-item-render-empty');
     expect(container?.querySelector('[data-activity-part-id="command-1"]')).toBeNull();
     if (thought.type !== 'reasoning') throw new Error('Expected reasoning fixture');
     upsertPart({ ...thought, time: { ...thought.time, end: 600 } });
+    flushSolid();
     await vi.advanceTimersByTimeAsync(3_000);
+    flushSolid();
     expect(toolRow()?.classList).not.toContain('interactive-item-render-empty');
     expect(container?.querySelector('[data-activity-part-id="command-1"]')).not.toBeNull();
   });
@@ -2341,8 +2875,16 @@ describe('MessageList compact activity', () => {
       title: 'npm run old-check',
       time: { start: 1 },
     };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the old check')] },
       {
@@ -2358,10 +2900,14 @@ describe('MessageList compact activity', () => {
         parts: [{ ...textPart('response-2', 'Working on it.'), messageID: 'assistant-2' }],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
 
     expect(container?.querySelector('[data-activity-part-id="command-stale"]')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -2390,8 +2936,16 @@ describe('MessageList compact activity', () => {
       };
       return part;
     });
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run checks')] },
       {
@@ -2407,13 +2961,17 @@ describe('MessageList compact activity', () => {
         parts: [completed[1]!],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 2 commands'
     );
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
 
     const summary = container?.querySelector<HTMLElement>('.assistant-activity-summary');
     const activeItem = container?.querySelector<HTMLElement>(
@@ -2424,6 +2982,7 @@ describe('MessageList compact activity', () => {
     expect(summary?.closest('.assistant-active-activity-tray')).toBe(
       activeItem?.closest('.assistant-active-activity-tray')
     );
+    flushSolid();
     expect(summary?.compareDocumentPosition(activeItem!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
@@ -2454,13 +3013,25 @@ describe('MessageList compact activity', () => {
       parentID: 'user-1',
       time: { created: 1 },
     });
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([user, { info, parts: [first, running, last] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
     expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 2 commands'
@@ -2468,7 +3039,9 @@ describe('MessageList compact activity', () => {
 
     const retained = completedCommand('command-2', 'npm run test:e2e', 3);
     replaceMessages([user, { info, parts: [first, retained, last] }]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -2479,6 +3052,7 @@ describe('MessageList compact activity', () => {
     ).not.toBeNull();
 
     await vi.advanceTimersByTimeAsync(2_000);
+    flushSolid();
 
     expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -2510,13 +3084,25 @@ describe('MessageList compact activity', () => {
       parentID: 'user-1',
       time: { created: 1 },
     });
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([user, { info, parts: [command] }]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
 
     const placeholder = container?.querySelector<HTMLElement>(
       '.assistant-activity-summary-placeholder'
@@ -2536,12 +3122,15 @@ describe('MessageList compact activity', () => {
         parts: [completedCommand],
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary-placeholder')).not.toBeNull();
     expect(container?.querySelector('button.assistant-activity-summary')).toBeNull();
 
     await vi.advanceTimersByTimeAsync(2_000);
+    flushSolid();
 
     const tray = container?.querySelector('.assistant-active-activity-tray');
     expect(tray).toBeNull();
@@ -2561,10 +3150,13 @@ describe('MessageList compact activity', () => {
         ],
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="command-1"].is-exiting')).toBeNull();
 
     await vi.advanceTimersByTimeAsync(32);
+    flushSolid();
 
     expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -2592,7 +3184,8 @@ describe('MessageList compact activity', () => {
       text: 'Checking after the response',
       time: { start: 3, end: 4 },
     };
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the checks')] },
       {
@@ -2600,9 +3193,12 @@ describe('MessageList compact activity', () => {
         parts: [command, response, thought],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const summaries = [
       ...(container?.querySelectorAll<HTMLButtonElement>('.assistant-activity-summary') || []),
@@ -2685,8 +3281,17 @@ describe('MessageList compact activity', () => {
       time: { start: 0, end: 1 },
     };
     setShowFileDiffs(true);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-history'), parts: [textPart('prompt-history', 'Earlier edit')] },
       {
@@ -2703,9 +3308,12 @@ describe('MessageList compact activity', () => {
         parts: [secondEdit],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const summaries = () => [
       ...(container?.querySelectorAll<HTMLElement>('.assistant-activity-summary') || []),
@@ -2725,7 +3333,9 @@ describe('MessageList compact activity', () => {
     ).toEqual(['app.ts', 'second.ts']);
 
     setShowFileDiffs(false);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(0);
     expect(
@@ -2737,18 +3347,31 @@ describe('MessageList compact activity', () => {
     ]);
 
     setShowFileDiffs(true);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
 
-    setState('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    setState(storePath('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
 
-    setState('questions', []);
+    setState(storePath('questions', []));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
 
@@ -2769,7 +3392,9 @@ describe('MessageList compact activity', () => {
       },
       { info: userMessage('user-2'), parts: [textPart('prompt-2', 'One more change')] },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
     expect(summaries()).toHaveLength(2);
@@ -2803,8 +3428,17 @@ describe('MessageList compact activity', () => {
       time: { start: 2, end: 3 },
     };
     setExpandThinking(true);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-history'), parts: [textPart('prompt-history', 'Earlier')] },
       {
@@ -2817,16 +3451,21 @@ describe('MessageList compact activity', () => {
         parts: [completedActiveThought, activeThought],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.thinking-content')).toBeNull();
 
     await vi.advanceTimersByTimeAsync(1_999);
+    flushSolid();
     expect(container?.querySelector('.thinking-content')).toBeNull();
 
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     const summaries = [...(container?.querySelectorAll('.assistant-activity-summary') || [])];
     expect(summaries.some((summary) => summary.textContent?.includes('Explored: 1 thought'))).toBe(
       true
@@ -2848,7 +3487,9 @@ describe('MessageList compact activity', () => {
     expect(container?.textContent).not.toContain('Historical details');
 
     upsertPart({ ...activeThought, time: { start: 3, end: 2_003 } });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.thinking-content')).toBeNull();
     expect(container?.textContent).not.toContain('Active details');
@@ -2868,22 +3509,36 @@ describe('MessageList compact activity', () => {
       time: { start: 2_004 },
     };
     upsertPart(nextThought);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.thinking-content')).toBeNull();
     await vi.advanceTimersByTimeAsync(1_999);
+    flushSolid();
     expect(container?.querySelector('.thinking-content')).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(container?.querySelectorAll('.thinking-content')).toHaveLength(1);
     expect(container?.textContent).toContain('Next active details');
 
     upsertPart({ ...nextThought, time: { start: 2_004, end: 4_004 } });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.thinking-content')).toBeNull();
 
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.chat-thinking-box')).toHaveLength(3);
     expect(container?.querySelector('.thinking-content')).toBeNull();
@@ -2901,13 +3556,17 @@ describe('MessageList compact activity', () => {
       },
       { info: userMessage('user-next'), parts: [textPart('prompt-next', 'Next turn')] },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.chat-thinking-box')).toHaveLength(0);
     expect(container?.textContent).toContain('Explored: 1 thought');
 
     replaceMessages([]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-active'), parts: [textPart('prompt-active', 'Current')] },
       {
@@ -2915,7 +3574,9 @@ describe('MessageList compact activity', () => {
         parts: [completedActiveThought, { ...activeThought, time: { start: 3, end: 2_003 } }],
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.chat-thinking-box')).toHaveLength(0);
   });
@@ -2943,22 +3604,46 @@ describe('MessageList compact activity', () => {
       },
     ];
     setShowFileDiffs(true);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages(transcript);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(1);
 
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(1);
 
     replaceMessages([]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     replaceMessages(transcript);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(0);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -2966,7 +3651,9 @@ describe('MessageList compact activity', () => {
     );
 
     startLoading();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(0);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -2988,8 +3675,17 @@ describe('MessageList compact activity', () => {
       time: { start: 1, end: 2 },
     };
     setShowFileDiffs(true);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
       {
@@ -2997,9 +3693,12 @@ describe('MessageList compact activity', () => {
         parts: [edit, read],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       '1 file'
@@ -3025,7 +3724,8 @@ describe('MessageList compact activity', () => {
         metadata: {},
         time: { start: 1, end: 2 },
       };
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
         {
@@ -3033,9 +3733,12 @@ describe('MessageList compact activity', () => {
           parts: [patch, read],
         },
       ]);
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
         'Explored: 1 file'
@@ -3053,8 +3756,21 @@ describe('MessageList compact activity', () => {
       const patch = toolPart('patch-pending', 'assistant-2', 'call-patch-pending');
       patch.tool = tool;
       patch.state = { status: 'pending', input: {}, raw: '' };
-      setState('activeSessionId', 'session-1');
-      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState((draft) => {
+        const current = draft['sessionStatus'];
+        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionStatus'] = incoming;
+        else reconcile(incoming)(current);
+      });
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Update the files')] },
         {
@@ -3069,9 +3785,12 @@ describe('MessageList compact activity', () => {
           parts: [patch],
         },
       ]);
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       const patchRow = container?.querySelector('[data-msg-id="assistant-2"]');
       expect(patchRow?.classList).not.toContain('interactive-item-render-empty');
@@ -3096,8 +3815,21 @@ describe('MessageList compact activity', () => {
         metadata: {},
         time: { start: 1, end: 2 },
       };
-      setState('activeSessionId', 'session-1');
-      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState((draft) => {
+        const current = draft['sessionStatus'];
+        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionStatus'] = incoming;
+        else reconcile(incoming)(current);
+      });
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
         {
@@ -3105,18 +3837,24 @@ describe('MessageList compact activity', () => {
           parts: [read, patch],
         },
       ]);
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await vi.advanceTimersByTimeAsync(500);
+      flushSolid();
       container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
+      flushSolid();
 
       upsertPart({ ...patch, tool: `functions.${tool}` });
+      flushSolid();
 
       const patchTitle = [...(container?.querySelectorAll('.tool-invocation-title') || [])].find(
         (element) => element.textContent === 'Editing'
       );
       expect(patchTitle).not.toBeUndefined();
       expect(patchTitle?.closest('.assistant-activity-details')).toBeNull();
+      flushSolid();
       expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
         'Explored: 1 file'
       );
@@ -3144,21 +3882,28 @@ describe('MessageList compact activity', () => {
       text: 'Verifying results',
       time: { start: 3, end: 4 },
     };
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: assistantMessage('assistant-2', { parentID: 'user-1' }), parts: [thought] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
+    flushSolid();
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(1);
 
     replaceMessages([
       { info: assistantMessage('assistant-1', { parentID: 'user-1' }), parts: [command] },
       { info: assistantMessage('assistant-2', { parentID: 'user-1' }), parts: [thought] },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       container?.querySelector('.assistant-activity-summary')?.getAttribute('aria-expanded')
@@ -3177,75 +3922,98 @@ describe('MessageList empty state', () => {
     const previousFocusKey = composerFocusKey();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     container?.querySelector<HTMLElement>('.interactive-list')?.click();
+    flushSolid();
 
     expect(composerFocusKey()).toBe(previousFocusKey + 1);
   });
 
   it('does not focus the composer for an existing chat whose messages have not loaded', () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Existing session',
-        version: '1',
-        time: { created: 100, updated: 200 },
-      },
-    ]);
-    setState('activeSessionId', 'session-1');
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/workspace',
+          title: 'Existing session',
+          version: '1',
+          time: { created: 100, updated: 200 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const previousFocusKey = composerFocusKey();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     container?.querySelector<HTMLElement>('.interactive-list')?.click();
+    flushSolid();
 
     expect(composerFocusKey()).toBe(previousFocusKey);
   });
 
   it('waits for equal-timestamp session hydration before enabling blank-area focus', () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Hydrating session',
-        version: '1',
-        time: { created: 100, updated: 100 },
-      },
-    ]);
-    setState('activeSessionId', 'session-1');
-    setState('messagesLoading', true);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/workspace',
+          title: 'Hydrating session',
+          version: '1',
+          time: { created: 100, updated: 100 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
     const previousFocusKey = composerFocusKey();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     const list = container?.querySelector<HTMLElement>('.interactive-list');
     list?.click();
+    flushSolid();
 
     expect(composerFocusKey()).toBe(previousFocusKey);
     expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
 
-    setState('messagesLoading', false);
+    setState(storePath('messagesLoading', false));
+    flushSolid();
     list?.click();
+    flushSolid();
 
     expect(composerFocusKey()).toBe(previousFocusKey + 1);
   });
 
   it('shows the starter logo for a blank new chat', () => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows NT 10.0');
-    setState('emptyStateLogoUri', 'https://example.test/logo.svg');
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Blank session',
-        version: '1',
-        time: { created: 100, updated: 100 },
-      },
-    ]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('emptyStateLogoUri', 'https://example.test/logo.svg'));
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/workspace',
+          title: 'Blank session',
+          version: '1',
+          time: { created: 100, updated: 100 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
     const logo = container?.querySelector<HTMLImageElement>('.chat-empty-logo');
@@ -3274,6 +4042,7 @@ describe('MessageList empty state', () => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh; Intel Mac OS X 10_15_7');
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     expect(
       container?.querySelector('.chat-empty-hint-grid > .chat-empty-hint:nth-child(6)')?.textContent
@@ -3285,18 +4054,22 @@ describe('MessageList empty state', () => {
     try {
       writeStored(STORAGE_KEYS.starterHintsDismissed, null);
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       const hints = container?.querySelector<HTMLElement>('.chat-empty-hints');
       const previousFocusKey = composerFocusKey();
       expect(hints?.hidden).toBe(false);
 
       container?.querySelector<HTMLButtonElement>('.chat-empty-hints-dismiss')?.click();
+      flushSolid();
 
       expect(hints?.hidden).toBe(true);
       expect(readStored<unknown>(STORAGE_KEYS.starterHintsDismissed)).toBe(true);
       expect(composerFocusKey()).toBe(previousFocusKey);
 
       cleanup();
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       expect(container?.querySelector<HTMLElement>('.chat-empty-hints')?.hidden).toBe(true);
     } finally {
       writeStored(STORAGE_KEYS.starterHintsDismissed, previousDismissal);
@@ -3305,20 +4078,27 @@ describe('MessageList empty state', () => {
 
   it('omits the logo image when no logo URI is available but keeps the hints', () => {
     setShowEmptyStateHistogram(true);
-    setState('emptyStateLogoUri', '');
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Blank session',
-        version: '1',
-        time: { created: 100, updated: 100 },
-      },
-    ]);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('emptyStateLogoUri', ''));
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/workspace',
+          title: 'Blank session',
+          version: '1',
+          time: { created: 100, updated: 100 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
@@ -3328,20 +4108,27 @@ describe('MessageList empty state', () => {
 
   it('does not show the starter logo while switching to an existing chat with no loaded messages yet', () => {
     setShowEmptyStateHistogram(true);
-    setState('emptyStateLogoUri', 'https://example.test/logo.svg');
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Existing session',
-        version: '1',
-        time: { created: 100, updated: 200 },
-      },
-    ]);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('emptyStateLogoUri', 'https://example.test/logo.svg'));
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/workspace',
+          title: 'Existing session',
+          version: '1',
+          time: { created: 100, updated: 200 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-empty-state')).toBeNull();
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
@@ -3350,13 +4137,16 @@ describe('MessageList empty state', () => {
 
   it('mounts the starter histogram only while opted in', () => {
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(container?.querySelector('.chat-empty-histogram')).toBeNull();
 
     setShowEmptyStateHistogram(true);
+    flushSolid();
     const histogram = container?.querySelector('.chat-empty-histogram');
     expect(histogram).not.toBeNull();
 
     setShowEmptyStateHistogram(false);
+    flushSolid();
     expect(container?.querySelector('.chat-empty-histogram')).toBeNull();
     expect(histogram?.isConnected).toBe(false);
     expect(container?.querySelector('.chat-empty-state')).not.toBeNull();
@@ -3364,14 +4154,19 @@ describe('MessageList empty state', () => {
 
   it('removes the starter histogram when the first message arrives', () => {
     setShowEmptyStateHistogram(true);
+    flushSolid();
     setSessions([session('session-1', { time: { created: 100, updated: 100 } })]);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(container?.querySelector('.chat-empty-histogram')).not.toBeNull();
 
     replaceMessages([
       { info: userMessage('first-message'), parts: [textPart('first-text', 'Hello')] },
     ]);
+    flushSolid();
 
     expect(container?.querySelector('.chat-empty-histogram')).toBeNull();
   });
@@ -3380,30 +4175,40 @@ describe('MessageList empty state', () => {
     'rebuilds the histogram on New chat while already blank, existing session: %s',
     (existing) => {
       setShowEmptyStateHistogram(true);
+      flushSolid();
       if (existing) {
         setSessions([session('session-1', { time: { created: 100, updated: 100 } })]);
-        setState('activeSessionId', 'session-1');
+        flushSolid();
+        setState(storePath('activeSessionId', 'session-1'));
+        flushSolid();
       }
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       const first = container?.querySelector('.chat-empty-histogram');
       expect(first).not.toBeNull();
       startNewChatDraft();
+      flushSolid();
       const second = container?.querySelector('.chat-empty-histogram');
       expect(second).not.toBeNull();
       expect(second).not.toBe(first);
       startNewChatDraft();
+      flushSolid();
       expect(container?.querySelector('.chat-empty-histogram')).not.toBe(second);
       expect(state.activeSessionId).toBe(existing ? 'session-1' : null);
     }
   );
 
   it('shows the parent starter state when only a hidden child message is retained', () => {
-    setState('emptyStateLogoUri', 'https://example.test/logo.svg');
+    setState(storePath('emptyStateLogoUri', 'https://example.test/logo.svg'));
+    flushSolid();
     setSessions([
       session('session-1'),
       session('child-1', { parentID: 'session-1', time: { created: 2, updated: 3 } }),
     ]);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('child-assistant', { sessionID: 'child-1' }),
@@ -3416,8 +4221,10 @@ describe('MessageList empty state', () => {
         ],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     expect(container?.querySelector('[data-msg-id]')).toBeNull();
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
@@ -3427,7 +4234,9 @@ describe('MessageList empty state', () => {
 describe('MessageList session scoping', () => {
   it('reacts synchronously when only the active session changes', async () => {
     setSessions([session('session-1'), session('session-2')]);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       {
         info: userMessage('session-1-message'),
@@ -3449,15 +4258,19 @@ describe('MessageList session scoping', () => {
         ],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       [...container!.querySelectorAll<HTMLElement>('[data-msg-id]')].map((row) => row.dataset.msgId)
     ).toEqual(['session-1-message']);
 
-    setState('activeSessionId', 'session-2');
+    setState(storePath('activeSessionId', 'session-2'));
+    flushSolid();
 
     expect(
       [...container!.querySelectorAll<HTMLElement>('[data-msg-id]')].map((row) => row.dataset.msgId)
@@ -3484,6 +4297,7 @@ describe('MessageList session scoping', () => {
         time: { created: 1, updated: 11 },
       },
     ]);
+    flushSolid();
 
     const messages: MessageEntry[] = [
       { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
@@ -3568,6 +4382,7 @@ describe('MessageList session scoping', () => {
         time: { created: 1, updated: 11 },
       },
     ]);
+    flushSolid();
 
     const messages: MessageEntry[] = [
       { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
@@ -3598,7 +4413,8 @@ describe('MessageList session scoping', () => {
   });
 
   it('hides child-session messages in the parent thread', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setSessions([
       {
         id: 'session-1',
@@ -3618,6 +4434,7 @@ describe('MessageList session scoping', () => {
         time: { created: 1, updated: 11 },
       },
     ]);
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
       {
@@ -3662,9 +4479,12 @@ describe('MessageList session scoping', () => {
         ],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).toContain('Root prompt');
     expect(container?.textContent).toContain('Root response');
@@ -3673,8 +4493,10 @@ describe('MessageList session scoping', () => {
   });
 
   it('keeps the visible parent error retryable when a hidden child assistant is newer', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setSessions([session('session-1'), session('child-1', { parentID: 'session-1' })]);
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
       {
@@ -3699,9 +4521,12 @@ describe('MessageList session scoping', () => {
         ],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const retry = [...(container?.querySelectorAll('button') ?? [])].find(
       (button) => button.textContent?.trim() === 'Retry'
@@ -3710,23 +4535,27 @@ describe('MessageList session scoping', () => {
   });
 
   it('does not let hidden child-session models create parent-thread switch markers', async () => {
-    setState('activeSessionId', 'session-1');
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-5.4': {
-            id: 'gpt-5.4',
-            name: 'GPT-5.4',
-            capabilities: { reasoning: true, toolcall: true, attachment: true },
-            cost: { input: 0, output: 0 },
-            variants: { medium: {}, high: {} },
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-5.4': {
+              id: 'gpt-5.4',
+              name: 'GPT-5.4',
+              capabilities: { reasoning: true, toolcall: true, attachment: true },
+              cost: { input: 0, output: 0 },
+              variants: { medium: {}, high: {} },
+            },
           },
         },
-      },
-    ]);
+      ])
+    );
+    flushSolid();
     setSessions([
       {
         id: 'session-1',
@@ -3746,6 +4575,7 @@ describe('MessageList session scoping', () => {
         time: { created: 1, updated: 11 },
       },
     ]);
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
       {
@@ -3765,9 +4595,12 @@ describe('MessageList session scoping', () => {
         parts: [textPart('text-root-3', 'Continuing root response')],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).toContain('Root response');
     expect(container?.textContent).toContain('Continuing root response');
@@ -3785,30 +4618,34 @@ describe('MessageList session scoping', () => {
     },
     { name: 'status without a provider', providerID: '', modelID: 'gpt-5.4', errorName: undefined },
   ])('ignores $name rows without losing genuine model or thinking changes', async (status) => {
-    setState('activeSessionId', 'session-1');
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-5.4': {
-            id: 'gpt-5.4',
-            name: 'GPT-5.4',
-            capabilities: { reasoning: true },
-            cost: { input: 0, output: 0 },
-            variants: { medium: {}, high: {} },
-          },
-          other: {
-            id: 'other',
-            name: 'Other',
-            capabilities: { reasoning: true },
-            cost: { input: 0, output: 0 },
-            variants: { medium: {} },
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-5.4': {
+              id: 'gpt-5.4',
+              name: 'GPT-5.4',
+              capabilities: { reasoning: true },
+              cost: { input: 0, output: 0 },
+              variants: { medium: {}, high: {} },
+            },
+            other: {
+              id: 'other',
+              name: 'Other',
+              capabilities: { reasoning: true },
+              cost: { input: 0, output: 0 },
+              variants: { medium: {} },
+            },
           },
         },
-      },
-    ]);
+      ])
+    );
+    flushSolid();
     const statusRow = (id: string): MessageEntry => ({
       info: assistantMessage(id, {
         providerID: status.providerID,
@@ -3848,9 +4685,12 @@ describe('MessageList session scoping', () => {
       },
       statusRow('trailing-status'),
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const labels = container!.querySelectorAll(
       '.model-change-indicator:not(.assistant-dialog-summary) .model-change-label'
@@ -3867,30 +4707,34 @@ describe('MessageList session scoping', () => {
   });
 
   it('shows model transitions with unchanged details omitted and full details in a tooltip', async () => {
-    setState('activeSessionId', 'session-1');
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-5.4': {
-            id: 'gpt-5.4',
-            name: 'GPT-5.4',
-            capabilities: { reasoning: true, toolcall: true, attachment: true },
-            cost: { input: 0, output: 0 },
-            variants: { medium: {}, high: {} },
-          },
-          xhigh: {
-            id: 'xhigh',
-            name: 'Xhigh',
-            capabilities: { reasoning: true, toolcall: true, attachment: true },
-            cost: { input: 0, output: 0 },
-            variants: { high: {} },
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-5.4': {
+              id: 'gpt-5.4',
+              name: 'GPT-5.4',
+              capabilities: { reasoning: true, toolcall: true, attachment: true },
+              cost: { input: 0, output: 0 },
+              variants: { medium: {}, high: {} },
+            },
+            xhigh: {
+              id: 'xhigh',
+              name: 'Xhigh',
+              capabilities: { reasoning: true, toolcall: true, attachment: true },
+              cost: { input: 0, output: 0 },
+              variants: { high: {} },
+            },
           },
         },
-      },
-    ]);
+      ])
+    );
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('assistant-1', { modelID: 'gpt-5.4', variant: 'medium' }),
@@ -3909,9 +4753,12 @@ describe('MessageList session scoping', () => {
         parts: [textPart('text-4', 'Fourth response')],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const labels = [
       ...(container?.querySelectorAll(
@@ -3932,9 +4779,12 @@ describe('MessageList session scoping', () => {
     ).toEqual(['Medium → High', 'GPT-5.4 → Xhigh', 'Xhigh → GPT-5.4 Medium']);
 
     labels[1]?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(299);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
 
     const tooltipCells = [
       ...document.querySelectorAll('[role="tooltip"] .model-change-tooltip > span'),
@@ -3953,28 +4803,32 @@ describe('MessageList session scoping', () => {
   ])(
     'uses $count speed icons for $speed model transitions and tooltips',
     async ({ speed, count }) => {
-      setState('activeSessionId', 'session-1');
-      setState('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            standard: {
-              id: 'standard',
-              name: 'GPT-6.1 Sol',
-              capabilities: { reasoning: true, toolcall: true },
-              cost: { input: 0, output: 0 },
-            },
-            speedy: {
-              id: 'speedy',
-              name: `GPT-6.1 Sol ${speed}`,
-              capabilities: { reasoning: true, toolcall: true },
-              cost: { input: 0, output: 0 },
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState(
+        storePath('providers', [
+          {
+            id: 'openai',
+            name: 'OpenAI',
+            source: 'api',
+            models: {
+              standard: {
+                id: 'standard',
+                name: 'GPT-6.1 Sol',
+                capabilities: { reasoning: true, toolcall: true },
+                cost: { input: 0, output: 0 },
+              },
+              speedy: {
+                id: 'speedy',
+                name: `GPT-6.1 Sol ${speed}`,
+                capabilities: { reasoning: true, toolcall: true },
+                cost: { input: 0, output: 0 },
+              },
             },
           },
-        },
-      ]);
+        ])
+      );
+      flushSolid();
       replaceMessages([
         {
           info: assistantMessage('assistant-1', { modelID: 'standard' }),
@@ -3989,9 +4843,12 @@ describe('MessageList session scoping', () => {
           parts: [textPart('text-3', 'Third response')],
         },
       ]);
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       const labels = container!.querySelectorAll(
         '.model-change-indicator:not(.assistant-dialog-summary) .model-change-label'
@@ -4009,7 +4866,9 @@ describe('MessageList session scoping', () => {
       }
 
       labels[0]?.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(300);
+      flushSolid();
       const tooltip = document.querySelector('[role="tooltip"] .model-change-tooltip');
       expect(tooltip).not.toBeNull();
       expect(tooltip?.textContent).not.toContain('⚡');
@@ -4018,23 +4877,27 @@ describe('MessageList session scoping', () => {
   );
 
   it('does not treat manual compaction as a reasoning-level change', async () => {
-    setState('activeSessionId', 'session-1');
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-5.4': {
-            id: 'gpt-5.4',
-            name: 'GPT-5.4',
-            capabilities: { reasoning: true, toolcall: true, attachment: true },
-            cost: { input: 0, output: 0 },
-            variants: { xhigh: {} },
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-5.4': {
+              id: 'gpt-5.4',
+              name: 'GPT-5.4',
+              capabilities: { reasoning: true, toolcall: true, attachment: true },
+              cost: { input: 0, output: 0 },
+              variants: { xhigh: {} },
+            },
           },
         },
-      },
-    ]);
+      ])
+    );
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('assistant-1', { modelID: 'gpt-5.4', variant: 'xhigh' }),
@@ -4057,9 +4920,12 @@ describe('MessageList session scoping', () => {
         parts: [textPart('text-2', 'Response after compaction')],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).toContain('Context compacted manually');
     expect(
@@ -4068,35 +4934,39 @@ describe('MessageList session scoping', () => {
   });
 
   it('shows both provider names when only the provider changes', async () => {
-    setState('activeSessionId', 'session-1');
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          shared: {
-            id: 'shared',
-            name: 'Shared',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            shared: {
+              id: 'shared',
+              name: 'Shared',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
           },
         },
-      },
-      {
-        id: 'copilot',
-        name: 'GitHub Copilot',
-        source: 'api',
-        models: {
-          shared: {
-            id: 'shared',
-            name: 'Shared',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
+        {
+          id: 'copilot',
+          name: 'GitHub Copilot',
+          source: 'api',
+          models: {
+            shared: {
+              id: 'shared',
+              name: 'Shared',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
           },
         },
-      },
-    ]);
+      ])
+    );
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('assistant-1', { providerID: 'openai', modelID: 'shared' }),
@@ -4107,9 +4977,12 @@ describe('MessageList session scoping', () => {
         parts: [textPart('text-2', 'Second response')],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const label = container?.querySelector(
       '.model-change-indicator:not(.assistant-dialog-summary) .model-change-label'
@@ -4123,7 +4996,8 @@ describe('MessageList session scoping', () => {
   });
 
   it('keeps child-session streaming text out of the parent thread', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setSessions([
       {
         id: 'session-1',
@@ -4143,6 +5017,7 @@ describe('MessageList session scoping', () => {
         time: { created: 1, updated: 11 },
       },
     ]);
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
       {
@@ -4164,11 +5039,16 @@ describe('MessageList session scoping', () => {
         ],
       },
     ]);
-    setState('streamingPartId', 'text-child-1');
-    setState('streamingText', 'Partial subagent result that should stay hidden');
+    flushSolid();
+    setState(storePath('streamingPartId', 'text-child-1'));
+    flushSolid();
+    setState(storePath('streamingText', 'Partial subagent result that should stay hidden'));
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).toContain('Root prompt');
     expect(container?.textContent).not.toContain('Partial subagent result');
@@ -4176,7 +5056,8 @@ describe('MessageList session scoping', () => {
   });
 
   it('shows child-session assistant messages when the child session is active', async () => {
-    setState('activeSessionId', 'child-1');
+    setState(storePath('activeSessionId', 'child-1'));
+    flushSolid();
     setSessions([
       {
         id: 'session-1',
@@ -4196,6 +5077,7 @@ describe('MessageList session scoping', () => {
         time: { created: 1, updated: 11 },
       },
     ]);
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
       {
@@ -4217,9 +5099,12 @@ describe('MessageList session scoping', () => {
         ],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).not.toContain('Root prompt');
     expect(container?.textContent).toContain('Subagent result');
@@ -4231,8 +5116,22 @@ describe('MessageList loading row', () => {
     'counts from completed %s events but ignores child-session completions',
     async (kind) => {
       vi.setSystemTime(100_000);
-      setState('activeSessionId', 'session-1');
-      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState((draft) => {
+        const current = draft['sessionStatus'];
+        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionStatus'] = incoming;
+        else reconcile(incoming)(current);
+      });
+      flushSolid();
       const part: Part = {
         id: 'done',
         sessionID: 'session-1',
@@ -4267,17 +5166,30 @@ describe('MessageList loading row', () => {
           parts: [],
         },
       ]);
+      flushSolid();
       startLoading(50_000);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await vi.advanceTimersByTimeAsync(2_500);
+      flushSolid();
       expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('22s');
     }
   );
 
   it('hides the loading row once a running tool timer mounts', async () => {
     vi.setSystemTime(64_000);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     const tool = toolPart('tool-active', 'assistant-1');
     tool.state = {
       status: 'running',
@@ -4302,16 +5214,22 @@ describe('MessageList loading row', () => {
         ],
       },
     ]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('51s');
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
     expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('1m 5s');
     expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
       'is-reserved'
     );
     vi.setSystemTime(65_001);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
     expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('1m 6s');
     expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
       'is-reserved'
@@ -4323,8 +5241,22 @@ describe('MessageList loading row', () => {
     'counts from the latest %s tool in the current turn and resets without hiding at completion',
     async (status) => {
       vi.setSystemTime(100_000);
-      setState('activeSessionId', 'session-1');
-      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState((draft) => {
+        const current = draft['sessionStatus'];
+        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionStatus'] = incoming;
+        else reconcile(incoming)(current);
+      });
+      flushSolid();
       const tool = toolPart('finished', 'assistant-1');
       tool.state =
         status === 'completed'
@@ -4351,43 +5283,62 @@ describe('MessageList loading row', () => {
           parts: [tool],
         },
       ]);
+      flushSolid();
       startLoading(50_000);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await vi.advanceTimersByTimeAsync(2_500);
+      flushSolid();
       const elapsed = container?.querySelector('.loading-elapsed');
       const verb = container?.querySelector('.loading-verb')?.textContent;
       expect(elapsed?.textContent).toBe('22s');
       upsertPart({ ...tool, state: { ...tool.state, time: { start: 60_000, end: Date.now() } } });
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       // Only the elapsed value resets; the mounted label and turn's verb cycle continue.
       expect(container?.querySelector('.loading-elapsed')).toBe(elapsed);
       expect(elapsed?.textContent).toBe('0s');
       expect(container?.querySelector('.loading-verb')?.textContent).toBe(verb);
       await vi.advanceTimersByTimeAsync(10_500);
+      flushSolid();
       expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
     }
   );
 
   it('shows hours and minutes without seconds for hour-long durations', async () => {
     vi.setSystemTime(69 * 60_000 + 32_000);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     startLoading(0);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1h 9m');
   });
 
   it('replaces the reserved row with the worked summary when an existing chat loads', async () => {
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    setState('activeSessionId', 'session-1');
-    setState('messagesLoading', true);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
     replaceMessages([]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
@@ -4406,9 +5357,13 @@ describe('MessageList loading row', () => {
         parts: [textPart('text-assistant-1', 'Final response')],
       },
     ]);
-    setState('messagesLoading', false);
+    flushSolid();
+    setState(storePath('messagesLoading', false));
+    flushSolid();
     stopLoading();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
     expect(
@@ -4418,59 +5373,91 @@ describe('MessageList loading row', () => {
 
   it('marks the loading row as stale after prolonged inactivity', async () => {
     vi.setSystemTime(0);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     startLoading(0);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
     expect(container?.textContent).not.toContain('Session may be stale');
 
     vi.advanceTimersByTime(91_000);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).toContain('Session may be stale');
     expect(container?.querySelector('.loading-action')).toBeInstanceOf(HTMLButtonElement);
   });
 
   it('shows the loading row while visible reasoning is streaming', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: assistantMessage('message-1'), parts: [reasoningPart('reason-1', 'Analyzing')] },
     ]);
-    setState('streamingPartId', 'reason-1');
-    setState('streamingText', 'Analyzing');
+    flushSolid();
+    setState(storePath('streamingPartId', 'reason-1'));
+    flushSolid();
+    setState(storePath('streamingText', 'Analyzing'));
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
   });
 
   it('shows the loading row while hidden reasoning is streaming', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setShowThinkingPreference(false);
+    flushSolid();
     replaceMessages([
       { info: assistantMessage('message-1'), parts: [reasoningPart('reason-1', 'Analyzing')] },
     ]);
-    setState('streamingPartId', 'reason-1');
-    setState('streamingText', 'Analyzing');
+    flushSolid();
+    setState(storePath('streamingPartId', 'reason-1'));
+    flushSolid();
+    setState(storePath('streamingText', 'Analyzing'));
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
   });
 
   it('shows the loading row while the active session status is busy', async () => {
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
@@ -4479,15 +5466,22 @@ describe('MessageList loading row', () => {
 
   it('shows the loading row while automatic permission review is in progress', async () => {
     setSessions([session('session-1'), session('child-1', { parentID: 'session-1' })]);
-    setState('activeSessionId', 'session-1');
-    setState('sessionAutoPermissionCounts', 'child-1', {
-      inFlight: 1,
-      approved: 0,
-      rejected: 0,
-    });
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('sessionAutoPermissionCounts', 'child-1', {
+        inFlight: 1,
+        approved: 0,
+        rejected: 0,
+      })
+    );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
@@ -4496,17 +5490,26 @@ describe('MessageList loading row', () => {
   });
 
   it('keeps the loading row while the visible assistant reply is incomplete', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([{ info: assistantMessage('message-1', { time: { created: 1 } }), parts: [] }]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     stopLoading();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.advanceTimersByTime(600);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
@@ -4514,7 +5517,8 @@ describe('MessageList loading row', () => {
   });
 
   it('does not keep the loading label for older incomplete assistant replies', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('user-text-1', 'First prompt')] },
       {
@@ -4527,9 +5531,12 @@ describe('MessageList loading row', () => {
         parts: [textPart('assistant-text-2', 'Final answer')],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.loading-indicator')).toBeNull();
     expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
@@ -4538,16 +5545,23 @@ describe('MessageList loading row', () => {
   });
 
   it('reserves the loading row while visible text is streaming', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Drafting')] },
     ]);
-    setState('streamingPartId', 'text-1');
-    setState('streamingText', 'Drafting');
+    flushSolid();
+    setState(storePath('streamingPartId', 'text-1'));
+    flushSolid();
+    setState(storePath('streamingText', 'Drafting'));
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
@@ -4556,19 +5570,26 @@ describe('MessageList loading row', () => {
   });
 
   it('immediately hides a visible loading label when final text is committed', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([{ info: assistantMessage('message-1'), parts: [] }]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
     ).toBe(false);
 
     upsertPart({ ...textPart('text-1', 'Final answer'), messageID: 'message-1' });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
@@ -4577,54 +5598,77 @@ describe('MessageList loading row', () => {
   });
 
   it('re-shows the loading label when committed commentary remains genuinely busy', async () => {
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('message-1'),
         parts: [textPart('text-1', 'I will update the recovery path.')],
       },
     ]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
     expect(row?.classList).toContain('is-reserved');
 
     await vi.advanceTimersByTimeAsync(599);
+    flushSolid();
     expect(row?.classList).toContain('is-reserved');
 
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(container?.querySelector('.interactive-loading-row')).toBe(row);
     expect(row?.classList).not.toContain('is-reserved');
     expect(row?.getAttribute('aria-hidden')).toBeNull();
   });
 
   it('does not re-show the loading label when committed commentary settles during grace', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('message-1'),
         parts: [textPart('text-1', 'The update is complete.')],
       },
     ]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(599);
+    flushSolid();
 
     stopLoading();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
 
     expect(container?.querySelector('.loading-indicator')).toBeNull();
   });
 
   it('hides the loading label when final text streams after a stale running tool', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('assistant-1', { parentID: 'old-prompt' }),
@@ -4635,13 +5679,20 @@ describe('MessageList loading row', () => {
         parts: [textPart('text-2', 'Final answer')],
       },
     ]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
-    setState('streamingPartId', 'text-2');
-    setState('streamingText', 'Final answer');
+    flushSolid();
+    setState(storePath('streamingPartId', 'text-2'));
+    flushSolid();
+    setState(storePath('streamingText', 'Final answer'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
@@ -4650,27 +5701,39 @@ describe('MessageList loading row', () => {
   });
 
   it('keeps the loading row reserved after final visible text completes while loading settles', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Final answer')] },
     ]);
-    setState('streamingPartId', 'text-1');
-    setState('streamingText', 'Final answer');
+    flushSolid();
+    setState(storePath('streamingPartId', 'text-1'));
+    flushSolid();
+    setState(storePath('streamingText', 'Final answer'));
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
     expect(
       container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
     ).toBe(true);
 
-    setState('streamingPartId', null);
-    setState('streamingText', '');
+    setState(storePath('streamingPartId', null));
+    flushSolid();
+    setState(storePath('streamingText', ''));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.advanceTimersByTime(180);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
@@ -4679,16 +5742,21 @@ describe('MessageList loading row', () => {
   });
 
   it('shows the loading row for a new prompt after the previous assistant completed', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [] },
       { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Final answer')] },
       { info: userMessage('user-2'), parts: [] },
     ]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
@@ -4696,13 +5764,18 @@ describe('MessageList loading row', () => {
   });
 
   it('keeps the loading row directly after the last message', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('user-text-1', 'Prompt')] }]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
     requestMessageListScrollToBottom('user-1');
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const messageRow = container?.querySelector('[data-msg-id="user-1"]');
     const loadingRow = container?.querySelector('.interactive-loading-row');
@@ -4711,14 +5784,25 @@ describe('MessageList loading row', () => {
   });
 
   it('keeps stale busy status hidden after the final assistant text completed', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Final answer')] },
     ]);
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
@@ -4727,17 +5811,28 @@ describe('MessageList loading row', () => {
   });
 
   it('shows the loading row while a visible tool is still running', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('message-1'),
         parts: [textPart('text-1', 'I will update the file.'), toolPart('tool-1')],
       },
     ]);
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
@@ -4757,8 +5852,17 @@ describe('MessageList loading row', () => {
       time: { start: 1 },
     };
     setShowFileDiffs(true);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Apply the change')] },
       {
@@ -4769,9 +5873,12 @@ describe('MessageList loading row', () => {
         parts: [patch],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
@@ -4789,8 +5896,16 @@ describe('MessageList loading row', () => {
       title: 'npm test',
       time: { start: 1 },
     };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run tests')] },
       {
@@ -4798,15 +5913,20 @@ describe('MessageList loading row', () => {
         parts: [tool],
       },
     ]);
-    setState('streamingPartId', 'tool-active');
+    flushSolid();
+    setState(storePath('streamingPartId', 'tool-active'));
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
       'is-reserved'
     );
 
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-task')).not.toBeNull();
     const row = container?.querySelector('.interactive-loading-row');
@@ -4823,8 +5943,16 @@ describe('MessageList loading row', () => {
       title: 'npm test',
       time: { start: 1 },
     };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run tests')] },
       {
@@ -4832,14 +5960,18 @@ describe('MessageList loading row', () => {
         parts: [tool],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
       'is-reserved'
     );
 
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
 
     expect(container?.querySelector('[data-activity-part-id="tool-active"]')).not.toBeNull();
     const row = container?.querySelector('.interactive-loading-row');
@@ -4850,34 +5982,47 @@ describe('MessageList loading row', () => {
   });
 
   it('re-shows the loading row only after a sustained visible-stream gap', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('message-1'),
         parts: [textPart('text-1', '[Working directory: /workspace]')],
       },
     ]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
 
-    setState('streamingPartId', 'text-1');
-    setState('streamingText', 'Drafting');
+    setState(storePath('streamingPartId', 'text-1'));
+    flushSolid();
+    setState(storePath('streamingText', 'Drafting'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
     expect(
       container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
     ).toBe(true);
 
-    setState('streamingPartId', null);
-    setState('streamingText', '');
+    setState(storePath('streamingPartId', null));
+    flushSolid();
+    setState(storePath('streamingText', ''));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.advanceTimersByTime(599);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
     expect(
@@ -4885,7 +6030,9 @@ describe('MessageList loading row', () => {
     ).toBe(true);
 
     vi.advanceTimersByTime(1);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
     expect(
@@ -4894,53 +6041,77 @@ describe('MessageList loading row', () => {
   });
 
   it('does not flash the loading row when the final event arrives during the stream grace period', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('message-1'),
         parts: [textPart('text-1', '[Working directory: /workspace]')],
       },
     ]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
-    setState('streamingPartId', 'text-1');
-    setState('streamingText', 'Final response');
+    setState(storePath('streamingPartId', 'text-1'));
+    flushSolid();
+    setState(storePath('streamingText', 'Final response'));
+    flushSolid();
     await Promise.resolve();
-    setState('streamingPartId', null);
-    setState('streamingText', '');
+    flushSolid();
+    setState(storePath('streamingPartId', null));
+    flushSolid();
+    setState(storePath('streamingText', ''));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     vi.advanceTimersByTime(599);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
     expect(row?.classList.contains('is-reserved')).toBe(true);
 
     stopLoading();
+    flushSolid();
     vi.advanceTimersByTime(1);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const settledRow = container?.querySelector('.interactive-loading-row');
     expect(settledRow == null || settledRow.classList.contains('is-reserved')).toBe(true);
   });
 
   it('keeps the loading row reserved across brief inactive gaps', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
 
     stopLoading();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.advanceTimersByTime(599);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
     expect(
@@ -4948,7 +6119,9 @@ describe('MessageList loading row', () => {
     ).toBe(true);
 
     startLoading(601);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
     expect(
@@ -4957,7 +6130,8 @@ describe('MessageList loading row', () => {
   });
 
   it('replaces the loading row immediately when the trailing worked summary settles', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       {
         info: { ...userMessage('user-1'), time: { created: 1_000 } },
@@ -4971,15 +6145,21 @@ describe('MessageList loading row', () => {
         parts: [textPart('text-assistant-1', 'Interim update')],
       },
     ]);
+    flushSolid();
     startLoading(11_000);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
 
     stopLoading();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
     expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
@@ -4991,7 +6171,8 @@ describe('MessageList loading row', () => {
   });
 
   it('shows the worked summary when a completed response is loaded directly in a fork', async () => {
-    setState('activeSessionId', 'forked-session');
+    setState(storePath('activeSessionId', 'forked-session'));
+    flushSolid();
     replaceMessages([
       {
         info: {
@@ -5010,9 +6191,12 @@ describe('MessageList loading row', () => {
         parts: [textPart('text-assistant-1', 'Final response')],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
     expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
@@ -5023,7 +6207,8 @@ describe('MessageList loading row', () => {
   it.each(['busy', 'retry', 'loading', 'streaming'] as const)(
     'revokes a retained worked summary as soon as %s resumes',
     async (workingState) => {
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       const completedDialog: MessageEntry[] = [
         {
           info: { ...userMessage('user-1'), time: { created: 1_000 } },
@@ -5038,40 +6223,49 @@ describe('MessageList loading row', () => {
         },
       ];
       replaceMessages(completedDialog);
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       const workedRow = container?.querySelector('.trailing-assistant-summary-row');
       expect(workedRow).toBeInstanceOf(HTMLDivElement);
 
-      batch(() => {
+      (() => {
         if (workingState === 'loading') startLoading(12_000);
         else if (workingState === 'streaming') {
-          setState('streamingPartId', 'text-assistant-1');
-          setState('streamingText', 'Final response');
+          setState(storePath('streamingPartId', 'text-assistant-1'));
+          setState(storePath('streamingText', 'Final response'));
         } else {
           setState(
-            'sessionStatus',
-            'session-1',
-            workingState === 'busy'
-              ? { type: 'busy' }
-              : { type: 'retry', attempt: 1, message: 'Retrying', next: 20_000 }
+            storePath(
+              'sessionStatus',
+              'session-1',
+              workingState === 'busy'
+                ? { type: 'busy' }
+                : { type: 'retry', attempt: 1, message: 'Retrying', next: 20_000 }
+            )
           );
         }
-      });
+      })();
       await Promise.resolve();
+      flushSolid();
       vi.advanceTimersByTime(700);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
       expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
 
-      batch(() => {
-        setState('streamingPartId', 'text-assistant-1');
-        setState('streamingText', 'Final response');
-      });
+      (() => {
+        setState(storePath('streamingPartId', 'text-assistant-1'));
+        setState(storePath('streamingText', 'Final response'));
+      })();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
       expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
@@ -5086,24 +6280,38 @@ describe('MessageList loading row', () => {
           parts: [textPart('text-assistant-1', 'Final response')],
         },
       ]);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
       expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
 
-      batch(() => {
-        setState('streamingPartId', null);
-        setState('streamingText', '');
+      (() => {
+        setState(storePath('streamingPartId', null));
+        setState(storePath('streamingText', ''));
         stopLoading();
-        setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+        setState((draft) => {
+          const current = draft['sessionStatus'];
+          const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+          if (
+            incoming === null ||
+            incoming === undefined ||
+            current === null ||
+            current === undefined
+          )
+            draft['sessionStatus'] = incoming;
+          else reconcile(incoming)(current);
+        });
         replaceMessages(completedDialog);
-      });
+      })();
       await Promise.resolve();
+      flushSolid();
       expect(container?.querySelector('.trailing-assistant-summary-row')).not.toBeNull();
       expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
       expect(container?.querySelector('.loading-indicator')).toBeNull();
 
-      batch(() => {
+      (() => {
         startLoading(13_000);
         replaceMessages([
           ...completedDialog,
@@ -5112,8 +6320,9 @@ describe('MessageList loading row', () => {
             parts: [textPart('text-user-2', 'Follow-up prompt')],
           },
         ]);
-      });
+      })();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
       expect(container?.querySelector('.loading-indicator')).toBeInstanceOf(HTMLDivElement);
@@ -5123,13 +6332,15 @@ describe('MessageList loading row', () => {
   it.each(['busy', 'retry'] as const)(
     'withholds the completed-turn summary while a nested subagent is %s',
     async (status) => {
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       setSessions([
         session('session-1'),
         session('child-1', { parentID: 'session-1' }),
         session('child-2', { parentID: 'child-1' }),
         session('unrelated'),
       ]);
+      flushSolid();
       const completed = assistantMessage('assistant-1', {
         time: { created: 2_000, completed: 11_000 },
         tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -5145,9 +6356,10 @@ describe('MessageList loading row', () => {
           parts: [textPart('text-assistant-1', 'Finishing validation with subagents.')],
         },
       ]);
-      setState(
-        'sessionStatus',
-        reconcile({
+      flushSolid();
+      setState((draft) => {
+        const current = draft['sessionStatus'];
+        const incoming = {
           'session-1': { type: 'idle' },
           'child-1': { type: 'busy' },
           'child-2':
@@ -5155,10 +6367,21 @@ describe('MessageList loading row', () => {
               ? { type: 'busy' }
               : { type: 'retry', attempt: 1, message: 'Retrying', next: 20_000 },
           unrelated: { type: 'busy' },
-        })
-      );
+        } satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionStatus'] = incoming;
+        else reconcile(incoming)(current);
+      });
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await vi.advanceTimersByTimeAsync(700);
+      flushSolid();
 
       const expectPending = () => {
         expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
@@ -5167,18 +6390,24 @@ describe('MessageList loading row', () => {
         expect(container?.textContent).toContain('Finishing validation with subagents.');
       };
       expectPending();
-      setState('sessionStatus', 'child-1', { type: 'idle' });
+      setState(storePath('sessionStatus', 'child-1', { type: 'idle' }));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(700);
+      flushSolid();
       expectPending();
 
-      setState('sessionStatus', 'child-2', { type: 'idle' });
+      setState(storePath('sessionStatus', 'child-2', { type: 'idle' }));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(700);
+      flushSolid();
       expect(container?.querySelector('.trailing-assistant-summary-row')).not.toBeNull();
       expect(container?.querySelector('.loading-indicator')).toBeNull();
 
       // A later child status must also revoke a summary that already took ownership.
-      setState('sessionStatus', 'child-2', { type: 'busy' });
+      setState(storePath('sessionStatus', 'child-2', { type: 'busy' }));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(700);
+      flushSolid();
       expectPending();
     }
   );
@@ -5186,7 +6415,8 @@ describe('MessageList loading row', () => {
   it.each(['busy', 'retry', 'loading', 'streaming'] as const)(
     'withholds an explicitly terminal worked summary while %s remains active',
     async (workingState) => {
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       const terminalAssistant = assistantMessage('assistant-1', {
         time: { created: 2_000, completed: 11_000 },
         tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -5202,35 +6432,56 @@ describe('MessageList loading row', () => {
           parts: [textPart('text-assistant-1', 'Final response')],
         },
       ]);
+      flushSolid();
       if (workingState === 'loading') startLoading(1_000);
       else if (workingState === 'streaming') {
-        setState('streamingPartId', 'text-assistant-1');
-        setState('streamingText', 'Final response');
+        setState(storePath('streamingPartId', 'text-assistant-1'));
+        flushSolid();
+        setState(storePath('streamingText', 'Final response'));
+        flushSolid();
       } else {
         setState(
-          'sessionStatus',
-          'session-1',
-          workingState === 'busy'
-            ? { type: 'busy' }
-            : { type: 'retry', attempt: 1, message: 'Retrying', next: 20_000 }
+          storePath(
+            'sessionStatus',
+            'session-1',
+            workingState === 'busy'
+              ? { type: 'busy' }
+              : { type: 'retry', attempt: 1, message: 'Retrying', next: 20_000 }
+          )
         );
+        flushSolid();
       }
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       await vi.advanceTimersByTimeAsync(700);
+      flushSolid();
 
       expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
       expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
       if (workingState !== 'streaming')
         expect(container?.querySelector('.loading-indicator')).not.toBeNull();
 
-      batch(() => {
+      (() => {
         stopLoading();
-        setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
-        setState('streamingPartId', null);
-        setState('streamingText', '');
-      });
+        setState((draft) => {
+          const current = draft['sessionStatus'];
+          const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+          if (
+            incoming === null ||
+            incoming === undefined ||
+            current === null ||
+            current === undefined
+          )
+            draft['sessionStatus'] = incoming;
+          else reconcile(incoming)(current);
+        });
+        setState(storePath('streamingPartId', null));
+        setState(storePath('streamingText', ''));
+      })();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.textContent).toContain('10s ↑ 42 ↓ 7');
       expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
@@ -5241,7 +6492,8 @@ describe('MessageList loading row', () => {
   );
 
   it('shows the background process card through the final-answer and resume handoff', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const interim = assistantMessage('assistant-1', {
       time: { created: 2_000, completed: 11_000 },
     });
@@ -5254,19 +6506,27 @@ describe('MessageList loading row', () => {
       { info: interim, parts: [textPart('text-assistant-1', 'Testing is still running.')] },
     ];
     replaceMessages(entries);
-    setState(
-      'sessionStatus',
-      reconcile({
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = {
         'session-1': {
           type: 'busy',
           background: true,
           backgroundCommand: 'python3 tools/serve.py 18765',
         },
-      })
-    );
+      } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     startLoading(1_000);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.background-process')?.textContent).toContain(
       'Background process: python3 tools/serve.py 18765'
     );
@@ -5274,8 +6534,16 @@ describe('MessageList loading row', () => {
 
     // The new execution can start before its first assistant message is hydrated.
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.background-process')?.textContent).toContain(
       'Background process: python3 tools/serve.py 18765'
     );
@@ -5288,25 +6556,43 @@ describe('MessageList loading row', () => {
         parts: [],
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.advanceTimersByTime(700);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.background-process')).toBeNull();
     expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
 
     const final = assistantMessage('assistant-2', { time: { created: 12_000, completed: 13_000 } });
     final.finish = 'stop';
-    batch(() => {
+    (() => {
       replaceMessages([
         ...entries,
         { info: final, parts: [textPart('text-assistant-2', 'All checks pass.')] },
       ]);
-      setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+      setState((draft) => {
+        const current = draft['sessionStatus'];
+        const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionStatus'] = incoming;
+        else reconcile(incoming)(current);
+      });
       stopLoading();
-    });
+    })();
     await Promise.resolve();
+    flushSolid();
     vi.advanceTimersByTime(3_000);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.textContent).toContain('12s');
     expect(container?.querySelector('.loading-indicator')).toBeNull();
     expect(container?.querySelectorAll('.assistant-message-flow-item-final')).toHaveLength(1);
@@ -5340,17 +6626,26 @@ describe('MessageList loading row', () => {
         completedTool,
       ],
     };
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([prompt, toolStep]);
+    flushSolid();
     startLoading(11_000);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     stopLoading();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.advanceTimersByTime(700);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
 
@@ -5365,17 +6660,26 @@ describe('MessageList loading row', () => {
         parts: [{ ...textPart('text-assistant-2', 'All checks pass.'), messageID: 'assistant-2' }],
       },
     ]);
-    setState('streamingPartId', 'text-assistant-2');
-    setState('streamingText', 'All checks pass.');
+    flushSolid();
+    setState(storePath('streamingPartId', 'text-assistant-2'));
+    flushSolid();
+    setState(storePath('streamingText', 'All checks pass.'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     vi.advanceTimersByTime(700);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
 
-    setState('streamingPartId', null);
-    setState('streamingText', '');
+    setState(storePath('streamingPartId', null));
+    flushSolid();
+    setState(storePath('streamingText', ''));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).toContain('12s ↑ 50 ↓ 10');
   });
@@ -5394,7 +6698,8 @@ describe('MessageList loading row', () => {
       tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
     });
     interrupted.finish = 'tool-calls';
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       {
         info: { ...userMessage('user-1'), time: { created: 1_000 } },
@@ -5402,9 +6707,12 @@ describe('MessageList loading row', () => {
       },
       { info: interrupted, parts: [rejectedCommand] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.tool-invocation-title')?.textContent).toBe('npm run release');
@@ -5439,12 +6747,23 @@ describe('MessageList loading row', () => {
       },
       { info: toolStep, parts: [rejectedTool] },
     ];
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(dialog);
+    flushSolid();
     // Authoritative busy status must suffice even without local loading state.
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
@@ -5454,14 +6773,32 @@ describe('MessageList loading row', () => {
       )?.textContent
     ).toBe(tool === 'bash' ? 'rejected' : 'Skipped');
 
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.assistant-dialog-summary')?.textContent).toContain(label);
 
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.advanceTimersByTime(700);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
 
     const finalAnswer = assistantMessage('assistant-2', {
@@ -5469,7 +6806,7 @@ describe('MessageList loading row', () => {
       tokens: { input: 8, output: 3, reasoning: 0, cache: { read: 0, write: 0 } },
     });
     finalAnswer.finish = 'stop';
-    batch(() => {
+    (() => {
       replaceMessages([
         ...dialog,
         {
@@ -5479,9 +6816,21 @@ describe('MessageList loading row', () => {
           ],
         },
       ]);
-      setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
-    });
+      setState((draft) => {
+        const current = draft['sessionStatus'];
+        const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionStatus'] = incoming;
+        else reconcile(incoming)(current);
+      });
+    })();
     await vi.advanceTimersByTimeAsync(300);
+    flushSolid();
 
     expect(container?.querySelectorAll('.assistant-dialog-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-dialog-summary')?.textContent).toContain(
@@ -5509,7 +6858,8 @@ describe('MessageList loading row', () => {
       tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
     });
     interrupted.finish = 'tool-calls';
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       {
         info: { ...userMessage('user-1'), time: { created: 1_000 } },
@@ -5517,9 +6867,12 @@ describe('MessageList loading row', () => {
       },
       { info: interrupted, parts: [skippedQuestion] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.question-summary-title')?.textContent).toBe(
@@ -5531,24 +6884,33 @@ describe('MessageList loading row', () => {
   });
 
   it('does not render the loading row in a draft session when stale messages leak in', async () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('message-1', { time: { created: 1 } }),
         parts: [textPart('text-1', 'Generating response')],
       },
     ]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
 
-    setState('activeSessionId', null);
+    setState(storePath('activeSessionId', null));
+    flushSolid();
     replaceMessages([]);
+    flushSolid();
     stopLoading();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeNull();
 
@@ -5558,7 +6920,9 @@ describe('MessageList loading row', () => {
         parts: [textPart('stale-text-1', 'Leftover from the previous session')],
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeNull();
   });

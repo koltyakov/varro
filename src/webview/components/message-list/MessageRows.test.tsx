@@ -1,6 +1,7 @@
+import { flush as flushSolid, createSignal } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
-import { createSignal } from 'solid-js';
+import { render } from '@solidjs/web';
 import type * as UseOpenCodeModule from '../../hooks/useOpenCode';
 import { formatClockTime } from '../../lib/message-time';
 import { setState, skipPlanSession, startLoading, stopLoading } from '../../lib/state';
@@ -36,14 +37,21 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   vi.useRealTimers();
   stopLoading();
+  flushSolid();
   resetMessageEditState();
-  setState('messages', []);
-  setState('skippedPlanSessions', {});
-  setState('sessions', []);
+  flushSolid();
+  setState(storePath('messages', []));
+  flushSolid();
+  setState(storePath('skippedPlanSessions', {}));
+  flushSolid();
+  setState(storePath('sessions', []));
+  flushSolid();
   container.remove();
+  flushSolid();
 });
 
 it.each([false, true])(
@@ -55,6 +63,7 @@ it.each([false, true])(
     ]);
     const [summaryMap, setSummaryMap] = createSignal(summaries);
     if (editing) startEditingMessage('user-1', message.info.sessionID, 'Prompt');
+    flushSolid();
     const onRemoval = vi.fn((element: HTMLElement) => {
       expect(element.isConnected).toBe(true);
       expect(element.classList).toContain('assistant-dialog-summary');
@@ -82,12 +91,15 @@ it.each([false, true])(
         ),
         container
       );
+      flushSolid();
       expect(container.querySelector('.assistant-dialog-summary')).not.toBeNull();
       expect(onRemoval).not.toHaveBeenCalled();
       setSummaryMap(new Map());
+      flushSolid();
       expect(onRemoval).toHaveBeenCalledTimes(editing ? 1 : 0);
       expect(container.querySelector('.assistant-dialog-summary')).toBeNull();
       setSummaryMap(summaries);
+      flushSolid();
       expect(onRemoval).toHaveBeenCalledTimes(editing ? 1 : 0);
     } finally {
       unregister();
@@ -121,28 +133,34 @@ it('retains the hover class when virtual row classes change', () => {
     ),
     container
   );
+  flushSolid();
   const row = container.querySelector('[data-msg-id="user-1"]')!;
   expect(row.classList).toContain('interactive-item-turn-hovered');
   setNearViewport(false);
+  flushSolid();
   expect(row.classList).toContain('interactive-item-off-core');
   expect(row.classList).toContain('interactive-item-turn-hovered');
   setNearViewport(true);
+  flushSolid();
   expect(row.classList.contains('interactive-item-off-core')).toBe(false);
   expect(row.classList).toContain('interactive-item-turn-hovered');
 });
 
 describe('AssistantDialogSummaryForMessage', () => {
   it('replaces skipped plan actions with a confirmation and clears stale skips', () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Plan',
-        version: '1',
-        time: { created: 100, updated: 200 },
-      },
-    ]);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/workspace',
+          title: 'Plan',
+          version: '1',
+          time: { created: 100, updated: 200 },
+        },
+      ])
+    );
+    flushSolid();
     cleanup = render(
       () => (
         <AssistantDialogSummaryForMessage
@@ -157,12 +175,14 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
 
     expect(container.querySelector('.assistant-dialog-summary-plan-skipped')).toBeNull();
     const skip = container.querySelector<HTMLButtonElement>(
       '.assistant-dialog-summary-action-skip'
     );
     skip?.click();
+    flushSolid();
     expect(container.querySelector('.assistant-dialog-summary-actions')).toBeNull();
     expect(container.querySelector('[role="status"]')?.textContent).toBe('Plan skipped');
     expect(
@@ -176,7 +196,8 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(skippedIcon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(xmarkCircleIcon));
     expect(skippedIcon?.getAttribute('aria-hidden')).toBe('true');
 
-    setState('sessions', 0, 'time', 'updated', 201);
+    setState(storePath('sessions', 0, 'time', 'updated', 201));
+    flushSolid();
     expect(container.querySelector('.assistant-dialog-summary-plan-skipped')).toBeNull();
     expect(container.querySelector('.assistant-dialog-summary-actions')).not.toBeNull();
   });
@@ -187,16 +208,19 @@ describe('AssistantDialogSummaryForMessage', () => {
   ])(
     'does not label an unrelated response as skipped: $agent/$messageId',
     ({ agent, messageId }) => {
-      setState('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/workspace',
-          title: 'Plan',
-          version: '1',
-          time: { created: 100, updated: 200 },
-        },
-      ]);
+      setState(
+        storePath('sessions', [
+          {
+            id: 'session-1',
+            projectID: 'project-1',
+            directory: '/workspace',
+            title: 'Plan',
+            version: '1',
+            time: { created: 100, updated: 200 },
+          },
+        ])
+      );
+      flushSolid();
       skipPlanSession('session-1');
       cleanup = render(
         () => (
@@ -212,6 +236,7 @@ describe('AssistantDialogSummaryForMessage', () => {
         ),
         container
       );
+      flushSolid();
       expect(container.querySelector('.assistant-dialog-summary-plan-skipped')).toBeNull();
     }
   );
@@ -231,6 +256,7 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
 
     const actions = container.querySelectorAll<HTMLButtonElement>(
       '.assistant-dialog-summary-actions button'
@@ -251,8 +277,10 @@ describe('AssistantDialogSummaryForMessage', () => {
     }
 
     startLoading();
+    flushSolid();
     expect([...actions].map((button) => button.disabled)).toEqual([true, true, false]);
     stopLoading();
+    flushSolid();
     expect([...actions].map((button) => button.disabled)).toEqual([false, false, false]);
   });
 
@@ -287,6 +315,7 @@ describe('AssistantDialogSummaryForMessage', () => {
         ),
         container
       );
+      flushSolid();
       const metric = container.querySelector('.assistant-dialog-summary-tps');
       if (expected !== null) {
         expect(metric?.textContent).toBe(expected);
@@ -315,6 +344,7 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
     const metric = container.querySelector('.assistant-dialog-summary-tps');
     expect(metric).toBeNull();
     expect(container.querySelector('[aria-label="Tokens per second"]')).toBeNull();
@@ -338,6 +368,7 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
     expect(container.querySelector('.assistant-dialog-summary-cost')?.textContent).toBe('0.07');
   });
   it.each([undefined, 0, 0.07, 1.25])('shows reported spending after turn tokens: %s', (cost) => {
@@ -352,6 +383,7 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
     const spending = container.querySelector('.assistant-dialog-summary-cost');
     expect(container.querySelector('.assistant-dialog-summary-cumulative-cost')).toBeNull();
     if (!cost) {
@@ -370,6 +402,7 @@ describe('AssistantDialogSummaryForMessage', () => {
     vi.useFakeTimers();
     const completedAt = new Date(2026, 0, 2, 13, 45).getTime();
     vi.setSystemTime(completedAt);
+    flushSolid();
     const onWorkedSummaryHoverChange = vi.fn();
     cleanup = render(
       () => (
@@ -391,6 +424,7 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
 
     const summary = container.querySelector<HTMLElement>('.assistant-dialog-summary');
     const completedTime = summary?.querySelector<HTMLTimeElement>(
@@ -404,21 +438,29 @@ describe('AssistantDialogSummaryForMessage', () => {
     );
 
     summary?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    flushSolid();
     vi.advanceTimersByTime(150);
+    flushSolid();
     summary?.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+    flushSolid();
     vi.advanceTimersByTime(150);
+    flushSolid();
     expect(onWorkedSummaryHoverChange).not.toHaveBeenCalled();
     expect(summary?.classList.contains('is-hover-intent-active')).toBe(false);
 
     summary?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    flushSolid();
     expect(onWorkedSummaryHoverChange).not.toHaveBeenCalled();
     vi.advanceTimersByTime(299);
+    flushSolid();
     expect(onWorkedSummaryHoverChange).not.toHaveBeenCalled();
     expect(summary?.classList.contains('is-hover-intent-active')).toBe(false);
     vi.advanceTimersByTime(1);
+    flushSolid();
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', true);
     expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);
     summary?.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+    flushSolid();
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', false);
   });
 
@@ -426,6 +468,7 @@ describe('AssistantDialogSummaryForMessage', () => {
     vi.useFakeTimers();
     const completedAt = new Date(2026, 0, 2, 13, 45).getTime();
     vi.setSystemTime(new Date(2026, 0, 16, 13, 45));
+    flushSolid();
     const onWorkedSummaryHoverChange = vi.fn();
     cleanup = render(
       () => (
@@ -447,13 +490,16 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
 
     const summary = container.querySelector<HTMLElement>('.assistant-dialog-summary');
     expect(summary?.textContent).toContain('Interrupted');
     expect(summary?.querySelector('time')?.textContent).toBe('2 weeks ago');
 
     summary?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    flushSolid();
     vi.advanceTimersByTime(300);
+    flushSolid();
     expect(summary?.classList.contains('is-completion-time-visible')).toBe(true);
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', true);
   });
@@ -486,6 +532,7 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
 
     const finalResponse = container.querySelector<HTMLElement>(
       '.assistant-message-flow-item-final'
@@ -493,7 +540,9 @@ describe('AssistantDialogSummaryForMessage', () => {
     const responseRow = container.querySelector<HTMLElement>('[data-msg-id="assistant-1"]');
     const summary = container.querySelector<HTMLElement>('.assistant-dialog-summary');
     finalResponse?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    flushSolid();
     vi.advanceTimersByTime(300);
+    flushSolid();
 
     expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', true);
@@ -501,18 +550,22 @@ describe('AssistantDialogSummaryForMessage', () => {
     finalResponse?.dispatchEvent(
       new MouseEvent('mouseout', { bubbles: true, relatedTarget: responseRow })
     );
+    flushSolid();
     responseRow?.dispatchEvent(
       new MouseEvent('mouseover', { bubbles: true, relatedTarget: finalResponse })
     );
+    flushSolid();
 
     expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);
 
     responseRow?.dispatchEvent(
       new MouseEvent('mouseout', { bubbles: true, relatedTarget: summary })
     );
+    flushSolid();
     summary?.dispatchEvent(
       new MouseEvent('mouseover', { bubbles: true, relatedTarget: responseRow })
     );
+    flushSolid();
 
     expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);
     expect(onWorkedSummaryHoverChange).toHaveBeenCalledTimes(1);
@@ -530,6 +583,7 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
 
     const button = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Fork chat from here"]'
@@ -541,12 +595,14 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(gitForkIcon));
 
     button?.click();
+    flushSolid();
 
     expect(forkSessionMock).toHaveBeenCalledWith('session-1');
   });
 
   it('forks a completed response while a later turn is active', () => {
     startLoading();
+    flushSolid();
     cleanup = render(
       () => (
         <AssistantDialogSummaryForMessage
@@ -558,6 +614,7 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
 
     const button = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Fork chat from here"]'
@@ -565,6 +622,7 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(button?.disabled).toBe(false);
 
     button?.click();
+    flushSolid();
 
     expect(forkSessionMock).toHaveBeenCalledWith('session-1');
   });
@@ -601,6 +659,7 @@ describe('AssistantDialogSummaryForMessage', () => {
         ),
         container
       );
+      flushSolid();
 
       const button = container.querySelector<HTMLButtonElement>(
         'button[aria-label="Copy final response"]'
@@ -620,11 +679,14 @@ describe('AssistantDialogSummaryForMessage', () => {
       ).toEqual(['Copy final response', 'Fork chat from here']);
 
       startLoading();
+      flushSolid();
       expect(button?.disabled).toBe(false);
       button?.click();
+      flushSolid();
       await vi.waitFor(() =>
         expect(writeText).toHaveBeenCalledWith('First paragraph\n\nSecond paragraph')
       );
+      flushSolid();
     }
   );
 
@@ -641,6 +703,7 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
 
     const button = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Fork chat from here"]'
@@ -648,10 +711,13 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(button?.hasAttribute('title')).toBe(false);
 
     button?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(499);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
 
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
       'Fork chat from here'
     );
@@ -662,24 +728,27 @@ describe('AssistantDialogSummaryForMessage', () => {
       info: assistantMessage('assistant-1', { sessionID: 'session-1' }),
       parts: [],
     };
-    setState('messages', [
-      summarized,
-      {
-        info: assistantMessage('child-assistant', { sessionID: 'child-session' }),
-        parts: [],
-      },
-      {
-        info: {
-          id: 'user-2',
-          sessionID: 'session-1',
-          role: 'user',
-          time: { created: 2 },
-          agent: 'build',
-          model: { providerID: 'openai', modelID: 'gpt-5.4' },
+    setState(
+      storePath('messages', [
+        summarized,
+        {
+          info: assistantMessage('child-assistant', { sessionID: 'child-session' }),
+          parts: [],
         },
-        parts: [],
-      },
-    ]);
+        {
+          info: {
+            id: 'user-2',
+            sessionID: 'session-1',
+            role: 'user',
+            time: { created: 2 },
+            agent: 'build',
+            model: { providerID: 'openai', modelID: 'gpt-5.4' },
+          },
+          parts: [],
+        },
+      ])
+    );
+    flushSolid();
     cleanup = render(
       () => (
         <AssistantDialogSummaryForMessage
@@ -691,8 +760,10 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
       container
     );
+    flushSolid();
 
     container.querySelector<HTMLButtonElement>('button[aria-label="Fork chat from here"]')?.click();
+    flushSolid();
 
     expect(forkSessionMock).toHaveBeenCalledWith('session-1', 'user-2');
   });

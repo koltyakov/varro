@@ -1,7 +1,8 @@
+import { flush as flushSolid, reconcile } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
-import { batch } from 'solid-js';
-import { reconcile } from 'solid-js/store';
+import { render } from '@solidjs/web';
+
 import {
   replaceMessages,
   requestMessageListScrollToBottom,
@@ -56,6 +57,7 @@ describe('MessageList auto-scroll', () => {
     'yields to a native touch pan through pointer cancellation and %s',
     async (endEvent) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       let height = 1200;
       vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
         this: HTMLElement
@@ -67,18 +69,23 @@ describe('MessageList auto-scroll', () => {
           this.classList.contains('interactive-list-track') ? height : 400
         );
       });
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
         { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
       ]);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
       Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
       }
       expect(list.scrollTop).toBe(800);
       const pointer = (type: string) => {
@@ -100,13 +107,18 @@ describe('MessageList auto-scroll', () => {
       expect(list.hasAttribute('data-pointer-scroll-owned')).toBe(true);
       // The first movement can arrive long after pointerdown and its input-intent timeout.
       vi.advanceTimersByTime(2000);
+      flushSolid();
       touch('touchmove', 104);
       list.scrollTop = 796;
       list.dispatchEvent(new Event('scroll'));
+      flushSolid();
       startLoading();
+      flushSolid();
       height += 200;
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(list.scrollTop).toBe(796);
       touch(endEvent);
       expect(list.hasAttribute('data-pointer-scroll-owned')).toBe(false);
@@ -114,17 +126,23 @@ describe('MessageList auto-scroll', () => {
       // Native momentum and subsequent streaming must not reattach the reader.
       list.scrollTop = 500;
       list.dispatchEvent(new Event('scroll'));
+      flushSolid();
       height += 200;
       for (let frame = 0; frame < 8; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
         expect(list.scrollTop).toBe(500);
       }
       requestMessageListScrollToBottom();
       await Promise.resolve();
+      flushSolid();
       settleBottomFollow(animationFrames, list);
+      flushSolid();
       expect(list.scrollTop).toBe(height - 400);
       animationFrames.restore();
+      flushSolid();
     }
   );
 
@@ -137,6 +155,7 @@ describe('MessageList auto-scroll', () => {
     'catches up instantly after visibility restoration with working=$working, detached=$detached',
     async ({ working, detached }) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       let hidden = false;
       vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
       let height = 1200;
@@ -150,59 +169,83 @@ describe('MessageList auto-scroll', () => {
           this.classList.contains('interactive-list-track') ? height : 400
         );
       });
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
         { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
       ]);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
       Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
       }
       expect(list.scrollTop).toBe(800);
       if (detached) {
         list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        flushSolid();
         list.scrollTop = 200;
         list.dispatchEvent(new Event('scroll'));
+        flushSolid();
       }
+      flushSolid();
 
       hidden = true;
       document.dispatchEvent(new Event('visibilitychange'));
+      flushSolid();
       startLoading();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       height += 2400;
       if (!working) stopLoading();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       hidden = false;
       document.dispatchEvent(new Event('visibilitychange'));
+      flushSolid();
       expect(list.scrollTop).toBe(detached ? 200 : height - 400);
       // Late row measurement on restoration must also settle before paint.
       height += 300;
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
         expect(list.scrollTop).toBe(detached ? 200 : height - 400);
       }
 
       if (!detached) {
         stopLoading();
+        flushSolid();
         await Promise.resolve();
+        flushSolid();
         for (let frame = 0; frame < 4; frame += 1) animationFrames.flush();
         const previousTop = list.scrollTop;
         height += 200;
         startLoading();
+        flushSolid();
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
         expect(list.scrollTop).toBeGreaterThanOrEqual(previousTop);
         expect(list.scrollTop).toBeLessThan(height - 400);
         settleBottomFollow(animationFrames, list);
+        flushSolid();
         expect(list.scrollTop).toBe(height - 400);
       }
+      flushSolid();
       animationFrames.restore();
+      flushSolid();
     }
   );
 
@@ -210,6 +253,7 @@ describe('MessageList auto-scroll', () => {
     'catches up instantly after suspended frames without a visibility event with working=%s',
     async (working) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       let height = 1200;
       vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
         this: HTMLElement
@@ -221,33 +265,45 @@ describe('MessageList auto-scroll', () => {
           this.classList.contains('interactive-list-track') ? height : 400
         );
       });
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
         { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
       ]);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
       Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
       }
       expect(list.scrollTop).toBe(800);
       startLoading();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       height += 2400;
       if (!working) stopLoading();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       const restoredAt = performance.now() + 2000;
       animationFrames.flush(restoredAt);
+      flushSolid();
       expect(list.scrollTop).toBe(height - 400);
       height += 300;
       animationFrames.flush(restoredAt + 16);
+      flushSolid();
       expect(list.scrollTop).toBe(height - 400);
       animationFrames.restore();
+      flushSolid();
     }
   );
 
@@ -259,6 +315,7 @@ describe('MessageList auto-scroll', () => {
     'follows composer growth immediately with growth=$growth, detached=$detached, trackChanged=$trackChanged',
     async ({ growth, detached, trackChanged }) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       const observers: Array<{ callback: ResizeObserverCallback; targets: Element[] }> = [];
       class TestResizeObserver {
         readonly targets: Element[] = [];
@@ -285,12 +342,15 @@ describe('MessageList auto-scroll', () => {
           this.classList.contains('interactive-list-track') ? height : viewportHeight
         );
       });
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
         { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
       ]);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
       const track = list.querySelector<HTMLElement>('.interactive-list-track')!;
       Object.defineProperty(list, 'clientHeight', {
@@ -306,16 +366,22 @@ describe('MessageList auto-scroll', () => {
         );
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
       }
       notifyResize([list]);
       animationFrames.flush();
+      flushSolid();
       expect(list.scrollTop).toBe(800);
       if (detached) {
         list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        flushSolid();
         list.scrollTop = 200;
         list.dispatchEvent(new Event('scroll'));
+        flushSolid();
       }
+      flushSolid();
 
       viewportHeight -= growth;
       notifyResize(trackChanged ? [list, track] : [list]);
@@ -329,12 +395,16 @@ describe('MessageList auto-scroll', () => {
         height += 200;
         notifyResize([track]);
         animationFrames.flush();
+        flushSolid();
         expect(list.scrollTop).toBeGreaterThanOrEqual(previousTop);
         expect(list.scrollTop).toBeLessThan(height - viewportHeight);
         settleBottomFollow(animationFrames, list);
+        flushSolid();
         expect(list.scrollTop).toBe(height - viewportHeight);
       }
+      flushSolid();
       animationFrames.restore();
+      flushSolid();
     }
   );
 
@@ -349,6 +419,7 @@ describe('MessageList auto-scroll', () => {
     'reconciles diff view immediately with enabled=$enabled, detached=$detached, interrupted=$interrupted',
     async ({ enabled, detached, interrupted }) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       let height = enabled ? 1200 : 2400;
       vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
         this: HTMLElement
@@ -361,59 +432,81 @@ describe('MessageList auto-scroll', () => {
         );
       });
       setShowFileDiffs(!enabled);
-      setState('activeSessionId', 'session-1');
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
         { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
       ]);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
       Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
       }
       expect(list.scrollTop).toBe(height - 400);
       if (detached) {
         list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        flushSolid();
         list.scrollTop = 200;
         list.dispatchEvent(new Event('scroll'));
+        flushSolid();
       }
+      flushSolid();
 
       height = enabled ? 2400 : 1200;
       setShowFileDiffs(enabled);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(list.scrollTop).toBe(detached ? 200 : height - 400);
       expect(container?.querySelector('.append-scroll-bottom-reserve')).toBeNull();
       if (interrupted) {
         list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        flushSolid();
         list.scrollTop = 200;
         list.dispatchEvent(new Event('scroll'));
+        flushSolid();
       }
+      flushSolid();
       for (let frame = 0; frame < 4; frame += 1) animationFrames.flush();
       if (interrupted) expect(list.scrollTop).toBe(200);
 
       const previousTop = list.scrollTop;
       height += 200;
       startLoading();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       if (detached || interrupted) {
         expect(list.scrollTop).toBe(previousTop);
       } else {
         expect(list.scrollTop).toBeGreaterThanOrEqual(previousTop);
         expect(list.scrollTop).toBeLessThan(height - 400);
         settleBottomFollow(animationFrames, list);
+        flushSolid();
         expect(list.scrollTop).toBe(height - 400);
       }
+      flushSolid();
       animationFrames.restore();
+      flushSolid();
     }
   );
 
   it('yields diff-toggle settling to paint when range changes release loading previews', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const height = 1200;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: HTMLElement
@@ -426,12 +519,16 @@ describe('MessageList auto-scroll', () => {
       );
     });
     setShowFileDiffs(false);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
     let releaseDuringMeasurement = false;
     let released = 0;
@@ -448,11 +545,14 @@ describe('MessageList auto-scroll', () => {
     });
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     expect(list.scrollTop).toBe(800);
     releaseDuringMeasurement = true;
     setShowFileDiffs(true);
+    flushSolid();
     for (let task = 0; task < 40; task += 1) await Promise.resolve();
     // Reentrant completion must leave work for the browser's next frame instead of
     // consuming every release in an uninterrupted microtask chain.
@@ -462,10 +562,12 @@ describe('MessageList auto-scroll', () => {
     for (let frame = 0; frame < 4; frame += 1) animationFrames.flush();
     expect(list.scrollTop).toBe(800);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('positions initial layout corrections immediately after the first stable frame', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let height = 1200;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: HTMLElement
@@ -477,31 +579,40 @@ describe('MessageList auto-scroll', () => {
         this.classList.contains('interactive-list-track') ? height : 400
       );
     });
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(list.scrollTop).toBe(800);
 
     // ResizeObserver can deliver the hydrated row geometry after the first frame callback.
     height += 24;
     animationFrames.flush();
+    flushSolid();
     expect(list.scrollTop).toBe(824);
     animationFrames.restore();
+    flushSolid();
   });
 
   it.each([1200, 900_000])(
     'jumps to latest immediately at height %i and still eases subsequent growth',
     async (initialHeight) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       let height = initialHeight;
       vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
         this: HTMLElement
@@ -513,36 +624,48 @@ describe('MessageList auto-scroll', () => {
           this.classList.contains('interactive-list-track') ? height : 400
         );
       });
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
         { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
       ]);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
       Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
       await Promise.resolve();
+      flushSolid();
       for (let frame = 0; frame < 20; frame += 1) animationFrames.flush();
       expect(list.scrollTop).toBe(height - 400);
 
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      flushSolid();
       list.scrollTop = 200;
       list.dispatchEvent(new Event('scroll'));
+      flushSolid();
       requestMessageListScrollToBottom();
       await Promise.resolve();
+      flushSolid();
       expect(list.scrollTop).toBe(height - 400);
 
       const previousBottom = list.scrollTop;
       height += 200;
       startLoading();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(list.scrollTop).toBeGreaterThanOrEqual(previousBottom);
       expect(list.scrollTop).toBeLessThan(height - 400);
       settleBottomFollow(animationFrames, list);
+      flushSolid();
       expect(list.scrollTop).toBe(height - 400);
       animationFrames.restore();
+      flushSolid();
     }
   );
 
@@ -550,6 +673,7 @@ describe('MessageList auto-scroll', () => {
     'jumps before a batched send and eases only the new card with %i existing rows',
     async (messageCount) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       const rowHeight = messageCount === 2 ? 600 : 120;
       const initialHeight = messageCount * rowHeight;
       let height = initialHeight;
@@ -572,28 +696,36 @@ describe('MessageList auto-scroll', () => {
           messageId?.startsWith('user-') ? 200 : rowHeight
         );
       });
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages(
         Array.from({ length: messageCount }, (_, index) => ({
           info: assistantMessage(`assistant-${index}`),
           parts: [textPart(`text-${index}`, `Response ${index}`)],
         }))
       );
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
       Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
       for (let frame = 0; frame < 20; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
       }
       if (messageCount >= 50) await measureTranscriptRows(list, animationFrames);
+      flushSolid();
       const previousBottom = initialHeight - 400;
       expect(list.scrollTop).toBe(previousBottom);
 
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      flushSolid();
       list.scrollTop = 200;
       list.dispatchEvent(new Event('scroll'));
+      flushSolid();
       // Use the current bottom, including output received while the reader was detached.
       height += rowHeight;
       userRowsStartTop = height;
@@ -604,12 +736,16 @@ describe('MessageList auto-scroll', () => {
           parts: [textPart('background-text', 'Output received while reading history')],
         },
       ]);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(list.scrollTop).toBe(200);
       const existingBottom = height - 400;
-      batch(() => {
+      (() => {
         startLoading();
         requestMessageListScrollToBottom('user-new');
         expect(list.scrollTop).toBe(existingBottom);
@@ -618,20 +754,26 @@ describe('MessageList auto-scroll', () => {
           ...state.messages,
           { info: userMessage('user-new'), parts: [textPart('new-text', 'Follow-up')] },
         ]);
-      });
+      })();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(list.scrollTop).toBeGreaterThanOrEqual(existingBottom);
       expect(list.scrollTop).toBeLessThan(height - 400);
       settleBottomFollow(animationFrames, list);
+      flushSolid();
       expect(list.scrollTop).toBe(height - 400);
 
       // The same reveal still yields to a new gesture after the immediate jump.
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      flushSolid();
       list.scrollTop = 200;
       list.dispatchEvent(new Event('scroll'));
-      batch(() => {
+      flushSolid();
+      (() => {
         requestMessageListScrollToBottom('user-next');
         expect(list.scrollTop).toBe(height - 400);
         height += 200;
@@ -639,17 +781,22 @@ describe('MessageList auto-scroll', () => {
           ...state.messages,
           { info: userMessage('user-next'), parts: [textPart('next-text', 'Another follow-up')] },
         ]);
-      });
+      })();
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -96, bubbles: true }));
+      flushSolid();
       const destination = list.scrollTop - 96;
       list.scrollTop = destination;
       list.dispatchEvent(new Event('scroll'));
+      flushSolid();
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
         expect(list.scrollTop).toBe(destination);
       }
       animationFrames.restore();
+      flushSolid();
     }
   );
 
@@ -657,19 +804,26 @@ describe('MessageList auto-scroll', () => {
     'preserves follow through steering admission with detachment=%s',
     async (detach) => {
       const animationFrames = installQueuedAnimationFrameMocks();
-      setState('activeSessionId', 'session-1');
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
         { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
       ]);
+      flushSolid();
       startLoading();
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
       let height = 1200;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
       Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(list.scrollTop).toBe(800);
 
       const scrollAway = () => {
@@ -678,7 +832,7 @@ describe('MessageList auto-scroll', () => {
         list.dispatchEvent(new Event('scroll'));
       };
       if (detach === 'before steering') scrollAway();
-      batch(() => {
+      (() => {
         setMessagesIncremental([
           ...state.messages,
           {
@@ -686,80 +840,112 @@ describe('MessageList auto-scroll', () => {
             parts: [textPart('steer-text', 'Change direction')],
           },
         ]);
-      });
+      })();
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(container!.querySelector('[data-msg-id="steer-1"]')).toBeNull();
       expect(list.scrollTop).toBe(detach === 'before steering' ? 400 : 800);
       if (detach === 'before admission') scrollAway();
 
       height = 1400;
-      setState('messages', 2, 'info', (info) => ({ ...info, pendingDelivery: undefined }));
+      setState(
+        storePath('messages', 2, 'info', (info) => ({ ...info, pendingDelivery: undefined }))
+      );
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       settleBottomFollow(animationFrames, list);
+      flushSolid();
       expect(container!.querySelector('[data-msg-id="steer-1"]')).not.toBeNull();
       expect(list.scrollTop).toBe(detach === 'never' ? 1000 : 400);
 
       // Admission must not establish a new scroll request that overrides later reading.
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+      flushSolid();
       const detachedTop = list.scrollTop - 200;
       list.scrollTop = detachedTop;
       list.dispatchEvent(new Event('scroll'));
+      flushSolid();
       height = 1600;
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
         expect(list.scrollTop).toBe(detachedTop);
       }
       animationFrames.restore();
+      flushSolid();
     }
   );
 
   it('restores bottom follow on send after scrolling up and follows subsequent growth', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
     let height = 1200;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(list.scrollTop).toBe(800);
 
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+    flushSolid();
     list.scrollTop = 400;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(list.scrollTop).toBe(400);
 
     requestMessageListScrollToBottom('user-2');
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(list.scrollTop).toBe(800);
 
     height = 1400;
     startLoading();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     settleBottomFollow(animationFrames, list);
+    flushSolid();
     expect(list.scrollTop).toBe(1000);
     animationFrames.restore();
+    flushSolid();
   });
 
   for (const cause of ['queued request', 'reattach', 'diff blur']) {
     it(`cancels ${cause} when an upward wheel takes ownership`, async () => {
       const animationFrames = installQueuedAnimationFrameMocks();
-      setState('activeSessionId', 'session-1');
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
         { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
       ]);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
       let top = 0;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -772,53 +958,75 @@ describe('MessageList auto-scroll', () => {
         },
       });
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(top).toBe(800);
 
       let diff: HTMLDivElement | undefined;
       if (cause === 'queued request') requestMessageListScrollToBottom();
       else if (cause === 'reattach') {
         list.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+        flushSolid();
         top = 600;
         list.dispatchEvent(new Event('scroll'));
+        flushSolid();
         list.dispatchEvent(new WheelEvent('wheel', { deltaY: 195, bubbles: true }));
+        flushSolid();
         top = 795;
         list.dispatchEvent(new Event('scroll'));
+        flushSolid();
       } else {
         diff = document.createElement('div');
         diff.className = 'diff-view-lines';
         diff.tabIndex = 0;
         list.append(diff);
         diff.focus();
+        flushSolid();
       }
+      flushSolid();
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -96, bubbles: true }));
+      flushSolid();
       diff?.blur();
+      flushSolid();
       const destination = top - 96;
       top = destination;
       // Diff blur can run before Chromium reports the wheel's resulting scroll event.
       if (cause === 'diff blur') await Promise.resolve();
+      flushSolid();
       list.dispatchEvent(new Event('scroll'));
+      flushSolid();
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
         expect(top).toBe(destination);
       }
       animationFrames.restore();
+      flushSolid();
     });
   }
 
   it('cancels a pending first-turn alignment frame on unmount', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     replaceMessages([
       { info: userMessage('user-first'), parts: [textPart('text-first', 'First prompt')] },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     requestMessageListScrollToBottom('user-first');
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const requestFrame = vi.mocked(globalThis.requestAnimationFrame);
     const alignmentCallIndex = requestFrame.mock.calls.findLastIndex(([callback]) =>
@@ -828,15 +1036,19 @@ describe('MessageList auto-scroll', () => {
     const alignmentRafId = requestFrame.mock.results[alignmentCallIndex]?.value;
 
     cleanup();
+    flushSolid();
     cleanup = undefined;
     expect(globalThis.cancelAnimationFrame).toHaveBeenCalledWith(alignmentRafId);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('updates the virtualized range when initial bottom scroll is programmatic', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 60 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -851,8 +1063,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -870,9 +1084,13 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(scrollTopValue).toBe(6800);
     const firstRenderedMessageId =
@@ -880,6 +1098,7 @@ describe('MessageList auto-scroll', () => {
     expect(firstRenderedMessageId).not.toBe('assistant-0');
 
     animationFrames.restore();
+    flushSolid();
   });
 
   it('virtualizes after mount-time measurement when resize observers do not emit', async () => {
@@ -887,8 +1106,10 @@ describe('MessageList auto-scroll', () => {
     // If this regresses, the list falls back to rendering every row and future refactors may hide it
     // behind fake performance improvements.
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 60 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -903,8 +1124,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -934,18 +1157,24 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(40);
     expect(container?.querySelector('.virtual-spacer-top')).toBeTruthy();
 
     animationFrames.restore();
+    flushSolid();
   });
 
   it('does not rescan an unmeasured transcript on every busy follow frame', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let rowMeasurementCount = 0;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -961,8 +1190,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages(
       Array.from({ length: 60 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -972,22 +1209,31 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     const measurementsAfterBootstrap = rowMeasurementCount;
 
     animationFrames.flush();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     expect(rowMeasurementCount).toBe(measurementsAfterBootstrap);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('stops the follow loop while a busy tool has no geometry changes', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: HTMLElement
@@ -998,32 +1244,47 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('assistant-1'),
         parts: [toolPart('tool-1', 'assistant-1')],
       },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     for (let frame = 0; frame < 4; frame += 1) animationFrames.flush();
 
     const requestFrame = vi.mocked(globalThis.requestAnimationFrame);
     const settledRequestCount = requestFrame.mock.calls.length;
     animationFrames.flush();
+    flushSolid();
 
     expect(requestFrame).toHaveBeenCalledTimes(settledRequestCount);
     animationFrames.restore();
+    flushSolid();
   });
 
   it.each(['text', 'part', 'track', 'container'] as const)(
     'settles a paused stream and resumes follow after %s changes without overriding detachment',
     async (trigger) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       const observers: Array<{ callback: ResizeObserverCallback; observer: ResizeObserver }> = [];
       globalThis.ResizeObserver = class implements ResizeObserver {
         constructor(callback: ResizeObserverCallback) {
@@ -1045,34 +1306,54 @@ describe('MessageList auto-scroll', () => {
           this.classList.contains('interactive-list-track') ? trackHeight : viewportHeight
         );
       });
-      setState('activeSessionId', 'session-1');
-      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState((draft) => {
+        const current = draft['sessionStatus'];
+        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionStatus'] = incoming;
+        else reconcile(incoming)(current);
+      });
+      flushSolid();
       replaceMessages([
         {
           info: assistantMessage('assistant-1'),
           parts: [{ ...textPart('text-1', 'Paused'), messageID: 'assistant-1' }],
         },
       ]);
-      setState('streamingPartId', 'text-1');
-      setState('streamingText', trigger === 'part' ? '' : 'Paused');
+      flushSolid();
+      setState(storePath('streamingPartId', 'text-1'));
+      flushSolid();
+      setState(storePath('streamingText', trigger === 'part' ? '' : 'Paused'));
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
       const track = container!.querySelector<HTMLDivElement>('.interactive-list-track')!;
       Object.defineProperty(list, 'clientHeight', { get: () => viewportHeight });
       Object.defineProperty(list, 'scrollHeight', { get: () => trackHeight });
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       for (let frame = 0; frame < 8; frame += 1) animationFrames.flush();
       expect(list.scrollTop).toBe(800);
       const requestFrame = vi.mocked(globalThis.requestAnimationFrame);
       const pausedRequestCount = requestFrame.mock.calls.length;
       animationFrames.flush();
+      flushSolid();
       expect(requestFrame).toHaveBeenCalledTimes(pausedRequestCount);
 
       const resume = async () => {
         if (trigger === 'text' || trigger === 'part') {
           trackHeight += 200;
-          setState('streamingText', `${state.streamingText} resumed`);
+          setState(storePath('streamingText', `${state.streamingText} resumed`));
         } else {
           if (trigger === 'track') trackHeight += 200;
           else viewportHeight -= 100;
@@ -1087,26 +1368,35 @@ describe('MessageList auto-scroll', () => {
         animationFrames.flush();
       };
       await resume();
+      flushSolid();
       settleBottomFollow(animationFrames, list);
+      flushSolid();
       expect(list.scrollTop).toBe(trackHeight - viewportHeight);
       // Deferred layout must still be followed before the next resize notification.
       trackHeight += 100;
       animationFrames.flush();
+      flushSolid();
       settleBottomFollow(animationFrames, list);
+      flushSolid();
       expect(list.scrollTop).toBe(trackHeight - viewportHeight);
       for (let frame = 0; frame < 8; frame += 1) animationFrames.flush();
       const resumedRequestCount = requestFrame.mock.calls.length;
       animationFrames.flush();
+      flushSolid();
       expect(requestFrame).toHaveBeenCalledTimes(resumedRequestCount);
 
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+      flushSolid();
       list.scrollTop -= 200;
       list.dispatchEvent(new Event('scroll'));
+      flushSolid();
       const detachedScrollTop = list.scrollTop;
       await resume();
+      flushSolid();
       for (let frame = 0; frame < 8; frame += 1) animationFrames.flush();
       expect(list.scrollTop).toBe(detachedScrollTop);
       animationFrames.restore();
+      flushSolid();
     }
   );
 
@@ -1114,6 +1404,7 @@ describe('MessageList auto-scroll', () => {
     'preserves a detached visible row across a structural %s during active slow scrolling',
     async (mutation) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       const baseMessages = Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
         return {
@@ -1152,9 +1443,12 @@ describe('MessageList auto-scroll', () => {
         return new DOMRect(0, 0, 500, 40);
       });
 
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages(baseMessages);
+      flushSolid();
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       list = container?.querySelector('.interactive-list') as HTMLDivElement;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -1172,15 +1466,22 @@ describe('MessageList auto-scroll', () => {
 
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
       }
       const anchorId = 'assistant-25';
       list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+      flushSolid();
       scrollTopValue = rowTop(anchorId) + 20;
       list.dispatchEvent(new Event('scroll'));
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const anchorBefore = container?.querySelector(
@@ -1198,6 +1499,7 @@ describe('MessageList auto-scroll', () => {
       } else {
         const insertedId = 'assistant-inserted';
         heightById.set(insertedId, 135);
+        flushSolid();
         nextMessages.splice(4, 0, {
           info: assistantMessage(insertedId),
           parts: [
@@ -1208,11 +1510,16 @@ describe('MessageList auto-scroll', () => {
           ],
         });
       }
+      flushSolid();
       replaceMessages(nextMessages);
+      flushSolid();
       layoutIds = nextMessages.map((message) => message.info.id);
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const anchorAfter = container?.querySelector(`[data-msg-id="${anchorId}"]`) as HTMLDivElement;
@@ -1221,11 +1528,13 @@ describe('MessageList auto-scroll', () => {
         Math.abs(anchorAfter.getBoundingClientRect().top - anchorTopBefore)
       ).toBeLessThanOrEqual(0.5);
       animationFrames.restore();
+      flushSolid();
     }
   );
 
   it('preserves the visible row for one mixed resize batch above, at, and below it', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const observers: Array<{
       callback: ResizeObserverCallback;
       targets: Set<Element>;
@@ -1275,7 +1584,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 40);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -1285,8 +1595,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -1304,15 +1616,23 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 2000;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchor = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
@@ -1359,10 +1679,12 @@ describe('MessageList auto-scroll', () => {
     expect(scrollTopValue).toBe(2010);
     expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('ignores delayed resize entries from unmounted rows', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const observers: Array<{
       callback: ResizeObserverCallback;
       targets: Set<Element>;
@@ -1405,7 +1727,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 40);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -1415,7 +1738,9 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -1430,7 +1755,9 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const staleRow = container?.querySelector('[data-msg-id="assistant-49"]') as HTMLDivElement;
@@ -1439,11 +1766,16 @@ describe('MessageList auto-scroll', () => {
     expect(rowObserver).toBeDefined();
 
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 0;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('[data-msg-id="assistant-49"]')).toBeNull();
 
     const bottomSpacer = () =>
@@ -1463,14 +1795,18 @@ describe('MessageList auto-scroll', () => {
       fixture<ResizeObserver>(rowObserver)
     );
     await Promise.resolve();
+    flushSolid();
 
     expect(bottomSpacer()).toBe(bottomPadBefore);
     staleRow.remove();
+    flushSolid();
     animationFrames.restore();
+    flushSolid();
   });
 
   it('yields pending width measurement anchoring to direct user scroll input', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const observers: Array<{
       callback: ResizeObserverCallback;
       targets: Set<Element>;
@@ -1520,7 +1856,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 40);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -1530,7 +1867,9 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -1550,15 +1889,23 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 2000;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.advanceTimersByTime(600);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchor = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
@@ -1581,39 +1928,53 @@ describe('MessageList auto-scroll', () => {
 
     publishWidthMeasurement(120, 420);
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
+    flushSolid();
     scrollTopValue += 120;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     const wheelOwnedTop = scrollTopValue;
     await Promise.resolve();
+    flushSolid();
     expect(scrollTopValue).toBe(wheelOwnedTop);
 
     vi.advanceTimersByTime(600);
+    flushSolid();
     publishWidthMeasurement(140, 380);
     list.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'PageDown' }));
+    flushSolid();
     scrollTopValue += 200;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     const keyboardOwnedTop = scrollTopValue;
     await Promise.resolve();
+    flushSolid();
     expect(scrollTopValue).toBe(keyboardOwnedTop);
 
     vi.advanceTimersByTime(600);
+    flushSolid();
     publishWidthMeasurement(160, 340);
     list.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 }));
+    flushSolid();
     expect(list.style.overflowAnchor).toBe('none');
     expect(list.hasAttribute('data-pointer-scroll-owned')).toBe(true);
     scrollTopValue += 100;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    flushSolid();
     expect(list.style.overflowAnchor).toBe('');
     expect(list.hasAttribute('data-pointer-scroll-owned')).toBe(false);
     const pointerOwnedTop = scrollTopValue;
     await Promise.resolve();
+    flushSolid();
     expect(scrollTopValue).toBe(pointerOwnedTop);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('anchors width reflow to the visible row instead of a stale mounted row', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const observers: Array<{
       callback: ResizeObserverCallback;
       targets: Set<Element>;
@@ -1663,7 +2024,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 40);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -1673,7 +2035,9 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -1693,17 +2057,24 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
 
     // Remember row 19 while it intersects the viewport, then let geometry move before the
     // ResizeObserver width batch. It remains mounted in overscan but row 20 is now first visible.
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 1975;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     scrollTopValue = 2010;
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -1733,15 +2104,20 @@ describe('MessageList auto-scroll', () => {
       fixture<ResizeObserver>(rowObserver)
     );
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(visibleRow.getBoundingClientRect().top).toBe(-10);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('preserves the first fully painted descendant when an earlier block is clipped', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let hostWidth = 500;
     vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => hostWidth);
 
@@ -1772,7 +2148,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, hostWidth, 40);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -1787,7 +2164,9 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -1804,26 +2183,42 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
 
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 20 * rowHeight;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 0 }));
+    flushSolid();
 
     scrollTopValue = 22 * rowHeight;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const marker = container?.querySelector<HTMLElement>(
       '[data-msg-id="assistant-22"] .rendered-markdown p:last-child'
@@ -1831,20 +2226,25 @@ describe('MessageList auto-scroll', () => {
     expect(marker?.getBoundingClientRect().top).toBe(140);
 
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 22 }));
+    flushSolid();
     scrollTopValue += 22;
     expect(marker?.getBoundingClientRect().top).toBe(118);
 
     markerOffset = 162;
     hostWidth = 360;
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     expect(marker?.getBoundingClientRect().top).toBe(118);
     animationFrames.flush();
+    flushSolid();
     expect(marker?.getBoundingClientRect().top).toBe(118);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('restores a detached paragraph during the native zoom frame after an earlier frame sampler', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let hostWidth = 486;
     let pixelRatio = 1;
     let listTop = 37;
@@ -1873,7 +2273,8 @@ describe('MessageList auto-scroll', () => {
       }
       return new DOMRect(0, 0, hostWidth, 40);
     });
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -1888,7 +2289,9 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
     Object.defineProperties(list, {
       clientHeight: { configurable: true, value: 631 },
@@ -1905,15 +2308,22 @@ describe('MessageList auto-scroll', () => {
     });
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 20 * 300;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     const paragraph = container!.querySelector<HTMLElement>(
       '[data-msg-id="assistant-20"] .rendered-markdown p'
@@ -1927,22 +2337,28 @@ describe('MessageList auto-scroll', () => {
     pixelRatio = 1.2;
     listTop = 36.822914;
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     // Native zoom can reflow again after the resize event, before the queued frame callbacks.
     hostWidth = 405;
     reflowOffset = -42.684894;
     animationFrames.flush();
+    flushSolid();
     expect(sampledTop).toBeCloseTo(18.13802, 4);
     expect(paragraph.getBoundingClientRect().top - listTop).toBeCloseTo(24, 4);
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(paragraph.getBoundingClientRect().top - listTop).toBeCloseTo(24, 4);
     }
     animationFrames.restore();
+    flushSolid();
   });
 
   it('settles a resize correction that synchronously reflows its virtual core before returning', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let width = 486;
     let top = 0;
     let offset = 0;
@@ -1964,7 +2380,8 @@ describe('MessageList auto-scroll', () => {
       }
       return new DOMRect(0, 0, width, 40);
     });
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 60 }, (_, index) => {
         const id = `assistant-${index}`;
@@ -1974,7 +2391,9 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
     Object.defineProperties(list, {
       clientHeight: { configurable: true, value: 631 },
@@ -1995,15 +2414,22 @@ describe('MessageList auto-scroll', () => {
     });
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -720 }));
+    flushSolid();
     top = 6000;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     const paragraph = container!.querySelector<HTMLElement>(
       '[data-msg-id="assistant-20"] .rendered-markdown p'
@@ -2013,13 +2439,16 @@ describe('MessageList auto-scroll', () => {
     offset = 178;
     reflowOnCorrection = true;
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     expect(paragraph.getBoundingClientRect().top).toBe(initialTop);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('does not refresh a fully visible resize anchor after local width reflow', async () => {
     vi.useFakeTimers();
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const observers: Array<{
       callback: ResizeObserverCallback;
       targets: Set<Element>;
@@ -2089,7 +2518,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, listWidth, 40);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = index % 2 === 0 ? `user-${index}` : `assistant-${index}`;
@@ -2102,13 +2532,16 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     for (const row of container?.querySelectorAll<HTMLElement>('[data-msg-id]') ?? []) {
       const messageId = row.dataset.msgId;
       if (!messageId) continue;
       rowElements.set(Number(messageId.slice(messageId.lastIndexOf('-') + 1)), row);
+      flushSolid();
     }
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 631 });
     Object.defineProperty(list, 'clientWidth', { configurable: true, get: () => listWidth });
@@ -2127,21 +2560,31 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
 
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     const userIndex = 20;
     const assistantIndex = 21;
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = rowTop(userIndex) + 14;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     // Leave the next coalesced refresh pending so local reflow can precede it.
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const userRow = container?.querySelector(`[data-msg-id="user-${userIndex}"]`) as HTMLDivElement;
@@ -2161,7 +2604,9 @@ describe('MessageList auto-scroll', () => {
     // Local layout can change before ResizeObserver reports the new row sizes. A pending detached
     // anchor refresh must not replace the pre-reflow anchor with this already-moved geometry.
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     rowObserver!.callback(
       [
@@ -2178,11 +2623,14 @@ describe('MessageList auto-scroll', () => {
     );
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(assistantRow.getBoundingClientRect().top).toBe(68);
     }
 
     await vi.advanceTimersByTimeAsync(101);
+    flushSolid();
     rowHeights[userIndex] = 125.5;
     listWidth = 480;
     rowObserver!.callback(
@@ -2200,14 +2648,18 @@ describe('MessageList auto-scroll', () => {
     );
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(assistantRow.getBoundingClientRect().top).toBe(68);
     }
     animationFrames.restore();
+    flushSolid();
   });
 
   it('preserves the wheel destination when width reflow precedes the native scroll event', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const observers: Array<{
       callback: ResizeObserverCallback;
       targets: Set<Element>;
@@ -2262,7 +2714,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 40);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 60 }, (_, index) => {
         const messageId = index === 20 ? `user-${index}` : `assistant-${index}`;
@@ -2272,7 +2725,9 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 786 });
@@ -2292,16 +2747,24 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
 
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 1976;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const precedingRow = container?.querySelector('[data-msg-id="assistant-19"]') as HTMLDivElement;
@@ -2316,6 +2779,7 @@ describe('MessageList auto-scroll', () => {
     expect(rowObserver).toBeDefined();
 
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 22 }));
+    flushSolid();
     scrollTopValue += 22;
     expect(anchorCard.getBoundingClientRect().top).toBe(8);
 
@@ -2338,19 +2802,26 @@ describe('MessageList auto-scroll', () => {
     // later correction hides.
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(anchorCard.getBoundingClientRect().top).toBe(8);
     }
     await Promise.resolve();
+    flushSolid();
 
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(anchorCard.getBoundingClientRect().top).toBe(8);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('does not reverse an upward wheel for a delayed stale measurement above its user anchor', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const observers: Array<{
       callback: ResizeObserverCallback;
       targets: Set<Element>;
@@ -2407,7 +2878,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 720, 40);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 60 }, (_, index) => {
         const messageId = index % 2 === 0 ? `assistant-${index}` : `user-${index}`;
@@ -2417,7 +2889,9 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 514 });
@@ -2437,21 +2911,30 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = rowTop(20) + 23;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     // The browser has already laid out this 2px change, but its observer entry is delayed until
     // after the next direct wheel destination is established.
     rowHeights[20] = rowHeights[20]! + 2;
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -180 }));
+    flushSolid();
     scrollTopValue -= 180;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     const wheelDestination = scrollTopValue;
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchorCard = container?.querySelector(
@@ -2500,10 +2983,12 @@ describe('MessageList auto-scroll', () => {
     );
     expect(scrollTopValue).toBe(wheelDestination);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('cancels compact activity layout settling before native wheel movement is reported', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const rowIds = Array.from({ length: 60 }, (_, index) => {
       if (index === 20) return 'user-active';
       if (index === 21) return 'assistant-completed';
@@ -2592,10 +3077,20 @@ describe('MessageList auto-scroll', () => {
         };
       });
 
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages(messagesWith(running));
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered MessageList fixture always provides its transcript element.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -2611,17 +3106,26 @@ describe('MessageList auto-scroll', () => {
     });
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 2000;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
 
     replaceMessages(messagesWith(completedRunning));
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -64 }));
+    flushSolid();
     scrollTopValue -= 64;
     const wheelDestination = scrollTopValue;
     const anchor = container?.querySelector<HTMLElement>(
@@ -2631,19 +3135,26 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 12; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(scrollTopValue).toBe(wheelDestination);
       expect(anchor?.getBoundingClientRect().top).toBe(anchorDestination);
     }
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(wheelDestination);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('does not treat a visible row below pre-message chrome as above the viewport', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const observers: Array<{
       callback: ResizeObserverCallback;
       targets: Set<Element>;
@@ -2693,8 +3204,10 @@ describe('MessageList auto-scroll', () => {
       }
       return new DOMRect(0, 0, 500, 40);
     });
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setSessionHistoryCursor('session-1', 'cursor-older');
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -2704,8 +3217,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -2725,14 +3240,21 @@ describe('MessageList auto-scroll', () => {
     });
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 30;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const firstRow = container?.querySelector('[data-msg-id="assistant-0"]') as HTMLDivElement;
@@ -2756,10 +3278,12 @@ describe('MessageList auto-scroll', () => {
     expect(firstRow.getBoundingClientRect().top).toBe(topBefore);
     expect(scrollTopValue).toBe(30);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('invalidates cached heights for offscreen reasoning rows when thinking visibility changes', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
@@ -2779,7 +3303,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 40);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -2797,8 +3322,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -2812,14 +3339,21 @@ describe('MessageList auto-scroll', () => {
     });
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 0;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
     const bottomSpacer = () =>
@@ -2829,20 +3363,25 @@ describe('MessageList auto-scroll', () => {
     const bottomPadBefore = bottomSpacer();
 
     setShowThinkingPreference(false);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
     // Compact activity already gives the follower rows zero height, so hiding thinking removes only
     // the disclosure owner's provisional height.
     expect(bottomSpacer() - bottomPadBefore).toBe(-100);
     animationFrames.restore();
+    flushSolid();
   });
 
   it.each([false, true])(
     'invalidates an offscreen active edit height when inline previews are disabled (reopened: %s)',
     async (reopened) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       let list: HTMLDivElement | null = null;
       let scrollTopValue = 0;
 
@@ -2877,8 +3416,22 @@ describe('MessageList auto-scroll', () => {
         time: { start: 1, end: 2 },
       };
       setShowFileDiffs(true);
-      setState('activeSessionId', 'session-1');
-      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState((draft) => {
+        const current = draft['sessionStatus'];
+        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionStatus'] = incoming;
+        else reconcile(incoming)(current);
+      });
+      flushSolid();
       replaceMessages(
         Array.from({ length: 50 }, (_, index) => {
           const messageId = `assistant-${index}`;
@@ -2891,10 +3444,13 @@ describe('MessageList auto-scroll', () => {
           };
         })
       );
+      flushSolid();
 
       for (let mount = 0; mount < (reopened ? 2 : 1); mount += 1) {
         if (mount > 0) cleanup?.();
+        flushSolid();
         cleanup = render(() => MessageList(), container!);
+        flushSolid();
         list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
         Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
         Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
@@ -2907,16 +3463,24 @@ describe('MessageList auto-scroll', () => {
         });
         for (let frame = 0; frame < 4; frame += 1) {
           await Promise.resolve();
+          flushSolid();
           animationFrames.flush();
+          flushSolid();
         }
         if (mount === 0) await measureTranscriptRows(list, animationFrames);
+        flushSolid();
       }
       list!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+      flushSolid();
       scrollTopValue = 4000;
       list!.dispatchEvent(new Event('scroll'));
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector(`[data-msg-id="${editMessageId}"]`)).toBeNull();
       const topSpacer = () =>
@@ -2926,8 +3490,11 @@ describe('MessageList auto-scroll', () => {
       const topPadBefore = topSpacer();
 
       setShowFileDiffs(false);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(container?.querySelector(`[data-msg-id="${editMessageId}"]`)).toBeNull();
       // A reopen's initial preview projection already invalidates the old estimate.
@@ -2935,11 +3502,13 @@ describe('MessageList auto-scroll', () => {
       expect(topSpacer() - topPadBefore).toBe(reopened ? 0 : 60);
       expect(topPadBefore % 100).toBe(reopened ? 60 : 0);
       animationFrames.restore();
+      flushSolid();
     }
   );
 
   it('preserves the visible row while invalidating offscreen thinking heights above it', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const rowHeights = Array.from({ length: 50 }, () => 100);
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
@@ -2980,7 +3549,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 40);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -2998,8 +3568,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -3017,15 +3589,23 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 2000;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchor = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
@@ -3036,18 +3616,23 @@ describe('MessageList auto-scroll', () => {
     for (let index = 1; index < 5; index += 1) rowHeights[index] = 0;
 
     setShowThinkingPreference(false);
+    flushSolid();
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
 
     expect(anchor.isConnected).toBe(true);
     expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('preserves the first fully painted user card when hiding thinking shrinks a clipped row', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
     let clientHeight = 100;
@@ -3107,7 +3692,9 @@ describe('MessageList auto-scroll', () => {
     });
 
     setShowThinkingPreference(true);
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         if (index === 20) {
@@ -3132,8 +3719,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', {
@@ -3165,16 +3754,23 @@ describe('MessageList auto-scroll', () => {
     });
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
 
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 1998;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
 
     const anchor = container?.querySelector<HTMLElement>(
@@ -3184,6 +3780,7 @@ describe('MessageList auto-scroll', () => {
 
     hostWidth = 360;
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     paragraphOffset = -21;
     clientHeight = 400;
     expect(anchor?.getBoundingClientRect().top).toBe(84);
@@ -3193,7 +3790,9 @@ describe('MessageList auto-scroll', () => {
     });
     collectingAnchorReads = true;
     setShowThinkingPreference(false);
+    flushSolid();
     stopUpdatingFixtureGeometry();
+    flushSolid();
     // Later visible blocks used to be reread by the anchor candidate sort comparator.
     for (const messageId of ['assistant-22', 'assistant-23']) {
       const paragraph = container?.querySelector<HTMLElement>(`[data-msg-id="${messageId}"] p`);
@@ -3202,15 +3801,19 @@ describe('MessageList auto-scroll', () => {
     }
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
 
     expect(anchor?.getBoundingClientRect().top).toBe(84);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('does not give an explicitly render-empty row a provisional virtual height', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
@@ -3230,7 +3833,8 @@ describe('MessageList auto-scroll', () => {
       }
       return new DOMRect(0, 0, 500, 40);
     });
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -3243,8 +3847,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -3259,28 +3865,38 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     expect(
       container?.querySelector('.interactive-list-track')?.classList.contains('virtualized')
     ).toBe(true);
 
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 3000;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId).toBe(
       'assistant-16'
     );
     animationFrames.restore();
+    flushSolid();
   });
 
   it('retains the prior height when a rendered nonempty row reports a transient zero', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const observers: Array<{
       callback: ResizeObserverCallback;
       targets: Set<Element>;
@@ -3320,7 +3936,8 @@ describe('MessageList auto-scroll', () => {
       }
       return new DOMRect(0, 0, 500, 40);
     });
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -3330,7 +3947,9 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -3343,11 +3962,16 @@ describe('MessageList auto-scroll', () => {
       },
     });
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     list.scrollTop = 0;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const firstRow = container?.querySelector('[data-msg-id="assistant-0"]') as HTMLDivElement;
     const rowObserver = observers.find((observer) => observer.targets.has(firstRow));
@@ -3366,23 +3990,32 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    flushSolid();
     scrollTopValue = 3000;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId).toBe(
       'assistant-15'
     );
     animationFrames.restore();
+    flushSolid();
   });
 
   it('remounts and remeasures a cached zero-height row after it gains content', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
@@ -3406,7 +4039,8 @@ describe('MessageList auto-scroll', () => {
       }
       return new DOMRect(0, 0, 500, 40);
     });
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -3419,8 +4053,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -3441,15 +4077,23 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
+    flushSolid();
     scrollTopValue = 4450;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeNull();
 
     let emptyRowRemounted = false;
@@ -3469,30 +4113,41 @@ describe('MessageList auto-scroll', () => {
       }
     });
     mutationObserver.observe(track, { childList: true, subtree: true });
+    flushSolid();
     upsertPart({
       ...textPart('text-0-extra', 'An unrelated message changed'),
       messageID: 'assistant-0',
     });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(emptyRowRemounted).toBe(false);
 
     upsertPart({
       ...textPart('text-30', 'Content appeared after the zero-height row unmounted'),
       messageID: 'assistant-30',
     });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeInstanceOf(HTMLDivElement);
     mutationObserver.disconnect();
     animationFrames.restore();
+    flushSolid();
   });
 
   it('makes a cached zero-height row provisional when it gains model chrome', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
@@ -3515,7 +4170,8 @@ describe('MessageList auto-scroll', () => {
       }
       return new DOMRect(0, 0, 500, 40);
     });
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -3528,8 +4184,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -3547,15 +4205,23 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
+    flushSolid();
     scrollTopValue = 4450;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeNull();
 
     replaceMessages(
@@ -3571,18 +4237,24 @@ describe('MessageList auto-scroll', () => {
           : message
       )
     );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const remountedRow = container?.querySelector('[data-msg-id="assistant-30"]');
     expect(remountedRow).toBeInstanceOf(HTMLDivElement);
     expect(remountedRow?.querySelector('.model-change-indicator')).not.toBeNull();
     animationFrames.restore();
+    flushSolid();
   });
 
   it('remounts an offscreen cached zero-height row after the same text part becomes visible', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
@@ -3607,7 +4279,8 @@ describe('MessageList auto-scroll', () => {
       }
       return new DOMRect(0, 0, 500, 40);
     });
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -3622,8 +4295,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -3646,33 +4321,47 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
+    flushSolid();
     scrollTopValue = 4450;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeNull();
 
     upsertPart({
       ...textPart('text-30', 'The existing part is now visible'),
       messageID: 'assistant-30',
     });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const remountedRow = container?.querySelector('[data-msg-id="assistant-30"]');
     expect(remountedRow).toBeInstanceOf(HTMLDivElement);
     expect(remountedRow?.textContent).toContain('The existing part is now visible');
     animationFrames.restore();
+    flushSolid();
   });
 
   it('remounts an offscreen zero-height row when completion makes diffs eligible', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
     let diffRequested = false;
@@ -3705,7 +4394,8 @@ describe('MessageList auto-scroll', () => {
       }
       return new DOMRect(0, 0, 500, 40);
     });
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `message-${index}`;
@@ -3721,8 +4411,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -3740,15 +4432,23 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
+    flushSolid();
     scrollTopValue = 4450;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('[data-msg-id="message-30"]')).toBeNull();
     expect(client.session.diff).not.toHaveBeenCalled();
 
@@ -3762,9 +4462,12 @@ describe('MessageList auto-scroll', () => {
           : message
       )
     );
+    flushSolid();
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
 
     expect(client.session.diff).toHaveBeenCalledWith('session-1', 'message-30', {
@@ -3774,6 +4477,7 @@ describe('MessageList auto-scroll', () => {
     expect(remountedRow).toBeInstanceOf(HTMLDivElement);
     expect(remountedRow?.querySelector('.diff-summary')).toBeInstanceOf(HTMLDivElement);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('cancels pending width work when async initial messages arrive or the list unmounts', async () => {
@@ -3813,8 +4517,10 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, listWidth, 500);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     const list = container!.querySelector('.interactive-list')!;
     const track = container!.querySelector('.interactive-list-track')!;
     const layoutObserver = observers.find(
@@ -3834,12 +4540,16 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.interactive-list-track.virtualized')).toBeTruthy();
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(40);
     await vi.advanceTimersByTimeAsync(100);
+    flushSolid();
     expect(container?.querySelector('.interactive-list-track.virtualized')).toBeTruthy();
 
     listWidth = 400;
@@ -3848,16 +4558,20 @@ describe('MessageList auto-scroll', () => {
     layoutObserver!.callback([], fixture<ResizeObserver>(layoutObserver));
     expect(vi.getTimerCount()).toBeGreaterThan(timersBeforeResize);
     cleanup();
+    flushSolid();
     cleanup = undefined;
     expect(vi.getTimerCount()).toBeLessThanOrEqual(timersBeforeResize);
     await vi.advanceTimersByTimeAsync(100);
+    flushSolid();
     expect(vi.getTimerCount()).toBeLessThanOrEqual(timersBeforeResize);
   });
 
   it('stays pinned to the real bottom when virtualized messages update in place', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 60 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -3872,8 +4586,10 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -3895,9 +4611,13 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(scrollTopValue).toBe(6800);
 
@@ -3920,19 +4640,27 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(7040);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('keeps correcting initial bottom scroll when scrollHeight shifts without track growth', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let trackHeight = 1200;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -3944,13 +4672,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -3972,20 +4703,26 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     scrollHeightValue = 1700;
     trackHeight = 1200;
     animationFrames.flush();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1300);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('keeps bottom follow active after a downward wheel that cannot move the list', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let trackHeight = 1200;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -3997,13 +4734,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -4025,21 +4765,28 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: 80, bubbles: true }));
+    flushSolid();
     trackHeight = 1600;
     scrollHeightValue = 1600;
     animationFrames.flush();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1200);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('restarts bottom follow after a downward wheel cancels its pending frame', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let trackHeight = 1200;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -4051,12 +4798,15 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -4076,32 +4826,46 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     trackHeight = 1600;
     scrollHeightValue = 1600;
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: 80, bubbles: true }));
-    setState('streamingPartId', 'text-2');
-    setState('streamingText', 'Streaming growth');
+    flushSolid();
+    setState(storePath('streamingPartId', 'text-2'));
+    flushSolid();
+    setState(storePath('streamingText', 'Streaming growth'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1200);
     animationFrames.flush();
+    flushSolid();
     animationFrames.restore();
+    flushSolid();
   });
 
   it('keeps the latest message fully visible when the last response grows', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -4126,17 +4890,23 @@ describe('MessageList auto-scroll', () => {
         parts: [textPart('text-2', 'Expanded response'), textPart('text-3', 'More content')],
       },
     ]);
+    flushSolid();
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1300);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('eases bottom scroll to the new destination when rendered content resizes', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -4161,13 +4931,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -4190,9 +4963,12 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     // Finish initial positioning before testing smooth follow for later content growth.
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     trackHeight = 1700;
@@ -4202,16 +4978,20 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush(performance.now() + 16);
+    flushSolid();
 
     expect(scrollTopValue).toBeGreaterThan(800);
     expect(scrollTopValue).toBeLessThan(1300);
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1300);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('keeps following running tool growth when a resize notification is delayed', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let trackHeight = 1200;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -4223,12 +5003,15 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Run checks')] },
       { info: assistantMessage('assistant-1'), parts: [toolPart('tool-1', 'assistant-1')] },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -4248,21 +5031,28 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
     animationFrames.flush();
+    flushSolid();
 
     trackHeight = 1700;
     scrollHeightValue = 1700;
     animationFrames.flush();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1300);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('keeps following delayed layout growth after final parts arrive in one batch', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let trackHeight = 1200;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -4278,7 +5068,8 @@ describe('MessageList auto-scroll', () => {
       info: userMessage('user-1'),
       parts: [textPart('text-1', 'Explain the result')],
     };
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       userEntry,
       {
@@ -4286,9 +5077,13 @@ describe('MessageList auto-scroll', () => {
         parts: [{ ...textPart('text-2', 'Initial response'), messageID: 'assistant-1' }],
       },
     ]);
-    setState('streamingPartId', 'text-2');
-    setState('streamingText', 'Initial response');
+    flushSolid();
+    setState(storePath('streamingPartId', 'text-2'));
+    flushSolid();
+    setState(storePath('streamingText', 'Initial response'));
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -4308,8 +5103,11 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     setMessagesIncremental([
@@ -4322,22 +5120,30 @@ describe('MessageList auto-scroll', () => {
         })),
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     // The first post-stream frame runs before deferred markdown and entrance layout settles.
     animationFrames.flush();
+    flushSolid();
     trackHeight = 1800;
     scrollHeightValue = 1800;
     animationFrames.flush();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1400);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('keeps following delayed layout growth while the session is still working', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let trackHeight = 1200;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -4349,13 +5155,23 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Explain the result')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Committed response')] },
     ]);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -4375,21 +5191,28 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     trackHeight = 1800;
     scrollHeightValue = 1800;
     animationFrames.flush();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1400);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('keeps following deferred final layout after loading completes', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let trackHeight = 1200;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -4401,13 +5224,17 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Explain the result')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Final response')] },
     ]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -4427,26 +5254,37 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     stopLoading();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     trackHeight = 1800;
     scrollHeightValue = 1800;
     animationFrames.flush();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1400);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('synchronizes a browser bottom clamp when grouped activity shrinks during follow', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
@@ -4482,7 +5320,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -4495,7 +5334,9 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
@@ -4514,7 +5355,9 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     expect(scrollTopValue).toBe(4600);
     for (const callback of resizeCallbacks) {
@@ -4522,12 +5365,15 @@ describe('MessageList auto-scroll', () => {
       callback([fixture<ResizeObserverEntry>({ target: list })], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
 
     trackHeight = 5500;
     scrollHeightValue = 5500;
     requestMessageListScrollToBottom();
     await Promise.resolve();
+    flushSolid();
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(5100);
 
     trackHeight = 1000;
@@ -4539,17 +5385,22 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('[data-msg-id]')?.getAttribute('data-msg-id')).toBe(
       'assistant-0'
     );
     animationFrames.restore();
+    flushSolid();
   });
 
   it('does not auto-scroll again when the track bounces back to an already-followed height', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -4574,13 +5425,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -4605,7 +5459,9 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     trackHeight = 1700;
@@ -4615,7 +5471,9 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1300);
 
     const assignmentCountAfterGrowth = assignedScrollTops.length;
@@ -4627,6 +5485,7 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterGrowth);
 
     trackHeight = 1700;
@@ -4636,14 +5495,17 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
 
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterGrowth);
     expect(scrollTopValue).toBe(1300);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('keeps following when non-scroll pointer input precedes a layout clamp', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -4668,13 +5530,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -4698,19 +5563,24 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     scrollHeightValue = 400;
     list?.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, clientX: 495 }));
+    flushSolid();
     scrollHeightValue = 1200;
     list?.firstElementChild?.dispatchEvent(
       new MouseEvent('pointerdown', { button: 0, bubbles: true, clientX: 495 })
     );
+    flushSolid();
     // The browser can clamp scrollTop while content briefly shrinks, then deliver the scroll
     // event only after the old bottom target has returned.
     scrollTopValue = 760;
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
 
     trackHeight = 1400;
     scrollHeightValue = 1400;
@@ -4719,14 +5589,18 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1000);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('yields bottom follow before a delayed in-list Shift+Space scroll event', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -4751,13 +5625,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -4779,14 +5656,18 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     const externalButton = document.createElement('button');
     container?.appendChild(externalButton);
     externalButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+    flushSolid();
     scrollTopValue = 500;
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
 
     trackHeight = 1400;
     scrollHeightValue = 1400;
@@ -4795,11 +5676,14 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1000);
 
     list?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', shiftKey: true, bubbles: true }));
+    flushSolid();
     const keyboardOwnedTop = scrollTopValue;
 
     trackHeight = 1600;
@@ -4809,12 +5693,16 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
 
     expect(scrollTopValue).toBe(keyboardOwnedTop);
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(keyboardOwnedTop);
     animationFrames.restore();
+    flushSolid();
   });
 
   it.each([
@@ -4822,6 +5710,7 @@ describe('MessageList auto-scroll', () => {
     { name: 'overlay', clientWidth: 500 },
   ])('stops following after $name scrollbar pointer-originated upward scrolling', async (args) => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -4846,13 +5735,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -4879,12 +5771,16 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     list?.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, clientX: 495 }));
+    flushSolid();
     scrollTopValue = 500;
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
 
     trackHeight = 1400;
     scrollHeightValue = 1400;
@@ -4893,13 +5789,16 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
 
     expect(scrollTopValue).toBe(500);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('resumes after nested diff input without outer movement but not after diff keyboard scrolling', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -4924,13 +5823,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -4963,16 +5865,24 @@ describe('MessageList auto-scroll', () => {
     container?.appendChild(externalButton);
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     diffViewport.focus();
+    flushSolid();
     diffViewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
+    flushSolid();
     diffViewport.scrollTop = 0;
     externalButton.focus();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     trackHeight = 1400;
     scrollHeightValue = 1400;
@@ -4981,16 +5891,24 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(1000);
 
     diffViewport.focus();
+    flushSolid();
     diffViewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+    flushSolid();
     scrollTopValue = 700;
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
     externalButton.focus();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     trackHeight = 1600;
     scrollHeightValue = 1600;
@@ -4999,13 +5917,16 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
 
     expect(scrollTopValue).toBe(700);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('does not rewrite scrollTop when resize leaves the list already at bottom', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -5030,13 +5951,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -5061,7 +5985,9 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     const assignmentCountAfterInitialScroll = assignedScrollTops.length;
@@ -5073,14 +5999,17 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
 
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterInitialScroll);
     expect(scrollTopValue).toBe(1300);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('does not snap back to bottom after a small upward scroll near the threshold', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -5105,13 +6034,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -5136,13 +6068,18 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true }));
+    flushSolid();
     scrollTopValue = 760;
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     const assignmentCountAfterUserScroll = assignedScrollTops.length;
 
@@ -5153,23 +6090,30 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
 
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterUserScroll);
     expect(scrollTopValue).toBe(760);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('does not re-pin to bottom after loading settles when the user moved slightly upward', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
     startLoading(1);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -5189,26 +6133,36 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true }));
+    flushSolid();
     scrollTopValue = 760;
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     const assignmentCountAfterUserScroll = assignedScrollTops.length;
 
     stopLoading();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterUserScroll);
     expect(scrollTopValue).toBe(760);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('keeps auto-scroll enabled when the bottom target shifts before a near-bottom scroll event', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -5233,13 +6187,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -5264,13 +6221,17 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     scrollHeightValue = 1240;
     scrollTopValue = 800;
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     trackHeight = 1240;
     for (const callback of resizeCallbacks) {
@@ -5278,15 +6239,19 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(assignedScrollTops.at(-1)).toBe(840);
     expect(scrollTopValue).toBe(840);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('releases the send-triggered follow lock after bottom scroll stabilizes', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -5311,13 +6276,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -5342,28 +6310,42 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+    flushSolid();
     scrollTopValue = 400;
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     requestMessageListScrollToBottom();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     animationFrames.flush();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true }));
+    flushSolid();
     scrollTopValue = 760;
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     trackHeight = 1240;
     scrollHeightValue = 1240;
@@ -5372,16 +6354,19 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    flushSolid();
 
     expect(assignedScrollTops.at(-1)).toBe(800);
     expect(scrollTopValue).toBe(760);
     animationFrames.restore();
+    flushSolid();
   });
 
   it.each(['downward wheel', 'held scrollbar', 'scrollbar held before append'] as const)(
     'respects %s ownership during the measured append transition',
     async (input) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       const baseMessages = Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
         return {
@@ -5411,10 +6396,13 @@ describe('MessageList auto-scroll', () => {
         }
         return new DOMRect(0, 0, 500, 40);
       });
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages(baseMessages);
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       list = container?.querySelector('.interactive-list') as HTMLDivElement;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -5433,7 +6421,9 @@ describe('MessageList auto-scroll', () => {
       });
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
+        flushSolid();
         animationFrames.flush();
+        flushSolid();
       }
       expect(scrollTopValue).toBe(4600);
 
@@ -5441,7 +6431,9 @@ describe('MessageList auto-scroll', () => {
         list.dispatchEvent(
           new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 })
         );
+        flushSolid();
       }
+      flushSolid();
       scrollHeightValue = 5200;
       replaceMessages([
         ...baseMessages,
@@ -5455,41 +6447,57 @@ describe('MessageList auto-scroll', () => {
           ],
         },
       ]);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush(30);
+      flushSolid();
 
       if (input !== 'downward wheel') {
         if (input === 'held scrollbar') {
           list.dispatchEvent(
             new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 })
           );
+          flushSolid();
         } else {
           expect(scrollTopValue).toBe(4600);
         }
+        flushSolid();
         const grabbedTop = scrollTopValue;
         animationFrames.flush(60);
+        flushSolid();
         expect(scrollTopValue).toBe(grabbedTop);
         scrollTopValue -= 100;
         const userOwnedTop = scrollTopValue;
         list.dispatchEvent(new Event('scroll'));
+        flushSolid();
         document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+        flushSolid();
         animationFrames.flush(90);
+        flushSolid();
         expect(scrollTopValue).toBe(userOwnedTop);
       } else {
         list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 100 }));
+        flushSolid();
         scrollTopValue += 100;
         const userOwnedTop = scrollTopValue;
         list.dispatchEvent(new Event('scroll'));
+        flushSolid();
         animationFrames.flush(60);
+        flushSolid();
         expect(scrollTopValue).toBeGreaterThanOrEqual(userOwnedTop);
       }
+      flushSolid();
       animationFrames.restore();
+      flushSolid();
     }
   );
 
   it('keeps following new messages after an explicit scroll request from a recent wheel scroll', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     let trackHeight = 1200;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -5501,13 +6509,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -5531,21 +6542,30 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+    flushSolid();
     scrollTopValue = 400;
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
 
     requestMessageListScrollToBottom();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     animationFrames.flush();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     trackHeight = 1600;
     scrollHeightValue = 1600;
@@ -5555,17 +6575,23 @@ describe('MessageList auto-scroll', () => {
       { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
       { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Follow-up response')] },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(assignedScrollTops.at(-1)).toBe(1200);
     expect(scrollTopValue).toBe(1200);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('re-attaches to bottom again on the next explicit scroll request', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     const trackHeight = 1200;
 
@@ -5590,13 +6616,16 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 400);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
     ]);
+    flushSolid();
 
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -5621,36 +6650,49 @@ describe('MessageList auto-scroll', () => {
     });
 
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     requestMessageListScrollToBottom();
     await Promise.resolve();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
 
     animationFrames.flush();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     scrollTopValue = 760;
     list?.dispatchEvent(new Event('scroll'));
+    flushSolid();
     animationFrames.flush();
+    flushSolid();
 
     const assignmentCountAfterNearBottomScroll = assignedScrollTops.length;
 
     requestMessageListScrollToBottom();
     await Promise.resolve();
+    flushSolid();
     expect(scrollTopValue).toBe(800);
     settleBottomFollow(animationFrames, list!);
+    flushSolid();
     expect(assignedScrollTops.length).toBeGreaterThan(assignmentCountAfterNearBottomScroll);
     expect(assignedScrollTops.at(-1)).toBe(800);
     expect(scrollTopValue).toBe(800);
     animationFrames.restore();
+    flushSolid();
   });
 
   it('reacts to trailing permission growth when jump-to-latest crosses its threshold', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
     const observers: Array<{
       callback: ResizeObserverCallback;
       targets: Set<Element>;
@@ -5695,7 +6737,8 @@ describe('MessageList auto-scroll', () => {
       return new DOMRect(0, 0, 500, 40);
     });
 
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -5705,7 +6748,9 @@ describe('MessageList auto-scroll', () => {
         };
       })
     );
+    flushSolid();
     cleanup = render(() => MessageList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -5725,27 +6770,36 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
     }
     await measureTranscriptRows(list, animationFrames);
+    flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+    flushSolid();
     scrollTopValue = messageTrackHeight - list.clientHeight - 220;
     list.dispatchEvent(new Event('scroll'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
 
     trailingHeight = 100;
-    setState('permissions', [
-      {
-        id: 'permission-1',
-        type: 'bash',
-        sessionID: 'session-1',
-        messageID: '',
-        title: 'Allow bash',
-        metadata: {},
-        time: { created: 1 },
-      },
-    ]);
+    setState(
+      storePath('permissions', [
+        {
+          id: 'permission-1',
+          type: 'bash',
+          sessionID: 'session-1',
+          messageID: '',
+          title: 'Allow bash',
+          metadata: {},
+          time: { created: 1 },
+        },
+      ])
+    );
+    flushSolid();
     const layoutObserver = observers.find(
       (observer) => observer.targets.has(list!) && observer.targets.has(track)
     );
@@ -5756,15 +6810,18 @@ describe('MessageList auto-scroll', () => {
       fixture<ResizeObserver>(layoutObserver)
     );
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.jump-to-latest-button')).toBeInstanceOf(HTMLButtonElement);
     animationFrames.restore();
+    flushSolid();
   });
 
   it.each(['idle', 'busy'] as const)(
     'shows the jump-to-latest button after scrolling away and jumps instantly on click while %s',
     async (status) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      flushSolid();
       const trackHeight = 1200;
 
       vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -5776,13 +6833,16 @@ describe('MessageList auto-scroll', () => {
         return new DOMRect(0, 0, 500, 400);
       });
 
-      setState('activeSessionId', 'session-1');
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
         { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
       ]);
+      flushSolid();
 
       cleanup = render(() => MessageList(), container!);
+      flushSolid();
 
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
@@ -5804,15 +6864,20 @@ describe('MessageList auto-scroll', () => {
       });
 
       await Promise.resolve();
+      flushSolid();
       animationFrames.flush();
+      flushSolid();
       expect(scrollTopValue).toBe(800);
       expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
       for (let frame = 0; frame < 20; frame += 1) animationFrames.flush();
 
       list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+      flushSolid();
       scrollTopValue = 200;
       list?.dispatchEvent(new Event('scroll'));
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const button = container?.querySelector('.jump-to-latest-button') as HTMLButtonElement | null;
@@ -5821,30 +6886,38 @@ describe('MessageList auto-scroll', () => {
       expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('14px');
       expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(navArrowDownIcon));
 
-      setState('sessionStatus', 'session-1', { type: 'busy' });
+      setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+      flushSolid();
       expect(button?.querySelector('.ui-icon')).toBeNull();
       expect(button?.querySelectorAll('.jump-to-latest-activity > span')).toHaveLength(3);
 
-      setState('sessionStatus', 'session-1', { type: 'idle' });
+      setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+      flushSolid();
       expect(button?.querySelector('.jump-to-latest-activity')).toBeNull();
       expect(button?.querySelector('.ui-icon')).toBeInstanceOf(HTMLElement);
 
       setExpandedDiffOverlay(testDiffOverlayOwner, true);
+      flushSolid();
       expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
 
       setExpandedDiffOverlay(testDiffOverlayOwner, false);
+      flushSolid();
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const restoredButton = container?.querySelector(
         '.jump-to-latest-button'
       ) as HTMLButtonElement | null;
       expect(restoredButton).toBeInstanceOf(HTMLButtonElement);
 
-      setState('sessionStatus', 'session-1', { type: status });
+      setState(storePath('sessionStatus', 'session-1', { type: status }));
+      flushSolid();
       restoredButton?.click();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(scrollTopValue).toBe(800);
       expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
       animationFrames.restore();
+      flushSolid();
     }
   );
 });

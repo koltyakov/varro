@@ -1,3 +1,4 @@
+import { storePath } from '@solidjs/signals';
 import { For, Show, createSignal, onCleanup } from 'solid-js';
 import { postMessage } from '../lib/bridge';
 import { defaultAppState } from '../lib/state';
@@ -41,7 +42,7 @@ export function RestartBlocked() {
         class="chat-image-preview-close server-status-close"
         aria-label="Close restart status"
         title="Close"
-        onClick={() => defaultAppState.setState('restartBlocked', null)}
+        onClick={() => defaultAppState.setState(storePath('restartBlocked', null))}
       >
         <UiIcon source={xmarkIcon} width={14} height={14} />
       </button>
@@ -101,7 +102,7 @@ export function RestartBlocked() {
           <button
             type="button"
             class="server-status-secondary-button"
-            onClick={() => defaultAppState.setState('restartBlocked', null)}
+            onClick={() => defaultAppState.setState(storePath('restartBlocked', null))}
           >
             Close
           </button>

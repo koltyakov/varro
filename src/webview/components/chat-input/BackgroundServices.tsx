@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { createEffect, For, Show, createSignal, onCleanup } from 'solid-js';
 import type { BackgroundProcess } from '../../../shared/background-process';
 import { client } from '../../lib/client';
 import { openBackgroundProcessView } from '../../lib/background-process-view';
@@ -16,27 +16,41 @@ export function BackgroundServices(props: {
   document.addEventListener('visibilitychange', onVisibilityChange);
   onCleanup(() => document.removeEventListener('visibilitychange', onVisibilityChange));
 
-  createEffect(() => {
-    const sessionID = props.sessionID;
-    const directory = props.directory;
-    const count = props.count;
-    setServices([]);
-    if (!sessionID || count <= 0 || !visible()) return;
-    const controller = new AbortController();
-    onCleanup(() => controller.abort());
-    // Commands are immutable. Refresh on service-count changes, not on a timer, and never fetch logs.
-    void client.session
-      .backgroundProcesses(sessionID, { directory, signal: controller.signal })
-      .then((processes) => {
-        if (!controller.signal.aborted)
-          setServices(
-            processes.filter((process) => process.service && process.status === 'running')
-          );
-      })
-      .catch(() => {
-        // Keep a disclosure row when the list cannot load. The details dialog exposes errors and Retry.
-      });
-  });
+  createEffect(
+    () => ({
+      sessionID: props.sessionID,
+      directory: props.directory,
+      count: props.count,
+      visible: visible(),
+    }),
+    ({ sessionID, directory, count, visible }) => {
+      const cleanups: Array<() => void> = [];
+
+      setServices([]);
+      if (!sessionID || count <= 0 || !visible)
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+      const controller = new AbortController();
+      cleanups.push(() => controller.abort());
+      // Commands are immutable. Refresh on service-count changes, not on a timer, and never fetch logs.
+      void client.session
+        .backgroundProcesses(sessionID, { directory, signal: controller.signal })
+        .then((processes) => {
+          if (!controller.signal.aborted)
+            setServices(
+              processes.filter((process) => process.service && process.status === 'running')
+            );
+        })
+        .catch(() => {
+          // Keep a disclosure row when the list cannot load. The details dialog exposes errors and Retry.
+        });
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    }
+  );
 
   const inspect = (processID?: string) => {
     if (props.sessionID) openBackgroundProcessView(props.sessionID, props.directory, processID);

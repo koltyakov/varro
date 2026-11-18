@@ -1,5 +1,6 @@
+import { ariaBoolean } from '../../lib/aria';
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { Portal } from '@solidjs/web';
 import type { Agent, Provider } from '../../types';
 import type {
   AutoApproveActivity,
@@ -195,26 +196,37 @@ export function WorkspacePicker(props: {
   };
   let popupEl: HTMLDivElement | undefined;
 
-  createEffect(() => {
-    if (!props.showPicker || !popupEl) return;
+  createEffect(
+    () => props.showPicker,
+    (showPicker) => {
+      const cleanups: Array<() => void> = [];
+      if (!showPicker || !popupEl)
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
 
-    const reposition = () => {
-      if (!popupEl) return;
-      flipPopupDownIfNeeded(popupEl);
-      if (props.boundaryRef) {
-        const viewportMargin = 8;
-        const boundaryBox = props.boundaryRef.getBoundingClientRect();
-        const boundaryLeft = Math.max(viewportMargin, boundaryBox.left);
-        const boundaryRight = Math.min(window.innerWidth - viewportMargin, boundaryBox.right);
-        popupEl.style.width = `${Math.min(360, Math.max(0, boundaryRight - boundaryLeft))}px`;
-        alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
-      }
-      clampPopupToViewport(popupEl);
-      updateOverflowTitles(popupEl);
-    };
+      const reposition = () => {
+        if (!popupEl) return;
+        flipPopupDownIfNeeded(popupEl);
+        if (props.boundaryRef) {
+          const viewportMargin = 8;
+          const boundaryBox = props.boundaryRef.getBoundingClientRect();
+          const boundaryLeft = Math.max(viewportMargin, boundaryBox.left);
+          const boundaryRight = Math.min(window.innerWidth - viewportMargin, boundaryBox.right);
+          popupEl.style.width = `${Math.min(360, Math.max(0, boundaryRight - boundaryLeft))}px`;
+          alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+        }
+        clampPopupToViewport(popupEl);
+        updateOverflowTitles(popupEl);
+      };
 
-    onCleanup(observePopupViewport(popupEl, reposition));
-  });
+      cleanups.push(observePopupViewport(popupEl, reposition));
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    }
+  );
 
   const setPopoverRef = (el: HTMLDivElement) => {
     popupEl = el;
@@ -229,7 +241,7 @@ export function WorkspacePicker(props: {
           ref={props.buttonRef}
           class="toolbar-picker workspace-picker-button"
           aria-label={selectedAriaLabel()}
-          aria-expanded={props.showPicker}
+          aria-expanded={ariaBoolean(props.showPicker)}
           onClick={props.onToggle}
         >
           <Show when={props.showIcon !== false}>
@@ -397,51 +409,65 @@ export function PermissionModePicker(props: {
   };
   let popupEl: HTMLDivElement | undefined;
 
-  createEffect(() => {
-    if (!props.showPicker || !popupEl) return;
-    const alignToTriggerWhenPossible = props.alignToTriggerWhenPossible;
+  createEffect(
+    () => ({
+      showPicker: props.showPicker,
+      alignToTriggerWhenPossible: props.alignToTriggerWhenPossible,
+    }),
+    ({ showPicker, alignToTriggerWhenPossible }) => {
+      const cleanups: Array<() => void> = [];
 
-    const reposition = () => {
-      if (!popupEl) return;
-      flipPopupDownIfNeeded(popupEl);
-      if (props.boundaryRef) {
-        popupEl.style.width = '';
-        const viewportMargin = 8;
-        const boundaryBox = props.boundaryRef.getBoundingClientRect();
-        const boundaryLeft = Math.max(viewportMargin, boundaryBox.left);
-        const boundaryRight = Math.min(window.innerWidth - viewportMargin, boundaryBox.right);
-        const boundaryWidth = Math.max(0, boundaryRight - boundaryLeft);
-        const naturalWidth = Math.min(
-          288,
-          popupEl.scrollWidth || popupEl.getBoundingClientRect().width
-        );
-        const popupWidth = Math.min(naturalWidth, boundaryWidth);
-        popupEl.style.width = `${popupWidth}px`;
-        const positionedAncestor =
-          popupEl.offsetParent instanceof HTMLElement
-            ? popupEl.offsetParent
-            : popupEl.parentElement;
-        const ancestorBox = positionedAncestor?.getBoundingClientRect();
-        const fitsAtTrigger =
-          alignToTriggerWhenPossible &&
-          ancestorBox &&
-          ancestorBox.left >= boundaryLeft &&
-          ancestorBox.left + popupWidth <= boundaryRight;
-        if (fitsAtTrigger) {
-          popupEl.style.right = 'auto';
-          popupEl.style.left = '0px';
-        } else if (alignToTriggerWhenPossible && ancestorBox) {
-          popupEl.style.right = 'auto';
-          popupEl.style.left = `${Math.round(boundaryLeft + (boundaryWidth - popupWidth) / 2 - ancestorBox.left)}px`;
-        } else {
-          alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+      if (!showPicker || !popupEl)
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+
+      const reposition = () => {
+        if (!popupEl) return;
+        flipPopupDownIfNeeded(popupEl);
+        if (props.boundaryRef) {
+          popupEl.style.width = '';
+          const viewportMargin = 8;
+          const boundaryBox = props.boundaryRef.getBoundingClientRect();
+          const boundaryLeft = Math.max(viewportMargin, boundaryBox.left);
+          const boundaryRight = Math.min(window.innerWidth - viewportMargin, boundaryBox.right);
+          const boundaryWidth = Math.max(0, boundaryRight - boundaryLeft);
+          const naturalWidth = Math.min(
+            288,
+            popupEl.scrollWidth || popupEl.getBoundingClientRect().width
+          );
+          const popupWidth = Math.min(naturalWidth, boundaryWidth);
+          popupEl.style.width = `${popupWidth}px`;
+          const positionedAncestor =
+            popupEl.offsetParent instanceof HTMLElement
+              ? popupEl.offsetParent
+              : popupEl.parentElement;
+          const ancestorBox = positionedAncestor?.getBoundingClientRect();
+          const fitsAtTrigger =
+            alignToTriggerWhenPossible &&
+            ancestorBox &&
+            ancestorBox.left >= boundaryLeft &&
+            ancestorBox.left + popupWidth <= boundaryRight;
+          if (fitsAtTrigger) {
+            popupEl.style.right = 'auto';
+            popupEl.style.left = '0px';
+          } else if (alignToTriggerWhenPossible && ancestorBox) {
+            popupEl.style.right = 'auto';
+            popupEl.style.left = `${Math.round(boundaryLeft + (boundaryWidth - popupWidth) / 2 - ancestorBox.left)}px`;
+          } else {
+            alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+          }
         }
-      }
-      clampPopupToViewport(popupEl);
-    };
+        clampPopupToViewport(popupEl);
+      };
 
-    onCleanup(observePopupViewport(popupEl, reposition));
-  });
+      cleanups.push(observePopupViewport(popupEl, reposition));
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    }
+  );
 
   const setPopoverRef = (el: HTMLDivElement) => {
     popupEl = el;
@@ -459,7 +485,7 @@ export function PermissionModePicker(props: {
             data-permission-mode={props.mode}
             onClick={props.onToggle}
             aria-label={title()}
-            aria-expanded={props.showPicker}
+            aria-expanded={ariaBoolean(props.showPicker)}
           >
             <PermissionModeIcon mode={props.mode} />
             <Show when={props.showLabel}>
@@ -585,51 +611,54 @@ export function AgentPicker(props: {
     );
   };
 
-  createEffect(() => {
-    if (!props.showPicker || !popupEl) return;
+  createEffect(
+    () => props.showPicker,
+    (shown) => {
+      if (!shown || !popupEl) return;
 
-    const reposition = () => {
-      if (!popupEl) return;
-      flipPopupDownIfNeeded(popupEl);
-      const trigger = popupEl.parentElement?.querySelector<HTMLElement>('.toolbar-picker');
-      const boundary = popupEl.closest<HTMLElement>('.chat-input-container');
-      const positionedParent = popupEl.offsetParent;
-      if (!trigger || !boundary || !(positionedParent instanceof HTMLElement)) {
-        clampPopupToViewport(popupEl);
-        return;
-      }
+      const reposition = () => {
+        if (!popupEl) return;
+        flipPopupDownIfNeeded(popupEl);
+        const trigger = popupEl.parentElement?.querySelector<HTMLElement>('.toolbar-picker');
+        const boundary = popupEl.closest<HTMLElement>('.chat-input-container');
+        const positionedParent = popupEl.offsetParent;
+        if (!trigger || !boundary || !(positionedParent instanceof HTMLElement)) {
+          clampPopupToViewport(popupEl);
+          return;
+        }
 
-      popupEl.style.width = '';
-      popupEl.style.left = '0px';
-      popupEl.style.right = 'auto';
-      popupEl.style.transform = '';
-      const viewportMargin = 8;
-      const boundaryBox = boundary.getBoundingClientRect();
-      const triggerBox = trigger.getBoundingClientRect();
-      const parentBox = positionedParent.getBoundingClientRect();
-      const boundaryLeft = Math.max(viewportMargin, boundaryBox.left);
-      const boundaryRight = Math.min(window.innerWidth - viewportMargin, boundaryBox.right);
-      const boundaryWidth = Math.max(0, boundaryRight - boundaryLeft);
-      const naturalWidth = Math.min(
-        288,
-        popupEl.scrollWidth || popupEl.getBoundingClientRect().width
-      );
-      const maximumWidth = Math.min(naturalWidth, boundaryWidth);
-      const triggerLeft = Math.max(boundaryLeft, triggerBox.left);
-      const availableRightWidth = boundaryRight - triggerLeft;
-      const canRemainRightOpening = availableRightWidth >= Math.min(220, maximumWidth);
-      const width = canRemainRightOpening
-        ? Math.min(maximumWidth, availableRightWidth)
-        : maximumWidth;
-      const left = canRemainRightOpening
-        ? triggerLeft
-        : Math.max(boundaryLeft, Math.min(triggerBox.right - width, boundaryRight - width));
-      popupEl.style.width = `${width}px`;
-      popupEl.style.left = `${Math.round(left - parentBox.left)}px`;
-    };
+        popupEl.style.width = '';
+        popupEl.style.left = '0px';
+        popupEl.style.right = 'auto';
+        popupEl.style.transform = '';
+        const viewportMargin = 8;
+        const boundaryBox = boundary.getBoundingClientRect();
+        const triggerBox = trigger.getBoundingClientRect();
+        const parentBox = positionedParent.getBoundingClientRect();
+        const boundaryLeft = Math.max(viewportMargin, boundaryBox.left);
+        const boundaryRight = Math.min(window.innerWidth - viewportMargin, boundaryBox.right);
+        const boundaryWidth = Math.max(0, boundaryRight - boundaryLeft);
+        const naturalWidth = Math.min(
+          288,
+          popupEl.scrollWidth || popupEl.getBoundingClientRect().width
+        );
+        const maximumWidth = Math.min(naturalWidth, boundaryWidth);
+        const triggerLeft = Math.max(boundaryLeft, triggerBox.left);
+        const availableRightWidth = boundaryRight - triggerLeft;
+        const canRemainRightOpening = availableRightWidth >= Math.min(220, maximumWidth);
+        const width = canRemainRightOpening
+          ? Math.min(maximumWidth, availableRightWidth)
+          : maximumWidth;
+        const left = canRemainRightOpening
+          ? triggerLeft
+          : Math.max(boundaryLeft, Math.min(triggerBox.right - width, boundaryRight - width));
+        popupEl.style.width = `${width}px`;
+        popupEl.style.left = `${Math.round(left - parentBox.left)}px`;
+      };
 
-    onCleanup(observePopupViewport(popupEl, reposition));
-  });
+      return observePopupViewport(popupEl, reposition);
+    }
+  );
 
   const setPopoverRef = (el: HTMLDivElement) => {
     popupEl = el;
@@ -692,7 +721,7 @@ export function AgentPicker(props: {
           class={`toolbar-picker ${props.selectedAgent === 'plan' ? 'plan-agent-selected' : ''}`}
           onClick={props.onToggle}
           aria-label="Select agent"
-          aria-expanded={props.showPicker}
+          aria-expanded={ariaBoolean(props.showPicker)}
         >
           <Show
             when={props.compact && selectedIcon()}
@@ -828,20 +857,23 @@ export function VariantPicker(props: {
     return `${level} reasoning may be more expensive and can sometimes produce worse results.`;
   };
 
-  createEffect(() => {
-    if (!props.showPicker || !popupEl) return;
+  createEffect(
+    () => props.showPicker && { boundary: props.boundaryRef, align: props.alignTo ?? 'left' },
+    (position) => {
+      if (!position || !popupEl) return;
 
-    const reposition = () => {
-      if (!popupEl) return;
-      flipPopupDownIfNeeded(popupEl);
-      if (props.boundaryRef) {
-        alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
-      }
-      clampPopupToViewport(popupEl);
-    };
+      const reposition = () => {
+        if (!popupEl) return;
+        flipPopupDownIfNeeded(popupEl);
+        if (position.boundary) {
+          alignPopupToBoundary(popupEl, position.boundary, position.align);
+        }
+        clampPopupToViewport(popupEl);
+      };
 
-    onCleanup(observePopupViewport(popupEl, reposition));
-  });
+      return observePopupViewport(popupEl, reposition);
+    }
+  );
 
   const setPopoverRef = (el: HTMLDivElement) => {
     popupEl = el;
@@ -870,7 +902,7 @@ export function VariantPicker(props: {
           disabled={props.disabled}
           onClick={props.onToggle}
           aria-label="Thinking level"
-          aria-expanded={props.showPicker}
+          aria-expanded={ariaBoolean(props.showPicker)}
         >
           <span class="toolbar-picker-label">{props.selectedLabel}</span>
           <PickerChevron />
@@ -932,24 +964,26 @@ export function ModelPickerButton(props: {
     )
   );
   const [catalogPricing, setCatalogPricing] = createSignal<ModelPricing | null>(null);
-  createEffect(() => {
-    const model = baseModel();
-    const providerID = props.providerID;
-    setCatalogPricing(null);
-    if (!model || !providerID) return;
-    let active = true;
-    onCleanup(() => {
-      active = false;
-    });
-    void client.config.modelPricing(providerID, model.id).then(
-      (pricing) => {
-        if (active) setCatalogPricing(pricing);
-      },
-      () => {
-        // Catalog enrichment is optional; retain provider rates when offline.
-      }
-    );
-  });
+  createEffect(
+    () => [baseModel()?.id, props.providerID] as const,
+    ([modelID, providerID]) => {
+      setCatalogPricing(null);
+      if (!modelID || !providerID) return;
+      let active = true;
+      void client.config.modelPricing(providerID, modelID).then(
+        (pricing) => {
+          if (active) setCatalogPricing(pricing);
+        },
+        () => {
+          // Catalog enrichment is optional; retain provider rates when offline.
+        }
+      );
+
+      return () => {
+        active = false;
+      };
+    }
+  );
   const showCostWarning = createMemo(() => {
     const pricing = catalogPricing() ?? baseModel()?.cost;
     const input = pricing?.input;
@@ -988,7 +1022,7 @@ export function ModelPickerButton(props: {
         disabled={props.disabled}
         onClick={props.onToggle}
         aria-label={label()}
-        aria-expanded={props.expanded ?? false}
+        aria-expanded={ariaBoolean(props.expanded ?? false)}
       >
         <Show
           when={props.modelName}
@@ -1018,8 +1052,7 @@ export function ModelPickerButton(props: {
 function ModelSpeedIcons(props: { count: number }) {
   return (
     <span
-      class="model-speed-icons"
-      classList={{ 'model-speed-icons-ultrafast': props.count === 2 }}
+      class={['model-speed-icons', { 'model-speed-icons-ultrafast': props.count === 2 }]}
       role="img"
       aria-label={FAST_MODE_COST_WARNING}
     >
@@ -1079,12 +1112,15 @@ export function ProviderLimitChip(props: {
         disabled={!props.title}
       >
         <button
-          ref={props.buttonRef}
+          ref={(button) => {
+            const forwarded = props.buttonRef;
+            if (isFunction(forwarded)) forwarded(button);
+            button.addEventListener('click', () => props.onClick());
+          }}
           type="button"
           class="toolbar-limit-chip"
           aria-label={props.ariaLabel ?? props.title ?? 'Provider limits'}
-          aria-expanded={props.expanded}
-          on:click={props.onClick}
+          aria-expanded={ariaBoolean(props.expanded)}
         >
           <span class="toolbar-limit-chip-label">
             <span class="toolbar-meta-full-label">Limits:</span>

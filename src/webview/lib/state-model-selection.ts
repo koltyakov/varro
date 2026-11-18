@@ -1,4 +1,5 @@
-import { produce, reconcile } from 'solid-js/store';
+import { storePath } from '@solidjs/signals';
+import { reconcile } from 'solid-js';
 import type { Command, Provider } from '../types';
 import type { SelectedModel } from './app-state-types';
 import type {
@@ -109,13 +110,25 @@ export function setSelectedModel(
     const activeTurnModel = getActiveTurnComposerModel(state.activeSessionId);
     if (activeTurnModel) model = { ...activeTurnModel };
   }
-  const currentSessionModel = sessionId ? state.sessionSelectedModels[sessionId] : undefined;
-  const previousSessionModel: SelectedModel | null = currentSessionModel
-    ? { ...currentSessionModel }
-    : null;
+  if (sessionId) {
+    setState((draft) => {
+      const current = draft.sessionSelectedModels[sessionId];
+      if (modelsEqual(current ?? null, model)) return;
+      if (!model) delete draft.sessionSelectedModels[sessionId];
+      else if (current) reconcile({ ...model })(current);
+      else draft.sessionSelectedModels[sessionId] = { ...model };
+      writeStored(STORAGE_KEYS.sessionSelectedModels, { ...draft.sessionSelectedModels });
+    });
+  }
 
   if (!modelsEqual(state.selectedModel, model)) {
-    setState('selectedModel', reconcile(model ? { ...model } : null));
+    setState((draft) => {
+      const current = draft['selectedModel'];
+      const incoming = (model ? { ...model } : null) satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['selectedModel'] = incoming;
+      else reconcile(incoming)(current);
+    });
   }
   if (persistGlobal) {
     writeStoredSelectedModelForWorkspace(state.editorContext.workspacePath, model);
@@ -124,7 +137,18 @@ export function setSelectedModel(
       options?.rememberLastSelected !== false &&
       !modelsEqual(state.lastSelectedModel, model)
     ) {
-      setState('lastSelectedModel', reconcile({ ...model }));
+      setState((draft) => {
+        const current = draft['lastSelectedModel'];
+        const incoming = { ...model } satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['lastSelectedModel'] = incoming;
+        else reconcile(incoming)(current);
+      });
       writeStored(STORAGE_KEYS.lastSelectedModel, model);
       preferencesChanged = true;
     }
@@ -136,41 +160,22 @@ export function setSelectedModel(
     const key = getModelVariantSelectionKey(model.providerID, model.modelID);
     if (state.modelVariantSelections[key] !== rememberedVariant) {
       const nextSelections = { ...state.modelVariantSelections, [key]: rememberedVariant };
-      setState('modelVariantSelections', nextSelections);
+      setState(storePath('modelVariantSelections', nextSelections));
       writeStored(STORAGE_KEYS.modelVariantSelections, nextSelections);
       preferencesChanged = true;
     }
   }
   if (preferencesChanged && preferencesBase) publishModelPreferences(preferencesBase);
-
-  if (sessionId) {
-    if (!modelsEqual(previousSessionModel, model)) {
-      if (model) {
-        setState('sessionSelectedModels', sessionId, reconcile(model));
-      } else {
-        setState(
-          'sessionSelectedModels',
-          produce((draft) => {
-            delete draft[sessionId];
-          })
-        );
-      }
-      writeStored(STORAGE_KEYS.sessionSelectedModels, { ...state.sessionSelectedModels });
-    }
-  }
 }
 
 export function clearSelectedModelForSession(sessionId: string) {
   pendingModelSelections.delete(sessionId);
   activeTurnComposerModels.delete(sessionId);
-  if (!state.sessionSelectedModels[sessionId]) return;
-  setState(
-    'sessionSelectedModels',
-    produce((draft) => {
-      delete draft[sessionId];
-    })
-  );
-  writeStored(STORAGE_KEYS.sessionSelectedModels, { ...state.sessionSelectedModels });
+  setState((draft) => {
+    if (!draft.sessionSelectedModels[sessionId]) return;
+    delete draft.sessionSelectedModels[sessionId];
+    writeStored(STORAGE_KEYS.sessionSelectedModels, { ...draft.sessionSelectedModels });
+  });
 }
 
 export function applySessionSelectedModelsSnapshot(
@@ -183,7 +188,10 @@ export function applySessionSelectedModelsSnapshot(
   ) {
     pendingModelSelections.delete(acknowledgement.sessionId);
   }
-  models = { ...models };
+  // Each session owns its choice even when a server snapshot reuses one object.
+  models = Object.fromEntries(
+    Object.entries(models).map(([sessionId, model]) => [sessionId, { ...model }])
+  );
   // Session metadata describes the running turn, not the next composer choice.
   // Keep a local choice through streaming snapshots even after its write is acknowledged.
   for (const sessionId of activeTurnComposerModels.keys()) {
@@ -195,7 +203,13 @@ export function applySessionSelectedModelsSnapshot(
     if (pending) models[sessionId] = { ...pending };
   }
   if (!selectedModelRecordsEqual(state.sessionSelectedModels, models)) {
-    setState('sessionSelectedModels', reconcile(models));
+    setState((draft) => {
+      const current = draft['sessionSelectedModels'];
+      const incoming = models satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionSelectedModels'] = incoming;
+      else reconcile(incoming)(current);
+    });
     writeStored(STORAGE_KEYS.sessionSelectedModels, models);
   }
   const sessionId = showSessionPicker() ? null : state.activeSessionId;
@@ -206,11 +220,17 @@ export function applySessionSelectedModelsSnapshot(
 }
 
 export function setMcpStatus(status: Record<string, McpStatus>) {
-  setState('mcpStatus', status);
+  setState(storePath('mcpStatus', status));
 }
 
 export function setMcpDefaults(defaults: McpDefaults) {
-  setState('mcpDefaults', reconcile(defaults));
+  setState((draft) => {
+    const current = draft['mcpDefaults'];
+    const incoming = defaults satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['mcpDefaults'] = incoming;
+    else reconcile(incoming)(current);
+  });
 }
 
 export function getAvailableMcpNames() {
@@ -224,39 +244,40 @@ export function getAvailableMcpNames() {
 
 export function setSelectedMcpsForSession(sessionId: string, names: string[]) {
   const nextNames = [...new Set(names)].toSorted((a, b) => a.localeCompare(b));
-  if (stringArraysEqual(state.sessionSelectedMcps[sessionId], nextNames)) return;
-  setState('sessionSelectedMcps', sessionId, nextNames);
-  writeStored(STORAGE_KEYS.sessionSelectedMcps, { ...state.sessionSelectedMcps });
+  setState((draft) => {
+    if (stringArraysEqual(draft.sessionSelectedMcps[sessionId], nextNames)) return;
+    draft.sessionSelectedMcps[sessionId] = nextNames;
+    writeStored(STORAGE_KEYS.sessionSelectedMcps, draft.sessionSelectedMcps);
+  });
 }
 
 export function setDraftSelectedMcps(names: string[]) {
   setState(
-    'draftSelectedMcps',
-    [...new Set(names)].toSorted((a, b) => a.localeCompare(b))
+    storePath(
+      'draftSelectedMcps',
+      [...new Set(names)].toSorted((a, b) => a.localeCompare(b))
+    )
   );
 }
 
 export function resetDraftSelectedMcps() {
-  setState('draftSelectedMcps', null);
+  setState(storePath('draftSelectedMcps', null));
 }
 
 export function clearSelectedMcpsForSession(sessionId: string) {
-  if (!state.sessionSelectedMcps[sessionId]) return;
-  setState(
-    'sessionSelectedMcps',
-    produce((draft) => {
-      delete draft[sessionId];
-    })
-  );
-  writeStored(STORAGE_KEYS.sessionSelectedMcps, { ...state.sessionSelectedMcps });
+  setState((draft) => {
+    if (!draft.sessionSelectedMcps[sessionId]) return;
+    delete draft.sessionSelectedMcps[sessionId];
+    writeStored(STORAGE_KEYS.sessionSelectedMcps, draft.sessionSelectedMcps);
+  });
 }
 
 export function setProviderAuthMethods(methods: ProviderAuthMethodsByProvider) {
-  setState('providerAuthMethods', methods);
+  setState(storePath('providerAuthMethods', methods));
 }
 
 export function setCommands(commands: Command[]) {
-  setState('commands', commands);
+  setState(storePath('commands', commands));
 }
 
 export function setSelectedAgent(
@@ -279,30 +300,18 @@ export function setSelectedAgent(
     // Loaded metadata describes the running turn, not a newer composer choice.
     agent = getProtectedSessionAgent(sessionId) ?? agent;
   }
-  const previousSessionAgent = sessionId ? state.sessionSelectedAgents[sessionId] : undefined;
-
   if (options?.updateSelection !== false && state.selectedAgent !== agent) {
-    setState('selectedAgent', agent);
+    setState(storePath('selectedAgent', agent));
   }
   if (persistGlobal) writeStored(STORAGE_KEYS.selectedAgent, agent);
 
   if (sessionId) {
-    const sessionAgentChanged = agent
-      ? previousSessionAgent !== agent
-      : previousSessionAgent !== undefined;
-    if (sessionAgentChanged) {
-      if (agent) {
-        setState('sessionSelectedAgents', sessionId, agent);
-      } else {
-        setState(
-          'sessionSelectedAgents',
-          produce((draft) => {
-            delete draft[sessionId];
-          })
-        );
-      }
-      writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...state.sessionSelectedAgents });
-    }
+    setState((draft) => {
+      if (draft.sessionSelectedAgents[sessionId] === (agent || undefined)) return;
+      if (agent) draft.sessionSelectedAgents[sessionId] = agent;
+      else delete draft.sessionSelectedAgents[sessionId];
+      writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...draft.sessionSelectedAgents });
+    });
     if (agent && selectionId) {
       postMessage({
         type: 'session-plan-state/update',
@@ -323,7 +332,13 @@ export function hydrateSessionSelectedAgents(agents: Record<string, string>) {
   }
   if (!changed) return;
 
-  setState('sessionSelectedAgents', reconcile(nextAgents));
+  setState((draft) => {
+    const current = draft['sessionSelectedAgents'];
+    const incoming = nextAgents satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['sessionSelectedAgents'] = incoming;
+    else reconcile(incoming)(current);
+  });
   writeStored(STORAGE_KEYS.sessionSelectedAgents, nextAgents);
 }
 
@@ -357,14 +372,11 @@ export function applySessionSelectedAgentUpdate(
 export function clearSelectedAgentForSession(sessionId: string) {
   pendingAgentSelections.delete(sessionId);
   activeTurnComposerAgents.delete(sessionId);
-  if (!state.sessionSelectedAgents[sessionId]) return;
-  setState(
-    'sessionSelectedAgents',
-    produce((draft) => {
-      delete draft[sessionId];
-    })
-  );
-  writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...state.sessionSelectedAgents });
+  setState((draft) => {
+    if (!draft.sessionSelectedAgents[sessionId]) return;
+    delete draft.sessionSelectedAgents[sessionId];
+    writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...draft.sessionSelectedAgents });
+  });
 }
 
 export function modelVisibilityKey(providerID: string, modelID: string) {
@@ -391,16 +403,18 @@ export function getReviewerModelNames(route: { providerID: string; modelID: stri
 }
 
 export function setModelDisplayName(providerID: string, modelID: string, name: string) {
-  const base = getModelPreferencesSnapshot();
-  const key = modelVisibilityKey(providerID, modelID);
-  const displayName = name.trim();
-  const next = { ...state.modelDisplayNames };
-  if (displayName) next[key] = displayName;
-  else delete next[key];
+  setState((draft) => {
+    const base = getModelPreferencesSnapshot(draft);
+    const key = modelVisibilityKey(providerID, modelID);
+    const displayName = name.trim();
+    const next = { ...draft.modelDisplayNames };
+    if (displayName) next[key] = displayName;
+    else delete next[key];
 
-  setState('modelDisplayNames', reconcile(next));
-  writeStored(STORAGE_KEYS.modelDisplayNames, Object.keys(next).length > 0 ? next : null);
-  publishModelPreferences(base);
+    reconcile(next)(draft.modelDisplayNames);
+    writeStored(STORAGE_KEYS.modelDisplayNames, Object.keys(next).length > 0 ? next : null);
+    publishModelPreferences(base);
+  });
 }
 
 export function isProviderVisible(providerID: string) {
@@ -442,21 +456,23 @@ export function isModelPinned(providerID: string, modelID: string) {
 }
 
 export function setModelPinned(providerID: string, modelID: string, pinned: boolean) {
-  const base = getModelPreferencesSnapshot();
-  const key = modelVisibilityKey(providerID, modelID);
-  const next = pinned
-    ? [...state.pinnedModels.filter((item) => item !== key), key]
-    : state.pinnedModels.filter((item) => item !== key);
+  setState((draft) => {
+    const base = getModelPreferencesSnapshot(draft);
+    const key = modelVisibilityKey(providerID, modelID);
+    const next = pinned
+      ? [...draft.pinnedModels.filter((item) => item !== key), key]
+      : draft.pinnedModels.filter((item) => item !== key);
 
-  setState('pinnedModels', next);
-  writeStored(STORAGE_KEYS.pinnedModels, next);
-  publishModelPreferences(base);
+    setState(storePath('pinnedModels', next));
+    writeStored(STORAGE_KEYS.pinnedModels, next);
+    publishModelPreferences(base);
+  });
 }
 
 export function setProviderOrder(providerIDs: readonly string[]) {
   const base = getModelPreferencesSnapshot();
   const next = [...new Set(providerIDs)];
-  setState('providerOrder', next);
+  setState(storePath('providerOrder', next));
   writeStored(STORAGE_KEYS.providerOrder, next);
   publishModelPreferences(base);
 }
@@ -471,19 +487,22 @@ export function canPinProviderLimits(providerID: string) {
 }
 
 export function setProviderLimitPin(providerID: string, displayName: string | null) {
-  if (
-    displayName !== null &&
-    !isProviderLimitPinned(providerID) &&
-    !canPinProviderLimits(providerID)
-  )
-    return;
-  const base = getModelPreferencesSnapshot();
-  const next = { ...state.providerLimitPins };
-  if (displayName === null) delete next[providerID];
-  else next[providerID] = displayName.trim();
-  setState('providerLimitPins', reconcile(next));
-  writeStored(STORAGE_KEYS.providerLimitPins, next);
-  publishModelPreferences(base);
+  setState((draft) => {
+    const limit = draft.providerLimits[getProviderLimitKey(providerID, null)];
+    if (
+      displayName !== null &&
+      draft.providerLimitPins[providerID] === undefined &&
+      !(limit?.status === 'available' && limit.windows.length > 0)
+    )
+      return;
+    const base = getModelPreferencesSnapshot(draft);
+    const next = { ...draft.providerLimitPins };
+    if (displayName === null) delete next[providerID];
+    else next[providerID] = displayName.trim();
+    reconcile(next)(draft.providerLimitPins);
+    writeStored(STORAGE_KEYS.providerLimitPins, next);
+    publishModelPreferences(base);
+  });
 }
 
 export function setModelOrder(providerID: string, modelIDs: readonly string[]) {
@@ -493,7 +512,7 @@ export function setModelOrder(providerID: string, modelIDs: readonly string[]) {
     ...state.modelOrder.filter((key) => !key.startsWith(prefix)),
     ...[...new Set(modelIDs)].map((modelID) => modelVisibilityKey(providerID, modelID)),
   ];
-  setState('modelOrder', next);
+  setState(storePath('modelOrder', next));
   writeStored(STORAGE_KEYS.modelOrder, next);
   publishModelPreferences(base);
 }
@@ -551,11 +570,11 @@ export function setModelsAdded(providerID: string, modelIDs: readonly string[]) 
         .filter((modelID) => !selected.has(modelID))
         .map((modelID) => modelVisibilityKey(providerID, modelID)),
     ];
-    setState('removedModels', removed);
+    setState(storePath('removedModels', removed));
     writeStored(STORAGE_KEYS.removedModels, removed);
   }
 
-  setState('addedModels', next);
+  setState(storePath('addedModels', next));
   writeStored(STORAGE_KEYS.addedModels, next);
   publishModelPreferences(base);
 
@@ -624,32 +643,35 @@ export function setProviderLimit(
   if (!key) return;
 
   setState(
-    'providerLimits',
-    produce((current) => {
+    storePath('providerLimits', (current) => {
       if (limit === null) {
         delete current[key];
-        return;
+        return current;
       }
 
-      if (current[key] && current[key].checkedAt > limit.checkedAt) return;
+      if (current[key] && current[key].checkedAt > limit.checkedAt) return current;
       current[key] = limit;
+
+      return current;
     })
   );
 }
 
 export function setProviderVisible(providerID: string, visible: boolean) {
-  const base = getModelPreferencesSnapshot();
-  const next = visible
-    ? state.hiddenProviders.filter((item) => item !== providerID)
-    : [...state.hiddenProviders.filter((item) => item !== providerID), providerID];
+  setState((draft) => {
+    const base = getModelPreferencesSnapshot(draft);
+    const next = visible
+      ? draft.hiddenProviders.filter((item) => item !== providerID)
+      : [...draft.hiddenProviders.filter((item) => item !== providerID), providerID];
 
-  setState('hiddenProviders', next);
-  writeStored(STORAGE_KEYS.hiddenProviders, next);
-  publishModelPreferences(base);
+    setState(storePath('hiddenProviders', next));
+    writeStored(STORAGE_KEYS.hiddenProviders, next);
+    publishModelPreferences(base);
 
-  if (!visible && state.selectedModel?.providerID === providerID) {
-    setSelectedModel(null);
-  }
+    if (!visible && draft.selectedModel?.providerID === providerID) {
+      setSelectedModel(null);
+    }
+  });
 }
 
 export function setModelVisible(providerID: string, modelID: string, visible: boolean) {
@@ -661,70 +683,137 @@ export function setModelsVisible(
   modelIDs: readonly string[],
   visible: boolean
 ) {
-  const base = getModelPreferencesSnapshot();
-  const keys = new Set(modelIDs.map((modelID) => modelVisibilityKey(providerID, modelID)));
-  if (keys.size === 0) return;
+  setState((draft) => {
+    const base = getModelPreferencesSnapshot(draft);
+    const keys = new Set(modelIDs.map((modelID) => modelVisibilityKey(providerID, modelID)));
+    if (keys.size === 0) return;
 
-  const next = visible
-    ? state.hiddenModels.filter((item) => !keys.has(item))
-    : [...state.hiddenModels.filter((item) => !keys.has(item)), ...keys];
+    const next = visible
+      ? draft.hiddenModels.filter((item) => !keys.has(item))
+      : [...draft.hiddenModels.filter((item) => !keys.has(item)), ...keys];
 
-  setState('hiddenModels', next);
-  writeStored(STORAGE_KEYS.hiddenModels, next);
+    setState(storePath('hiddenModels', next));
+    writeStored(STORAGE_KEYS.hiddenModels, next);
 
-  publishModelPreferences(base);
+    publishModelPreferences(base);
 
-  if (
-    !visible &&
-    state.selectedModel?.providerID === providerID &&
-    modelIDs.includes(state.selectedModel.modelID)
-  ) {
-    setSelectedModel(null);
-  }
+    if (
+      !visible &&
+      draft.selectedModel?.providerID === providerID &&
+      modelIDs.includes(draft.selectedModel.modelID)
+    ) {
+      setSelectedModel(null);
+    }
+  });
 }
 
 export function resetModelVisibility() {
   const base = getModelPreferencesSnapshot();
-  setState('hiddenProviders', []);
-  setState('hiddenModels', []);
+  setState(storePath('hiddenProviders', []));
+  setState(storePath('hiddenModels', []));
   writeStored(STORAGE_KEYS.hiddenProviders, []);
   writeStored(STORAGE_KEYS.hiddenModels, []);
   publishModelPreferences(base);
 }
 
-export function getModelPreferencesSnapshot(): ModelPreferences {
+export function getModelPreferencesSnapshot(source = state): ModelPreferences {
   const preferences: ModelPreferences = {
-    modelVariantSelections: { ...state.modelVariantSelections },
-    providerOrder: [...state.providerOrder],
-    providerLimitPins: { ...state.providerLimitPins },
-    modelOrder: [...state.modelOrder],
-    hiddenProviders: [...state.hiddenProviders],
-    hiddenModels: [...state.hiddenModels],
-    addedModels: [...state.addedModels],
-    removedModels: [...state.removedModels],
-    pinnedModels: [...state.pinnedModels],
-    modelDisplayNames: { ...state.modelDisplayNames },
+    modelVariantSelections: { ...source.modelVariantSelections },
+    providerOrder: [...source.providerOrder],
+    providerLimitPins: { ...source.providerLimitPins },
+    modelOrder: [...source.modelOrder],
+    hiddenProviders: [...source.hiddenProviders],
+    hiddenModels: [...source.hiddenModels],
+    addedModels: [...source.addedModels],
+    removedModels: [...source.removedModels],
+    pinnedModels: [...source.pinnedModels],
+    modelDisplayNames: { ...source.modelDisplayNames },
   };
-  if (state.lastSelectedModel) preferences.lastSelectedModel = { ...state.lastSelectedModel };
+  if (source.lastSelectedModel) preferences.lastSelectedModel = { ...source.lastSelectedModel };
   return preferences;
 }
 
 export function applyModelPreferencesSnapshot(preferences: ModelPreferences) {
-  setState(
-    'lastSelectedModel',
-    reconcile(preferences.lastSelectedModel ? { ...preferences.lastSelectedModel } : null)
-  );
+  setState((draft) => {
+    const current = draft['lastSelectedModel'];
+    const incoming = (
+      preferences.lastSelectedModel ? { ...preferences.lastSelectedModel } : null
+    ) satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['lastSelectedModel'] = incoming;
+    else reconcile(incoming)(current);
+  });
   writeStored(STORAGE_KEYS.lastSelectedModel, preferences.lastSelectedModel ?? null);
-  setState('modelVariantSelections', reconcile(preferences.modelVariantSelections));
-  setState('providerOrder', reconcile(preferences.providerOrder));
-  setState('providerLimitPins', reconcile(preferences.providerLimitPins ?? {}));
-  setState('modelOrder', reconcile(preferences.modelOrder));
-  setState('hiddenProviders', reconcile(preferences.hiddenProviders));
-  setState('hiddenModels', reconcile(preferences.hiddenModels));
-  setState('addedModels', reconcile(preferences.addedModels));
-  setState('removedModels', reconcile(preferences.removedModels ?? []));
-  setState('pinnedModels', reconcile(preferences.pinnedModels));
-  setState('modelDisplayNames', reconcile(preferences.modelDisplayNames));
+  setState((draft) => {
+    const current = draft['modelVariantSelections'];
+    const incoming = preferences.modelVariantSelections satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['modelVariantSelections'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  setState((draft) => {
+    const current = draft['providerOrder'];
+    const incoming = preferences.providerOrder satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['providerOrder'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  setState((draft) => {
+    const current = draft['providerLimitPins'];
+    const incoming = (preferences.providerLimitPins ?? {}) satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['providerLimitPins'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  setState((draft) => {
+    const current = draft['modelOrder'];
+    const incoming = preferences.modelOrder satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['modelOrder'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  setState((draft) => {
+    const current = draft['hiddenProviders'];
+    const incoming = preferences.hiddenProviders satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['hiddenProviders'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  setState((draft) => {
+    const current = draft['hiddenModels'];
+    const incoming = preferences.hiddenModels satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['hiddenModels'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  setState((draft) => {
+    const current = draft['addedModels'];
+    const incoming = preferences.addedModels satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['addedModels'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  setState((draft) => {
+    const current = draft['removedModels'];
+    const incoming = (preferences.removedModels ?? []) satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['removedModels'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  setState((draft) => {
+    const current = draft['pinnedModels'];
+    const incoming = preferences.pinnedModels satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['pinnedModels'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  setState((draft) => {
+    const current = draft['modelDisplayNames'];
+    const incoming = preferences.modelDisplayNames satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['modelDisplayNames'] = incoming;
+    else reconcile(incoming)(current);
+  });
   writeStored(STORAGE_KEYS.modelVariantSelections, preferences.modelVariantSelections);
   writeStored(STORAGE_KEYS.providerOrder, preferences.providerOrder);
   writeStored(STORAGE_KEYS.providerLimitPins, preferences.providerLimitPins ?? {});
@@ -738,9 +827,11 @@ export function applyModelPreferencesSnapshot(preferences: ModelPreferences) {
 }
 
 function publishModelPreferences(base: ReturnType<typeof getModelPreferencesSnapshot>) {
-  postMessage({
-    type: 'model-preferences/update',
-    payload: { base, preferences: getModelPreferencesSnapshot() },
+  setState((draft) => {
+    postMessage({
+      type: 'model-preferences/update',
+      payload: { base, preferences: getModelPreferencesSnapshot(draft) },
+    });
   });
 }
 

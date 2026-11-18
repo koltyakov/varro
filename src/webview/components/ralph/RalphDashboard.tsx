@@ -1,4 +1,4 @@
-import { For, Show, createEffect, onCleanup } from 'solid-js';
+import { onSettled, For, Show } from 'solid-js';
 import {
   RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT,
   type RalphStatus,
@@ -83,14 +83,26 @@ export function RalphDashboard(props: { sessionId: string }) {
     return `${model.providerID}/${model.modelID}${formatReasoningLevel(model.variant)}`;
   };
 
-  createEffect(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const listScroll = listScrollRef;
-    if (!listScroll) return;
+    if (!listScroll)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     updateScrollbarInset();
-    if (globalThis.ResizeObserver === undefined) return;
+    if (globalThis.ResizeObserver === undefined)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     const observer = new ResizeObserver(() => updateScrollbarInset());
     observer.observe(listScroll);
-    onCleanup(() => observer.disconnect());
+    cleanups.push(() => observer.disconnect());
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (

@@ -1,4 +1,4 @@
-import { For, Show, createEffect, onCleanup, onMount } from 'solid-js';
+import { createEffect, For, Show, onSettled } from 'solid-js';
 import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
 import { MaterialChipIcon } from '../MaterialChipIcon';
@@ -114,54 +114,69 @@ export function CompletionMenu(props: {
     updateScrollbarInset();
   }
 
-  createEffect(() => {
-    props.anchorRect?.();
-    queueMicrotask(reposition);
-  });
-
-  createEffect(() => {
-    const items = props.items;
-    const activeKeys = new Set(items.map((item) => item.key));
-    for (const key of itemRefs.keys()) {
-      if (!activeKeys.has(key)) itemRefs.delete(key);
+  createEffect(
+    () => props.anchorRect?.(),
+    () => {
+      queueMicrotask(reposition);
     }
-  });
+  );
 
-  createEffect(() => {
-    void props.items;
-    queueMicrotask(updateScrollbarInset);
-  });
-
-  createEffect(() => {
-    const idx = props.selectedIndex;
-    const selectedItem = props.items[idx];
-    const el = selectedItem ? itemRefs.get(selectedItem.key) : undefined;
-    if (!el || !menuRef) return;
-    const elTop = el.offsetTop;
-    const elBottom = elTop + el.offsetHeight;
-    const viewTop = menuRef.scrollTop + COMPLETION_MENU_EDGE_INSET;
-    const viewBottom = menuRef.scrollTop + menuRef.clientHeight - COMPLETION_MENU_EDGE_INSET;
-    if (elTop < viewTop) {
-      menuRef.scrollTop = Math.max(0, elTop - COMPLETION_MENU_EDGE_INSET);
-    } else if (elBottom > viewBottom) {
-      menuRef.scrollTop = elBottom - menuRef.clientHeight + COMPLETION_MENU_EDGE_INSET;
+  createEffect(
+    () => new Set(props.items.map((item) => item.key)),
+    (activeKeys) => {
+      for (const key of itemRefs.keys()) {
+        if (!activeKeys.has(key)) itemRefs.delete(key);
+      }
     }
-  });
+  );
 
-  onMount(() => {
+  createEffect(
+    () => props.items,
+    () => {
+      queueMicrotask(updateScrollbarInset);
+    }
+  );
+
+  createEffect(
+    () => props.items[props.selectedIndex]?.key,
+    (key) => {
+      const el = key !== undefined ? itemRefs.get(key) : undefined;
+      if (!el || !menuRef) return;
+      const elTop = el.offsetTop;
+      const elBottom = elTop + el.offsetHeight;
+      const viewTop = menuRef.scrollTop + COMPLETION_MENU_EDGE_INSET;
+      const viewBottom = menuRef.scrollTop + menuRef.clientHeight - COMPLETION_MENU_EDGE_INSET;
+      if (elTop < viewTop) {
+        menuRef.scrollTop = Math.max(0, elTop - COMPLETION_MENU_EDGE_INSET);
+      } else if (elBottom > viewBottom) {
+        menuRef.scrollTop = elBottom - menuRef.clientHeight + COMPLETION_MENU_EDGE_INSET;
+      }
+    }
+  );
+
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     updateScrollbarInset();
-    if (!menuRef) return;
+    if (!menuRef)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
 
-    onCleanup(observePopupViewport(menuRef, reposition));
+    cleanups.push(observePopupViewport(menuRef, reposition));
     document.addEventListener('selectionchange', reposition);
     document.addEventListener('scroll', reposition, true);
     const observer = globalThis.ResizeObserver ? new ResizeObserver(reposition) : undefined;
     if (menuRef.parentElement) observer?.observe(menuRef.parentElement);
-    onCleanup(() => {
+    cleanups.push(() => {
       document.removeEventListener('selectionchange', reposition);
       document.removeEventListener('scroll', reposition, true);
       observer?.disconnect();
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (

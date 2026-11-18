@@ -10,6 +10,50 @@ import {
 import { appendDeltaToLastLargeAssistant, appendDeltaToRapidStreaming } from './scroll-helpers';
 
 test.describe('auto-scroll', () => {
+  test('eases new streaming growth after a native wheel returns to the physical bottom', async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    const list = page.locator('.interactive-list');
+    const gap = () =>
+      list.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop);
+    await expect.poll(gap).toBeLessThanOrEqual(1);
+    await list.hover();
+    await page.mouse.wheel(0, -440);
+    await expect.poll(gap).toBeGreaterThan(220);
+    await appendDeltaToRapidStreaming(page, '\n\nOutside the viewport. '.repeat(25));
+    await waitForAnimationFrames(page, 20);
+    expect(await gap()).toBeGreaterThan(200);
+    await page.mouse.wheel(0, 100_000);
+    await expect.poll(gap).toBeLessThanOrEqual(1);
+    await waitForAnimationFrames(page, 24);
+
+    const [eased] = await Promise.all([
+      list.evaluate(async (element) => {
+        const origin = element.scrollTop;
+        let previous = origin;
+        let movedWhileBehind = false;
+        const deadline = performance.now() + 5000;
+        while (performance.now() < deadline) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const top = element.scrollTop;
+          const remaining = element.scrollHeight - element.clientHeight - top;
+          if (top > previous && remaining > 1) movedWhileBehind = true;
+          if (movedWhileBehind && top > origin && remaining <= 1) return true;
+          previous = top;
+        }
+        return false;
+      }),
+      appendDeltaToRapidStreaming(
+        page,
+        '\n\nGrowth beyond the restored physical bottom. '.repeat(40)
+      ),
+    ]);
+    expect(eased).toBe(true);
+    await expect(list).toContainText('Growth beyond the restored physical bottom.');
+    await expect.poll(gap).toBeLessThanOrEqual(1);
+  });
+
   for (const scenario of ['mixed-small-transcript', 'large-transcript', 'rapid-streaming-jitter']) {
     for (const detached of [false, true]) {
       test(`restores hidden bottom-follow instantly in ${scenario}, detached=${detached}`, async ({
@@ -791,11 +835,82 @@ test.describe('auto-scroll', () => {
     await expect(
       page.getByText('Corrected final prompt with bottom follow restored.', { exact: true })
     ).toBeVisible();
+    await expect(page.locator('[data-msg-id="message-large-user-239"]')).toHaveCount(0);
     await expect(page.locator('.interactive-list')).not.toHaveClass(/editing-message/);
     await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(2);
+  });
+
+  test('retains a native wheel destination while edit deletion is pending and permits cancellation after refusal', async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+    const list = page.locator('.interactive-list');
+    const original = list.locator('[data-msg-id="message-large-user-239"]');
+    await original
+      .getByText('Review large transcript section 239 and keep the UI responsive.')
+      .click();
+    const editor = page.locator('.inline-edit-composer-slot [role="textbox"]');
+    await editor.fill('Rejected replacement');
+    await page.evaluate(() => {
+      const host = window as Window & {
+        __sendToExtension: (message: unknown) => void;
+        refuseEditDelete?: () => void;
+      };
+      const send = host.__sendToExtension;
+      host.__sendToExtension = (message) => {
+        const request = message as {
+          type: string;
+          payload?: { id: string; method: string; path: string };
+        };
+        if (
+          request.type !== 'api/request' ||
+          request.payload?.method !== 'DELETE' ||
+          !request.payload.path.includes('/message/')
+        )
+          return send(message);
+        const { id } = request.payload;
+        host.refuseEditDelete = () =>
+          window.postMessage(
+            { type: 'api/response', payload: { id, error: 'Edit delete refused' } },
+            '*'
+          );
+      };
+    });
+    await editor.press('Enter');
+    await expect.poll(() => page.evaluate(() => 'refuseEditDelete' in window)).toBe(true);
+    const box = await list.boundingBox();
+    if (!box) throw new Error('Missing transcript');
+    await page.mouse.move(box.x + 8, box.y + box.height / 2);
+    const before = await list.evaluate((el) => el.scrollTop);
+    await page.mouse.wheel(0, -160);
+    await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeLessThan(before - 100);
+    await expect(list.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+    const marker = list.locator('[data-msg-id="message-large-assistant-238"] p').first();
+    const tops = await marker.evaluate(async (el) => {
+      const samples = [el.getBoundingClientRect().top];
+      for (let i = 0; i < 12; i++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+        samples.push(el.getBoundingClientRect().top);
+      }
+      return samples;
+    });
+    expect(
+      tops.every((y) => Math.abs(y - tops[0]!) <= 1),
+      JSON.stringify(tops)
+    ).toBe(true);
+    await page.evaluate(() => {
+      const refuse = (window as Window & { refuseEditDelete?: () => void }).refuseEditDelete;
+      if (!refuse) throw new Error('Missing pending edit deletion');
+      refuse();
+    });
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(original).toContainText('Review large transcript section 239');
+    await expect(list.getByText('Rejected replacement', { exact: true })).toHaveCount(0);
+    await expect(list.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
   });
 
   test('does not move the transcript backward when streamed text moves reasoning into Explored', async ({

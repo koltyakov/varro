@@ -1,4 +1,16 @@
 import {
+  Show,
+  Loading,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onSettled,
+  untrack,
+} from 'solid-js';
+import { storePath } from '@solidjs/signals';
+import { ariaBoolean } from '../lib/aria';
+import {
   createPastedText,
   isLargeTextPaste,
   pastedTextBytes,
@@ -14,18 +26,6 @@ import {
   databaseContextDetail,
   databaseAttachmentDetail,
 } from '../../shared/database-context';
-import {
-  Show,
-  Suspense,
-  batch,
-  createEffect,
-  createMemo,
-  createSignal,
-  on,
-  onCleanup,
-  onMount,
-  untrack,
-} from 'solid-js';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import { requestWorkspaceSelection } from '../lib/workspace-selection';
 import { toggleIssuesEnabled } from '../lib/state-attachments';
@@ -557,36 +557,40 @@ function captureEditDraftBackup(): MessageEditContext & { text: string } {
   };
 }
 
-function applyEditContext(context: MessageEditContext, mergeWholeFileIntoActiveContext = false) {
-  setState('attachedDiagnostics', context.attachedDiagnostics ?? null);
-  setState('inlineProblems', cloneInlineProblems(context.inlineProblems));
+function normalizeEditFiles(files: DroppedFile[], mergeWholeFileIntoActiveContext: boolean) {
   const activeFile = state.editorContext.activeFile;
-  replaceContextFiles(
-    context.files.flatMap((file) => {
-      const matchesActiveFile =
-        activeFile &&
-        file.type === 'file' &&
-        (isSamePath(file.path, activeFile.path) ||
-          isSamePath(file.path, activeFile.relativePath) ||
-          isSamePath(file.relativePath, activeFile.relativePath) ||
-          [file.path, file.relativePath].some((path) => {
-            const normalizedPath = path.replace(/^\.\//, '');
-            return (
-              !normalizedPath.includes('/') &&
-              !normalizedPath.includes('\\') &&
-              isSamePath(normalizedPath, getLeafPathName(activeFile.relativePath))
-            );
-          }));
-      if (!matchesActiveFile) return [file];
-      if (mergeWholeFileIntoActiveContext && !file.lineRanges?.length) return [];
-      return [{ ...file, path: activeFile.path, relativePath: activeFile.relativePath }];
-    })
-  );
+  return files.flatMap((file) => {
+    const matchesActiveFile =
+      activeFile &&
+      file.type === 'file' &&
+      (isSamePath(file.path, activeFile.path) ||
+        isSamePath(file.path, activeFile.relativePath) ||
+        isSamePath(file.relativePath, activeFile.relativePath) ||
+        [file.path, file.relativePath].some((path) => {
+          const normalizedPath = path.replace(/^\.\//, '');
+          return (
+            !normalizedPath.includes('/') &&
+            !normalizedPath.includes('\\') &&
+            isSamePath(normalizedPath, getLeafPathName(activeFile.relativePath))
+          );
+        }));
+    if (!matchesActiveFile) return [file];
+    if (mergeWholeFileIntoActiveContext && !file.lineRanges?.length) return [];
+    return [{ ...file, path: activeFile.path, relativePath: activeFile.relativePath }];
+  });
+}
+
+function applyEditContext(context: MessageEditContext, files: DroppedFile[]) {
+  setState(storePath('attachedDiagnostics', context.attachedDiagnostics ?? null));
+  setState(storePath('inlineProblems', cloneInlineProblems(context.inlineProblems)));
+  replaceContextFiles(files);
   const droppedImages = replaceClipboardImages(context.images);
   replaceNativePdfs(context.pdfs ?? []);
   setState(
-    'terminalSelection',
-    context.terminalSelection ? { ...context.terminalSelection } : null
+    storePath(
+      'terminalSelection',
+      context.terminalSelection ? { ...context.terminalSelection } : null
+    )
   );
   return droppedImages;
 }
@@ -795,10 +799,12 @@ function attachCurrentDiagnostics() {
     showSessionActionFeedback('No issues found');
     return;
   }
-  setState('attachedDiagnostics', {
-    diagnostics: state.editorContext.diagnostics.map((diagnostic) => ({ ...diagnostic })),
-    total: state.editorContext.diagnosticsTotal ?? state.editorContext.diagnostics.length,
-  });
+  setState(
+    storePath('attachedDiagnostics', {
+      diagnostics: state.editorContext.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+      total: state.editorContext.diagnosticsTotal ?? state.editorContext.diagnostics.length,
+    })
+  );
 }
 
 function postSessionModelSelection(
@@ -826,7 +832,7 @@ function isQueuedSessionHydrating(sessionId: string) {
 
 const pendingWorkspacePath = () => state.pendingWorkspaceSelectionPath;
 const setPendingWorkspacePath = (path: string | null) =>
-  setState('pendingWorkspaceSelectionPath', path);
+  setState(storePath('pendingWorkspaceSelectionPath', path));
 
 function detachBlankSessionForWorkspace(path: string | null) {
   const blankSessionId = getDiscardableActiveBlankSessionId();
@@ -917,8 +923,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const invalidatePendingPdfAttachments = () => {
     pdfAttachmentEpoch += 1;
   };
-  createEffect(() => {
-    const sessionId = composerSessionId();
+  createEffect(composerSessionId, (sessionId) => {
     if (sessionId === pdfAttachmentSessionId) return;
     pdfAttachmentSessionId = sessionId;
     invalidatePendingPdfAttachments();
@@ -961,29 +966,35 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       !!state.attachedDiagnostics
   );
 
-  createEffect(() => {
-    const sendPending = workspaceSendPending();
-    const draftNonempty = hasSendableComposerContent();
-    if (sendPending) return;
-    if (!draftNonempty && previousDraftNonempty) setManualWorkspaceSelection(false);
-    previousDraftNonempty = draftNonempty;
-  });
-
-  createEffect(() => {
-    const activeWorkspacePath = state.editorContext.activeWorkspacePath;
-    if (
-      !activeWorkspacePath ||
-      !canSelectWorkspace() ||
-      hasSendableComposerContent() ||
-      manualWorkspaceSelection() ||
-      isSameWorkspacePath(activeWorkspacePath, state.editorContext.workspacePath) ||
-      isSameWorkspacePath(activeWorkspacePath, pendingWorkspacePath())
-    ) {
-      return;
+  createEffect(
+    () => [workspaceSendPending(), hasSendableComposerContent()] as const,
+    ([sendPending, draftNonempty]) => {
+      if (sendPending) return;
+      if (!draftNonempty && previousDraftNonempty) setManualWorkspaceSelection(false);
+      previousDraftNonempty = draftNonempty;
     }
+  );
 
-    requestWorkspaceSelection(activeWorkspacePath);
-  });
+  createEffect(
+    () => {
+      const activeWorkspacePath = state.editorContext.activeWorkspacePath;
+      if (
+        !activeWorkspacePath ||
+        !canSelectWorkspace() ||
+        hasSendableComposerContent() ||
+        manualWorkspaceSelection() ||
+        isSameWorkspacePath(activeWorkspacePath, state.editorContext.workspacePath) ||
+        isSameWorkspacePath(activeWorkspacePath, pendingWorkspacePath())
+      ) {
+        return;
+      }
+
+      return activeWorkspacePath;
+    },
+    (path) => {
+      if (path) requestWorkspaceSelection(path);
+    }
+  );
 
   async function attachNativePdfFiles(files: File[], sequences?: ReadonlyMap<File, number>) {
     const ownerSessionId = composerSessionId();
@@ -1062,18 +1073,24 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (restore) untrack(restore);
   };
   onCleanup(restoreCurrentDocumentAfterQueuedEdit);
-  createEffect(() => {
-    if (!queuedMessageEdit()) restoreCurrentDocumentAfterQueuedEdit();
+  createEffect(queuedMessageEdit, (edit) => {
+    if (!edit) restoreCurrentDocumentAfterQueuedEdit();
   });
 
-  createEffect(() => {
-    const queuedEdit = queuedMessageEdit();
-    if (!queuedEdit) return;
-    const queuedEditExists = state.queuedMessages.some((message) => message.id === queuedEdit.id);
-    if (!queuedEditExists || composerSessionId() !== queuedEdit.sessionId)
-      cancelQueuedMessageEdit();
-    else if (composerEditingMessage()) setQueuedMessageEdit(null);
-  });
+  createEffect(
+    () => {
+      const queuedEdit = queuedMessageEdit();
+      if (!queuedEdit) return;
+      const queuedEditExists = state.queuedMessages.some((message) => message.id === queuedEdit.id);
+      if (!queuedEditExists || composerSessionId() !== queuedEdit.sessionId) return 'cancel';
+      if (composerEditingMessage()) return 'clear';
+      return undefined;
+    },
+    (action) => {
+      if (action === 'cancel') cancelQueuedMessageEdit();
+      else if (action === 'clear') setQueuedMessageEdit(null);
+    }
+  );
 
   type PopupKind =
     | 'workspace'
@@ -1110,12 +1127,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     showProviderLimitPopup() ||
     showBusyMenu();
 
-  createEffect(() => {
-    const pending = pendingWorkspacePath();
-    if (pending && isSameWorkspacePath(state.editorContext.workspacePath, pending)) {
-      setPendingWorkspacePath(null);
+  createEffect(
+    () => {
+      const pending = pendingWorkspacePath();
+      return pending && isSameWorkspacePath(state.editorContext.workspacePath, pending);
+    },
+    (selected) => {
+      if (selected) {
+        setPendingWorkspacePath(null);
+      }
     }
-  });
+  );
 
   const [isFocused, setIsFocused] = createSignal(false);
   const [dictationRequested, setDictationRequested] = createSignal(false);
@@ -1186,16 +1208,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     pendingTableAttachments.clear();
     setPendingTableCount(0);
   };
-  createEffect(() => {
-    const sessionId = composerSessionId();
-    const scope = getFileSearchScopeKey();
-    for (const request of pendingTableAttachments.values()) {
-      if (request.sessionId !== sessionId || request.scope !== scope) {
-        clearPendingTableAttachments();
-        break;
+  createEffect(
+    () => [composerSessionId(), getFileSearchScopeKey()] as const,
+    ([sessionId, scope]) => {
+      for (const request of pendingTableAttachments.values()) {
+        if (request.sessionId !== sessionId || request.scope !== scope) {
+          clearPendingTableAttachments();
+          break;
+        }
       }
     }
-  });
+  );
   const pastedImageDecodeQueues = Array.from({ length: PASTED_IMAGE_DECODE_CONCURRENCY }, () =>
     Promise.resolve()
   );
@@ -1232,7 +1255,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [sendComposerMinHeight, setSendComposerMinHeight] = createSignal(0);
   let latestFileSearchRequestId = 0;
   let latestFileSearchQuery = '';
-  let latestFileSearchScope = getFileSearchScopeKey();
+  let latestFileSearchScope = untrack(getFileSearchScopeKey);
   let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let sessionSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let sessionSearchAbortController: AbortController | undefined;
@@ -1308,13 +1331,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   createEffect(
-    on(
-      composerSessionId,
-      (sessionId, previousSessionId) => {
-        if (previousSessionId || !sessionId) clearSendAnimation?.();
-      },
-      { defer: true }
-    )
+    composerSessionId,
+    (sessionId, previousSessionId) => {
+      if (previousSessionId || !sessionId) clearSendAnimation?.();
+    },
+    { defer: true }
   );
   onCleanup(() => clearSendAnimation?.());
 
@@ -1380,27 +1401,31 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   createEffect(
-    on(
-      composerSessionId,
-      (sessionId, previousSessionId) => {
-        // Creating the first session keeps this composer mounted through the send.
-        releaseHeldComposerHeight(!previousSessionId && !!sessionId);
-      },
-      { defer: true }
-    )
+    composerSessionId,
+    (sessionId, previousSessionId) => {
+      // Creating the first session keeps this composer mounted through the send.
+      releaseHeldComposerHeight(!previousSessionId && !!sessionId);
+    },
+    { defer: true }
   );
   onCleanup(() => releaseHeldComposerHeight());
 
-  createEffect(() => {
-    if (sendComposerMinHeight() <= 0) return;
-    const heldSessionId = heldComposerSessionId;
-    if (!heldSessionId) return;
-    const activeSessionId = state.activeSessionId;
-    const messageCount = state.messages.length;
-    if (activeSessionId !== heldSessionId || messageCount > heldComposerMessageCount) {
-      releaseHeldComposerHeight(activeSessionId === heldSessionId);
+  createEffect(
+    () => {
+      if (sendComposerMinHeight() <= 0) return;
+      const heldSessionId = heldComposerSessionId;
+      if (!heldSessionId) return;
+      const activeSessionId = state.activeSessionId;
+      const messageCount = state.messages.length;
+      if (activeSessionId !== heldSessionId || messageCount > heldComposerMessageCount) {
+        return activeSessionId === heldSessionId;
+      }
+      return undefined;
+    },
+    (animate) => {
+      if (animate !== undefined) releaseHeldComposerHeight(animate);
     }
-  });
+  );
 
   // Keep the exact pasted text with history so undo restores partial-line selections too.
   const pastedFileChipText = new Map<string, { ranges: string | null; text: string }>();
@@ -1443,27 +1468,52 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const replacement = `${prefix}@${file.relativePath}${suffix}`;
     applyingComposerHistory = true;
     try {
-      batch(() => {
+      (() => {
         addContextFile(file);
         setInputText(`${before}${replacement}${after}`);
         setCaretPosition(before.length + replacement.length);
+      })();
+      setState((draft) => {
+        composerHistory.replaceCurrent(
+          captureComposerSnapshot(
+            `${before}${replacement}${after}`,
+            before.length + replacement.length,
+            draft
+          )
+        );
       });
-      composerHistory.replaceCurrent(captureComposerSnapshot());
     } finally {
       applyingComposerHistory = false;
     }
   }
 
-  function captureComposerSnapshot(): ComposerSnapshot {
+  function captureComposerSnapshot(
+    text = inputText(),
+    caret = caretPosition(),
+    source = state
+  ): ComposerSnapshot {
     return {
-      text: inputText(),
-      caret: caretPosition(),
-      files: state.droppedFiles.map((file) => ({ ...file })),
-      images: state.clipboardImages.map((image) => ({ ...image })),
-      pdfs: state.nativePdfs.map((pdf) => ({ ...pdf })),
-      problems: state.attachedDiagnostics,
-      inlineProblems: state.inlineProblems,
-      terminalSelection: state.terminalSelection,
+      text,
+      caret,
+      files: source.droppedFiles.map((file) => ({
+        ...file,
+        ...(file.lineRanges && { lineRanges: file.lineRanges.map((range) => ({ ...range })) }),
+      })),
+      images: source.clipboardImages.map((image) => ({ ...image })),
+      pdfs: source.nativePdfs.map((pdf) => ({
+        ...pdf,
+        ...(pdf.contextFile && { contextFile: { ...pdf.contextFile } }),
+      })),
+      problems: source.attachedDiagnostics
+        ? {
+            ...source.attachedDiagnostics,
+            diagnostics: source.attachedDiagnostics.diagnostics.map((diagnostic) => ({
+              ...diagnostic,
+            })),
+          }
+        : null,
+      inlineProblems: cloneInlineProblems(source.inlineProblems),
+      terminalSelection: source.terminalSelection ? { ...source.terminalSelection } : null,
       pastedFileChips: [...pastedFileChipText].map(([path, pasted]) => ({ path, ...pasted })),
     };
   }
@@ -1476,24 +1526,24 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (totalBytes > MAX_PASTED_TEXT_TOTAL_BYTES) {
       throw new Error('Annotations and pasted text are limited to 256 KB per draft.');
     }
-    batch(() => {
+    (() => {
       const text = inputText();
       const prefix = shouldPadInlineInsertion(text.at(-1)) ? ' ' : '';
       const nextText = `${text}${prefix}@${file.relativePath} `;
       addContextFile(file);
       setInputText(nextText);
       setCaretPosition(nextText.length);
-    });
+    })();
     queueMicrotask(() => richEditorRef?.focus({ preventScroll: true }));
   }
 
   const composerHistory = createComposerHistory();
-  createEffect(() => {
-    writeStored(
-      STORAGE_KEYS.inputDraftProblems,
-      state.inlineProblems.length ? cloneInlineProblems(state.inlineProblems) : null
-    );
-  });
+  createEffect(
+    () => (state.inlineProblems.length ? cloneInlineProblems(state.inlineProblems) : null),
+    (problems) => {
+      writeStored(STORAGE_KEYS.inputDraftProblems, problems);
+    }
+  );
   let applyingComposerHistory = false;
   composerHistory.reset(untrack(captureComposerSnapshot));
 
@@ -1512,7 +1562,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       for (const { path, ranges, text } of snapshot.pastedFileChips ?? []) {
         pastedFileChipText.set(path, { ranges, text });
       }
-      batch(() => {
+      (() => {
         setHistoryIndex(null);
         setHistoryDraft('');
         setInputText(snapshot.text);
@@ -1520,15 +1570,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         replaceContextFiles(snapshot.files);
         replaceClipboardImages(snapshot.images);
         replaceNativePdfs(snapshot.pdfs ?? []);
-        setState('attachedDiagnostics', snapshot.problems ?? null);
-        setState('inlineProblems', cloneInlineProblems(snapshot.inlineProblems));
+        setState(storePath('attachedDiagnostics', snapshot.problems ?? null));
+        setState(storePath('inlineProblems', cloneInlineProblems(snapshot.inlineProblems)));
         setState(
-          'terminalSelection',
-          snapshot.terminalSelection ? { ...snapshot.terminalSelection } : null
+          storePath(
+            'terminalSelection',
+            snapshot.terminalSelection ? { ...snapshot.terminalSelection } : null
+          )
         );
         setCompletionIndex(0);
         setSuppressCompletion(false);
-      });
+      })();
     } finally {
       applyingComposerHistory = false;
     }
@@ -1542,87 +1594,89 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const explicitContextForActiveFile = () =>
     hasExplicitContextForPath(composerFiles(), composerActiveFile()?.path);
 
-  const currentModel = createMemo<CurrentComposerModel>((previous) => {
-    const editing = composerEditingMessage();
-    const editSelection = editing ? editSelectedModel() || editing.model : null;
-    const resolvedSelection = resolveSelectedModel(
-      state.selectedModel,
-      state.providers,
-      state.providerDefaults,
-      { allowHidden: true }
-    );
-    const selected =
-      editSelection?.providerID && editSelection.modelID
-        ? editSelection
-        : resolvedSelection || state.selectedModel;
-    if (selected) {
-      const provider = state.providers.find((item) => item.id === selected.providerID);
-      const model = provider?.models[selected.modelID];
-      const preservePresentation =
-        previous.providerID === selected.providerID && previous.modelID === selected.modelID;
-      return {
-        providerID: selected.providerID,
-        modelID: selected.modelID,
-        variant: selected.variant || null,
-        providerName:
-          provider?.name || (preservePresentation ? previous.providerName : selected.providerID),
-        modelName: model
-          ? getModelDisplayName(selected.providerID, selected.modelID, model.name)
-          : preservePresentation
-            ? previous.modelName
-            : getModelDisplayName(selected.providerID, selected.modelID, selected.modelID),
-        contextLimit: model?.limit?.context || null,
-      };
-    }
-
-    const latestAuto = getLatestAssistantMessageInfo(state.messages);
-    if (latestAuto) {
-      const provider = state.providers.find((item) => item.id === latestAuto.providerID);
-      const model = provider?.models[latestAuto.modelID];
-      return {
-        providerID: latestAuto.providerID,
-        modelID: latestAuto.modelID,
-        variant: latestAuto.variant || null,
-        providerName: provider?.name || latestAuto.providerID,
-        modelName: model
-          ? getModelDisplayName(latestAuto.providerID, latestAuto.modelID, model.name)
-          : latestAuto.modelID,
-        contextLimit: model?.limit?.context || null,
-      };
-    }
-
-    for (const provider of state.providers) {
-      const defaultModelID = state.providerDefaults[provider.id];
-      if (defaultModelID && provider.models[defaultModelID]) {
-        const model = provider.models[defaultModelID];
+  const currentModel = createMemo<CurrentComposerModel>(
+    (previous = EMPTY_CURRENT_COMPOSER_MODEL) => {
+      const editing = composerEditingMessage();
+      const editSelection = editing ? editSelectedModel() || editing.model : null;
+      const resolvedSelection = resolveSelectedModel(
+        state.selectedModel,
+        state.providers,
+        state.providerDefaults,
+        { allowHidden: true }
+      );
+      const selected =
+        editSelection?.providerID && editSelection.modelID
+          ? editSelection
+          : resolvedSelection || state.selectedModel;
+      if (selected) {
+        const provider = state.providers.find((item) => item.id === selected.providerID);
+        const model = provider?.models[selected.modelID];
+        const preservePresentation =
+          previous.providerID === selected.providerID && previous.modelID === selected.modelID;
         return {
-          providerID: provider.id,
-          modelID: model.id,
-          variant: null,
-          providerName: provider.name,
-          modelName: getModelDisplayName(provider.id, model.id, model.name),
-          contextLimit: model.limit?.context || null,
+          providerID: selected.providerID,
+          modelID: selected.modelID,
+          variant: selected.variant || null,
+          providerName:
+            provider?.name || (preservePresentation ? previous.providerName : selected.providerID),
+          modelName: model
+            ? getModelDisplayName(selected.providerID, selected.modelID, model.name)
+            : preservePresentation
+              ? previous.modelName
+              : getModelDisplayName(selected.providerID, selected.modelID, selected.modelID),
+          contextLimit: model?.limit?.context || null,
         };
       }
-    }
 
-    const firstProvider = state.providers[0];
-    if (firstProvider) {
-      const firstModel = Object.values(firstProvider.models)[0];
-      if (firstModel) {
+      const latestAuto = getLatestAssistantMessageInfo(state.messages);
+      if (latestAuto) {
+        const provider = state.providers.find((item) => item.id === latestAuto.providerID);
+        const model = provider?.models[latestAuto.modelID];
         return {
-          providerID: firstProvider.id,
-          modelID: firstModel.id,
-          variant: null,
-          providerName: firstProvider.name,
-          modelName: getModelDisplayName(firstProvider.id, firstModel.id, firstModel.name),
-          contextLimit: firstModel.limit?.context || null,
+          providerID: latestAuto.providerID,
+          modelID: latestAuto.modelID,
+          variant: latestAuto.variant || null,
+          providerName: provider?.name || latestAuto.providerID,
+          modelName: model
+            ? getModelDisplayName(latestAuto.providerID, latestAuto.modelID, model.name)
+            : latestAuto.modelID,
+          contextLimit: model?.limit?.context || null,
         };
       }
-    }
 
-    return EMPTY_CURRENT_COMPOSER_MODEL;
-  }, EMPTY_CURRENT_COMPOSER_MODEL);
+      for (const provider of state.providers) {
+        const defaultModelID = state.providerDefaults[provider.id];
+        if (defaultModelID && provider.models[defaultModelID]) {
+          const model = provider.models[defaultModelID];
+          return {
+            providerID: provider.id,
+            modelID: model.id,
+            variant: null,
+            providerName: provider.name,
+            modelName: getModelDisplayName(provider.id, model.id, model.name),
+            contextLimit: model.limit?.context || null,
+          };
+        }
+      }
+
+      const firstProvider = state.providers[0];
+      if (firstProvider) {
+        const firstModel = Object.values(firstProvider.models)[0];
+        if (firstModel) {
+          return {
+            providerID: firstProvider.id,
+            modelID: firstModel.id,
+            variant: null,
+            providerName: firstProvider.name,
+            modelName: getModelDisplayName(firstProvider.id, firstModel.id, firstModel.name),
+            contextLimit: firstModel.limit?.context || null,
+          };
+        }
+      }
+
+      return EMPTY_CURRENT_COMPOSER_MODEL;
+    }
+  );
 
   const hasMentions = () =>
     visibleFiles().length > 0 ||
@@ -1635,28 +1689,36 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     );
   }
 
-  createEffect(() => {
-    const ids = getSessionReferenceIds(inputText());
-    const references = sessionReferences();
-    for (const id of ids) {
-      if (references[id]) continue;
-      const loaded = state.sessions.find((session) => session.id === id);
-      if (loaded) {
-        rememberSessionReference(loaded);
-        continue;
+  createEffect(
+    () => {
+      const ids = getSessionReferenceIds(inputText());
+      const references = sessionReferences();
+      return ids
+        .filter((id) => !references[id])
+        .map((id) => ({
+          id,
+          loaded: state.sessions.find((session) => session.id === id),
+        }));
+    },
+    (missing) => {
+      for (const { id, loaded } of missing) {
+        if (loaded) {
+          rememberSessionReference(loaded);
+          continue;
+        }
+        if (pendingSessionReferenceIds.has(id)) continue;
+        pendingSessionReferenceIds.add(id);
+        void lookupSessionReference(id)
+          .then((session) => {
+            if (!session) return;
+            if (!getSessionReferenceIds(inputText()).includes(id)) return;
+            rememberSessionReference(session);
+          })
+          .catch(() => {})
+          .finally(() => pendingSessionReferenceIds.delete(id));
       }
-      if (pendingSessionReferenceIds.has(id)) continue;
-      pendingSessionReferenceIds.add(id);
-      void lookupSessionReference(id)
-        .then((session) => {
-          if (!session) return;
-          if (!getSessionReferenceIds(inputText()).includes(id)) return;
-          rememberSessionReference(session);
-        })
-        .catch(() => {})
-        .finally(() => pendingSessionReferenceIds.delete(id));
     }
-  });
+  );
 
   const explicitProblemAttachment = createMemo(() => {
     const attached = state.attachedDiagnostics;
@@ -1865,7 +1927,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
       return ids;
     },
-    new Set<string>(),
     { equals: equalStringSets }
   );
 
@@ -1875,19 +1936,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     terminal: typeof state.terminalSelection;
     diagnostics: typeof state.attachedDiagnostics;
   } | null>(null);
-  createEffect(
-    on(composerSessionId, (sessionId, previousSessionId) => {
-      const sending = sendingInlineAttachments();
-      if (!sending || sending.sessionId === sessionId) return;
-      // The first send acquires a session ID before its attachments are cleared.
-      // Keep that same submitted draft hidden through this ownership handoff.
-      if (previousSessionId === null && sending.sessionId === null && sessionId) {
-        setSendingInlineAttachments({ ...sending, sessionId });
-      } else {
-        setSendingInlineAttachments(null);
-      }
-    })
-  );
+  createEffect(composerSessionId, (sessionId, previousSessionId) => {
+    const sending = untrack(sendingInlineAttachments);
+    if (!sending || sending.sessionId === sessionId) return;
+    // The first send acquires a session ID before its attachments are cleared.
+    // Keep that same submitted draft hidden through this ownership handoff.
+    if (previousSessionId === null && sending.sessionId === null && sessionId) {
+      setSendingInlineAttachments({ ...sending, sessionId });
+    } else {
+      setSendingInlineAttachments(null);
+    }
+  });
   const sendingAttachments = () => {
     const sending = sendingInlineAttachments();
     return sending?.sessionId === composerSessionId() ? sending : null;
@@ -1967,8 +2026,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (restoreFocus) richEditorRef?.focus();
   }
 
-  createEffect(() => {
-    void compressionOwner();
+  createEffect(compressionOwner, () => {
     compressionEpoch += 1;
     cancelImageAnalyses();
     setOriginalImages(new Map());
@@ -1991,102 +2049,110 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return !!image && result?.url === image.url && result.error === null;
   }
 
-  createEffect(() => {
-    // Decode readiness belongs to image content, not the chat or compression owner.
-    const images = composerClipboardImages().map((image) => ({ id: image.id, url: image.url }));
-    const current = untrack(imageLoadResults);
-    setImageLoadResults(
-      new Map(
-        [...current].filter(([id, result]) =>
-          images.some((image) => image.id === id && image.url === result.url)
+  // Decode readiness belongs to image content, not the chat or compression owner.
+  createEffect(
+    () => composerClipboardImages().map((image) => ({ id: image.id, url: image.url })),
+    (images) => {
+      const current = untrack(imageLoadResults);
+      setImageLoadResults(
+        new Map(
+          [...current].filter(([id, result]) =>
+            images.some((image) => image.id === id && image.url === result.url)
+          )
         )
-      )
-    );
-    for (const [id, pending] of pendingImageLoads) {
-      if (!images.some((image) => image.id === id && image.url === pending.url)) {
-        pendingImageLoads.delete(id);
+      );
+      for (const [id, pending] of pendingImageLoads) {
+        if (!images.some((image) => image.id === id && image.url === pending.url)) {
+          pendingImageLoads.delete(id);
+        }
+      }
+      for (const image of images) {
+        if (
+          current.get(image.id)?.url === image.url ||
+          pendingImageLoads.get(image.id)?.url === image.url
+        )
+          continue;
+        const pending = { url: image.url };
+        pendingImageLoads.set(image.id, pending);
+        const complete = (error: string | null) => {
+          if (composerDisposed || pendingImageLoads.get(image.id) !== pending) return;
+          pendingImageLoads.delete(image.id);
+          setImageLoadResults((results) =>
+            new Map(results).set(image.id, { url: image.url, error })
+          );
+        };
+        void (async () => {
+          try {
+            await loadImage(image.url);
+            complete(null);
+          } catch (error) {
+            complete(error instanceof Error ? error.message : 'Could not decode the image');
+          }
+        })();
       }
     }
-    for (const image of images) {
-      if (
-        current.get(image.id)?.url === image.url ||
-        pendingImageLoads.get(image.id)?.url === image.url
-      )
-        continue;
-      const pending = { url: image.url };
-      pendingImageLoads.set(image.id, pending);
-      const complete = (error: string | null) => {
-        if (composerDisposed || pendingImageLoads.get(image.id) !== pending) return;
-        pendingImageLoads.delete(image.id);
-        setImageLoadResults((results) => new Map(results).set(image.id, { url: image.url, error }));
-      };
-      void (async () => {
-        try {
-          await loadImage(image.url);
-          complete(null);
-        } catch (error) {
-          complete(error instanceof Error ? error.message : 'Could not decode the image');
-        }
-      })();
-    }
-  });
+  );
 
-  createEffect(() => {
-    void compressionOwner();
-    const images = composerClipboardImages().map((image) => ({ ...image }));
-    const epoch = compressionEpoch;
-    const current = untrack(imageAnalyses);
-    setImageAnalyses(
-      new Map(
-        [...current].filter(([id, entry]) =>
-          images.some((image) => image.id === id && image.url === entry.url)
+  createEffect(
+    () => {
+      void compressionOwner();
+      return composerClipboardImages().map((image) => ({ ...image }));
+    },
+    (images) => {
+      const epoch = compressionEpoch;
+      const current = untrack(imageAnalyses);
+      setImageAnalyses(
+        new Map(
+          [...current].filter(([id, entry]) =>
+            images.some((image) => image.id === id && image.url === entry.url)
+          )
         )
-      )
-    );
-    const menu = untrack(compressionMenu);
-    if (menu && !images.some((image) => image.id === menu.id)) setCompressionMenu(null);
-    for (const [key, pending] of pendingImageAnalyses) {
-      if (images.some((image) => image.id === pending.id && image.url === pending.url)) continue;
-      pending.controller.abort();
-      pendingImageAnalyses.delete(key);
+      );
+      const menu = untrack(compressionMenu);
+      if (menu && !images.some((image) => image.id === menu.id)) setCompressionMenu(null);
+      for (const [key, pending] of pendingImageAnalyses) {
+        if (images.some((image) => image.id === pending.id && image.url === pending.url)) continue;
+        pending.controller.abort();
+        pendingImageAnalyses.delete(key);
+      }
+      for (const image of images) {
+        const key = `${epoch}:${image.id}`;
+        if (current.get(image.id)?.url === image.url || pendingImageAnalyses.has(key)) continue;
+        const controller = new AbortController();
+        pendingImageAnalyses.set(key, { id: image.id, url: image.url, controller });
+        imageAnalysisQueue = imageAnalysisQueue
+          .then(async () => {
+            if (
+              controller.signal.aborted ||
+              composerDisposed ||
+              compressionEpoch !== epoch ||
+              !state.clipboardImages.some((item) => item.id === image.id && item.url === image.url)
+            )
+              return;
+            let analysis: ImageCompressionAnalysis | null = null;
+            try {
+              analysis = await analyzeImageCompression(image, controller.signal);
+            } catch (error) {
+              if (!controller.signal.aborted) logError('chat-input:analyzeImageCompression', error);
+            }
+            if (
+              controller.signal.aborted ||
+              composerDisposed ||
+              compressionEpoch !== epoch ||
+              !state.clipboardImages.some((item) => item.id === image.id && item.url === image.url)
+            )
+              return;
+            setImageAnalyses((entries) =>
+              new Map(entries).set(image.id, { url: image.url, analysis })
+            );
+          })
+          .finally(() => {
+            if (pendingImageAnalyses.get(key)?.controller === controller)
+              pendingImageAnalyses.delete(key);
+          });
+      }
     }
-    for (const image of images) {
-      const key = `${epoch}:${image.id}`;
-      if (current.get(image.id)?.url === image.url || pendingImageAnalyses.has(key)) continue;
-      const controller = new AbortController();
-      pendingImageAnalyses.set(key, { id: image.id, url: image.url, controller });
-      imageAnalysisQueue = imageAnalysisQueue
-        .then(async () => {
-          if (
-            controller.signal.aborted ||
-            composerDisposed ||
-            compressionEpoch !== epoch ||
-            !state.clipboardImages.some((item) => item.id === image.id && item.url === image.url)
-          )
-            return;
-          let analysis: ImageCompressionAnalysis | null = null;
-          try {
-            analysis = await analyzeImageCompression(image, controller.signal);
-          } catch (error) {
-            if (!controller.signal.aborted) logError('chat-input:analyzeImageCompression', error);
-          }
-          if (
-            controller.signal.aborted ||
-            composerDisposed ||
-            compressionEpoch !== epoch ||
-            !state.clipboardImages.some((item) => item.id === image.id && item.url === image.url)
-          )
-            return;
-          setImageAnalyses((entries) =>
-            new Map(entries).set(image.id, { url: image.url, analysis })
-          );
-        })
-        .finally(() => {
-          if (pendingImageAnalyses.get(key)?.controller === controller)
-            pendingImageAnalyses.delete(key);
-        });
-    }
-  });
+  );
 
   function replaceCompressedImage(id: string, replacement: ClipboardImage) {
     const previous = state.clipboardImages.find((image) => image.id === id);
@@ -2418,7 +2484,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     () => waitingForSubagents() && workingSubagentIds().some((id) => !isSubagentCardVisible(id))
   );
   const [composerBusyDisplayHold, setComposerBusyDisplayHold] = createSignal(
-    !props.newSession && isActiveSessionWorking()
+    untrack(() => !props.newSession && isActiveSessionWorking())
   );
   let composerBusyDisplayTimer: ReturnType<typeof setTimeout> | 0 = 0;
   const clearComposerBusyDisplayTimer = () => {
@@ -2427,19 +2493,24 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     composerBusyDisplayTimer = 0;
   };
 
-  createEffect(() => {
-    const busy = isComposerBusy();
-    clearComposerBusyDisplayTimer();
-    if (busy) {
-      setComposerBusyDisplayHold(true);
-      return;
+  createEffect(
+    () => {
+      const busy = isComposerBusy();
+      return { busy, held: !busy && composerBusyDisplayHold() };
+    },
+    ({ busy, held }) => {
+      clearComposerBusyDisplayTimer();
+      if (busy) {
+        setComposerBusyDisplayHold(true);
+        return;
+      }
+      if (!held) return;
+      composerBusyDisplayTimer = setTimeout(() => {
+        composerBusyDisplayTimer = 0;
+        if (!isComposerBusy()) setComposerBusyDisplayHold(false);
+      }, COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS);
     }
-    if (!composerBusyDisplayHold()) return;
-    composerBusyDisplayTimer = setTimeout(() => {
-      composerBusyDisplayTimer = 0;
-      if (!isComposerBusy()) setComposerBusyDisplayHold(false);
-    }, COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS);
-  });
+  );
   onCleanup(clearComposerBusyDisplayTimer);
   const isComposerDisplayBusy = createMemo(
     () =>
@@ -2533,116 +2604,126 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return completion;
   });
 
-  createEffect(() => {
-    const completion = activeCompletion();
-    const fileSearchScope = getFileSearchScopeKey();
-    if (fileSearchScope !== latestFileSearchScope) {
-      latestFileSearchScope = fileSearchScope;
+  createEffect(
+    () => [activeCompletion(), getFileSearchScopeKey()] as const,
+    ([completion, fileSearchScope]) => {
+      if (fileSearchScope !== latestFileSearchScope) {
+        latestFileSearchScope = fileSearchScope;
+        latestFileSearchRequestId += 1;
+        latestFileSearchQuery = '';
+        setFileSearchResults([]);
+        setTableSearchResults([]);
+      }
+      if (completion?.type !== 'mention') {
+        if (fileSearchTimer) {
+          clearTimeout(fileSearchTimer);
+          fileSearchTimer = null;
+        }
+        latestFileSearchQuery = '';
+        setFileSearchResults([]);
+        setShowFileSearchHint(false);
+        setTableSearchResults([]);
+        return;
+      }
+
+      const rawQuery = completion.query.trim();
+
+      setShowFileSearchHint(rawQuery.length === 0);
+
+      if (!rawQuery) {
+        if (fileSearchTimer) {
+          clearTimeout(fileSearchTimer);
+          fileSearchTimer = null;
+        }
+        latestFileSearchQuery = '';
+        setFileSearchResults([]);
+        setTableSearchResults([]);
+        return;
+      }
+
+      if (!shouldRequestMentionFileSearch(latestFileSearchQuery, rawQuery)) return;
+
       latestFileSearchRequestId += 1;
-      latestFileSearchQuery = '';
-      setFileSearchResults([]);
-      setTableSearchResults([]);
-    }
-    if (completion?.type !== 'mention') {
-      if (fileSearchTimer) {
-        clearTimeout(fileSearchTimer);
+      const requestId = latestFileSearchRequestId;
+      latestFileSearchQuery = rawQuery;
+      if (fileSearchTimer) clearTimeout(fileSearchTimer);
+      fileSearchTimer = setTimeout(() => {
         fileSearchTimer = null;
-      }
-      latestFileSearchQuery = '';
-      setFileSearchResults([]);
-      setShowFileSearchHint(false);
-      setTableSearchResults([]);
-      return;
-    }
-
-    const rawQuery = completion.query.trim();
-
-    setShowFileSearchHint(rawQuery.length === 0);
-
-    if (!rawQuery) {
-      if (fileSearchTimer) {
-        clearTimeout(fileSearchTimer);
-        fileSearchTimer = null;
-      }
-      latestFileSearchQuery = '';
-      setFileSearchResults([]);
-      setTableSearchResults([]);
-      return;
-    }
-
-    if (!shouldRequestMentionFileSearch(latestFileSearchQuery, rawQuery)) return;
-
-    latestFileSearchRequestId += 1;
-    const requestId = latestFileSearchRequestId;
-    latestFileSearchQuery = rawQuery;
-    if (fileSearchTimer) clearTimeout(fileSearchTimer);
-    fileSearchTimer = setTimeout(() => {
-      fileSearchTimer = null;
-      postMessage({
-        type: 'files/search',
-        payload: { requestId, query: rawQuery, limit: 12 },
-      });
-    }, 120);
-  });
-
-  createEffect(() => {
-    const completion = activeCompletion();
-    sessionSearchAbortController?.abort();
-    sessionSearchAbortController = undefined;
-    if (sessionSearchTimer) {
-      clearTimeout(sessionSearchTimer);
-      sessionSearchTimer = null;
-    }
-    if (completion?.type !== 'session') {
-      setSessionSearchResults([]);
-      return;
-    }
-
-    const query = normalizeSessionLookupQuery(completion.query);
-    const exactSessionId =
-      /^sessions?:/i.test(completion.query.trim()) || /^ses_[a-z0-9]+$/i.test(query) ? query : null;
-    const currentSessionId = composerSessionId();
-    const localResults = state.sessions.filter((session) => {
-      if (session.id === currentSessionId || session.parentID) return false;
-      if (!query) return true;
-      return (
-        session.id.toLowerCase().includes(query) || session.title.toLowerCase().includes(query)
-      );
-    });
-    setSessionSearchResults(localResults.slice(0, 30));
-
-    sessionSearchTimer = setTimeout(
-      () => {
-        sessionSearchTimer = null;
-        const controller = new AbortController();
-        sessionSearchAbortController = controller;
-        const listRequest = client.session
-          .list({
-            limit: 30,
-            search: query ? query : undefined,
-            roots: true,
-            signal: controller.signal,
-          })
-          .catch(() => null);
-        void listRequest.then((page) => {
-          if (controller.signal.aborted) return;
-          const sessions = page ? [...(Array.isArray(page) ? page : page.items)] : [];
-          const exactSession = exactSessionId
-            ? sessions.find((session) => session.id.toLowerCase() === exactSessionId)
-            : undefined;
-          if (exactSession) sessions.unshift(exactSession);
-          const seen = new Set<string>();
-          const results = sessions.filter((session) => {
-            if (session.id === currentSessionId || seen.has(session.id)) return false;
-            seen.add(session.id);
-            return true;
-          });
-          if (results.length > 0 || page) setSessionSearchResults(results.slice(0, 30));
+        postMessage({
+          type: 'files/search',
+          payload: { requestId, query: rawQuery, limit: 12 },
         });
-      },
-      query ? 120 : 0
-    );
-  });
+      }, 120);
+    }
+  );
+
+  createEffect(
+    () => {
+      const completion = activeCompletion();
+      if (completion?.type !== 'session') return;
+
+      const query = normalizeSessionLookupQuery(completion.query);
+      const exactSessionId =
+        /^sessions?:/i.test(completion.query.trim()) || /^ses_[a-z0-9]+$/i.test(query)
+          ? query
+          : null;
+      const currentSessionId = composerSessionId();
+      const localResults = state.sessions.filter((session) => {
+        if (session.id === currentSessionId || session.parentID) return false;
+        if (!query) return true;
+        return (
+          session.id.toLowerCase().includes(query) || session.title.toLowerCase().includes(query)
+        );
+      });
+      return { query, currentSessionId, exactSessionId, localResults };
+    },
+    (search) => {
+      sessionSearchAbortController?.abort();
+      sessionSearchAbortController = undefined;
+      if (sessionSearchTimer) {
+        clearTimeout(sessionSearchTimer);
+        sessionSearchTimer = null;
+      }
+      if (!search) {
+        setSessionSearchResults([]);
+        return;
+      }
+      const { query, currentSessionId, exactSessionId, localResults } = search;
+      setSessionSearchResults(localResults.slice(0, 30));
+
+      sessionSearchTimer = setTimeout(
+        () => {
+          sessionSearchTimer = null;
+          const controller = new AbortController();
+          sessionSearchAbortController = controller;
+          const listRequest = client.session
+            .list({
+              limit: 30,
+              search: query ? query : undefined,
+              roots: true,
+              signal: controller.signal,
+            })
+            .catch(() => null);
+          void listRequest.then((page) => {
+            if (controller.signal.aborted) return;
+            const sessions = page ? [...(Array.isArray(page) ? page : page.items)] : [];
+            const exactSession = exactSessionId
+              ? sessions.find((session) => session.id.toLowerCase() === exactSessionId)
+              : undefined;
+            if (exactSession) sessions.unshift(exactSession);
+            const seen = new Set<string>();
+            const results = sessions.filter((session) => {
+              if (session.id === currentSessionId || seen.has(session.id)) return false;
+              seen.add(session.id);
+              return true;
+            });
+            if (results.length > 0 || page) setSessionSearchResults(results.slice(0, 30));
+          });
+        },
+        query ? 120 : 0
+      );
+    }
+  );
 
   onCleanup(() => {
     if (sessionSearchTimer) clearTimeout(sessionSearchTimer);
@@ -2676,8 +2757,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       ? JSON.stringify([getFileSearchScopeKey(), composerSessionId(), getNewChatDraftGeneration()])
       : null;
   });
-  createEffect(() => {
-    const scope = problemsPickerScope();
+  createEffect(problemsPickerScope, (scope) => {
     problemsRequest?.abort();
     problemsRequest = undefined;
     setPendingProblems(false);
@@ -2802,16 +2882,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return slashCompletions().length === 0 ? 'No matching problems' : undefined;
   });
 
-  createEffect(() => {
-    const completion = activeCompletion();
-    if (!problemsPickerScope() || completion?.type !== 'slash') return;
-    const searching = completion.query.slice(PROBLEMS_COMMAND_NAME.length + 1).trim().length > 0;
-    const items = slashCompletions();
-    const match = searching
-      ? items.findIndex((item) => item.type === 'problems' && item.diagnostic !== null)
-      : 0;
-    setCompletionIndex(Math.max(0, match));
-  });
+  createEffect(
+    () => {
+      const completion = activeCompletion();
+      if (!problemsPickerScope() || completion?.type !== 'slash') return;
+      const searching = completion.query.slice(PROBLEMS_COMMAND_NAME.length + 1).trim().length > 0;
+      const items = slashCompletions();
+      const match = searching
+        ? items.findIndex((item) => item.type === 'problems' && item.diagnostic !== null)
+        : 0;
+      return Math.max(0, match);
+    },
+    (index) => {
+      if (index !== undefined) setCompletionIndex(index);
+    }
+  );
 
   const showCompletionMenu = () => {
     if (suppressCompletion()) return false;
@@ -2847,14 +2932,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       (isFocused() && showCompletionMenu())
   );
 
-  createEffect(() => {
-    const length = composerCompletions().length;
-    if (length === 0) {
-      setCompletionIndex(0);
-      return;
+  createEffect(
+    () => composerCompletions().length,
+    (length) => {
+      if (length === 0) {
+        setCompletionIndex(0);
+        return;
+      }
+      setCompletionIndex((current) => Math.max(0, Math.min(current, length - 1)));
     }
-    setCompletionIndex((current) => Math.max(0, Math.min(current, length - 1)));
-  });
+  );
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key.toLowerCase() === 's' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
@@ -2975,10 +3062,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (e.key === 'Tab') {
         e.preventDefault();
         const value = inputText() + promptCompletion.suggestion();
-        batch(() => {
+        (() => {
           setComposerValue(value);
-          promptCompletion.dismiss();
-        });
+          promptCompletion.dismiss(value);
+        })();
         return;
       }
       if (e.key === 'Escape') {
@@ -3102,11 +3189,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     value: string
   ) {
     const result = applySlashCompletion(inputText(), completion, value);
-    batch(() => {
+    (() => {
       setInputText(result.value);
       setCaretPosition(result.cursor);
       setCompletionIndex(0);
-    });
+    })();
     queueMicrotask(() => richEditorRef?.focus());
   }
 
@@ -3183,12 +3270,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       const marker = problemReferenceMarker(reference);
       insertion = `${marker}${getMentionInsertionTrailingSpace(marker, text[completion.end])}`;
     }
-    batch(() => {
-      setState('inlineProblems', references);
+    (() => {
+      setState(storePath('inlineProblems', references));
       setInputText(text.slice(0, completion.start) + insertion + text.slice(completion.end));
       setCaretPosition(completion.start + insertion.length);
       setCompletionIndex(0);
-    });
+    })();
     if (added.length === 0) showSessionActionFeedback('Problems already added to context');
     queueMicrotask(() => richEditorRef?.focus());
   }
@@ -3206,7 +3293,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     }
     const diagnostics = [...existing, ...additions];
-    setState('attachedDiagnostics', { diagnostics, total: diagnostics.length, inline: false });
+    setState(
+      storePath('attachedDiagnostics', { diagnostics, total: diagnostics.length, inline: false })
+    );
     queueMicrotask(() => richEditorRef?.focus());
   }
 
@@ -3221,14 +3310,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const trailingSpace = getMentionInsertionTrailingSpace(value, text[completion.end]);
     const nextValue = `${text.slice(0, completion.start)}${value}${trailingSpace}${text.slice(completion.end)}`;
     const nextCursor = completion.start + value.length + trailingSpace.length;
-    batch(() => {
+    (() => {
       setInputText(nextValue);
       setCaretPosition(nextCursor);
       setCompletionIndex(0);
       setFileSearchResults([]);
       setTableSearchResults([]);
       setSessionSearchResults([]);
-    });
+    })();
     latestFileSearchQuery = '';
 
     queueMicrotask(() => {
@@ -3785,9 +3874,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       animateSubmittedContent();
       setInputText('');
       clearContextFiles();
-      setState('terminalSelection', null);
-      setState('attachedDiagnostics', null);
-      setState('inlineProblems', []);
+      setState(storePath('terminalSelection', null));
+      setState(storePath('attachedDiagnostics', null));
+      setState(storePath('inlineProblems', []));
       clearClipboardImages();
       clearNativePdfs();
       resetPastedImageIndex();
@@ -3848,12 +3937,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       sendingAttachments() !== null &&
       inputTextMutationVersion() === clearedInputVersion &&
       inputText() === '';
-    batch(() => {
+    (() => {
       if (!sent) clearSendAnimation?.();
       if (shouldRestoreFailedInput) setInputText(text);
       setSendingInlineAttachments(null);
       setWorkspaceSendPending(false);
-    });
+    })();
     if (shouldRestoreFailedInput) {
       setErrorRetry(() => {
         setErrorRetry(null);
@@ -3882,11 +3971,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (!ownsQueuedMessage(item)) return;
     if (isQueuedSessionHydrating(item.sessionId)) return;
     if (isSessionAwaitingInput(item.sessionId)) return;
-    if (dispatchingQueuedMessageId()) return;
-    if (!retry && state.queuedMessages.find((queued) => queued.id === item.id)?.paused) return;
-    if (failedQueuedMessageIds().has(item.id) && !retry) return;
+    let claimed = false;
+    setState((draft) => {
+      const queued = draft.queuedMessages.find((entry) => entry.id === item.id);
+      if (!queued || draft.queuedMessageDispatchingId) return;
+      if (!retry && (queued.paused || draft.failedQueuedMessageIds.includes(item.id))) return;
+      draft.queuedMessageDispatchingId = item.id;
+      claimed = true;
+    });
+    if (!claimed) return;
     setQueuedMessageFailed(item.id, false);
-    setDispatchingQueuedMessageId(item.id);
     const priorAttemptId = item.messageId;
     const messageId = priorAttemptId ?? createOpenCodeMessageID();
     const workspaceDirectory = getQueuedMessageWorkspaceDirectory(item);
@@ -4042,25 +4136,30 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     );
   };
 
-  createEffect(() => {
-    const queuedStatusSessionIds = new Set(
-      state.queuedMessages.filter(ownsQueuedMessage).map((message) => message.sessionId)
-    );
-    const queuedTreeSessionIds = new Set(
-      [...queuedStatusSessionIds].flatMap(getSessionTreeIdsForSession)
-    );
-    for (const sessionId of authoritativeQueuedSessionStatuses.keys()) {
-      if (!queuedTreeSessionIds.has(sessionId)) {
-        authoritativeQueuedSessionStatuses.delete(sessionId);
+  createEffect(
+    () => {
+      const queuedStatusSessionIds = new Set(
+        state.queuedMessages.filter(ownsQueuedMessage).map((message) => message.sessionId)
+      );
+      const queuedTreeSessionIds = new Set(
+        [...queuedStatusSessionIds].flatMap(getSessionTreeIdsForSession)
+      );
+      return { queuedStatusSessionIds, queuedTreeSessionIds };
+    },
+    ({ queuedStatusSessionIds, queuedTreeSessionIds }) => {
+      for (const sessionId of authoritativeQueuedSessionStatuses.keys()) {
+        if (!queuedTreeSessionIds.has(sessionId)) {
+          authoritativeQueuedSessionStatuses.delete(sessionId);
+        }
       }
-    }
-    for (const sessionId of queuedSessionDispatchPhases.keys()) {
-      if (!queuedStatusSessionIds.has(sessionId)) {
-        queuedSessionDispatchPhases.delete(sessionId);
+      for (const sessionId of queuedSessionDispatchPhases.keys()) {
+        if (!queuedStatusSessionIds.has(sessionId)) {
+          queuedSessionDispatchPhases.delete(sessionId);
+        }
       }
+      scheduleQueuedStatusReconciliation();
     }
-    scheduleQueuedStatusReconciliation();
-  });
+  );
 
   function findNextQueuedMessageForDispatch() {
     const steeringIds = steeringQueuedMessageIds();
@@ -4120,24 +4219,29 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return undefined;
   }
 
-  createEffect(() => {
-    const initialized = connectionInitialized();
-    const dispatchingId = dispatchingQueuedMessageId();
-    const next = findNextQueuedMessageForDispatch();
-    if (queueDispatchTimer) {
-      clearTimeout(queueDispatchTimer);
-      queueDispatchTimer = 0;
+  createEffect(
+    () => {
+      const initialized = connectionInitialized();
+      const dispatchingId = dispatchingQueuedMessageId();
+      const next = findNextQueuedMessageForDispatch();
+      return initialized && !dispatchingId && !!next;
+    },
+    (ready) => {
+      if (queueDispatchTimer) {
+        clearTimeout(queueDispatchTimer);
+        queueDispatchTimer = 0;
+      }
+      if (!ready) return;
+      queueDispatchTimer = setTimeout(() => {
+        queueDispatchTimer = 0;
+        if (!connectionInitialized()) return;
+        if (dispatchingQueuedMessageId()) return;
+        const nextQueued = findNextQueuedMessageForDispatch();
+        if (!nextQueued) return;
+        void dispatchQueuedMessage(nextQueued);
+      }, 250);
     }
-    if (!initialized || dispatchingId || !next) return;
-    queueDispatchTimer = setTimeout(() => {
-      queueDispatchTimer = 0;
-      if (!connectionInitialized()) return;
-      if (dispatchingQueuedMessageId()) return;
-      const nextQueued = findNextQueuedMessageForDispatch();
-      if (!nextQueued) return;
-      void dispatchQueuedMessage(nextQueued);
-    }, 250);
-  });
+  );
   const observeQueuedSessionStatus = (
     sessionId: string,
     status: 'busy' | 'idle',
@@ -4349,12 +4453,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   function setComposerValue(value: string) {
-    batch(() => {
+    (() => {
       setInputText(value);
       setCaretPosition(value.length);
       if (value.trim().length === 0 && state.clipboardImages.length === 0) resetPastedImageIndex();
       setCompletionIndex(0);
-    });
+    })();
     queueMicrotask(() => {
       if (richEditorRef) {
         richEditorRef.focus();
@@ -4370,30 +4474,30 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   function applyComposerEditState(
     context: MessageEditContext,
     text: string,
-    mergeWholeFileIntoActiveContext = false
+    files = normalizeEditFiles(context.files, false)
   ) {
-    const droppedImages = applyEditContext(context, mergeWholeFileIntoActiveContext);
+    const droppedImages = applyEditContext(context, files);
     setComposerValue(stripClipboardImagePlaceholders(text, droppedImages));
   }
 
   function cancelQueuedMessageEdit() {
     if (!queuedMessageEdit()) return;
-    batch(() => {
+    (() => {
       setQueuedMessageEdit(null);
       setHistoryIndex(null);
       setHistoryDraft('');
       setCompletionIndex(0);
       setSuppressCompletion(false);
       clearContextFiles();
-      setState('terminalSelection', null);
-      setState('attachedDiagnostics', null);
-      setState('inlineProblems', []);
+      setState(storePath('terminalSelection', null));
+      setState(storePath('attachedDiagnostics', null));
+      setState(storePath('inlineProblems', []));
       clearClipboardImages();
       clearNativePdfs();
       invalidatePendingPdfAttachments();
       resetPastedImageIndex();
       setComposerValue('');
-    });
+    })();
     postMessage({ type: 'files/clear' });
     postMessage({ type: 'terminal-selection/clear' });
   }
@@ -4411,7 +4515,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     }
 
-    batch(() => {
+    (() => {
       setHistoryIndex(null);
       setHistoryDraft('');
       setCompletionIndex(0);
@@ -4451,9 +4555,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         },
         queued.text
       );
-      setState('attachedDiagnostics', queued.attachedDiagnostics ?? null);
+      setState(storePath('attachedDiagnostics', queued.attachedDiagnostics ?? null));
       setQueuedMessageEdit({ id: queued.id, sessionId: queued.sessionId });
-    });
+    })();
   }
 
   const messageHistory = createMemo(() => {
@@ -4719,7 +4823,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   function updatePasteTransactionOwners(
     sessionId: string | null,
     previousMutationVersion: number,
-    previousValue: string
+    previousValue: string,
+    nextValue = inputText()
   ) {
     for (const transaction of pendingPasteTransactions) {
       if (
@@ -4730,111 +4835,122 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         continue;
       }
       transaction.mutationVersion = inputTextMutationVersion();
-      transaction.value = inputText();
+      transaction.value = nextValue;
     }
   }
 
   function commitPasteTransaction(transaction: PasteTransaction) {
-    const mentions = transaction.mentions!;
-    const contextFiles = [...transaction.contextFiles, ...mentions.files];
-    const withdrawPastedMention =
-      !!transaction.insertion &&
-      mentions.mentionCount > 0 &&
-      mentions.resolvedCount === mentions.mentionCount &&
-      getPromptTextWithoutContextReferences(transaction.pastedText).length === 0;
-    const previousMutationVersion = transaction.mutationVersion;
-    const previousValue = transaction.value;
-    const committedImageIds: string[] = [];
-    const imageFilenames: string[] = [];
-    const pendingImages: ClipboardImage[] = [];
-    const availableSlots = Math.max(0, MAX_CLIPBOARD_IMAGES - state.clipboardImages.length);
-    const usedFilenames = new Set(state.clipboardImages.map((image) => image.filename));
-    const usedImageContentKeys = new Set(
-      state.clipboardImages.map((image) => image.contentKey ?? image.url)
-    );
-    let imageIndex = nextPastedImageIndex();
+    setState((draft) => {
+      const mentions = transaction.mentions!;
+      const contextFiles = [...transaction.contextFiles, ...mentions.files];
+      const withdrawPastedMention =
+        !!transaction.insertion &&
+        mentions.mentionCount > 0 &&
+        mentions.resolvedCount === mentions.mentionCount &&
+        getPromptTextWithoutContextReferences(transaction.pastedText).length === 0;
+      const previousMutationVersion = transaction.mutationVersion;
+      const previousValue = transaction.value;
+      const committedImageIds: string[] = [];
+      const imageFilenames: string[] = [];
+      const pendingImages: ClipboardImage[] = [];
+      const availableSlots = Math.max(0, MAX_CLIPBOARD_IMAGES - draft.clipboardImages.length);
+      const usedFilenames = new Set(draft.clipboardImages.map((image) => image.filename));
+      const usedImageContentKeys = new Set(
+        draft.clipboardImages.map((image) => image.contentKey ?? image.url)
+      );
+      let imageIndex = nextPastedImageIndex();
+      let committedText = transaction.value;
+      let committedCaret = caretPosition();
 
-    applyingComposerHistory = true;
-    try {
-      batch(() => {
-        for (const file of contextFiles) addContextFile(file);
-        for (const image of transaction.images!) {
-          if (!image) continue;
-          if (imageFilenames.length >= availableSlots) {
-            transaction.imageRejections.add('limit');
-            continue;
-          }
-          const duplicateKey = image.url;
-          if (usedImageContentKeys.has(duplicateKey)) {
-            transaction.imageRejections.add('duplicate');
-            continue;
-          }
+      applyingComposerHistory = true;
+      try {
+        (() => {
+          for (const file of contextFiles) addContextFile(file);
+          for (const image of transaction.images!) {
+            if (!image) continue;
+            if (imageFilenames.length >= availableSlots) {
+              transaction.imageRejections.add('limit');
+              continue;
+            }
+            const duplicateKey = image.url;
+            if (usedImageContentKeys.has(duplicateKey)) {
+              transaction.imageRejections.add('duplicate');
+              continue;
+            }
 
-          let filename = getPastedImageFilename(imageIndex);
-          while (usedFilenames.has(filename)) {
+            let filename = getPastedImageFilename(imageIndex);
+            while (usedFilenames.has(filename)) {
+              imageIndex += 1;
+              filename = getPastedImageFilename(imageIndex);
+            }
+
+            const id = createAttachmentID();
+            pendingImages.push({ id, ...image, filename });
+            imageFilenames.push(filename);
+            usedFilenames.add(filename);
+            usedImageContentKeys.add(duplicateKey);
             imageIndex += 1;
-            filename = getPastedImageFilename(imageIndex);
           }
+          const committedImages = addClipboardImages(pendingImages);
+          committedImageIds.push(...committedImages.map((image) => image.id));
+          if (committedImages.length > 0) setNextPastedImageIndex(imageIndex);
 
-          const id = createAttachmentID();
-          pendingImages.push({ id, ...image, filename });
-          imageFilenames.push(filename);
-          usedFilenames.add(filename);
-          usedImageContentKeys.add(duplicateKey);
-          imageIndex += 1;
-        }
-        const committedImages = addClipboardImages(pendingImages);
-        committedImageIds.push(...committedImages.map((image) => image.id));
-        if (committedImages.length > 0) setNextPastedImageIndex(imageIndex);
+          const next = applyPasteTransactionText(
+            captureComposerSnapshot(transaction.value, committedCaret, draft),
+            transaction,
+            withdrawPastedMention,
+            imageFilenames
+          );
+          setInputText(next.text);
+          setCaretPosition(next.caret);
+          committedText = next.text;
+          committedCaret = next.caret;
+        })();
 
-        const next = applyPasteTransactionText(
-          captureComposerSnapshot(),
-          transaction,
-          withdrawPastedMention,
-          imageFilenames
+        const committedFiles = draft.droppedFiles.filter((file) =>
+          contextFiles.some((candidate) => isSamePath(candidate.path, file.path))
         );
-        setInputText(next.text);
-        setCaretPosition(next.caret);
-      });
-
-      const committedFiles = state.droppedFiles.filter((file) =>
-        contextFiles.some((candidate) => isSamePath(candidate.path, file.path))
-      );
-      const committedImages = state.clipboardImages.filter((image) =>
-        committedImageIds.includes(image.id)
-      );
-      const rewrite = (snapshot: ComposerSnapshot) => {
-        const next = applyPasteTransactionText(
-          snapshot,
-          transaction,
-          withdrawPastedMention,
-          imageFilenames
+        const committedImages = draft.clipboardImages.filter((image) =>
+          committedImageIds.includes(image.id)
         );
-        return {
-          ...next,
-          files: mergeTransactionFiles(next.files, committedFiles),
-          images: mergeTransactionImages(next.images, committedImages),
+        const rewrite = (snapshot: ComposerSnapshot) => {
+          const next = applyPasteTransactionText(
+            snapshot,
+            transaction,
+            withdrawPastedMention,
+            imageFilenames
+          );
+          return {
+            ...next,
+            files: mergeTransactionFiles(next.files, committedFiles),
+            images: mergeTransactionImages(next.images, committedImages),
+          };
         };
-      };
-      if (transaction.historyEntry === null) {
-        composerHistory.record(captureComposerSnapshot());
-      } else {
-        composerHistory.rewriteFrom(transaction.historyEntry, rewrite);
+        if (transaction.historyEntry === null) {
+          composerHistory.record(captureComposerSnapshot(committedText, committedCaret, draft));
+        } else {
+          composerHistory.rewriteFrom(transaction.historyEntry, rewrite);
+        }
+      } finally {
+        applyingComposerHistory = false;
       }
-    } finally {
-      applyingComposerHistory = false;
-    }
-    notifyPastedImageRejections(transaction.imageRejections, containerRef);
+      notifyPastedImageRejections(transaction.imageRejections, containerRef);
 
-    const textDelta = inputText().length - previousValue.length;
-    if (textDelta !== 0) {
-      for (const pending of pendingPasteTransactions) {
-        if (pending === transaction || pending.start < transaction.end) continue;
-        pending.start += textDelta;
-        pending.end += textDelta;
+      const textDelta = committedText.length - previousValue.length;
+      if (textDelta !== 0) {
+        for (const pending of pendingPasteTransactions) {
+          if (pending === transaction || pending.start < transaction.end) continue;
+          pending.start += textDelta;
+          pending.end += textDelta;
+        }
       }
-    }
-    updatePasteTransactionOwners(transaction.sessionId, previousMutationVersion, previousValue);
+      updatePasteTransactionOwners(
+        transaction.sessionId,
+        previousMutationVersion,
+        previousValue,
+        committedText
+      );
+    });
   }
 
   function drainPasteTransactions() {
@@ -4865,6 +4981,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         continue;
       }
       commitPasteTransaction(transaction);
+      // Let the committed text/caret catch up before admitting the next paste.
+      queueMicrotask(drainPasteTransactions);
+      return;
     }
   }
 
@@ -5032,7 +5151,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       .then(drainPasteTransactions);
   }
 
-  function handlePasteInsertion(e: ClipboardEvent, insertion: RichComposerPasteInsertion | null) {
+  function handlePasteInsertion(
+    e: ClipboardEvent,
+    insertion: RichComposerPasteInsertion | null
+  ): RichComposerPasteInsertion | undefined {
     const transaction = pasteTransactionsByEvent.get(e);
     if (transaction) {
       pasteTransactionsByEvent.delete(e);
@@ -5049,8 +5171,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (resolvedInsertion) {
         transaction.start = resolvedInsertion.start;
         transaction.end = resolvedInsertion.end;
-        updatePasteTransactionOwners(transaction.sessionId, previousMutationVersion, previousValue);
-        transaction.historyEntry = composerHistory.record(captureComposerSnapshot());
+        updatePasteTransactionOwners(
+          transaction.sessionId,
+          previousMutationVersion,
+          previousValue,
+          resolvedInsertion.value
+        );
+        transaction.historyEntry = composerHistory.record(
+          captureComposerSnapshot(resolvedInsertion.value, resolvedInsertion.end)
+        );
       }
       drainPasteTransactions();
       return;
@@ -5063,8 +5192,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       const types = Array.from(e.clipboardData?.types ?? []);
       const plainTextOnly =
         types.length > 0 && types.every((type) => type.split(';')[0] === 'text/plain');
-      resolveCopiedSelection(pastedText, insertion, plainTextOnly);
-      return;
+      return resolveCopiedSelection(pastedText, insertion, plainTextOnly);
     }
     if (!insertion) return;
     // SAFETY: handlePaste assigns this optional marker on clipboard events containing context files.
@@ -5073,6 +5201,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (!pastedText) return;
 
     resolvePastedMentions(pastedText, insertion);
+    return undefined;
   }
 
   function resolveCopiedSelection(
@@ -5087,10 +5216,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const owner = {
       sessionId: composerSessionId(),
       mutationVersion: inputTextMutationVersion(),
-      value: inputText(),
+      value: insertion.value,
       insertion,
     };
     setPendingCopiedSelectionPaste(owner);
+    let upgradedValue = insertion.value;
+    let upgradedCaret = insertion.end;
     let settled = false;
     const settle = (match: Awaited<ReturnType<typeof client.varro.matchCopiedSelection>>) => {
       if (settled) return;
@@ -5108,7 +5239,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       applyingComposerHistory = true;
       try {
         if (match && insertCopiedSelectionChip(match)) {
-          composerHistory.replaceCurrent(captureComposerSnapshot());
+          setState((draft) => {
+            composerHistory.replaceCurrent(
+              captureComposerSnapshot(upgradedValue, upgradedCaret, draft)
+            );
+          });
           return;
         }
       } finally {
@@ -5123,6 +5258,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       logError('chat-input:matchCopiedSelection', err);
       settle(null);
     });
+    return insertion;
 
     /** Returns false when the paste should stay plain text. */
     function insertCopiedSelectionChip(
@@ -5142,10 +5278,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         // its chip; a different one stays plain text instead of replacing it.
         if (current && !sameSelection) return false;
         if (sameSelection && rest.includes(marker)) {
-          batch(() => {
-            setInputText(rest);
-            setCaretPosition(before.length);
-          });
+          (() => {
+            upgradedValue = setInputText(rest);
+            upgradedCaret = setCaretPosition(before.length);
+          })();
           return true;
         }
       } else {
@@ -5158,18 +5294,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             !existing.lineRanges?.length ||
             (!!match.file.lineRanges?.length &&
               subtractContextLineRanges(match.file.lineRanges, existing.lineRanges).length === 0);
-          batch(() => {
+          (() => {
             if (!covered) addContextFile(match.file);
-            setInputText(rest);
-            setCaretPosition(before.length);
-          });
+            upgradedValue = setInputText(rest);
+            upgradedCaret = setCaretPosition(before.length);
+          })();
           return true;
         }
       }
       const prefix = shouldPadInlineInsertion(before.at(-1)) ? ' ' : '';
       const suffix = after ? getInlineInsertionSuffix(rest, before.length) : '';
       const replacement = `${prefix}${marker}${suffix}`;
-      batch(() => {
+      (() => {
         if (match.type === 'file') {
           addContextFile(match.file);
           pastedFileChipText.set(match.file.path, {
@@ -5177,11 +5313,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             text: pastedText,
           });
         } else {
-          setState('terminalSelection', { ...match.selection });
+          setState(storePath('terminalSelection', { ...match.selection }));
         }
-        setInputText(`${before}${replacement}${after}`);
-        setCaretPosition(before.length + replacement.length);
-      });
+        upgradedValue = setInputText(`${before}${replacement}${after}`);
+        upgradedCaret = setCaretPosition(before.length + replacement.length);
+      })();
       return true;
     }
   }
@@ -5224,7 +5360,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (chipId === 'terminal-selection' && terminal) {
       text = terminal.text;
       detach = () => {
-        setState('terminalSelection', null);
+        setState(storePath('terminalSelection', null));
         postMessage({ type: 'terminal-selection/clear' });
       };
     } else {
@@ -5256,11 +5392,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
     const [first = '', ...rest] = owner.value.split(chip.textMarker);
     const expanded = text;
-    batch(() => {
+    (() => {
       detach();
       setInputText([first, ...rest].join(expanded));
       setCaretPosition(first.length + expanded.length);
-    });
+    })();
   }
 
   function resolvePastedMentions(pastedText: string, insertion: RichComposerPasteInsertion | null) {
@@ -5285,16 +5421,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         if (mentions.mentionCount === 0 || mentions.resolvedCount < mentions.mentionCount) return;
         if (getPromptTextWithoutContextReferences(pastedText).length > 0) return;
         if (!ownsActiveComposer()) return;
-        batch(() => {
+        (() => {
           withdrawPastedText(insertion, setInputText, setCaretPosition);
-        });
+        })();
       })
       .catch((err) => {
         logError('chat-input:resolvePastedMentions', err);
       });
   }
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const disposeBridge = onMessage((msg: ExtensionMessage) => {
       if (msg.type === 'command/attach-problems') {
         attachProblemsFromEditor(msg.payload.diagnostics);
@@ -5501,7 +5639,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     document.addEventListener('drop', handleWindowDrop, true);
     document.addEventListener('dragleave', handleWindowDragLeave, true);
 
-    onCleanup(() => {
+    cleanups.push(() => {
       disposeBridge();
       window.removeEventListener('keydown', handlePopupEscape, true);
       window.removeEventListener('click', handleWindowClick, true);
@@ -5515,10 +5653,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       document.removeEventListener('drop', handleWindowDrop, true);
       document.removeEventListener('dragleave', handleWindowDragLeave, true);
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
-  onMount(() => {
-    if (!toolbarRef) return;
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
+    if (!toolbarRef)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     let lastObservedToolbarWidth = toolbarRef.clientWidth;
     const observer = new ResizeObserver((entries) => {
       const entry = entries.find((candidate) => candidate.target === toolbarRef);
@@ -5539,14 +5686,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     });
     observer.observe(toolbarRef);
 
-    onCleanup(() => {
+    cleanups.push(() => {
       observer.disconnect();
       toolbarFitter.cancel();
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
-  createEffect(() => {
-    void composerSessionId();
+  createEffect(composerSessionId, () => {
     pastedFileChipText.clear();
     setHistoryIndex(null);
     setHistoryDraft('');
@@ -5554,28 +5704,40 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     composerHistory.reset(untrack(captureComposerSnapshot));
   });
 
-  createEffect(() => {
-    for (const [path, pasted] of pastedFileChipText) {
-      if (
-        !state.droppedFiles.some(
-          (file) => file.path === path && formatContextLineRanges(file.lineRanges) === pasted.ranges
-        )
-      )
-        pastedFileChipText.delete(path);
+  createEffect(
+    () => {
+      const snapshot = captureComposerSnapshot();
+      return {
+        snapshot,
+        stalePaths: [...pastedFileChipText].filter(
+          ([path, pasted]) =>
+            !snapshot.files.some(
+              (file) =>
+                file.path === path && formatContextLineRanges(file.lineRanges) === pasted.ranges
+            )
+        ),
+      };
+    },
+    ({ snapshot, stalePaths }) => {
+      for (const [path] of stalePaths) pastedFileChipText.delete(path);
+      snapshot.pastedFileChips = snapshot.pastedFileChips?.filter(({ path }) =>
+        pastedFileChipText.has(path)
+      );
+      if (applyingComposerHistory) return;
+      composerHistory.record(snapshot);
     }
-    const snapshot = captureComposerSnapshot();
-    if (applyingComposerHistory) return;
-    composerHistory.record(snapshot);
-  });
+  );
 
-  createEffect(() => {
-    if (inputText().trim().length === 0 && state.clipboardImages.length === 0) {
-      resetPastedImageIndex();
+  createEffect(
+    () => inputText().trim().length === 0 && state.clipboardImages.length === 0,
+    (empty) => {
+      if (empty) {
+        resetPastedImageIndex();
+      }
     }
-  });
+  );
 
-  createEffect(() => {
-    const focusKey = composerFocusKey();
+  createEffect(composerFocusKey, (focusKey) => {
     if (focusKey === 0) return;
 
     queueMicrotask(() => {
@@ -5591,27 +5753,36 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   // current draft, loads the message text/context, and focuses the editor.
   let activeEditMessageId: string | null = null;
 
-  createEffect(() => {
-    const editing = composerEditingMessage();
-    if (!editing) {
-      activeEditMessageId = null;
-      setEditSelectedModel(null);
-      return;
-    }
-    if (editing.messageId === activeEditMessageId) return;
-    if (activeEditMessageId === null && !getMessageEditDraftBackup()) {
-      setMessageEditDraftBackup(untrack(captureEditDraftBackup));
-    }
-    activeEditMessageId = editing.messageId;
-    setEditSelectedModel(editing.model ? { ...editing.model } : null);
-    applyComposerEditState(editing.context, editing.text, activeContextEnabled(editing.sessionId));
-    queueMicrotask(() => {
-      if (richEditorRef) {
-        richEditorRef.focus();
-        setIsFocused(true);
+  createEffect(
+    () => {
+      const editing = composerEditingMessage();
+      if (!editing || editing.messageId === activeEditMessageId) return { editing };
+      return {
+        editing,
+        files: normalizeEditFiles(editing.context.files, activeContextEnabled(editing.sessionId)),
+      };
+    },
+    ({ editing, files }) => {
+      if (!editing) {
+        activeEditMessageId = null;
+        setEditSelectedModel(null);
+        return;
       }
-    });
-  });
+      if (editing.messageId === activeEditMessageId) return;
+      if (activeEditMessageId === null && !getMessageEditDraftBackup()) {
+        setMessageEditDraftBackup(untrack(captureEditDraftBackup));
+      }
+      activeEditMessageId = editing.messageId;
+      setEditSelectedModel(editing.model ? { ...editing.model } : null);
+      applyComposerEditState(editing.context, editing.text, files);
+      queueMicrotask(() => {
+        if (richEditorRef) {
+          richEditorRef.focus();
+          setIsFocused(true);
+        }
+      });
+    }
+  );
 
   function cancelMessageEdit() {
     if (!untrack(editingMessage)) return;
@@ -5624,12 +5795,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
   }
 
-  createEffect(() => {
-    const editing = composerEditingMessage();
-    if (editing && composerSessionId() !== editing.sessionId) {
-      cancelMessageEdit();
+  createEffect(
+    () => {
+      const editing = composerEditingMessage();
+      return editing && composerSessionId() !== editing.sessionId;
+    },
+    (changedSession) => {
+      if (changedSession) {
+        cancelMessageEdit();
+      }
     }
-  });
+  );
 
   function currentModelSupportsVision() {
     const current = currentModel();
@@ -5697,26 +5873,33 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     currentModelSupportsTools() &&
     canDelegateCurrentImages();
 
-  createEffect(() => {
-    void imageStoreRevision();
-    const images = composerClipboardImages();
-    if (!images.some((image) => !image.contextFile)) return;
-    if (currentModelSupportsVision() || !currentModelSupportsTools()) return;
-    if (!canDelegateCurrentImages()) return;
-    for (const image of images) {
-      if (image.contextFile || pendingImageStores.has(image.id)) continue;
-      pendingImageStores.set(image.id, image.url);
-      postMessage({
-        type: 'images/store',
-        payload: {
-          id: image.id,
-          name: image.filename,
-          content: image.url.slice(image.url.indexOf(',') + 1),
-          size: image.size,
-        },
-      });
+  createEffect(
+    () => {
+      void imageStoreRevision();
+      const images = composerClipboardImages();
+      if (!images.some((image) => !image.contextFile)) return;
+      if (currentModelSupportsVision() || !currentModelSupportsTools()) return;
+      if (!canDelegateCurrentImages()) return;
+      return images
+        .filter((image) => !image.contextFile && !pendingImageStores.has(image.id))
+        .map(({ id, filename, url, size }) => ({ id, filename, url, size }));
+    },
+    (pending) => {
+      if (!pending) return;
+      for (const image of pending) {
+        pendingImageStores.set(image.id, image.url);
+        postMessage({
+          type: 'images/store',
+          payload: {
+            id: image.id,
+            name: image.filename,
+            content: image.url.slice(image.url.indexOf(',') + 1),
+            size: image.size,
+          },
+        });
+      }
     }
-  });
+  );
 
   const hasPendingApproval = () => composerHasActiveQuestion() || composerHasActivePermission();
   const transferredDirectory = () => {
@@ -5735,8 +5918,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     !queuedMessageEdit() &&
     state.serverStatus.state === 'running' &&
     state.serverStatus.apiVersion === 2;
-  createEffect(() => {
-    if (isSideQuestionDraft()) setShowBusyMenu(false);
+  createEffect(isSideQuestionDraft, (sideQuestion) => {
+    if (sideQuestion) setShowBusyMenu(false);
   });
   const canSend = () =>
     connectionInitialized() &&
@@ -5955,7 +6138,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       const rootId = tokenTreeRootId();
       return rootId ? getSessionTreeIds(rootId) : [];
     },
-    [],
     { equals: sameEntries }
   );
   const tokenHistory = createSettledHistoryRanges(() => state.messages);
@@ -6082,11 +6264,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       .map((status) => status.name)
       .toSorted((left, right) => left.localeCompare(right))
   );
-  createEffect(() => {
-    if (!showCurrentProviderLimit() && showProviderLimitPopup()) {
-      setShowProviderLimitPopup(false);
+  createEffect(
+    () => !showCurrentProviderLimit() && showProviderLimitPopup(),
+    (close) => {
+      if (close) {
+        setShowProviderLimitPopup(false);
+      }
     }
-  });
+  );
   const visibleUsageLimit = createMemo(() => {
     const notice = activeUsageLimit();
     const hasActiveAssistantContext = getLatestAssistantMessageInfo(state.messages) !== null;
@@ -6242,26 +6427,32 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return route ? getReviewerModelNames(route) : null;
   });
   let judgeModelRequestId = 0;
-  createEffect(() => {
-    if (activePermissionMode() !== 'auto') return;
-    const current = currentModel();
-    const fallback =
-      current.providerID && current.modelID
-        ? {
-            providerID: current.providerID,
-            modelID: current.modelID,
-            variant: effectiveVariant() ? effectiveVariant()! : undefined,
-          }
-        : undefined;
-    void state.providerRefreshPending;
-    const requestId = ++judgeModelRequestId;
-    void client.varro
-      .resolveJudgeModel(fallback)
-      .then((model) => {
-        if (requestId === judgeModelRequestId) setResolvedAutoApproveJudgeModel(model);
-      })
-      .catch(() => {});
-  });
+  createEffect(
+    () => {
+      if (activePermissionMode() !== 'auto') return;
+      const current = currentModel();
+      const fallback =
+        current.providerID && current.modelID
+          ? {
+              providerID: current.providerID,
+              modelID: current.modelID,
+              variant: effectiveVariant() ? effectiveVariant()! : undefined,
+            }
+          : undefined;
+      void state.providerRefreshPending;
+      return { fallback };
+    },
+    (route) => {
+      if (!route) return;
+      const requestId = ++judgeModelRequestId;
+      void client.varro
+        .resolveJudgeModel(route.fallback)
+        .then((model) => {
+          if (requestId === judgeModelRequestId) setResolvedAutoApproveJudgeModel(model);
+        })
+        .catch(() => {});
+    }
+  );
   onCleanup(() => judgeModelRequestId++);
 
   function syncActiveRalphModel(nextModel: RalphSelectedModel) {
@@ -6352,10 +6543,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
 
     if (retryingSessionIds.length > 0) {
-      setState('sessionStatus', (current) => ({
-        ...current,
-        ...Object.fromEntries(retryingSessionIds.map((sessionId) => [sessionId, { type: 'idle' }])),
-      }));
+      setState(
+        storePath('sessionStatus', (current) => ({
+          ...current,
+          ...Object.fromEntries(
+            retryingSessionIds.map((sessionId) => [sessionId, { type: 'idle' }])
+          ),
+        }))
+      );
     }
 
     for (const sessionId of treeSessionIds) {
@@ -6496,8 +6691,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       (!isDisplayBusyWithoutInterruption() || canSend() || isSideQuestionDraft())
   );
 
-  createEffect(() => {
-    const deps = toolbarFitDependencies();
+  createEffect(toolbarFitDependencies, (deps) => {
     if (
       deps.showAgentPicker ||
       deps.showVariantPicker ||
@@ -6515,7 +6709,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   return (
     <div
       class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''}${editReconciliationPending() ? ' is-edit-reconciling' : ''} ${showModelPicker() ? 'model-picker-open' : ''} ${showMcpPicker() || showLspPicker() ? 'mcp-picker-open' : ''} ${showMentionCompletionMenu() ? 'mention-completion-open' : ''}`}
-      aria-busy={editReconciliationPending()}
+      aria-busy={ariaBoolean(editReconciliationPending())}
     >
       <Show when={!props.newSession}>
         <ChatTextAnnotation
@@ -6680,7 +6874,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         inert={editReconciliationPending()}
       >
         <Show when={showModelPicker()}>
-          <Suspense>
+          <Loading>
             <ModelPicker
               onSelect={(sel) => {
                 if (sel.providerID && sel.modelID) {
@@ -6696,7 +6890,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               onClose={() => setShowModelPicker(false)}
               popoverRef={(el) => (modelPopoverRef = el)}
             />
-          </Suspense>
+          </Loading>
         </Show>
 
         <Show when={showMcpPicker()}>
@@ -6781,7 +6975,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               onToggleActiveContext={() => toggleCurrentDocumentEnabled(composerSessionId())}
               onPinActiveContext={canPinActiveContext() ? pinActiveContext : undefined}
               onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
-              onClearDiagnostics={() => setState('attachedDiagnostics', null)}
+              onClearDiagnostics={() => setState(storePath('attachedDiagnostics', null))}
               onRemoveFile={(path) => {
                 removeContextFile(path);
                 postMessage({ type: 'files/remove', payload: { path } });
@@ -6868,16 +7062,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             completionHeader={completionHeader()}
             completionEmptyMessage={completionEmptyMessage()}
             onInput={(text, cursorOffset) => {
-              batch(() => {
-                setState('inlineProblems', (references) =>
-                  references.filter((reference) => text.includes(problemReferenceMarker(reference)))
+              (() => {
+                setState(
+                  storePath('inlineProblems', (references) =>
+                    references.filter((reference) =>
+                      text.includes(problemReferenceMarker(reference))
+                    )
+                  )
                 );
                 if (
                   state.attachedDiagnostics?.inline &&
                   inputText().includes(PROBLEMS_REFERENCE) &&
                   !text.includes(PROBLEMS_REFERENCE)
                 ) {
-                  setState('attachedDiagnostics', null);
+                  setState(storePath('attachedDiagnostics', null));
                 }
                 closePopups();
                 dismissComposerOverlays();
@@ -6888,7 +7086,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
                 setComposerSelectionCollapsed(true);
                 setCompletionIndex(0);
                 setSuppressCompletion(false);
-              });
+              })();
             }}
             onKeyDown={handleKeydown}
             onHistory={applyComposerHistoryAction}
@@ -6921,22 +7119,24 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             onExpandChip={(chipId) => void expandChip(chipId)}
             onRemoveChip={(chipId) => {
               if (chipId.startsWith('problem:')) {
-                setState('inlineProblems', (references) =>
-                  references.filter(
-                    (reference) =>
-                      reference.id !== chipId.slice(8) ||
-                      inputText().includes(problemReferenceMarker(reference))
+                setState(
+                  storePath('inlineProblems', (references) =>
+                    references.filter(
+                      (reference) =>
+                        reference.id !== chipId.slice(8) ||
+                        inputText().includes(problemReferenceMarker(reference))
+                    )
                   )
                 );
               }
               if (chipId === 'problems' && !inputText().includes(PROBLEMS_REFERENCE)) {
-                setState('attachedDiagnostics', null);
+                setState(storePath('attachedDiagnostics', null));
               }
               if (
                 chipId === 'terminal-selection' &&
                 !inputText().includes(TERMINAL_SELECTION_MARKER)
               ) {
-                setState('terminalSelection', null);
+                setState(storePath('terminalSelection', null));
                 postMessage({ type: 'terminal-selection/clear' });
               }
               if (chipId.startsWith('file:')) {

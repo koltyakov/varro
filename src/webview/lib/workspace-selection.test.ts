@@ -1,3 +1,5 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebviewMessage } from '../../shared/protocol';
 import { fixture } from '../test-fixtures';
@@ -17,8 +19,11 @@ describe('workspace selection', () => {
 
   beforeEach(() => {
     resetDefaultAppState();
+    flushSolid();
     setError(null);
+    flushSolid();
     setManualWorkspaceSelection(false);
+    flushSolid();
     send.mockClear();
     fixture<{ __sendToExtension?: typeof send }>(window).__sendToExtension = send;
   });
@@ -29,9 +34,11 @@ describe('workspace selection', () => {
 
   it('correlates selections across callers, including repeated paths', () => {
     requestWorkspaceSelection('/repo-b');
+    flushSolid();
     const firstId = state.workspaceSelectionRequestId;
     requestWorkspaceSelection('/repo-c');
     requestWorkspaceSelection('/repo-b');
+    flushSolid();
     const latestId = state.workspaceSelectionRequestId;
 
     expect(latestId).not.toBe(firstId);
@@ -42,6 +49,7 @@ describe('workspace selection', () => {
     if (firstId === null || latestId === null) throw new Error('Missing selection request ID');
 
     handleWorkspaceSelectionFailure({ requestId: firstId, path: '/repo-b', error: 'Old failure' });
+    flushSolid();
     expect(state.pendingWorkspaceSelectionPath).toBe('/repo-b');
     expect(state.workspaceSelectionRequestId).toBe(latestId);
     expect(error()).toBeNull();
@@ -51,6 +59,7 @@ describe('workspace selection', () => {
       path: '/repo-b',
       error: 'Selected workspace folder is not open',
     });
+    flushSolid();
     expect(state.pendingWorkspaceSelectionPath).toBeNull();
     expect(state.workspaceSelectionRequestId).toBeNull();
     expect(manualWorkspaceSelection()).toBe(true);
@@ -59,11 +68,14 @@ describe('workspace selection', () => {
 
   it('ignores failure after local cancellation without sending another request', () => {
     requestWorkspaceSelection('/repo-b');
+    flushSolid();
     const requestId = state.workspaceSelectionRequestId;
     requestWorkspaceSelection(null);
+    flushSolid();
     if (requestId === null) throw new Error('Missing selection request ID');
 
     handleWorkspaceSelectionFailure({ requestId, path: '/repo-b', error: 'Late failure' });
+    flushSolid();
     expect(send).toHaveBeenCalledTimes(1);
     expect(state.pendingWorkspaceSelectionPath).toBeNull();
     expect(state.workspaceSelectionRequestId).toBeNull();
@@ -73,12 +85,16 @@ describe('workspace selection', () => {
 
   it('reports persistence failure even when context already acknowledged the endpoint switch', () => {
     requestWorkspaceSelection('/repo-b');
+    flushSolid();
     const requestId = state.workspaceSelectionRequestId;
-    setState('editorContext', 'workspacePath', '/repo-b');
-    setState('pendingWorkspaceSelectionPath', null);
+    setState(storePath('editorContext', 'workspacePath', '/repo-b'));
+    flushSolid();
+    setState(storePath('pendingWorkspaceSelectionPath', null));
+    flushSolid();
     if (requestId === null) throw new Error('Missing selection request ID');
 
     handleWorkspaceSelectionFailure({ requestId, path: '/repo-b', error: 'Storage unavailable' });
+    flushSolid();
     expect(state.editorContext.workspacePath).toBe('/repo-b');
     expect(state.pendingWorkspaceSelectionPath).toBeNull();
     expect(error()).toContain('Storage unavailable');

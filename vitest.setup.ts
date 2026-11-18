@@ -1,7 +1,7 @@
 import cssEscape from 'css.escape';
 import type * as Solid from 'solid-js';
-import type * as SolidStore from 'solid-js/store';
-import type * as SolidWeb from 'solid-js/web';
+import type * as Signals from '@solidjs/signals';
+import type * as SolidWeb from '@solidjs/web';
 import { beforeEach, vi } from 'vitest';
 
 // resetModules must reload application state, not split Solid's owner graph between
@@ -9,8 +9,8 @@ import { beforeEach, vi } from 'vitest';
 // stay cached across resets and return the real runtime without replacing any APIs.
 /* oxlint-disable anti-slop/no-module-mocking -- Preserve the real Solid runtime across application module resets. */
 vi.mock('solid-js', async (importOriginal) => importOriginal<typeof Solid>());
-vi.mock('solid-js/store', async (importOriginal) => importOriginal<typeof SolidStore>());
-vi.mock('solid-js/web', async (importOriginal) => importOriginal<typeof SolidWeb>());
+vi.mock('@solidjs/signals', async (importOriginal) => importOriginal<typeof Signals>());
+vi.mock('@solidjs/web', async (importOriginal) => importOriginal<typeof SolidWeb>());
 /* oxlint-enable anti-slop/no-module-mocking */
 
 if (!globalThis.CSS) {

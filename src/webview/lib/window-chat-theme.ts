@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
+import type { ExtensionMessage, WebviewThemeKind, WindowChatTheme } from '../../shared/protocol';
 import { readInitialWebviewState } from './state-stored-values';
 import { applyWebviewTheme, themeClassName } from './theme';
 import { setTheme } from './state';
@@ -111,12 +111,11 @@ function defaultColors(kind: WebviewThemeKind) {
   };
 }
 
-function applyLocalTheme(): WebviewThemeKind {
+function applyLocalTheme(counterpart: WindowChatTheme['counterpart']): WebviewThemeKind {
   themeObserver?.disconnect();
   themeObserver = undefined;
   overrideStyle?.remove();
   overrideStyle = undefined;
-  const counterpart = windowChatThemeReversed() ? windowChatTheme()?.counterpart : null;
   if (!counterpart) return hostTheme;
   const colors = { ...defaultColors(counterpart.kind), ...counterpart.colors };
   const declarations = Object.entries(colors)
@@ -137,24 +136,23 @@ function applyLocalTheme(): WebviewThemeKind {
 export function syncWindowChatTheme(
   payload: Extract<ExtensionMessage, { type: 'theme/update' }>['payload']
 ): WebviewThemeKind {
-  setWindowChatThemeReversed(
-    payload.windowChatTheme
-      ? (payload.windowChatTheme.reversed ?? windowChatThemeReversed())
-      : false
+  const reversed = setWindowChatThemeReversed((previous) =>
+    payload.windowChatTheme ? (payload.windowChatTheme.reversed ?? previous) : false
   );
   hostTheme = payload.theme;
   setWindowChatTheme(payload.windowChatTheme);
-  return applyLocalTheme();
+  return applyLocalTheme(reversed ? (payload.windowChatTheme?.counterpart ?? null) : null);
 }
 
 export function toggleWindowChatTheme() {
-  if (!windowChatTheme()?.counterpart) return;
-  setWindowChatThemeReversed((value) => !value);
+  const counterpart = windowChatTheme()?.counterpart;
+  if (!counterpart) return;
+  const reversed = setWindowChatThemeReversed((value) => !value);
   postMessage({
     type: 'window-chat-theme/set-reversed',
-    payload: { reversed: windowChatThemeReversed() },
+    payload: { reversed },
   });
-  const kind = applyLocalTheme();
+  const kind = applyLocalTheme(reversed ? counterpart : null);
   setTheme(kind);
   applyWebviewTheme(kind);
 }

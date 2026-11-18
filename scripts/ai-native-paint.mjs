@@ -3,11 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { CdpController, revealRetainedActivity } from './ai-fuzzy-live.mjs';
 import { goToLatest } from './ai-fuzzy-navigation.mjs';
-import { controlRequest, runCapture } from './ai-streaming.mjs';
+import { controlRequest } from './ai-streaming.mjs';
 import { createCdpRequestClient, executeVscodeCommand } from './vscode-launch-process.mjs';
 import { nativePaintFixture } from './ai-native-paint-fixture.mjs';
 import { installNativePaintProbe } from './ai-native-paint-probe.mjs';
@@ -25,13 +25,28 @@ const args = process.argv.slice(2);
 const options = {};
 for (let index = 0; index < args.length; index += 2) {
   const key = args[index];
-  if (!['--capture', '--checkpoint', '--output'].includes(key) || !args[index + 1]) {
+  if (
+    !['--capture', '--checkpoint', '--output', '--extension-root'].includes(key) ||
+    !args[index + 1]
+  ) {
     throw new Error(
-      'Usage: ai-native-paint.mjs [--capture file --checkpoint count] [--output directory]'
+      'Usage: ai-native-paint.mjs [--capture file --checkpoint count] [--output directory] [--extension-root built-worktree]'
     );
   }
   options[key.slice(2)] = args[index + 1];
 }
+// Run the same native driver and pixel oracles against either built worktree.
+// Its own launcher retains the existing endpoint/profile isolation checks.
+const extensionRoot = options['extension-root'] ? path.resolve(options['extension-root']) : root;
+const { runCapture } = await import(
+  pathToFileURL(path.join(extensionRoot, 'scripts/ai-streaming.mjs')).href
+);
+const builtVersion = (
+  await readFile(path.join(extensionRoot, 'dist/webview/webview.version'), 'utf8')
+).trim();
+const extensionSha256 = createHash('sha256')
+  .update(await readFile(path.join(extensionRoot, 'dist/extension/extension.js')))
+  .digest('hex');
 const output = path.resolve(
   options.output ?? path.join(root, 'artifacts/ai-streaming', `native-paint-${Date.now()}`)
 );
@@ -51,8 +66,17 @@ assert.ok(
   Number.isSafeInteger(checkpoint) && checkpoint >= 0 && checkpoint <= capture.events.length
 );
 const result = {
-  commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
-  initialStatus: execFileSync('git', ['status', '--short'], { cwd: root, encoding: 'utf8' }),
+  commit: execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: extensionRoot,
+    encoding: 'utf8',
+  }).trim(),
+  initialStatus: execFileSync('git', ['status', '--short'], {
+    cwd: extensionRoot,
+    encoding: 'utf8',
+  }),
+  extensionRoot,
+  builtVersion,
+  extensionSha256,
   captureSha256: createHash('sha256').update(captureBytes).digest('hex'),
   generated: !options.capture,
   checkpoint,
@@ -116,6 +140,13 @@ const main = async (expression) => {
   return response.result.value;
 };
 const snapshot = () => main('globalThis.__nativePaint.snapshot()');
+async function readWorkCounters() {
+  const { metrics } = await cdp.call('Performance.getMetrics');
+  return {
+    at: Date.now(),
+    metrics: Object.fromEntries(metrics.map(({ name, value }) => [name, value])),
+  };
+}
 async function drag(name) {
   const action = { name, started: Date.now(), before: await snapshot(), dispatches: [] };
   result.actions.push(action);
@@ -256,6 +287,7 @@ try {
   assert.equal(hosts.length, 1);
   result.host = hosts[0];
   result.runtime = await workbench.call('Browser.getVersion');
+  await cdp.call('Performance.enable');
   await main(`(${installNativePaintProbe.toString()})()`);
   result.initial = await snapshot();
   assert.ok(
@@ -283,7 +315,9 @@ try {
   await workbench.call('Page.enable');
   await workbench.call('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
   recording = true;
+  result.firstDragWork = { before: await readWorkCounters() };
   await drag('first-top');
+  result.firstDragWork.after = await readWorkCounters();
   await workbench.call('Page.stopScreencast');
   recording = false;
   await main("globalThis.__nativePaint.label = ''");

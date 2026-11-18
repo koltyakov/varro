@@ -1,4 +1,5 @@
-import { createComputed, createRoot } from 'solid-js';
+import { flush as flushSolid, createEffect, createRoot } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
 import type { ServerEventName } from '../../shared/protocol';
 import type { onMessage } from '../lib/bridge';
@@ -93,15 +94,18 @@ function mockRuntimeBootstrap() {
 describe('useOpenCode session state flows', () => {
   it('reopens a persisted transferred session read-only without activating its closed folder', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const moved = {
       ...session('moved'),
       directory: '/outside',
       transfer: { originDirectory: '/repo', available: false },
     };
-    stateModule.setState('sessions', [moved]);
+    stateModule.setState(storePath('sessions', [moved]));
+    flushSolid();
     clientMocks.sessionGet.mockResolvedValue(moved);
     clientMocks.sessionMessages.mockResolvedValue([userEntry('old-prompt', 'moved')]);
     await hookModule.selectSession('moved', { directory: '/outside' });
+    flushSolid();
     expect(clientMocks.sessionActivate).not.toHaveBeenCalled();
     expect(stateModule.state.activeSessionId).toBe('moved');
     expect(stateModule.state.messages[0]?.info.id).toBe('old-prompt');
@@ -119,24 +123,29 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
       stateModule.setShowSessionPicker(true);
+      flushSolid();
 
       bridgeHandler({
         type: 'command/open-session',
         payload: { sessionId: 'session-1' },
       });
+      flushSolid();
 
       expect(stateModule.showSessionPicker()).toBe(false);
       expect(stateModule.state.activeSessionId).toBe('session-1');
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -185,15 +194,19 @@ describe('useOpenCode session state flows', () => {
     };
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
-      stateModule.setState('sessions', [siblingSession]);
+      stateModule.setState(storePath('sessions', [siblingSession]));
+      flushSolid();
 
       await hookModule.selectSession('session-b', { directory: '/repo-b' });
+      flushSolid();
 
       expect(clientMocks.sessionActivate).toHaveBeenCalledWith(
         'session-b',
@@ -205,6 +218,7 @@ describe('useOpenCode session state flows', () => {
       expect(stateModule.state.messages).toEqual([siblingMessage]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -230,19 +244,26 @@ describe('useOpenCode session state flows', () => {
     };
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const { startNewChatDraft } = await import('../lib/new-chat-draft');
-    stateModule.setState('sessions', [siblingSession]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [siblingSession]));
+    flushSolid();
 
     const selection = hookModule.selectSession('session-b', { directory: '/repo-b' });
     await vi.waitFor(() => expect(clientMocks.sessionActivate).toHaveBeenCalledOnce());
+    flushSolid();
 
     expect(stateModule.state.pendingSessionSelectionId).toBe('session-b');
     expect(stateModule.state.messagesLoading).toBe(true);
 
     startNewChatDraft();
+    flushSolid();
     expect(stateModule.state.pendingSessionSelectionId).toBeNull();
     activation.resolve(siblingSession);
+    flushSolid();
     await selection;
+    flushSolid();
 
     expect(stateModule.state.activeSessionId).toBeNull();
     expect(stateModule.state.messages).toEqual([]);
@@ -266,12 +287,15 @@ describe('useOpenCode session state flows', () => {
     };
 
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('sessions', [siblingSession]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [siblingSession]));
+    flushSolid();
 
     await hookModule.selectSession('session-b', {
       directory: '/repo-b',
       reportActivationError: false,
     });
+    flushSolid();
 
     expect(clientMocks.sessionActivate).toHaveBeenCalledOnce();
     expect(stateModule.error()).toBeNull();
@@ -294,9 +318,12 @@ describe('useOpenCode session state flows', () => {
     };
 
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('sessions', [localSession]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [localSession]));
+    flushSolid();
 
     await hookModule.selectSession('session-a', { directory: '/repo-a' });
+    flushSolid();
 
     expect(clientMocks.sessionActivate).not.toHaveBeenCalled();
     expect(stateModule.state.activeSessionId).toBe('session-a');
@@ -331,14 +358,18 @@ describe('useOpenCode session state flows', () => {
     };
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
-      stateModule.setState('sessions', [siblingSession]);
+      stateModule.setState(storePath('sessions', [siblingSession]));
+      flushSolid();
       await hookModule.selectSession('session-b', { directory: '/repo-b' });
+      flushSolid();
       clientMocks.sessionList.mockResolvedValue([siblingSession]);
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
 
@@ -356,11 +387,13 @@ describe('useOpenCode session state flows', () => {
           diagnostics: [],
         },
       });
+      flushSolid();
 
       expect(stateModule.state.activeSessionId).toBe('session-b');
       expect(stateModule.state.messages).toEqual([siblingMessage]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -380,10 +413,12 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
@@ -392,8 +427,11 @@ describe('useOpenCode session state flows', () => {
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096', eventStream: 'degraded' },
       });
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(stateModule.state.serverStatus).toMatchObject({
         state: 'running',
@@ -402,6 +440,7 @@ describe('useOpenCode session state flows', () => {
       expect(clientMocks.health).toHaveBeenCalledTimes(1);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -426,39 +465,49 @@ describe('useOpenCode session state flows', () => {
     ]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
       const settledAssistant = assistantMessage('assistant-1', 'user-1');
       if (settledAssistant.role !== 'assistant') {
         throw new Error('Expected an assistant message fixture');
       }
       settledAssistant.time.completed = 1;
 
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [
-        { info: userMessage('user-1'), parts: [] },
-        {
-          info: settledAssistant,
-          parts: [],
-        },
-      ]);
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: settledAssistant,
+            parts: [],
+          },
+        ])
+      );
+      flushSolid();
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(clientMocks.sessionGet).toHaveBeenCalledWith('session-1', {
           directory: undefined,
         });
       });
+      flushSolid();
 
       expect(clientMocks.sessionMessages).not.toHaveBeenCalled();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -483,25 +532,32 @@ describe('useOpenCode session state flows', () => {
     });
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
-      stateModule.setState('sessions', [{ ...session('session-1'), title: 'New Chat' }]);
+      flushSolid();
+      stateModule.setState(storePath('sessions', [{ ...session('session-1'), title: 'New Chat' }]));
+      flushSolid();
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(stateModule.state.sessions[0]?.title).toBe('Test Message');
       });
+      flushSolid();
       expect(clientMocks.varroSessionRenameIfUntitled).toHaveBeenCalledWith('session-1', {
         directory: '/repo',
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -521,17 +577,22 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('lastSeenSessions', { 'session-1': 1_000 });
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('lastSeenSessions', { 'session-1': 1_000 }));
+      flushSolid();
 
       handlers.get('session.updated')?.({
         properties: {
@@ -541,12 +602,14 @@ describe('useOpenCode session state flows', () => {
           },
         },
       });
+      flushSolid();
 
       expect(stateModule.state.lastSeenSessions['session-1']).toBe(2_000);
       expect(stateModule.isSessionUnread('session-1', 2_000)).toBe(false);
     } finally {
       nowSpy.mockRestore();
       dispose();
+      flushSolid();
     }
   });
 
@@ -566,19 +629,26 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('lastSeenSessions', { 'session-1': 1_000 });
-      stateModule.setState('completedSessionResponses', { 'session-1': 1_500 });
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('lastSeenSessions', { 'session-1': 1_000 }));
+      flushSolid();
+      stateModule.setState(storePath('completedSessionResponses', { 'session-1': 1_500 }));
+      flushSolid();
       stateModule.setShowSessionPicker(true);
+      flushSolid();
 
       handlers.get('session.updated')?.({
         properties: {
@@ -588,22 +658,29 @@ describe('useOpenCode session state flows', () => {
           },
         },
       });
+      flushSolid();
 
       expect(stateModule.state.lastSeenSessions['session-1']).toBe(1_000);
       expect(stateModule.isSessionCompletedResponseUnread('session-1')).toBe(true);
     } finally {
       nowSpy.mockRestore();
       dispose();
+      flushSolid();
     }
   });
 
   it('ignores stale session selection results after switching sessions quickly', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
     const slowSession = Promise.resolve({ ...session('session-1'), title: 'Slow session' });
+    flushSolid();
     const fastSession = Promise.resolve({ ...session('session-2'), title: 'Fast session' });
+    flushSolid();
     const slowMessages = Promise.resolve([userEntry('user-1', 'session-1')]);
+    flushSolid();
     const fastMessages = Promise.resolve([userEntry('user-2', 'session-2')]);
+    flushSolid();
 
     clientMocks.sessionGet.mockImplementation(async (id: string) =>
       id === 'session-1' ? slowSession : fastSession
@@ -618,6 +695,7 @@ describe('useOpenCode session state flows', () => {
       hookModule.selectSession('session-1'),
       hookModule.selectSession('session-2'),
     ]);
+    flushSolid();
 
     expect(stateModule.state.activeSessionId).toBe('session-2');
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['user-2']);
@@ -625,6 +703,7 @@ describe('useOpenCode session state flows', () => {
 
   it('loads older session messages through cursor pages', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     // SAFETY: The fixture provides the complete domain shape read by this statement.
     const latest = [{ info: userMessage('user-3'), parts: [] }] as Array<{
       info: ReturnType<typeof userMessage>;
@@ -643,7 +722,9 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     await hookModule.selectSession('session-1');
+    flushSolid();
     await hookModule.loadFullSessionHistory('session-1');
+    flushSolid();
 
     expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(1, 'session-1', { limit: 200 });
     expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
@@ -685,9 +766,13 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     await hookModule.selectSession('session-1');
+    flushSolid();
     await hookModule.loadFullSessionHistory('session-1');
+    flushSolid();
 
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
       'user-1',
@@ -715,10 +800,14 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     await hookModule.selectSession('session-1');
+    flushSolid();
 
     await expect(hookModule.loadOlderSessionHistoryPage('session-1')).resolves.toBe(true);
+    flushSolid();
     expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
       limit: 200,
       before: 'cursor-2',
@@ -743,9 +832,13 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     await hookModule.selectSession('session-1');
+    flushSolid();
     messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+    flushSolid();
     clientMocks.sessionMessages.mockReturnValueOnce(olderPage.promise);
 
     const load = hookModule.loadOlderSessionHistoryPage('session-1');
@@ -756,14 +849,18 @@ describe('useOpenCode session state flows', () => {
         directory: '/repo',
       });
     });
+    flushSolid();
     stateModule.upsertMessage({ info: userMessage('user-4'), parts: [] });
+    flushSolid();
 
     olderPage.resolve([
       { info: userMessage('user-1'), parts: [] },
       { info: userMessage('user-2'), parts: [] },
     ]);
+    flushSolid();
 
     await expect(load).resolves.toBe(true);
+    flushSolid();
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
       'user-1',
       'user-2',
@@ -774,7 +871,9 @@ describe('useOpenCode session state flows', () => {
 
   it('preserves child-session messages and streaming state while loading older parent history', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     const childInfo = assistantMessage('child-assistant', 'child-user');
     childInfo.sessionID = 'child-1';
     const childPart: Part = {
@@ -785,20 +884,28 @@ describe('useOpenCode session state flows', () => {
       text: '',
     };
     clientMocks.sessionMessages.mockResolvedValue([userEntry('parent-old')]);
-    stateModule.setState('sessions', [
-      session('session-1'),
-      { ...session('child-1'), parentID: 'session-1' },
-    ]);
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('messages', [
-      userEntry('parent-latest'),
-      { info: childInfo, parts: [childPart] },
-    ]);
-    stateModule.setState('streamingPartId', childPart.id);
-    stateModule.setState('streamingText', 'Child response in progress');
+    stateModule.setState(
+      storePath('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1' },
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(
+      storePath('messages', [userEntry('parent-latest'), { info: childInfo, parts: [childPart] }])
+    );
+    flushSolid();
+    stateModule.setState(storePath('streamingPartId', childPart.id));
+    flushSolid();
+    stateModule.setState(storePath('streamingText', 'Child response in progress'));
+    flushSolid();
     messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+    flushSolid();
 
     await hookModule.loadOlderSessionHistoryPage('session-1');
+    flushSolid();
 
     expect({
       messageIds: stateModule.state.messages.map((entry) => entry.info.id),
@@ -813,23 +920,32 @@ describe('useOpenCode session state flows', () => {
 
   it('preserves interleaved child entry identities while loading older parent history', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     const childBefore = userEntry('child-before', 'child-1');
     const parentCurrent = userEntry('parent-current');
     const childAfter = userEntry('child-after', 'child-1');
     clientMocks.sessionMessages.mockResolvedValue([userEntry('parent-older')]);
-    stateModule.setState('sessions', [
-      session('session-1'),
-      { ...session('child-1'), parentID: 'session-1' },
-    ]);
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('messages', [childBefore, parentCurrent, childAfter]);
+    stateModule.setState(
+      storePath('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1' },
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('messages', [childBefore, parentCurrent, childAfter]));
+    flushSolid();
     const retained = new Map(
       stateModule.state.messages.map((entry) => [entry.info.id, entry] as const)
     );
     messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+    flushSolid();
 
     await hookModule.loadOlderSessionHistoryPage('session-1');
+    flushSolid();
 
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
       'child-before',
@@ -844,7 +960,9 @@ describe('useOpenCode session state flows', () => {
 
   it('preserves active-session streaming state while prepending older history', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     const currentInfo = assistantMessage('parent-assistant', 'parent-user');
     currentInfo.time = { created: 1 };
     const currentPart: Part = {
@@ -855,27 +973,38 @@ describe('useOpenCode session state flows', () => {
       text: '',
     };
     clientMocks.sessionMessages.mockResolvedValue([userEntry('parent-old')]);
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('messages', [{ info: currentInfo, parts: [currentPart] }]);
-    stateModule.setState('streamingPartId', currentPart.id);
-    stateModule.setState('streamingText', 'Parent response in progress');
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('messages', [{ info: currentInfo, parts: [currentPart] }]));
+    flushSolid();
+    stateModule.setState(storePath('streamingPartId', currentPart.id));
+    flushSolid();
+    stateModule.setState(storePath('streamingText', 'Parent response in progress'));
+    flushSolid();
     messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+    flushSolid();
 
     const observedStreamingState: Array<[string | null, string]> = [];
     const dispose = createRoot((cleanup) => {
-      createComputed(() => {
-        observedStreamingState.push([
+      createEffect(
+        (): [string | null, string] => [
           stateModule.state.streamingPartId,
           stateModule.state.streamingText,
-        ]);
-      });
+        ],
+        (state) => {
+          observedStreamingState.push(state);
+        }
+      );
       return cleanup;
     });
+    flushSolid();
 
     try {
       await hookModule.loadOlderSessionHistoryPage('session-1');
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
 
     expect({
@@ -905,13 +1034,20 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionMessages.mockResolvedValue([{ info, parts: [stalePart] }]);
 
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session('session-1')]);
-    stateModule.setState('messages', [{ info, parts: [stalePart] }]);
-    stateModule.setState('streamingPartId', stalePart.id);
-    stateModule.setState('streamingText', 'Partial answer from the live SSE stream');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session('session-1')]));
+    flushSolid();
+    stateModule.setState(storePath('messages', [{ info, parts: [stalePart] }]));
+    flushSolid();
+    stateModule.setState(storePath('streamingPartId', stalePart.id));
+    flushSolid();
+    stateModule.setState(storePath('streamingText', 'Partial answer from the live SSE stream'));
+    flushSolid();
 
     await hookModule.recheckSessionStatus('session-1');
+    flushSolid();
 
     expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({
       id: 'text-1',
@@ -931,7 +1067,9 @@ describe('useOpenCode session state flows', () => {
 
     try {
       const { stateModule, hookModule } = await loadModules();
+      flushSolid();
       const messageWindow = await import('../lib/message-window');
+      flushSolid();
       const currentInfo = assistantMessage('parent-assistant', 'parent-user');
       currentInfo.time = { created: 1 };
       const currentPart: Part = {
@@ -942,19 +1080,26 @@ describe('useOpenCode session state flows', () => {
         text: '',
       };
       clientMocks.sessionMessages.mockResolvedValue([userEntry('parent-old')]);
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [{ info: currentInfo, parts: [currentPart] }]);
-      stateModule.setState('streamingPartId', currentPart.id);
-      stateModule.setState('streamingText', 'Parent response');
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('messages', [{ info: currentInfo, parts: [currentPart] }]));
+      flushSolid();
+      stateModule.setState(storePath('streamingPartId', currentPart.id));
+      flushSolid();
+      stateModule.setState(storePath('streamingText', 'Parent response'));
+      flushSolid();
       stateModule.applyMessagePartDelta(
         currentInfo.id,
         currentPart.id,
         ' in progress',
         'session-1'
       );
+      flushSolid();
       messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+      flushSolid();
 
       await hookModule.loadOlderSessionHistoryPage('session-1');
+      flushSolid();
 
       expect({
         streamingPartId: stateModule.state.streamingPartId,
@@ -1020,8 +1165,11 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     await hookModule.selectSession('session-a');
+    flushSolid();
     const staleLoad = hookModule.loadOlderSessionHistoryPage('session-a');
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-a', {
@@ -1029,12 +1177,17 @@ describe('useOpenCode session state flows', () => {
         before: 'cursor-stale',
       });
     });
+    flushSolid();
 
     await hookModule.selectSession('session-b');
+    flushSolid();
     await hookModule.selectSession('session-a');
+    flushSolid();
     stalePage.resolve(staleOlderA);
+    flushSolid();
 
     await expect(staleLoad).resolves.toBe(false);
+    flushSolid();
     expect(stateModule.state.activeSessionId).toBe('session-a');
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['user-a-current']);
     expect(messageWindow.getSessionHistoryCursor('session-a')).toBe('cursor-current');
@@ -1076,9 +1229,13 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     await hookModule.selectSession('session-a');
+    flushSolid();
     await expect(hookModule.loadOlderSessionHistoryPage('session-a')).resolves.toBe(true);
+    flushSolid();
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
       'user-a-1',
       'user-a-2',
@@ -1087,7 +1244,9 @@ describe('useOpenCode session state flows', () => {
     expect(messageWindow.getSessionHistoryCursor('session-a')).toBeUndefined();
 
     await hookModule.selectSession('session-b');
+    flushSolid();
     await hookModule.selectSession('session-a');
+    flushSolid();
 
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
       'user-a-1',
@@ -1129,8 +1288,11 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     await hookModule.selectSession('session-1');
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
@@ -1141,8 +1303,10 @@ describe('useOpenCode session state flows', () => {
         messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
       ).toEqual(['user-1']);
     });
+    flushSolid();
 
     await expect(hookModule.loadOlderSessionHistoryPage('session-1')).resolves.toBe(true);
+    flushSolid();
     expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
       limit: 200,
       before: 'cursor-1',
@@ -1164,6 +1328,7 @@ describe('useOpenCode session state flows', () => {
         messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
       ).toEqual(['user-0', 'user-1']);
     });
+    flushSolid();
   });
 
   it.each(['assistant', 'steer', 'inferred-steer', 'notice', 'followup'] as const)(
@@ -1229,12 +1394,16 @@ describe('useOpenCode session state flows', () => {
       clientMocks.questionList.mockResolvedValue([]);
 
       const { stateModule, hookModule } = await loadModules();
+      flushSolid();
       const messageWindow = await import('../lib/message-window');
+      flushSolid();
       await hookModule.selectSession('session-1');
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(messageWindow.getSessionHistoryPrompts('session-1')).toContainEqual(root);
       });
+      flushSolid();
       expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(
         latest.map((entry) => entry.info.id)
       );
@@ -1245,6 +1414,7 @@ describe('useOpenCode session state flows', () => {
 
   it('restarts boundary prefetch after an active message invalidates its revision', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const staleBoundary = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     // SAFETY: The test installs the typed mock implementation before this statement.
@@ -1290,18 +1460,25 @@ describe('useOpenCode session state flows', () => {
     });
 
     const { hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('message.updated')).toBe(true));
+      flushSolid();
       await hookModule.selectSession('session-1');
+      flushSolid();
       await vi.waitFor(() => expect(boundaryLoads).toBe(1));
+      flushSolid();
 
       handlers.get('message.updated')?.({ properties: { info: completedAssistant } });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(latestLoads).toBeGreaterThanOrEqual(2);
@@ -1310,10 +1487,14 @@ describe('useOpenCode session state flows', () => {
           messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
         ).toEqual(['user-1']);
       });
+      flushSolid();
     } finally {
       staleBoundary.resolve(boundary);
+      flushSolid();
       await staleBoundary.promise;
+      flushSolid();
       dispose();
+      flushSolid();
     }
   });
 
@@ -1341,7 +1522,9 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     await hookModule.selectSession('session-1');
+    flushSolid();
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
         limit: 200,
@@ -1349,10 +1532,12 @@ describe('useOpenCode session state flows', () => {
         directory: undefined,
       });
     });
+    flushSolid();
 
     const pageLoad = hookModule.loadOlderSessionHistoryPage('session-1');
     try {
       firstPromptPage.resolve(olderPage);
+      flushSolid();
       await vi.waitFor(() => {
         expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
           limit: 200,
@@ -1360,7 +1545,9 @@ describe('useOpenCode session state flows', () => {
           directory: '/repo',
         });
       });
+      flushSolid();
       await expect(pageLoad).resolves.toBe(true);
+      flushSolid();
       expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
         'user-older',
         'user-current',
@@ -1372,7 +1559,9 @@ describe('useOpenCode session state flows', () => {
       ).toHaveLength(1);
     } finally {
       laterPromptPage.resolve([]);
+      flushSolid();
       await laterPromptPage.promise;
+      flushSolid();
     }
   });
 
@@ -1410,8 +1599,11 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     await hookModule.selectSession('session-1');
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
@@ -1419,6 +1611,7 @@ describe('useOpenCode session state flows', () => {
         before: 'cursor-valid',
       });
     });
+    flushSolid();
     expect(
       messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
     ).toEqual(['user-valid', 'user-empty']);
@@ -1469,8 +1662,11 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     await hookModule.selectSession('session-1');
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
@@ -1478,6 +1674,7 @@ describe('useOpenCode session state flows', () => {
         before: 'cursor-valid',
       });
     });
+    flushSolid();
     expect(
       messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
     ).toEqual(['user-valid', 'user-metadata']);
@@ -1529,7 +1726,9 @@ describe('useOpenCode session state flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { hookModule } = await loadModules();
+    flushSolid();
     await hookModule.selectSession('session-1');
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
@@ -1537,10 +1736,12 @@ describe('useOpenCode session state flows', () => {
         before: 'cursor-older',
       });
     });
+    flushSolid();
   });
 
   it('preserves append and removal events that beat a stale latest response', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     const canonical = [userEntry('message-1'), userEntry('message-3')];
@@ -1551,28 +1752,40 @@ describe('useOpenCode session state flows', () => {
       .mockResolvedValueOnce(canonical);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
-      stateModule.setState('sessions', [session('session-1')]);
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [userEntry('message-1'), userEntry('message-2')]);
+      flushSolid();
+      stateModule.setState(storePath('sessions', [session('session-1')]));
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('messages', [userEntry('message-1'), userEntry('message-2')]));
+      flushSolid();
 
       handlers.get('session.error')?.({
         properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
       });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+      flushSolid();
 
       handlers.get('message.updated')?.({ properties: { info: userMessage('message-3') } });
+      flushSolid();
       handlers.get('message.removed')?.({
         properties: { sessionID: 'session-1', messageID: 'message-2' },
       });
+      flushSolid();
       staleLatest.resolve([userEntry('message-1'), userEntry('message-2')]);
+      flushSolid();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      flushSolid();
 
       expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
         'message-1',
@@ -1580,11 +1793,13 @@ describe('useOpenCode session state flows', () => {
       ]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('preserves an append without relying on a later removal invalidation', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     // SAFETY: The fixture provides the string fields read by this statement.
@@ -1592,25 +1807,36 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionMessages.mockReturnValueOnce(staleLatest.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
-      stateModule.setState('sessions', [session('session-1')]);
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [userEntry('message-1'), userEntry('message-2')]);
+      flushSolid();
+      stateModule.setState(storePath('sessions', [session('session-1')]));
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('messages', [userEntry('message-1'), userEntry('message-2')]));
+      flushSolid();
 
       handlers.get('session.error')?.({
         properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
       });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+      flushSolid();
       handlers.get('message.updated')?.({ properties: { info: userMessage('message-3') } });
+      flushSolid();
 
       staleLatest.resolve([userEntry('message-1'), userEntry('message-2')]);
+      flushSolid();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      flushSolid();
 
       expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
         'message-1',
@@ -1619,11 +1845,13 @@ describe('useOpenCode session state flows', () => {
       ]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('preserves a same-part SSE update that beats a stale latest response', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     const staleEntry = {
@@ -1643,21 +1871,29 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionMessages.mockReturnValueOnce(staleLatest.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
-      stateModule.setState('sessions', [session('session-1')]);
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [staleEntry]);
+      flushSolid();
+      stateModule.setState(storePath('sessions', [session('session-1')]));
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('messages', [staleEntry]));
+      flushSolid();
 
       handlers.get('session.error')?.({
         properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
       });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+      flushSolid();
       handlers.get('message.part.updated')?.({
         properties: {
           part: {
@@ -1666,17 +1902,22 @@ describe('useOpenCode session state flows', () => {
           },
         },
       });
+      flushSolid();
       staleLatest.resolve([staleEntry]);
+      flushSolid();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      flushSolid();
 
       expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({ text: 'new' });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('hydrates a selected busy session when an unprojectable stream event races the initial snapshot', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const initialSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     const followUpSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -1690,16 +1931,21 @@ describe('useOpenCode session state flows', () => {
       .mockReturnValue(followUpSnapshot.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.next.text.delta')).toBe(true));
-      stateModule.setState('sessions', [session('session-1')]);
+      flushSolid();
+      stateModule.setState(storePath('sessions', [session('session-1')]));
+      flushSolid();
       const selection = hookModule.selectSession('session-1');
       await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+      flushSolid();
 
       handlers.get('session.next.text.delta')?.({
         properties: {
@@ -1709,6 +1955,7 @@ describe('useOpenCode session state flows', () => {
           delta: 'streaming response',
         },
       });
+      flushSolid();
       handlers.get('session.next.reasoning.delta')?.({
         properties: {
           sessionID: 'session-1',
@@ -1717,6 +1964,7 @@ describe('useOpenCode session state flows', () => {
           delta: 'thinking',
         },
       });
+      flushSolid();
       handlers.get('message.part.delta')?.({
         properties: {
           sessionID: 'session-1',
@@ -1726,6 +1974,7 @@ describe('useOpenCode session state flows', () => {
           delta: 'streaming response',
         },
       });
+      flushSolid();
       handlers.get('message.part.updated')?.({
         properties: {
           part: {
@@ -1737,6 +1986,7 @@ describe('useOpenCode session state flows', () => {
           },
         },
       });
+      flushSolid();
       handlers.get('message.updated')?.({
         properties: {
           info: {
@@ -1746,8 +1996,11 @@ describe('useOpenCode session state flows', () => {
           },
         },
       });
+      flushSolid();
       initialSnapshot.resolve(canonical);
+      flushSolid();
       await selection;
+      flushSolid();
 
       expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
         'user-1',
@@ -1756,11 +2009,13 @@ describe('useOpenCode session state flows', () => {
       expect(stateModule.state.messagesLoading).toBe(false);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('preserves child-session messages during active-parent latest-message resync', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const parentMessage = userEntry('parent-message');
     // SAFETY: The fixture provides the string fields read by this statement.
@@ -1768,25 +2023,38 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionMessages.mockResolvedValue([parentMessage]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
-      stateModule.setState('sessions', [
-        session('session-1'),
-        { ...session('child-1'), parentID: 'session-1' },
-      ]);
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [parentMessage, userEntry('child-message', 'child-1')]);
+      flushSolid();
+      stateModule.setState(
+        storePath('sessions', [
+          session('session-1'),
+          { ...session('child-1'), parentID: 'session-1' },
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [parentMessage, userEntry('child-message', 'child-1')])
+      );
+      flushSolid();
 
       handlers.get('session.error')?.({
         properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
       });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+      flushSolid();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      flushSolid();
 
       expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
         'parent-message',
@@ -1794,11 +2062,13 @@ describe('useOpenCode session state flows', () => {
       ]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('reconciles repeated native child result events through history without selecting the child or duplicating results', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const parent = session('session-1');
     const child = { ...session('native-child'), parentID: parent.id };
@@ -1819,24 +2089,38 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionGet.mockImplementation(async (id) => (id === child.id ? child : parent));
     clientMocks.sessionMessages.mockResolvedValue([result]);
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
     try {
       await vi.waitFor(() => expect(handlers.has('session.next.synthetic')).toBe(true));
-      stateModule.setState('sessions', [parent]);
-      stateModule.setState('activeSessionId', parent.id);
-      stateModule.setState('selectedAgent', 'build');
-      stateModule.setState('selectedModel', { providerID: 'fixture', modelID: 'parent-model' });
+      flushSolid();
+      stateModule.setState(storePath('sessions', [parent]));
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', parent.id));
+      flushSolid();
+      stateModule.setState(storePath('selectedAgent', 'build'));
+      flushSolid();
+      stateModule.setState(
+        storePath('selectedModel', { providerID: 'fixture', modelID: 'parent-model' })
+      );
+      flushSolid();
       handlers.get('session.created')?.({ properties: { info: child } });
+      flushSolid();
       handlers.get('session.next.synthetic')?.({ properties: { sessionID: parent.id } });
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['native-result'])
       );
+      flushSolid();
       const retained = stateModule.state.messages[0];
       handlers.get('session.next.synthetic')?.({ properties: { sessionID: parent.id } });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(2));
+      flushSolid();
       expect(stateModule.state.messages).toHaveLength(1);
       expect(stateModule.state.messages[0]).toBe(retained);
       expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({
@@ -1855,11 +2139,13 @@ describe('useOpenCode session state flows', () => {
       expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('inserts a child idle sync after its parent task anchor', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const childMessage = userEntry('child-message', 'child-1');
     clientMocks.sessionGet.mockImplementation(async (id) =>
@@ -1870,18 +2156,25 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionMessages.mockResolvedValue([childMessage]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
-      stateModule.setState('sessions', [
-        session('session-1'),
-        { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
-      ]);
-      stateModule.setState('activeSessionId', 'session-1');
+      flushSolid();
+      stateModule.setState(
+        storePath('sessions', [
+          session('session-1'),
+          { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       const parentAnchor = taskAnchorEntry('child-1');
       parentAnchor.parts.push({
         id: 'parent-stream',
@@ -1890,15 +2183,17 @@ describe('useOpenCode session state flows', () => {
         type: 'text',
         text: '',
       });
-      stateModule.setState('messages', [
-        userEntry('parent-before'),
-        parentAnchor,
-        userEntry('parent-after'),
-      ]);
-      stateModule.setState('streamingPartId', 'parent-stream');
-      stateModule.setState('streamingText', 'Parent still streaming');
+      stateModule.setState(
+        storePath('messages', [userEntry('parent-before'), parentAnchor, userEntry('parent-after')])
+      );
+      flushSolid();
+      stateModule.setState(storePath('streamingPartId', 'parent-stream'));
+      flushSolid();
+      stateModule.setState(storePath('streamingText', 'Parent still streaming'));
+      flushSolid();
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'child-1' } });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
@@ -1908,15 +2203,18 @@ describe('useOpenCode session state flows', () => {
           'parent-after',
         ]);
       });
+      flushSolid();
       expect(stateModule.state.streamingPartId).toBe('parent-stream');
       expect(stateModule.state.streamingText).toBe('Parent still streaming');
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('clears child streaming state when the child snapshot completes that stream', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const childInfo = assistantMessage('child-assistant', 'child-user');
     childInfo.sessionID = 'child-1';
@@ -1936,29 +2234,42 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionMessages.mockResolvedValue([{ info: childInfo, parts: [childPart] }]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
-      stateModule.setState('sessions', [
-        session('session-1'),
-        { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 4 } },
-      ]);
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [
-        taskAnchorEntry('child-1'),
-        {
-          info: { ...childInfo, time: { created: 2 } },
-          parts: [{ ...childPart, text: '' }],
-        },
-      ]);
-      stateModule.setState('streamingPartId', childPart.id);
-      stateModule.setState('streamingText', 'Stale child stream');
+      flushSolid();
+      stateModule.setState(
+        storePath('sessions', [
+          session('session-1'),
+          { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 4 } },
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [
+          taskAnchorEntry('child-1'),
+          {
+            info: { ...childInfo, time: { created: 2 } },
+            parts: [{ ...childPart, text: '' }],
+          },
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('streamingPartId', childPart.id));
+      flushSolid();
+      stateModule.setState(storePath('streamingText', 'Stale child stream'));
+      flushSolid();
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'child-1' } });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(stateModule.state.streamingPartId).toBeNull();
@@ -1966,13 +2277,16 @@ describe('useOpenCode session state flows', () => {
         const child = stateModule.state.messages.find((entry) => entry.info.id === childInfo.id);
         expect(child?.parts[0]).toMatchObject({ text: 'Final child response' });
       });
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('reorders an early child recovery after its anchor when the parent snapshot arrives', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const parentSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     const childMessage = userEntry('child-message', 'child-1');
@@ -1986,24 +2300,33 @@ describe('useOpenCode session state flows', () => {
     );
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
-      stateModule.setState('sessions', [
-        session('session-1'),
-        { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
-      ]);
+      flushSolid();
+      stateModule.setState(
+        storePath('sessions', [
+          session('session-1'),
+          { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
+        ])
+      );
+      flushSolid();
       const selection = hookModule.selectSession('session-1');
       await vi.waitFor(() => expect(stateModule.state.activeSessionId).toBe('session-1'));
+      flushSolid();
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'child-1' } });
+      flushSolid();
       await vi.waitFor(() => {
         expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['child-message']);
       });
+      flushSolid();
       const recoveredChild = stateModule.state.messages[0];
 
       parentSnapshot.resolve([
@@ -2011,7 +2334,9 @@ describe('useOpenCode session state flows', () => {
         taskAnchorEntry('child-1'),
         userEntry('parent-after'),
       ]);
+      flushSolid();
       await selection;
+      flushSolid();
 
       expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
         'parent-before',
@@ -2022,11 +2347,13 @@ describe('useOpenCode session state flows', () => {
       expect(stateModule.state.messages[2]).toBe(recoveredChild);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('orders a grandchild recovered before its child when the parent snapshot arrives', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const parentSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     const grandchildMessage = userEntry('grandchild-message', 'grandchild-1');
@@ -2055,34 +2382,44 @@ describe('useOpenCode session state flows', () => {
     });
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
-      stateModule.setState('sessions', [
-        session('session-1'),
-        { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
-        {
-          ...session('grandchild-1'),
-          parentID: 'child-1',
-          time: { created: 3, updated: 3 },
-        },
-      ]);
+      flushSolid();
+      stateModule.setState(
+        storePath('sessions', [
+          session('session-1'),
+          { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
+          {
+            ...session('grandchild-1'),
+            parentID: 'child-1',
+            time: { created: 3, updated: 3 },
+          },
+        ])
+      );
+      flushSolid();
       const selection = hookModule.selectSession('session-1');
       await vi.waitFor(() => expect(stateModule.state.activeSessionId).toBe('session-1'));
+      flushSolid();
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'grandchild-1' } });
+      flushSolid();
       await vi.waitFor(() => {
         expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
           'grandchild-message',
         ]);
       });
+      flushSolid();
       const recoveredGrandchild = stateModule.state.messages[0];
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'child-1' } });
+      flushSolid();
       await vi.waitFor(() => {
         expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
           'grandchild-message',
@@ -2091,6 +2428,7 @@ describe('useOpenCode session state flows', () => {
           'child-after',
         ]);
       });
+      flushSolid();
       const recoveredChild = stateModule.state.messages.slice(1);
 
       parentSnapshot.resolve([
@@ -2098,7 +2436,9 @@ describe('useOpenCode session state flows', () => {
         taskAnchorEntry('child-1'),
         userEntry('parent-after'),
       ]);
+      flushSolid();
       await selection;
+      flushSolid();
 
       expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
         'parent-before',
@@ -2115,11 +2455,13 @@ describe('useOpenCode session state flows', () => {
       expect(stateModule.state.messages[5]).toBe(recoveredChild[2]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('rejects a stale child snapshot after a newer child mutation', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const childSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     clientMocks.sessionGet.mockImplementation(async (id) =>
@@ -2130,13 +2472,16 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionMessages.mockReturnValue(childSnapshot.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
+      flushSolid();
       const childInfo = assistantMessage('child-assistant', 'child-user');
       childInfo.sessionID = 'child-1';
       const initialPart: Part = {
@@ -2146,17 +2491,26 @@ describe('useOpenCode session state flows', () => {
         type: 'text',
         text: 'Initial',
       };
-      stateModule.setState('sessions', [
-        session('session-1'),
-        { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
-      ]);
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [
-        taskAnchorEntry('child-1'),
-        { info: childInfo, parts: [initialPart] },
-      ]);
-      stateModule.setState('streamingPartId', 'child-text');
-      stateModule.setState('streamingText', 'Live child text');
+      stateModule.setState(
+        storePath('sessions', [
+          session('session-1'),
+          { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [
+          taskAnchorEntry('child-1'),
+          { info: childInfo, parts: [initialPart] },
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('streamingPartId', 'child-text'));
+      flushSolid();
+      stateModule.setState(storePath('streamingText', 'Live child text'));
+      flushSolid();
 
       handlers.get('message.part.updated')?.({
         properties: {
@@ -2169,20 +2523,24 @@ describe('useOpenCode session state flows', () => {
           },
         },
       });
+      flushSolid();
       await vi.waitFor(() =>
         expect(clientMocks.sessionMessages).toHaveBeenCalledWith('child-1', {
           limit: 200,
           directory: '/repo',
         })
       );
+      flushSolid();
       handlers.get('message.updated')?.({
         properties: {
           info: { ...childInfo, cost: 1 },
         },
       });
+      flushSolid();
       childSnapshot.resolve([
         { info: childInfo, parts: [{ ...initialPart, text: 'Stale child text' }] },
       ]);
+      flushSolid();
 
       await vi.waitFor(() => {
         const child = stateModule.state.messages.find(
@@ -2191,15 +2549,18 @@ describe('useOpenCode session state flows', () => {
         expect(child?.info).toMatchObject({ cost: 1 });
         expect(child?.parts[0]).toMatchObject({ text: 'Initial' });
       });
+      flushSolid();
       expect(stateModule.state.streamingPartId).toBe('child-text');
       expect(stateModule.state.streamingText).toBe('Live child text');
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('does not reintroduce a removed message from an in-flight older page', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const stalePage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     let latestLoads = 0;
@@ -2214,16 +2575,22 @@ describe('useOpenCode session state flows', () => {
     });
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('message.removed')).toBe(true));
+      flushSolid();
       await hookModule.selectSession('session-1');
+      flushSolid();
       messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+      flushSolid();
 
       const pageLoad = hookModule.loadOlderSessionHistoryPage('session-1');
       await vi.waitFor(() => {
@@ -2233,21 +2600,28 @@ describe('useOpenCode session state flows', () => {
           directory: '/repo',
         });
       });
+      flushSolid();
       handlers.get('message.removed')?.({
         properties: { sessionID: 'session-1', messageID: 'message-2' },
       });
+      flushSolid();
       stalePage.resolve([userEntry('message-1'), userEntry('message-2')]);
+      flushSolid();
 
       await pageLoad;
+      flushSolid();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      flushSolid();
       expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-3']);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('keeps a newer selection load when an inactive sync resolves late', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     const staleBackground = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     // SAFETY: The test installs the typed mock implementation before this statement.
@@ -2268,38 +2642,52 @@ describe('useOpenCode session state flows', () => {
       .mockResolvedValueOnce(freshSelection);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
-      stateModule.setState('sessions', [session('session-a'), session('session-b')]);
-      stateModule.setState('activeSessionId', 'session-a');
-      stateModule.setState('messages', [userEntry('session-a-message', 'session-a')]);
+      flushSolid();
+      stateModule.setState(storePath('sessions', [session('session-a'), session('session-b')]));
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-a'));
+      flushSolid();
+      stateModule.setState(storePath('messages', [userEntry('session-a-message', 'session-a')]));
+      flushSolid();
 
       handlers.get('session.error')?.({
         properties: { sessionID: 'session-b', error: { name: 'UnexpectedFailure' } },
       });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+      flushSolid();
 
       await hookModule.selectSession('session-b');
+      flushSolid();
       expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['session-b-fresh']);
       staleBackground.resolve(staleMessages);
+      flushSolid();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      flushSolid();
 
       expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['session-b-fresh']);
       expect(stateModule.state.sessionMessageCounts['session-b']).toBe(1);
       expect(messageWindow.getSessionHistoryCursor('session-b')).toBe('cursor-fresh');
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('clears every old history store after empty and disjoint resyncs', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
@@ -2309,11 +2697,14 @@ describe('useOpenCode session state flows', () => {
       .mockResolvedValueOnce([userEntry('message-new')]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
     const seedOldHistory = (suffix: string) => {
       messageWindow.setSessionHistoryCursor('session-1', `history-${suffix}`);
       messageWindow.setSessionHistoryPromptCursor('session-1', `prompt-${suffix}`);
@@ -2325,26 +2716,35 @@ describe('useOpenCode session state flows', () => {
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
+      flushSolid();
       await hookModule.selectSession('session-1');
+      flushSolid();
       seedOldHistory('empty');
+      flushSolid();
 
       handlers.get('session.error')?.({
         properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
       });
+      flushSolid();
       await vi.waitFor(() => expect(stateModule.state.messages).toEqual([]));
+      flushSolid();
       expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
       expect(messageWindow.getSessionHistoryPromptCursor('session-1')).toBeUndefined();
       expect(messageWindow.getSessionHistoryPrompts('session-1')).toEqual([]);
       expect(messageWindow.takeCachedSessionHistoryPage('session-1', 'page-empty')).toBeUndefined();
 
-      stateModule.setState('messages', [userEntry('message-old-again')]);
+      stateModule.setState(storePath('messages', [userEntry('message-old-again')]));
+      flushSolid();
       seedOldHistory('disjoint');
+      flushSolid();
       handlers.get('session.error')?.({
         properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
       });
+      flushSolid();
       await vi.waitFor(() => {
         expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-new']);
       });
+      flushSolid();
       expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
       expect(messageWindow.getSessionHistoryPromptCursor('session-1')).toBeUndefined();
       expect(messageWindow.getSessionHistoryPrompts('session-1')).toEqual([]);
@@ -2353,12 +2753,15 @@ describe('useOpenCode session state flows', () => {
       ).toBeUndefined();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('continues full-history loading through an empty continuation page', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     // SAFETY: The test installs the typed mock implementation before this statement.
     const emptyPage = [] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
     emptyPage.nextCursor = 'cursor-b';
@@ -2367,11 +2770,15 @@ describe('useOpenCode session state flows', () => {
       if (options?.before === 'cursor-b') return [userEntry('message-1')];
       throw new Error(`Unexpected cursor ${options?.before}`);
     });
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('messages', [userEntry('message-3')]);
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('messages', [userEntry('message-3')]));
+    flushSolid();
     messageWindow.setSessionHistoryCursor('session-1', 'cursor-a');
+    flushSolid();
 
     await hookModule.loadFullSessionHistory('session-1');
+    flushSolid();
 
     expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
       limit: 200,
@@ -2386,7 +2793,9 @@ describe('useOpenCode session state flows', () => {
 
   it('terminates a cursor cycle across separate one-page history loads', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     // SAFETY: The test installs the typed mock implementation before this statement.
     const pageA = [userEntry('message-2')] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
@@ -2413,12 +2822,17 @@ describe('useOpenCode session state flows', () => {
       if (options?.before === 'cursor-b') return pageB;
       throw new Error(`Unexpected cursor ${options?.before}`);
     });
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('messages', [userEntry('message-3')]);
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('messages', [userEntry('message-3')]));
+    flushSolid();
     messageWindow.setSessionHistoryCursor('session-1', 'cursor-a');
+    flushSolid();
 
     await hookModule.loadOlderSessionHistoryPage('session-1');
+    flushSolid();
     await hookModule.loadOlderSessionHistoryPage('session-1');
+    flushSolid();
 
     expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
     expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(2);
@@ -2426,7 +2840,9 @@ describe('useOpenCode session state flows', () => {
 
   it('terminates a prompt cursor cycle across separate history requests', async () => {
     const { hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     // SAFETY: The test installs the typed mock implementation before this statement.
     const pageA = [userEntry('prompt-a')] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
@@ -2443,9 +2859,12 @@ describe('useOpenCode session state flows', () => {
       throw new Error(`Unexpected cursor ${options?.before}`);
     });
     messageWindow.setSessionHistoryPromptCursor('session-1', 'cursor-a');
+    flushSolid();
 
     await hookModule.loadOlderSessionPrompts('session-1');
+    flushSolid();
     await hookModule.loadOlderSessionPrompts('session-1');
+    flushSolid();
 
     expect(messageWindow.getSessionHistoryPromptCursor('session-1')).toBeUndefined();
     expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(2);
@@ -2453,25 +2872,37 @@ describe('useOpenCode session state flows', () => {
 
   it('canonically resyncs and resets history after a committed revert', async () => {
     const handlers = installServerEventHandlers();
+    flushSolid();
     mockRuntimeBootstrap();
     // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockResolvedValue([userEntry('message-kept')]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const messageWindow = await import('../lib/message-window');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.next.revert.committed')).toBe(true));
-      stateModule.setState('sessions', [session('session-1')]);
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [userEntry('message-kept'), userEntry('message-reverted')]);
+      flushSolid();
+      stateModule.setState(storePath('sessions', [session('session-1')]));
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [userEntry('message-kept'), userEntry('message-reverted')])
+      );
+      flushSolid();
       messageWindow.setSessionHistoryCursor('session-1', 'cursor-old');
+      flushSolid();
       messageWindow.setSessionHistoryPrompts('session-1', [userEntry('prompt-old')]);
+      flushSolid();
       messageWindow.cacheSessionHistoryPage('session-1', 'page-old', [
         userEntry('message-reverted'),
       ]);
@@ -2479,15 +2910,18 @@ describe('useOpenCode session state flows', () => {
       handlers.get('session.next.revert.committed')?.({
         properties: { sessionID: 'session-1', messageID: 'message-reverted' },
       });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-kept']);
       });
+      flushSolid();
       expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
       expect(messageWindow.getSessionHistoryPrompts('session-1')).toEqual([]);
       expect(messageWindow.takeCachedSessionHistoryPage('session-1', 'page-old')).toBeUndefined();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 });

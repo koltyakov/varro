@@ -1,4 +1,4 @@
-import { createRoot, createSignal } from 'solid-js';
+import { flush as flushSolid, createRoot, createSignal } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus } from '../../shared/protocol';
 import { PROVIDER_LIMIT_STALE_RETENTION_MS } from '../../shared/provider-limit-config';
@@ -8,6 +8,7 @@ describe('provider quota display retention', () => {
   let dispose: (() => void) | undefined;
   afterEach(() => {
     dispose?.();
+    flushSolid();
     vi.useRealTimers();
   });
   const snapshot = (): Extract<ProviderLimitStatus, { status: 'available' }> => ({
@@ -33,15 +34,19 @@ describe('provider quota display retention', () => {
   it('expires retained quotas at the exact deadline without another poll', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-11-17T10:00:00Z'));
+    flushSolid();
     const stale = snapshot();
     const display = createRoot((cleanup) => {
       dispose = cleanup;
       return createProviderLimitDisplay(() => stale);
     });
+    flushSolid();
     expect(display()).toBe(stale);
     await vi.advanceTimersByTimeAsync(PROVIDER_LIMIT_STALE_RETENTION_MS - 1);
+    flushSolid();
     expect(display()).toBe(stale);
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(display()).toMatchObject({
       status: 'error',
       retryAt: stale.retryAt,
@@ -60,13 +65,17 @@ describe('provider quota display retention', () => {
       dispose = cleanup;
       return createProviderLimitDisplay(value);
     });
+    flushSolid();
     expect(vi.getTimerCount()).toBe(1);
     const fresh = { ...stale, stale: undefined, retryAt: undefined };
     setValue(fresh);
+    flushSolid();
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(PROVIDER_LIMIT_STALE_RETENTION_MS);
+    flushSolid();
     expect(display()).toBe(fresh);
     setValue(null);
+    flushSolid();
     expect(display()).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -81,8 +90,10 @@ describe('provider quota display retention', () => {
       dispose = cleanup;
       createProviderLimitDisplay(() => stale);
     });
+    flushSolid();
     expect(vi.getTimerCount()).toBe(1);
     dispose?.();
+    flushSolid();
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -102,8 +113,10 @@ describe('provider quota display retention', () => {
       dispose = cleanup;
       return createProviderLimitDisplay(() => fresh);
     });
+    flushSolid();
     expect(display()).toBe(fresh);
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
     expect(display()).toMatchObject({ status: 'available', windows: fresh.windows });
     expect(display()).not.toHaveProperty('usageLimitResets');
   });
@@ -123,11 +136,14 @@ describe('provider quota display retention', () => {
       dispose = cleanup;
       return createProviderLimitDisplay(() => stale);
     });
+    flushSolid();
     expect(vi.getTimerCount()).toBe(2);
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
     expect(display()).toMatchObject({ status: 'available' });
     expect(display()).not.toHaveProperty('usageLimitResets');
     await vi.advanceTimersByTimeAsync(PROVIDER_LIMIT_STALE_RETENTION_MS - 1_000);
+    flushSolid();
     expect(display()).toMatchObject({ status: 'error' });
     expect(vi.getTimerCount()).toBe(0);
   });

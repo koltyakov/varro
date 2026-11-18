@@ -239,7 +239,11 @@ export function placeDropdownAnchor(
   menuEl.style.maxHeight = `${Math.max(0, rect.bottom - topBound)}px`;
 }
 
-export function observePopupViewport(el: HTMLElement, reposition: () => void): () => void {
+export function observePopupViewport(
+  el: HTMLElement,
+  reposition: () => void,
+  onFirstReveal?: () => void
+): () => void {
   let scheduled = false;
   let disposed = false;
   const run = () => {
@@ -250,6 +254,8 @@ export function observePopupViewport(el: HTMLElement, reposition: () => void): (
       if (disposed) return;
       reposition();
       el.removeAttribute('data-popup-position-pending');
+      onFirstReveal?.();
+      onFirstReveal = undefined;
     });
   };
 

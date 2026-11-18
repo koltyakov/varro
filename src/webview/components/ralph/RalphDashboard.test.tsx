@@ -1,6 +1,6 @@
 import { createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import type { RalphIteration, RalphRun } from '../../../shared/ralph';
 import { RalphDashboard } from './RalphDashboard';
 import type { ProviderLimitStatus } from '../../../shared/protocol';

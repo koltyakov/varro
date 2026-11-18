@@ -1,5 +1,6 @@
-import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { createEffect, For, Show, createMemo, createSignal, onCleanup, untrack } from 'solid-js';
+import { Portal } from '@solidjs/web';
+import { ariaBoolean } from '../lib/aria';
 import { postMessage } from '../lib/bridge';
 import { setExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import { getLeafPathName } from '../lib/path-display';
@@ -606,22 +607,32 @@ function DiffLinesContent(props: {
 function HighlightedDiffLineContent(props: { content: string; language?: string }) {
   // oxlint-disable-next-line no-unassigned-vars -- Solid assigns the JSX ref before effects run.
   let element!: HTMLSpanElement;
-  createEffect(() => {
-    const text = props.content;
-    const language = resolveCodeLanguage(props.language);
-    element.innerHTML = renderHighlightedCodeHtml(text, language);
-    if (!language || highlightCode(text, language) !== null) return;
-    const cancel = codeHighlighter.request(
-      text,
-      language,
-      (html) => {
-        if (html !== null && element.isConnected && element.textContent === text)
-          element.innerHTML = html;
-      },
-      1
-    );
-    onCleanup(cancel);
-  });
+  createEffect(
+    () => ({ text: props.content, language: resolveCodeLanguage(props.language) }),
+    ({ text, language }) => {
+      const cleanups: Array<() => void> = [];
+
+      element.innerHTML = renderHighlightedCodeHtml(text, language);
+      if (!language || highlightCode(text, language) !== null)
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+      const cancel = codeHighlighter.request(
+        text,
+        language,
+        (html) => {
+          if (html !== null && element.isConnected && element.textContent === text)
+            element.innerHTML = html;
+        },
+        1
+      );
+      cleanups.push(cancel);
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    }
+  );
   return <span ref={element} class="diff-view-line-content hljs" />;
 }
 
@@ -645,7 +656,7 @@ export function DiffView(props: {
 
   return (
     <div class={`diff-view-widget${props.showChanges ? ' diff-view-widget-inline' : ''}`}>
-      <Index each={preparedDiffs()}>
+      <For keyed={false} each={preparedDiffs()}>
         {(prepared, index) => (
           <DiffItem
             diff={prepared().diff}
@@ -658,7 +669,7 @@ export function DiffView(props: {
             }
           />
         )}
-      </Index>
+      </For>
     </div>
   );
 }
@@ -684,10 +695,11 @@ function DiffItem(props: {
   // resize callbacks run without an owner, where those computations would never
   // be disposed, so resolve the prop once here and read the memo everywhere else.
   const stateKey = createMemo(() => props.stateKey);
-  let renderedFile = props.diff.file;
-  let renderedStateKey = stateKey();
-  let previewStateReady = !stateKey();
-  const initialPreviewState = stateKey() ? getToolDiffPreviewState(stateKey()!) : null;
+  const initialState = untrack(() => ({ file: props.diff.file, key: stateKey() }));
+  let renderedFile = initialState.file;
+  let renderedStateKey = initialState.key;
+  let previewStateReady = !initialState.key;
+  const initialPreviewState = initialState.key ? getToolDiffPreviewState(initialState.key) : null;
   let restoreExpandedScroll = initialPreviewState?.expanded ?? false;
   const file = () => props.diff.file;
   const fromFile = () => props.diff.fromFile;
@@ -873,28 +885,32 @@ function DiffItem(props: {
     if (canExpand()) toggleExpanded();
   };
 
-  createEffect(() => {
-    const nextFile = file();
-    const nextStateKey = stateKey();
-    displayLines();
-    const itemChanged = nextFile !== renderedFile || nextStateKey !== renderedStateKey;
-    renderedFile = nextFile;
-    renderedStateKey = nextStateKey;
-    if (itemChanged) {
-      const previewState = nextStateKey ? getToolDiffPreviewState(nextStateKey) : null;
-      previewStateReady = !nextStateKey;
-      restoreExpandedScroll = previewState?.expanded ?? false;
-      setExpanded(previewState?.expanded ?? false);
-      return;
+  createEffect(
+    () => ({ nextFile: file(), nextStateKey: stateKey(), lines: displayLines() }),
+    ({ nextFile, nextStateKey }) => {
+      const itemChanged = nextFile !== renderedFile || nextStateKey !== renderedStateKey;
+      renderedFile = nextFile;
+      renderedStateKey = nextStateKey;
+      if (itemChanged) {
+        const previewState = nextStateKey ? getToolDiffPreviewState(nextStateKey) : null;
+        previewStateReady = !nextStateKey;
+        restoreExpandedScroll = previewState?.expanded ?? false;
+        setExpanded(previewState?.expanded ?? false);
+        return;
+      }
+      queueMicrotask(() => {
+        updateScrollThumbs();
+      });
     }
-    queueMicrotask(() => {
-      updateScrollThumbs();
-    });
-  });
+  );
 
-  createEffect(() => {
-    const viewport = viewportElement();
-    if (!viewport) return;
+  createEffect(viewportElement, (viewport) => {
+    const cleanups: Array<() => void> = [];
+
+    if (!viewport)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
 
     queueMicrotask(() => {
       if (viewport !== linesViewport || !viewport.isConnected) return;
@@ -904,30 +920,46 @@ function DiffItem(props: {
       updateScrollThumbs();
     });
 
-    onCleanup(observeSettledResize(viewport, updateScrollThumbs));
+    cleanups.push(observeSettledResize(viewport, updateScrollThumbs));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
-  createEffect(() => {
-    const viewport = overlayViewportElement();
-    if (!expanded() || !viewport) return;
-    const previewState = stateKey() ? getToolDiffPreviewState(stateKey()!) : null;
+  createEffect(
+    () => {
+      const viewport = overlayViewportElement();
+      if (!expanded() || !viewport) return null;
+      return { viewport, key: stateKey() };
+    },
+    (overlay) => {
+      if (!overlay) return;
+      const { viewport, key } = overlay;
+      const previewState = key ? getToolDiffPreviewState(key) : null;
 
-    queueMicrotask(() => {
-      if (viewport !== overlayViewport || !viewport.isConnected || !expanded()) return;
-      if (restoreExpandedScroll && previewState?.expanded) {
-        viewport.scrollTop = previewState.scrollTop;
-        viewport.scrollLeft = previewState.scrollLeft;
-      } else {
-        scrollDiffToFirstChange(viewport);
-      }
-      restoreExpandedScroll = true;
-      previewStateReady = true;
-      savePreviewState();
-    });
-  });
+      queueMicrotask(() => {
+        if (viewport !== overlayViewport || !viewport.isConnected || !expanded()) return;
+        if (restoreExpandedScroll && previewState?.expanded) {
+          viewport.scrollTop = previewState.scrollTop;
+          viewport.scrollLeft = previewState.scrollLeft;
+        } else {
+          scrollDiffToFirstChange(viewport);
+        }
+        restoreExpandedScroll = true;
+        previewStateReady = true;
+        savePreviewState();
+      });
+    }
+  );
 
-  createEffect(() => {
-    if (!expanded()) return;
+  createEffect(expanded, (isExpanded) => {
+    const cleanups: Array<() => void> = [];
+
+    if (!isExpanded)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -935,11 +967,15 @@ function DiffItem(props: {
       toggleExpanded();
     };
     document.addEventListener('keydown', closeOnEscape, true);
-    onCleanup(() => document.removeEventListener('keydown', closeOnEscape, true));
+    cleanups.push(() => document.removeEventListener('keydown', closeOnEscape, true));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
-  createEffect(() => {
-    setExpandedDiffOverlay(overlayOwner, expanded(), collapseExpanded);
+  createEffect(expanded, (isExpanded) => {
+    setExpandedDiffOverlay(overlayOwner, isExpanded, collapseExpanded);
   });
 
   onCleanup(() => setExpandedDiffOverlay(overlayOwner, false));
@@ -994,7 +1030,7 @@ function DiffItem(props: {
             }}
             type="button"
             class="diff-view-toggle"
-            aria-expanded={expanded()}
+            aria-expanded={ariaBoolean(expanded())}
             aria-label={`${expanded() ? 'Collapse' : 'Expand'} changes in ${displayName()}`}
             title={`${expanded() ? 'Collapse' : 'Expand'} diff preview`}
           >
@@ -1025,7 +1061,7 @@ function DiffItem(props: {
             }}
             class={`diff-view-lines${hasLineNumbers() ? '' : ' diff-view-lines-unnumbered'}`}
             role="region"
-            tabIndex={0}
+            tabindex={0}
             aria-label={`Changes in ${file() || 'file'}`}
             onClick={toggleExpandedFromPreview}
             onFocus={updateScrollThumbs}
@@ -1145,7 +1181,7 @@ function DiffItem(props: {
                     }}
                     class={`diff-view-lines diff-view-overlay-lines${hasLineNumbers() ? '' : ' diff-view-lines-unnumbered'}`}
                     role="region"
-                    tabIndex={0}
+                    tabindex={0}
                     aria-label={`All changes in ${file() || 'file'}`}
                     onScroll={savePreviewState}
                   >

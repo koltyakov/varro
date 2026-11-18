@@ -1,3 +1,5 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InitialWebviewState } from '../../shared/protocol';
 import type { UnknownRecord } from '../../shared/type-utils';
@@ -37,9 +39,12 @@ function installView(workspacePath: string, surface: 'sidebar' | 'editor' = 'sid
 
 beforeEach(() => {
   vi.resetModules();
+  flushSolid();
   window.localStorage.clear();
+  flushSolid();
   savedState = {};
   installView('/repo-a');
+  flushSolid();
 });
 
 afterEach(() => {
@@ -52,6 +57,7 @@ afterEach(() => {
 describe('main chat view persistence', () => {
   it('restores the folder view from VS Code state after the webview origin changes', async () => {
     const first = await import('./state-view-persistence');
+    flushSolid();
     first.persistLastOpenedView(
       { type: 'session', sessionId: 'session-a', directory: '/repo-a' },
       1
@@ -66,9 +72,12 @@ describe('main chat view persistence', () => {
     });
     expect(window.localStorage.getItem('varro.lastOpenedView:/repo-a')).toBeNull();
     window.localStorage.clear();
+    flushSolid();
     vi.resetModules();
+    flushSolid();
 
     const restored = await import('./state-view-persistence');
+    flushSolid();
     expect(restored.getPersistedLastOpenedView()).toEqual(
       savedState['varro.lastOpenedView:/repo-a']
     );
@@ -77,23 +86,28 @@ describe('main chat view persistence', () => {
 
   it('keeps separate views and active sessions for each selected folder', async () => {
     const persistence = await import('./state-view-persistence');
+    flushSolid();
     const { setState } = await import('./app-state');
+    flushSolid();
     persistence.persistLastOpenedView(
       { type: 'session', sessionId: 'session-a', directory: '/repo-a' },
       1
     );
     persistence.persistActiveSessionId('session-a');
 
-    setState('editorContext', 'workspacePath', '/repo-b');
+    setState(storePath('editorContext', 'workspacePath', '/repo-b'));
+    flushSolid();
     expect(persistence.getPersistedLastOpenedView()).toBeNull();
     expect(persistence.getPersistedActiveSessionId()).toBeNull();
     persistence.persistLastOpenedView({ type: 'sessions-list' }, 2);
     persistence.persistActiveSessionId('session-b');
 
-    setState('editorContext', 'workspacePath', '/repo-a');
+    setState(storePath('editorContext', 'workspacePath', '/repo-a'));
+    flushSolid();
     expect(persistence.getPersistedLastOpenedView()).toMatchObject({ sessionId: 'session-a' });
     expect(persistence.getPersistedActiveSessionId()).toBe('session-a');
-    setState('editorContext', 'workspacePath', '/repo-b');
+    setState(storePath('editorContext', 'workspacePath', '/repo-b'));
+    flushSolid();
     expect(persistence.getPersistedLastOpenedView()).toEqual({
       type: 'sessions-list',
       timestamp: 2,
@@ -103,10 +117,14 @@ describe('main chat view persistence', () => {
 
   it('normalizes Windows folder identities', async () => {
     installView('C:\\Repo');
+    flushSolid();
     const persistence = await import('./state-view-persistence');
+    flushSolid();
     const { setState } = await import('./app-state');
+    flushSolid();
     persistence.persistLastOpenedView({ type: 'new-session' }, 3);
-    setState('editorContext', 'workspacePath', 'c:/repo/');
+    setState(storePath('editorContext', 'workspacePath', 'c:/repo/'));
+    flushSolid();
     expect(persistence.getPersistedLastOpenedView()).toEqual({ type: 'new-session', timestamp: 3 });
   });
 
@@ -118,13 +136,18 @@ describe('main chat view persistence', () => {
       timestamp: 1,
     };
     window.localStorage.setItem('varro.lastOpenedView', JSON.stringify(legacy));
+    flushSolid();
     const persistence = await import('./state-view-persistence');
+    flushSolid();
     const { setState } = await import('./app-state');
-    setState('editorContext', 'workspacePath', '/repo-b');
+    flushSolid();
+    setState(storePath('editorContext', 'workspacePath', '/repo-b'));
+    flushSolid();
     expect(persistence.getPersistedLastOpenedView()).toBeNull();
     expect(savedState['varro.lastOpenedView:/repo-b']).toBeUndefined();
 
-    setState('editorContext', 'workspacePath', '/repo-a');
+    setState(storePath('editorContext', 'workspacePath', '/repo-a'));
+    flushSolid();
     expect(persistence.getPersistedLastOpenedView()).toEqual(legacy);
     expect(savedState['varro.lastOpenedView:/repo-a']).toEqual(legacy);
   });
@@ -133,14 +156,18 @@ describe('main chat view persistence', () => {
     'does not migrate an unscoped %s view into another folder',
     async (type) => {
       window.localStorage.setItem('varro.lastOpenedView', JSON.stringify({ type, timestamp: 1 }));
+      flushSolid();
       const persistence = await import('./state-view-persistence');
+      flushSolid();
       expect(persistence.getPersistedLastOpenedView()).toBeNull();
     }
   );
 
   it('keeps editor routes in the unscoped state used by the panel serializer', async () => {
     installView('/repo-a', 'editor');
+    flushSolid();
     const persistence = await import('./state-view-persistence');
+    flushSolid();
     persistence.persistLastOpenedView(
       { type: 'session', sessionId: 'editor-session', directory: '/repo-a' },
       4

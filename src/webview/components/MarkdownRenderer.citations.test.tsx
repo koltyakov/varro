@@ -1,7 +1,8 @@
+import { flush as flushSolid, createComponent, createSignal } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 /* oxlint-disable anti-slop/no-module-mocking -- Only unrelated session navigation is stubbed; citation checks use the real bridge and binding. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createComponent, createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { MarkdownRenderer, __resetMarkdownCachesForTests } from './MarkdownRenderer';
 import { citationPathChecks } from '../lib/citation-path-checks';
 import { citationSymbolLookups } from '../lib/citation-symbol-checks';
@@ -18,28 +19,39 @@ describe('MarkdownRenderer exact citation validation', () => {
 
   beforeEach(() => {
     citationPathChecks.clear();
+    flushSolid();
     citationSymbolLookups.clear();
+    flushSolid();
     __resetMarkdownCachesForTests();
     send.mockReset();
     window.__sendToExtension = send;
-    setState('activeSessionId', null);
-    setState('sessions', []);
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(storePath('activeSessionId', null));
+    flushSolid();
+    setState(storePath('sessions', []));
+    flushSolid();
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     root = document.createElement('div');
     document.body.append(root);
   });
 
   afterEach(() => {
     dispose?.();
+    flushSolid();
     dispose = undefined;
     root.remove();
+    flushSolid();
     citationPathChecks.clear();
+    flushSolid();
     citationSymbolLookups.clear();
+    flushSolid();
     delete window.__sendToExtension;
   });
 
@@ -83,12 +95,15 @@ describe('MarkdownRenderer exact citation validation', () => {
     ['app.ts', '/repo/app.ts'],
   ])('links an existing exact path %s only after validation', async (path, absolutePath) => {
     dispose = render(() => <MarkdownRenderer content={`Updated \`${path}\`.`} />, root);
+    flushSolid();
     expect(root.querySelector('a[data-file]')).toBeNull();
     expect(root.querySelector('code')?.textContent).toBe(path);
     await respond([absolutePath]);
+    flushSolid();
     await vi.waitFor(() =>
       expect(root.querySelector('a[data-file]')?.getAttribute('href')).toBe(absolutePath)
     );
+    flushSolid();
     expect(asRecord(requests()[0]?.body)).toEqual({ directory: '/repo', paths: [path] });
   });
 
@@ -102,9 +117,11 @@ describe('MarkdownRenderer exact citation validation', () => {
     'pdf-source/__65129.pdf',
   ])('keeps missing citation %s as plain code without discovering namesakes', async (path) => {
     dispose = render(() => <MarkdownRenderer content={`Inspect \`${path}\`.`} />, root);
+    flushSolid();
     const icon = root.querySelector<HTMLImageElement>('code.citation-path .file-path-icon');
     expect(icon?.getAttribute('src')).toBe(getFileTypeIcon(path));
     await respond([null]);
+    flushSolid();
     expect(root.querySelector('code.citation-path .file-path-icon')).toBe(icon);
     expect(root.querySelector('a[data-file]')).toBeNull();
     expect(root.querySelector('code')?.textContent).toBe(path);
@@ -122,9 +139,12 @@ describe('MarkdownRenderer exact citation validation', () => {
     ['\\\\server\\share\\my files\\app.ts', 'file://server/share/my%20files/app.ts'],
   ])('exports validated file %s as a native file drag', async (path, uri) => {
     dispose = render(() => <MarkdownRenderer content="[app.ts](src/app.ts#L10-L12)" />, root);
+    flushSolid();
     await respond([path]);
+    flushSolid();
     const anchor = root.querySelector<HTMLAnchorElement>('a[data-file]');
     await vi.waitFor(() => expect(anchor?.dataset.fileValidated).toBe('true'));
+    flushSolid();
 
     const data = new Map([
       ['text/plain', 'https://webview.invalid/src/app.ts:10-12'],
@@ -140,6 +160,7 @@ describe('MarkdownRenderer exact citation validation', () => {
     Object.defineProperty(event, 'dataTransfer', { value: transfer });
     // Starting on the icon exercises delegated handling too.
     (anchor!.querySelector('.file-path-icon') ?? anchor!).dispatchEvent(event);
+    flushSolid();
 
     expect(event.defaultPrevented).toBe(false);
     expect(transfer.effectAllowed).toBe('copy');
@@ -154,7 +175,9 @@ describe('MarkdownRenderer exact citation validation', () => {
     'cancels file drags with invalid metadata %s',
     async (payload) => {
       dispose = render(() => <MarkdownRenderer content="[app.ts](src/app.ts)" />, root);
+      flushSolid();
       await respond(['/repo/src/app.ts']);
+      flushSolid();
       const anchor = root.querySelector<HTMLAnchorElement>('a[data-file]')!;
       anchor.dataset.file = payload;
       const setData = vi.fn();
@@ -162,6 +185,7 @@ describe('MarkdownRenderer exact citation validation', () => {
       Object.defineProperty(event, 'dataTransfer', { value: { setData } });
 
       anchor.dispatchEvent(event);
+      flushSolid();
 
       expect(event.defaultPrevented).toBe(true);
       expect(setData).not.toHaveBeenCalled();
@@ -170,10 +194,14 @@ describe('MarkdownRenderer exact citation validation', () => {
 
   it('opens the validated absolute target and preserves the cited line range', async () => {
     dispose = render(() => <MarkdownRenderer content="[app.ts](src/app.ts#L10-L12)" />, root);
+    flushSolid();
     await respond(['/repo/src/app.ts']);
+    flushSolid();
     const anchor = root.querySelector<HTMLAnchorElement>('a[data-file]');
     await vi.waitFor(() => expect(anchor?.href).toContain('/repo/src/app.ts:10-12'));
+    flushSolid();
     anchor?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: expect.objectContaining({
@@ -197,6 +225,7 @@ describe('MarkdownRenderer exact citation validation', () => {
         },
       })
     );
+    flushSolid();
   });
 
   it('renders streaming text while checks are pending and reuses checks across appends', async () => {
@@ -211,17 +240,25 @@ describe('MarkdownRenderer exact citation validation', () => {
         }),
       root
     );
+    flushSolid();
     await vi.waitFor(() => expect(requests()).toHaveLength(1));
+    flushSolid();
     setContent('Updated `src/app.ts`.\n\nWorking without waiting for the filesystem.');
+    flushSolid();
     await vi.waitFor(() =>
       expect(root.textContent).toContain('without waiting for the filesystem')
     );
+    flushSolid();
     expect(root.querySelector('a[data-file]')).toBeNull();
     await respond(['/repo/src/app.ts']);
+    flushSolid();
     await vi.waitFor(() => expect(root.querySelector('a[data-file]')).not.toBeNull());
+    flushSolid();
     const anchor = root.querySelector('a[data-file]');
     setContent('Updated `src/app.ts`.\n\nWorking without waiting for the filesystem. More text.');
+    flushSolid();
     await vi.waitFor(() => expect(root.textContent).toContain('More text.'));
+    flushSolid();
     expect(root.querySelector('a[data-file]')).toBe(anchor);
     expect(requests()).toHaveLength(1);
   });
@@ -231,14 +268,20 @@ describe('MarkdownRenderer exact citation validation', () => {
       () => <MarkdownRenderer content="`src/app.ts` and `missing.ts`" cacheByContent />,
       root
     );
+    flushSolid();
     await respond(['/repo/src/app.ts', null]);
+    flushSolid();
     await vi.waitFor(() => expect(root.querySelectorAll('a[data-file]')).toHaveLength(1));
+    flushSolid();
     dispose();
+    flushSolid();
     root.replaceChildren();
+    flushSolid();
     dispose = render(
       () => <MarkdownRenderer content="`src/app.ts` and `missing.ts`" cacheByContent />,
       root
     );
+    flushSolid();
     expect(root.querySelectorAll('a[data-file]')).toHaveLength(1);
     expect(root.querySelector('code')?.textContent).toBe('missing.ts');
     expect(root.querySelector('code.citation-path .file-path-icon')?.getAttribute('src')).toBe(
@@ -249,10 +292,14 @@ describe('MarkdownRenderer exact citation validation', () => {
 
   it('ignores a late result after the component is disposed', async () => {
     dispose = render(() => <MarkdownRenderer content="`src/app.ts`" />, root);
+    flushSolid();
     await vi.waitFor(() => expect(requests()).toHaveLength(1));
+    flushSolid();
     dispose();
+    flushSolid();
     dispose = undefined;
     await respond(['/repo/src/app.ts']);
+    flushSolid();
     expect(root.querySelector('a[data-file]')).toBeNull();
   });
 
@@ -268,16 +315,23 @@ describe('MarkdownRenderer exact citation validation', () => {
         }),
       root
     );
+    flushSolid();
     await vi.waitFor(() => expect(requests()).toHaveLength(1));
+    flushSolid();
     const oldCode = root.querySelector('code');
     setDirectory('/repo-b');
+    flushSolid();
     await vi.waitFor(() => expect(root.querySelector('code')).not.toBe(oldCode));
+    flushSolid();
     await respond(['/repo-a/src/app.ts']);
+    flushSolid();
     expect(root.querySelector('a[data-file]')).toBeNull();
     await respond(['/repo-b/src/app.ts'], 1);
+    flushSolid();
     await vi.waitFor(() =>
       expect(root.querySelector('a[data-file]')?.getAttribute('href')).toBe('/repo-b/src/app.ts')
     );
+    flushSolid();
     expect(asRecord(requests()[1]?.body)?.directory).toBe('/repo-b');
   });
 
@@ -288,9 +342,11 @@ describe('MarkdownRenderer exact citation validation', () => {
       ),
       root
     );
+    flushSolid();
     expect(root.querySelector('pre code')?.textContent?.trim()).toBe('src/example.ts');
     expect(root.querySelector('a')?.getAttribute('href')).toBe('https://example.com');
     await new Promise((resolve) => setTimeout(resolve, 10));
+    flushSolid();
     expect(requests()).toHaveLength(0);
   });
 
@@ -322,6 +378,7 @@ describe('MarkdownRenderer exact citation validation', () => {
       ),
       root
     );
+    flushSolid();
     const codes = [...root.querySelectorAll('code')];
     expect(root.querySelector('a')).toBeNull();
     await respondSymbols([
@@ -330,7 +387,9 @@ describe('MarkdownRenderer exact citation validation', () => {
       { path: '/repo/stack.py', line: 56 },
       { path: '/repo/env.py', line: 78 },
     ]);
+    flushSolid();
     await vi.waitFor(() => expect(root.querySelectorAll('a[data-file]')).toHaveLength(4));
+    flushSolid();
     expect([...root.querySelectorAll('code')]).toEqual(codes);
     expect(codes[0]?.parentElement?.tagName).not.toBe('A');
     expect(asRecord(requests()[0]?.body)).toEqual({
@@ -344,6 +403,7 @@ describe('MarkdownRenderer exact citation validation', () => {
     });
     const anchor = root.querySelector<HTMLAnchorElement>('a[data-file]')!;
     anchor.click();
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: expect.objectContaining({
@@ -358,8 +418,10 @@ describe('MarkdownRenderer exact citation validation', () => {
     'leaves unresolved or malformed symbol results inert: %j',
     async (value) => {
       dispose = render(() => <MarkdownRenderer content="`loss_weights()`" />, root);
+      flushSolid();
       const code = root.querySelector('code');
       await respondSymbols([value]);
+      flushSolid();
       expect(root.querySelector('a')).toBeNull();
       expect(root.querySelector('code')).toBe(code);
     }
@@ -455,15 +517,23 @@ describe('MarkdownRenderer exact citation validation', () => {
     const [content, setContent] = createSignal('`loss_weights()`\n\nWorking');
     const mount = () => render(() => <MarkdownRenderer content={content()} />, root);
     dispose = mount();
+    flushSolid();
     await respondSymbols([{ path: '/repo/loss.py', line: 12 }]);
+    flushSolid();
     await vi.waitFor(() => expect(root.querySelector('a')).not.toBeNull());
+    flushSolid();
     const anchor = root.querySelector('a');
     setContent('`loss_weights()`\n\nWorking on more text');
+    flushSolid();
     await vi.waitFor(() => expect(root.textContent).toContain('more text'));
+    flushSolid();
     expect(root.querySelector('a')).toBe(anchor);
     dispose();
+    flushSolid();
     root.replaceChildren();
+    flushSolid();
     dispose = mount();
+    flushSolid();
     expect(root.querySelector('a')?.getAttribute('href')).toBe('/repo/loss.py:12');
     expect(requests()).toHaveLength(1);
   });
@@ -474,26 +544,39 @@ describe('MarkdownRenderer exact citation validation', () => {
       () => <MarkdownRenderer content="`loss_weights()`" directory={directory()} />,
       root
     );
+    flushSolid();
     await vi.waitFor(() => expect(requests()).toHaveLength(1));
+    flushSolid();
     const oldCode = root.querySelector('code');
     setDirectory('/repo-b');
+    flushSolid();
     await vi.waitFor(() => expect(root.querySelector('code')).not.toBe(oldCode));
+    flushSolid();
     await respondSymbols([{ path: '/repo-a/loss.py', line: 12 }]);
+    flushSolid();
     expect(root.querySelector('a')).toBeNull();
     await vi.waitFor(() => expect(requests()).toHaveLength(2));
+    flushSolid();
     dispose();
+    flushSolid();
     dispose = undefined;
     await respondSymbols([{ path: '/repo-b/loss.py', line: 12 }], 1);
+    flushSolid();
     expect(root.querySelector('a')).toBeNull();
   });
 
   it('activates cached symbols in a detached stable append before attaching its nodes', async () => {
     const [content, setContent] = createSignal('`loss_weights()`\n\nWorking');
     dispose = render(() => <MarkdownRenderer content={content()} />, root);
+    flushSolid();
     await respondSymbols([{ path: '/repo/loss.py', line: 12 }]);
+    flushSolid();
     await vi.waitFor(() => expect(root.querySelectorAll('a[data-file]')).toHaveLength(1));
+    flushSolid();
     setContent('`loss_weights()`\n\nAlso `loss_weights()`\n\nWorking');
+    flushSolid();
     await vi.waitFor(() => expect(root.querySelectorAll('a[data-file]')).toHaveLength(2));
+    flushSolid();
     expect(requests()).toHaveLength(1);
   });
 
@@ -504,8 +587,10 @@ describe('MarkdownRenderer exact citation validation', () => {
       ),
       root
     );
+    flushSolid();
     expect(root.querySelector('code[data-citation-symbol]')).toBeNull();
     await new Promise((done) => setTimeout(done, 10));
+    flushSolid();
     expect(requests()).toHaveLength(0);
   });
 
@@ -520,15 +605,21 @@ describe('MarkdownRenderer exact citation validation', () => {
       ),
       root
     );
+    flushSolid();
     await new Promise((done) => setTimeout(done, 10));
+    flushSolid();
     expect(requests()).toHaveLength(0);
     dispose();
+    flushSolid();
     root.replaceChildren();
+    flushSolid();
     dispose = render(
       () => <MarkdownRenderer content="`loss_weights()`" disablePathLinkify />,
       root
     );
+    flushSolid();
     await new Promise((done) => setTimeout(done, 10));
+    flushSolid();
     expect(requests()).toHaveLength(0);
   });
 });

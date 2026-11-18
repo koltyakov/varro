@@ -1,5 +1,6 @@
+import { flush as flushSolid } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import {
   InlineMessageImage,
   getInlineImagePresentation,
@@ -27,14 +28,18 @@ function loadImage(image: HTMLImageElement, naturalWidth: number, naturalHeight:
   // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
   image.parentElement!.getBoundingClientRect = () => ({ width: 640, height: 360 }) as DOMRect;
   image.dispatchEvent(new Event('load'));
+  flushSolid();
 }
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container?.remove();
+  flushSolid();
   container = null;
   vi.restoreAllMocks();
+  flushSolid();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -46,10 +51,12 @@ describe('InlineMessageImage', () => {
     await expect(
       preloadInlineImageDimensions('https://example.test/no-image-global.png')
     ).resolves.toBeUndefined();
+    flushSolid();
   });
 
   it('uses cover for a sufficiently large image with a compatible crop', () => {
     const image = renderImage();
+    flushSolid();
 
     loadImage(image, 1600, 1000);
 
@@ -59,6 +66,7 @@ describe('InlineMessageImage', () => {
 
   it('contains images with ambient fill when cover is disabled', () => {
     const image = renderImage('https://example.test/tile.png', false);
+    flushSolid();
 
     loadImage(image, 1600, 1000);
 
@@ -68,6 +76,7 @@ describe('InlineMessageImage', () => {
 
   it('places a blurred copy behind portrait images', () => {
     const image = renderImage();
+    flushSolid();
 
     loadImage(image, 1080, 1920);
 
@@ -81,15 +90,19 @@ describe('InlineMessageImage', () => {
   it('preserves the presentation when a reconciled image remounts with the same source', () => {
     const src = 'https://example.test/reconciled-image.png';
     const image = renderImage(src);
+    flushSolid();
     loadImage(image, 1080, 1920);
     expect(image.classList.contains('chat-image-img-ambient')).toBe(true);
 
     cleanup?.();
+    flushSolid();
     container?.remove();
+    flushSolid();
     cleanup = undefined;
     container = null;
 
     const reconciledImage = renderImage(src);
+    flushSolid();
 
     expect(reconciledImage.classList.contains('chat-image-img-ambient')).toBe(true);
     expect(reconciledImage.parentElement?.querySelector('.chat-image-ambient')).toBeInstanceOf(
@@ -106,6 +119,7 @@ describe('InlineMessageImage', () => {
     );
 
     const image = renderImage('https://example.test/existing-session-image.png');
+    flushSolid();
 
     expect(image.classList.contains('chat-image-img-ambient')).toBe(true);
     expect(image.parentElement?.querySelector('.chat-image-ambient')).toBeInstanceOf(
@@ -125,7 +139,9 @@ describe('InlineMessageImage', () => {
     const src = 'data:image/png;base64,composer-handoff';
 
     await preloadInlineImageDimensions(src);
+    flushSolid();
     const image = renderImage(src);
+    flushSolid();
 
     expect(image.classList.contains('chat-image-img-ambient')).toBe(true);
   });
@@ -158,13 +174,16 @@ describe('InlineMessageImage', () => {
 
     const preload = preloadInlineImageDimensions('data:image/png;base64,stalled');
     await vi.advanceTimersByTimeAsync(10_000);
+    flushSolid();
 
     await expect(preload).resolves.toBeUndefined();
+    flushSolid();
     expect(StalledImage.latest?.src).toBe('');
   });
 
   it('keeps small landscape images contained instead of upscaling them to cover', () => {
     const image = renderImage();
+    flushSolid();
 
     loadImage(image, 320, 180);
 

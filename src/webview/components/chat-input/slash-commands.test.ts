@@ -1,3 +1,5 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getSlashCommands } from './slash-commands';
 import { resetDefaultAppState, setState } from '../../lib/state';
@@ -42,7 +44,10 @@ describe('getSlashCommands', () => {
   it.each([1, 2] as const)(
     'reserves /btw and offers it only for an existing V2 conversation on API %s',
     (apiVersion) => {
-      setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion });
+      setState(
+        storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion })
+      );
+      flushSolid();
       const onSideQuestion = vi.fn();
       const commands = getSlashCommands({
         hasCurrentSession: true,
@@ -147,7 +152,10 @@ describe('getSlashCommands', () => {
   });
 
   it.each([1, 2] as const)('keeps command presentation neutral on API %s', (apiVersion) => {
-    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion });
+    setState(
+      storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion })
+    );
+    flushSolid();
     const commands = getSlashCommands({
       hasCurrentSession: true,
       canInit: false,
@@ -210,7 +218,10 @@ describe('getSlashCommands', () => {
   ] as const)(
     'gates /pause on API %s and current session %s',
     (apiVersion, hasCurrentSession, visible) => {
-      setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion });
+      setState(
+        storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion })
+      );
+      flushSolid();
       const commands = getSlashCommands({
         hasCurrentSession,
         canInit: false,

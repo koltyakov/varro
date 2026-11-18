@@ -1,14 +1,16 @@
+import { ariaBoolean } from '../../lib/aria';
 import {
+  createEffect,
   For,
   Show,
-  createEffect,
   createMemo,
   createSignal,
   mapArray,
   onCleanup,
-  onMount,
+  onSettled,
+  untrack,
 } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { Portal } from '@solidjs/web';
 import type { ProviderErrorDetailRow } from '../../../shared/error-classification';
 import {
   getAssistantActivityCountItems,
@@ -41,7 +43,7 @@ import {
 } from '../../lib/ui-icons';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import { getSmoothBottomFollowTop } from '../message-list/scrolling';
-import { trapModalFocus } from '../../lib/modal-focus';
+import { modalFocus } from '../../lib/modal-focus';
 import {
   getFinalAssistantTextPartId,
   isFileEditPart,
@@ -73,7 +75,6 @@ type AssistantRenderItem =
 type AssistantRenderEntry = {
   key: string;
   item: () => AssistantRenderItem;
-  update: (item: AssistantRenderItem) => void;
 };
 
 function borderedFlowClasses(startsBordered: boolean, endsBordered = startsBordered) {
@@ -484,17 +485,27 @@ export function AssistantMessageContent(props: {
   );
   const [readModeOpen, setReadModeOpen] = createSignal(false);
   const [retrySeconds, setRetrySeconds] = createSignal<number>();
-  createEffect(() => {
-    const retryAt = props.errorRetryAt;
-    if (retryAt === undefined) {
-      setRetrySeconds(undefined);
-      return;
+  createEffect(
+    () => props.errorRetryAt,
+    (retryAt) => {
+      const cleanups: Array<() => void> = [];
+
+      if (retryAt === undefined) {
+        setRetrySeconds(undefined);
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+      }
+      const update = () => setRetrySeconds(Math.max(0, Math.ceil((retryAt - Date.now()) / 1000)));
+      update();
+      const timer = setInterval(update, 250);
+      cleanups.push(() => clearInterval(timer));
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     }
-    const update = () => setRetrySeconds(Math.max(0, Math.ceil((retryAt - Date.now()) / 1000)));
-    update();
-    const timer = setInterval(update, 250);
-    onCleanup(() => clearInterval(timer));
-  });
+  );
   const errorDetailsExpansionKey = () => getAssistantErrorDetailsExpansionKey(props.info.id);
   const [errorDetailsOpen, setErrorDetailsOpen] = createSignal(
     getMessageBlockExpanded(errorDetailsExpansionKey()) ?? false
@@ -647,12 +658,23 @@ export function AssistantMessageContent(props: {
   });
   const showReadModeToggle = createMemo(() => shouldShowReadModeToggle(finalTextContent()));
 
-  createEffect(() => {
-    onCleanup(retainReadModeAltListener());
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
+    cleanups.push(retainReadModeAltListener());
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
-  createEffect(() => {
-    if (!readModeOpen()) return;
+  createEffect(readModeOpen, (open) => {
+    const cleanups: Array<() => void> = [];
+
+    if (!open)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
 
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -663,18 +685,22 @@ export function AssistantMessageContent(props: {
     window.addEventListener('keydown', handleKeydown);
     document.body.classList.add('chat-read-mode-open');
 
-    onCleanup(() => {
+    cleanups.push(() => {
       window.removeEventListener('keydown', handleKeydown);
       document.body.classList.remove('chat-read-mode-open');
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
-  createEffect(() => {
-    if (finalTextPart()) return;
+  createEffect(finalTextPart, (part) => {
+    if (part) return;
     setReadModeOpen(false);
   });
 
-  const renderItems = createMemo<AssistantRenderItem[]>((previousItems) => {
+  const renderItems = createMemo<AssistantRenderItem[]>((previousItems = []) => {
     const previousByKey = new Map((previousItems || []).map((item) => [item.key, item]));
     const items: AssistantRenderItem[] = [];
     const parts = orderedDisplayParts();
@@ -792,36 +818,11 @@ export function AssistantMessageContent(props: {
     }
 
     return items;
-  }, []);
-  const renderEntries = createMemo<AssistantRenderEntry[]>((previousEntries) => {
-    const previousByKey = new Map(
-      (previousEntries || []).map((entry) => [entry.key, entry] as const)
-    );
-
-    return renderItems().map((item) => {
-      const previous = previousByKey.get(item.key);
-      if (previous) {
-        previous.update(item);
-        return previous;
-      }
-
-      let currentItem = item;
-      const [readItem, setItem] = createSignal(item, { equals: false });
-      return {
-        key: item.key,
-        item: readItem,
-        update: (nextItem) => {
-          if (nextItem === currentItem) return;
-          currentItem = nextItem;
-          setItem(nextItem);
-        },
-      };
-    });
-  }, []);
+  });
   const revealedRenderKeys = new Set<string>();
 
-  if (!props.claimItemReveal && !props.allowInitialItemReveal) {
-    for (const item of renderItems()) {
+  if (untrack(() => !props.claimItemReveal && !props.allowInitialItemReveal)) {
+    for (const item of untrack(renderItems)) {
       const trackingKey = getRevealTrackingKey(item);
       revealedRenderKeys.add(trackingKey);
     }
@@ -859,14 +860,22 @@ export function AssistantMessageContent(props: {
     () => [...activeActivityParts().keys()],
     (partId) => {
       const part = createMemo(() => activeActivityParts().get(partId)!);
-      const partKey = getAssistantActivityPartKey(part());
+      const partKey = untrack(() => getAssistantActivityPartKey(part()));
       const [entering, setEntering] = createSignal(
-        claimReveal(`active-activity:${partId}`) && part().type === 'reasoning' && !isLightweight()
+        untrack(
+          () =>
+            claimReveal(`active-activity:${partId}`) &&
+            part().type === 'reasoning' &&
+            !isLightweight()
+        )
       );
       const exiting = () => !isLightweight() && !!props.exitingActivityPartKeys?.has(partKey);
-      createEffect(() => {
-        if (isLightweight() || props.exitingActivityPartKeys?.has(partKey)) setEntering(false);
-      });
+      createEffect(
+        () => isLightweight() || props.exitingActivityPartKeys?.has(partKey),
+        (exit) => {
+          if (exit) setEntering(false);
+        }
+      );
       // SAFETY: This JSX expression creates a single native div, not a component or fragment.
       const element = (
         <div
@@ -914,7 +923,7 @@ export function AssistantMessageContent(props: {
   const activeActivityElementById = createMemo(() => new Map(activeActivityElements()));
 
   const renderAssistantItem = (entry: AssistantRenderEntry) => {
-    if (entry.item().kind === 'active-activity-tray') {
+    if (untrack(entry.item).kind === 'active-activity-tray') {
       const item = () =>
         // SAFETY: The surrounding shape or discriminator check establishes the Extract<AssistantRenderItem, { kind: 'active-activity-tray' }> contract used below.
         entry.item() as Extract<AssistantRenderItem, { kind: 'active-activity-tray' }>;
@@ -938,6 +947,35 @@ export function AssistantMessageContent(props: {
         item().parts.some((part) =>
           props.exitingActivityPartKeys?.has(getAssistantActivityPartKey(part))
         );
+      let viewport: HTMLDivElement | undefined;
+      onSettled(() => (viewport ? prepareActiveActivityItemsViewport(viewport) : undefined));
+      createEffect(
+        () => {
+          const elements = activeActivityElementById();
+          return { elements, children: item().parts.map((part) => elements.get(part.id)!) };
+        },
+        ({ elements, children }) => {
+          const element = viewport;
+          if (!element) return;
+          let next = element.firstChild;
+          for (const child of children) {
+            if (child === next) next = next.nextSibling;
+            else if (child.isConnected && element.isConnected) {
+              child.getAnimations();
+              element.moveBefore(child, next);
+            } else element.insertBefore(child, next);
+          }
+          while (next) {
+            const child = next;
+            next = next.nextSibling;
+            if (
+              !(child instanceof HTMLElement) ||
+              elements.get(child.dataset.activityPartId!) !== child
+            )
+              element.removeChild(child);
+          }
+        }
+      );
       return (
         <div
           class={`assistant-active-activity-tray${borderedFlowClasses(!activeSummary(), true)}${hasExitingPart() ? ' is-exiting' : ''}${activeSummary() ? ' has-active-summary assistant-flow-block-starts-summary' : ''}`}
@@ -986,29 +1024,7 @@ export function AssistantMessageContent(props: {
           </Show>
           <div
             ref={(element) => {
-              onCleanup(prepareActiveActivityItemsViewport(element));
-              createEffect(() => {
-                let next = element.firstChild;
-                for (const part of item().parts) {
-                  const child = activeActivityElementById().get(part.id)!;
-                  if (child === next) next = next.nextSibling;
-                  else if (child.isConnected && element.isConnected) {
-                    // Flush pending animation styles before the state-preserving move.
-                    child.getAnimations();
-                    element.moveBefore(child, next);
-                  } else element.insertBefore(child, next);
-                }
-                while (next) {
-                  const child = next;
-                  next = next.nextSibling;
-                  if (
-                    !(child instanceof HTMLElement) ||
-                    activeActivityElementById().get(child.dataset.activityPartId!) !== child
-                  ) {
-                    element.removeChild(child);
-                  }
-                }
-              });
+              viewport = element;
             }}
             class="assistant-active-activity-items"
             data-max-visible-items={MAX_VISIBLE_ACTIVE_ACTIVITY_ITEMS}
@@ -1017,8 +1033,8 @@ export function AssistantMessageContent(props: {
       );
     }
 
-    const initialItem = entry.item();
-    const revealClass = getRevealClass(initialItem);
+    const initialItem = untrack(entry.item);
+    const revealClass = untrack(() => getRevealClass(initialItem));
     if (initialItem.kind === 'activity-group') {
       // SAFETY: The surrounding shape or discriminator check establishes the Extract<AssistantRenderItem, { kind: 'activity-group' }> contract used below.
       const item = () => entry.item() as Extract<AssistantRenderItem, { kind: 'activity-group' }>;
@@ -1092,20 +1108,20 @@ export function AssistantMessageContent(props: {
       const partsById = createMemo(
         () => new Map(item().parts.map((part) => [partRenderKeys().get(part.id)!, part]))
       );
+      let stack: HTMLDivElement | undefined;
+      onSettled(() => {
+        if (stack && revealClass && !props.outerListVirtualized)
+          return prepareMeasuredEntrance(stack, {
+            animationName: 'streamed-assistant-item-in',
+            heightProperty: '--streamed-assistant-item-height',
+            skipWithin: '.interactive-item-entering',
+          });
+        return undefined;
+      });
       return (
         <div
           ref={(element) => {
-            // Measured transcripts reveal growth through bottom-follow. Animating this
-            // height too leaves stale fractional row corrections below the new card.
-            if (revealClass && !props.outerListVirtualized) {
-              onCleanup(
-                prepareMeasuredEntrance(element, {
-                  animationName: 'streamed-assistant-item-in',
-                  heightProperty: '--streamed-assistant-item-height',
-                  skipWithin: '.interactive-item-entering',
-                })
-              );
-            }
+            stack = element;
           }}
           class={`assistant-message-flow-item${borderedFlowClasses(true)}${revealClass}`}
           data-assistant-render-key={entry.key}
@@ -1116,8 +1132,7 @@ export function AssistantMessageContent(props: {
                 // A removed map entry still needs its last snapshot while the old
                 // card's cleanup reads completion state to preserve the scroll anchor.
                 const part = createMemo<ToolPart>(
-                  (previous) => partsById().get(id) ?? previous,
-                  partsById().get(id)!
+                  (previous = partsById().get(id)!) => partsById().get(id) ?? previous
                 );
                 return (
                   <MessagePart
@@ -1141,27 +1156,28 @@ export function AssistantMessageContent(props: {
 
     // SAFETY: The surrounding shape or discriminator check establishes the Extract<AssistantRenderItem, { kind: 'part' }> contract used below.
     const item = () => entry.item() as Extract<AssistantRenderItem, { kind: 'part' }>;
+    let partElement: HTMLDivElement | undefined;
+    onSettled(() => {
+      const element = partElement;
+      // Measured bottom-follow reveals tool growth without a second height animation.
+      if (element && revealClass && (!props.outerListVirtualized || item().part.type !== 'tool'))
+        return prepareMeasuredEntrance(element, {
+          animationName: 'streamed-assistant-item-in',
+          heightProperty: '--streamed-assistant-item-height',
+          skipWithin: '.interactive-item-entering',
+          measureContentHeight:
+            item().part.type === 'text'
+              ? () =>
+                  element.querySelector(':scope > .rendered-markdown')?.getBoundingClientRect()
+                    .height
+              : undefined,
+        });
+      return undefined;
+    });
     return (
       <div
         ref={(element) => {
-          // Standalone tools can appear before their file metadata forms an edit stack.
-          // Let measured bottom-follow reveal them without fractional height animation.
-          if (revealClass && (!props.outerListVirtualized || item().part.type !== 'tool')) {
-            onCleanup(
-              prepareMeasuredEntrance(element, {
-                animationName: 'streamed-assistant-item-in',
-                heightProperty: '--streamed-assistant-item-height',
-                skipWithin: '.interactive-item-entering',
-                measureContentHeight:
-                  item().part.type === 'text'
-                    ? () =>
-                        element
-                          .querySelector(':scope > .rendered-markdown')
-                          ?.getBoundingClientRect().height
-                    : undefined,
-              })
-            );
-          }
+          partElement = element;
         }}
         data-assistant-render-key={entry.key}
         class={`${getAssistantFlowItemClass(
@@ -1217,7 +1233,9 @@ export function AssistantMessageContent(props: {
 
   return (
     <div class="assistant-message-flow">
-      <For each={renderEntries()}>{renderAssistantItem}</For>
+      <For each={renderItems()} keyed={(item) => item.key}>
+        {(item) => renderAssistantItem({ key: untrack(item).key, item })}
+      </For>
       <Show when={trailingPermissionMatch()}>
         {(match) => (
           <PermissionPrompt
@@ -1229,19 +1247,24 @@ export function AssistantMessageContent(props: {
       </Show>
       <Show when={props.errorMessage}>
         <div
-          class="assistant-message-flow-item-error assistant-flow-block-starts-bordered assistant-flow-block-ends-bordered"
-          classList={{ 'assistant-message-flow-item-error-notice': props.errorIsNotice }}
+          class={[
+            'assistant-message-flow-item-error assistant-flow-block-starts-bordered assistant-flow-block-ends-bordered',
+            { 'assistant-message-flow-item-error-notice': props.errorIsNotice },
+          ]}
         >
           <div class="assistant-message-flow-item-error-card">
             <button
               type="button"
-              class="assistant-message-flow-item-notice-header"
-              classList={{
-                'assistant-message-flow-item-error-details-toggle':
-                  !props.errorIsNotice && !!props.errorDetails,
-              }}
+
+              class={[
+                'assistant-message-flow-item-notice-header',
+                {
+                  'assistant-message-flow-item-error-details-toggle':
+                    !props.errorIsNotice && !!props.errorDetails,
+                },
+              ]}
               disabled={!props.errorDetails}
-              aria-expanded={props.errorDetails ? errorDetailsOpen() : undefined}
+              aria-expanded={ariaBoolean(props.errorDetails ? errorDetailsOpen() : undefined)}
               aria-controls={props.errorDetails ? errorDetailsId() : undefined}
               onClick={toggleErrorDetails}
             >
@@ -1274,8 +1297,10 @@ export function AssistantMessageContent(props: {
                   <For each={props.errorDetails?.rows}>
                     {(row) => (
                       <div
-                        class="assistant-error-field"
-                        classList={{ 'assistant-error-field-response': row.label === 'Response' }}
+                        class={[
+                          'assistant-error-field',
+                          { 'assistant-error-field-response': row.label === 'Response' },
+                        ]}
                       >
                         <dt>{row.label}</dt>
                         <dd>
@@ -1324,50 +1349,55 @@ export function AssistantMessageContent(props: {
         </div>
       </Show>
       <Show when={readModeOpen() && finalTextContent().trim().length > 0}>
-        <Portal>
-          <div
-            ref={(element) => onCleanup(trapModalFocus(element))}
-            class="assistant-read-overlay"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Read mode"
-            onClick={() => setReadModeOpen(false)}
-          >
-            <button
-              type="button"
-              class="assistant-read-mode-close"
-              aria-label="Exit read mode"
-              title="Exit read mode"
-              onClick={(event) => {
-                event.stopPropagation();
-                setReadModeOpen(false);
-              }}
-            >
-              <CloseIcon />
-            </button>
-            <div class="assistant-read-overlay-scroll">
+        {(_open) => {
+          const focus = modalFocus();
+          return (
+            <Portal>
               <div
-                class="assistant-read-overlay-inner"
-                onClick={(event) => event.stopPropagation()}
+                ref={focus}
+                class="assistant-read-overlay"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Read mode"
+                onClick={() => setReadModeOpen(false)}
               >
-                <div class="assistant-read-mode-content">
-                  <MarkdownRenderer
-                    sessionID={props.info.sessionID}
-                    directory={props.info.path.cwd}
-                    content={finalTextContent()}
-                    cacheByContent={
-                      !!props.info.time.completed &&
-                      !(finalTextPart() && props.isPartStreaming?.(finalTextPart()!))
-                    }
-                    forceStreaming={
-                      !!finalTextPart() && !!props.isPartStreaming?.(finalTextPart()!)
-                    }
-                  />
+                <button
+                  type="button"
+                  class="assistant-read-mode-close"
+                  aria-label="Exit read mode"
+                  title="Exit read mode"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setReadModeOpen(false);
+                  }}
+                >
+                  <CloseIcon />
+                </button>
+                <div class="assistant-read-overlay-scroll">
+                  <div
+                    class="assistant-read-overlay-inner"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div class="assistant-read-mode-content">
+                      <MarkdownRenderer
+                        sessionID={props.info.sessionID}
+                        directory={props.info.path.cwd}
+                        content={finalTextContent()}
+                        cacheByContent={
+                          !!props.info.time.completed &&
+                          !(finalTextPart() && props.isPartStreaming?.(finalTextPart()!))
+                        }
+                        forceStreaming={
+                          !!finalTextPart() && !!props.isPartStreaming?.(finalTextPart()!)
+                        }
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-        </Portal>
+            </Portal>
+          );
+        }}
       </Show>
     </div>
   );
@@ -1398,10 +1428,13 @@ function AssistantActivityGroup(props: {
   const activityStatus = createMemo(() => getAssistantActivityStatus(props.summaryParts));
   const activityItems = createMemo(() => getAssistantActivityCountItems(props.summaryParts));
 
-  createEffect(() => {
-    if (!props.showSummary || props.summaryParts.length === 0) return;
-    props.onSummaryShown?.();
-  });
+  createEffect(
+    () => props.showSummary && props.summaryParts.length > 0,
+    (shown) => {
+      if (!shown) return;
+      untrack(() => props.onSummaryShown?.());
+    }
+  );
 
   const toggleExpanded = () => {
     const nextExpanded = !expanded();
@@ -1421,7 +1454,7 @@ function AssistantActivityGroup(props: {
           type="button"
           class="assistant-activity-summary"
           data-activity-summary-group-key={encodeURIComponent(props.expansionKey)}
-          aria-expanded={expanded()}
+          aria-expanded={ariaBoolean(expanded())}
           onMouseDown={activateButtonOnPrimaryMouseDown}
           onClick={handleClick}
         >
@@ -1571,16 +1604,24 @@ function AssistantActivitySummaryText(props: {
     return () => setCompactCount(nextCompactCount);
   };
 
-  createEffect(() => {
-    fullLabel();
+  createEffect(fullLabel, () => {
     queueMicrotask(() => measure()?.());
   });
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const host = textElement?.closest('button')?.parentElement;
-    if (!host) return;
+    if (!host)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     const resizeTarget = host.closest('.assistant-message-flow') ?? host;
-    onCleanup(observeActivitySummaryResize(resizeTarget, measure));
+    cleanups.push(observeActivitySummaryResize(resizeTarget, measure));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (

@@ -1,4 +1,6 @@
-import { render } from 'solid-js/web';
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
+import { render } from '@solidjs/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenCodePermissionConfig } from '../../shared/protocol';
 import type { PermissionRule } from '../../shared/opencode-types';
@@ -77,24 +79,35 @@ beforeEach(() => {
   mocks.saveSessionRules.mockResolvedValue([]);
   mocks.loadServerMemory.mockResolvedValue({ supported: true, rules: [] });
   mocks.removeServerMemory.mockResolvedValue({ supported: true, rules: [] });
-  setState('sessions', []);
-  setState('activeSessionId', null);
-  setState('sessionPermissionModes', {});
-  setState('serverStatus', { state: 'running', apiVersion: 1, url: 'http://localhost:4096' });
+  setState(storePath('sessions', []));
+  flushSolid();
+  setState(storePath('activeSessionId', null));
+  flushSolid();
+  setState(storePath('sessionPermissionModes', {}));
+  flushSolid();
+  setState(
+    storePath('serverStatus', { state: 'running', apiVersion: 1, url: 'http://localhost:4096' })
+  );
+  flushSolid();
 });
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container.remove();
+  flushSolid();
   vi.clearAllMocks();
+  flushSolid();
   vi.restoreAllMocks();
+  flushSolid();
   vi.useRealTimers();
 });
 
 describe('PermissionSettingsPanel', () => {
   it('edits native WebFetch patterns in project and global config independently', async () => {
-    setState('serverStatus', { state: 'running', apiVersion: 2 });
+    setState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
+    flushSolid();
     mocks.load.mockResolvedValue({
       ...config,
       supportsPatterns: true,
@@ -102,15 +115,20 @@ describe('PermissionSettingsPanel', () => {
     });
     mocks.saveGlobal.mockRejectedValueOnce(new Error('Global write failed'));
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
     const global = container.querySelector('.permission-global-section')!;
     const pattern = global.querySelector<HTMLInputElement>('[aria-label="Pattern"]')!;
     expect(pattern.disabled).toBe(false);
     pattern.value = 'https://example.com/*';
     pattern.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
     const save = global.querySelector<HTMLButtonElement>('.permission-settings-save')!;
     save.click();
+    flushSolid();
     await flush();
+    flushSolid();
     expect(global.textContent).toContain('Global write failed');
     expect(pattern.value).toBe('https://example.com/*');
     expect(mocks.saveGlobal).toHaveBeenCalledWith([
@@ -129,15 +147,20 @@ describe('PermissionSettingsPanel', () => {
       rules: [],
     });
     global.querySelector<HTMLButtonElement>('[aria-label="Remove rule"]')!.click();
+    flushSolid();
     save.click();
+    flushSolid();
     await flush();
+    flushSolid();
     expect(mocks.saveGlobal).toHaveBeenLastCalledWith([]);
     expect(global.textContent).toContain('No rules in this global config file');
   });
 
   it('shows editable, inherited, and effective rules', async () => {
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     expect(container.textContent).toContain('opencode.jsonc');
     expect(container.querySelector('.permission-config-source')?.getAttribute('title')).toBe(
@@ -173,7 +196,9 @@ describe('PermissionSettingsPanel', () => {
       ],
     });
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     expect(container.textContent).not.toContain('Global rules');
     expect(container.textContent).toContain('Effective Default rules');
@@ -194,7 +219,9 @@ describe('PermissionSettingsPanel', () => {
     });
     mocks.removeServerMemory.mockResolvedValue({ supported: true, rules: [] });
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     expect(container.textContent).not.toContain('Current session rules');
     expect(container.textContent).toContain('Server memory');
@@ -202,7 +229,9 @@ describe('PermissionSettingsPanel', () => {
     expect(mocks.loadServerMemory).toHaveBeenCalledWith(null, { directory: undefined });
 
     container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')?.click();
+    flushSolid();
     await flush();
+    flushSolid();
 
     expect(mocks.removeServerMemory).toHaveBeenCalledWith(null, 'saved-1', {
       directory: undefined,
@@ -223,7 +252,9 @@ describe('PermissionSettingsPanel', () => {
       ],
     });
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     expect(container.textContent).toContain('opencode *');
     expect(container.textContent).toContain('Restart to clear');
@@ -232,7 +263,10 @@ describe('PermissionSettingsPanel', () => {
   });
 
   it('shows V2 approvals as durable and requires confirmation to revoke an untracked rule', async () => {
-    setState('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' });
+    setState(
+      storePath('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' })
+    );
+    flushSolid();
     mocks.loadServerMemory.mockResolvedValue({
       supported: true,
       rules: [],
@@ -241,7 +275,9 @@ describe('PermissionSettingsPanel', () => {
       ],
     });
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
     expect(container.textContent).toContain('Saved project approvals');
     expect(container.textContent).toContain('Persistent');
     expect(container.textContent).not.toContain('Until restart');
@@ -251,15 +287,20 @@ describe('PermissionSettingsPanel', () => {
     expect(container.textContent).toContain('printf *');
     expect(container.querySelector('[aria-label="Edit server allowance"]')).toBeNull();
     container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')!.click();
+    flushSolid();
     expect(mocks.removeServerMemory).not.toHaveBeenCalled();
     const confirmation = container.querySelector('.permission-memory-confirm')!;
     expect(confirmation.textContent).toContain('Its origin is unknown');
     confirmation.querySelectorAll<HTMLButtonElement>('button')[1]!.click();
+    flushSolid();
     expect(container.querySelector('.permission-memory-confirm')).toBeNull();
     expect(mocks.removeServerMemory).not.toHaveBeenCalled();
     container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')!.click();
+    flushSolid();
     container.querySelector<HTMLButtonElement>('.permission-memory-confirm button')!.click();
+    flushSolid();
     await flush();
+    flushSolid();
     expect(mocks.removeServerMemory).toHaveBeenCalledExactlyOnceWith(null, 'untracked-1', {
       directory: undefined,
     });
@@ -269,7 +310,10 @@ describe('PermissionSettingsPanel', () => {
   });
 
   it('labels cached V2 data stale, disables mutation, and refreshes without clearing a project draft', async () => {
-    setState('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' });
+    setState(
+      storePath('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' })
+    );
+    flushSolid();
     const rule = {
       id: 'saved-1',
       projectID: 'project-1',
@@ -283,7 +327,9 @@ describe('PermissionSettingsPanel', () => {
       stale: '401 Unauthorized',
     });
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
     expect(container.textContent).toContain('Cached approvals only');
     expect(container.textContent).toContain('401 Unauthorized');
     expect(
@@ -296,9 +342,12 @@ describe('PermissionSettingsPanel', () => {
     const draft = container.querySelector<HTMLInputElement>('[aria-label="Pattern"]')!;
     draft.value = 'git diff *';
     draft.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
     mocks.loadServerMemory.mockResolvedValue({ supported: true, rules: [rule] });
     container.querySelector<HTMLButtonElement>('[aria-label="Refresh saved approvals"]')!.click();
+    flushSolid();
     await flush();
+    flushSolid();
     expect(container.textContent).not.toContain('Cached approvals only');
     expect(
       container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')!
@@ -314,10 +363,14 @@ describe('PermissionSettingsPanel', () => {
     const rule = { id: 'saved-1', projectID: 'project-1', permission: 'bash', pattern: 'echo *' };
     mocks.loadServerMemory.mockResolvedValue({ supported: true, rules: [rule] });
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
     mocks.loadServerMemory.mockRejectedValue(new Error('Refresh failed'));
     container.querySelector<HTMLButtonElement>('[aria-label="Refresh saved approvals"]')!.click();
+    flushSolid();
     await flush();
+    flushSolid();
     expect(container.textContent).toContain('echo *');
     expect(container.textContent).toContain('Cached approvals only');
     expect(container.textContent).toContain('Refresh failed');
@@ -339,10 +392,15 @@ describe('PermissionSettingsPanel', () => {
       new Error('Removal was sent, but could not be verified.')
     );
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
     container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')!.click();
+    flushSolid();
     container.querySelector<HTMLButtonElement>('.permission-memory-confirm button')!.click();
+    flushSolid();
     await flush();
+    flushSolid();
     expect(container.textContent).toContain('printf *');
     expect(container.textContent).toContain('could not be verified');
     expect(
@@ -351,7 +409,10 @@ describe('PermissionSettingsPanel', () => {
   });
 
   it('refreshes after reconnect and ignores an earlier in-flight snapshot', async () => {
-    setState('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' });
+    setState(
+      storePath('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' })
+    );
+    flushSolid();
     let resolveOld!: (value: { supported: true; rules: [] }) => void;
     mocks.loadServerMemory.mockReturnValueOnce(
       new Promise((resolve) => {
@@ -359,7 +420,9 @@ describe('PermissionSettingsPanel', () => {
       })
     );
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
     mocks.loadServerMemory.mockResolvedValue({
       supported: true,
       rules: [],
@@ -372,12 +435,19 @@ describe('PermissionSettingsPanel', () => {
         },
       ],
     });
-    setState('serverStatus', { state: 'starting' });
-    setState('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4097' });
+    setState(storePath('serverStatus', { state: 'starting' }));
+    flushSolid();
+    setState(
+      storePath('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4097' })
+    );
+    flushSolid();
     await flush();
+    flushSolid();
     expect(container.textContent).toContain('echo recovered *');
     resolveOld({ supported: true, rules: [] });
+    flushSolid();
     await flush();
+    flushSolid();
     expect(container.textContent).toContain('echo recovered *');
     expect(mocks.loadServerMemory).toHaveBeenCalledTimes(2);
   });
@@ -390,7 +460,9 @@ describe('PermissionSettingsPanel', () => {
       ],
     });
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
     expect(container.querySelector('[aria-label="Edit server allowance"]')).toBeNull();
     expect(container.querySelector('[aria-label="Retract server allowance"]')).not.toBeNull();
   });
@@ -409,15 +481,21 @@ describe('PermissionSettingsPanel', () => {
       rules: [{ ...rule, pattern: 'git diff *' }],
     });
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
     container.querySelector<HTMLButtonElement>('[aria-label="Edit server allowance"]')!.click();
+    flushSolid();
     const input = container.querySelector<HTMLInputElement>(
       '[aria-label="Saved resource pattern"]'
     )!;
     input.value = 'git diff *';
     input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
     container.querySelector<HTMLButtonElement>('[aria-label="Save server allowance"]')!.click();
+    flushSolid();
     await flush();
+    flushSolid();
     expect(mocks.updateServerMemory).toHaveBeenCalledWith(
       null,
       'saved-1',
@@ -445,15 +523,21 @@ describe('PermissionSettingsPanel', () => {
     });
     mocks.updateServerMemory.mockRejectedValue(new Error('409 duplicate saved allowance'));
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
     container.querySelector<HTMLButtonElement>('[aria-label="Edit server allowance"]')!.click();
+    flushSolid();
     const input = container.querySelector<HTMLInputElement>(
       '[aria-label="Saved resource pattern"]'
     )!;
     input.value = 'git diff *';
     input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
     container.querySelector<HTMLButtonElement>('[aria-label="Save server allowance"]')!.click();
+    flushSolid();
     await flush();
+    flushSolid();
     expect(
       container.querySelector<HTMLInputElement>('[aria-label="Saved resource pattern"]')?.value
     ).toBe('git diff *');
@@ -464,6 +548,7 @@ describe('PermissionSettingsPanel', () => {
     container
       .querySelector<HTMLButtonElement>('[aria-label="Cancel server allowance edit"]')!
       .click();
+    flushSolid();
     expect(container.textContent).toContain('git status *');
     expect(container.querySelector('[aria-label="Saved resource pattern"]')).toBeNull();
   });
@@ -489,9 +574,13 @@ describe('PermissionSettingsPanel', () => {
         })
     );
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
     container.querySelector<HTMLButtonElement>('[aria-label="Edit server allowance"]')!.click();
+    flushSolid();
     container.querySelector<HTMLButtonElement>('[aria-label="Save server allowance"]')!.click();
+    flushSolid();
     expect(
       container.querySelector<HTMLButtonElement>('[aria-label="Save server allowance"]')?.disabled
     ).toBe(true);
@@ -512,36 +601,47 @@ describe('PermissionSettingsPanel', () => {
         },
       ],
     });
-    setState('sessions', [
-      {
-        id: 'session-2',
-        projectID: 'project-2',
-        directory: '/other',
-        title: 'Other session',
-        version: '2',
-        time: { created: 1, updated: 1 },
-      },
-    ]);
-    setState('activeSessionId', 'session-2');
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-2',
+          projectID: 'project-2',
+          directory: '/other',
+          title: 'Other session',
+          version: '2',
+          time: { created: 1, updated: 1 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-2'));
+    flushSolid();
     await flush();
+    flushSolid();
     resolveSave?.({ supported: true, rules: [] });
+    flushSolid();
     await flush();
+    flushSolid();
     expect(container.textContent).toContain('new workspace');
     expect(container.textContent).not.toContain('git status *');
   });
 
   it('shows and independently retracts current-session and server-memory rules', async () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'Session',
-        version: '1',
-        time: { created: 1, updated: 1 },
-      },
-    ]);
-    setState('activeSessionId', 'session-1');
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Session',
+          version: '1',
+          time: { created: 1, updated: 1 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     mocks.loadSessionRules.mockResolvedValue([
       { permission: 'bash', pattern: 'npm test *', action: 'allow' },
     ]);
@@ -557,7 +657,9 @@ describe('PermissionSettingsPanel', () => {
       ],
     });
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     expect(container.textContent).toContain('Current session rules');
     expect(container.textContent).toContain('Server memory');
@@ -580,8 +682,11 @@ describe('PermissionSettingsPanel', () => {
     )!;
     sessionPattern.value = 'npm run test *';
     sessionPattern.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
     sessionSection.querySelector<HTMLButtonElement>('.permission-settings-save')?.click();
+    flushSolid();
     await flush();
+    flushSolid();
 
     expect(mocks.saveSessionRules).toHaveBeenCalledWith(
       'session-1',
@@ -591,7 +696,9 @@ describe('PermissionSettingsPanel', () => {
     expect(mocks.save).not.toHaveBeenCalled();
 
     container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')?.click();
+    flushSolid();
     await flush();
+    flushSolid();
 
     expect(mocks.removeServerMemory).toHaveBeenCalledWith('session-1', 'saved-1', {
       directory: '/repo',
@@ -600,25 +707,29 @@ describe('PermissionSettingsPanel', () => {
   });
 
   it('keeps the newly selected session rules when an older save resolves', async () => {
-    setState('sessions', [
-      {
-        id: 'session-a',
-        projectID: 'project-1',
-        directory: '/repo/a',
-        title: 'Session A',
-        version: '1',
-        time: { created: 1, updated: 1 },
-      },
-      {
-        id: 'session-b',
-        projectID: 'project-1',
-        directory: '/repo/b',
-        title: 'Session B',
-        version: '1',
-        time: { created: 2, updated: 2 },
-      },
-    ]);
-    setState('activeSessionId', 'session-a');
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-a',
+          projectID: 'project-1',
+          directory: '/repo/a',
+          title: 'Session A',
+          version: '1',
+          time: { created: 1, updated: 1 },
+        },
+        {
+          id: 'session-b',
+          projectID: 'project-1',
+          directory: '/repo/b',
+          title: 'Session B',
+          version: '1',
+          time: { created: 2, updated: 2 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-a'));
+    flushSolid();
     mocks.loadSessionRules.mockImplementation(async (sessionId: string) => [
       {
         permission: 'bash',
@@ -634,7 +745,9 @@ describe('PermissionSettingsPanel', () => {
         })
     );
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     const sessionSection = [
       ...container.querySelectorAll<HTMLElement>('.permission-config-section'),
@@ -644,17 +757,24 @@ describe('PermissionSettingsPanel', () => {
     )!;
     patternInput.value = 'session-a edited';
     patternInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
     sessionSection.querySelector<HTMLButtonElement>('.permission-settings-save')?.click();
+    flushSolid();
     await flush();
+    flushSolid();
 
-    setState('activeSessionId', 'session-b');
+    setState(storePath('activeSessionId', 'session-b'));
+    flushSolid();
     await vi.waitFor(() =>
       expect(
         sessionSection.querySelector<HTMLInputElement>('input[aria-label="Pattern"]')?.value
       ).toBe('session-b rule')
     );
+    flushSolid();
     resolveSave?.([{ permission: 'bash', pattern: 'session-a saved', action: 'allow' }]);
+    flushSolid();
     await flush();
+    flushSolid();
 
     expect(
       sessionSection.querySelector<HTMLInputElement>('input[aria-label="Pattern"]')?.value
@@ -662,25 +782,32 @@ describe('PermissionSettingsPanel', () => {
   });
 
   it('infers hidden mode rules and keeps only the latest session override', async () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'Session',
-        version: '1',
-        time: { created: 1, updated: 1 },
-      },
-    ]);
-    setState('activeSessionId', 'session-1');
-    setState('sessionPermissionModes', { 'session-1': 'default' });
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Session',
+          version: '1',
+          time: { created: 1, updated: 1 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('sessionPermissionModes', { 'session-1': 'default' }));
+    flushSolid();
     mocks.loadSessionRules.mockResolvedValue([
       ...getSessionPermissionRulesForMode('auto', 'update'),
       { permission: 'bash', pattern: 'npm *', action: 'ask' },
       { permission: 'bash', pattern: 'npm *', action: 'allow' },
     ]);
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     const sessionSection = [
       ...container.querySelectorAll<HTMLElement>('.permission-config-section'),
@@ -698,25 +825,32 @@ describe('PermissionSettingsPanel', () => {
   });
 
   it('does not hide generated-looking session rules with different actions', async () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'Session',
-        version: '1',
-        time: { created: 1, updated: 1 },
-      },
-    ]);
-    setState('activeSessionId', 'session-1');
-    setState('sessionPermissionModes', { 'session-1': 'auto' });
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Session',
+          version: '1',
+          time: { created: 1, updated: 1 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('sessionPermissionModes', { 'session-1': 'auto' }));
+    flushSolid();
     const autoRules = getSessionPermissionRulesForMode('auto', 'update');
     mocks.loadSessionRules.mockResolvedValue([
       { ...autoRules[0]!, action: 'allow' },
       ...autoRules.slice(1),
     ]);
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     const sessionSection = [
       ...container.querySelectorAll<HTMLElement>('.permission-config-section'),
@@ -736,14 +870,18 @@ describe('PermissionSettingsPanel', () => {
     };
     mocks.save.mockResolvedValue(saved);
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     container.querySelector<HTMLButtonElement>('.permission-config-add')?.click();
+    flushSolid();
     const names = container.querySelectorAll<HTMLInputElement>(
       'input[aria-label="Permission name"]'
     );
     names[1]!.value = 'websearch';
     names[1]!.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
     const patterns = container.querySelectorAll<HTMLInputElement>('input[aria-label="Pattern"]');
     expect(patterns[1]?.value).toBe('*');
     expect(patterns[1]?.disabled).toBe(true);
@@ -751,9 +889,13 @@ describe('PermissionSettingsPanel', () => {
       '.permission-config-action-button'
     );
     actions[1]!.click();
+    flushSolid();
     actions[1]!.parentElement?.querySelector<HTMLButtonElement>('[data-action="allow"]')?.click();
+    flushSolid();
     container.querySelector<HTMLButtonElement>('.permission-settings-save')?.click();
+    flushSolid();
     await flush();
+    flushSolid();
 
     expect(mocks.save).toHaveBeenCalledWith([
       { permission: 'bash', pattern: 'git status*', action: 'allow' },
@@ -764,28 +906,34 @@ describe('PermissionSettingsPanel', () => {
   it('suggests known permission names while preserving free text entry', async () => {
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(500);
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     const permission = container.querySelector<HTMLInputElement>(
       'input[aria-label="Permission name"]'
     )!;
     permission.value = 'ed';
     permission.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
 
     const editOption = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
       (option) => option.textContent === 'edit'
     );
     expect(editOption).toBeInstanceOf(HTMLButtonElement);
     editOption?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     expect(container.querySelector('.permission-name-details')?.classList).toContain('right');
     expect(container.querySelector('.permission-name-details')?.textContent).toContain(
       'Creates, updates, or removes files.'
     );
     editOption?.click();
+    flushSolid();
     expect(permission.value).toBe('edit');
 
     permission.value = 'mcp_custom_permission';
     permission.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
     expect(permission.value).toBe('mcp_custom_permission');
     expect(container.querySelector('[role="listbox"]')).toBeNull();
   });
@@ -793,13 +941,17 @@ describe('PermissionSettingsPanel', () => {
   it('shows permission descriptions when hovering policy chips', async () => {
     vi.useFakeTimers();
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     const bashChip = [
       ...container.querySelectorAll<HTMLElement>('.permission-rule-chips code'),
     ].find((chip) => chip.textContent === 'bash');
     bashChip?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
 
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
       'Runs commands in a shell.'
@@ -808,11 +960,14 @@ describe('PermissionSettingsPanel', () => {
 
   it('uses a custom action dropdown', async () => {
     cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
     await flush();
+    flushSolid();
 
     expect(container.querySelector('select[aria-label="Action"]')).toBeNull();
     const trigger = container.querySelector<HTMLButtonElement>('.permission-config-action-button')!;
     trigger.click();
+    flushSolid();
     const options = trigger.parentElement?.querySelectorAll<HTMLButtonElement>('[data-action]');
     expect([...options!].map((option) => option.textContent?.trim())).toEqual([
       'Allow',
@@ -820,6 +975,7 @@ describe('PermissionSettingsPanel', () => {
       'Deny',
     ]);
     trigger.parentElement?.querySelector<HTMLButtonElement>('[data-action="ask"]')?.click();
+    flushSolid();
     expect(trigger.textContent?.trim()).toBe('Ask');
   });
 });

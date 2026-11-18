@@ -1,3 +1,16 @@
+import { ariaBoolean } from '../../lib/aria';
+import {
+  Show,
+  For,
+  createSignal,
+  onCleanup,
+  onSettled,
+  createEffect,
+  untrack,
+  createMemo,
+  createUniqueId,
+} from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import {
   getModelDisplayName,
   getSelectedAgentForSession,
@@ -23,19 +36,6 @@ import {
 } from '../../lib/state';
 import { WindowedSessionItems } from './WindowedSessionItems';
 import { setHostDragImage } from '../../host/extensions';
-import {
-  Show,
-  For,
-  createSignal,
-  onCleanup,
-  onMount,
-  createEffect,
-  createMemo,
-  createUniqueId,
-  on,
-  untrack,
-  batch,
-} from 'solid-js';
 import {
   selectSession,
   deleteSession,
@@ -173,32 +173,37 @@ function SessionHistoryScopePicker(props: {
     SESSION_HISTORY_SCOPE_OPTIONS.find((option) => option.scope === scope())!
   );
 
-  createEffect(() => {
-    const directory = props.directory;
-    const key = ++requestKey;
-    saveKey += 1;
-    setOpen(false);
-    setScope('directory');
-    props.onScopeChange('directory');
-    void (async () => {
-      try {
-        const result = await client.varro.sessionHistoryScope.get(directory);
-        if (key !== requestKey || directory !== props.directory) return;
-        setScope(result.scope);
-        props.onScopeChange(result.scope);
-        setIsGit(result.git);
-        if (result.scope !== 'directory') await reloadSessions();
-      } catch (error: unknown) {
-        if (key === requestKey && directory === props.directory) {
-          setError(error instanceof Error ? error.message : String(error));
+  createEffect(
+    () => props.directory,
+    (directory) => {
+      const key = ++requestKey;
+      saveKey += 1;
+      setOpen(false);
+      setScope('directory');
+      props.onScopeChange('directory');
+      void (async () => {
+        try {
+          const result = await client.varro.sessionHistoryScope.get(directory);
+          if (key !== requestKey || directory !== props.directory) return;
+          setScope(result.scope);
+          props.onScopeChange(result.scope);
+          setIsGit(result.git);
+          if (result.scope !== 'directory') await reloadSessions();
+        } catch (error: unknown) {
+          if (key === requestKey && directory === props.directory) {
+            setError(error instanceof Error ? error.message : String(error));
+          }
         }
-      }
-    })();
-  });
+      })();
+    }
+  );
 
-  createEffect(() => {
-    if (props.hidden) setOpen(false);
-  });
+  createEffect(
+    () => props.hidden,
+    (hidden) => {
+      if (hidden) setOpen(false);
+    }
+  );
 
   const dismiss = (event: PointerEvent) => {
     if (!(event.target instanceof Node) || !root?.contains(event.target)) setOpen(false);
@@ -254,7 +259,7 @@ function SessionHistoryScopePicker(props: {
             class="session-history-scope-trigger"
             aria-label={`Session history: ${selected().label}`}
             aria-haspopup="menu"
-            aria-expanded={open()}
+            aria-expanded={ariaBoolean(open())}
             onClick={() => setOpen((value) => !value)}
           >
             <UiIcon source={selected().icon} width={14} height={14} />
@@ -270,7 +275,7 @@ function SessionHistoryScopePicker(props: {
                   <button
                     type="button"
                     role="menuitemradio"
-                    aria-checked={scope() === option.scope}
+                    aria-checked={ariaBoolean(scope() === option.scope)}
                     class="session-history-scope-option"
                     onClick={() => void selectScope(option.scope)}
                   >
@@ -309,41 +314,43 @@ export function createStableSessionIndicators(
   const [lingeringRunningIds, setLingeringRunningIds] = createSignal(new Set<string>());
   const settleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  createEffect(() => {
-    const runningIds = getIndicators().runningIds;
-    const lingeringIds = untrack(lingeringRunningIds);
-    const nextLingeringIds = new Set(lingeringIds);
-    let changed = false;
+  createEffect(
+    () => getIndicators().runningIds,
+    (runningIds) => {
+      const lingeringIds = untrack(lingeringRunningIds);
+      const nextLingeringIds = new Set(lingeringIds);
+      let changed = false;
 
-    for (const sessionId of runningIds) {
-      const timer = settleTimers.get(sessionId);
-      if (timer !== undefined) {
-        clearTimeout(timer);
-        settleTimers.delete(sessionId);
+      for (const sessionId of runningIds) {
+        const timer = settleTimers.get(sessionId);
+        if (timer !== undefined) {
+          clearTimeout(timer);
+          settleTimers.delete(sessionId);
+        }
+        if (!nextLingeringIds.has(sessionId)) {
+          nextLingeringIds.add(sessionId);
+          changed = true;
+        }
       }
-      if (!nextLingeringIds.has(sessionId)) {
-        nextLingeringIds.add(sessionId);
-        changed = true;
+
+      for (const sessionId of nextLingeringIds) {
+        if (runningIds.has(sessionId) || settleTimers.has(sessionId)) continue;
+        const timer = setTimeout(() => {
+          settleTimers.delete(sessionId);
+          if (getIndicators().runningIds.has(sessionId)) return;
+          setLingeringRunningIds((current) => {
+            if (!current.has(sessionId)) return current;
+            const next = new Set(current);
+            next.delete(sessionId);
+            return next;
+          });
+        }, settleDelayMs);
+        settleTimers.set(sessionId, timer);
       }
-    }
 
-    for (const sessionId of nextLingeringIds) {
-      if (runningIds.has(sessionId) || settleTimers.has(sessionId)) continue;
-      const timer = setTimeout(() => {
-        settleTimers.delete(sessionId);
-        if (getIndicators().runningIds.has(sessionId)) return;
-        setLingeringRunningIds((current) => {
-          if (!current.has(sessionId)) return current;
-          const next = new Set(current);
-          next.delete(sessionId);
-          return next;
-        });
-      }, settleDelayMs);
-      settleTimers.set(sessionId, timer);
+      if (changed) setLingeringRunningIds(nextLingeringIds);
     }
-
-    if (changed) setLingeringRunningIds(nextLingeringIds);
-  });
+  );
 
   onCleanup(() => {
     for (const timer of settleTimers.values()) clearTimeout(timer);
@@ -815,7 +822,7 @@ async function reorderPinnedSession(sourceSessionId: string, targetSessionId: st
   const next = [...previous];
   const [sourceId] = next.splice(sourceIndex, 1);
   next.splice(targetIndex, 0, sourceId!);
-  setState('pinnedSessionIds', next);
+  setState(storePath('pinnedSessionIds', next));
 
   const sourceSession = state.sessions.find((session) => session.id === sourceSessionId);
   const targetSession = state.sessions.find((session) => session.id === targetSessionId);
@@ -828,9 +835,9 @@ async function reorderPinnedSession(sourceSessionId: string, targetSessionId: st
         targetDirectory: targetSession?.directory,
       }
     );
-    setState('pinnedSessionIds', pinnedSessionIds);
+    setState(storePath('pinnedSessionIds', pinnedSessionIds));
   } catch (error) {
-    setState('pinnedSessionIds', previous);
+    setState(storePath('pinnedSessionIds', previous));
     setError(error instanceof Error ? error.message : String(error));
   }
 }
@@ -990,10 +997,12 @@ function SessionListContinuation() {
     observer.observe(element);
   };
 
-  createEffect(() => {
-    if (state.sessionsHasMore || state.sessionsPaginationError) return;
-    disconnectObserver();
-  });
+  createEffect(
+    () => state.sessionsHasMore || state.sessionsPaginationError,
+    (hasContinuation) => {
+      if (!hasContinuation) disconnectObserver();
+    }
+  );
   onCleanup(disconnectObserver);
 
   return (
@@ -1030,8 +1039,8 @@ function SessionListWorkspaceSelector(props: {
   let buttonRef: HTMLButtonElement | undefined;
   let popoverRef: HTMLDivElement | undefined;
 
-  createEffect(() => {
-    if (!showPicker()) return;
+  createEffect(showPicker, (open) => {
+    if (!open) return;
     const closeIfOutside = (event: Event) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
@@ -1045,10 +1054,10 @@ function SessionListWorkspaceSelector(props: {
     };
     window.addEventListener('pointerdown', closeIfOutside, true);
     window.addEventListener('keydown', closeOnEscape, true);
-    onCleanup(() => {
+    return () => {
       window.removeEventListener('pointerdown', closeIfOutside, true);
       window.removeEventListener('keydown', closeOnEscape, true);
-    });
+    };
   });
 
   return (
@@ -1098,10 +1107,16 @@ export function SessionListView(props: {
 }) {
   const diffSummaryOwner = Symbol('session-list');
   const [visible, setVisible] = createSignal(!document.hidden);
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const update = () => setVisible(!document.hidden);
     document.addEventListener('visibilitychange', update);
-    onCleanup(() => document.removeEventListener('visibilitychange', update));
+    cleanups.push(() => document.removeEventListener('visibilitychange', update));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
   const ageNow = useMinuteClock(visible);
 
@@ -1202,94 +1217,100 @@ export function SessionListView(props: {
   let resolutionRequestKey = 0;
   let resolutionRequestActive = false;
   let resolutionAbortController: AbortController | undefined;
-  createEffect(() => {
-    const resolutionActive = Boolean(props.subagentParentId);
-    if (!resolutionActive) {
-      resolutionRequestActive = false;
-      resolutionAbortController?.abort();
-      resolutionAbortController = undefined;
-      resolutionRequestKey += 1;
-      setAllSessionsForSubagent(null);
-      setIsResolvingSubagents(false);
-      return;
-    }
-    if (resolutionRequestActive) return;
-
-    resolutionRequestActive = true;
-    const requestKey = ++resolutionRequestKey;
-    const controller = new AbortController();
-    resolutionAbortController = controller;
-    setIsResolvingSubagents(true);
-    void (async () => {
-      let limit = SUBAGENT_SESSION_PAGE_SIZE;
-      while (true) {
-        if (requestKey !== resolutionRequestKey) return;
-        const page = await listCompleteSessionPage({ limit, signal: controller.signal });
-        if (requestKey !== resolutionRequestKey) return;
-        setAllSessionsForSubagent(page.items);
-        if (!page.hasMore) return;
-
-        const nextLimit = Math.min(limit * 2, MAX_SUBAGENT_SESSION_LIMIT);
-        if (nextLimit === limit) throw new Error('Session lookup exceeded the supported limit');
-        limit = nextLimit;
+  createEffect(
+    () => Boolean(props.subagentParentId),
+    (resolutionActive) => {
+      if (!resolutionActive) {
+        resolutionRequestActive = false;
+        resolutionAbortController?.abort();
+        resolutionAbortController = undefined;
+        resolutionRequestKey += 1;
+        setAllSessionsForSubagent(null);
+        setIsResolvingSubagents(false);
+        return;
       }
-    })()
-      .catch((error) => {
-        if (requestKey !== resolutionRequestKey || controller.signal.aborted) return;
-        setError(error instanceof Error ? error.message : String(error));
-      })
-      .finally(() => {
-        if (requestKey === resolutionRequestKey) {
-          resolutionAbortController = undefined;
-          setIsResolvingSubagents(false);
+      if (resolutionRequestActive) return;
+
+      resolutionRequestActive = true;
+      const requestKey = ++resolutionRequestKey;
+      const controller = new AbortController();
+      resolutionAbortController = controller;
+      setIsResolvingSubagents(true);
+      void (async () => {
+        let limit = SUBAGENT_SESSION_PAGE_SIZE;
+        while (true) {
+          if (requestKey !== resolutionRequestKey) return;
+          const page = await listCompleteSessionPage({ limit, signal: controller.signal });
+          if (requestKey !== resolutionRequestKey) return;
+          setAllSessionsForSubagent(page.items);
+          if (!page.hasMore) return;
+
+          const nextLimit = Math.min(limit * 2, MAX_SUBAGENT_SESSION_LIMIT);
+          if (nextLimit === limit) throw new Error('Session lookup exceeded the supported limit');
+          limit = nextLimit;
         }
-      });
-  });
+      })()
+        .catch((error) => {
+          if (requestKey !== resolutionRequestKey || controller.signal.aborted) return;
+          setError(error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => {
+          if (requestKey === resolutionRequestKey) {
+            resolutionAbortController = undefined;
+            setIsResolvingSubagents(false);
+          }
+        });
+    }
+  );
 
   let searchRequestKey = 0;
   let searchAbortController: AbortController | undefined;
   let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined;
-  createEffect(() => {
-    const query = trimmedSearchQuery();
-    const searchActive = shouldShowSearch() && query.length > 0;
-    const directory = folderFilter() ?? undefined;
-    if (searchDebounceTimer !== undefined) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = undefined;
-    searchAbortController?.abort();
-    searchAbortController = undefined;
-    searchRequestKey += 1;
-    setNativeSearchResults(null);
-    if (!searchActive) {
-      setIsSearchingAllSessions(false);
-      return;
-    }
-
-    const requestKey = searchRequestKey;
-    const controller = new AbortController();
-    searchAbortController = controller;
-    setIsSearchingAllSessions(true);
-    searchDebounceTimer = setTimeout(() => {
+  createEffect(
+    () => ({
+      query: trimmedSearchQuery(),
+      showSearch: shouldShowSearch(),
+      directory: folderFilter() ?? undefined,
+    }),
+    ({ query, showSearch, directory }) => {
+      if (searchDebounceTimer !== undefined) clearTimeout(searchDebounceTimer);
       searchDebounceTimer = undefined;
-      void listCompleteSessionPage({
-        limit: SESSION_SEARCH_LIMIT,
-        search: query,
-        roots: true,
-        directory,
-        signal: controller.signal,
-      })
-        .then((page) => {
-          if (requestKey !== searchRequestKey || controller.signal.aborted) return;
-          setNativeSearchResults(page.items);
+      searchAbortController?.abort();
+      searchAbortController = undefined;
+      searchRequestKey += 1;
+      setNativeSearchResults(null);
+      if (!showSearch || !query) {
+        setIsSearchingAllSessions(false);
+        return;
+      }
+
+      const requestKey = searchRequestKey;
+      const controller = new AbortController();
+      searchAbortController = controller;
+      setIsSearchingAllSessions(true);
+      searchDebounceTimer = setTimeout(() => {
+        searchDebounceTimer = undefined;
+        void listCompleteSessionPage({
+          limit: SESSION_SEARCH_LIMIT,
+          search: query,
+          roots: true,
+          directory,
+          signal: controller.signal,
         })
-        .catch((error) => {
-          if (requestKey !== searchRequestKey || controller.signal.aborted) return;
-          setError(error instanceof Error ? error.message : String(error));
-        })
-        .finally(() => {
-          if (requestKey === searchRequestKey) setIsSearchingAllSessions(false);
-        });
-    }, SESSION_SEARCH_DEBOUNCE_MS);
-  });
+          .then((page) => {
+            if (requestKey !== searchRequestKey || controller.signal.aborted) return;
+            setNativeSearchResults(page.items);
+          })
+          .catch((error) => {
+            if (requestKey !== searchRequestKey || controller.signal.aborted) return;
+            setError(error instanceof Error ? error.message : String(error));
+          })
+          .finally(() => {
+            if (requestKey === searchRequestKey) setIsSearchingAllSessions(false);
+          });
+      }, SESSION_SEARCH_DEBOUNCE_MS);
+    }
+  );
   onCleanup(() => {
     resolutionRequestKey += 1;
     resolutionAbortController?.abort();
@@ -1352,9 +1373,18 @@ export function SessionListView(props: {
         )
     )
   );
-  createEffect(() => {
-    props.onPrimarySessionsCountChange?.(visibleSessionsForList().filter(isPrimarySession).length);
-  });
+  createEffect(
+    () =>
+      props.onPrimarySessionsCountChange
+        ? {
+            notify: props.onPrimarySessionsCountChange,
+            count: visibleSessionsForList().filter(isPrimarySession).length,
+          }
+        : null,
+    (result) => {
+      result?.notify(result.count);
+    }
+  );
   const groupedSessions = createMemo(() =>
     groupSessions(
       visibleSessionsForList(),
@@ -1417,45 +1447,50 @@ export function SessionListView(props: {
         )
       : []
   );
-  createEffect(() => {
-    const filter = props.sessionFilter;
-    const unreadSessions = props.subagentParentId
-      ? []
-      : filteredSessions().filter((session) => {
-          switch (filter) {
-            case 'completed':
-              return isSessionCompletedResponseUnread(session.id);
-            case 'plan-ready':
-              return isSessionUnread(
-                session.id,
-                getSessionPlanUpdatedAt(session.id, session.time.updated)
-              );
-            case 'failed':
-              return isSessionFailureUnread(session.id);
-            default:
-              return false;
-          }
-        });
-    props.onMarkAllReadChange?.(
-      unreadSessions.length >= 2
-        ? () => {
-            batch(() => {
-              for (const session of unreadSessions) {
-                markSessionSeen(
+  createEffect(
+    () => {
+      const filter = props.sessionFilter;
+      const unreadSessions = props.subagentParentId
+        ? []
+        : filteredSessions().filter((session) => {
+            switch (filter) {
+              case 'completed':
+                return isSessionCompletedResponseUnread(session.id);
+              case 'plan-ready':
+                return isSessionUnread(
                   session.id,
-                  Math.max(
-                    Date.now(),
-                    session.time.updated,
-                    state.completedSessionResponses[session.id] ?? 0,
-                    getSessionTreeFailedUpdated(session.id) ?? getSessionTreeUpdated(session.id)
-                  )
+                  getSessionPlanUpdatedAt(session.id, session.time.updated)
                 );
-              }
-            });
-          }
-        : null
-    );
-  });
+              case 'failed':
+                return isSessionFailureUnread(session.id);
+              default:
+                return false;
+            }
+          });
+      return unreadSessions;
+    },
+    (unreadSessions) => {
+      props.onMarkAllReadChange?.(
+        unreadSessions.length >= 2
+          ? () => {
+              (() => {
+                for (const session of unreadSessions) {
+                  markSessionSeen(
+                    session.id,
+                    Math.max(
+                      Date.now(),
+                      session.time.updated,
+                      state.completedSessionResponses[session.id] ?? 0,
+                      getSessionTreeFailedUpdated(session.id) ?? getSessionTreeUpdated(session.id)
+                    )
+                  );
+                }
+              })();
+            }
+          : null
+      );
+    }
+  );
   const defaultSurfacedSessions = createMemo(() =>
     sortSessionsForDisplay(recentSessions(), ageNow())
   );
@@ -1485,17 +1520,16 @@ export function SessionListView(props: {
     () =>
       isDefaultGroupedView() && availableGroupedSections().some((section) => section !== 'recent')
   );
-  createEffect(() => {
-    if (
-      !isDefaultGroupedView() ||
-      overflowOtherSessions().length >= SESSION_ARCHIVE_PRELOAD_TARGET ||
-      !state.sessionsHasMore ||
-      state.sessionsLoadingMore ||
-      state.sessionsPaginationError
-    ) {
-      return;
-    }
-    void loadMoreSessions();
+  const shouldPreloadArchive = createMemo(
+    () =>
+      isDefaultGroupedView() &&
+      overflowOtherSessions().length < SESSION_ARCHIVE_PRELOAD_TARGET &&
+      state.sessionsHasMore &&
+      !state.sessionsLoadingMore &&
+      !state.sessionsPaginationError
+  );
+  createEffect(shouldPreloadArchive, (shouldPreload) => {
+    if (shouldPreload) void loadMoreSessions();
   });
   const directSessions = createMemo(() => {
     if (props.subagentParentId) return subagentSessions();
@@ -1575,14 +1609,14 @@ export function SessionListView(props: {
     });
   };
 
-  createEffect(() => {
-    visibleSessions();
-    expandedGroupedSection();
-    sessionDiffSummaryCache();
-    scheduleScrollableContentUpdate();
-  });
+  createEffect(
+    () => [visibleSessions(), expandedGroupedSection(), sessionDiffSummaryCache()],
+    scheduleScrollableContentUpdate
+  );
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const observer =
       globalThis.ResizeObserver === undefined
         ? null
@@ -1590,73 +1624,82 @@ export function SessionListView(props: {
     if (containerRef) observer?.observe(containerRef);
     window.addEventListener('resize', scheduleScrollableContentUpdate);
     scheduleScrollableContentUpdate();
-    onCleanup(() => {
+    cleanups.push(() => {
       scrollabilityUpdateDisposed = true;
       observer?.disconnect();
       window.removeEventListener('resize', scheduleScrollableContentUpdate);
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
-  createEffect(() => {
-    const sessions = visibleSessions();
-    updateRelevantDiffSummarySessions(
-      diffSummaryOwner,
-      new Set(sessions.map((session) => session.id))
-    );
-  });
+  createEffect(
+    () => new Set(visibleSessions().map((session) => session.id)),
+    (ids) => updateRelevantDiffSummarySessions(diffSummaryOwner, ids)
+  );
   onCleanup(() => updateRelevantDiffSummarySessions(diffSummaryOwner, null));
 
   createEffect(
-    on(
-      () => [props.sessionFilter, props.subagentParentId],
-      () => {
-        setActiveGroupedSection(null);
-        setSearchQuery('');
-        setFocusedIndex(-1);
-      }
-    )
+    () => [props.sessionFilter, props.subagentParentId],
+    () => {
+      setActiveGroupedSection(null);
+      setSearchQuery('');
+      setFocusedIndex(-1);
+    }
+  );
+
+  createEffect(folderFilter, () => {
+    setActiveGroupedSection(null);
+    setFocusedIndex(-1);
+  });
+
+  createEffect(
+    () => {
+      const selected = folderFilter();
+      return (
+        selected &&
+        !(state.editorContext.workspaceFolders ?? []).some((folder) =>
+          isSameWorkspacePath(folder.path, selected)
+        )
+      );
+    },
+    (missing) => {
+      if (missing) setFolderFilter(null);
+    }
   );
 
   createEffect(
-    on(folderFilter, () => {
-      setActiveGroupedSection(null);
-      setFocusedIndex(-1);
-    })
+    () => {
+      const activeSection = activeGroupedSection();
+      return activeSection && !availableGroupedSections().includes(activeSection);
+    },
+    (missing) => {
+      if (missing) setActiveGroupedSection(null);
+    }
   );
 
-  createEffect(() => {
-    const selected = folderFilter();
-    if (
-      selected &&
-      !(state.editorContext.workspaceFolders ?? []).some((folder) =>
-        isSameWorkspacePath(folder.path, selected)
-      )
-    ) {
-      setFolderFilter(null);
+  createEffect(
+    () => {
+      const sessionId = sessionActions.sessionId();
+      return sessionId && !state.sessions.some((session) => session.id === sessionId);
+    },
+    (missing) => {
+      if (missing) sessionActions.close();
     }
-  });
+  );
 
-  createEffect(() => {
-    const activeSection = activeGroupedSection();
-    if (!activeSection) return;
-    if (!availableGroupedSections().includes(activeSection)) setActiveGroupedSection(null);
-  });
-
-  createEffect(() => {
-    const sessionId = sessionActions.sessionId();
-    if (sessionId && !state.sessions.some((session) => session.id === sessionId)) {
-      sessionActions.close();
+  createEffect(
+    () => visibleSessions().length,
+    (length) => {
+      setFocusedIndex((current) => {
+        if (length === 0) return -1;
+        if (current < 0) return current;
+        return Math.min(current, length - 1);
+      });
     }
-  });
-
-  createEffect(() => {
-    const sessions = visibleSessions();
-    setFocusedIndex((current) => {
-      if (sessions.length === 0) return -1;
-      if (current < 0) return current;
-      return Math.min(current, sessions.length - 1);
-    });
-  });
+  );
 
   const toggleGroupedSection = (section: SessionListGroupedSection) => {
     if (section === 'recent') {
@@ -1720,7 +1763,6 @@ export function SessionListView(props: {
               observe={observe}
               session={session()}
               summaryUpdated={sessionDiffSummaries.getRevision(sessionId)}
-              onRequestSummary={(updated) => enqueueDiffSummaryRequest(session(), updated)}
               diffSummary={diffSummary()?.stats ?? null}
               isSummaryLoading={
                 diffSummary()?.status === 'loading' && diffSummary()?.stats === null
@@ -1797,10 +1839,10 @@ export function SessionListView(props: {
                             },
                           };
                         };
-                        batch(() => {
-                          setState('sessions', (items) => items.map(hideLink));
+                        (() => {
+                          setState(storePath('sessions', (items) => items.map(hideLink)));
                           setNativeSearchResults((results) => results?.map(hideLink) ?? null);
-                        });
+                        })();
                         await reloadSessions();
                       } catch (error) {
                         setError(error instanceof Error ? error.message : String(error));
@@ -1815,7 +1857,7 @@ export function SessionListView(props: {
                     !state.pinnedSessionIds.includes(sessionId),
                     { directory: session().directory }
                   );
-                  setState('pinnedSessionIds', pinnedSessionIds);
+                  setState(storePath('pinnedSessionIds', pinnedSessionIds));
                 } catch (error) {
                   setError(error instanceof Error ? error.message : String(error));
                 }
@@ -1986,8 +2028,13 @@ export function SessionListView(props: {
     }
   }
 
-  onMount(() => {
-    if (props.embedded) return;
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
+    if (props.embedded)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     const focusFrame = requestAnimationFrame(() => {
       if (hasPointerInteraction) return;
       if (shouldShowSearch()) {
@@ -1996,20 +2043,22 @@ export function SessionListView(props: {
       }
       containerRef?.focus();
     });
-    onCleanup(() => cancelAnimationFrame(focusFrame));
+    cleanups.push(() => cancelAnimationFrame(focusFrame));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   createEffect(
-    on(
-      sessionSearchFocusKey,
-      (key) => {
-        if (key === 0) return;
-        queueMicrotask(() => {
-          if (shouldShowSearch()) searchInputRef?.focus();
-        });
-      },
-      { defer: true }
-    )
+    sessionSearchFocusKey,
+    (key) => {
+      if (key === 0) return;
+      queueMicrotask(() => {
+        if (shouldShowSearch()) searchInputRef?.focus();
+      });
+    },
+    { defer: true }
   );
 
   const emptyMessage = () => {
@@ -2071,11 +2120,14 @@ export function SessionListView(props: {
               searchInputRef = el;
             }}
             type="text"
-            class="session-list-search-input"
-            classList={{
-              'session-list-search-input-with-scope':
-                searchQuery().length === 0 && Boolean(sessionHistoryDirectory()),
-            }}
+
+            class={[
+              'session-list-search-input',
+              {
+                'session-list-search-input-with-scope':
+                  searchQuery().length === 0 && Boolean(sessionHistoryDirectory()),
+              },
+            ]}
             value={searchQuery()}
             onInput={(e) => setSearchQuery(e.currentTarget.value)}
             onFocus={() => setFocusedIndex(-1)}
@@ -2272,7 +2324,6 @@ function SessionListItem(props: {
   observe: (element: HTMLElement) => void;
   session: (typeof state.sessions)[number];
   summaryUpdated: number;
-  onRequestSummary: (updated: number) => void;
   diffSummary: SessionDiffSummary | null;
   isSummaryLoading: boolean;
   tokens: number | null;
@@ -2488,26 +2539,43 @@ function SessionListItem(props: {
     pointerClickTimer = undefined;
   };
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     if (!rowRef || globalThis.IntersectionObserver === undefined) {
       setShouldLoadSummary(true);
-      return;
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     }
 
-    onCleanup(observeSessionSummary(rowRef, () => setShouldLoadSummary(true)));
+    cleanups.push(observeSessionSummary(rowRef, () => setShouldLoadSummary(true)));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
-  createEffect(() => {
-    if (!shouldLoadSummary()) return;
-    props.onRequestSummary(props.summaryUpdated);
-  });
+  createEffect(
+    () =>
+      shouldLoadSummary()
+        ? {
+            sessionId: props.session.id,
+            directory: props.session.directory,
+            updated: props.summaryUpdated,
+          }
+        : null,
+    (request) => {
+      if (request) enqueueDiffSummaryRequest(request);
+    }
+  );
 
   onCleanup(() => {
     if (pointerClickTimer !== undefined) clearTimeout(pointerClickTimer);
   });
 
-  createEffect(() => {
-    if (!showActions()) return;
+  createEffect(showActions, (open) => {
+    if (!open) return;
     let dismissOnSessionClick = false;
     const closeIfOutside = (event: Event) => {
       const target = event.target;
@@ -2546,12 +2614,12 @@ function SessionListItem(props: {
     window.addEventListener('pointerdown', closeIfOutside, true);
     window.addEventListener('focusin', closeIfOutside);
     window.addEventListener('click', dismissSessionClick, true);
-    onCleanup(() => {
+    return () => {
       window.removeEventListener('contextmenu', closeIfOutside, true);
       window.removeEventListener('pointerdown', closeIfOutside, true);
       window.removeEventListener('focusin', closeIfOutside);
       window.removeEventListener('click', dismissSessionClick, true);
-    });
+    };
   });
 
   return (
@@ -2588,8 +2656,10 @@ function SessionListItem(props: {
       onDrop={props.onPinnedDrop}
     >
       <span
-        class={`session-item-leading ${indicatorKind() ? 'has-status' : ''}`}
-        classList={{ 'can-reorder': props.canReorderPinned }}
+        class={[
+          `session-item-leading ${indicatorKind() ? 'has-status' : ''}`,
+          { 'can-reorder': props.canReorderPinned },
+        ]}
       >
         <Show when={indicatorKind()}>
           {(kind) => (
@@ -2611,7 +2681,7 @@ function SessionListItem(props: {
           <button
             type="button"
             class="session-item-drag-handle"
-            draggable={true}
+            draggable="true"
             title="Drag to reorder pinned session"
             aria-label={`Reorder pinned session: ${normalizeSessionTitle(props.session.title) || 'Untitled'}`}
             onDragStart={props.onPinnedDragStart}

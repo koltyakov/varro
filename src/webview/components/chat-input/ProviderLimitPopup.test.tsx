@@ -1,5 +1,5 @@
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { flush as flushSolid, createSignal } from 'solid-js';
+import { render } from '@solidjs/web';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
 import { hasProviderLimitWindowWithinThreshold } from '../../lib/format';
@@ -11,9 +11,13 @@ describe('ProviderLimitPopup', () => {
 
   afterEach(() => {
     dispose?.();
+    flushSolid();
     container?.remove();
+    flushSolid();
     Reflect.deleteProperty(window, '__sendToExtension');
+    flushSolid();
     vi.clearAllMocks();
+    flushSolid();
     vi.useRealTimers();
   });
 
@@ -44,6 +48,7 @@ describe('ProviderLimitPopup', () => {
         () => <ProviderLimitPopup providerName="OpenAI" onClose={() => {}} limit={limit} />,
         container
       );
+      flushSolid();
 
       const credits = container.querySelector('.provider-limit-credit-section');
       if (balance === undefined || balance === 0) {
@@ -80,6 +85,7 @@ describe('ProviderLimitPopup', () => {
       ),
       container
     );
+    flushSolid();
 
     expect(container.querySelector('.provider-limit-credit-section')).toBeNull();
     expect(container.querySelector('.provider-limit-popup-empty')?.textContent).toBe(
@@ -90,6 +96,7 @@ describe('ProviderLimitPopup', () => {
   it('expands Grok reset expiration details and opens Grok Usage', () => {
     const sendToExtension = vi.fn();
     Reflect.set(window, '__sendToExtension', sendToExtension);
+    flushSolid();
     container = document.createElement('div');
     document.body.append(container);
     const expiresAt = Date.parse('2026-09-12T12:00:00Z');
@@ -124,6 +131,7 @@ describe('ProviderLimitPopup', () => {
       ),
       container
     );
+    flushSolid();
 
     const toggle = container.querySelector<HTMLButtonElement>('.provider-limit-reset-toggle');
     expect(toggle?.textContent).toBe('Usage limit resets (1)');
@@ -131,6 +139,7 @@ describe('ProviderLimitPopup', () => {
     expect(container.querySelector('.provider-limit-reset-rows')).toBeNull();
 
     toggle?.click();
+    flushSolid();
 
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     expect(container.querySelector('.provider-limit-reset-rows')?.textContent).toBe(
@@ -140,6 +149,7 @@ describe('ProviderLimitPopup', () => {
     expect(link?.textContent).toBe('Grok Usage');
     expect(link?.href).toBe('https://grok.com/?_s=usage');
     link?.click();
+    flushSolid();
     expect(sendToExtension).toHaveBeenCalledWith({
       type: 'vscode/open-external',
       payload: { url: 'https://grok.com/?_s=usage' },
@@ -147,6 +157,7 @@ describe('ProviderLimitPopup', () => {
     expect(sendToExtension).toHaveBeenCalledTimes(1);
 
     toggle?.click();
+    flushSolid();
     expect(container.querySelector('.provider-limit-reset-rows')).toBeNull();
   });
 
@@ -175,6 +186,7 @@ describe('ProviderLimitPopup', () => {
       ),
       container
     );
+    flushSolid();
     const message = container.querySelector('[role="status"]')?.textContent;
     expect(message).toContain(
       status === 'unsupported' ? 'Authentication failed' : 'invalid quota data'
@@ -192,6 +204,7 @@ describe('ProviderLimitPopup', () => {
   it('marks retained quotas stale and expires their rows without another response', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-11-17T10:00:00Z'));
+    flushSolid();
     const checkedAt = Date.now() - 15 * 60_000 + 1_000;
     container = document.createElement('div');
     document.body.append(container);
@@ -223,12 +236,14 @@ describe('ProviderLimitPopup', () => {
       ),
       container
     );
+    flushSolid();
     expect(container.querySelector('.provider-limit-row')).not.toBeNull();
     expect(container.querySelector('[role="status"]')?.textContent).toContain(
       'Quota data is stale'
     );
     expect(container.textContent).toContain('Invalid quota data');
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
     expect(container.querySelector('.provider-limit-row')).toBeNull();
     expect(container.querySelector('[role="status"]')?.textContent).toContain('snapshot expired');
   });
@@ -260,12 +275,14 @@ describe('ProviderLimitPopup', () => {
       ),
       container
     );
+    flushSolid();
     expect(container.querySelector('[role="status"]')).toBeNull();
     setLimit({
       ...fresh,
       usageLimitResetsUnavailable: true,
       usageLimitResets: { ...fresh.usageLimitResets!, stale: true },
     });
+    flushSolid();
     expect(container.querySelector('[role="status"]')?.textContent).toContain(
       'Reset credits may be outdated'
     );
@@ -273,8 +290,10 @@ describe('ProviderLimitPopup', () => {
       'latest refresh failed'
     );
     setLimit(fresh);
+    flushSolid();
     expect(container.querySelector('[role="status"]')).toBeNull();
     setLimit({ ...fresh, usageLimitResets: undefined });
+    flushSolid();
     expect(container.querySelector('.provider-limit-reset-section')).toBeNull();
   });
 });

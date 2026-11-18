@@ -1,3 +1,4 @@
+import { flush as flushSolid } from 'solid-js';
 import { describe, expect, it } from 'vitest';
 import type { Part, ToolPart, ToolStateCompleted } from '../types';
 import {
@@ -96,6 +97,7 @@ describe('part utils', () => {
     };
 
     setShowThinking(true);
+    flushSolid();
     expect(shouldShowAssistantPartInline(textPart)).toBe(true);
     expect(shouldShowAssistantPartInline(emptyTextPart)).toBe(false);
     expect(shouldShowAssistantPartInline(reasoningPart)).toBe(true);
@@ -125,6 +127,7 @@ describe('part utils', () => {
     expect(shouldShowAssistantPartInline(parsedAbortedPatch)).toBe(true);
 
     setShowThinking(false);
+    flushSolid();
     expect(shouldShowAssistantPartInline(reasoningPart)).toBe(false);
     expect(shouldShowAssistantPartInline(reasoningPart, false)).toBe(true);
   });

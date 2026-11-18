@@ -541,7 +541,7 @@ describe('session-approvals helpers', () => {
     expect(setPendingSessionPermissionMode.mock.calls).toEqual([
       ['session-1', 'full'],
       ['session-1', 'auto'],
-      ['session-1', null, 2],
+      ['session-1', null, 2, 'confirmed'],
     ]);
   });
 

@@ -1,3 +1,4 @@
+import { storePath } from '@solidjs/signals';
 import type { EditorContext } from '../../../shared/protocol';
 import {
   addClipboardImage,
@@ -56,22 +57,22 @@ export const composerStore = {
   clearDraftCurrentDocumentState,
   clearCurrentDocumentStateForSession,
   setEditorContext(payload: EditorContext) {
-    setState('editorContext', payload);
+    setState(storePath('editorContext', payload));
   },
   setTerminalSelection(payload: { text: string; terminalName: string } | null) {
-    setState('terminalSelection', payload);
+    setState(storePath('terminalSelection', payload));
   },
   clearTerminalSelection() {
-    setState('terminalSelection', null);
+    setState(storePath('terminalSelection', null));
   },
   clearAttachedDiagnostics() {
-    setState('attachedDiagnostics', null);
+    setState(storePath('attachedDiagnostics', null));
   },
   clearDroppedFiles() {
     clearContextFiles();
   },
   clearTodos() {
-    setState('todos', []);
+    setState(storePath('todos', []));
   },
 };
 

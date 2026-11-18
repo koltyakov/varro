@@ -1,4 +1,5 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { ariaBoolean } from '../lib/aria';
+import { createEffect, For, Show, createMemo, createSignal, onCleanup, untrack } from 'solid-js';
 import type { QuestionRequest } from '../types';
 import { rejectQuestion, respondQuestion } from '../hooks/useOpenCode';
 import { defaultAppState } from '../lib/state';
@@ -41,31 +42,35 @@ function LegacyQuestionPrompt(props: { request: QuestionRequest }) {
   const isCustomEnabled = (questionIndex: number) => questions()[questionIndex]?.custom !== false;
   const ensureAnswerSlots = <T,>(values: T[], fallback: T) =>
     Array.from({ length: questions().length }, (_, index) => values[index] ?? fallback);
-  const savedDraft = () => questionDrafts.get(props.request.id);
-  const [selected, setSelected] = createSignal<Array<Array<string>>>(savedDraft()?.selected || []);
-  const [customValues, setCustomValues] = createSignal<string[]>(savedDraft()?.customValues || []);
-  const [currentStep, setCurrentStep] = createSignal(savedDraft()?.currentStep || 0);
+  const savedDraft = untrack(() => questionDrafts.get(props.request.id));
+  const [selected, setSelected] = createSignal<Array<Array<string>>>(savedDraft?.selected || []);
+  const [customValues, setCustomValues] = createSignal<string[]>(savedDraft?.customValues || []);
+  const [currentStep, setCurrentStep] = createSignal(savedDraft?.currentStep || 0);
 
-  createEffect(() => {
-    const count = questions().length;
-    setSelected((prev) => {
-      if (prev.length === count) return prev;
-      return Array.from({ length: count }, (_, i) => prev[i] || []);
-    });
-    setCustomValues((prev) => {
-      if (prev.length === count) return prev;
-      return Array.from({ length: count }, (_, i) => prev[i] || '');
-    });
-    setCurrentStep((step) => Math.min(step, Math.max(0, count - 1)));
-  });
+  createEffect(
+    () => questions().length,
+    (count) => {
+      setSelected((prev) => {
+        if (prev.length === count) return prev;
+        return Array.from({ length: count }, (_, i) => prev[i] || []);
+      });
+      setCustomValues((prev) => {
+        if (prev.length === count) return prev;
+        return Array.from({ length: count }, (_, i) => prev[i] || '');
+      });
+      setCurrentStep((step) => Math.min(step, Math.max(0, count - 1)));
+    }
+  );
 
-  createEffect(() => {
-    saveQuestionDraft(props.request.id, {
+  createEffect(
+    (): QuestionDraft & { id: string } => ({
+      id: props.request.id,
       selected: selected().map((entry) => [...entry]),
       customValues: [...customValues()],
       currentStep: currentStep(),
-    });
-  });
+    }),
+    ({ id, ...draft }) => saveQuestionDraft(id, draft)
+  );
 
   onCleanup(() => {
     queueMicrotask(() => {
@@ -215,8 +220,8 @@ function LegacyQuestionPrompt(props: { request: QuestionRequest }) {
                         <div
                           class={`question-option ${checked() ? 'selected' : ''}`}
                           role={isMultiple() ? 'checkbox' : 'radio'}
-                          aria-checked={checked()}
-                          tabIndex={0}
+                          aria-checked={ariaBoolean(checked())}
+                          tabindex={0}
                           onClick={() =>
                             toggleOption(questionIndex(), option.label, question().multiple)
                           }
@@ -259,8 +264,10 @@ function LegacyQuestionPrompt(props: { request: QuestionRequest }) {
                         <div
                           class={`question-option question-option-custom ${(customValues()[questionIndex()] || '').trim() ? 'selected' : ''}`}
                           role={question().multiple ? 'checkbox' : 'radio'}
-                          aria-checked={!!(customValues()[questionIndex()] || '').trim()}
-                          tabIndex={0}
+                          aria-checked={ariaBoolean(
+                            !!(customValues()[questionIndex()] || '').trim()
+                          )}
+                          tabindex={0}
                           onClick={(event) => {
                             if (event.target === customInputRef) return;
                             if (!question().multiple) {

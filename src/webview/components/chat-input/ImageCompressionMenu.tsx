@@ -1,5 +1,5 @@
-import { onCleanup, onMount, Show } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { onSettled, Show } from 'solid-js';
+import { Portal } from '@solidjs/web';
 import type { CompressedImage, ImageCompressionAnalysis } from '../../lib/image-compression';
 import { formatImageBytes } from '../../lib/image-compression';
 import { observePopupViewport } from '../../lib/popup-position';
@@ -27,10 +27,12 @@ export function ImageCompressionMenu(props: {
     menu.style.left = `${Math.max(margin, Math.min(props.x, window.innerWidth - margin - rect.width))}px`;
     menu.style.top = `${Math.max(margin, Math.min(props.y - gap - rect.height, window.innerHeight - margin - rect.height))}px`;
   };
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     if (menu) {
       positionMenu();
-      onCleanup(observePopupViewport(menu, positionMenu));
+      cleanups.push(observePopupViewport(menu, positionMenu));
       menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
     }
     const outside = (event: Event) => {
@@ -41,12 +43,16 @@ export function ImageCompressionMenu(props: {
     window.addEventListener('contextmenu', outside, true);
     window.addEventListener('focusin', outside);
     const unregister = registerComposerOverlayDismiss(props.onClose);
-    onCleanup(() => {
+    cleanups.push(() => {
       window.removeEventListener('pointerdown', outside, true);
       window.removeEventListener('contextmenu', outside, true);
       window.removeEventListener('focusin', outside);
       unregister();
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
   const describe = (image: CompressedImage) => {
     const reduction =

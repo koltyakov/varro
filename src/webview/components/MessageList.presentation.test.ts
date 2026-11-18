@@ -1,7 +1,8 @@
+import { flush as flushSolid, reconcile } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
-import { batch } from 'solid-js';
-import { render } from 'solid-js/web';
-import { reconcile } from 'solid-js/store';
+
+import { render } from '@solidjs/web';
 import type { SessionMessageAssistant } from '@opencode/client';
 import {
   replaceMessages,
@@ -67,8 +68,14 @@ function completeSearch(part: ToolPart): ToolPart {
 }
 
 function openChat(parts: Part[] = []) {
-  setState('activeSessionId', 'session-1');
-  setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+  setState(storePath('activeSessionId', 'session-1'));
+  setState((draft) => {
+    const current = draft['sessionStatus'];
+    const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['sessionStatus'] = incoming;
+    else reconcile(incoming)(current);
+  });
   replaceMessages([
     { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Inspect the queue')] },
     { info: assistantMessage('answer', { parentID: 'prompt', time: { created: 1 } }), parts },
@@ -77,19 +84,51 @@ function openChat(parts: Part[] = []) {
 }
 
 describe('streaming presentation handoff', () => {
+  it('mounts a paced text part once and keeps its node as the remaining text arrives', async () => {
+    openChat([{ ...textPart('first', 'Already visible'), messageID: 'answer' }]);
+    flushSolid();
+    const flow = container!.querySelector<HTMLElement>('.assistant-message-flow')!;
+    const selector = '[data-assistant-render-key="part:second"]';
+    const mounts: Element[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node instanceof Element && node.matches(selector)) mounts.push(node);
+        }
+      }
+    });
+    observer.observe(flow, { childList: true });
+    try {
+      const text = 'A paced response with enough words for several updates. '.repeat(8).trim();
+      upsertPart({ ...textPart('second', text), messageID: 'answer' });
+      flushSolid();
+      await vi.advanceTimersByTimeAsync(2_000);
+      flushSolid();
+      expect(mounts).toHaveLength(1);
+      expect(flow.querySelector(selector)).toBe(mounts[0]);
+      expect(mounts[0]?.textContent).toContain(text);
+    } finally {
+      observer.disconnect();
+    }
+  });
+
   it('restores the turn verb cycle and duration after hydration with a recent completion', async () => {
     vi.setSystemTime(12_001);
+    flushSolid();
     const completed = completeSearch(searchPart());
     if (completed.state.status !== 'completed') throw new Error('Expected completed tool fixture');
     completed.state.time.end = Date.now();
     openChat([completed]);
+    flushSolid();
     expect(container?.querySelector('.loading-verb')?.textContent).toBe('Considering');
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('0s');
     await vi.advanceTimersByTimeAsync(6_000);
+    flushSolid();
     upsertPart({
       ...completed,
       state: { ...completed.state, time: { start: 1, end: Date.now() } },
     });
+    flushSolid();
     expect(container?.querySelector('.loading-verb')?.textContent).toBe('Pondering');
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('0s');
   });
@@ -99,17 +138,21 @@ describe('streaming presentation handoff', () => {
     const running = { ...searchPart(), id: 'long', callID: 'long-call' };
     const after = completeSearch({ ...searchPart(), id: 'after', callID: 'after-call' });
     openChat([before, running, after]);
+    flushSolid();
     expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 2 searches'
     );
     for (let frame = 0; frame < 250; frame += 1) {
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
       expect(container?.querySelector('.assistant-activity-summary-placeholder')).toBeNull();
     }
     upsertPart(completeSearch(running));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(600);
+    flushSolid();
     expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 3 searches'
@@ -118,6 +161,7 @@ describe('streaming presentation handoff', () => {
 
   it('shares one summary across messages on both sides of a delayed running tool', async () => {
     openChat([completeSearch(searchPart())]);
+    flushSolid();
     const running = { ...searchPart(), id: 'middle-tool', messageID: 'middle' };
     const after = completeSearch({ ...searchPart(), id: 'after-tool', messageID: 'after' });
     setMessagesIncremental([
@@ -131,8 +175,10 @@ describe('streaming presentation handoff', () => {
         parts: [after],
       },
     ]);
+    flushSolid();
     for (let frame = 0; frame < 250; frame += 1) {
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
       expect(container?.querySelector('.assistant-activity-summary-placeholder')).toBeNull();
     }
@@ -140,14 +186,16 @@ describe('streaming presentation handoff', () => {
 
   it('does not add Exploring after Explored when a queued tool separates them', async () => {
     openChat([completeSearch(searchPart())]);
+    flushSolid();
     const queued = { ...searchPart(), id: 'queued', callID: 'queued-call' };
     const running = { ...searchPart(), id: 'running', callID: 'running-call' };
-    batch(() => {
+    (() => {
       upsertPart(queued);
       upsertPart(running);
-    });
+    })();
     for (let frame = 0; frame < 300; frame += 1) {
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
       expect(container?.querySelector('.assistant-activity-summary-placeholder')).toBeNull();
     }
@@ -155,6 +203,7 @@ describe('streaming presentation handoff', () => {
 
   it('rotates the visible tool while queued running tools stay out of Explored', async () => {
     openChat();
+    flushSolid();
     const startedAt = Date.now();
     const tools = ['long', 'two', 'three'].map((id) => ({
       ...searchPart(),
@@ -166,13 +215,15 @@ describe('streaming presentation handoff', () => {
         time: { start: startedAt },
       },
     }));
-    batch(() => tools.forEach(upsertPart));
+    (() => tools.forEach(upsertPart))();
     await vi.advanceTimersByTimeAsync(2_999);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="long"]')).not.toBeNull();
     const tray = container?.querySelector('.assistant-active-activity-tray');
     for (const expected of ['two', 'long', 'three', 'long']) {
       for (let frame = 0; frame < 70; frame += 1) {
         await vi.advanceTimersByTimeAsync(16);
+        flushSolid();
         expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
         expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
         expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
@@ -196,18 +247,24 @@ describe('streaming presentation handoff', () => {
 
   it('hides the existing status row during a tool preview and restores it when tools finish', async () => {
     vi.setSystemTime(1);
+    flushSolid();
     openChat();
+    flushSolid();
     const row = container?.querySelector('.interactive-loading-row');
     expect(row?.textContent).toContain('Thinking');
     const running = searchPart();
     upsertPart(running);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(600);
+    flushSolid();
     expect(container?.querySelector('.interactive-loading-row')).toBe(row);
     expect(row?.classList).toContain('is-reserved');
     expect(row?.getAttribute('aria-hidden')).toBe('true');
     expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
     upsertPart(completeSearch(running));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(3_000);
+    flushSolid();
     expect(container?.querySelector('.interactive-loading-row')).toBe(row);
     expect(row?.classList).not.toContain('is-reserved');
     expect(container?.querySelector('.loading-verb')?.textContent).toBe('Thinking');
@@ -216,11 +273,15 @@ describe('streaming presentation handoff', () => {
 
   it('hides the loading label for pending tool previews and restores it after a tool error', async () => {
     vi.setSystemTime(1);
+    flushSolid();
     openChat();
+    flushSolid();
     const pending = searchPart();
     pending.state = { status: 'pending', input: { pattern: 'queue' }, raw: '' };
     upsertPart(pending);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(600);
+    flushSolid();
     expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
       'is-reserved'
     );
@@ -234,7 +295,9 @@ describe('streaming presentation handoff', () => {
         time: { start: 1, end: 2 },
       },
     });
+    flushSolid();
     await vi.advanceTimersByTimeAsync(3_000);
+    flushSolid();
     expect(container?.querySelector('.loading-verb')?.textContent).toBe('Thinking');
   });
 
@@ -242,6 +305,7 @@ describe('streaming presentation handoff', () => {
     'replaces a completed tool with a %s preview instantly',
     async (status) => {
       openChat();
+      flushSolid();
       const completed = completeSearch(searchPart());
       if (completed.state.status !== 'completed')
         throw new Error('Expected completed tool fixture');
@@ -251,16 +315,18 @@ describe('streaming presentation handoff', () => {
         id: 'replacement',
         callID: 'replacement-call',
       };
-      batch(() => {
+      (() => {
         upsertPart(completed);
         upsertPart(replacement);
-      });
+      })();
       await vi.advanceTimersByTimeAsync(1_299);
+      flushSolid();
       expect(container?.querySelector('[data-activity-part-id="search"]')).not.toBeNull();
       expect(container?.querySelector('[data-activity-part-id="replacement"]')).toBeNull();
       const tray = container?.querySelector('.assistant-active-activity-tray');
       for (let frame = 0; frame < 20; frame += 1) {
         await vi.advanceTimersByTimeAsync(16);
+        flushSolid();
         expect(container?.querySelector('.assistant-active-activity-item.is-exiting')).toBeNull();
         expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
         if (!container?.querySelector('[data-activity-part-id="search"]')) break;
@@ -280,6 +346,7 @@ describe('streaming presentation handoff', () => {
     'groups a short %s tool and previews the running alternative',
     async (status) => {
       openChat();
+      flushSolid();
       const short = completeSearch(searchPart());
       if (status === 'error') {
         short.state = {
@@ -290,11 +357,12 @@ describe('streaming presentation handoff', () => {
         };
       }
       const running = { ...searchPart(), id: 'running', callID: 'running-call' };
-      batch(() => {
+      (() => {
         upsertPart(short);
         upsertPart(running);
-      });
+      })();
       await vi.advanceTimersByTimeAsync(600);
+      flushSolid();
       const items = container?.querySelectorAll<HTMLElement>('.assistant-active-activity-item');
       expect(items).toHaveLength(1);
       expect(items?.[0]?.dataset.activityPartId).toBe('running');
@@ -302,7 +370,9 @@ describe('streaming presentation handoff', () => {
         'Explored: 1 search'
       );
       upsertPart(completeSearch(running));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(3_000);
+      flushSolid();
       expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
       expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
         'Explored: 2 searches'
@@ -320,6 +390,7 @@ describe('streaming presentation handoff', () => {
     'groups the remaining burst immediately when $boundary arrives after $delay ms',
     async ({ boundary, delay }) => {
       openChat([completeSearch(searchPart())]);
+      flushSolid();
       const parts = Array.from({ length: 32 }, (_, index) =>
         completeSearch({
           ...searchPart(),
@@ -327,8 +398,9 @@ describe('streaming presentation handoff', () => {
           callID: `search-call-${index}`,
         })
       );
-      batch(() => parts.forEach(upsertPart));
+      (() => parts.forEach(upsertPart))();
       await vi.advanceTimersByTimeAsync(delay);
+      flushSolid();
       if (delay === 600) {
         expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
       }
@@ -336,6 +408,7 @@ describe('streaming presentation handoff', () => {
       if (boundary === 'compaction') {
         // Metadata can precede the divider part. It must not reset the active turn.
         setMessagesIncremental([...state.messages, { info: userMessage('compaction'), parts: [] }]);
+        flushSolid();
         upsertPart({
           id: 'compaction-part',
           messageID: 'compaction',
@@ -344,21 +417,26 @@ describe('streaming presentation handoff', () => {
           auto: true,
           status: 'running',
         });
+        flushSolid();
         expect(container?.textContent).toContain('Compacting context');
       } else if (boundary === 'text') {
         upsertPart({ ...textPart('answer-text', 'The queue is ready.'), messageID: 'answer' });
+        flushSolid();
       } else {
         upsertPart({
           ...toolPart('patch-streaming', 'answer', 'patch-call'),
           tool: 'patch',
           state: { status: 'pending', input: {}, raw: '' },
         });
+        flushSolid();
       }
+      flushSolid();
 
       expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
       expect(container?.textContent).toContain('Explored: 33 searches');
       for (let frame = 0; frame < 200; frame += 1) {
         await vi.advanceTimersByTimeAsync(16);
+        flushSolid();
         expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
         expect(container?.textContent).toContain('Explored: 33 searches');
       }
@@ -372,20 +450,26 @@ describe('streaming presentation handoff', () => {
       callID: `search-call-${index}`,
     }));
     openChat([completeSearch(searchPart()), ...parts]);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(600);
+    flushSolid();
     expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(1);
-    batch(() => parts.forEach((part) => upsertPart(completeSearch(part))));
+    (() => parts.forEach((part) => upsertPart(completeSearch(part))))();
     const summary = container!.querySelector<HTMLButtonElement>(
       'button.assistant-activity-summary'
     )!;
     summary.click();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     expect(summary.getAttribute('aria-expanded')).toBe('true');
     expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
     expect(container?.textContent).toContain('4 searches');
     summary.click();
+    flushSolid();
     for (let frame = 0; frame < 200; frame += 1) {
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(0);
     }
   });
@@ -398,7 +482,9 @@ describe('streaming presentation handoff', () => {
         completeSearch(searchPart()),
         { ...textPart('answer-text', answer), messageID: 'answer' },
       ]);
+      flushSolid();
       await vi.advanceTimersByTimeAsync(3_000);
+      flushSolid();
       expect(container?.textContent).toContain(answer);
 
       const noticePart: Part = {
@@ -413,11 +499,16 @@ describe('streaming presentation handoff', () => {
         ...state.messages,
         { info: userMessage('background-notice'), parts: splitDelivery ? [] : [noticePart] },
       ]);
+      flushSolid();
       if (splitDelivery) {
         await vi.advanceTimersByTimeAsync(16);
+        flushSolid();
         upsertPart(noticePart);
+        flushSolid();
       }
+      flushSolid();
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       setMessagesIncremental([
         ...state.messages,
         {
@@ -425,9 +516,11 @@ describe('streaming presentation handoff', () => {
           parts: [],
         },
       ]);
+      flushSolid();
       for (let frame = 0; frame < 150; frame += 1) {
         expect(container?.textContent).toContain(answer);
         await vi.advanceTimersByTimeAsync(16);
+        flushSolid();
       }
     }
   );
@@ -440,7 +533,9 @@ describe('streaming presentation handoff', () => {
         completeSearch(searchPart()),
         { ...textPart('answer-text', answer), messageID: 'answer' },
       ]);
+      flushSolid();
       await vi.advanceTimersByTimeAsync(3_000);
+      flushSolid();
       expect(container?.textContent).toContain(answer);
       const compactionPart: CompactionPart = {
         id: 'compaction-part',
@@ -455,13 +550,16 @@ describe('streaming presentation handoff', () => {
         parts: [compactionPart],
       };
       setMessagesIncremental([...state.messages, compaction]);
+      flushSolid();
       for (let frame = 0; frame < 20; frame += 1) {
         expect(container?.textContent).toContain(answer);
         await vi.advanceTimersByTimeAsync(16);
+        flushSolid();
       }
       expect(container?.textContent).toContain('Compacting context');
 
       upsertPart({ ...compactionPart, status: 'completed' });
+      flushSolid();
       expect(container?.textContent).toContain('Context compacted');
       setMessagesIncremental([
         ...state.messages,
@@ -472,9 +570,11 @@ describe('streaming presentation handoff', () => {
           ],
         },
       ]);
+      flushSolid();
       for (let frame = 0; frame < 150; frame += 1) {
         expect(container?.textContent).toContain(answer);
         await vi.advanceTimersByTimeAsync(16);
+        flushSolid();
       }
       expect(container?.textContent).toContain('Continuing the work.');
       expect(container?.textContent).toContain('Explored: 1 search');
@@ -508,6 +608,7 @@ describe('streaming presentation handoff', () => {
       // SAFETY: This typed native fixture projects into the legacy parts consumed by the webview.
       const initialParts = projectV2Message(native, 'session-1').parts as Part[];
       openChat(initialParts);
+      flushSolid();
       const handle = createProjectedSessionEventHandler({
         isSessionInActiveTree: (sessionId) => sessionId === 'session-1',
         getMessages: () => state.messages,
@@ -532,6 +633,7 @@ describe('streaming presentation handoff', () => {
       if (!event?.properties) throw new Error('Expected a projected v2 text event');
       expect(handle(event.type, event.properties)).toBe(true);
       await vi.advanceTimersByTimeAsync(350);
+      flushSolid();
       expect(container?.textContent).toContain(answer);
 
       // SAFETY: The completed native snapshot uses the same projection as initial hydration.
@@ -543,15 +645,28 @@ describe('streaming presentation handoff', () => {
         [state.messages[0]!, { info: state.messages[1]!.info, parts: finalParts }],
         { preserveExtraParts }
       );
+      flushSolid();
       for (let frame = 0; frame < 150; frame += 1) {
         if (frame === 60) {
-          batch(() => {
-            setState('messages', 1, 'info', 'time', { created: 1, completed: 5 });
-            setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
-          });
+          (() => {
+            setState(storePath('messages', 1, 'info', 'time', { created: 1, completed: 5 }));
+            setState((draft) => {
+              const current = draft['sessionStatus'];
+              const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+              if (
+                incoming === null ||
+                incoming === undefined ||
+                current === null ||
+                current === undefined
+              )
+                draft['sessionStatus'] = incoming;
+              else reconcile(incoming)(current);
+            });
+          })();
         }
         expect(container?.textContent).toContain(answer);
         await vi.advanceTimersByTimeAsync(16);
+        flushSolid();
       }
       expect(state.messages[1]?.parts.map((part) => part.type)).toEqual([
         'reasoning',
@@ -565,13 +680,17 @@ describe('streaming presentation handoff', () => {
     'shows a streaming v2 patch before its input arrives with diffs=%s',
     async (diffs) => {
       setShowFileDiffs(diffs);
+      flushSolid();
       openChat([completeSearch(searchPart())]);
+      flushSolid();
       upsertPart({
         ...toolPart('patch-streaming', 'answer', 'patch-call'),
         tool: 'patch',
         state: { status: 'pending', input: {}, raw: '' },
       });
+      flushSolid();
       await vi.advanceTimersByTimeAsync(3_000);
+      flushSolid();
       expect(
         container?.querySelector('.tool-status-running'),
         container?.textContent
@@ -582,35 +701,49 @@ describe('streaming presentation handoff', () => {
 
   it('flushes available text when Stop interrupts an activity preview', async () => {
     openChat();
+    flushSolid();
     upsertPart(completeSearch(searchPart()));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(100);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search"]')).not.toBeNull();
     upsertPart({ ...textPart('answer-text', 'Available before stopping.'), messageID: 'answer' });
+    flushSolid();
     expect(container?.textContent).not.toContain('Available before stopping.');
     flushMessagePresentation('session-1');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.textContent).toContain('Available before stopping.');
     expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
   });
 
   it('reveals an actionable permission immediately while presentation is queued', async () => {
     openChat();
+    flushSolid();
     upsertPart(completeSearch(searchPart()));
+    flushSolid();
     upsertPart({ ...textPart('answer-text', 'The command needs approval.'), messageID: 'answer' });
+    flushSolid();
     await vi.advanceTimersByTimeAsync(100);
-    setState('permissions', [
-      {
-        id: 'permission',
-        type: 'bash',
-        sessionID: 'session-1',
-        messageID: 'answer',
-        callID: 'approval-call',
-        title: 'Allow command',
-        metadata: { command: 'pwd' },
-        time: { created: 1 },
-      },
-    ]);
+    flushSolid();
+    setState(
+      storePath('permissions', [
+        {
+          id: 'permission',
+          type: 'bash',
+          sessionID: 'session-1',
+          messageID: 'answer',
+          callID: 'approval-call',
+          title: 'Allow command',
+          metadata: { command: 'pwd' },
+          time: { created: 1 },
+        },
+      ])
+    );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.permission-prompt')).not.toBeNull();
     expect(container?.textContent).toContain('The command needs approval.');
     expect(state.permissions).toHaveLength(1);
@@ -618,44 +751,59 @@ describe('streaming presentation handoff', () => {
 
   it('cancels the old queue during hydration and shows the replacement snapshot immediately', async () => {
     openChat();
+    flushSolid();
     upsertPart(completeSearch(searchPart()));
+    flushSolid();
     upsertPart({ ...textPart('answer-text', 'Old queued answer.'), messageID: 'answer' });
+    flushSolid();
     await vi.advanceTimersByTimeAsync(100);
-    setState('messagesLoading', true);
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
     replaceMessages([
       {
         info: assistantMessage('replacement'),
         parts: [{ ...textPart('replacement-text', 'Loaded snapshot.'), messageID: 'replacement' }],
       },
     ]);
-    setState('messagesLoading', false);
+    flushSolid();
+    setState(storePath('messagesLoading', false));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.textContent).toContain('Loaded snapshot.');
     await vi.advanceTimersByTimeAsync(3_000);
+    flushSolid();
     expect(container?.textContent).not.toContain('Old queued answer.');
     expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
   });
 
   it('groups a fast completed tool immediately when the answer arrives', async () => {
     openChat();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     const search = searchPart();
     upsertPart(search);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(40);
-    batch(() => {
+    flushSolid();
+    (() => {
       upsertPart(completeSearch(search));
       upsertPart({
         ...textPart('answer-text', 'The queue is ready.'),
         messageID: 'answer',
       });
-    });
+    })();
     await vi.advanceTimersByTimeAsync(100);
+    flushSolid();
 
     expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
     expect(container?.textContent).toContain('The queue is ready.');
     expect(state.messages.at(-1)?.parts.at(-1)).toMatchObject({ text: 'The queue is ready.' });
 
     await vi.advanceTimersByTimeAsync(2_300);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
     expect(container?.textContent).toContain('Explored: 1 search');
     expect(container?.textContent).toContain('The queue is ready.');
@@ -667,47 +815,68 @@ describe('streaming presentation handoff', () => {
   it('groups an already visible activity when text arrives in the completion batch', async () => {
     const search = searchPart();
     openChat([search]);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search"]')).not.toBeNull();
 
-    batch(() => {
+    (() => {
       upsertPart(completeSearch(search));
       upsertPart({
         ...textPart('answer-text', 'A readable handoff.'),
         messageID: 'answer',
       });
-      setState('streamingPartId', 'answer-text');
-      setState('streamingText', 'A readable handoff.');
-    });
+      setState(storePath('streamingPartId', 'answer-text'));
+      setState(storePath('streamingText', 'A readable handoff.'));
+    })();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
     expect(container?.textContent).toContain('Explored: 1 search');
     expect(container?.textContent).not.toContain('A readable handoff.');
 
     await vi.advanceTimersByTimeAsync(32);
+    flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search"]')).toBeNull();
     expect(container?.textContent).toContain('A readable handoff.');
   });
 
   it('drains a completed text burst without delaying canonical completion', async () => {
     openChat();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     const text = 'Readable streaming words. '.repeat(100);
-    batch(() => {
+    (() => {
       upsertPart({ ...textPart('answer-text', text), messageID: 'answer' });
-      setState('messages', 1, 'info', {
-        ...assistantMessage('answer', { parentID: 'prompt' }),
-        time: { created: 1, completed: Date.now() },
+      setState(
+        storePath('messages', 1, 'info', {
+          ...assistantMessage('answer', { parentID: 'prompt' }),
+          time: { created: 1, completed: Date.now() },
+        })
+      );
+      setState((draft) => {
+        const current = draft['sessionStatus'];
+        const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionStatus'] = incoming;
+        else reconcile(incoming)(current);
       });
-      setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
-    });
+    })();
     await Promise.resolve();
+    flushSolid();
     expect(state.messages[1]?.info.time).toHaveProperty('completed');
     expect(state.messages[1]?.parts[0]).toMatchObject({ text });
     expect(
       container?.querySelector('[data-msg-id="answer"] .rendered-markdown')?.textContent?.trim()
     ).not.toBe(text.trim());
     await vi.advanceTimersByTimeAsync(350);
+    flushSolid();
     expect(
       container?.querySelector('[data-msg-id="answer"] .rendered-markdown')?.textContent?.trim()
     ).toBe(text.trim());

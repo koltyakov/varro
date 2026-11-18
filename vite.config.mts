@@ -2,7 +2,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import solid from 'vite-plugin-solid';
+import solid from '@solidjs/vite-plugin';
 import { defineConfig, type Plugin } from 'vite';
 
 const projectRoot = dirname(fileURLToPath(import.meta.url));

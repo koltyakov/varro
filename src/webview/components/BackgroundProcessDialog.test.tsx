@@ -1,5 +1,6 @@
+import { flush as flushSolid } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import type { BackgroundProcess, BackgroundProcessOutput } from '../../shared/background-process';
 import { client } from '../lib/client';
 import { BackgroundProcessDialog } from './BackgroundProcessDialog';
@@ -55,8 +56,10 @@ function dialog() {
 
 beforeEach(() => {
   resetDefaultAppState();
+  flushSolid();
   vi.useFakeTimers();
   vi.setSystemTime(11_000);
+  flushSolid();
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
   container = document.createElement('div');
   document.body.append(container);
@@ -70,9 +73,12 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container.remove();
+  flushSolid();
   vi.restoreAllMocks();
+  flushSolid();
   vi.useRealTimers();
 });
 
@@ -81,7 +87,9 @@ describe('BackgroundProcessDialog', () => {
     const command = "python3 - <<'PY'\nimport subprocess\nprint('done')\nPY";
     vi.mocked(client.session.backgroundProcesses).mockResolvedValue([{ ...process, command }]);
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const toggle = dialog().querySelector<HTMLButtonElement>('.background-process-command-toggle')!;
     const preview = dialog().querySelector('.background-process-detail-command')!;
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
@@ -89,15 +97,19 @@ describe('BackgroundProcessDialog', () => {
     expect(dialog().querySelector('[aria-label="Full command"]')).toBeNull();
     expect(preview.textContent).toBe(command);
     toggle.click();
+    flushSolid();
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(toggle.getAttribute('aria-label')).toBe('Collapse command');
     expect(dialog().querySelector('[aria-label="Full command"]')?.textContent).toBe(command);
     expect(dialog().querySelector('[aria-label="Full command"]')?.closest('[id]')?.id).toBe(
       toggle.getAttribute('aria-controls')
     );
+    flushSolid();
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     toggle.click();
+    flushSolid();
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(dialog().querySelector('[aria-label="Full command"]')).toBeNull();
   });
@@ -110,25 +122,36 @@ describe('BackgroundProcessDialog', () => {
       { ...process, id: 'shell-2', command: 'npm run build' },
     ]);
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const toggle = dialog().querySelector<HTMLButtonElement>('.background-process-command-toggle')!;
     const copy = dialog().querySelector<HTMLButtonElement>('.tool-copy-button')!;
     expect(toggle.contains(copy)).toBe(false);
     copy.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(writeClipboard).toHaveBeenLastCalledWith(command);
     expect(copy.getAttribute('aria-label')).toBe('Copied');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     await vi.advanceTimersByTimeAsync(1500);
+    flushSolid();
     expect(copy.getAttribute('aria-label')).toBe(`Copy command: ${command}`);
     toggle.click();
+    flushSolid();
     copy.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(writeClipboard).toHaveBeenLastCalledWith(command);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     dialog().querySelectorAll<HTMLButtonElement>('.background-process-list-item')[1]!.click();
+    flushSolid();
     dialog().querySelector<HTMLButtonElement>('.tool-copy-button')!.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(writeClipboard).toHaveBeenLastCalledWith('npm run build');
   });
 
@@ -138,9 +161,13 @@ describe('BackgroundProcessDialog', () => {
       { ...process, id: 'shell-2', command: 'npm run build' },
     ]);
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     dialog().querySelector<HTMLButtonElement>('.background-process-command-toggle')!.click();
+    flushSolid();
     dialog().querySelectorAll<HTMLButtonElement>('.background-process-list-item')[1]!.click();
+    flushSolid();
     expect(
       dialog().querySelector('.background-process-command-toggle')?.getAttribute('aria-expanded')
     ).toBe('false');
@@ -155,7 +182,9 @@ describe('BackgroundProcessDialog', () => {
       { ...process, id: 'shell-2', command: 'npm run build', pid: 43 },
     ]);
     mount('shell-2');
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().classList.contains('has-process-target')).toBe(true);
     expect(dialog().querySelector('.background-process-detail-command')?.textContent).toBe(
       'npm run build'
@@ -179,12 +208,18 @@ describe('BackgroundProcessDialog', () => {
       { ...process, id: 'shell-2', command: 'npm run build', pid },
     ]);
     const onClose = mount();
+    flushSolid();
     await settle();
+    flushSolid();
     dialog().querySelectorAll<HTMLButtonElement>('.background-process-list-item')[1]!.click();
+    flushSolid();
     const stop = dialog().querySelector<HTMLButtonElement>('.background-process-actions button')!;
     stop.click();
+    flushSolid();
     stop.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(client.session.stopBackgroundProcess).toHaveBeenCalledExactlyOnceWith(
       'ses_own',
       'shell-2',
@@ -200,16 +235,20 @@ describe('BackgroundProcessDialog', () => {
 
   it('disables stop for completed and removed processes', async () => {
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     vi.mocked(client.session.backgroundProcesses).mockResolvedValue([
       { ...process, status: 'exited' },
     ]);
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     expect(
       dialog().querySelector<HTMLButtonElement>('.background-process-actions button')!.disabled
     ).toBe(true);
     vi.mocked(client.session.backgroundProcesses).mockResolvedValue([]);
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     expect(
       dialog().querySelector<HTMLButtonElement>('.background-process-actions button')!.disabled
     ).toBe(true);
@@ -221,11 +260,16 @@ describe('BackgroundProcessDialog', () => {
       ses_own: { type: 'idle', backgroundServices: 1 },
     });
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const wait = dialog().querySelector<HTMLInputElement>('.background-process-controls input')!;
     wait.focus();
+    flushSolid();
     wait.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(client.session.status).toHaveBeenCalledWith({
       fresh: true,
       signal: expect.any(AbortSignal),
@@ -235,11 +279,15 @@ describe('BackgroundProcessDialog', () => {
   });
   it('detaches and reattaches waiting without stopping the process or losing output', async () => {
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const wait = dialog().querySelector<HTMLInputElement>('.background-process-controls input')!;
     expect(wait.checked).toBe(true);
     wait.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(wait.checked).toBe(false);
     expect(client.session.setBackgroundProcessService).toHaveBeenLastCalledWith(
       'ses_own',
@@ -250,7 +298,9 @@ describe('BackgroundProcessDialog', () => {
     expect(dialog().textContent).toContain('Chat does not wait for this process');
     expect(dialog().querySelector('pre')?.textContent).toBe('first line\n');
     wait.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(wait.checked).toBe(true);
     expect(client.session.setBackgroundProcessService).toHaveBeenLastCalledWith(
       'ses_own',
@@ -267,10 +317,14 @@ describe('BackgroundProcessDialog', () => {
       new Error('Could not save choice')
     );
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const wait = dialog().querySelector<HTMLInputElement>('.background-process-controls input')!;
     wait.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(wait.checked).toBe(true);
     expect(wait.disabled).toBe(false);
     expect(dialog().querySelector('[role="alert"]')?.textContent).toContain(
@@ -285,11 +339,15 @@ describe('BackgroundProcessDialog', () => {
       { ...process, id: 'shell-2', time: { started: 500 } },
     ]);
     const onClose = mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const stop = dialog().querySelector<HTMLButtonElement>('.background-process-controls button')!;
     expect(client.session.stopBackgroundProcess).not.toHaveBeenCalled();
     stop.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(client.session.stopBackgroundProcess).toHaveBeenCalledWith('ses_own', 'shell-1', {
       directory: '/repo',
       signal: expect.any(AbortSignal),
@@ -317,12 +375,18 @@ describe('BackgroundProcessDialog', () => {
       if (refreshFails)
         vi.mocked(client.session.status).mockRejectedValue(new Error('Refresh failed'));
       const onClose = mount();
+      flushSolid();
       await settle();
+      flushSolid();
       dialog().querySelector<HTMLButtonElement>('.background-process-controls button')!.click();
+      flushSolid();
       await settle();
+      flushSolid();
       expect(onClose).not.toHaveBeenCalled();
       resolveStop(true);
+      flushSolid();
       await settle();
+      flushSolid();
       expect(onClose).toHaveBeenCalledTimes(1);
     }
   );
@@ -330,10 +394,14 @@ describe('BackgroundProcessDialog', () => {
   it('keeps the dialog open when stopping fails', async () => {
     vi.mocked(client.session.stopBackgroundProcess).mockRejectedValue(new Error('Stop failed'));
     const onClose = mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const stop = dialog().querySelector<HTMLButtonElement>('.background-process-controls button')!;
     stop.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(onClose).not.toHaveBeenCalled();
     expect(stop.disabled).toBe(false);
     expect(dialog().querySelector('[role="alert"]')?.textContent).toContain('Stop failed');
@@ -341,7 +409,9 @@ describe('BackgroundProcessDialog', () => {
 
   it('ignores a stale process list that resolves during a choice update', async () => {
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     let resolveList!: (value: BackgroundProcess[]) => void;
     vi.mocked(client.session.backgroundProcesses).mockImplementationOnce(
       () =>
@@ -350,27 +420,38 @@ describe('BackgroundProcessDialog', () => {
         })
     );
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     const wait = dialog().querySelector<HTMLInputElement>('.background-process-controls input')!;
     wait.click();
+    flushSolid();
     await settle();
+    flushSolid();
     resolveList([process]);
+    flushSolid();
     await settle();
+    flushSolid();
     expect(wait.checked).toBe(false);
   });
   it('toggles wrapping and following without fetching more output', async () => {
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const wrap = dialog().querySelector<HTMLButtonElement>('[aria-label="Wrap output lines"]')!;
     const follow = dialog().querySelector<HTMLButtonElement>('[aria-label="Follow output"]')!;
     expect(wrap.getAttribute('aria-pressed')).toBe('false');
     expect(follow.getAttribute('aria-pressed')).toBe('true');
     wrap.click();
+    flushSolid();
     expect(wrap.getAttribute('aria-pressed')).toBe('true');
     expect(dialog().querySelector('pre')?.classList.contains('is-wrapped')).toBe(true);
     wrap.click();
+    flushSolid();
     follow.click();
+    flushSolid();
     expect(follow.getAttribute('aria-pressed')).toBe('false');
     follow.click();
+    flushSolid();
     expect(follow.getAttribute('aria-pressed')).toBe('true');
     expect(dialog().querySelector('pre')?.textContent).toBe('first line\n');
     expect(client.session.backgroundProcessOutput).toHaveBeenCalledTimes(1);
@@ -381,7 +462,9 @@ describe('BackgroundProcessDialog', () => {
       output: '<script>bad()</script>\n',
     });
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().textContent).toContain('npm test');
     expect(dialog().textContent).toContain('Running · 10s');
     expect(dialog().textContent).toContain('/repo · PID 42');
@@ -395,19 +478,24 @@ describe('BackgroundProcessDialog', () => {
 
   it('updates elapsed time in the selected details and freezes it on completion', async () => {
     mount('shell-1');
+    flushSolid();
     await settle();
+    flushSolid();
     const duration = () =>
       dialog().querySelector('.background-process-detail .background-process-duration')
         ?.textContent;
     expect(duration()).toBe('10s');
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     expect(duration()).toBe('11s');
     vi.mocked(client.session.backgroundProcesses).mockResolvedValue([
       { ...process, status: 'exited', exit: 0, time: { started: 1000, completed: 12_000 } },
     ]);
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     expect(duration()).toBe('11s');
     await vi.advanceTimersByTimeAsync(2000);
+    flushSolid();
     expect(duration()).toBe('11s');
   });
 
@@ -416,9 +504,12 @@ describe('BackgroundProcessDialog', () => {
       .mockResolvedValueOnce(output)
       .mockResolvedValue({ output: 'next\n', cursor: 16, size: 16, truncated: false });
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const button = dialog().querySelector('.background-process-list-item');
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     expect(dialog().querySelector('pre')?.textContent).toBe('first line\nnext\n');
     expect(dialog().querySelector('.background-process-list-item')).toBe(button);
     expect(client.session.backgroundProcessOutput).toHaveBeenLastCalledWith('ses_own', 'shell-1', {
@@ -430,9 +521,12 @@ describe('BackgroundProcessDialog', () => {
 
   it('keeps completed and removed process output available', async () => {
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const button = dialog().querySelector<HTMLButtonElement>('.background-process-list-item')!;
     button.focus();
+    flushSolid();
     vi.mocked(client.session.backgroundProcesses).mockResolvedValue([
       { ...process, status: 'exited', exit: 0, time: { started: 1000, completed: 11_000 } },
     ]);
@@ -443,6 +537,7 @@ describe('BackgroundProcessDialog', () => {
       truncated: false,
     });
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     expect(dialog().textContent).toContain('Exited (0)');
     expect(dialog().querySelector('.background-process-list-item')).toBe(button);
     expect(document.activeElement).toBe(button);
@@ -450,6 +545,7 @@ describe('BackgroundProcessDialog', () => {
     const reads = vi.mocked(client.session.backgroundProcessOutput).mock.calls.length;
     vi.mocked(client.session.backgroundProcesses).mockResolvedValue([]);
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     expect(dialog().textContent).toContain('No longer available');
     expect(dialog().querySelector('pre')?.textContent).toContain('done');
     expect(client.session.backgroundProcessOutput).toHaveBeenCalledTimes(reads);
@@ -469,28 +565,39 @@ describe('BackgroundProcessDialog', () => {
             : { ...output, output: '' }
     );
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(client.session.backgroundProcessOutput).toHaveBeenCalledTimes(1);
     const buttons = dialog().querySelectorAll<HTMLButtonElement>('.background-process-list-item');
     buttons[1]!.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().querySelector('pre')?.textContent).toBe('build\n');
     buttons[0]!.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().querySelector('pre')?.textContent).toBe('first line\n');
   });
 
   it('exposes errors with retry and does not discard an already loaded log', async () => {
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     vi.mocked(client.session.backgroundProcessOutput).mockRejectedValueOnce(
       new Error('Log read failed')
     );
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     expect(dialog().textContent).toContain('Log read failed');
     expect(dialog().querySelector('pre')?.textContent).toBe('first line\n');
     dialog().querySelector<HTMLButtonElement>('.background-process-error button')!.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().querySelector('[role="alert"]')).toBeNull();
   });
 
@@ -499,10 +606,14 @@ describe('BackgroundProcessDialog', () => {
       .mockRejectedValueOnce(new Error('Server unavailable'))
       .mockResolvedValue([]);
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().textContent).toContain('Server unavailable');
     dialog().querySelector<HTMLButtonElement>('.background-process-error button')!.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().textContent).toContain('No background processes are available');
   });
 
@@ -521,8 +632,11 @@ describe('BackgroundProcessDialog', () => {
         truncated: false,
       });
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     expect(dialog().querySelector('pre')?.textContent?.length).toBe(128 * 1024);
     expect(dialog().textContent).toContain('Earlier output omitted');
   });
@@ -536,16 +650,23 @@ describe('BackgroundProcessDialog', () => {
         })
     );
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const signal = vi.mocked(client.session.backgroundProcessOutput).mock.calls[0]?.[2]?.signal;
     await vi.advanceTimersByTimeAsync(5000);
+    flushSolid();
     expect(client.session.backgroundProcessOutput).toHaveBeenCalledTimes(1);
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     expect(signal?.aborted).toBe(true);
     resolve(output);
+    flushSolid();
     await settle();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(2000);
+    flushSolid();
     expect(document.querySelector('.background-process-dialog')).toBeNull();
     expect(client.session.backgroundProcessOutput).toHaveBeenCalledTimes(1);
   });
@@ -554,19 +675,27 @@ describe('BackgroundProcessDialog', () => {
     const opener = document.createElement('button');
     document.body.append(opener);
     opener.focus();
+    flushSolid();
     const onClose = mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const reads = vi.mocked(client.session.backgroundProcessOutput).mock.calls.length;
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     await vi.advanceTimersByTimeAsync(5000);
+    flushSolid();
     expect(client.session.backgroundProcessOutput).toHaveBeenCalledTimes(reads);
     dialog().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSolid();
     expect(onClose).toHaveBeenCalledTimes(1);
     dialog().querySelector<HTMLButtonElement>('.background-process-close')!.click();
+    flushSolid();
     expect(onClose).toHaveBeenCalledTimes(2);
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     expect(document.activeElement).toBe(opener);
     opener.remove();
+    flushSolid();
   });
 });

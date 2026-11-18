@@ -1,19 +1,20 @@
+import { ariaBoolean } from '../lib/aria';
 import {
+  createEffect,
   For,
   Show,
-  batch,
-  createEffect,
   createMemo,
   createSignal,
   createUniqueId,
   onCleanup,
+  onSettled,
   untrack,
 } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { Portal } from '@solidjs/web';
 import type { BackgroundProcess } from '../../shared/background-process';
 import { client } from '../lib/client';
 import { useSecondClock } from '../lib/clock';
-import { trapModalFocus } from '../lib/modal-focus';
+import { modalFocus } from '../lib/modal-focus';
 import { navArrowRightIcon, terminalIcon, xmarkIcon } from '../lib/ui-icons';
 import { UiIcon } from './UiIcon';
 import { CopyIconButton } from './CopyIconButton';
@@ -63,141 +64,140 @@ export function BackgroundProcessDialog(props: {
     availableIDs().has(selectedID() ?? '') ? selectedProcess()?.status : undefined
   );
   const selectedLog = createMemo(() => logs().get(selectedID() ?? ''));
-  createEffect(() => {
-    selectedID();
+  createEffect(selectedID, () => {
     setFollowOutput(true);
     setCommandExpanded(false);
   });
-  createEffect(() => {
-    selectedLog();
-    wrapOutput();
-    followOutput();
-    queueMicrotask(() => {
-      if (!disposed && outputElement && followOutput()) {
-        outputElement.scrollTop = outputElement.scrollHeight;
-        previousOutputScrollTop = outputElement.scrollTop;
-      }
-    });
-  });
+  createEffect(
+    () => [selectedLog(), wrapOutput(), followOutput()],
+    () => {
+      queueMicrotask(() => {
+        if (!disposed && outputElement && followOutput()) {
+          outputElement.scrollTop = outputElement.scrollHeight;
+          previousOutputScrollTop = outputElement.scrollTop;
+        }
+      });
+    }
+  );
   const now = useSecondClock(() =>
     processes().some((process) => availableIDs().has(process.id) && process.status === 'running')
   );
 
-  createEffect(() => {
-    const sessionID = props.sessionID;
-    const directory = props.directory;
-    retry();
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    onCleanup(() => {
-      controller.abort();
-      clearTimeout(timer);
-    });
-    const poll = async () => {
-      if (document.hidden || untrack(actionPending)) {
-        timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
-        return;
-      }
-      try {
-        const revision = actionRevision;
-        const next = await client.session.backgroundProcesses(sessionID, {
-          directory,
-          signal: controller.signal,
-        });
-        if (controller.signal.aborted) return;
-        if (revision !== actionRevision) {
+  createEffect(
+    () => [props.sessionID, props.directory, retry()] as const,
+    ([sessionID, directory]) => {
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const poll = async () => {
+        if (document.hidden || untrack(actionPending)) {
           timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
           return;
         }
-        const ids = new Set(next.map((process) => process.id));
-        // Keep inspected processes and logs after server cleanup and the assistant handoff.
-        batch(() => {
-          setProcesses((previous) => {
-            const previousByID = new Map(previous.map((process) => [process.id, process]));
-            return [
-              ...next
-                .map((process) => {
-                  const existing = previousByID.get(process.id);
-                  return existing && sameProcess(existing, process) ? existing : process;
-                })
-                .toSorted(
-                  (a, b) =>
-                    Number(b.status === 'running') - Number(a.status === 'running') ||
-                    b.time.started - a.time.started
-                ),
-              ...previous.filter((process) => !ids.has(process.id)),
-            ];
+        try {
+          const revision = actionRevision;
+          const next = await client.session.backgroundProcesses(sessionID, {
+            directory,
+            signal: controller.signal,
           });
-          setAvailableIDs(ids);
-          setLoaded(true);
-          setListError(null);
-          if (!untrack(selectedID))
-            setSelectedID(
-              next.find((process) => process.status === 'running')?.id ?? next[0]?.id ?? null
-            );
-        });
-        timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
-      } catch (error) {
-        if (!controller.signal.aborted)
-          setListError(error instanceof Error ? error.message : String(error));
-      }
-    };
-    void poll();
-  });
-
-  createEffect(() => {
-    const id = selectedID();
-    const status = selectedStatus();
-    const sessionID = props.sessionID;
-    const directory = props.directory;
-    retry();
-    setOutputError(null);
-    if (!id || !status) return;
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    onCleanup(() => {
-      controller.abort();
-      clearTimeout(timer);
-    });
-    const poll = async () => {
-      if (document.hidden) {
-        timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
-        return;
-      }
-      try {
-        const previous = untrack(logs).get(id);
-        const output = await client.session.backgroundProcessOutput(sessionID, id, {
-          directory,
-          cursor: previous?.cursor,
-          signal: controller.signal,
-        });
-        if (controller.signal.aborted) return;
-        const combined = (previous?.text ?? '') + output.output;
-        const log: ProcessLog = {
-          text: combined.slice(-RETAINED_OUTPUT_CHARS),
-          cursor: output.cursor,
-          size: output.size,
-          truncated: Boolean(
-            previous?.truncated || output.truncated || combined.length > RETAINED_OUTPUT_CHARS
-          ),
-        };
-        if (
-          !previous ||
-          output.output ||
-          previous.cursor !== log.cursor ||
-          previous.size !== log.size ||
-          previous.truncated !== log.truncated
-        )
-          setLogs((current) => new Map(current).set(id, log));
-        if (status === 'running' || output.cursor < output.size)
+          if (controller.signal.aborted) return;
+          if (revision !== actionRevision) {
+            timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+            return;
+          }
+          const ids = new Set(next.map((process) => process.id));
+          // Keep inspected processes and logs after server cleanup and the assistant handoff.
+          (() => {
+            setProcesses((previous) => {
+              const previousByID = new Map(previous.map((process) => [process.id, process]));
+              return [
+                ...next
+                  .map((process) => {
+                    const existing = previousByID.get(process.id);
+                    return existing && sameProcess(existing, process) ? existing : process;
+                  })
+                  .toSorted(
+                    (a, b) =>
+                      Number(b.status === 'running') - Number(a.status === 'running') ||
+                      b.time.started - a.time.started
+                  ),
+                ...previous.filter((process) => !ids.has(process.id)),
+              ];
+            });
+            setAvailableIDs(ids);
+            setLoaded(true);
+            setListError(null);
+            if (!untrack(selectedID))
+              setSelectedID(
+                next.find((process) => process.status === 'running')?.id ?? next[0]?.id ?? null
+              );
+          })();
           timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
-      } catch (error) {
-        if (!controller.signal.aborted)
-          setOutputError(error instanceof Error ? error.message : String(error));
-      }
-    };
-    void poll();
-  });
+        } catch (error) {
+          if (!controller.signal.aborted)
+            setListError(error instanceof Error ? error.message : String(error));
+        }
+      };
+      void poll();
+
+      return () => {
+        controller.abort();
+        clearTimeout(timer);
+      };
+    }
+  );
+
+  createEffect(
+    () => [selectedID(), selectedStatus(), props.sessionID, props.directory, retry()] as const,
+    ([id, status, sessionID, directory]) => {
+      setOutputError(null);
+      if (!id || !status) return;
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const poll = async () => {
+        if (document.hidden) {
+          timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+          return;
+        }
+        try {
+          const previous = untrack(logs).get(id);
+          const output = await client.session.backgroundProcessOutput(sessionID, id, {
+            directory,
+            cursor: previous?.cursor,
+            signal: controller.signal,
+          });
+          if (controller.signal.aborted) return;
+          const combined = (previous?.text ?? '') + output.output;
+          const log: ProcessLog = {
+            text: combined.slice(-RETAINED_OUTPUT_CHARS),
+            cursor: output.cursor,
+            size: output.size,
+            truncated: Boolean(
+              previous?.truncated || output.truncated || combined.length > RETAINED_OUTPUT_CHARS
+            ),
+          };
+          if (
+            !previous ||
+            output.output ||
+            previous.cursor !== log.cursor ||
+            previous.size !== log.size ||
+            previous.truncated !== log.truncated
+          )
+            setLogs((current) => new Map(current).set(id, log));
+          if (status === 'running' || output.cursor < output.size)
+            timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+        } catch (error) {
+          if (!controller.signal.aborted)
+            setOutputError(error instanceof Error ? error.message : String(error));
+        }
+      };
+      void poll();
+
+      return () => {
+        controller.abort();
+        clearTimeout(timer);
+      };
+    }
+  );
 
   const elapsed = (process: BackgroundProcess) => {
     const end =
@@ -241,7 +241,10 @@ export function BackgroundProcessDialog(props: {
           return next;
         });
         closeAfterStop = !processes().some(
-          (candidate) => availableIDs().has(candidate.id) && candidate.status === 'running'
+          (candidate) =>
+            candidate.id !== process.id &&
+            availableIDs().has(candidate.id) &&
+            candidate.status === 'running'
         );
       } else
         setProcesses((current) =>
@@ -265,17 +268,21 @@ export function BackgroundProcessDialog(props: {
       if (!actionController.signal.aborted) {
         setActionPending(false);
         if (closeAfterStop) props.onClose();
-        else if (
-          document.activeElement === dialogElement &&
-          focusedControl instanceof HTMLElement &&
-          focusedControl.isConnected &&
-          !focusedControl.hasAttribute('disabled')
-        )
-          focusedControl.focus({ preventScroll: true });
+        else
+          onSettled(() => {
+            if (
+              document.activeElement === dialogElement &&
+              focusedControl instanceof HTMLElement &&
+              focusedControl.isConnected &&
+              !focusedControl.hasAttribute('disabled')
+            )
+              focusedControl.focus({ preventScroll: true });
+          });
       }
     }
   };
 
+  const focus = modalFocus({ preventScrollOnRestore: true });
   return (
     <Portal>
       <div
@@ -289,14 +296,16 @@ export function BackgroundProcessDialog(props: {
         }}
       >
         <section
-          class="background-process-dialog"
-          classList={{ 'has-process-target': props.processID !== undefined }}
+          class={[
+            'background-process-dialog',
+            { 'has-process-target': props.processID !== undefined },
+          ]}
           role="dialog"
           aria-modal="true"
           aria-labelledby="background-process-title"
           ref={(element) => {
             dialogElement = element;
-            onCleanup(trapModalFocus(element, { preventScrollOnRestore: true }));
+            focus(element);
           }}
         >
           <header class="background-process-dialog-header">
@@ -340,9 +349,12 @@ export function BackgroundProcessDialog(props: {
                       {(process) => (
                         <button
                           type="button"
-                          class="background-process-list-item"
-                          classList={{ 'is-selected': selectedID() === id }}
-                          aria-pressed={selectedID() === id}
+
+                          class={[
+                            'background-process-list-item',
+                            { 'is-selected': selectedID() === id },
+                          ]}
+                          aria-pressed={ariaBoolean(selectedID() === id)}
                           onClick={() => setSelectedID(id)}
                         >
                           <span class="background-process-command">{process().command}</span>
@@ -367,7 +379,7 @@ export function BackgroundProcessDialog(props: {
                           type="button"
                           class="background-process-command-toggle tool-invocation-header"
                           aria-label={commandExpanded() ? 'Collapse command' : 'Expand command'}
-                          aria-expanded={commandExpanded()}
+                          aria-expanded={ariaBoolean(commandExpanded())}
                           aria-controls={commandBodyID}
                           onClick={() => setCommandExpanded((value) => !value)}
                         >
@@ -385,8 +397,8 @@ export function BackgroundProcessDialog(props: {
                           </Show>
                           <UiIcon
                             source={navArrowRightIcon}
-                            class="tool-invocation-chevron"
-                            classList={{ expanded: commandExpanded() }}
+
+                            class={['tool-invocation-chevron', { expanded: commandExpanded() }]}
                             aria-hidden="true"
                           />
                         </button>
@@ -478,7 +490,7 @@ export function BackgroundProcessDialog(props: {
                           <button
                             type="button"
                             aria-label="Wrap output lines"
-                            aria-pressed={wrapOutput()}
+                            aria-pressed={ariaBoolean(wrapOutput())}
                             title="Wrap long output lines"
                             onClick={() => setWrapOutput((value) => !value)}
                           >
@@ -487,7 +499,7 @@ export function BackgroundProcessDialog(props: {
                           <button
                             type="button"
                             aria-label="Follow output"
-                            aria-pressed={followOutput()}
+                            aria-pressed={ariaBoolean(followOutput())}
                             title={
                               followOutput()
                                 ? 'Pause following new output'
@@ -501,8 +513,8 @@ export function BackgroundProcessDialog(props: {
                       </div>
                       <pre
                         ref={outputElement}
-                        class="background-process-output"
-                        classList={{ 'is-wrapped': wrapOutput() }}
+
+                        class={['background-process-output', { 'is-wrapped': wrapOutput() }]}
                         tabindex="0"
                         aria-label="Process output"
                         onScroll={(event) => {

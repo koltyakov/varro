@@ -49,6 +49,9 @@ export class StreamingToolContent {
     const reference = messageID
       ? deferredPartPath({ id: callID, sessionID, messageID }, event.workspaceDirectory)
       : true;
+    // A bounded event can still describe incomplete content. Rebuild its route
+    // from the current envelope; an embedded path may belong to a different session.
+    if (source.deferred === true || isString(source.deferred)) properties.deferred = reference;
 
     let state: ToolState;
     const time = { start: 0, end: 0 };

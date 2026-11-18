@@ -1,4 +1,4 @@
-import { createEffect, createMemo, onCleanup, onMount, Show, untrack } from 'solid-js';
+import { createEffect, createMemo, onSettled, Show, untrack } from 'solid-js';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
 import { codexLoginWarningDismissal } from '../../lib/codex-login-warning';
 import { requestProviderConnection } from '../../lib/provider-connection-state';
@@ -13,29 +13,38 @@ export function CodexLoginWarning(props: { limit: ProviderLimitStatus | null }) 
       ? limit.codexLoginRequired?.connectionID
       : undefined;
   });
-  createEffect(() => {
-    const id = connectionID();
-    const limit = props.limit;
-    // Other composers may still have older snapshots. Storage changes must not
-    // make them repeatedly overwrite each other's connection observations.
-    untrack(() => {
-      if (id) codexLoginWarningDismissal.observe(id);
-      else if (limit?.providerID === 'openai' && limit.status !== 'error')
-        codexLoginWarningDismissal.reset();
-    });
-  });
+  createEffect(
+    () => ({
+      id: connectionID(),
+      reset: props.limit?.providerID === 'openai' && props.limit.status !== 'error',
+    }),
+    ({ id, reset }) => {
+      // Other composers may still have older snapshots. Storage changes must not
+      // make them repeatedly overwrite each other's connection observations.
+      untrack(() => {
+        if (id) codexLoginWarningDismissal.observe(id);
+        else if (reset) codexLoginWarningDismissal.reset();
+      });
+    }
+  );
   const visible = createMemo(() => {
     const id = connectionID();
     const dismissal = codexLoginWarningDismissal.read();
     return id && !(dismissal?.connectionID === id && dismissal.dismissed);
   });
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const onStorage = (event: StorageEvent) => {
       if (event.key === null || event.key === STORAGE_KEYS.codexLoginWarningDismissal)
         codexLoginWarningDismissal.reload();
     };
     window.addEventListener('storage', onStorage);
-    onCleanup(() => window.removeEventListener('storage', onStorage));
+    cleanups.push(() => window.removeEventListener('storage', onStorage));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (

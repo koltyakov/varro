@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { shareIosIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 import { DropOverlay } from './DropOverlay';

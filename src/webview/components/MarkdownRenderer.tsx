@@ -1,6 +1,15 @@
-import { Show, createSignal, createEffect, createMemo, onMount, onCleanup } from 'solid-js';
-import type { JSX } from 'solid-js';
-import { Portal, render } from 'solid-js/web';
+import {
+  createEffect,
+  Show,
+  createSignal,
+  createMemo,
+  getOwner,
+  runWithOwner,
+  onSettled,
+  onCleanup,
+} from 'solid-js';
+import { type JSX, Portal, render } from '@solidjs/web';
+
 import DOMPurify from 'dompurify';
 import { renderToString as renderKatex } from 'katex';
 import { marked, Tokenizer } from 'marked';
@@ -22,11 +31,14 @@ import { state, theme } from '../lib/state';
 import { getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { getSessionReferenceContextKey, splitSessionReferenceText } from '../lib/session-reference';
-import { lookupSessionReferences } from '../lib/session-reference-lookups';
+import {
+  getSessionReferenceLookupScope,
+  lookupSessionReferences,
+} from '../lib/session-reference-lookups';
 import { client } from '../lib/client';
 import { rememberDirectSessionReturn } from '../lib/session-navigation';
 import { selectSession } from '../hooks/useOpenCode';
-import { trapModalFocus } from '../lib/modal-focus';
+import { modalFocus } from '../lib/modal-focus';
 import { mixRgb, parseThemeColor } from '../lib/theme';
 import { getExternalLinkContext, isSafeExternalHref } from '../lib/external-link';
 import { parseRemoteImageUrl } from '../../shared/remote-images';
@@ -2352,6 +2364,7 @@ function hydrateRenderedMarkdown(root: HTMLDivElement | undefined, flags: Markdo
 }
 
 export function MarkdownRenderer(props: MarkdownProps) {
+  const owner = getOwner();
   const sessionDirectory = createMemo(() => {
     const sessionID = props.sessionID ?? state.activeSessionId;
     return props.directory || state.sessions.find((entry) => entry.id === sessionID)?.directory;
@@ -2383,7 +2396,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
     postMessage({ type: 'vscode/mermaid-preview', payload: { open: false } });
   }
 
-  createEffect(() => lookupSessionReferences(props.content || ''));
+  createEffect(
+    () => ({ content: props.content || '', scope: getSessionReferenceLookupScope() }),
+    ({ content, scope }) => lookupSessionReferences(content, scope)
+  );
 
   let pendingContent: string | null = null;
   let rafId: number | null = null;
@@ -2601,8 +2617,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   // Keep cross-segment spacing local. Looking through the tail with :has() makes
   // older Chromium invalidate unrelated transcript content on each append.
-  createEffect(() => {
-    tailHtml();
+  createEffect(tailHtml, () => {
     const firstTailBlock = tailRef?.firstElementChild;
     const tag = firstTailBlock?.classList.contains('streaming-markdown-pending-block')
       ? ''
@@ -2789,43 +2804,39 @@ export function MarkdownRenderer(props: MarkdownProps) {
     }
   }
 
-  createEffect(() => {
-    const content = props.content || '';
-    const cacheByContent = !!props.cacheByContent;
-    const forceStreaming = !!props.forceStreaming;
-    const isLightweight = lw();
-    const disablePathLinkify = !!props.disablePathLinkify;
-    const escapeRawHtml = !!props.escapeHtml;
-    const workspacePath = state.editorContext.workspacePath;
-    const directory = sessionDirectory();
-    const sessionContextKey = getSessionReferenceContextKey(content);
-    if (rafId !== null) {
+  createEffect(
+    () => ({
+      content: props.content || '',
+      cacheByContent: !!props.cacheByContent,
+      forceStreaming: !!props.forceStreaming,
+      lightweight: lw(),
+      disablePathLinkify: !!props.disablePathLinkify,
+      escapeRawHtml: !!props.escapeHtml,
+      workspacePath: state.editorContext.workspacePath,
+      directory: sessionDirectory(),
+      sessionContextKey: getSessionReferenceContextKey(props.content || ''),
+    }),
+    ({ content }) => {
+      if (rafId !== null) {
+        pendingContent = content;
+        return;
+      }
       pendingContent = content;
-      return;
+      rafId = requestAnimationFrame(flushPending);
     }
-    pendingContent = content;
-    rafId = requestAnimationFrame(flushPending);
-    void workspacePath;
-    void directory;
-    void sessionContextKey;
-    void cacheByContent;
-    void forceStreaming;
-    void isLightweight;
-    void disablePathLinkify;
-    void escapeRawHtml;
-  });
+  );
 
-  createEffect(() => {
-    const slots = props.inlineSlots;
-    slots?.forEach((slot) => slot.marker);
-    queueMicrotask(() => {
-      hydrateInlineSlots(stableRef);
-      hydrateInlineSlots(tailRef);
-    });
-  });
+  createEffect(
+    () => props.inlineSlots?.map((slot) => slot.marker),
+    () => {
+      queueMicrotask(() => {
+        hydrateInlineSlots(stableRef);
+        hydrateInlineSlots(tailRef);
+      });
+    }
+  );
 
-  createEffect(() => {
-    const nextTheme = theme();
+  createEffect(theme, (nextTheme) => {
     if (nextTheme === appliedMermaidTheme) return;
     appliedMermaidTheme = nextTheme;
     closeMermaidPreview();
@@ -3028,15 +3039,29 @@ export function MarkdownRenderer(props: MarkdownProps) {
     transfer.setData('ResourceURLs', JSON.stringify([uri]));
   }
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     ref?.addEventListener('click', handleClick);
     ref?.addEventListener('dragstart', handleDragStart);
-    if (ref) onCleanup(markdownCitationSelection.bind(ref));
-    hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
-    hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
-    stableHighlights.reconcile([stableRef], initialCacheByContent ? 0 : 1);
-    tailHighlights.reconcile([tailRef], initialCacheByContent ? 0 : 1);
+    if (ref) cleanups.push(markdownCitationSelection.bind(ref));
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
+  // Hydration creates separately disposed tooltip/slot roots. The effect apply
+  // phase permits that setup; owner-backed settled callbacks do not.
+  createEffect(
+    () => null,
+    () => {
+      runWithOwner(owner, () => {
+        hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
+        hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
+        stableHighlights.reconcile([stableRef], initialCacheByContent ? 0 : 1);
+        tailHighlights.reconcile([tailRef], initialCacheByContent ? 0 : 1);
+      });
+    }
+  );
   onCleanup(() => {
     ref?.removeEventListener('click', handleClick);
     ref?.removeEventListener('dragstart', handleDragStart);
@@ -3069,52 +3094,67 @@ export function MarkdownRenderer(props: MarkdownProps) {
 }
 
 function MermaidPreviewOverlay(props: { preview: { svg: string } | null; onClose: () => void }) {
-  createEffect(() => {
-    if (!props.preview) return;
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      props.onClose();
-    };
-    window.addEventListener('keydown', handleKeydown);
-    onCleanup(() => window.removeEventListener('keydown', handleKeydown));
-  });
+  createEffect(
+    () => props.preview,
+    (preview) => {
+      const cleanups: Array<() => void> = [];
+
+      if (!preview)
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+      const handleKeydown = (event: KeyboardEvent) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        props.onClose();
+      };
+      window.addEventListener('keydown', handleKeydown);
+      cleanups.push(() => window.removeEventListener('keydown', handleKeydown));
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    }
+  );
 
   return (
     <Show when={props.preview}>
-      {(preview) => (
-        <Portal>
-          <div
-            ref={(element) => onCleanup(trapModalFocus(element))}
-            class="mermaid-preview-overlay"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Mermaid diagram preview"
-            onClick={props.onClose}
-          >
-            <div class="mermaid-preview-toolbar">
-              <button
-                type="button"
-                aria-label="Close diagram preview"
-                title="Close diagram preview"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  props.onClose();
-                }}
-              >
-                <UiIcon source={xmarkIcon} width={14} height={14} />
-              </button>
-            </div>
+      {(preview) => {
+        const focus = modalFocus();
+        return (
+          <Portal>
             <div
-              ref={(element) =>
-                element.replaceChildren(createSanitizedMermaidFragment(preview().svg))
-              }
-              class="mermaid-preview-canvas"
-              onClick={(event) => event.stopPropagation()}
-            />
-          </div>
-        </Portal>
-      )}
+              ref={focus}
+              class="mermaid-preview-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Mermaid diagram preview"
+              onClick={props.onClose}
+            >
+              <div class="mermaid-preview-toolbar">
+                <button
+                  type="button"
+                  aria-label="Close diagram preview"
+                  title="Close diagram preview"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    props.onClose();
+                  }}
+                >
+                  <UiIcon source={xmarkIcon} width={14} height={14} />
+                </button>
+              </div>
+              <div
+                ref={(element) =>
+                  element.replaceChildren(createSanitizedMermaidFragment(preview().svg))
+                }
+                class="mermaid-preview-canvas"
+                onClick={(event) => event.stopPropagation()}
+              />
+            </div>
+          </Portal>
+        );
+      }}
     </Show>
   );
 }

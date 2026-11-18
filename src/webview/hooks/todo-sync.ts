@@ -1,4 +1,5 @@
-import { batch } from 'solid-js';
+import { storePath } from '@solidjs/signals';
+
 import { appStore } from '../lib/stores/app-store';
 import { isTodoToolName } from '../lib/tool-normalization';
 import type { AssistantMessage, MessageEntry, NormalizedTodo, Part } from '../types';
@@ -10,15 +11,17 @@ type TodoSyncDependencies = {
 };
 
 export function resetTodoSync() {
-  appStore.setState('todos', []);
+  appStore.setState(storePath('todos', []));
 }
 
 function setStateTodos(todos: NormalizedTodo[], options?: { preserveAdvancedStatuses?: boolean }) {
-  const nextTodos = options?.preserveAdvancedStatuses
-    ? preserveAdvancedTodoStatuses(todos, appStore.state.todos)
-    : todos;
-  if (areTodosEqual(appStore.state.todos, nextTodos)) return;
-  appStore.setState('todos', nextTodos);
+  appStore.setState((draft) => {
+    const nextTodos = options?.preserveAdvancedStatuses
+      ? preserveAdvancedTodoStatuses(todos, draft.todos)
+      : todos;
+    if (areTodosEqual(draft.todos, nextTodos)) return;
+    draft.todos = nextTodos;
+  });
 }
 
 export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
@@ -90,10 +93,10 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
         }
         // Resolve the native snapshot and message fallback as one visible update.
         // An empty intermediate list would unmount the panel and replay its entrance animation.
-        batch(() => {
+        (() => {
           setStateTodos(todos, { preserveAdvancedStatuses: true });
           advanceTodosFromMessages(messages);
-        });
+        })();
       }
     } catch {
       if (!isCurrent()) return;
@@ -127,16 +130,21 @@ function advanceTodosFromMessages(messages: MessageEntry[]) {
   const messageTodos = deriveTodosFromMessages(messages);
   if (messageTodos.length === 0) return false;
 
-  const currentTodos = appStore.state.todos;
-  if (currentTodos.length === 0) {
-    setStateTodos(messageTodos);
-    return true;
-  }
+  let advanced = false;
+  appStore.setState((draft) => {
+    const currentTodos = draft.todos;
+    if (currentTodos.length === 0) {
+      setStateTodos(messageTodos);
+      advanced = true;
+      return;
+    }
 
-  if (currentTodos.length !== messageTodos.length) return false;
-  const nextTodos = mergeTodoEventAdvance(currentTodos, messageTodos);
-  setStateTodos(nextTodos);
-  return true;
+    if (currentTodos.length !== messageTodos.length) return;
+    const nextTodos = mergeTodoEventAdvance(currentTodos, messageTodos);
+    setStateTodos(nextTodos);
+    advanced = true;
+  });
+  return advanced;
 }
 
 function isStaleSettledNativeTodoSnapshot(todos: NormalizedTodo[], messages: MessageEntry[]) {

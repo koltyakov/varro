@@ -1,5 +1,7 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { McpPicker } from './McpPicker';
 import { resetDefaultAppState, setState, showMcpSettings, state } from '../lib/state';
 import type { McpStatus } from '../../shared/protocol';
@@ -34,7 +36,7 @@ let cleanup: (() => void) | undefined;
 let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView | undefined;
 
 function setMcpStatuses(statuses: Record<string, McpStatus>) {
-  setState('mcpStatus', statuses);
+  setState(storePath('mcpStatus', statuses));
 }
 
 async function flushMicrotasks(count = 2) {
@@ -45,6 +47,7 @@ async function flushMicrotasks(count = 2) {
 
 beforeEach(() => {
   resetDefaultAppState();
+  flushSolid();
   container = document.createElement('div');
   document.body.appendChild(container);
   originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -67,27 +70,34 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container?.remove();
+  flushSolid();
   container = null;
   if (originalScrollIntoView) HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+  flushSolid();
   resetDefaultAppState();
+  flushSolid();
   vi.restoreAllMocks();
+  flushSolid();
   vi.useRealTimers();
 });
 
 describe('McpPicker', () => {
   function renderConnectedOAuth() {
     setMcpStatuses({ oauth: { status: 'connected' }, local: { status: 'connected' } });
-    setState('mcpDefaults', {
-      global: { oauth: true, local: true },
-      project: {},
-      effective: { oauth: true, local: true },
-      editable: true,
-      oauthServers: ['oauth'],
-    });
-    setState('sessionSelectedMcps', { 'session-1': ['oauth', 'local'] });
+    setState(
+      storePath('mcpDefaults', {
+        global: { oauth: true, local: true },
+        project: {},
+        effective: { oauth: true, local: true },
+        editable: true,
+        oauthServers: ['oauth'],
+      })
+    );
+    setState(storePath('sessionSelectedMcps', { 'session-1': ['oauth', 'local'] }));
     const onChange = vi.fn();
     cleanup = render(
       () => McpPicker({ sessionId: 'session-1', onChange, onClose: vi.fn() }),
@@ -102,10 +112,12 @@ describe('McpPicker', () => {
 
   it('offers account actions only for connected OAuth-enabled servers', () => {
     renderConnectedOAuth();
+    flushSolid();
     expect(accountButton('Sign out of oauth')).not.toBeNull();
     expect(accountButton('Switch account for oauth')).not.toBeNull();
     expect(container!.querySelector('[aria-label="Sign out of local"]')).toBeNull();
     setMcpStatuses({ oauth: { status: 'disabled' } });
+    flushSolid();
     expect(container!.querySelector('.mcp-picker-account-actions')).toBeNull();
   });
 
@@ -113,15 +125,19 @@ describe('McpPicker', () => {
     'only toggles selection on a %s row; authentication requires its own button',
     async (status) => {
       setMcpStatuses({ oauth: { status } });
-      setState('sessionSelectedMcps', { 'session-1': ['oauth'] });
+      flushSolid();
+      setState(storePath('sessionSelectedMcps', { 'session-1': ['oauth'] }));
+      flushSolid();
       const onChange = vi.fn((names: string[]) =>
-        setState('sessionSelectedMcps', 'session-1', names)
+        setState(storePath('sessionSelectedMcps', 'session-1', names))
       );
       cleanup = render(
         () => McpPicker({ sessionId: 'session-1', onChange, onClose: vi.fn() }),
         container!
       );
+      flushSolid();
       container!.querySelector<HTMLButtonElement>('.dropdown-item')!.click();
+      flushSolid();
       expect(onChange).toHaveBeenLastCalledWith([]);
       expect(mocks.startAuth).not.toHaveBeenCalled();
       expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -130,15 +146,19 @@ describe('McpPicker', () => {
         .dispatchEvent(
           new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
         );
+      flushSolid();
       expect(onChange).toHaveBeenLastCalledWith(['oauth']);
       expect(mocks.startAuth).not.toHaveBeenCalled();
       const action = container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!;
       const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
       action.dispatchEvent(enter);
+      flushSolid();
       expect(enter.defaultPrevented).toBe(false);
       const selectionChanges = onChange.mock.calls.length;
       action.click();
+      flushSolid();
       await flushMicrotasks(6);
+      flushSolid();
       expect(onChange).toHaveBeenCalledTimes(selectionChanges);
       expect(document.querySelector('[role="dialog"]')).not.toBeNull();
       expect(mocks.startAuth).toHaveBeenCalledTimes(status === 'needs_auth' ? 1 : 0);
@@ -147,12 +167,15 @@ describe('McpPicker', () => {
 
   it('disconnects and removes credentials without opening a browser or changing session selections', async () => {
     const onChange = renderConnectedOAuth();
+    flushSolid();
     mocks.status.mockResolvedValue({
       oauth: { status: 'disabled' },
       local: { status: 'connected' },
     });
     accountButton('Sign out of oauth').click();
+    flushSolid();
     await flushMicrotasks(6);
+    flushSolid();
     expect(mocks.disconnect).toHaveBeenCalledExactlyOnceWith('oauth');
     expect(mocks.removeAuth).toHaveBeenCalledExactlyOnceWith('oauth');
     expect(mocks.disconnect.mock.invocationCallOrder[0]).toBeLessThan(
@@ -173,12 +196,15 @@ describe('McpPicker', () => {
 
   it('starts a fresh authorization only after Switch account clears the old credentials', async () => {
     const onChange = renderConnectedOAuth();
+    flushSolid();
     mocks.status.mockResolvedValue({
       oauth: { status: 'disabled' },
       local: { status: 'connected' },
     });
     accountButton('Switch account for oauth').click();
+    flushSolid();
     await flushMicrotasks(8);
+    flushSolid();
     expect(mocks.removeAuth).toHaveBeenCalledExactlyOnceWith('oauth');
     expect(mocks.startAuth).toHaveBeenCalledExactlyOnceWith('oauth');
     expect(mocks.removeAuth.mock.invocationCallOrder[0]).toBeLessThan(
@@ -201,13 +227,16 @@ describe('McpPicker', () => {
     'does not start new authorization when %s fails',
     async (operation) => {
       renderConnectedOAuth();
+      flushSolid();
       mocks[operation].mockRejectedValue(new Error('Credential service unavailable'));
       mocks.status.mockResolvedValue({
         oauth: { status: operation === 'disconnect' ? 'connected' : 'disabled' },
         local: { status: 'connected' },
       });
       accountButton('Switch account for oauth').click();
+      flushSolid();
       await flushMicrotasks(8);
+      flushSolid();
       expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
         'Could not switch accounts for oauth'
       );
@@ -223,9 +252,12 @@ describe('McpPicker', () => {
 
   it('reports a status refresh failure after credentials are removed without claiming the old login remains', async () => {
     renderConnectedOAuth();
+    flushSolid();
     mocks.status.mockRejectedValue(new Error('Status unavailable'));
     accountButton('Switch account for oauth').click();
+    flushSolid();
     await flushMicrotasks(8);
+    flushSolid();
     expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
       'Credentials for oauth were removed'
     );
@@ -234,8 +266,11 @@ describe('McpPicker', () => {
 
   it('does not claim sign-out succeeded if the server still reports an active connection', async () => {
     renderConnectedOAuth();
+    flushSolid();
     accountButton('Sign out of oauth').click();
+    flushSolid();
     await flushMicrotasks(8);
+    flushSolid();
     expect(container!.querySelector('[role="alert"]')?.textContent).toContain('still connected');
     expect(container!.textContent).not.toContain('Signed out of oauth');
     expect(mocks.startAuth).not.toHaveBeenCalled();
@@ -243,6 +278,7 @@ describe('McpPicker', () => {
 
   it('leaves Enter on account buttons to their native action and prevents duplicate submissions', async () => {
     renderConnectedOAuth();
+    flushSolid();
     let finishRemoval!: () => void;
     mocks.removeAuth.mockImplementation(
       () =>
@@ -253,18 +289,24 @@ describe('McpPicker', () => {
     const button = accountButton('Sign out of oauth');
     const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     button.dispatchEvent(event);
+    flushSolid();
     expect(event.defaultPrevented).toBe(false);
     button.click();
+    flushSolid();
     await flushMicrotasks(4);
+    flushSolid();
     expect(button.disabled).toBe(true);
     accountButton('Switch account for oauth').click();
+    flushSolid();
     expect(mocks.disconnect).toHaveBeenCalledTimes(1);
     finishRemoval();
     await flushMicrotasks(6);
+    flushSolid();
   });
 
   it('finishes clearing credentials but does not open authorization after the picker closes', async () => {
     renderConnectedOAuth();
+    flushSolid();
     let finishRemoval!: () => void;
     mocks.removeAuth.mockImplementation(
       () =>
@@ -273,11 +315,15 @@ describe('McpPicker', () => {
         })
     );
     accountButton('Switch account for oauth').click();
+    flushSolid();
     await flushMicrotasks(4);
+    flushSolid();
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     finishRemoval();
     await flushMicrotasks(8);
+    flushSolid();
     expect(mocks.removeAuth).toHaveBeenCalledTimes(1);
     expect(mocks.startAuth).not.toHaveBeenCalled();
     expect(mocks.postMessage).not.toHaveBeenCalled();
@@ -285,6 +331,7 @@ describe('McpPicker', () => {
 
   it('does not start credential removal in a new view after closing during disconnect', async () => {
     renderConnectedOAuth();
+    flushSolid();
     let finishDisconnect!: () => void;
     mocks.disconnect.mockImplementation(
       () =>
@@ -293,10 +340,13 @@ describe('McpPicker', () => {
         })
     );
     accountButton('Switch account for oauth').click();
+    flushSolid();
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     finishDisconnect();
     await flushMicrotasks(6);
+    flushSolid();
     expect(mocks.removeAuth).not.toHaveBeenCalled();
     expect(mocks.startAuth).not.toHaveBeenCalled();
   });
@@ -310,10 +360,12 @@ describe('McpPicker', () => {
       'browser-bridge': { status: 'disabled' },
       lightpanda: { status: 'disabled' },
     });
+    flushSolid();
     cleanup = render(
       () => McpPicker({ sessionId: null, initialQuery: 'at', onChange: vi.fn(), onClose: vi.fn() }),
       container!
     );
+    flushSolid();
     const search = container!.querySelector<HTMLInputElement>('[aria-label="Search MCPs"]')!;
     expect(search.value).toBe('at');
     expect(document.activeElement).toBe(search);
@@ -325,10 +377,12 @@ describe('McpPicker', () => {
     expect(container!.querySelector('.mcp-picker-action')?.textContent).toBe('Sign in');
     search.value = '';
     search.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     expect(container!.querySelectorAll('.dropdown-name')).toHaveLength(3);
     expect(container!.querySelector('[aria-label="Search MCPs"]')).toBe(search);
     search.value = 'sign in';
     search.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     expect(container!.querySelectorAll('.dropdown-name')).toHaveLength(1);
   });
 
@@ -344,6 +398,7 @@ describe('McpPicker', () => {
       theta: { status: 'connected' },
       iota: { status: 'needs_auth' },
     });
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -354,7 +409,9 @@ describe('McpPicker', () => {
         }),
       container!
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const searchInput = container?.querySelector('input[aria-label="Search MCPs"]');
     expect(searchInput).toBeInstanceOf(HTMLInputElement);
@@ -365,7 +422,9 @@ describe('McpPicker', () => {
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (searchInput as HTMLInputElement).value = 'auth';
     searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(
       Array.from(container?.querySelectorAll('.dropdown-name') ?? []).map((item) =>
@@ -376,7 +435,9 @@ describe('McpPicker', () => {
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (searchInput as HTMLInputElement).value = 'missing';
     searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(container?.textContent).toContain('No matching MCPs');
   });
@@ -391,6 +452,7 @@ describe('McpPicker', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.dropdown-header')?.textContent).toBe('MCPs');
     expect(container?.textContent).toContain('No MCPs found');
@@ -405,7 +467,9 @@ describe('McpPicker', () => {
       alpha: { status: 'connected' },
       zeta: { status: 'disabled' },
     });
-    setState('sessionSelectedMcps', { 'session-1': ['zeta'] });
+    flushSolid();
+    setState(storePath('sessionSelectedMcps', { 'session-1': ['zeta'] }));
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -416,7 +480,9 @@ describe('McpPicker', () => {
         }),
       container!
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const menu = container?.querySelector('.dropdown-menu');
     expect(menu).toBeInstanceOf(HTMLDivElement);
@@ -436,7 +502,9 @@ describe('McpPicker', () => {
     menu?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const focusedItem = container?.querySelector('.dropdown-item.keyboard-focus');
     expect(focusedItem?.textContent).toContain('zeta');
@@ -444,6 +512,7 @@ describe('McpPicker', () => {
     menu?.dispatchEvent(
       new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
     );
+    flushSolid();
 
     expect(onChange).toHaveBeenCalledWith([]);
     expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
@@ -451,6 +520,7 @@ describe('McpPicker', () => {
     menu?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
     );
+    flushSolid();
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -465,6 +535,7 @@ describe('McpPicker', () => {
         )
       )
     );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -475,7 +546,9 @@ describe('McpPicker', () => {
         }),
       container!
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const searchInput = container?.querySelector<HTMLInputElement>('[aria-label="Search MCPs"]');
     const spaceEvent = new KeyboardEvent('keydown', {
@@ -484,6 +557,7 @@ describe('McpPicker', () => {
       cancelable: true,
     });
     searchInput?.dispatchEvent(spaceEvent);
+    flushSolid();
     expect(spaceEvent.defaultPrevented).toBe(false);
     expect(onChange).not.toHaveBeenCalled();
 
@@ -493,7 +567,9 @@ describe('McpPicker', () => {
       cancelable: true,
     });
     searchInput?.dispatchEvent(arrowEvent);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
     expect(arrowEvent.defaultPrevented).toBe(true);
 
     const enterEvent = new KeyboardEvent('keydown', {
@@ -502,6 +578,7 @@ describe('McpPicker', () => {
       cancelable: true,
     });
     searchInput?.dispatchEvent(enterEvent);
+    flushSolid();
     expect(enterEvent.defaultPrevented).toBe(true);
     expect(onChange).toHaveBeenCalledTimes(1);
 
@@ -511,6 +588,7 @@ describe('McpPicker', () => {
       cancelable: true,
     });
     searchInput?.dispatchEvent(escapeEvent);
+    flushSolid();
     expect(escapeEvent.defaultPrevented).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -519,6 +597,7 @@ describe('McpPicker', () => {
     setMcpStatuses({
       alpha: { status: 'connected' },
     });
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -529,7 +608,9 @@ describe('McpPicker', () => {
         }),
       container!
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchor = container?.firstElementChild as HTMLDivElement | null;
@@ -539,16 +620,20 @@ describe('McpPicker', () => {
 
   it('toggles MCPs against the connected defaults in a new chat draft', async () => {
     const onChange = vi.fn();
-    setState('mcpDefaults', {
-      global: { alpha: true, 'browser-bridge': false },
-      project: {},
-      effective: { alpha: true, 'browser-bridge': false },
-      editable: true,
-    });
+    setState(
+      storePath('mcpDefaults', {
+        global: { alpha: true, 'browser-bridge': false },
+        project: {},
+        effective: { alpha: true, 'browser-bridge': false },
+        editable: true,
+      })
+    );
+    flushSolid();
     setMcpStatuses({
       alpha: { status: 'connected' },
       'browser-bridge': { status: 'failed', error: 'Connection closed' },
     });
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -559,34 +644,43 @@ describe('McpPicker', () => {
         }),
       container!
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const items = Array.from(container!.querySelectorAll<HTMLButtonElement>('.dropdown-item'));
     const browserBridge = items.find((item) => item.textContent?.includes('browser-bridge'));
     browserBridge?.click();
+    flushSolid();
 
     expect(onChange).toHaveBeenCalledWith(['alpha', 'browser-bridge']);
   });
 
   it('keeps on-demand MCPs visible without adopting shared connections as session selections', () => {
     const onChange = vi.fn();
-    setState('mcpDefaults', {
-      global: { rare: false, offline: false },
-      project: {},
-      effective: { rare: false, offline: false },
-      editable: true,
-    });
+    setState(
+      storePath('mcpDefaults', {
+        global: { rare: false, offline: false },
+        project: {},
+        effective: { rare: false, offline: false },
+        editable: true,
+      })
+    );
+    flushSolid();
     setMcpStatuses({ rare: { status: 'connected' } });
+    flushSolid();
     cleanup = render(
       () => McpPicker({ sessionId: 'fresh', onChange, onClose: vi.fn() }),
       container!
     );
+    flushSolid();
     const items = Array.from(
       container!.querySelectorAll<HTMLButtonElement>('.dropdown-item[aria-pressed]')
     );
     expect(items).toHaveLength(2);
     expect(items.every((item) => item.getAttribute('aria-pressed') === 'false')).toBe(true);
     items.find((item) => item.textContent?.includes('offline'))?.click();
+    flushSolid();
     expect(onChange).toHaveBeenCalledWith(['offline']);
     expect(mocks.setDefault).not.toHaveBeenCalled();
   });
@@ -594,14 +688,19 @@ describe('McpPicker', () => {
   it('offers just one settings button beyond the session toggles', () => {
     const onChange = vi.fn();
     const onClose = vi.fn();
-    setState('mcpDefaults', {
-      global: { rare: false },
-      project: {},
-      effective: { rare: false },
-      editable: true,
-    });
-    setState('sessionSelectedMcps', { current: [] });
+    setState(
+      storePath('mcpDefaults', {
+        global: { rare: false },
+        project: {},
+        effective: { rare: false },
+        editable: true,
+      })
+    );
+    flushSolid();
+    setState(storePath('sessionSelectedMcps', { current: [] }));
+    flushSolid();
     cleanup = render(() => McpPicker({ sessionId: 'current', onChange, onClose }), container!);
+    flushSolid();
     expect(container!.querySelectorAll('button')).toHaveLength(2);
     expect(container!.querySelector('select')).toBeNull();
     expect(container!.textContent).not.toContain('Use defaults');
@@ -613,6 +712,7 @@ describe('McpPicker', () => {
     expect(icon?.classList.contains('h-[18px]')).toBe(true);
     expect(icon?.classList.contains('w-[18px]')).toBe(true);
     settings.click();
+    flushSolid();
     expect(showMcpSettings()).toBe(true);
     expect(onClose).toHaveBeenCalledOnce();
     expect(onChange).not.toHaveBeenCalled();
@@ -623,21 +723,26 @@ describe('McpPicker', () => {
     const onChange = vi.fn();
     const onClose = vi.fn();
     setMcpStatuses({ alpha: { status: 'connected' } });
+    flushSolid();
     cleanup = render(() => McpPicker({ sessionId: null, onChange, onClose }), container!);
+    flushSolid();
     const settings = container!.querySelector<HTMLButtonElement>('.dropdown-footer button')!;
     const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     settings.dispatchEvent(event);
+    flushSolid();
     expect(event.defaultPrevented).toBe(false);
     expect(onChange).not.toHaveBeenCalled();
     settings.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
     );
+    flushSolid();
     expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('selects needs_auth MCPs and completes the explicit OAuth lifecycle', async () => {
     const onChange = vi.fn();
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -648,10 +753,14 @@ describe('McpPicker', () => {
         }),
       container!
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
+    flushSolid();
     await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledWith('oauth'));
+    flushSolid();
 
     expect(onChange).toHaveBeenCalledWith(['oauth']);
     expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-labelledby')).toBe(
@@ -666,9 +775,11 @@ describe('McpPicker', () => {
     expect(input).toBeInstanceOf(HTMLInputElement);
     input!.value = 'oauth-code';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     document.querySelector<HTMLFormElement>('.provider-connect-form')?.requestSubmit();
 
     await vi.waitFor(() => expect(mocks.completeAuth).toHaveBeenCalledWith('oauth', 'oauth-code'));
+    flushSolid();
     expect(mocks.status).toHaveBeenCalled();
   });
 
@@ -681,12 +792,16 @@ describe('McpPicker', () => {
         paste,
       });
       setMcpStatuses({ oauth: { status: 'needs_auth' } });
+      flushSolid();
       cleanup = render(
         () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
         container!
       );
+      flushSolid();
       container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
+      flushSolid();
       await flushMicrotasks(6);
+      flushSolid();
       const dialog = document.querySelector('[role="dialog"]')!;
       expect(dialog.querySelector('summary')?.textContent).toBe(
         paste ? 'Paste the browser redirect URL instead' : 'Use an authorization code instead'
@@ -701,8 +816,10 @@ describe('McpPicker', () => {
         : 'legacy-code';
       input.value = value;
       input.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSolid();
       dialog.querySelector<HTMLFormElement>('form')!.requestSubmit();
       await flushMicrotasks(6);
+      flushSolid();
       expect(mocks.completeAuth).toHaveBeenCalledExactlyOnceWith('oauth', value);
     }
   );
@@ -716,13 +833,18 @@ describe('McpPicker', () => {
     });
     mocks.status.mockResolvedValue({ oauth: { status: 'connected' } });
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    flushSolid();
     cleanup = render(
       () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
       container!
     );
+    flushSolid();
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
+    flushSolid();
     await flushMicrotasks(6);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
       'Authorization successful'
     );
@@ -742,22 +864,30 @@ describe('McpPicker', () => {
       })
     );
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    flushSolid();
     cleanup = render(
       () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
       container!
     );
+    flushSolid();
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
+    flushSolid();
     await flushMicrotasks(6);
+    flushSolid();
     const form = document.querySelector<HTMLFormElement>('.provider-connect-form')!;
     const input = form.querySelector('input')!;
     input.value = 'http://localhost/callback?code=fixture';
     input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     form.requestSubmit();
     form.requestSubmit();
     await flushMicrotasks(6);
+    flushSolid();
     expect(mocks.completeAuth).toHaveBeenCalledTimes(1);
     resolve({ status: 'connected' });
+    flushSolid();
     await flushMicrotasks(6);
+    flushSolid();
   });
 
   it('detects browser authorization without requiring a code and stops checking after connection', async () => {
@@ -766,46 +896,60 @@ describe('McpPicker', () => {
       .mockResolvedValueOnce({ oauth: { status: 'needs_auth' } })
       .mockResolvedValueOnce({ oauth: { status: 'connected' } });
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    flushSolid();
     cleanup = render(
       () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
       container!
     );
+    flushSolid();
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
+    flushSolid();
     await flushMicrotasks(4);
+    flushSolid();
     const dialog = document.querySelector('[role="dialog"]')!;
     expect(dialog.textContent).toContain('updates automatically');
     expect(dialog.querySelector('details')?.open).toBe(false);
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
     expect(mocks.status).toHaveBeenCalledTimes(1);
     expect(dialog.textContent).not.toContain('Authorization successful');
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
     expect(dialog.textContent).toContain('Authorization successful');
     expect(dialog.textContent).toContain('oauth is connected');
     expect(dialog.querySelector('input')).toBeNull();
     expect(container!.querySelector('.mcp-status-tag')?.textContent).toBe('connected');
     expect(mocks.completeAuth).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(10_000);
+    flushSolid();
     expect(mocks.status).toHaveBeenCalledTimes(2);
     Array.from(dialog.querySelectorAll('button'))
       .find((button) => button.textContent === 'Done')!
       .click();
+    flushSolid();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it('reflects a server status event immediately without waiting for the next check', async () => {
     vi.useFakeTimers();
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    flushSolid();
     cleanup = render(
       () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
       container!
     );
+    flushSolid();
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
+    flushSolid();
     await flushMicrotasks(4);
+    flushSolid();
     setMcpStatuses({ oauth: { status: 'connected' } });
+    flushSolid();
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
       'Authorization successful'
     );
     await vi.advanceTimersByTimeAsync(2_000);
+    flushSolid();
     expect(mocks.status).not.toHaveBeenCalled();
     expect(mocks.completeAuth).not.toHaveBeenCalled();
   });
@@ -820,18 +964,27 @@ describe('McpPicker', () => {
         })
     );
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    flushSolid();
     cleanup = render(
       () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
       container!
     );
+    flushSolid();
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
+    flushSolid();
     await flushMicrotasks(4);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
     expect(mocks.status).toHaveBeenCalledTimes(1);
     document.querySelector<HTMLButtonElement>('.provider-connect-close')!.click();
+    flushSolid();
     resolveStatus?.({ oauth: { status: 'connected' } });
+    flushSolid();
     await flushMicrotasks(4);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(10_000);
+    flushSolid();
     expect(mocks.status).toHaveBeenCalledTimes(1);
     expect(container!.querySelector('.mcp-picker-action')?.textContent).toBe('Sign in');
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -842,30 +995,40 @@ describe('McpPicker', () => {
     mocks.status.mockRejectedValueOnce(new Error('Status temporarily unavailable'));
     mocks.status.mockResolvedValue({ oauth: { status: 'needs_auth' } });
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    flushSolid();
     cleanup = render(
       () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
       container!
     );
+    flushSolid();
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
+    flushSolid();
     await flushMicrotasks(4);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
     expect(document.querySelector('[role="alert"]')?.textContent).toContain(
       'Status temporarily unavailable'
     );
     await vi.advanceTimersByTimeAsync(1_000);
+    flushSolid();
     expect(document.querySelector('[role="alert"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(5 * 60_000);
+    flushSolid();
     expect(document.querySelector('[role="alert"]')?.textContent).toContain(
       'Still waiting for sign-in'
     );
     const checks = mocks.status.mock.calls.length;
     await vi.advanceTimersByTimeAsync(10_000);
+    flushSolid();
     expect(mocks.status).toHaveBeenCalledTimes(checks);
     mocks.status.mockResolvedValue({ oauth: { status: 'connected' } });
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
       .find((button) => button.textContent === 'Refresh status')!
       .click();
+    flushSolid();
     await flushMicrotasks(4);
+    flushSolid();
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
       'Authorization successful'
     );
@@ -882,6 +1045,7 @@ describe('McpPicker', () => {
         })
     );
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    flushSolid();
     cleanup = render(
       () =>
         McpPicker({
@@ -891,17 +1055,23 @@ describe('McpPicker', () => {
         }),
       container!
     );
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
+    flushSolid();
     await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledWith('oauth'));
+    flushSolid();
     document.querySelector<HTMLButtonElement>('.provider-connect-close')?.click();
+    flushSolid();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
 
     resolveAuth?.({
       authorizationUrl: 'https://mcp.example.com/authorize',
       oauthState: 'state-1',
     });
+    flushSolid();
     await flushMicrotasks(4);
+    flushSolid();
 
     expect(mocks.postMessage).not.toHaveBeenCalledWith({
       type: 'vscode/open-external',
@@ -915,6 +1085,7 @@ describe('McpPicker', () => {
       oauthState: 'state-1',
     });
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    flushSolid();
     cleanup = render(
       () =>
         McpPicker({
@@ -924,12 +1095,15 @@ describe('McpPicker', () => {
         }),
       container!
     );
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
+    flushSolid();
 
     await vi.waitFor(() =>
       expect(document.querySelector('[role="alert"]')?.textContent).toContain('Only HTTPS')
     );
+    flushSolid();
     expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 
@@ -941,6 +1115,7 @@ describe('McpPicker', () => {
         error: 'Set clientId in opencode.json.',
       },
     });
+    flushSolid();
     cleanup = render(
       () =>
         McpPicker({
@@ -950,9 +1125,12 @@ describe('McpPicker', () => {
         }),
       container!
     );
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(onChange).toHaveBeenCalledWith(['registered']);
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
@@ -966,6 +1144,7 @@ describe('McpPicker', () => {
 
   it('removes credentials and starts a fresh authorization flow', async () => {
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    flushSolid();
     cleanup = render(
       () =>
         McpPicker({
@@ -975,16 +1154,22 @@ describe('McpPicker', () => {
         }),
       container!
     );
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
+    flushSolid();
     await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledTimes(1));
+    flushSolid();
 
     const removeButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.textContent?.includes('Remove credentials')
     );
     removeButton?.click();
+    flushSolid();
 
     await vi.waitFor(() => expect(mocks.removeAuth).toHaveBeenCalledWith('oauth'));
+    flushSolid();
     await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledTimes(2));
+    flushSolid();
     expect(mocks.status).toHaveBeenCalled();
   });
 });

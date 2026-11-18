@@ -1,3 +1,4 @@
+import { ariaBoolean } from '../../lib/aria';
 import { Show } from 'solid-js';
 import { hostMetadata } from '../../host/extensions';
 import type { Agent, Provider } from '../../types';
@@ -220,11 +221,13 @@ function ComposerWarning(
       }
     >
       <span
-        class="model-selection-cost-warning"
-        classList={{ 'prompt-completion-warning': !!props.promptCompletionError }}
+        class={[
+          'model-selection-cost-warning',
+          { 'prompt-completion-warning': !!props.promptCompletionError },
+        ]}
         role="img"
         aria-label={label()}
-        tabIndex={0}
+        tabindex={0}
       >
         <UiIcon source={warningTriangleIcon} width={16} height={16} />
       </span>
@@ -452,7 +455,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                 type="button"
                 class="toolbar-lsp-count"
                 aria-label={`${props.activeLspNames.length} active LSP${props.activeLspNames.length === 1 ? '' : 's'}: ${props.activeLspNames.join(', ')}`}
-                aria-expanded={props.showLspPicker}
+                aria-expanded={ariaBoolean(props.showLspPicker)}
                 onClick={props.onToggleLsps}
               >
                 <span class="toolbar-lsp-count-label">
@@ -475,7 +478,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                 type="button"
                 class="toolbar-mcp-count"
                 aria-label={`${props.enabledMcpCount} of ${props.availableMcpCount} MCP${props.availableMcpCount === 1 ? '' : 's'} enabled`}
-                aria-expanded={props.showMcpPicker}
+                aria-expanded={ariaBoolean(props.showMcpPicker)}
                 onClick={props.onToggleMcps}
               >
                 <span class="toolbar-mcp-count-label">

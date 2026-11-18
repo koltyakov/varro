@@ -1,5 +1,6 @@
-import { For, Show, createEffect, createSignal, createUniqueId, onCleanup } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { ariaBoolean } from '../lib/aria';
+import { createEffect, For, Show, createSignal, createUniqueId } from 'solid-js';
+import { Portal } from '@solidjs/web';
 import { getPopupTopBound } from '../lib/popup-position';
 import { checkIcon, navArrowDownIcon } from '../lib/ui-icons';
 import { UiIcon } from './UiIcon';
@@ -58,12 +59,15 @@ export function NativeFormSelect(props: {
     menu.removeAttribute('data-popup-position-pending');
   }
 
-  createEffect(() => {
-    if (props.disabled) setOpen(false);
-  });
+  createEffect(
+    () => props.disabled,
+    (disabled) => {
+      if (disabled) setOpen(false);
+    }
+  );
 
-  createEffect(() => {
-    if (!open()) return;
+  createEffect(open, (shown) => {
+    if (!shown) return;
     queueMicrotask(positionMenu);
     const outside = (event: PointerEvent) => {
       if (
@@ -81,25 +85,27 @@ export function NativeFormSelect(props: {
     document.addEventListener('pointerdown', outside);
     document.addEventListener('scroll', scroll, true);
     window.addEventListener('resize', close);
-    onCleanup(() => {
+    return () => {
       document.removeEventListener('pointerdown', outside);
       document.removeEventListener('scroll', scroll, true);
       window.removeEventListener('resize', close);
-    });
+    };
   });
 
-  createEffect(() => {
-    const index = activeIndex();
-    if (!open()) return;
-    queueMicrotask(() => {
-      const option = menu?.children[index];
-      if (!open() || !menu || !(option instanceof HTMLElement)) return;
-      // Scroll only the menu, never the transcript or its virtual anchor.
-      if (option.offsetTop < menu.scrollTop) menu.scrollTop = option.offsetTop;
-      else if (option.offsetTop + option.offsetHeight > menu.scrollTop + menu.clientHeight)
-        menu.scrollTop = option.offsetTop + option.offsetHeight - menu.clientHeight;
-    });
-  });
+  createEffect(
+    () => (open() ? activeIndex() : undefined),
+    (index) => {
+      if (index === undefined) return;
+      queueMicrotask(() => {
+        const option = menu?.children[index];
+        if (!open() || !menu || !(option instanceof HTMLElement)) return;
+        // Scroll only the menu, never the transcript or its virtual anchor.
+        if (option.offsetTop < menu.scrollTop) menu.scrollTop = option.offsetTop;
+        else if (option.offsetTop + option.offsetHeight > menu.scrollTop + menu.clientHeight)
+          menu.scrollTop = option.offsetTop + option.offsetHeight - menu.clientHeight;
+      });
+    }
+  );
 
   function handleKeyDown(event: KeyboardEvent) {
     if (props.disabled || event.isComposing) return;
@@ -159,11 +165,11 @@ export function NativeFormSelect(props: {
         class="native-form-select-trigger"
         value={props.value}
         aria-label={props.label}
-        aria-invalid={props.invalid}
-        aria-required={props.required}
+        aria-invalid={ariaBoolean(props.invalid)}
+        aria-required={ariaBoolean(props.required)}
         aria-describedby={props.describedBy}
         aria-haspopup="listbox"
-        aria-expanded={open()}
+        aria-expanded={ariaBoolean(open())}
         aria-controls={listID}
         aria-activedescendant={open() ? `${listID}-${activeIndex()}` : undefined}
         disabled={props.disabled}
@@ -198,12 +204,12 @@ export function NativeFormSelect(props: {
                 <button
                   type="button"
                   role="option"
-                  tabIndex={-1}
+                  tabindex={-1}
                   id={`${listID}-${index()}`}
                   data-value={option.value}
-                  aria-selected={option.value === props.value}
-                  class="native-form-select-option"
-                  classList={{ 'is-active': index() === activeIndex() }}
+                  aria-selected={ariaBoolean(option.value === props.value)}
+
+                  class={['native-form-select-option', { 'is-active': index() === activeIndex() }]}
                   onPointerMove={() => setActiveIndex(index())}
                   onClick={() => choose(index())}
                 >

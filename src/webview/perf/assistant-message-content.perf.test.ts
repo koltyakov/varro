@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import type { AssistantMessage, Part, TextPart, ToolPart } from '../types';
 import { AssistantMessageContent } from '../components/message/AssistantMessageContent';
 import { resetDefaultAppState } from '../lib/state';

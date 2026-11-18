@@ -1,7 +1,14 @@
-import { createSignal } from 'solid-js';
-import type { Accessor, Setter } from 'solid-js';
-import { createStore, reconcile } from 'solid-js/store';
-import type { SetStoreFunction, Store } from 'solid-js/store';
+import {
+  createSignal,
+  untrack,
+  createStore,
+  reconcile,
+  type Accessor,
+  type Setter,
+  type StoreSetter,
+  type Store,
+} from 'solid-js';
+
 import type {
   Session,
   Permission,
@@ -62,7 +69,7 @@ import {
 } from './attachment-order';
 import { createMessageIndex } from './message-index';
 import { readInputDraft, writeInputDraft } from './input-draft-persistence';
-import { asRecord, isString } from './runtime-values';
+import { asRecord, isFunction, isString } from './runtime-values';
 
 import {
   activePermissionReconciliations,
@@ -235,11 +242,12 @@ type StreamingDeltaQueue = ReturnType<typeof createStreamingDeltaQueue>;
 
 export interface AppStateInstance {
   state: Store<AppState>;
-  setState: SetStoreFunction<AppState>;
+  setState: StoreSetter<AppState>;
   showThinking: Accessor<boolean>;
   setShowThinking: Setter<boolean>;
   showFileDiffs: Accessor<boolean>;
   setShowFileDiffs: Setter<boolean>;
+  onBeforeShowFileDiffsPreferenceChange(listener: () => void): () => void;
   expandThinking: Accessor<boolean>;
   setExpandThinking: Setter<boolean>;
   showChangedFiles: Accessor<boolean>;
@@ -528,9 +536,24 @@ export function createAppState(): AppStateInstance {
   });
 
   const [showThinking, setShowThinking] = createSignal(readShowThinking());
-  const [showFileDiffs, setShowFileDiffs] = createSignal(
+  const [showFileDiffs, writeShowFileDiffs] = createSignal(
     initialWebviewState.showFileDiffs ?? false
   );
+  const beforeShowFileDiffsPreferenceChangeListeners = new Set<() => void>();
+  const onBeforeShowFileDiffsPreferenceChange = (listener: () => void) => {
+    beforeShowFileDiffsPreferenceChangeListeners.add(listener);
+    return () => {
+      beforeShowFileDiffsPreferenceChangeListeners.delete(listener);
+    };
+  };
+  const setShowFileDiffs: Setter<boolean> = (value) =>
+    writeShowFileDiffs((current) => {
+      const next = isFunction(value) ? value(current) : value;
+      if (next !== current) {
+        for (const listener of beforeShowFileDiffsPreferenceChangeListeners) untrack(listener);
+      }
+      return next;
+    });
   const [expandThinking, setExpandThinking] = createSignal(
     initialWebviewState.expandThinking ?? false
   );
@@ -547,9 +570,16 @@ export function createAppState(): AppStateInstance {
     readDesktopSessionPaneSide(initialWebviewState)
   );
   const [inputText, setInputTextValue] = createSignal(readInputDraft() ?? '');
-  const [inputTextMutationVersion, setInputTextMutationVersion] = createSignal(0);
+  // Rollback/paste ownership captures this token at the setter boundary, before
+  // Solid publishes the draft. Retain reactive invalidation for pending paste UI.
+  let currentInputTextMutationVersion = 0;
+  const [readInputTextMutationVersion, setInputTextMutationVersion] = createSignal(0);
+  const inputTextMutationVersion = () => {
+    readInputTextMutationVersion();
+    return currentInputTextMutationVersion;
+  };
   const setInputText: Setter<string> = (value) => {
-    setInputTextMutationVersion((version) => version + 1);
+    setInputTextMutationVersion(++currentInputTextMutationVersion);
     const nextValue = setInputTextValue(value);
     writeInputDraft(nextValue);
     return nextValue;
@@ -639,6 +669,7 @@ export function createAppState(): AppStateInstance {
     setShowThinking,
     showFileDiffs,
     setShowFileDiffs,
+    onBeforeShowFileDiffsPreferenceChange,
     expandThinking,
     setExpandThinking,
     showChangedFiles,
@@ -740,6 +771,8 @@ export const showThinking = defaultAppState.showThinking;
 export const setShowThinking = defaultAppState.setShowThinking;
 export const showFileDiffs = defaultAppState.showFileDiffs;
 export const setShowFileDiffs = defaultAppState.setShowFileDiffs;
+export const onBeforeShowFileDiffsPreferenceChange =
+  defaultAppState.onBeforeShowFileDiffsPreferenceChange;
 export const expandThinking = defaultAppState.expandThinking;
 export const setExpandThinking = defaultAppState.setExpandThinking;
 export const showChangedFiles = defaultAppState.showChangedFiles;

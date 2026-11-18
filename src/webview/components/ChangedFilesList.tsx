@@ -1,3 +1,4 @@
+import { ariaBoolean } from '../lib/aria';
 import { For, Show, createMemo, createSignal } from 'solid-js';
 import { isActiveSessionWorking, showChangedFiles, state } from '../lib/state';
 import { postMessage } from '../lib/bridge';
@@ -184,7 +185,7 @@ export function ChangedFilesList() {
           type="button"
           class="todo-block-header"
           onClick={() => setCollapsed(!collapsed())}
-          aria-expanded={!collapsed()}
+          aria-expanded={ariaBoolean(!collapsed())}
         >
           <UiIcon
             source={navArrowDownIcon}

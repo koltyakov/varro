@@ -1,4 +1,5 @@
-import { batch, createEffect, createSignal, on, onCleanup, onMount } from 'solid-js';
+import { storePath } from '@solidjs/signals';
+import { createEffect, createSignal, onSettled, reconcile, untrack } from 'solid-js';
 import type {
   QuestionAnswer,
   AutoApproveJudgeReference,
@@ -9,7 +10,6 @@ import type {
   WebviewThemeKind,
 } from '../../../shared/protocol';
 import { syncWindowChatTheme } from '../../lib/window-chat-theme';
-import { reconcile } from 'solid-js/store';
 import type { PermissionApprovalOptions } from '../../../shared/opencode-types';
 import {
   AUTO_APPROVE_JUDGE_TIMEOUT_MS,
@@ -331,17 +331,19 @@ const MAX_AUTO_APPROVE_ACTIVITY = 40;
 function startAutoApproveActivity(permission: Permission) {
   const current = appStore.state.sessionAutoPermissionActivity[permission.sessionID] ?? [];
   appStore.setState(
-    'sessionAutoPermissionActivity',
-    permission.sessionID,
-    [
-      ...current.filter((activity) => activity.permissionId !== permission.id),
-      {
-        permissionId: permission.id,
-        status: 'reviewing' as const,
-        title: permission.title?.trim() || permission.type,
-        createdAt: Date.now(),
-      },
-    ].slice(-MAX_AUTO_APPROVE_ACTIVITY)
+    storePath(
+      'sessionAutoPermissionActivity',
+      permission.sessionID,
+      [
+        ...current.filter((activity) => activity.permissionId !== permission.id),
+        {
+          permissionId: permission.id,
+          status: 'reviewing' as const,
+          title: permission.title?.trim() || permission.type,
+          createdAt: Date.now(),
+        },
+      ].slice(-MAX_AUTO_APPROVE_ACTIVITY)
+    )
   );
 }
 
@@ -368,12 +370,14 @@ function finishAutoApproveActivity(
     createdAt: index >= 0 ? current[index]!.createdAt : Date.now(),
   };
   appStore.setState(
-    'sessionAutoPermissionActivity',
-    permission.sessionID,
-    (index >= 0
-      ? current.map((activity, i) => (i === index ? next : activity))
-      : [...current, next]
-    ).slice(-MAX_AUTO_APPROVE_ACTIVITY)
+    storePath(
+      'sessionAutoPermissionActivity',
+      permission.sessionID,
+      (index >= 0
+        ? current.map((activity, i) => (i === index ? next : activity))
+        : [...current, next]
+      ).slice(-MAX_AUTO_APPROVE_ACTIVITY)
+    )
   );
 }
 
@@ -392,10 +396,12 @@ function clearReviewingAutoApproveActivity(permission: Pick<Permission, 'id' | '
     return;
   }
   appStore.setState(
-    'sessionAutoPermissionActivity',
-    permission.sessionID,
-    current.filter(
-      (activity) => activity.permissionId !== permission.id || activity.status !== 'reviewing'
+    storePath(
+      'sessionAutoPermissionActivity',
+      permission.sessionID,
+      current.filter(
+        (activity) => activity.permissionId !== permission.id || activity.status !== 'reviewing'
+      )
     )
   );
 }
@@ -442,17 +448,24 @@ function getPermissionJudgeErrorMessage<T>(error: T): string {
 
 function updateSessionAutoPermissionCounts(
   sessionId: string,
-  changes: Partial<{ inFlight: number; approved: number; rejected: number }>
+  update: (current: {
+    inFlight: number;
+    approved: number;
+    rejected: number;
+  }) => Partial<{ inFlight: number; approved: number; rejected: number }>
 ) {
-  const current = appStore.state.sessionAutoPermissionCounts[sessionId] ?? {
-    inFlight: 0,
-    approved: 0,
-    rejected: 0,
-  };
-  appStore.setState('sessionAutoPermissionCounts', sessionId, {
-    inFlight: Math.max(0, changes.inFlight ?? current.inFlight),
-    approved: changes.approved ?? current.approved,
-    rejected: changes.rejected ?? current.rejected,
+  appStore.setState((draft) => {
+    const current = draft.sessionAutoPermissionCounts[sessionId] ?? {
+      inFlight: 0,
+      approved: 0,
+      rejected: 0,
+    };
+    const changes = update(current);
+    draft.sessionAutoPermissionCounts[sessionId] = {
+      inFlight: Math.max(0, changes.inFlight ?? current.inFlight),
+      approved: changes.approved ?? current.approved,
+      rejected: changes.rejected ?? current.rejected,
+    };
   });
 }
 
@@ -463,10 +476,9 @@ function getPermissionDecisionScopeId(sessionId: string) {
 function finishPermissionJudgeAttempt(attempt: PermissionJudgeAttempt) {
   if (!attempt.countedInFlight) return;
   attempt.countedInFlight = false;
-  const current = appStore.state.sessionAutoPermissionCounts[attempt.permission.sessionID];
-  updateSessionAutoPermissionCounts(attempt.permission.sessionID, {
-    inFlight: (current?.inFlight ?? 0) - 1,
-  });
+  updateSessionAutoPermissionCounts(attempt.permission.sessionID, (current) => ({
+    inFlight: current.inFlight - 1,
+  }));
 }
 
 function isPermissionSessionKnown(sessionId: string): boolean {
@@ -714,47 +726,47 @@ function setSessionMessagesIncremental(
   behavior?: { preserveSessionStreaming?: boolean; authoritativeSessionSnapshot?: boolean }
 ) {
   flushPendingStreamingDeltasFor(appStore.defaultAppState);
-  const current = appStore.state.messages;
-  const streamingPartId = appStore.state.streamingPartId;
-  const streamingText = appStore.state.streamingText;
-  const streamingBelongsToSession =
-    !!streamingPartId &&
-    current.some(
-      (entry) =>
-        entry.info.sessionID === sessionId &&
-        entry.parts.some((part) => part.id === streamingPartId)
-    );
-  const preserveStreamingState =
-    !!streamingPartId &&
-    current.some(
-      (entry) =>
-        (entry.info.sessionID !== sessionId ||
-          (behavior?.preserveSessionStreaming &&
-            (!behavior.authoritativeSessionSnapshot || options?.preserveExtraParts))) &&
-        entry.parts.some((part) => part.id === streamingPartId)
-    );
-  batch(() => {
-    if (streamingBelongsToSession && !preserveStreamingState && !options?.preserveExtraParts) {
-      appStore.setState('streamingPartId', null);
-      appStore.setState('streamingText', '');
-    }
-    sessionStore.setMessagesIncremental(
-      mergeSessionMessages(current, sessionId, messages),
-      options
-    );
-    setCachedSessionMessages(
-      sessionId,
-      appStore.state.messages.filter((entry) => entry.info.sessionID === sessionId)
-    );
-    if (
-      preserveStreamingState &&
-      appStore.state.messages.some((entry) =>
-        entry.parts.some((part) => part.id === streamingPartId)
-      )
-    ) {
-      appStore.setState('streamingPartId', streamingPartId);
-      appStore.setState('streamingText', streamingText);
-    }
+  appStore.setState((draft) => {
+    const current = draft.messages;
+    const streamingPartId = draft.streamingPartId;
+    const streamingText = draft.streamingText;
+    const streamingBelongsToSession =
+      !!streamingPartId &&
+      current.some(
+        (entry) =>
+          entry.info.sessionID === sessionId &&
+          entry.parts.some((part) => part.id === streamingPartId)
+      );
+    const preserveStreamingState =
+      !!streamingPartId &&
+      current.some(
+        (entry) =>
+          (entry.info.sessionID !== sessionId ||
+            (behavior?.preserveSessionStreaming &&
+              (!behavior.authoritativeSessionSnapshot || options?.preserveExtraParts))) &&
+          entry.parts.some((part) => part.id === streamingPartId)
+      );
+    (() => {
+      if (streamingBelongsToSession && !preserveStreamingState && !options?.preserveExtraParts) {
+        draft.streamingPartId = null;
+        draft.streamingText = '';
+      }
+      sessionStore.setMessagesIncremental(
+        mergeSessionMessages(current, sessionId, messages),
+        options
+      );
+      setCachedSessionMessages(
+        sessionId,
+        draft.messages.filter((entry) => entry.info.sessionID === sessionId)
+      );
+      if (
+        preserveStreamingState &&
+        draft.messages.some((entry) => entry.parts.some((part) => part.id === streamingPartId))
+      ) {
+        draft.streamingPartId = streamingPartId;
+        draft.streamingText = streamingText;
+      }
+    })();
   });
 }
 
@@ -823,7 +835,7 @@ async function fetchSessionMessages(
       );
     }
   }
-  appStore.setState('sessionMessageCounts', sessionId, messages.length);
+  appStore.setState(storePath('sessionMessageCounts', sessionId, messages.length));
   return messages;
 }
 
@@ -897,19 +909,15 @@ function loadOlderSessionPrompts(
       cacheSessionHistoryPage(sessionId, cursor, page);
       const nextCursor = advanceSessionHistoryPromptCursor(sessionId, cursor, page.nextCursor);
       const prompts = page.filter((entry) => entry.info.role === 'user');
-      setSessionHistoryPrompts(
-        sessionId,
-        mergeOlderHistory(
-          getSessionHistoryPromptEntries(sessionId),
-          page.map((entry) =>
-            entry.info.role === 'user' ? entry : { info: entry.info, parts: [] }
-          )
-        )
+      const mergedPrompts = mergeOlderHistory(
+        getSessionHistoryPromptEntries(sessionId),
+        page.map((entry) => (entry.info.role === 'user' ? entry : { info: entry.info, parts: [] }))
       );
+      setSessionHistoryPrompts(sessionId, mergedPrompts);
       if (prompts.length > 0) {
         // Steering, follow-up actions, and automatic notices cannot own the sticky header. Keep walking
         // older pages until the original prompt is available, even for multi-page turns.
-        const steeringIds = collectSteeringMessages(getSessionHistoryPromptEntries(sessionId)).ids;
+        const steeringIds = collectSteeringMessages(mergedPrompts).ids;
         const loadedMessageIds = new Set([
           ...knownLoadedMessageIds,
           ...appStore.state.messages
@@ -1083,51 +1091,110 @@ export function resetWorkspaceDerivedState(options?: {
     )
   );
   permissionsStore.resetQuestionResolutionState();
-  batch(() => {
+  (() => {
     if (!options?.preserveTranscript) {
       sessionStore.setActiveSessionId(null);
       sessionStore.persistActiveSessionId(null);
       sessionStore.clearMessages();
     }
     if (!preserveWorkspaceCatalog) {
-      appStore.setState('sessions', []);
-      appStore.setState('sessionsLoadError', null);
-      appStore.setState('sessionsHasMore', false);
-      appStore.setState('recycleBinEntries', []);
-      appStore.setState('recycleBinLoadError', null);
-      appStore.setState('sessionStatus', reconcile(queuedWorkingStatuses));
-      appStore.setState('failedSessionIds', []);
-      appStore.setState('failedSessionUpdatedAt', {});
-      appStore.setState('sessionMessageCounts', reconcile({}));
-      appStore.setState('sessionUsageLimits', reconcile({}));
+      appStore.setState(storePath('sessions', []));
+      appStore.setState(storePath('sessionsLoadError', null));
+      appStore.setState(storePath('sessionsHasMore', false));
+      appStore.setState(storePath('recycleBinEntries', []));
+      appStore.setState(storePath('recycleBinLoadError', null));
+      appStore.setState((draft) => {
+        const current = draft['sessionStatus'];
+        const incoming = queuedWorkingStatuses satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionStatus'] = incoming;
+        else reconcile(incoming)(current);
+      });
+      appStore.setState(storePath('failedSessionIds', []));
+      appStore.setState(storePath('failedSessionUpdatedAt', {}));
+      appStore.setState((draft) => {
+        const current = draft['sessionMessageCounts'];
+        const incoming = {} satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionMessageCounts'] = incoming;
+        else reconcile(incoming)(current);
+      });
+      appStore.setState((draft) => {
+        const current = draft['sessionUsageLimits'];
+        const incoming = {} satisfies typeof current;
+        if (
+          incoming === null ||
+          incoming === undefined ||
+          current === null ||
+          current === undefined
+        )
+          draft['sessionUsageLimits'] = incoming;
+        else reconcile(incoming)(current);
+      });
     }
-    appStore.setState('sessionsLoadingMore', false);
-    appStore.setState('sessionsPaginationError', null);
-    appStore.setState('messagesLoading', appStore.state.pendingSessionSelectionId !== null);
-    appStore.setState('permissions', []);
-    appStore.setState('questions', []);
-    appStore.setState('compactingSessionIds', []);
-    appStore.setState('queuedMessageDispatchingId', null);
+    appStore.setState(storePath('sessionsLoadingMore', false));
+    appStore.setState(storePath('sessionsPaginationError', null));
+    appStore.setState(
+      storePath('messagesLoading', appStore.state.pendingSessionSelectionId !== null)
+    );
+    appStore.setState(storePath('permissions', []));
+    appStore.setState(storePath('questions', []));
+    appStore.setState(storePath('compactingSessionIds', []));
+    appStore.setState(storePath('queuedMessageDispatchingId', null));
     setQueuedMessageEdit(null);
-    appStore.setState('interruptedSessionIds', []);
+    appStore.setState(storePath('interruptedSessionIds', []));
 
     // Keep the toolbar presentation stable while the new catalogs load. Sending
     // remains blocked by workspaceCatalogReloadPending until they are authoritative.
-    appStore.setState('providersLoaded', false);
-    appStore.setState('workspaceCatalogReloadPending', true);
-    appStore.setState('agentsLoaded', false);
-    appStore.setState('commandsLoaded', false);
-    appStore.setState('commands', []);
-    appStore.setState('lspStatus', []);
-    appStore.setState('mcpDefaults', null);
+    appStore.setState(storePath('providersLoaded', false));
+    appStore.setState(storePath('workspaceCatalogReloadPending', true));
+    appStore.setState(storePath('agentsLoaded', false));
+    appStore.setState(storePath('commandsLoaded', false));
+    appStore.setState(storePath('commands', []));
+    appStore.setState(storePath('lspStatus', []));
+    appStore.setState(storePath('mcpDefaults', null));
     routingStore.resetDraftSelectedMcps();
-    appStore.setState('sessionAutoPermissionCounts', reconcile({}));
-    appStore.setState('sessionAutoPermissionActivity', reconcile({}));
-    appStore.setState('autoPermissionCountsSince', Date.now());
-    appStore.setState('providerAuthMethods', reconcile({}));
-    appStore.setState('workspaceStatuses', []);
-    appStore.setState('workspaceStatusSummary', reconcile({ entries: [] }));
-    appStore.setState('draftSelectedMcps', null);
+    appStore.setState((draft) => {
+      const current = draft['sessionAutoPermissionCounts'];
+      const incoming = {} satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionAutoPermissionCounts'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    appStore.setState((draft) => {
+      const current = draft['sessionAutoPermissionActivity'];
+      const incoming = {} satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionAutoPermissionActivity'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    appStore.setState(storePath('autoPermissionCountsSince', Date.now()));
+    appStore.setState((draft) => {
+      const current = draft['providerAuthMethods'];
+      const incoming = {} satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['providerAuthMethods'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    appStore.setState(storePath('workspaceStatuses', []));
+    appStore.setState((draft) => {
+      const current = draft['workspaceStatusSummary'];
+      const incoming = { entries: [] } satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['workspaceStatusSummary'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    appStore.setState(storePath('draftSelectedMcps', null));
     routingStore.setSelectedAgent(null, {
       persistGlobal: false,
     });
@@ -1146,7 +1213,7 @@ export function resetWorkspaceDerivedState(options?: {
     uiStore.setError(null);
     uiStore.setShowModelPicker(false);
     uiStore.setShowModels(false);
-  });
+  })();
 
   appStore.defaultAppState.sessionTreeIndex.invalidate();
   appStore.defaultAppState.setSessionUsageLimitVersion((version) => version + 1);
@@ -1380,8 +1447,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       reconcileServerState,
       invalidateMessageSync: messageSyncGenerations.invalidate,
       isMessageRemovalDeferred,
-      abortRemoteSession: (sessionId: string) =>
-        client.session.abort(sessionId, { directory: getSessionDirectory(sessionId) }),
+      abortRemoteSession: (sessionId: string, directory?: string) =>
+        client.session.abort(sessionId, { directory: directory ?? getSessionDirectory(sessionId) }),
       continueInterruptedSession,
       logError,
       isPermissionAutomationOwner: () => permissionAutomationOwner,
@@ -1391,20 +1458,20 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   function useOpenCode() {
-    hideAutomaticallyHandledRestoredPermissions();
+    onSettled(() => untrack(hideAutomaticallyHandledRestoredPermissions));
     createEffect(
-      on(
-        getEffectiveComposerSessionId,
-        (sessionId) => {
-          if (initialized && sessionId === null) {
-            void syncSessionMcps(null).catch((error) => logError('syncDraftMcps', error));
-          }
-        },
-        { defer: true }
-      )
+      getEffectiveComposerSessionId,
+      (sessionId) => {
+        if (initialized && sessionId === null) {
+          void syncSessionMcps(null).catch((error) => logError('syncDraftMcps', error));
+        }
+      },
+      { defer: true }
     );
 
-    onMount(() => {
+    onSettled(() => {
+      const cleanups: Array<() => void> = [];
+
       const initialTheme = syncWindowChatTheme({
         theme: initialWebviewState.theme ?? uiStore.theme(),
         windowChatTheme: initialWebviewState.windowChatTheme,
@@ -1551,7 +1618,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           void refreshRoutingState();
         },
       });
-      onCleanup(() => {
+      cleanups.push(() => {
         disposeBridge();
         disposeFocusTracking();
         for (const cleanup of eventHandlerCleanups) cleanup();
@@ -1561,6 +1628,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         resetMessageWindowState();
         setDocumentVisible(document.visibilityState === 'visible');
       });
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     });
 
     registerLoadingStatusPollEffect({
@@ -2065,11 +2136,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       );
       if (pendingPermissionSnapshot.get(permission.id) === permission)
         pendingPermissionSnapshot.delete(permission.id);
-      const counts = appStore.state.sessionAutoPermissionCounts[permission.sessionID];
       const key = outcome.response.decision === 'allow' ? 'approved' : 'rejected';
-      updateSessionAutoPermissionCounts(permission.sessionID, {
-        [key]: (counts?.[key] ?? 0) + 1,
-      });
+      updateSessionAutoPermissionCounts(permission.sessionID, (counts) => ({
+        [key]: counts[key] + 1,
+      }));
       finishAutoApproveActivity(
         permission,
         outcome.response.decision === 'allow' ? 'auto-approved' : 'auto-review-failed',
@@ -2120,10 +2190,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     };
     permissionJudgeAttempts.set(permission.id, attempt);
     startAutoApproveActivity(permission);
-    const counts = appStore.state.sessionAutoPermissionCounts[permission.sessionID];
-    updateSessionAutoPermissionCounts(permission.sessionID, {
-      inFlight: (counts?.inFlight ?? 0) + 1,
-    });
+    updateSessionAutoPermissionCounts(permission.sessionID, (counts) => ({
+      inFlight: counts.inFlight + 1,
+    }));
 
     const judgeRequest = Promise.resolve()
       .then(async (): Promise<PermissionJudgeOutcome> => {
@@ -2236,7 +2305,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const generation = workspaceGeneration;
     try {
       const status = await client.lsp.status();
-      if (generation === workspaceGeneration) appStore.setState('lspStatus', status);
+      if (generation === workspaceGeneration) appStore.setState(storePath('lspStatus', status));
     } catch (err) {
       if (generation === workspaceGeneration) logError('loadLsps', err);
     }
@@ -2246,18 +2315,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function refreshRoutingState() {
     pendingRoutingRefreshes += 1;
-    appStore.setState('providersRefreshing', true);
+    appStore.setState(storePath('providersRefreshing', true));
     try {
       await Promise.all([dataLoaders.refreshRoutingState(), loadCompatibilityState()]);
     } finally {
       pendingRoutingRefreshes -= 1;
-      appStore.setState('providersRefreshing', pendingRoutingRefreshes > 0);
+      appStore.setState(storePath('providersRefreshing', pendingRoutingRefreshes > 0));
     }
   }
 
   function removeUnavailableSession(sessionId: string) {
     // A missing record on another server is not a deletion of its saved drafts or settings.
-    batch(() => {
+    (() => {
       sessionStore.setSessions(
         appStore.state.sessions.filter((session) => session.id !== sessionId)
       );
@@ -2265,7 +2334,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         sessionLifecycleOperations.clearActiveSessionState();
         uiStore.setShowSessionPicker(true);
       }
-    });
+    })();
   }
 
   async function reconcileServerState() {
@@ -2431,7 +2500,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       sessionActivationDirectory = null;
       invalidateClientWorkspaceState();
       workspaceGeneration += 1;
-      appStore.setState('workspaceCatalogReloadPending', true);
+      appStore.setState(storePath('workspaceCatalogReloadPending', true));
       return;
     }
     const preserveSessionActivation = Boolean(
@@ -2533,7 +2602,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     setInitialized: (value) => {
       initialized = value;
       uiStore.setConnectionInitialized(value);
-      if (value) appStore.setState('serverReconnecting', false);
+      if (value) appStore.setState(storePath('serverReconnecting', false));
     },
     setError: (message) => {
       uiStore.setError(message);
@@ -2698,7 +2767,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           session?.time.updated ?? 0,
           appStore.state.completedSessionResponses[id] ?? 0
         );
-        appStore.setState('followupOpening', updatedAt > seenAt ? { sessionId: id, seenAt } : null);
+        appStore.setState(
+          storePath('followupOpening', updatedAt > seenAt ? { sessionId: id, seenAt } : null)
+        );
       },
       clearDraftCurrentDocumentState: composerStore.clearDraftCurrentDocumentState,
       resetToolCallExpansionState,
@@ -2728,7 +2799,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       },
       resetTodoSync,
       clearMessages: sessionStore.clearMessages,
-      setMessagesLoading: (loading) => appStore.setState('messagesLoading', loading),
+      setMessagesLoading: (loading) => appStore.setState(storePath('messagesLoading', loading)),
       loadSession: (sessionId, isCurrentSelection = () => true) => {
         const generation = workspaceGeneration;
         return loadSessionWithMessages(
@@ -3069,7 +3140,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     sessionActivationPreserveTranscript =
       options?.preserveTranscript === true && appStore.state.activeSessionId === id;
     const targetDirectory = options?.directory ?? knownSession?.directory;
-    appStore.setState('pendingSessionSelectionId', null);
+    appStore.setState(storePath('pendingSessionSelectionId', null));
     sessionActivationDirectory = null;
     if (
       targetDirectory &&
@@ -3077,10 +3148,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       !isSameWorkspacePath(targetDirectory, currentWorkspacePath)
     ) {
       sessionActivationDirectory = targetDirectory;
-      batch(() => {
-        appStore.setState('pendingSessionSelectionId', id);
-        appStore.setState('messagesLoading', true);
-      });
+      (() => {
+        appStore.setState(storePath('pendingSessionSelectionId', id));
+        appStore.setState(storePath('messagesLoading', true));
+      })();
       try {
         const activatedSession = await client.session.activate(id, targetDirectory, {
           signal: activationController.signal,
@@ -3092,10 +3163,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           if (sessionActivationController === activationController) {
             sessionActivationController = null;
             sessionActivationDirectory = null;
-            batch(() => {
-              appStore.setState('pendingSessionSelectionId', null);
-              appStore.setState('messagesLoading', false);
-            });
+            (() => {
+              appStore.setState(storePath('pendingSessionSelectionId', null));
+              appStore.setState(storePath('messagesLoading', false));
+            })();
           }
           return false;
         }
@@ -3112,10 +3183,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         if (sessionActivationController === activationController) {
           sessionActivationController = null;
           sessionActivationDirectory = null;
-          batch(() => {
-            appStore.setState('pendingSessionSelectionId', null);
-            appStore.setState('messagesLoading', false);
-          });
+          (() => {
+            appStore.setState(storePath('pendingSessionSelectionId', null));
+            appStore.setState(storePath('messagesLoading', false));
+          })();
         }
         if (
           activation === sessionActivationGeneration &&
@@ -3135,7 +3206,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     messageSyncGenerations.invalidate(id);
     const selection = sessionSyncOperations.selectSession(id, options);
     if (appStore.state.pendingSessionSelectionId === id) {
-      appStore.setState('pendingSessionSelectionId', null);
+      appStore.setState(storePath('pendingSessionSelectionId', null));
     }
     const result = await selection;
     if (result.state === 'failed' && options?.throwOnLoadFailure === true)

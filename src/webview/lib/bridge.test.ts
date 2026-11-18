@@ -429,7 +429,7 @@ describe('bridge', () => {
 
   it('sends reactive prompt data through a structured-clone transport', async () => {
     const bridge = await loadBridge();
-    const { createStore } = await import('solid-js/store');
+    const { createStore } = await import('solid-js');
     const [state] = createStore({
       model: { providerID: 'openai', modelID: 'gpt-5.6-luna' },
       parts: [{ type: 'text', text: 'A prompt from reactive session state' }],

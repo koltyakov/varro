@@ -1,10 +1,13 @@
+import { flush as flushSolid } from 'solid-js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QuestionRequest } from '../types';
 
 const storageKey = 'varro.nativeFormDrafts.v1';
 beforeEach(() => {
   vi.resetModules();
+  flushSolid();
   window.localStorage.clear();
+  flushSolid();
 });
 
 describe('native form draft checkpoints', () => {
@@ -12,6 +15,7 @@ describe('native form draft checkpoints', () => {
     'retains a restored draft during initial %s hydration',
     async (kind) => {
       const { nativeFormDrafts } = await import('./native-form-drafts');
+      flushSolid();
       const draft = {
         id: 'frm_hydrated',
         sessionID: 'ses_child',
@@ -19,9 +23,13 @@ describe('native form draft checkpoints', () => {
         custom: { selection: 'unfinished' },
       };
       nativeFormDrafts.save(draft);
+      flushSolid();
       vi.resetModules();
+      flushSolid();
       const reloaded = await import('./native-form-drafts');
+      flushSolid();
       const permissions = await import('./state-permissions');
+      flushSolid();
       const question: QuestionRequest = {
         id: draft.id,
         sessionID: draft.sessionID,
@@ -37,38 +45,49 @@ describe('native form draft checkpoints', () => {
 
       if (kind === 'ask') permissions.upsertQuestion(question);
       else permissions.setQuestions([question]);
+      flushSolid();
 
       expect(reloaded.nativeFormDrafts.get(draft.id, draft.sessionID)).toEqual(draft);
       permissions.upsertQuestion(question);
+      flushSolid();
       expect(reloaded.nativeFormDrafts.get(draft.id, draft.sessionID)).toEqual(draft);
 
       permissions.removeResolvedQuestion(question.id);
+      flushSolid();
       expect(reloaded.nativeFormDrafts.get(draft.id, draft.sessionID)).toBeUndefined();
       reloaded.nativeFormDrafts.save(draft);
+      flushSolid();
       permissions.upsertQuestion(question);
+      flushSolid();
       expect(reloaded.nativeFormDrafts.get(draft.id, draft.sessionID)).toBeUndefined();
     }
   );
 
   it('removes a draft when an authoritative snapshot resolves its pending request', async () => {
     const { nativeFormDrafts } = await import('./native-form-drafts');
+    flushSolid();
     const { setQuestions } = await import('./state-permissions');
+    flushSolid();
     const question: QuestionRequest = { id: 'frm_resolved', sessionID: 'ses_one', questions: [] };
     setQuestions([question]);
+    flushSolid();
     nativeFormDrafts.save({
       id: question.id,
       sessionID: question.sessionID,
       values: { answer: 'no longer pending' },
       custom: {},
     });
+    flushSolid();
 
     setQuestions([]);
+    flushSolid();
 
     expect(nativeFormDrafts.get(question.id, question.sessionID)).toBeUndefined();
   });
 
   it('restores values and unfinished custom selections after a module reload', async () => {
     const { nativeFormDrafts } = await import('./native-form-drafts');
+    flushSolid();
     const draft = {
       id: 'frm_one',
       sessionID: 'ses_child',
@@ -76,11 +95,15 @@ describe('native form draft checkpoints', () => {
       custom: { selection: 'unfinished' },
     };
     nativeFormDrafts.save(draft);
+    flushSolid();
     vi.resetModules();
+    flushSolid();
     const reloaded = await import('./native-form-drafts');
+    flushSolid();
     expect(reloaded.nativeFormDrafts.get('frm_one', 'ses_child')).toEqual(draft);
     expect(reloaded.nativeFormDrafts.get('frm_one', 'ses_other')).toBeUndefined();
     reloaded.nativeFormDrafts.remove('frm_one');
+    flushSolid();
     expect(window.localStorage.getItem(storageKey)).toBeNull();
   });
   it('bounds the cache and rejects malformed or oversized saved drafts', async () => {
@@ -91,7 +114,9 @@ describe('native form draft checkpoints', () => {
         entries: [{ id: 'frm_bad', sessionID: 'ses_one', values: { n: null }, custom: {} }],
       })
     );
+    flushSolid();
     const { nativeFormDrafts } = await import('./native-form-drafts');
+    flushSolid();
     expect(nativeFormDrafts.get('frm_bad', 'ses_one')).toBeUndefined();
     for (let index = 0; index < 101; index++)
       nativeFormDrafts.save({
@@ -108,6 +133,7 @@ describe('native form draft checkpoints', () => {
       values: { text: 'x'.repeat(65_536) },
       custom: {},
     });
+    flushSolid();
     expect(nativeFormDrafts.get('frm_big', 'ses_one')).toBeUndefined();
   });
 
@@ -127,7 +153,9 @@ describe('native form draft checkpoints', () => {
         ],
       })
     );
+    flushSolid();
     const { nativeFormDrafts } = await import('./native-form-drafts');
+    flushSolid();
     expect(nativeFormDrafts.get('frm_bad_rows', 'ses_child')).toBeUndefined();
     const draft = {
       id: 'frm_rows',
@@ -143,8 +171,11 @@ describe('native form draft checkpoints', () => {
       },
     };
     nativeFormDrafts.save(draft);
+    flushSolid();
     vi.resetModules();
+    flushSolid();
     const reloaded = await import('./native-form-drafts');
+    flushSolid();
     expect(reloaded.nativeFormDrafts.get('frm_rows', 'ses_child')).toEqual(draft);
   });
 });

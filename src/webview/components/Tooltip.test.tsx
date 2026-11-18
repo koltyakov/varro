@@ -1,5 +1,6 @@
+import { ariaBoolean } from '../lib/aria';
 import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dismissComposerOverlays } from './chat-input/composer-overlay-dismiss';
 import { DEFAULT_TOOLTIP_DELAY, Tooltip } from './Tooltip';
@@ -153,7 +154,7 @@ describe('Tooltip', () => {
     cleanup = render(
       () => (
         <Tooltip content="Choose an option" delay={0}>
-          <button aria-expanded={expanded()}>Choose</button>
+          <button aria-expanded={ariaBoolean(expanded())}>Choose</button>
         </Tooltip>
       ),
       container

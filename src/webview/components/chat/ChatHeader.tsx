@@ -1,7 +1,9 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { ariaBoolean } from '../../lib/aria';
+import { createEffect, Show, createMemo, createSignal } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { supportsDetachedEditors } from '../../host/extensions';
 import { HostActions } from '../HostActions';
-import { Portal } from 'solid-js/web';
+import { Portal } from '@solidjs/web';
 import type { SessionDiffSummary, SiblingWorkspaceAlertKind } from '../../../shared/protocol';
 import { readSessionPauses } from '../../../shared/session-pauses';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
@@ -67,8 +69,8 @@ function NewChatButton(props: { onCreateSession: () => void }) {
 
   const closeMenu = () => setMenuPosition(null);
 
-  createEffect(() => {
-    if (!menuPosition()) return;
+  createEffect(menuPosition, (position) => {
+    if (!position) return;
     const closeIfOutside = (event: Event) => {
       const target = event.target;
       if (target instanceof Node && menuRef?.contains(target)) return;
@@ -77,15 +79,15 @@ function NewChatButton(props: { onCreateSession: () => void }) {
     window.addEventListener('contextmenu', closeIfOutside, true);
     window.addEventListener('pointerdown', closeIfOutside, true);
     window.addEventListener('focusin', closeIfOutside);
-    onCleanup(() => {
+    return () => {
       window.removeEventListener('contextmenu', closeIfOutside, true);
       window.removeEventListener('pointerdown', closeIfOutside, true);
       window.removeEventListener('focusin', closeIfOutside);
-    });
+    };
   });
 
-  createEffect(() => {
-    if (!menuPosition()) return;
+  createEffect(menuPosition, (position) => {
+    if (!position) return;
     queueMicrotask(() => {
       if (!menuRef) return;
       clampPopupToViewport(menuRef);
@@ -108,7 +110,7 @@ function NewChatButton(props: { onCreateSession: () => void }) {
           }}
           aria-label="New chat"
           aria-haspopup="menu"
-          aria-expanded={menuPosition() ? 'true' : undefined}
+          aria-expanded={ariaBoolean(menuPosition() ? 'true' : undefined)}
         >
           <PlusIcon class="chat-header-add-icon" />
         </button>
@@ -223,65 +225,77 @@ function SiblingWorkspaceAlertsButton() {
     iconRef.classList.add('is-ringing');
   };
 
-  createEffect(() => {
-    const kindCount = alertKinds().length;
-    setActiveKindIndex(0);
-    if (kindCount <= 1) return;
-    const interval = window.setInterval(() => {
-      setActiveKindIndex((index) => (index + 1) % kindCount);
-    }, SIBLING_ALERT_COLOR_INTERVAL_MS);
-    onCleanup(() => window.clearInterval(interval));
-  });
-
-  createEffect(() => {
-    const alerts = siblingWorkspaceAlerts();
-    const hasNewEvent = alerts.some((alert) => {
-      const previous = previousAlerts.get(alert.path);
-      return (
-        !previous ||
-        alert.count > previous.count ||
-        alert.kinds.some((kind) => !previous.kinds.has(kind))
-      );
-    });
-    previousAlerts = new Map(
-      alerts.map((alert) => [
-        alert.path,
-        { count: alert.count, kinds: new Set<string>(alert.kinds) },
-      ])
-    );
-    if (alerts.length === 0) return;
-    if (hasNewEvent) ringIcon();
-    const reminder = window.setInterval(ringIcon, SIBLING_ALERT_REMINDER_INTERVAL_MS);
-    onCleanup(() => window.clearInterval(reminder));
-  });
-
-  createEffect(() => {
-    if (!showMenu()) return;
-    if (siblingWorkspaceAlerts().length < 2) {
-      setShowMenu(false);
-      return;
+  createEffect(
+    () => alertKinds().length,
+    (kindCount) => {
+      setActiveKindIndex(0);
+      if (kindCount <= 1) return;
+      const interval = window.setInterval(() => {
+        setActiveKindIndex((index) => (index + 1) % kindCount);
+      }, SIBLING_ALERT_COLOR_INTERVAL_MS);
+      return () => window.clearInterval(interval);
     }
-    const closeIfOutside = (event: Event) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (buttonRef?.contains(target) || menuRef?.contains(target)) return;
-      setShowMenu(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      setShowMenu(false);
-      buttonRef?.focus();
-    };
-    window.addEventListener('pointerdown', closeIfOutside, true);
-    window.addEventListener('keydown', closeOnEscape, true);
-    onCleanup(() => {
-      window.removeEventListener('pointerdown', closeIfOutside, true);
-      window.removeEventListener('keydown', closeOnEscape, true);
-    });
-  });
+  );
 
-  createEffect(() => {
-    if (!showMenu()) return;
+  createEffect(
+    () =>
+      siblingWorkspaceAlerts().map(({ path, count, kinds }) => ({
+        path,
+        count,
+        kinds: [...kinds],
+      })),
+    (alerts) => {
+      const hasNewEvent = alerts.some((alert) => {
+        const previous = previousAlerts.get(alert.path);
+        return (
+          !previous ||
+          alert.count > previous.count ||
+          alert.kinds.some((kind) => !previous.kinds.has(kind))
+        );
+      });
+      previousAlerts = new Map(
+        alerts.map((alert) => [
+          alert.path,
+          { count: alert.count, kinds: new Set<string>(alert.kinds) },
+        ])
+      );
+      if (alerts.length === 0) return;
+      if (hasNewEvent) ringIcon();
+      const reminder = window.setInterval(ringIcon, SIBLING_ALERT_REMINDER_INTERVAL_MS);
+      return () => window.clearInterval(reminder);
+    }
+  );
+
+  createEffect(
+    () => (showMenu() ? siblingWorkspaceAlerts().length : null),
+    (count) => {
+      if (count === null) return;
+      if (count < 2) {
+        setShowMenu(false);
+        return;
+      }
+      const closeIfOutside = (event: Event) => {
+        const target = event.target;
+        if (!(target instanceof Node)) return;
+        if (buttonRef?.contains(target) || menuRef?.contains(target)) return;
+        setShowMenu(false);
+      };
+      const closeOnEscape = (event: KeyboardEvent) => {
+        if (event.key !== 'Escape') return;
+        setShowMenu(false);
+        buttonRef?.focus();
+      };
+      window.addEventListener('pointerdown', closeIfOutside, true);
+      window.addEventListener('keydown', closeOnEscape, true);
+      return () => {
+        window.removeEventListener('pointerdown', closeIfOutside, true);
+        window.removeEventListener('keydown', closeOnEscape, true);
+      };
+    }
+  );
+
+  createEffect(showMenu, (open) => {
+    if (!open) return;
     queueMicrotask(() => {
       if (!buttonRef || !menuRef) return;
       const buttonBox = buttonRef.getBoundingClientRect();
@@ -303,7 +317,7 @@ function SiblingWorkspaceAlertsButton() {
           class="chat-header-sibling-alerts"
           aria-label={label()}
           aria-haspopup={siblingWorkspaceAlerts().length > 1 ? 'menu' : undefined}
-          aria-expanded={siblingWorkspaceAlerts().length > 1 ? showMenu() : undefined}
+          aria-expanded={ariaBoolean(siblingWorkspaceAlerts().length > 1 ? showMenu() : undefined)}
           onClick={() => {
             const current = siblingWorkspaceAlerts();
             if (current.length === 1) openWorkspace(current[0]!.path);
@@ -367,7 +381,7 @@ async function toggleSessionPinned(sessionId: string) {
     const pinnedSessionIds = await client.varro.session.setPinned(sessionId, pinned, {
       directory: state.sessions.find((session) => session.id === sessionId)?.directory,
     });
-    setState('pinnedSessionIds', pinnedSessionIds);
+    setState(storePath('pinnedSessionIds', pinnedSessionIds));
   } catch (error) {
     setError(error instanceof Error ? error.message : String(error));
   }
@@ -551,36 +565,43 @@ export function ActiveChatHeader(props: {
     return total > 0 ? total : null;
   };
 
-  createEffect(() => {
-    const sessionId = getActiveSession()?.id ?? state.activeSessionId;
-    if (!sessionId) {
-      setWorkSummary(null);
-      return;
-    }
-    isActiveSessionRunning();
-    let cancelled = false;
-    const session = state.sessions.find((entry) => entry.id === sessionId);
-    const directory = session?.directory;
-    const pausedAt = readSessionPauses(session?.metadata).at(-1)?.pausedAt;
-    client.varro.session
-      .diffSummary(
+  createEffect(
+    () => {
+      const sessionId = getActiveSession()?.id ?? state.activeSessionId;
+      if (!sessionId) return null;
+      isActiveSessionRunning();
+      const session = state.sessions.find((entry) => entry.id === sessionId);
+      const directory = session?.directory;
+      const pausedAt = readSessionPauses(session?.metadata).at(-1)?.pausedAt;
+      return {
         sessionId,
-        pausedAt === undefined ? undefined : Math.max(pausedAt, session?.time.updated ?? 0),
-        { directory }
-      )
-      .then((summary) => {
-        if (cancelled) return;
-        setWorkSummaryReceivedAt(Date.now());
-        setWorkSummary({
-          durationMs: summary.durationMs,
-          activeStartedAt: summary.activeStartedAt,
-        });
-      })
-      .catch(() => {});
-    onCleanup(() => {
-      cancelled = true;
-    });
-  });
+        directory,
+        updated:
+          pausedAt === undefined ? undefined : Math.max(pausedAt, session?.time.updated ?? 0),
+      };
+    },
+    (request) => {
+      if (!request) {
+        setWorkSummary(null);
+        return;
+      }
+      let cancelled = false;
+      client.varro.session
+        .diffSummary(request.sessionId, request.updated, { directory: request.directory })
+        .then((summary) => {
+          if (cancelled) return;
+          setWorkSummaryReceivedAt(Date.now());
+          setWorkSummary({
+            durationMs: summary.durationMs,
+            activeStartedAt: summary.activeStartedAt,
+          });
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }
+  );
 
   let titleRef: HTMLSpanElement | undefined;
   let actionsMenuRef: HTMLDivElement | undefined;
@@ -601,8 +622,8 @@ export function ActiveChatHeader(props: {
       actionsMenuRef?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
     );
   };
-  createEffect(() => {
-    if (!sessionActions.sessionId()) return;
+  createEffect(sessionActions.sessionId, (id) => {
+    if (!id) return;
     const closeIfOutside = (event: Event) => {
       const target = event.target;
       if (target instanceof Node && actionsMenuRef?.contains(target)) return;
@@ -611,11 +632,11 @@ export function ActiveChatHeader(props: {
     window.addEventListener('contextmenu', closeIfOutside, true);
     window.addEventListener('pointerdown', closeIfOutside, true);
     window.addEventListener('focusin', closeIfOutside);
-    onCleanup(() => {
+    return () => {
       window.removeEventListener('contextmenu', closeIfOutside, true);
       window.removeEventListener('pointerdown', closeIfOutside, true);
       window.removeEventListener('focusin', closeIfOutside);
-    });
+    };
   });
 
   return (
@@ -629,15 +650,14 @@ export function ActiveChatHeader(props: {
           </Tooltip>
         </Show>
         <div
-          class="chat-header-session-meta"
-          classList={{ 'has-subagents': !!props.activeSubagentRootId }}
+          class={['chat-header-session-meta', { 'has-subagents': !!props.activeSubagentRootId }]}
         >
           <span
             ref={(element) => {
               titleRef = element;
             }}
             class="chat-header-session-title"
-            tabIndex={-1}
+            tabindex={-1}
             onContextMenu={openActions}
           >
             <span class="chat-header-title-text">{props.title}</span>

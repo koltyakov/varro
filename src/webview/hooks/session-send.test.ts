@@ -1,4 +1,5 @@
-import { createComputed, createRoot, createSignal } from 'solid-js';
+import { createEffect, createRoot, createSignal } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { createPastedText, readPastedTextDataUrl } from '../../shared/pasted-text';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -510,7 +511,7 @@ describe('session-send helpers', () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    setState('hiddenModels', []);
+    setState(storePath('hiddenModels', []));
   });
 
   it('builds payload with unique live selection and explicit same-file context', () => {
@@ -553,7 +554,7 @@ describe('session-send helpers', () => {
   });
 
   it('sends an explicitly selected hidden session model', () => {
-    setState('hiddenModels', ['openai:gpt-4o']);
+    setState(storePath('hiddenModels', ['openai:gpt-4o']));
 
     const result = buildSessionSendBody(
       createState({ editorContext: createEditorContext({ workspacePath: null }) }),
@@ -1692,9 +1693,12 @@ describe('session-send helpers', () => {
       const [trailingUserId, updateTrailingUserId] = createSignal('completed-user');
       setBusy = updateBusy;
       setTrailingUserId = updateTrailingUserId;
-      createComputed(() => {
-        observedStates.push({ busy: busy(), trailingUserId: trailingUserId() });
-      });
+      createEffect(
+        () => ({ busy: busy(), trailingUserId: trailingUserId() }),
+        (state) => {
+          observedStates.push(state);
+        }
+      );
       return rootDispose;
     });
 

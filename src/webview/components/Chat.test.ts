@@ -1,7 +1,7 @@
+import { flush as flushSolid, createSignal, reconcile } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
-import { reconcile } from 'solid-js/store';
+import { render } from '@solidjs/web';
 import type { AssistantMessage, MessageEntry, Session } from '../types';
 import type { WebviewMessage } from '../../shared/protocol';
 import * as openCodeModule from '../hooks/useOpenCode';
@@ -140,58 +140,163 @@ afterEach(() => {
   delete hostWindow.__initialWebviewState;
   delete hostWindow.__vscodeWebviewState;
   vi.runOnlyPendingTimers();
+  flushSolid();
   vi.useRealTimers();
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   resetMessageEditState();
+  flushSolid();
   container?.remove();
+  flushSolid();
   container = null;
-  setState('sessions', []);
-  setState('sessionStatus', reconcile({}));
-  setState('sessionUsageLimits', reconcile({}));
-  setState('failedSessionIds', []);
-  setState('failedSessionUpdatedAt', {});
-  setState('recycleBinEntries', []);
-  setState('questions', []);
-  setState('questionResponsePendingSessionIds', []);
-  setState('permissions', []);
-  setState('lastSeenSessions', reconcile({}));
-  setState('completedSessionResponses', reconcile({}));
-  setState('skippedPlanSessions', reconcile({}));
-  setState('sessionSelectedAgents', reconcile({}));
-  setState('sessionSelectedModels', reconcile({}));
-  setState('selectedAgent', null);
-  setState('selectedModel', null);
-  setState('providers', []);
-  setState('providerDefaults', reconcile({}));
-  setState('providerLimits', reconcile({}));
-  setState('editorTabsOpen', false);
-  setState('editorSessionIds', []);
-  setState('activeSessionId', null);
-  setState('transferredSessions', reconcile({}));
-  setState('messages', []);
-  setState('queuedMessages', []);
-  setState('streamingPartId', null);
-  setState('streamingText', '');
-  setState('compactingSessionIds', []);
+  setState(storePath('sessions', []));
+  flushSolid();
+  setState((draft) => {
+    const current = draft['sessionStatus'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['sessionStatus'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState((draft) => {
+    const current = draft['sessionUsageLimits'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['sessionUsageLimits'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState(storePath('failedSessionIds', []));
+  flushSolid();
+  setState(storePath('failedSessionUpdatedAt', {}));
+  flushSolid();
+  setState(storePath('recycleBinEntries', []));
+  flushSolid();
+  setState(storePath('questions', []));
+  flushSolid();
+  setState(storePath('questionResponsePendingSessionIds', []));
+  flushSolid();
+  setState(storePath('permissions', []));
+  flushSolid();
+  setState((draft) => {
+    const current = draft['lastSeenSessions'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['lastSeenSessions'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState((draft) => {
+    const current = draft['completedSessionResponses'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['completedSessionResponses'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState((draft) => {
+    const current = draft['skippedPlanSessions'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['skippedPlanSessions'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState((draft) => {
+    const current = draft['sessionSelectedAgents'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['sessionSelectedAgents'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState((draft) => {
+    const current = draft['sessionSelectedModels'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['sessionSelectedModels'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState(storePath('selectedAgent', null));
+  flushSolid();
+  setState(storePath('selectedModel', null));
+  flushSolid();
+  setState(storePath('providers', []));
+  flushSolid();
+  setState((draft) => {
+    const current = draft['providerDefaults'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['providerDefaults'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState((draft) => {
+    const current = draft['providerLimits'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['providerLimits'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState(storePath('editorTabsOpen', false));
+  flushSolid();
+  setState(storePath('editorSessionIds', []));
+  flushSolid();
+  setState(storePath('activeSessionId', null));
+  flushSolid();
+  setState((draft) => {
+    const current = draft['transferredSessions'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['transferredSessions'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState(storePath('messages', []));
+  flushSolid();
+  setState(storePath('queuedMessages', []));
+  flushSolid();
+  setState(storePath('streamingPartId', null));
+  flushSolid();
+  setState(storePath('streamingText', ''));
+  flushSolid();
+  setState(storePath('compactingSessionIds', []));
+  flushSolid();
   setDesktopSessionPaneSide('left');
+  flushSolid();
   setShowSessionPicker(false);
+  flushSolid();
   setShowModels(false);
+  flushSolid();
   setShowMcpSettings(false);
+  flushSolid();
   setConnectionInitialized(false);
+  flushSolid();
   stopLoading();
+  flushSolid();
   clearDirectSessionReturn();
+  flushSolid();
   resetProviderConnectionState();
+  flushSolid();
   for (const run of ralphStore.getAllRuns()) {
     ralphStore.removeRun(run.config.managerSessionId);
+    flushSolid();
   }
   if (originalResizeObserver) globalThis.ResizeObserver = originalResizeObserver;
   else Reflect.deleteProperty(globalThis, 'ResizeObserver');
+  flushSolid();
   if (originalMatchMedia) globalThis.matchMedia = originalMatchMedia;
   else Reflect.deleteProperty(globalThis, 'matchMedia');
+  flushSolid();
   if (originalScrollIntoView) HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+  flushSolid();
   vi.restoreAllMocks();
+  flushSolid();
 });
 
 function session(id: string, updated: number, overrides: Partial<Session> = {}): Session {
@@ -207,12 +312,18 @@ function session(id: string, updated: number, overrides: Partial<Session> = {}):
 }
 
 it('keeps a transferred conversation visible with an explicit open-folder action', () => {
-  setState('sessions', [session('session-1', 500)]);
-  setState('activeSessionId', 'session-1');
-  setState('transferredSessions', { 'session-1': '/outside' });
+  setState(storePath('sessions', [session('session-1', 500)]));
+  flushSolid();
+  setState(storePath('activeSessionId', 'session-1'));
+  flushSolid();
+  setState(storePath('transferredSessions', { 'session-1': '/outside' }));
+  flushSolid();
   setConnectionInitialized(true);
+  flushSolid();
   setInputText('Unsent draft');
-  setState('selectedModel', { providerID: 'openai', modelID: 'test-model' });
+  flushSolid();
+  setState(storePath('selectedModel', { providerID: 'openai', modelID: 'test-model' }));
+  flushSolid();
   const sent: WebviewMessage[] = [];
   // SAFETY: This fixture owns the extension transport callback and restores it below.
   const bridgeWindow = window as { __sendToExtension?: (message: WebviewMessage) => void };
@@ -220,12 +331,14 @@ it('keeps a transferred conversation visible with an explicit open-folder action
   bridgeWindow.__sendToExtension = (message) => sent.push(message);
   try {
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     const banner = container!.querySelector('.chat-transport-banner');
     expect(banner?.textContent).toContain('Conversation moved');
     expect(banner?.textContent).toContain('/outside');
     const open = banner?.querySelector('button');
     expect(open?.textContent).toBe('Open folder');
     open?.click();
+    flushSolid();
     expect(sent).toContainEqual({
       type: 'session/open-transferred',
       payload: { sessionId: 'session-1' },
@@ -238,6 +351,7 @@ it('keeps a transferred conversation visible with an explicit open-folder action
     if (previous) bridgeWindow.__sendToExtension = previous;
     else delete bridgeWindow.__sendToExtension;
     setInputText('');
+    flushSolid();
   }
 });
 
@@ -249,12 +363,18 @@ it.each([false, true])(
       directory,
       transfer: { originDirectory: '/repo', available: false },
     });
-    setState('sessions', [moved]);
-    setState('activeSessionId', moved.id);
-    setState('transferredSessions', { [moved.id]: newerMove ? '/outside' : directory });
+    setState(storePath('sessions', [moved]));
+    flushSolid();
+    setState(storePath('activeSessionId', moved.id));
+    flushSolid();
+    setState(storePath('transferredSessions', { [moved.id]: newerMove ? '/outside' : directory }));
+    flushSolid();
     setConnectionInitialized(true);
+    flushSolid();
     setInputText('Continue from here');
-    setState('selectedModel', { providerID: 'openai', modelID: 'test-model' });
+    flushSolid();
+    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'test-model' }));
+    flushSolid();
     const operations = new SessionLifecycleOperations({
       getCurrentWorkspacePath: () => '/repo',
       clearPendingAbort: vi.fn(),
@@ -264,6 +384,7 @@ it.each([false, true])(
       publishSessionModel: vi.fn(),
     });
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     expect(container!.querySelector('.chat-transport-banner')).not.toBeNull();
     expect(
       container!.querySelector<HTMLButtonElement>('button[aria-label="Send (Enter)"]')?.disabled
@@ -273,6 +394,7 @@ it.each([false, true])(
       ...moved,
       transfer: { ...moved.transfer!, available: true },
     });
+    flushSolid();
 
     expect(container!.querySelector('.chat-transport-banner') !== null).toBe(newerMove);
     expect(
@@ -590,19 +712,28 @@ describe('empty session pruning', () => {
 
     const now = Date.now();
 
-    setState('sessions', [
-      session('new-session', now, {
-        title: 'New chat',
-        time: { created: now, updated: now },
-      }),
-    ]);
-    setState('activeSessionId', 'new-session');
+    setState(
+      storePath('sessions', [
+        session('new-session', now, {
+          title: 'New chat',
+          time: { created: now, updated: now },
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'new-session'));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.runOnlyPendingTimers();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
       (item) => item.textContent?.trim()
@@ -618,20 +749,29 @@ describe('empty session pruning', () => {
 
     const staleTime = Date.now() - EMPTY_SESSION_PRUNE_GRACE_MS - 100;
 
-    setState('sessions', [
-      session('active', 200),
-      session('empty', staleTime, {
-        title: 'New Chat',
-        time: { created: staleTime, updated: staleTime },
-      }),
-    ]);
-    setState('activeSessionId', 'active');
+    setState(
+      storePath('sessions', [
+        session('active', 200),
+        session('empty', staleTime, {
+          title: 'New Chat',
+          time: { created: staleTime, updated: staleTime },
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.runOnlyPendingTimers();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
       (item) => item.textContent?.trim()
@@ -647,21 +787,31 @@ describe('empty session pruning', () => {
 
     const now = Date.now();
 
-    setState('sessions', [
-      session('new-session', now, {
-        title: 'New session',
-        time: { created: now, updated: now },
-      }),
-    ]);
-    setState('activeSessionId', null);
+    setState(
+      storePath('sessions', [
+        session('new-session', now, {
+          title: 'New session',
+          time: { created: now, updated: now },
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', null));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
-    setState('activeSessionId', 'new-session');
+    setState(storePath('activeSessionId', 'new-session'));
+    flushSolid();
     vi.runOnlyPendingTimers();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(deleteImmediatelySpy).not.toHaveBeenCalled();
   });
@@ -673,19 +823,28 @@ describe('empty session pruning', () => {
 
     const staleTime = Date.now() - EMPTY_SESSION_PRUNE_GRACE_MS - 100;
 
-    setState('sessions', [
-      session('new-session', staleTime, {
-        title: 'New session',
-        time: { created: staleTime, updated: staleTime },
-      }),
-    ]);
-    setState('activeSessionId', 'new-session');
+    setState(
+      storePath('sessions', [
+        session('new-session', staleTime, {
+          title: 'New session',
+          time: { created: staleTime, updated: staleTime },
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'new-session'));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.runOnlyPendingTimers();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).not.toContain('New session');
     expect(container?.textContent).toContain('Sessions (0)');
@@ -699,17 +858,21 @@ describe('empty session pruning', () => {
 
     const staleTime = Date.now() - EMPTY_SESSION_PRUNE_GRACE_MS - 100;
 
-    setState('sessions', [
-      session('manager', staleTime, {
-        title: 'Ralph manager',
-        time: { created: staleTime, updated: staleTime },
-      }),
-      session('child-1', staleTime + 1_000, {
-        title: 'Ralph iter 1',
-        parentID: 'manager',
-      }),
-    ]);
+    setState(
+      storePath('sessions', [
+        session('manager', staleTime, {
+          title: 'Ralph manager',
+          time: { created: staleTime, updated: staleTime },
+        }),
+        session('child-1', staleTime + 1_000, {
+          title: 'Ralph iter 1',
+          parentID: 'manager',
+        }),
+      ])
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
     ralphStore.startRun({
       managerSessionId: 'manager',
       workspaceDirectory: '/workspace',
@@ -721,6 +884,7 @@ describe('empty session pruning', () => {
       agent: null,
       createdAt: 1,
     });
+    flushSolid();
     ralphStore.upsertIteration('manager', {
       index: 1,
       childSessionId: 'child-1',
@@ -730,11 +894,16 @@ describe('empty session pruning', () => {
       filesChanged: [],
       verification: {},
     });
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     vi.runOnlyPendingTimers();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).toContain('Ralph manager');
     expect(container?.textContent).toContain('Ralph');
@@ -1028,6 +1197,7 @@ describe('archiveSessionGroup', () => {
     await expect(
       archiveSessionGroup([], 'Sub-Agents', confirmArchive, archiveSession)
     ).resolves.toBe(false);
+    flushSolid();
 
     expect(confirmArchive).not.toHaveBeenCalled();
     expect(archiveSession).not.toHaveBeenCalled();
@@ -1044,6 +1214,7 @@ describe('archiveSessionGroup', () => {
     await expect(
       archiveSessionGroup(sessions, 'Sub-Agents', confirmArchive, archiveSession)
     ).resolves.toBe(true);
+    flushSolid();
 
     expect(confirmArchive).toHaveBeenCalledWith(
       getArchiveSessionGroupConfirmationMessage('Sub-Agents', 2)
@@ -1059,6 +1230,7 @@ describe('archiveSessionGroup', () => {
     await expect(
       archiveSessionGroup(sessions, 'Sub-Agents', confirmArchive, archiveSession)
     ).resolves.toBe(false);
+    flushSolid();
 
     expect(confirmArchive).toHaveBeenCalledWith(
       getArchiveSessionGroupConfirmationMessage('Sub-Agents', 1)
@@ -1082,6 +1254,7 @@ describe('SessionListSectionHeader', () => {
         }),
       container!
     );
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const archiveButton = container?.querySelector(
@@ -1090,6 +1263,7 @@ describe('SessionListSectionHeader', () => {
     expect(archiveButton).toBeInstanceOf(HTMLButtonElement);
 
     archiveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const confirmButton = container?.querySelector(
@@ -1105,6 +1279,7 @@ describe('SessionListSectionHeader', () => {
     expect(onArchive).not.toHaveBeenCalled();
 
     confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(onArchive).toHaveBeenCalledTimes(1);
     expect(container?.querySelector('button.session-list-section-confirm')).toBeNull();
@@ -1126,9 +1301,12 @@ describe('SessionListSectionHeader', () => {
         }),
       container!
     );
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('button.session-list-section-archive')?.click();
+    flushSolid();
     setCount(3);
+    flushSolid();
 
     expect(container?.querySelector('button.session-list-section-confirm')).not.toBeNull();
     expect(container?.querySelector('button.session-list-section-cancel')).not.toBeNull();
@@ -1147,6 +1325,7 @@ describe('SessionListSectionHeader', () => {
         }),
       container!
     );
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const actionButton = container?.querySelector(
@@ -1159,18 +1338,26 @@ describe('SessionListSectionHeader', () => {
 describe('header status badges', () => {
   it('removes a hidden moved row and its running badge as soon as hiding succeeds, before reload completes', async () => {
     const now = Date.now();
-    setState('editorContext', 'workspacePath', '/repo');
-    setState('editorContext', 'workspaceFolders', [{ name: 'Repo', path: '/repo' }]);
-    setState('sessions', [
-      session('moved', now, {
-        directory: '/outside',
-        transfer: { originDirectory: '/repo', available: false },
-      }),
-      session('local', now - 1),
-    ]);
-    setState('activeSessionId', 'moved');
-    setState('sessionStatus', { moved: { type: 'busy' }, local: { type: 'idle' } });
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
+    setState(storePath('editorContext', 'workspaceFolders', [{ name: 'Repo', path: '/repo' }]));
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        session('moved', now, {
+          directory: '/outside',
+          transfer: { originDirectory: '/repo', available: false },
+        }),
+        session('local', now - 1),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'moved'));
+    flushSolid();
+    setState(storePath('sessionStatus', { moved: { type: 'busy' }, local: { type: 'idle' } }));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
     vi.spyOn(client.varro.session, 'hideTransfer').mockResolvedValue(true);
     let finishReload!: () => void;
     vi.spyOn(openCodeModule, 'reloadSessions').mockReturnValue(
@@ -1179,16 +1366,20 @@ describe('header status badges', () => {
       })
     );
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
     container
       ?.querySelector('[data-session-id="moved"]')
       ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent === 'Hide from this list')!
       .click();
+    flushSolid();
     await vi.waitFor(() =>
       expect(container?.querySelector('[data-session-id="moved"]')).toBeNull()
     );
+    flushSolid();
     expect(container?.querySelector('.chat-header-running-badge')).toBeNull();
     expect(container?.querySelector('[data-session-id="local"]')).not.toBeNull();
     expect(state.activeSessionId).toBe('moved');
@@ -1200,27 +1391,37 @@ describe('header status badges', () => {
     'does not count a persisted %s moved link after mounting a fresh view',
     (preference) => {
       const now = Date.now();
-      setState('editorContext', 'workspacePath', '/repo');
-      setState('editorContext', 'workspaceFolders', [{ name: 'Repo', path: '/repo' }]);
-      setState('sessions', [
-        session('moved', now, {
-          directory: '/outside',
-          transfer: {
-            originDirectory: '/repo',
-            available: false,
-            hidden: preference === 'hidden',
-            hiddenOrigins: preference === 'hiddenOrigins' ? ['/repo'] : undefined,
-          },
-        }),
-        session('local', now - 1),
-      ]);
-      setState('activeSessionId', 'local');
-      setState('sessionStatus', { moved: { type: 'busy' }, local: { type: 'idle' } });
+      setState(storePath('editorContext', 'workspacePath', '/repo'));
+      flushSolid();
+      setState(storePath('editorContext', 'workspaceFolders', [{ name: 'Repo', path: '/repo' }]));
+      flushSolid();
+      setState(
+        storePath('sessions', [
+          session('moved', now, {
+            directory: '/outside',
+            transfer: {
+              originDirectory: '/repo',
+              available: false,
+              hidden: preference === 'hidden',
+              hiddenOrigins: preference === 'hiddenOrigins' ? ['/repo'] : undefined,
+            },
+          }),
+          session('local', now - 1),
+        ])
+      );
+      flushSolid();
+      setState(storePath('activeSessionId', 'local'));
+      flushSolid();
+      setState(storePath('sessionStatus', { moved: { type: 'busy' }, local: { type: 'idle' } }));
+      flushSolid();
       setShowSessionPicker(true);
+      flushSolid();
       cleanup = render(() => Chat(), container!);
+      flushSolid();
       expect(container?.querySelector('[data-session-id="moved"]')).toBeNull();
       expect(container?.querySelector('.chat-header-running-badge')).toBeNull();
       vi.advanceTimersByTime(1500);
+      flushSolid();
       expect(container?.querySelector('.chat-header-running-badge')).toBeNull();
       expect(state.sessionStatus.moved?.type).toBe('busy');
     }
@@ -1228,53 +1429,73 @@ describe('header status badges', () => {
 
   it('opens a Pending filter from the hourglass and keeps it separate from Running', () => {
     const now = Date.now();
-    setState('sessions', [session('waiting', now), session('working', now)]);
-    setState('activeSessionId', null);
-    setState('sessionStatus', {
-      waiting: { type: 'busy', background: true, backgroundStartedAt: now - 60_000 },
-      working: { type: 'busy' },
-    });
+    setState(storePath('sessions', [session('waiting', now), session('working', now)]));
+    flushSolid();
+    setState(storePath('activeSessionId', null));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        waiting: { type: 'busy', background: true, backgroundStartedAt: now - 60_000 },
+        working: { type: 'busy' },
+      })
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.chat-header-pending-badge')?.click();
+    flushSolid();
     expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe('Pending');
     expect(container?.querySelector('[data-session-id="waiting"]')).not.toBeNull();
     expect(container?.querySelector('[data-session-id="working"]')).toBeNull();
     expect(container?.querySelector('.chat-header-pending-badge')).toBeNull();
 
     container?.querySelector<HTMLButtonElement>('.chat-header-running-badge')?.click();
+    flushSolid();
     expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe('Running');
     expect(container?.querySelector('[data-session-id="waiting"]')).toBeNull();
     expect(container?.querySelector('[data-session-id="working"]')).not.toBeNull();
     expect(container?.querySelector('.chat-header-pending-badge')).not.toBeNull();
 
     container?.querySelector<HTMLButtonElement>('.chat-header-pending-badge')?.click();
-    setState('sessionStatus', 'waiting', { type: 'busy', background: false });
+    flushSolid();
+    setState(storePath('sessionStatus', 'waiting', { type: 'busy', background: false }));
+    flushSolid();
     expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe('Pending');
     expect(container?.querySelector('[data-session-id="waiting"]')).toBeNull();
   });
   it('removes long background waits from the running count and shows a counter-free pending badge', () => {
     const now = Date.now();
-    setState('sessions', [session('waiting', now), session('working', now)]);
-    setState('activeSessionId', null);
-    setState('sessionStatus', {
-      waiting: { type: 'busy', background: true, backgroundStartedAt: now },
-      working: { type: 'busy' },
-    });
+    setState(storePath('sessions', [session('waiting', now), session('working', now)]));
+    flushSolid();
+    setState(storePath('activeSessionId', null));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        waiting: { type: 'busy', background: true, backgroundStartedAt: now },
+        working: { type: 'busy' },
+      })
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('2');
     expect(container?.querySelector('.chat-header-pending-badge')).toBeNull();
 
     vi.advanceTimersByTime(60_000);
+    flushSolid();
     expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
     const pending = container?.querySelector('.chat-header-pending-badge');
     expect(pending).toBeInstanceOf(HTMLButtonElement);
     expect(pending?.textContent).toBe('');
     expect(container?.querySelector('[data-session-id="waiting"] .is-pending')).not.toBeNull();
 
-    setState('sessionStatus', 'waiting', { type: 'busy', background: false });
+    setState(storePath('sessionStatus', 'waiting', { type: 'busy', background: false }));
+    flushSolid();
     expect(container?.querySelector('.chat-header-pending-badge')).toBeNull();
     expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('2');
   });
@@ -1282,13 +1503,20 @@ describe('header status badges', () => {
   it('shows an hourglass beside the active title even when desktop header actions are hidden', () => {
     const now = Date.now();
     desktopMediaQueryMatches = true;
-    setState('sessions', [session('waiting', now)]);
-    setState('activeSessionId', 'waiting');
-    setState('sessionStatus', {
-      waiting: { type: 'busy', background: true, backgroundStartedAt: now - 60_000 },
-    });
+    setState(storePath('sessions', [session('waiting', now)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'waiting'));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        waiting: { type: 'busy', background: true, backgroundStartedAt: now - 60_000 },
+      })
+    );
+    flushSolid();
     setShowSessionPicker(false);
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     const marker = container?.querySelector(
       '.chat-header-chat-desktop .chat-header-pending-marker'
     );
@@ -1298,54 +1526,80 @@ describe('header status badges', () => {
   });
   it('keeps background details through completion and closes them on session switch', async () => {
     const now = Date.now();
-    setState('sessions', [session('waiting', now), session('other', now)]);
-    setState('activeSessionId', 'waiting');
+    setState(storePath('sessions', [session('waiting', now), session('other', now)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'waiting'));
+    flushSolid();
     setShowSessionPicker(false);
+    flushSolid();
     vi.spyOn(client.session, 'backgroundProcesses').mockResolvedValue([]);
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     openBackgroundProcessView('waiting', '/repo');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(document.querySelector('.background-process-dialog')).not.toBeNull();
-    setState('sessionStatus', 'waiting', { type: 'idle' });
+    setState(storePath('sessionStatus', 'waiting', { type: 'idle' }));
+    flushSolid();
     expect(document.querySelector('.background-process-dialog')).not.toBeNull();
-    setState('activeSessionId', 'other');
+    setState(storePath('activeSessionId', 'other'));
+    flushSolid();
     expect(document.querySelector('.background-process-dialog')).toBeNull();
   });
   it('derives quick statuses from Recent sessions and excludes recycled sessions', () => {
     const now = Date.now();
     const oldUpdatedAt = now - 3 * 24 * 60 * 60 * 1_000;
-    setState('sessions', [
-      session('active', now),
-      session('old-running', oldUpdatedAt),
-      session('old-attention', oldUpdatedAt),
-      session('old-failed', oldUpdatedAt),
-      session('old-plan', oldUpdatedAt),
-      session('old-completed', oldUpdatedAt),
-      ...Array.from({ length: 44 }, (_, index) => session(`recent-${index}`, now - 1_000)),
-      session('archived', oldUpdatedAt),
-      session('deleted-running', now - 1_000),
-    ]);
-    setState('activeSessionId', 'active');
-    setState('sessionStatus', {
-      'old-running': { type: 'busy' },
-      'deleted-running': { type: 'busy' },
-    });
-    setState('questions', [{ id: 'question-1', sessionID: 'old-attention', questions: [] }]);
-    setState('failedSessionIds', ['old-failed']);
-    setState('sessionSelectedAgents', { 'old-plan': 'plan' });
-    setState('completedSessionResponses', { 'old-completed': oldUpdatedAt });
-    setState('recycleBinEntries', [
-      {
-        rootID: 'deleted-running',
-        deletedAt: now - 500,
-        expiresAt: now + 1_000,
-        root: session('deleted-running', now - 1_000),
-        sessions: [session('deleted-running', now - 1_000)],
-      },
-    ]);
+    setState(
+      storePath('sessions', [
+        session('active', now),
+        session('old-running', oldUpdatedAt),
+        session('old-attention', oldUpdatedAt),
+        session('old-failed', oldUpdatedAt),
+        session('old-plan', oldUpdatedAt),
+        session('old-completed', oldUpdatedAt),
+        ...Array.from({ length: 44 }, (_, index) => session(`recent-${index}`, now - 1_000)),
+        session('archived', oldUpdatedAt),
+        session('deleted-running', now - 1_000),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'old-running': { type: 'busy' },
+        'deleted-running': { type: 'busy' },
+      })
+    );
+    flushSolid();
+    setState(
+      storePath('questions', [{ id: 'question-1', sessionID: 'old-attention', questions: [] }])
+    );
+    flushSolid();
+    setState(storePath('failedSessionIds', ['old-failed']));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'old-plan': 'plan' }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'old-completed': oldUpdatedAt }));
+    flushSolid();
+    setState(
+      storePath('recycleBinEntries', [
+        {
+          rootID: 'deleted-running',
+          deletedAt: now - 500,
+          expiresAt: now + 1_000,
+          root: session('deleted-running', now - 1_000),
+          sessions: [session('deleted-running', now - 1_000)],
+        },
+      ])
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
     expect(container?.querySelector('.chat-header-attention-badge')).toBeInstanceOf(
@@ -1371,10 +1625,13 @@ describe('header status badges', () => {
 
   it('opens the session list and focuses search when requested by the host', async () => {
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     requestSessionSearchFocus();
     await Promise.resolve();
+    flushSolid();
     vi.advanceTimersByTime(20);
+    flushSolid();
 
     const search = container?.querySelector<HTMLInputElement>('[aria-label="Search sessions"]');
     expect(search).toBeInstanceOf(HTMLInputElement);
@@ -1382,128 +1639,188 @@ describe('header status badges', () => {
   });
 
   it('does not show the reconnect banner for brief event stream degradation', () => {
-    setState('serverStatus', {
-      state: 'running',
-      url: 'http://127.0.0.1:4096',
-      eventStream: 'healthy',
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'running',
+        url: 'http://127.0.0.1:4096',
+        eventStream: 'healthy',
+      })
+    );
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
-    setState('serverStatus', {
-      state: 'running',
-      url: 'http://127.0.0.1:4096',
-      eventStream: 'degraded',
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'running',
+        url: 'http://127.0.0.1:4096',
+        eventStream: 'degraded',
+      })
+    );
+    flushSolid();
     vi.advanceTimersByTime(9999);
-    setState('serverStatus', {
-      state: 'running',
-      url: 'http://127.0.0.1:4096',
-      eventStream: 'healthy',
-    });
+    flushSolid();
+    setState(
+      storePath('serverStatus', {
+        state: 'running',
+        url: 'http://127.0.0.1:4096',
+        eventStream: 'healthy',
+      })
+    );
+    flushSolid();
 
     expect(container?.querySelector('.chat-transport-banner')).toBeNull();
   });
 
   it('keeps the reconnect banner visible briefly after recovery once shown', () => {
-    setState('serverStatus', {
-      state: 'running',
-      url: 'http://127.0.0.1:4096',
-      eventStream: 'healthy',
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'running',
+        url: 'http://127.0.0.1:4096',
+        eventStream: 'healthy',
+      })
+    );
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
-    setState('serverStatus', {
-      state: 'running',
-      url: 'http://127.0.0.1:4096',
-      eventStream: 'degraded',
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'running',
+        url: 'http://127.0.0.1:4096',
+        eventStream: 'degraded',
+      })
+    );
+    flushSolid();
     vi.advanceTimersByTime(10_000);
+    flushSolid();
 
     expect(container?.querySelector('.chat-transport-banner')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.chat-transport-title')?.textContent).toBe(
       'Live updates are reconnecting'
     );
 
-    setState('serverStatus', {
-      state: 'running',
-      url: 'http://127.0.0.1:4096',
-      eventStream: 'healthy',
-    });
+    setState(
+      storePath('serverStatus', {
+        state: 'running',
+        url: 'http://127.0.0.1:4096',
+        eventStream: 'healthy',
+      })
+    );
+    flushSolid();
     vi.advanceTimersByTime(1999);
+    flushSolid();
 
     expect(container?.querySelector('.chat-transport-banner')).toBeInstanceOf(HTMLDivElement);
 
     vi.advanceTimersByTime(1);
+    flushSolid();
 
     expect(container?.querySelector('.chat-transport-banner')).toBeNull();
   });
 
   it.each([false, true])('derives raw indicators once with session picker %s', (picker) => {
-    setState('sessions', [session('first', Date.now()), session('second', Date.now() - 1)]);
-    setState('activeSessionId', 'first');
-    setState('sessionStatus', { first: { type: 'busy' }, second: { type: 'idle' } });
+    setState(
+      storePath('sessions', [session('first', Date.now()), session('second', Date.now() - 1)])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'first'));
+    flushSolid();
+    setState(storePath('sessionStatus', { first: { type: 'busy' }, second: { type: 'idle' } }));
+    flushSolid();
     setShowSessionPicker(picker);
+    flushSolid();
     // Each raw derivation reads the Ralph catalog once. Spy on the real store
     // method so both the parent and list's local derivations are counted.
     const catalogReads = vi.spyOn(ralphStore, 'getAllRuns');
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     expect(container?.querySelectorAll('.session-item').length).toBeGreaterThan(0);
     catalogReads.mockClear();
 
-    setState('sessionStatus', 'second', { type: 'busy' });
+    setState(storePath('sessionStatus', 'second', { type: 'busy' }));
+    flushSolid();
 
     expect(catalogReads).toHaveBeenCalledTimes(1);
     const row = container?.querySelector('[data-session-id="second"]');
     expect(row?.querySelector('.session-item-indicator.is-running')).not.toBeNull();
-    setState('sessionStatus', 'second', { type: 'idle' });
+    setState(storePath('sessionStatus', 'second', { type: 'idle' }));
+    flushSolid();
     vi.advanceTimersByTime(1199);
+    flushSolid();
     expect(row?.querySelector('.session-item-indicator.is-running')).not.toBeNull();
     vi.advanceTimersByTime(1);
+    flushSolid();
     expect(row?.querySelector('.session-item-indicator.is-running')).toBeNull();
   });
 
   it('keeps list settling local when the session list remounts during a parent settle window', () => {
-    setState('sessions', [session('first', Date.now()), session('other', Date.now() - 1)]);
-    setState('activeSessionId', 'other');
-    setState('sessionStatus', { first: { type: 'busy' } });
+    setState(
+      storePath('sessions', [session('first', Date.now()), session('other', Date.now() - 1)])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'other'));
+    flushSolid();
+    setState(storePath('sessionStatus', { first: { type: 'busy' } }));
+    flushSolid();
     cleanup = render(() => Chat(), container!);
-    setState('sessionStatus', 'first', { type: 'idle' });
+    flushSolid();
+    setState(storePath('sessionStatus', 'first', { type: 'idle' }));
+    flushSolid();
     vi.advanceTimersByTime(500);
+    flushSolid();
     expect(container?.querySelector('.session-item-indicator.is-running')).not.toBeNull();
     const previousRow = container?.querySelector('[data-session-id="first"]');
 
     setShowSessionPicker(true);
+    flushSolid();
 
     expect(container?.querySelector('.session-item')).not.toBeNull();
     expect(container?.querySelector('[data-session-id="first"]')).not.toBe(previousRow);
     expect(container?.querySelector('.session-item-indicator.is-running')).toBeNull();
     vi.advanceTimersByTime(700);
+    flushSolid();
     expect(container?.querySelector('.session-item-indicator.is-running')).toBeNull();
   });
 
   it('shows a count only for running sessions', () => {
-    setState('sessions', [
-      session('running-1', 500),
-      session('running-2', 400),
-      session('failed-1', 300),
-      session('attention-1', 200),
-      session('plan-1', 100),
-      session('completed-1', 50),
-    ]);
-    setState('activeSessionId', 'active');
-    setState('sessionStatus', {
-      'running-1': { type: 'busy' },
-      'running-2': { type: 'busy' },
-    });
-    setState('failedSessionIds', ['failed-1']);
-    setState('questions', [{ id: 'question-1', sessionID: 'attention-1', questions: [] }]);
-    setState('lastSeenSessions', { 'plan-1': 0 });
-    setState('completedSessionResponses', { 'completed-1': 50 });
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState(
+      storePath('sessions', [
+        session('running-1', 500),
+        session('running-2', 400),
+        session('failed-1', 300),
+        session('attention-1', 200),
+        session('plan-1', 100),
+        session('completed-1', 50),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'running-1': { type: 'busy' },
+        'running-2': { type: 'busy' },
+      })
+    );
+    flushSolid();
+    setState(storePath('failedSessionIds', ['failed-1']));
+    flushSolid();
+    setState(
+      storePath('questions', [{ id: 'question-1', sessionID: 'attention-1', questions: [] }])
+    );
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'plan-1': 0 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'completed-1': 50 }));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('2');
     expect(container?.querySelector('.chat-header-failed-badge')?.textContent).toBe('');
@@ -1513,75 +1830,107 @@ describe('header status badges', () => {
   });
 
   it('switches the running badge to unread completion without a settle-window gap', () => {
-    setState('sessions', [session('finishing', 500)]);
-    setState('sessionStatus', { finishing: { type: 'busy' } });
+    setState(storePath('sessions', [session('finishing', 500)]));
+    flushSolid();
+    setState(storePath('sessionStatus', { finishing: { type: 'busy' } }));
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
-    setState('completedSessionResponses', { finishing: 500 });
-    setState('sessionStatus', 'finishing', { type: 'idle' });
+    setState(storePath('completedSessionResponses', { finishing: 500 }));
+    flushSolid();
+    setState(storePath('sessionStatus', 'finishing', { type: 'idle' }));
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-running-badge')).not.toBeNull();
     expect(container?.querySelector('.chat-header-completed-badge')).toBeNull();
     vi.advanceTimersByTime(1199);
+    flushSolid();
     expect(container?.querySelector('.chat-header-running-badge')).not.toBeNull();
     expect(container?.querySelector('.chat-header-completed-badge')).toBeNull();
     vi.advanceTimersByTime(1);
+    flushSolid();
     expect(container?.querySelector('.chat-header-running-badge')).toBeNull();
     expect(container?.querySelector('.chat-header-completed-badge')).not.toBeNull();
   });
 
   it('does not count parent sessions that are only running subagents', () => {
-    setState('sessions', [
-      session('direct-running', 600),
-      session('child-running-parent', 500),
-      session('child-running', 400, { parentID: 'child-running-parent' }),
-      session('other-child-parent', 300),
-      session('other-child-running', 200, { parentID: 'other-child-parent' }),
-    ]);
-    setState('sessionStatus', {
-      'direct-running': { type: 'busy' },
-      'child-running': { type: 'busy' },
-      'other-child-running': { type: 'busy' },
-    });
+    setState(
+      storePath('sessions', [
+        session('direct-running', 600),
+        session('child-running-parent', 500),
+        session('child-running', 400, { parentID: 'child-running-parent' }),
+        session('other-child-parent', 300),
+        session('other-child-running', 200, { parentID: 'other-child-parent' }),
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'direct-running': { type: 'busy' },
+        'child-running': { type: 'busy' },
+        'other-child-running': { type: 'busy' },
+      })
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
   });
 
   it('hides the failed badge after all failed sessions have been read', () => {
-    setState('sessions', [session('failed-1', 500), session('failed-2', 400)]);
-    setState('failedSessionIds', ['failed-1', 'failed-2']);
-    setState('failedSessionUpdatedAt', { 'failed-1': 500, 'failed-2': 400 });
-    setState('lastSeenSessions', { 'failed-1': 0, 'failed-2': 0 });
+    setState(storePath('sessions', [session('failed-1', 500), session('failed-2', 400)]));
+    flushSolid();
+    setState(storePath('failedSessionIds', ['failed-1', 'failed-2']));
+    flushSolid();
+    setState(storePath('failedSessionUpdatedAt', { 'failed-1': 500, 'failed-2': 400 }));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'failed-1': 0, 'failed-2': 0 }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-failed-badge')).not.toBeNull();
 
-    setState('lastSeenSessions', 'failed-1', 500);
+    setState(storePath('lastSeenSessions', 'failed-1', 500));
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-failed-badge')).not.toBeNull();
 
-    setState('lastSeenSessions', 'failed-2', 400);
+    setState(storePath('lastSeenSessions', 'failed-2', 400));
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-failed-badge')).toBeNull();
     expect(state.failedSessionIds).toEqual(['failed-1', 'failed-2']);
   });
 
   it('shows an actively loading session as running when its status entry is idle', async () => {
-    setState('sessions', [session('active-loading', 500), session('other-running', 400)]);
-    setState('activeSessionId', 'active-loading');
-    setState('sessionStatus', {
-      'active-loading': { type: 'idle' },
-      'other-running': { type: 'busy' },
-    });
+    setState(
+      storePath('sessions', [session('active-loading', 500), session('other-running', 400)])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'active-loading'));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'active-loading': { type: 'idle' },
+        'other-running': { type: 'busy' },
+      })
+    );
+    flushSolid();
     startLoading();
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const activeRow = Array.from(container!.querySelectorAll<HTMLElement>('.session-item')).find(
       (row) => row.querySelector('.session-item-title-text')?.textContent === 'active-loading'
@@ -1590,16 +1939,21 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('2');
 
     setShowSessionPicker(false);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
   });
 
   it('renders an embedded session sidebar alongside the active chat view', () => {
-    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 500), session('session-2', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-workspace')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.chat-session-sidebar')).toBeInstanceOf(HTMLElement);
@@ -1612,29 +1966,45 @@ describe('header status badges', () => {
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
-    setState('sessions', [session('newest', 300), session('middle', 200), session('oldest', 100)]);
-    setState('pinnedSessionIds', ['oldest', 'middle']);
-    setState('activeSessionId', 'oldest');
+    setState(
+      storePath('sessions', [
+        session('newest', 300),
+        session('middle', 200),
+        session('oldest', 100),
+      ])
+    );
+    flushSolid();
+    setState(storePath('pinnedSessionIds', ['oldest', 'middle']));
+    flushSolid();
+    setState(storePath('activeSessionId', 'oldest'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     window.dispatchEvent(
       new MessageEvent('message', {
         data: { type: 'command/switch-session', payload: { direction: 'next' } },
       })
     );
+    flushSolid();
 
     expect(selectSessionSpy).toHaveBeenCalledWith('middle');
   });
 
   it('returns to the sessions list with Escape', async () => {
-    setState('sessions', [session('active', 500), session('other', 400)]);
-    setState('activeSessionId', 'active');
+    setState(storePath('sessions', [session('active', 500), session('other', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
@@ -1648,19 +2018,28 @@ describe('header status badges', () => {
       effective: { docs: false },
       editable: true,
     });
-    setState('sessions', [session('active', 500)]);
-    setState('activeSessionId', 'active');
+    setState(storePath('sessions', [session('active', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
     setInputText('Keep this draft');
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     setShowMcpSettings(true);
+    flushSolid();
     expect(
       container?.querySelector('.mcp-settings-panel [aria-label="Loading MCP settings"]')
     ).not.toBeNull();
     await vi.dynamicImportSettled();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('h1')?.textContent).toBe('MCP settings');
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(showMcpSettings()).toBe(false);
     expect(container?.querySelector('.mcp-settings-panel')).toBeNull();
     expect(state.activeSessionId).toBe('active');
@@ -1671,15 +2050,22 @@ describe('header status badges', () => {
   });
 
   it('leaves Escape to nested chat controls that consume it', async () => {
-    setState('sessions', [session('active', 500), session('other', 400)]);
-    setState('activeSessionId', 'active');
+    setState(storePath('sessions', [session('active', 500), session('other', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     window.addEventListener('keydown', preventKeyboardDefault);
+    flushSolid();
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     window.removeEventListener('keydown', preventKeyboardDefault);
+    flushSolid();
 
     expect(
       container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
@@ -1687,13 +2073,19 @@ describe('header status badges', () => {
   });
 
   it('keeps desktop session controls in the sessions sidebar instead of duplicating them', () => {
-    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', {
-      'session-2': { type: 'busy' },
-    });
+    setState(storePath('sessions', [session('session-1', 500), session('session-2', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'session-2': { type: 'busy' },
+      })
+    );
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const desktopHeader = container?.querySelector('.chat-header-chat-desktop');
     const desktopActions = desktopHeader?.querySelector('.chat-header-actions');
@@ -1723,40 +2115,57 @@ describe('header status badges', () => {
   it('shows a background plan completion in the narrow header without a metadata update', async () => {
     const selectSessionSpy = vi.spyOn(openCodeModule, 'selectSession').mockResolvedValue(undefined);
     const now = Date.now();
-    setState('sessions', [session('active', now), session('plan-1', now - 1000)]);
-    setState('activeSessionId', 'plan-1');
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
-    setState('sessionStatus', { 'plan-1': { type: 'busy' } });
-    setState('lastSeenSessions', { active: now, 'plan-1': now });
+    setState(storePath('sessions', [session('active', now), session('plan-1', now - 1000)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'plan-1'));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
+    setState(storePath('sessionStatus', { 'plan-1': { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { active: now, 'plan-1': now }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     setShowSessionPicker(true);
-    setState('activeSessionId', 'active');
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
     setShowSessionPicker(false);
+    flushSolid();
     const header = container?.querySelector('.interactive-session > .chat-header');
     expect(header?.querySelector('.chat-header-plan-badge')).toBeNull();
 
     vi.advanceTimersByTime(100);
+    flushSolid();
     sessionStore.setSessionStatusEntry('plan-1', { type: 'idle' });
+    flushSolid();
     vi.advanceTimersByTime(1200);
+    flushSolid();
 
     expect(state.sessions.find((entry) => entry.id === 'plan-1')?.time.updated).toBe(now - 1000);
 
     const badge = header?.querySelector<HTMLButtonElement>('.chat-header-plan-badge');
     expect(badge).toBeInstanceOf(HTMLButtonElement);
     badge?.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(selectSessionSpy).toHaveBeenCalledWith('plan-1');
 
     setShowSessionPicker(true);
+    flushSolid();
     expect(
       container?.querySelector(
         '[data-session-id="plan-1"] .session-item-indicator.is-plan-completed'
       )
     ).not.toBeNull();
     sessionStore.markSessionSeen('plan-1');
+    flushSolid();
     setShowSessionPicker(false);
+    flushSolid();
     expect(
       container?.querySelector('.interactive-session > .chat-header .chat-header-plan-badge')
     ).toBeNull();
@@ -1775,10 +2184,13 @@ describe('header status badges', () => {
         initialRoute: { type: 'session', sessionId: 'session-1' },
       },
     };
-    setState('sessions', [session('session-1', 500)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.interactive-session > .chat-header')).toBeNull();
     expect(container?.querySelector('.chat-header-chat-desktop')).toBeNull();
@@ -1793,16 +2205,20 @@ describe('header status badges', () => {
     };
     const originalSend = bridgeWindow.__sendToExtension;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState('sessions', [session('session-1', 500)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     try {
       cleanup = render(() => Chat(), container!);
+      flushSolid();
       sent.length = 0;
 
       applySessionSelectedModelsSnapshot({
         'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
       });
+      flushSolid();
 
       expect(sent.some((message) => message.type === 'session-model/update')).toBe(false);
     } finally {
@@ -1820,16 +2236,23 @@ describe('header status badges', () => {
     const originalSend = bridgeWindow.__sendToExtension;
     const originalWorkspacePath = state.editorContext.workspacePath;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState('editorContext', 'workspacePath', '/repo');
-    setState('sessions', [
-      session('primary-1', 500),
-      session('child-1', 400, { parentID: 'primary-1' }),
-    ]);
-    setState('lastSeenSessions', { 'primary-1': 0, 'child-1': 0 });
-    setState('completedSessionResponses', { 'primary-1': 500, 'child-1': 400 });
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        session('primary-1', 500),
+        session('child-1', 400, { parentID: 'primary-1' }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'primary-1': 0, 'child-1': 0 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'primary-1': 500, 'child-1': 400 }));
+    flushSolid();
 
     try {
       cleanup = render(() => Chat(), container!);
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
         {
@@ -1844,7 +2267,8 @@ describe('header status badges', () => {
         },
       ]);
     } finally {
-      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      setState(storePath('editorContext', 'workspacePath', originalWorkspacePath));
+      flushSolid();
       if (originalSend) bridgeWindow.__sendToExtension = originalSend;
       else delete bridgeWindow.__sendToExtension;
     }
@@ -1859,13 +2283,18 @@ describe('header status badges', () => {
     const originalSend = bridgeWindow.__sendToExtension;
     const originalWorkspacePath = state.editorContext.workspacePath;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState('editorContext', 'workspacePath', '/repo');
-    setState('sessions', [session('plan-read', 500), session('plan-unread', 400)]);
-    setState('sessionSelectedAgents', { 'plan-read': 'plan', 'plan-unread': 'plan' });
-    setState('lastSeenSessions', { 'plan-read': 500, 'plan-unread': 0 });
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
+    setState(storePath('sessions', [session('plan-read', 500), session('plan-unread', 400)]));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-read': 'plan', 'plan-unread': 'plan' }));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'plan-read': 500, 'plan-unread': 0 }));
+    flushSolid();
 
     try {
       cleanup = render(() => Chat(), container!);
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
         {
@@ -1890,7 +2319,8 @@ describe('header status badges', () => {
         },
       ]);
 
-      setState('sessions', [session('plan-read', 501), session('plan-unread', 400)]);
+      setState(storePath('sessions', [session('plan-read', 501), session('plan-unread', 400)]));
+      flushSolid();
 
       expect(
         sent.filter((message) => message.type === 'session-unread-state/update').at(-1)
@@ -1905,8 +2335,10 @@ describe('header status badges', () => {
         },
       });
 
-      setState('lastSeenSessions', 'plan-read', 501);
-      setState('completedSessionResponses', 'plan-read', 600);
+      setState(storePath('lastSeenSessions', 'plan-read', 501));
+      flushSolid();
+      setState(storePath('completedSessionResponses', 'plan-read', 600));
+      flushSolid();
       expect(
         sent.filter((message) => message.type === 'session-unread-state/update').at(-1)
       ).toEqual({
@@ -1920,6 +2352,7 @@ describe('header status badges', () => {
         },
       });
       sessionStore.markSessionSeen('plan-read', 600);
+      flushSolid();
       expect(
         sent.filter((message) => message.type === 'session-unread-state/update').at(-1)
       ).toEqual({
@@ -1933,7 +2366,8 @@ describe('header status badges', () => {
         },
       });
     } finally {
-      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      setState(storePath('editorContext', 'workspacePath', originalWorkspacePath));
+      flushSolid();
       if (originalSend) bridgeWindow.__sendToExtension = originalSend;
       else delete bridgeWindow.__sendToExtension;
     }
@@ -1948,19 +2382,27 @@ describe('header status badges', () => {
     const originalSend = bridgeWindow.__sendToExtension;
     const originalWorkspacePath = state.editorContext.workspacePath;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState('editorContext', 'workspacePath', '/repo');
-    setState('sessions', [session('session-1', 500)]);
-    setState('completedSessionResponses', { 'session-1': 500 });
-    setState('lastSeenSessions', { 'session-1': 400 });
-    setState('editorTabsOpen', true);
-    setState('editorSessionIds', ['session-1']);
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'session-1': 500 }));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'session-1': 400 }));
+    flushSolid();
+    setState(storePath('editorTabsOpen', true));
+    flushSolid();
+    setState(storePath('editorSessionIds', ['session-1']));
+    flushSolid();
 
     try {
       cleanup = render(() => Chat(), container!);
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
 
-      setState('lastSeenSessions', 'session-1', 500);
+      setState(storePath('lastSeenSessions', 'session-1', 500));
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
         {
@@ -1975,7 +2417,8 @@ describe('header status badges', () => {
         },
       ]);
     } finally {
-      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      setState(storePath('editorContext', 'workspacePath', originalWorkspacePath));
+      flushSolid();
       if (originalSend) bridgeWindow.__sendToExtension = originalSend;
       else delete bridgeWindow.__sendToExtension;
     }
@@ -1990,12 +2433,16 @@ describe('header status badges', () => {
     const originalSend = bridgeWindow.__sendToExtension;
     const originalWorkspacePath = state.editorContext.workspacePath;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState('editorContext', 'workspacePath', '/repo');
-    setState('sessions', [session('session-1', 400)]);
-    setState('lastSeenSessions', { 'session-1': 500 });
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', 400)]));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'session-1': 500 }));
+    flushSolid();
 
     try {
       cleanup = render(() => Chat(), container!);
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
         {
@@ -2010,7 +2457,8 @@ describe('header status badges', () => {
         },
       ]);
     } finally {
-      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      setState(storePath('editorContext', 'workspacePath', originalWorkspacePath));
+      flushSolid();
       if (originalSend) bridgeWindow.__sendToExtension = originalSend;
       else delete bridgeWindow.__sendToExtension;
     }
@@ -2025,23 +2473,31 @@ describe('header status badges', () => {
     const originalSend = bridgeWindow.__sendToExtension;
     const originalWorkspacePath = state.editorContext.workspacePath;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState('editorContext', 'workspacePath', '/repo');
-    setState('sessions', [session('session-1', 500)]);
-    setState('sessionStatus', { 'session-1': { type: 'busy' } });
-    setState('lastSeenSessions', { 'session-1': 0 });
-    setState('completedSessionResponses', { 'session-1': 500 });
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'session-1': 0 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'session-1': 500 }));
+    flushSolid();
 
     try {
       cleanup = render(() => Chat(), container!);
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
 
-      setState('sessionStatus', 'session-1', { type: 'idle' });
+      setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+      flushSolid();
 
       // Still inside the running settle window - nothing is published yet.
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
 
       vi.advanceTimersByTime(1_200);
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
         {
@@ -2056,7 +2512,8 @@ describe('header status badges', () => {
         },
       ]);
     } finally {
-      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      setState(storePath('editorContext', 'workspacePath', originalWorkspacePath));
+      flushSolid();
       if (originalSend) bridgeWindow.__sendToExtension = originalSend;
       else delete bridgeWindow.__sendToExtension;
     }
@@ -2071,13 +2528,18 @@ describe('header status badges', () => {
     const originalSend = bridgeWindow.__sendToExtension;
     const originalWorkspacePath = state.editorContext.workspacePath;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState('editorContext', 'workspacePath', '/repo');
-    setState('sessions', [session('plan-1', 500)]);
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
-    setState('lastSeenSessions', { 'plan-1': 0 });
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
+    setState(storePath('sessions', [session('plan-1', 500)]));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'plan-1': 0 }));
+    flushSolid();
 
     try {
       cleanup = render(() => Chat(), container!);
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
         {
@@ -2094,21 +2556,27 @@ describe('header status badges', () => {
       sent.length = 0;
 
       // A stepping turn: busy, a momentary idle gap between steps, busy again.
-      setState('sessionStatus', { 'plan-1': { type: 'busy' } });
-      setState('sessionStatus', 'plan-1', { type: 'idle' });
-      setState('sessionStatus', 'plan-1', { type: 'busy' });
+      setState(storePath('sessionStatus', { 'plan-1': { type: 'busy' } }));
+      flushSolid();
+      setState(storePath('sessionStatus', 'plan-1', { type: 'idle' }));
+      flushSolid();
+      setState(storePath('sessionStatus', 'plan-1', { type: 'busy' }));
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
 
       // The turn ends and the running state settles; the already-published
       // state is unchanged, so nothing is re-sent.
-      setState('sessionStatus', 'plan-1', { type: 'idle' });
+      setState(storePath('sessionStatus', 'plan-1', { type: 'idle' }));
+      flushSolid();
       vi.advanceTimersByTime(1_200);
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
 
       // A real update after the turn publishes exactly once.
-      setState('sessions', [session('plan-1', 600)]);
+      setState(storePath('sessions', [session('plan-1', 600)]));
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
         {
@@ -2123,7 +2591,8 @@ describe('header status badges', () => {
         },
       ]);
     } finally {
-      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      setState(storePath('editorContext', 'workspacePath', originalWorkspacePath));
+      flushSolid();
       if (originalSend) bridgeWindow.__sendToExtension = originalSend;
       else delete bridgeWindow.__sendToExtension;
     }
@@ -2138,27 +2607,39 @@ describe('header status badges', () => {
     const originalSend = bridgeWindow.__sendToExtension;
     const originalWorkspacePath = state.editorContext.workspacePath;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState('editorContext', 'workspacePath', '/repo');
-    setState('sessions', [session('plan-1', 500)]);
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
-    setState('lastSeenSessions', { 'plan-1': 0 });
-    setState('questions', [{ id: 'question-1', sessionID: 'plan-1', questions: [] }]);
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
+    setState(storePath('sessions', [session('plan-1', 500)]));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'plan-1': 0 }));
+    flushSolid();
+    setState(storePath('questions', [{ id: 'question-1', sessionID: 'plan-1', questions: [] }]));
+    flushSolid();
 
     try {
       cleanup = render(() => Chat(), container!);
+      flushSolid();
       sent.length = 0;
 
       removeResolvedQuestion('question-1');
-      setState('sessions', [session('plan-1', 600)]);
+      flushSolid();
+      setState(storePath('sessions', [session('plan-1', 600)]));
+      flushSolid();
       vi.advanceTimersByTime(1_200);
+      flushSolid();
 
       expect(state.questionResponsePendingSessionIds).toEqual(['plan-1']);
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
 
       sessionStore.setSessionStatusEntry('plan-1', { type: 'busy' });
+      flushSolid();
       const completedAt = Date.now();
       sessionStore.setSessionStatusEntry('plan-1', { type: 'idle' });
+      flushSolid();
       vi.advanceTimersByTime(1_200);
+      flushSolid();
 
       expect(state.questionResponsePendingSessionIds).toEqual([]);
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
@@ -2174,7 +2655,8 @@ describe('header status badges', () => {
         },
       ]);
     } finally {
-      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      setState(storePath('editorContext', 'workspacePath', originalWorkspacePath));
+      flushSolid();
       if (originalSend) bridgeWindow.__sendToExtension = originalSend;
       else delete bridgeWindow.__sendToExtension;
     }
@@ -2188,15 +2670,19 @@ describe('header status badges', () => {
     };
     const originalSend = bridgeWindow.__sendToExtension;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState('sessions', [session('session-1', 1)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 1)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     try {
       cleanup = render(() => Chat(), container!);
+      flushSolid();
       sent.length = 0;
 
       for (let updated = 2; updated <= 101; updated += 1) {
-        setState('sessions', [session('session-1', updated)]);
+        setState(storePath('sessions', [session('session-1', updated)]));
+        flushSolid();
       }
 
       expect(sent.filter((message) => message.type === 'commands/state')).toEqual([]);
@@ -2214,13 +2700,17 @@ describe('header status badges', () => {
     };
     const originalSend = bridgeWindow.__sendToExtension;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState('sessions', [session('session-1', 1)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 1)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     try {
       cleanup = render(() => Chat(), container!);
+      flushSolid();
       sent.length = 0;
       cleanup();
+      flushSolid();
       cleanup = undefined;
 
       const cleanupState = sent.findLast((message) => message.type === 'commands/state');
@@ -2244,14 +2734,20 @@ describe('header status badges', () => {
     const originalSend = bridgeWindow.__sendToExtension;
     const originalWorkspacePath = state.editorContext.workspacePath;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState('editorContext', 'workspacePath', '/repo');
-    setState('sessions', [session('session-1', 500)]);
-    setState('lastSeenSessions', { 'session-1': 0 });
-    setState('completedSessionResponses', { 'session-1': 500 });
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'session-1': 0 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'session-1': 500 }));
+    flushSolid();
 
     try {
       cleanup = render(() => Chat(), container!);
-      setState('completedSessionResponses', 'session-1', 600);
+      flushSolid();
+      setState(storePath('completedSessionResponses', 'session-1', 600));
+      flushSolid();
 
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
         {
@@ -2276,13 +2772,21 @@ describe('header status badges', () => {
         },
       ]);
     } finally {
-      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      setState(storePath('editorContext', 'workspacePath', originalWorkspacePath));
+      flushSolid();
       if (originalSend) bridgeWindow.__sendToExtension = originalSend;
       else delete bridgeWindow.__sendToExtension;
     }
   });
 
   it('reconciles a restored editor route before reporting a new-chat route', () => {
+    const persisted: TestWebviewState[] = [];
+    hostWindow.__vscodeWebviewState = {
+      getState: () => persisted.at(-1) ?? {},
+      setState: (next) => {
+        persisted.push(next);
+      },
+    };
     hostWindow.__initialWebviewState = {
       webviewContext: {
         viewId: 'editor-1',
@@ -2293,15 +2797,61 @@ describe('header status badges', () => {
     const selectSession = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockImplementation(async (id) => {
-        setState('activeSessionId', id);
+        setState(storePath('activeSessionId', id));
       });
     setConnectionInitialized(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(selectSession).toHaveBeenCalledOnce();
     expect(selectSession).toHaveBeenCalledWith('session-1');
     expect(state.activeSessionId).toBe('session-1');
+    expect(persisted.flatMap((entry) => entry['varro.lastOpenedView'] ?? [])).not.toContainEqual(
+      expect.objectContaining({ type: 'new-session' })
+    );
+    expect(persisted.at(-1)?.['varro.lastOpenedView']).toMatchObject({
+      type: 'session',
+      sessionId: 'session-1',
+    });
+  });
+
+  it('preserves the saved editor route during directory activation and publishes the fallback if it fails', async () => {
+    const savedRoute = { type: 'session', sessionId: 'to-restore' };
+    let webviewState: TestWebviewState = { 'varro.lastOpenedView': savedRoute };
+    hostWindow.__vscodeWebviewState = {
+      getState: () => webviewState,
+      setState: (next) => {
+        webviewState = next;
+      },
+    };
+    hostWindow.__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { ...savedRoute, directory: '/another-workspace' },
+      },
+    };
+    let finishActivation!: () => void;
+    const activation = new Promise<void>((resolve) => {
+      finishActivation = resolve;
+    });
+    const select = vi.spyOn(openCodeModule, 'selectSession').mockReturnValue(activation);
+    setConnectionInitialized(true);
+    flushSolid();
+    cleanup = render(() => Chat(), container!);
+    flushSolid();
+    expect(select).toHaveBeenCalledExactlyOnceWith('to-restore', {
+      directory: '/another-workspace',
+    });
+    expect(webviewState['varro.lastOpenedView']).toEqual(savedRoute);
+
+    // Failed activation settles selectSession without changing the active ID.
+    finishActivation();
+    await activation;
+    flushSolid();
+    expect(webviewState['varro.lastOpenedView']).toMatchObject({ type: 'new-session' });
   });
 
   it('persists the confirmed editor session route for panel serialization', () => {
@@ -2319,11 +2869,15 @@ describe('header status badges', () => {
         webviewState = next;
       },
     };
-    setState('sessions', [session('session-1', 500)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setConnectionInitialized(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(webviewState['varro.lastOpenedView']).toMatchObject({
       type: 'session',
@@ -2332,15 +2886,20 @@ describe('header status badges', () => {
   });
 
   it('shows the active session subagent button beside the title and opens its sub-agent list', async () => {
-    setState('sessions', [
-      session('parent', 500),
-      session('child-1', 400, { parentID: 'parent' }),
-      session('child-2', 300, { parentID: 'parent' }),
-      session('other', 200),
-    ]);
-    setState('activeSessionId', 'parent');
+    setState(
+      storePath('sessions', [
+        session('parent', 500),
+        session('child-1', 400, { parentID: 'parent' }),
+        session('child-2', 300, { parentID: 'parent' }),
+        session('other', 200),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'parent'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const headerLeft = container?.querySelector('.chat-header-left');
     const title = headerLeft?.querySelector('.chat-header-title-text');
@@ -2359,9 +2918,12 @@ describe('header status badges', () => {
     expect(
       metadataChildren.indexOf(title?.closest('.chat-header-session-title') as Element)
     ).toBeLessThan(metadataChildren.indexOf(subagentsButton as Element));
+    flushSolid();
 
     subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
       'Sub-agents for parent'
@@ -2373,14 +2935,19 @@ describe('header status badges', () => {
   });
 
   it('hides the parent subagent button when the active session is a sub-agent', () => {
-    setState('sessions', [
-      session('parent', 500),
-      session('child-1', 400, { parentID: 'parent' }),
-      session('child-2', 300, { parentID: 'parent' }),
-    ]);
-    setState('activeSessionId', 'child-1');
+    setState(
+      storePath('sessions', [
+        session('parent', 500),
+        session('child-1', 400, { parentID: 'parent' }),
+        session('child-2', 300, { parentID: 'parent' }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'child-1'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const subagentsButton = container?.querySelector(
@@ -2394,70 +2961,84 @@ describe('header status badges', () => {
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
-    setState('sessions', [
-      session('parent', 500, { title: 'Parent task' }),
-      session('child', 400, {
-        parentID: 'parent',
-        model: { id: 'gpt-5.6-sol', providerID: 'openai', variant: 'high' },
-      }),
-    ]);
-    setState('activeSessionId', 'child');
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-5.6-sol': {
-            id: 'gpt-5.6-sol',
-            name: 'GPT-5.6 Sol',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-            limit: { context: 1000, output: 1000 },
-            variants: { medium: {}, high: {} },
+    setState(
+      storePath('sessions', [
+        session('parent', 500, { title: 'Parent task' }),
+        session('child', 400, {
+          parentID: 'parent',
+          model: { id: 'gpt-5.6-sol', providerID: 'openai', variant: 'high' },
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'child'));
+    flushSolid();
+    setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-5.6-sol': {
+              id: 'gpt-5.6-sol',
+              name: 'GPT-5.6 Sol',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+              limit: { context: 1000, output: 1000 },
+              variants: { medium: {}, high: {} },
+            },
           },
         },
-      },
-    ]);
-    setState('messages', [
-      {
-        ...assistantMessageEntry('assistant-child'),
-        info: {
-          ...assistantMessageEntry('assistant-child').info,
-          sessionID: 'child',
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('messages', [
+        {
+          ...assistantMessageEntry('assistant-child'),
+          info: {
+            ...assistantMessageEntry('assistant-child').info,
+            sessionID: 'child',
+            providerID: 'openai',
+            modelID: 'gpt-5.6-sol',
+            variant: 'high',
+            tokens: {
+              input: 600,
+              output: 100,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+          },
+        },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('providerLimits', {
+        'openai:gpt-5.6-sol': {
           providerID: 'openai',
           modelID: 'gpt-5.6-sol',
-          variant: 'high',
-          tokens: {
-            input: 600,
-            output: 100,
-            reasoning: 0,
-            cache: { read: 0, write: 0 },
-          },
+          status: 'available',
+          source: 'provider',
+          checkedAt: 1,
+          windows: [
+            {
+              id: 'five_hour',
+              label: '5-Hour Limit',
+              unit: 'requests',
+              remaining: 39,
+              limit: 100,
+              resetAt: null,
+            },
+          ],
         },
-      },
-    ]);
-    setState('providerLimits', {
-      'openai:gpt-5.6-sol': {
-        providerID: 'openai',
-        modelID: 'gpt-5.6-sol',
-        status: 'available',
-        source: 'provider',
-        checkedAt: 1,
-        windows: [
-          {
-            id: 'five_hour',
-            label: '5-Hour Limit',
-            unit: 'requests',
-            remaining: 39,
-            limit: 100,
-            resetAt: null,
-          },
-        ],
-      },
-    });
+      })
+    );
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const footer = container?.querySelector('.managed-subagent-footer');
     const returnButton = footer?.querySelector<HTMLButtonElement>(
@@ -2487,21 +3068,27 @@ describe('header status badges', () => {
     expect(returnButton?.textContent?.trim()).toBe('Return to parent');
 
     contextButton?.click();
+    flushSolid();
     expect(footer?.querySelector('.context-popup')).toBeInstanceOf(HTMLDivElement);
     expect(footer?.querySelector('.context-popup-action')).toBeNull();
 
     providerLimitButton?.click();
+    flushSolid();
     expect(footer?.querySelector('.context-popup')).toBeNull();
     expect(footer?.querySelector('.provider-limit-popup')).toBeInstanceOf(HTMLDivElement);
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(footer?.querySelector('.provider-limit-popup')).toBeNull();
     expect(container?.querySelector('.managed-subagent-footer')).toBeInstanceOf(HTMLDivElement);
     expect(selectSessionSpy).not.toHaveBeenCalled();
 
     returnButton?.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).toHaveBeenCalledWith('parent');
   });
@@ -2512,10 +3099,15 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
 
-    setState('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })]);
-    setState('activeSessionId', 'child');
+    setState(
+      storePath('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'child'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const backButton = container?.querySelector(
@@ -2527,7 +3119,9 @@ describe('header status badges', () => {
     ).toHaveLength(1);
 
     backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).not.toHaveBeenCalled();
     expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
@@ -2545,11 +3139,17 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
 
-    setState('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })]);
-    setState('activeSessionId', 'child');
+    setState(
+      storePath('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'child'));
+    flushSolid();
     rememberDirectSessionReturn('child', 'parent');
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const backButton = container?.querySelector(
@@ -2558,7 +3158,9 @@ describe('header status badges', () => {
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 
     backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).toHaveBeenCalledWith('parent');
     expect(
@@ -2572,11 +3174,15 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
 
-    setState('sessions', [
-      session('manager', 500),
-      session('ralph-child', 400, { parentID: 'manager' }),
-    ]);
-    setState('activeSessionId', 'ralph-child');
+    setState(
+      storePath('sessions', [
+        session('manager', 500),
+        session('ralph-child', 400, { parentID: 'manager' }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'ralph-child'));
+    flushSolid();
     ralphStore.startRun({
       managerSessionId: 'manager',
       workspaceDirectory: '/workspace',
@@ -2588,6 +3194,7 @@ describe('header status badges', () => {
       agent: null,
       createdAt: 1,
     });
+    flushSolid();
     ralphStore.upsertIteration('manager', {
       index: 1,
       childSessionId: 'ralph-child',
@@ -2597,8 +3204,10 @@ describe('header status badges', () => {
       filesChanged: [],
       verification: {},
     });
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const backButton = container?.querySelector<HTMLButtonElement>(
       '.chat-header .chat-header-btn[aria-label="Back to parent session"]'
@@ -2606,7 +3215,9 @@ describe('header status badges', () => {
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 
     backButton?.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).toHaveBeenCalledWith('manager');
     expect(
@@ -2620,11 +3231,15 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
 
-    setState('sessions', [session('origin', 500), session('linked', 400)]);
-    setState('activeSessionId', 'linked');
+    setState(storePath('sessions', [session('origin', 500), session('linked', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'linked'));
+    flushSolid();
     rememberDirectSessionReturn('linked', 'origin');
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const backButton = container?.querySelector(
@@ -2633,7 +3248,9 @@ describe('header status badges', () => {
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 
     backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).toHaveBeenCalledWith('origin');
     expect(
@@ -2647,15 +3264,20 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
     desktopMediaQueryMatches = true;
-    setState('sessions', [
-      session('parent', 500),
-      session('child', 400, { parentID: 'parent' }),
-      session('sibling', 300, { parentID: 'parent' }),
-      session('other', 200),
-    ]);
-    setState('activeSessionId', 'child');
+    setState(
+      storePath('sessions', [
+        session('parent', 500),
+        session('child', 400, { parentID: 'parent' }),
+        session('sibling', 300, { parentID: 'parent' }),
+        session('other', 200),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'child'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const desktopBackButton = container?.querySelector(
@@ -2682,7 +3304,9 @@ describe('header status badges', () => {
     sidebarHeader
       ?.querySelector<HTMLButtonElement>('.chat-header-btn[aria-label="Back to sessions"]')
       ?.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       Array.from(sidebar?.querySelectorAll('.session-item-title') ?? []).map((item) =>
@@ -2692,7 +3316,9 @@ describe('header status badges', () => {
     expect(selectSessionSpy).not.toHaveBeenCalled();
 
     desktopBackButton?.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).toHaveBeenCalledWith('parent');
   });
@@ -2703,14 +3329,19 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
 
-    setState('sessions', [
-      session('top', 500),
-      session('child', 400, { parentID: 'top' }),
-      session('grandchild', 300, { parentID: 'child' }),
-    ]);
-    setState('activeSessionId', 'grandchild');
+    setState(
+      storePath('sessions', [
+        session('top', 500),
+        session('child', 400, { parentID: 'top' }),
+        session('grandchild', 300, { parentID: 'child' }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'grandchild'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const topButton = container?.querySelector(
@@ -2719,7 +3350,9 @@ describe('header status badges', () => {
     expect(topButton).toBeInstanceOf(HTMLButtonElement);
 
     topButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).not.toHaveBeenCalled();
     expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
@@ -2737,17 +3370,24 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
 
-    setState('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })]);
-    setState('activeSessionId', 'parent');
+    setState(
+      storePath('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'parent'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const subagentsButton = container?.querySelector(
       '.chat-header-subagents'
     ) as HTMLButtonElement | null;
     subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const backButton = container?.querySelector(
@@ -2756,7 +3396,9 @@ describe('header status badges', () => {
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 
     backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).toHaveBeenCalledWith('parent');
     expect(
@@ -2765,25 +3407,40 @@ describe('header status badges', () => {
   });
 
   it('shows session status badges in the desktop session sidebar header', () => {
-    setState('sessions', [
-      session('running-1', 500),
-      session('failed-1', 400),
-      session('attention-1', 300),
-      session('plan-1', 200),
-      session('completed-1', 150),
-      session('session-1', 100),
-    ]);
-    setState('activeSessionId', 'running-1');
-    setState('sessionStatus', {
-      'running-1': { type: 'busy' },
-    });
-    setState('failedSessionIds', ['failed-1']);
-    setState('questions', [{ id: 'question-1', sessionID: 'attention-1', questions: [] }]);
-    setState('lastSeenSessions', { 'plan-1': 0 });
-    setState('completedSessionResponses', { 'completed-1': 150 });
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState(
+      storePath('sessions', [
+        session('running-1', 500),
+        session('failed-1', 400),
+        session('attention-1', 300),
+        session('plan-1', 200),
+        session('completed-1', 150),
+        session('session-1', 100),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'running-1'));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'running-1': { type: 'busy' },
+      })
+    );
+    flushSolid();
+    setState(storePath('failedSessionIds', ['failed-1']));
+    flushSolid();
+    setState(
+      storePath('questions', [{ id: 'question-1', sessionID: 'attention-1', questions: [] }])
+    );
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'plan-1': 0 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'completed-1': 150 }));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const sidebarHeader = container?.querySelector('.chat-session-sidebar-header');
 
@@ -2814,11 +3471,15 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
 
-    setState('sessions', [session('active', 500), session('failed-target', 400)]);
-    setState('activeSessionId', 'active');
-    setState('failedSessionIds', ['failed-target']);
+    setState(storePath('sessions', [session('active', 500), session('failed-target', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(storePath('failedSessionIds', ['failed-target']));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const failedBadge = container?.querySelector(
@@ -2827,7 +3488,9 @@ describe('header status badges', () => {
     expect(failedBadge).toBeInstanceOf(HTMLButtonElement);
 
     failedBadge?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).toHaveBeenCalledWith('failed-target');
     expect(container?.querySelector('.chat-header-filter-chip')).toBeNull();
@@ -2838,11 +3501,15 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'createSession')
       .mockResolvedValue('new-session');
 
-    setState('sessions', [session('active', 500)]);
-    setState('activeSessionId', 'active');
+    setState(storePath('sessions', [session('active', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const newChatButton = container?.querySelector(
@@ -2851,7 +3518,9 @@ describe('header status badges', () => {
     expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
 
     newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(createSessionSpy).not.toHaveBeenCalled();
     expect(state.activeSessionId).toBeNull();
@@ -2866,31 +3535,41 @@ describe('header status badges', () => {
 
   it('keeps the created session active when sending from the restored sessions screen', async () => {
     setConnectionInitialized(true);
-    setState('sessions', [session('existing', 500)]);
-    setState('activeSessionId', null);
-    setState('messagesLoading', false);
+    flushSolid();
+    setState(storePath('sessions', [session('existing', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', null));
+    flushSolid();
+    setState(storePath('messagesLoading', false));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
     setInputText('Continue work in this workspace');
+    flushSolid();
     const send = vi
       .spyOn(openCodeModule, 'sendMessage')
       .mockImplementation(async (_text, options) => {
         // A server update can advance the timestamp before optimistic publication.
-        setState('sessions', [session('created', Date.now()), session('existing', 500)]);
-        setState('activeSessionId', 'created');
+        setState(storePath('sessions', [session('created', Date.now()), session('existing', 500)]));
+        setState(storePath('activeSessionId', 'created'));
         options?.onOptimisticPublish?.();
         return true;
       });
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     const button = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     expect(button).toBeInstanceOf(HTMLButtonElement);
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+    flushSolid();
 
     expect(state.activeSessionId).toBe('created');
     expect(container?.querySelector('.session-list-new-session')).toBeNull();
     expect(container?.querySelector('.chat-main-shell')).not.toBeNull();
     setInputText('');
+    flushSolid();
   });
 
   it('removes a busy streaming transcript when the new-chat button receives a pointer click', async () => {
@@ -2905,16 +3584,25 @@ describe('header status badges', () => {
         text: '',
       },
     ];
-    setState('sessions', [session('session-1', 500, { title: 'Streaming session' })]);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', { 'session-1': { type: 'busy' } });
-    setState('messages', [streamingMessage]);
-    setState('streamingPartId', 'text-streaming');
-    setState('streamingText', 'Old streaming transcript');
+    setState(storePath('sessions', [session('session-1', 500, { title: 'Streaming session' })]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('messages', [streamingMessage]));
+    flushSolid();
+    setState(storePath('streamingPartId', 'text-streaming'));
+    flushSolid();
+    setState(storePath('streamingText', 'Old streaming transcript'));
+    flushSolid();
     startLoading();
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('[data-msg-id="assistant-streaming"]')).not.toBeNull();
 
     const newChatButton = container?.querySelector<HTMLButtonElement>(
@@ -2922,9 +3610,13 @@ describe('header status badges', () => {
     );
     expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
     newChatButton?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    flushSolid();
     newChatButton?.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+    flushSolid();
     newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(state.activeSessionId).toBeNull();
     expect(container?.querySelector('[data-msg-id="assistant-streaming"]')).toBeNull();
@@ -2933,6 +3625,7 @@ describe('header status badges', () => {
     );
 
     await vi.advanceTimersByTimeAsync(17);
+    flushSolid();
 
     expect(state.messages).toEqual([]);
     expect(state.streamingPartId).toBeNull();
@@ -2948,15 +3641,20 @@ describe('header status badges', () => {
       .mockResolvedValue(undefined);
 
     const now = Date.now();
-    setState('sessions', [
-      session('draft-session', now, {
-        title: 'New session',
-        time: { created: now, updated: now },
-      }),
-    ]);
-    setState('activeSessionId', 'draft-session');
+    setState(
+      storePath('sessions', [
+        session('draft-session', now, {
+          title: 'New session',
+          time: { created: now, updated: now },
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'draft-session'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const newChatButton = container?.querySelector(
@@ -2965,8 +3663,11 @@ describe('header status badges', () => {
     expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
 
     newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(deleteImmediatelySpy).not.toHaveBeenCalled();
     expect(createSessionSpy).not.toHaveBeenCalled();
@@ -2982,16 +3683,22 @@ describe('header status badges', () => {
       .mockResolvedValue(undefined);
 
     const now = Date.now();
-    setState('sessions', [
-      session('draft-session', now, {
-        title: 'New session',
-        time: { created: now, updated: now },
-      }),
-    ]);
-    setState('activeSessionId', 'draft-session');
+    setState(
+      storePath('sessions', [
+        session('draft-session', now, {
+          title: 'New session',
+          time: { created: now, updated: now },
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'draft-session'));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const newChatButton = container?.querySelector(
@@ -3000,8 +3707,11 @@ describe('header status badges', () => {
     expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
 
     newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(deleteImmediatelySpy).not.toHaveBeenCalled();
     expect(createSessionSpy).not.toHaveBeenCalled();
@@ -3017,15 +3727,20 @@ describe('header status badges', () => {
       .mockResolvedValue(undefined);
 
     const now = Date.now();
-    setState('sessions', [
-      session('draft-session', now, {
-        title: 'New session',
-        time: { created: now, updated: now },
-      }),
-    ]);
-    setState('activeSessionId', 'draft-session');
+    setState(
+      storePath('sessions', [
+        session('draft-session', now, {
+          title: 'New session',
+          time: { created: now, updated: now },
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'draft-session'));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const backButton = container?.querySelector(
@@ -3034,24 +3749,33 @@ describe('header status badges', () => {
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 
     backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(deleteImmediatelySpy).toHaveBeenCalledWith('draft-session');
     expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
   });
 
   it('filters completed sessions from the header badge', async () => {
-    setState('sessions', [
-      session('active', 500),
-      session('completed-1', 400),
-      session('completed-2', 300),
-      session('other', 200),
-    ]);
-    setState('activeSessionId', 'active');
-    setState('lastSeenSessions', { active: 500, other: 200 });
-    setState('completedSessionResponses', { 'completed-1': 400, 'completed-2': 300 });
+    setState(
+      storePath('sessions', [
+        session('active', 500),
+        session('completed-1', 400),
+        session('completed-2', 300),
+        session('other', 200),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { active: 500, other: 200 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'completed-1': 400, 'completed-2': 300 }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const completedBadge = container?.querySelector(
@@ -3060,7 +3784,9 @@ describe('header status badges', () => {
     expect(completedBadge).toBeInstanceOf(HTMLButtonElement);
 
     completedBadge?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
       'Completed'
@@ -3072,12 +3798,17 @@ describe('header status badges', () => {
   });
 
   it('keeps the active completed session out of the chat header but shows it in the sessions list', () => {
-    setState('sessions', [session('active-completed', 500), session('other', 400)]);
-    setState('activeSessionId', 'active-completed');
-    setState('lastSeenSessions', { other: 400 });
-    setState('completedSessionResponses', { 'active-completed': 500 });
+    setState(storePath('sessions', [session('active-completed', 500), session('other', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active-completed'));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { other: 400 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'active-completed': 500 }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const chatHeader = container?.querySelector('.interactive-session > .chat-header');
     expect(chatHeader?.querySelector('.chat-header-completed-badge')).toBeNull();
@@ -3107,27 +3838,38 @@ describe('header status badges', () => {
       const previousSend = bridgeWindow.__sendToExtension;
       bridgeWindow.__sendToExtension = send;
       try {
-        setState('sessions', [
-          session('completed-1', future),
-          session('completed-2', 300),
-          session('running', 250),
-          session('plan', 200),
-          session('child', 150, { parentID: 'completed-1' }),
-        ]);
-        setState('sessionStatus', { running: { type: 'busy' } });
-        setState('sessionSelectedAgents', { plan: 'plan' });
-        setState('completedSessionResponses', {
-          'completed-1': future + 500,
-          'completed-2': 300,
-          running: 250,
-          child: 150,
-        });
+        setState(
+          storePath('sessions', [
+            session('completed-1', future),
+            session('completed-2', 300),
+            session('running', 250),
+            session('plan', 200),
+            session('child', 150, { parentID: 'completed-1' }),
+          ])
+        );
+        flushSolid();
+        setState(storePath('sessionStatus', { running: { type: 'busy' } }));
+        flushSolid();
+        setState(storePath('sessionSelectedAgents', { plan: 'plan' }));
+        flushSolid();
+        setState(
+          storePath('completedSessionResponses', {
+            'completed-1': future + 500,
+            'completed-2': 300,
+            running: 250,
+            child: 150,
+          })
+        );
+        flushSolid();
         setShowSessionPicker(true);
+        flushSolid();
         cleanup = render(() => Chat(), container!);
+        flushSolid();
         expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
 
         requestOpenCompletedSessions();
         await Promise.resolve();
+        flushSolid();
         const header = container?.querySelector(
           desktopLayout ? '.chat-session-sidebar-header' : '.interactive-session > .chat-header'
         );
@@ -3140,8 +3882,10 @@ describe('header status badges', () => {
           markAllRead
         );
         expect(markAllRead!.closest('.chat-header-left')).not.toBeNull();
+        flushSolid();
         expect(markAllRead!.querySelector('.ui-icon')).toBeNull();
         markAllRead!.click();
+        flushSolid();
 
         expect(state.lastSeenSessions['completed-1']).toBeGreaterThanOrEqual(future + 500);
         expect(state.lastSeenSessions['completed-2']).toBeGreaterThanOrEqual(300);
@@ -3161,11 +3905,14 @@ describe('header status badges', () => {
           });
         }
 
-        setState('completedSessionResponses', 'completed-1', future + 1_000);
+        setState(storePath('completedSessionResponses', 'completed-1', future + 1_000));
+        flushSolid();
         expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
-        setState('completedSessionResponses', 'completed-2', future + 1_000);
+        setState(storePath('completedSessionResponses', 'completed-2', future + 1_000));
+        flushSolid();
         expect(container?.querySelector('[aria-label="Mark all as read"]')).not.toBeNull();
         sessionStore.markSessionSeen('completed-1', future + 1_000);
+        flushSolid();
         expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
         expect(warn).not.toHaveBeenCalled();
       } finally {
@@ -3176,14 +3923,23 @@ describe('header status badges', () => {
 
   it('marks plans as read without skipping them', async () => {
     const warn = vi.spyOn(console, 'warn');
-    setState('sessions', [session('plan-1', 400), session('plan-2', 300), session('other', 200)]);
-    setState('sessionSelectedAgents', { 'plan-1': 'plan', 'plan-2': 'plan' });
+    setState(
+      storePath('sessions', [session('plan-1', 400), session('plan-2', 300), session('other', 200)])
+    );
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan', 'plan-2': 'plan' }));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.chat-header-plan-badge')!.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('[aria-label="Mark all as read"]')!.click();
+    flushSolid();
 
     expect(state.lastSeenSessions['plan-1']).toBeGreaterThanOrEqual(400);
     expect(state.lastSeenSessions['plan-2']).toBeGreaterThanOrEqual(300);
@@ -3198,20 +3954,30 @@ describe('header status badges', () => {
   it('acknowledges child failures without clearing failure status', async () => {
     const warn = vi.spyOn(console, 'warn');
     const failedAt = Date.now() + 10_000;
-    setState('sessions', [
-      session('root', 400),
-      session('child', failedAt, { parentID: 'root' }),
-      session('failed', 300),
-      session('other', 200),
-    ]);
-    setState('failedSessionIds', ['child', 'failed']);
-    setState('failedSessionUpdatedAt', { child: failedAt, failed: 300 });
+    setState(
+      storePath('sessions', [
+        session('root', 400),
+        session('child', failedAt, { parentID: 'root' }),
+        session('failed', 300),
+        session('other', 200),
+      ])
+    );
+    flushSolid();
+    setState(storePath('failedSessionIds', ['child', 'failed']));
+    flushSolid();
+    setState(storePath('failedSessionUpdatedAt', { child: failedAt, failed: 300 }));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.chat-header-failed-badge')!.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('[aria-label="Mark all as read"]')!.click();
+    flushSolid();
 
     expect(state.lastSeenSessions.root).toBeGreaterThanOrEqual(failedAt);
     expect(state.lastSeenSessions.failed).toBeGreaterThanOrEqual(300);
@@ -3223,16 +3989,22 @@ describe('header status badges', () => {
   });
 
   it('does not offer mark all as read for pending questions', async () => {
-    setState('sessions', [session('attention-1', 400), session('attention-2', 300)]);
+    setState(storePath('sessions', [session('attention-1', 400), session('attention-2', 300)]));
+    flushSolid();
     const questions = [
       { id: 'question-1', sessionID: 'attention-1', questions: [] },
       { id: 'question-2', sessionID: 'attention-2', questions: [] },
     ];
-    setState('questions', questions);
+    setState(storePath('questions', questions));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.chat-header-attention-badge')!.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
       'Needs attention'
@@ -3244,24 +4016,34 @@ describe('header status badges', () => {
   it.each(['plan-ready', 'failed'])(
     'hides mark all as read with one unread session in the %s filter',
     async (filter) => {
-      setState('sessions', [session('first', 400), session('second', 300)]);
+      setState(storePath('sessions', [session('first', 400), session('second', 300)]));
+      flushSolid();
       if (filter === 'plan-ready') {
-        setState('sessionSelectedAgents', { first: 'plan', second: 'plan' });
+        setState(storePath('sessionSelectedAgents', { first: 'plan', second: 'plan' }));
+        flushSolid();
       } else {
-        setState('failedSessionIds', ['first', 'second']);
-        setState('failedSessionUpdatedAt', { first: 400, second: 300 });
+        setState(storePath('failedSessionIds', ['first', 'second']));
+        flushSolid();
+        setState(storePath('failedSessionUpdatedAt', { first: 400, second: 300 }));
+        flushSolid();
       }
+      flushSolid();
       setShowSessionPicker(true);
+      flushSolid();
       cleanup = render(() => Chat(), container!);
+      flushSolid();
       container
         ?.querySelector<HTMLButtonElement>(
           filter === 'plan-ready' ? '.chat-header-plan-badge' : '.chat-header-failed-badge'
         )!
         .click();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(container?.querySelector('[aria-label="Mark all as read"]')).not.toBeNull();
 
       sessionStore.markSessionSeen('first');
+      flushSolid();
 
       expect(container?.querySelectorAll('.session-item')).toHaveLength(2);
       expect(container?.querySelector('[aria-label="Mark all as read"]')).toBeNull();
@@ -3269,12 +4051,17 @@ describe('header status badges', () => {
   );
 
   it('opens completed sessions when the desktop sidebar badge only counts the active session', async () => {
-    setState('sessions', [session('active-completed', 500), session('other', 400)]);
-    setState('activeSessionId', 'active-completed');
-    setState('lastSeenSessions', { other: 400 });
-    setState('completedSessionResponses', { 'active-completed': 500 });
+    setState(storePath('sessions', [session('active-completed', 500), session('other', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active-completed'));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { other: 400 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'active-completed': 500 }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const completedBadge = container?.querySelector<HTMLButtonElement>(
       '.chat-session-sidebar-header .chat-header-completed-badge'
@@ -3282,7 +4069,9 @@ describe('header status badges', () => {
     expect(completedBadge).toBeInstanceOf(HTMLButtonElement);
 
     completedBadge?.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
       'Completed'
@@ -3293,13 +4082,19 @@ describe('header status badges', () => {
   });
 
   it('keeps the active completed session indicator when its messages are loaded', () => {
-    setState('sessions', [session('session-1', 500), session('other', 400)]);
-    setState('activeSessionId', 'session-1');
-    setState('lastSeenSessions', { other: 400 });
-    setState('completedSessionResponses', { 'session-1': 500 });
-    setState('messages', [assistantMessageEntry('assistant-1')]);
+    setState(storePath('sessions', [session('session-1', 500), session('other', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { other: 400 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'session-1': 500 }));
+    flushSolid();
+    setState(storePath('messages', [assistantMessageEntry('assistant-1')]));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const activeIndicator = Array.from(container?.querySelectorAll('.session-item') ?? [])
       .find(
@@ -3310,11 +4105,15 @@ describe('header status badges', () => {
   });
 
   it('does not treat generic unread session updates as completed responses', () => {
-    setState('sessions', [session('active', 500), session('metadata-update', 400)]);
-    setState('activeSessionId', 'active');
-    setState('lastSeenSessions', { active: 500, 'metadata-update': 0 });
+    setState(storePath('sessions', [session('active', 500), session('metadata-update', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { active: 500, 'metadata-update': 0 }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-completed-badge')).toBeNull();
     const indicator = Array.from(container?.querySelectorAll('.session-item') ?? [])
@@ -3327,23 +4126,30 @@ describe('header status badges', () => {
   });
 
   it('shows pending permission indicators before running indicators in the sessions list', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', { 'session-1': { type: 'busy' } });
-    setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'bash',
-        sessionID: 'session-1',
-        messageID: 'message-1',
-        callID: 'call-1',
-        title: 'Allow bash',
-        metadata: {},
-        time: { created: 1 },
-      },
-    ]);
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'bash',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          callID: 'call-1',
+          title: 'Allow bash',
+          metadata: {},
+          time: { created: 1 },
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const indicator = container?.querySelector('.session-item-indicator');
     expect(indicator?.classList.contains('is-attention')).toBe(true);
@@ -3351,11 +4157,15 @@ describe('header status badges', () => {
   });
 
   it('leaves running spinner timing to CSS', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const headerSpinner = container?.querySelector(
@@ -3373,20 +4183,29 @@ describe('header status badges', () => {
 
   it('keeps the active session in the sessions picker after returning from chat', async () => {
     const now = Date.now();
-    setState('sessions', [
-      session('active-completed', now - 1_000),
-      session('plan-ready', now - 2_000),
-      session('other', now - 3_000),
-    ]);
-    setState('activeSessionId', 'active-completed');
-    setState('lastSeenSessions', {
-      'active-completed': now - 1_000,
-      'plan-ready': 0,
-      other: now - 3_000,
-    });
-    setState('sessionSelectedAgents', { 'plan-ready': 'plan' });
+    setState(
+      storePath('sessions', [
+        session('active-completed', now - 1_000),
+        session('plan-ready', now - 2_000),
+        session('other', now - 3_000),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'active-completed'));
+    flushSolid();
+    setState(
+      storePath('lastSeenSessions', {
+        'active-completed': now - 1_000,
+        'plan-ready': 0,
+        other: now - 3_000,
+      })
+    );
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-ready': 'plan' }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const backButton = container?.querySelector(
@@ -3395,7 +4214,9 @@ describe('header status badges', () => {
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 
     backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
       (item) => item.textContent?.trim()
@@ -3410,15 +4231,21 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
 
-    setState('sessions', [
-      session('active', 500),
-      session('failed-1', 400),
-      session('failed-2', 300),
-    ]);
-    setState('activeSessionId', 'active');
-    setState('failedSessionIds', ['failed-1', 'failed-2']);
+    setState(
+      storePath('sessions', [
+        session('active', 500),
+        session('failed-1', 400),
+        session('failed-2', 300),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(storePath('failedSessionIds', ['failed-1', 'failed-2']));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const failedBadge = container?.querySelector(
@@ -3427,7 +4254,9 @@ describe('header status badges', () => {
     expect(failedBadge).toBeInstanceOf(HTMLButtonElement);
 
     failedBadge?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).not.toHaveBeenCalled();
     expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
@@ -3439,14 +4268,21 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
 
-    setState('sessions', [session('active', 500), session('attention-target', 400)]);
-    setState('activeSessionId', 'active');
-    setState('questions', [{ id: 'question-1', sessionID: 'attention-target', questions: [] }]);
+    setState(storePath('sessions', [session('active', 500), session('attention-target', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(
+      storePath('questions', [{ id: 'question-1', sessionID: 'attention-target', questions: [] }])
+    );
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     requestOpenAttentionSessions();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).toHaveBeenCalledWith('attention-target');
     expect(container?.querySelector('.chat-header-filter-chip')).toBeNull();
@@ -3458,33 +4294,46 @@ describe('header status badges', () => {
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
 
-    setState('sessions', [session('active', 500), session('failed-target', 400)]);
-    setState('activeSessionId', 'active');
-    setState('failedSessionIds', ['failed-target']);
+    setState(storePath('sessions', [session('active', 500), session('failed-target', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(storePath('failedSessionIds', ['failed-target']));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     requestOpenAttentionSessions();
     await Promise.resolve();
+    flushSolid();
 
     expect(selectSessionSpy).toHaveBeenCalledWith('failed-target');
     expect(container?.querySelector('.chat-header-filter-chip')).toBeNull();
   });
 
   it('opens completed sessions from state and keeps multiple matches filtered', async () => {
-    setState('sessions', [
-      session('active', 500),
-      session('completed-1', 400),
-      session('completed-2', 300),
-    ]);
-    setState('activeSessionId', 'active');
-    setState('lastSeenSessions', { active: 500 });
-    setState('completedSessionResponses', { 'completed-1': 400, 'completed-2': 300 });
+    setState(
+      storePath('sessions', [
+        session('active', 500),
+        session('completed-1', 400),
+        session('completed-2', 300),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { active: 500 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'completed-1': 400, 'completed-2': 300 }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     requestOpenCompletedSessions();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
       'Completed'
@@ -3496,57 +4345,79 @@ describe('header status badges', () => {
   });
 
   it('hides skipped plans from the plan-ready badge', () => {
-    setState('sessions', [session('plan-1', 200), session('session-1', 100)]);
-    setState('activeSessionId', 'session-1');
-    setState('lastSeenSessions', { 'plan-1': 0 });
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState(storePath('sessions', [session('plan-1', 200), session('session-1', 100)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'plan-1': 0 }));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
     skipPlanSession('plan-1', 200);
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const sidebarHeader = container?.querySelector('.chat-session-sidebar-header');
     expect(sidebarHeader?.querySelector('.chat-header-plan-badge')).toBeNull();
   });
 
   it('keeps seen plans ready without showing the header badge', () => {
-    setState('sessions', [session('plan-1', 200), session('session-1', 100)]);
-    setState('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 });
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState(storePath('sessions', [session('plan-1', 200), session('session-1', 100)]));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 }));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
     expect(indicators.planReadyIds.has('plan-1')).toBe(true);
     expect(indicators.newlyCompletedIds.has('plan-1')).toBe(false);
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-plan-badge')).toBeNull();
   });
 
   it('does not show plan-ready indicators for a session visible in an editor tab', () => {
-    setState('sessions', [session('plan-1', 200), session('session-1', 100)]);
-    setState('activeSessionId', 'plan-1');
-    setState('lastSeenSessions', { 'plan-1': 0, 'session-1': 100 });
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
-    setState('editorTabsOpen', true);
-    setState('editorSessionIds', ['plan-1']);
+    setState(storePath('sessions', [session('plan-1', 200), session('session-1', 100)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'plan-1'));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'plan-1': 0, 'session-1': 100 }));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
+    setState(storePath('editorTabsOpen', true));
+    flushSolid();
+    setState(storePath('editorSessionIds', ['plan-1']));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
     expect(indicators.planReadyIds.has('plan-1')).toBe(false);
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-plan-badge')).toBeNull();
     expect(container?.querySelector('.session-item-indicator.is-plan-completed')).toBeNull();
   });
 
   it('does not mark an empty session with the plan agent as plan ready', () => {
-    setState('sessions', [
-      session('plan-blank', 200, { time: { created: 200, updated: 200 } }),
-      session('plan-done', 100),
-    ]);
-    setState('sessionSelectedAgents', { 'plan-blank': 'plan', 'plan-done': 'plan' });
+    setState(
+      storePath('sessions', [
+        session('plan-blank', 200, { time: { created: 200, updated: 200 } }),
+        session('plan-done', 100),
+      ])
+    );
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-blank': 'plan', 'plan-done': 'plan' }));
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
     expect(indicators.planReadyIds.has('plan-blank')).toBe(false);
@@ -3554,9 +4425,17 @@ describe('header status badges', () => {
   });
 
   it('does not mark a plan root ready when a child session failed', () => {
-    setState('sessions', [session('plan-1', 200), session('child-1', 100, { parentID: 'plan-1' })]);
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
-    setState('failedSessionIds', ['child-1']);
+    setState(
+      storePath('sessions', [
+        session('plan-1', 200),
+        session('child-1', 100, { parentID: 'plan-1' }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
+    setState(storePath('failedSessionIds', ['child-1']));
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
 
@@ -3565,9 +4444,12 @@ describe('header status badges', () => {
   });
 
   it('keeps seen plan sessions in the plan-ready session group', () => {
-    setState('sessions', [session('plan-1', 200), session('session-1', 100)]);
-    setState('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 });
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState(storePath('sessions', [session('plan-1', 200), session('session-1', 100)]));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 }));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
 
@@ -3585,12 +4467,17 @@ describe('header status badges', () => {
   });
 
   it('does not show a skip button in the session list for plan-ready sessions', () => {
-    setState('sessions', [session('plan-1', 200), session('session-1', 100)]);
-    setState('activeSessionId', 'session-1');
-    setState('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 });
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState(storePath('sessions', [session('plan-1', 200), session('session-1', 100)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 }));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.session-item-plan-skip')).toBeNull();
     expect(
@@ -3601,16 +4488,23 @@ describe('header status badges', () => {
   });
 
   it('shows a plan tag before trailing session metadata for running plan sessions', () => {
-    setState('sessions', [
-      session('plan-1', 300),
-      session('plan-child', 250, { parentID: 'plan-1' }),
-      session('session-1', 200),
-    ]);
-    setState('activeSessionId', 'session-1');
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
-    setState('sessionStatus', { 'plan-1': { type: 'busy' } });
+    setState(
+      storePath('sessions', [
+        session('plan-1', 300),
+        session('plan-child', 250, { parentID: 'plan-1' }),
+        session('session-1', 200),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
+    setState(storePath('sessionStatus', { 'plan-1': { type: 'busy' } }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const planRow = Array.from(container?.querySelectorAll('.session-item') ?? []).find(
       (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'plan-1'
@@ -3635,12 +4529,17 @@ describe('header status badges', () => {
   });
 
   it('hides the indicator but keeps the plan tag for seen plan-ready sessions', () => {
-    setState('sessions', [session('plan-1', 200), session('session-1', 100)]);
-    setState('activeSessionId', 'session-1');
-    setState('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 });
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState(storePath('sessions', [session('plan-1', 200), session('session-1', 100)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 }));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const planRow = Array.from(container?.querySelectorAll('.session-item') ?? []).find(
       (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'plan-1'
@@ -3651,19 +4550,31 @@ describe('header status badges', () => {
   });
 
   it('orders the default session list by age only', () => {
-    setState('sessions', [
-      session('running-newest', 500),
-      session('failed-middle', 400),
-      session('attention-oldest', 300),
-    ]);
-    setState('activeSessionId', 'running-newest');
-    setState('sessionStatus', {
-      'running-newest': { type: 'busy' },
-    });
-    setState('failedSessionIds', ['failed-middle']);
-    setState('questions', [{ id: 'question-1', sessionID: 'attention-oldest', questions: [] }]);
+    setState(
+      storePath('sessions', [
+        session('running-newest', 500),
+        session('failed-middle', 400),
+        session('attention-oldest', 300),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'running-newest'));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'running-newest': { type: 'busy' },
+      })
+    );
+    flushSolid();
+    setState(storePath('failedSessionIds', ['failed-middle']));
+    flushSolid();
+    setState(
+      storePath('questions', [{ id: 'question-1', sessionID: 'attention-oldest', questions: [] }])
+    );
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const sidebar = container?.querySelector('.session-list-view-sidebar');
     const titles = Array.from(sidebar?.querySelectorAll('.session-item-title') ?? []).map((item) =>
@@ -3683,11 +4594,15 @@ describe('header status badges', () => {
       items: [sessions[2]!],
       hasMore: false,
     });
-    setState('sessions', sessions);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', sessions));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const input = container?.querySelector('.session-list-search-input') as HTMLInputElement | null;
@@ -3695,6 +4610,7 @@ describe('header status badges', () => {
 
     input!.value = 'gamma';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
 
     await vi.waitFor(() => {
       const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
@@ -3702,18 +4618,25 @@ describe('header status badges', () => {
       );
       expect(titles).toEqual(['Gamma review']);
     });
+    flushSolid();
   });
 
   it('resets keyboard-focused session when the search input regains focus', async () => {
-    setState('sessions', [
-      session('session-1', 500, { title: 'Alpha build' }),
-      session('session-2', 400, { title: 'Beta follow-up' }),
-      session('session-3', 300, { title: 'Gamma review' }),
-    ]);
-    setState('activeSessionId', 'session-1');
+    setState(
+      storePath('sessions', [
+        session('session-1', 500, { title: 'Alpha build' }),
+        session('session-2', 400, { title: 'Beta follow-up' }),
+        session('session-3', 300, { title: 'Gamma review' }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const input = container?.querySelector('.session-list-search-input') as HTMLInputElement | null;
@@ -3722,10 +4645,13 @@ describe('header status badges', () => {
     expect(items).toHaveLength(3);
 
     items[2]?.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    flushSolid();
     expect(items[2]?.classList.contains('keyboard-focus')).toBe(true);
 
     input!.dispatchEvent(new FocusEvent('focus'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.session-item.keyboard-focus')).toBeNull();
   });
@@ -3733,10 +4659,13 @@ describe('header status badges', () => {
   it('shows an empty state for a search with no matching sessions', async () => {
     const sessions = [session('session-1', 500, { title: 'Alpha build' })];
     vi.spyOn(client.session, 'list').mockResolvedValue({ items: [], hasMore: false });
-    setState('sessions', sessions);
+    setState(storePath('sessions', sessions));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const input = container?.querySelector('.session-list-search-input') as HTMLInputElement | null;
@@ -3744,29 +4673,40 @@ describe('header status badges', () => {
 
     input!.value = 'missing';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(container?.querySelector('.session-empty')?.textContent?.trim()).toBe(
         'No matching sessions'
       );
     });
+    flushSolid();
   });
 
   it('keeps all group headers outside the expanded section scroll region', () => {
     const now = Date.now();
-    setState('sessions', [
-      session('recent-session', now - 1_000, { title: 'Recent session' }),
-      ...Array.from({ length: 49 }, (_, index) => session(`recent-${index}`, now - 2_000)),
-      session('older-session', now - (24 * 60 * 60 * 1_000 + 1), { title: 'Older session' }),
-    ]);
-    setState('activeSessionId', 'recent-session');
-    setState('lastSeenSessions', {
-      'recent-session': now - 1_000,
-      'older-session': now - (24 * 60 * 60 * 1_000 + 1),
-    });
+    setState(
+      storePath('sessions', [
+        session('recent-session', now - 1_000, { title: 'Recent session' }),
+        ...Array.from({ length: 49 }, (_, index) => session(`recent-${index}`, now - 2_000)),
+        session('older-session', now - (24 * 60 * 60 * 1_000 + 1), { title: 'Older session' }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'recent-session'));
+    flushSolid();
+    setState(
+      storePath('lastSeenSessions', {
+        'recent-session': now - 1_000,
+        'older-session': now - (24 * 60 * 60 * 1_000 + 1),
+      })
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const sections = container?.querySelector('.session-list-sections') as HTMLDivElement | null;
@@ -3792,20 +4732,29 @@ describe('header status badges', () => {
 
   it('keeps showing sessions in the default list when all are older than one day', () => {
     const now = Date.now();
-    setState('sessions', [
-      session('older-session-a', now - (24 * 60 * 60 * 1_000 + 1), { title: 'Older session A' }),
-      session('older-session-b', now - (2 * 24 * 60 * 60 * 1_000 + 1), {
-        title: 'Older session B',
-      }),
-    ]);
-    setState('activeSessionId', 'older-session-a');
-    setState('lastSeenSessions', {
-      'older-session-a': now - (24 * 60 * 60 * 1_000 + 1),
-      'older-session-b': now - (2 * 24 * 60 * 60 * 1_000 + 1),
-    });
+    setState(
+      storePath('sessions', [
+        session('older-session-a', now - (24 * 60 * 60 * 1_000 + 1), { title: 'Older session A' }),
+        session('older-session-b', now - (2 * 24 * 60 * 60 * 1_000 + 1), {
+          title: 'Older session B',
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'older-session-a'));
+    flushSolid();
+    setState(
+      storePath('lastSeenSessions', {
+        'older-session-a': now - (24 * 60 * 60 * 1_000 + 1),
+        'older-session-b': now - (2 * 24 * 60 * 60 * 1_000 + 1),
+      })
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(
       Array.from(container?.querySelectorAll('.session-item-title') ?? []).map((item) =>
@@ -3817,19 +4766,28 @@ describe('header status badges', () => {
 
   it('keeps group headers visible when archive is expanded', async () => {
     const now = Date.now();
-    setState('sessions', [
-      session('recent-session', now - 1_000),
-      ...Array.from({ length: 49 }, (_, index) => session(`recent-${index}`, now - 2_000)),
-      session('older-session', now - (24 * 60 * 60 * 1_000 + 1)),
-    ]);
-    setState('activeSessionId', 'recent-session');
-    setState('lastSeenSessions', {
-      'recent-session': now - 1_000,
-      'older-session': now - (24 * 60 * 60 * 1_000 + 1),
-    });
+    setState(
+      storePath('sessions', [
+        session('recent-session', now - 1_000),
+        ...Array.from({ length: 49 }, (_, index) => session(`recent-${index}`, now - 2_000)),
+        session('older-session', now - (24 * 60 * 60 * 1_000 + 1)),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'recent-session'));
+    flushSolid();
+    setState(
+      storePath('lastSeenSessions', {
+        'recent-session': now - 1_000,
+        'older-session': now - (24 * 60 * 60 * 1_000 + 1),
+      })
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const button = Array.from(
@@ -3838,8 +4796,11 @@ describe('header status badges', () => {
     expect(button).toBeInstanceOf(HTMLButtonElement);
 
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const sectionTitles = Array.from(
       container?.querySelectorAll('.session-list-section-title') ?? []
@@ -3854,19 +4815,28 @@ describe('header status badges', () => {
 
   it('shows recent sessions in an ephemeral group when archive is open', async () => {
     const now = Date.now();
-    setState('sessions', [
-      session('recent-session', now - 1_000, { title: 'Recent session' }),
-      ...Array.from({ length: 49 }, (_, index) => session(`recent-${index}`, now - 2_000)),
-      session('older-session', now - (24 * 60 * 60 * 1_000 + 1), { title: 'Older session' }),
-    ]);
-    setState('activeSessionId', 'recent-session');
-    setState('lastSeenSessions', {
-      'recent-session': now - 1_000,
-      'older-session': now - (24 * 60 * 60 * 1_000 + 1),
-    });
+    setState(
+      storePath('sessions', [
+        session('recent-session', now - 1_000, { title: 'Recent session' }),
+        ...Array.from({ length: 49 }, (_, index) => session(`recent-${index}`, now - 2_000)),
+        session('older-session', now - (24 * 60 * 60 * 1_000 + 1), { title: 'Older session' }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'recent-session'));
+    flushSolid();
+    setState(
+      storePath('lastSeenSessions', {
+        'recent-session': now - 1_000,
+        'older-session': now - (24 * 60 * 60 * 1_000 + 1),
+      })
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const archiveToggle = Array.from(
@@ -3875,7 +4845,9 @@ describe('header status badges', () => {
     expect(archiveToggle).toBeInstanceOf(HTMLButtonElement);
 
     archiveToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const sectionTitles = Array.from(
       container?.querySelectorAll('.session-list-section-title') ?? []
@@ -3894,7 +4866,9 @@ describe('header status badges', () => {
     expect(recentToggle).toBeInstanceOf(HTMLButtonElement);
 
     recentToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const expandedSectionTitles = Array.from(
       container?.querySelectorAll('.session-list-section-title') ?? []
@@ -3912,23 +4886,17 @@ describe('header status badges', () => {
 
   it('keeps group headers visible when recycle bin is expanded', async () => {
     const now = Date.now();
-    setState('sessions', [session('active', now - 1_000)]);
-    setState('activeSessionId', 'active');
-    setState('recycleBinEntries', [
-      {
-        rootID: 'deleted-session',
-        deletedAt: now - 10_000,
-        expiresAt: now + 10_000,
-        root: {
-          id: 'deleted-session',
-          projectID: 'project-1',
-          directory: '/repo',
-          title: 'Deleted session',
-          version: '1',
-          time: { created: now - 20_000, updated: now - 10_000 },
-        },
-        sessions: [
-          {
+    setState(storePath('sessions', [session('active', now - 1_000)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(
+      storePath('recycleBinEntries', [
+        {
+          rootID: 'deleted-session',
+          deletedAt: now - 10_000,
+          expiresAt: now + 10_000,
+          root: {
             id: 'deleted-session',
             projectID: 'project-1',
             directory: '/repo',
@@ -3936,12 +4904,25 @@ describe('header status badges', () => {
             version: '1',
             time: { created: now - 20_000, updated: now - 10_000 },
           },
-        ],
-      },
-    ]);
+          sessions: [
+            {
+              id: 'deleted-session',
+              projectID: 'project-1',
+              directory: '/repo',
+              title: 'Deleted session',
+              version: '1',
+              time: { created: now - 20_000, updated: now - 10_000 },
+            },
+          ],
+        },
+      ])
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const button = Array.from(
@@ -3950,8 +4931,11 @@ describe('header status badges', () => {
     expect(button).toBeInstanceOf(HTMLButtonElement);
 
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(
       Array.from(container?.querySelectorAll('.session-list-section-title') ?? []).map((item) =>
@@ -3967,19 +4951,26 @@ describe('header status badges', () => {
 
   it('expands recycle bin entries that are missing snapshots', async () => {
     const now = Date.now();
-    setState('sessions', [session('active', now - 1_000)]);
-    setState('activeSessionId', 'active');
+    setState(storePath('sessions', [session('active', now - 1_000)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
     // SAFETY: The fixture provides the never fields read by this statement.
-    setState('recycleBinEntries', [
-      {
-        rootID: 'deleted-session',
-        deletedAt: now - 10_000,
-        expiresAt: now + 10_000,
-      } as never,
-    ]);
+    setState(
+      storePath('recycleBinEntries', [
+        {
+          rootID: 'deleted-session',
+          deletedAt: now - 10_000,
+          expiresAt: now + 10_000,
+        } as never,
+      ])
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = Array.from(
@@ -3987,7 +4978,9 @@ describe('header status badges', () => {
     ).find((item) => item.textContent?.includes('Recycle Bin')) as HTMLButtonElement | undefined;
 
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.textContent).not.toContain('Something went wrong');
     expect(
@@ -4004,23 +4997,17 @@ describe('header status badges', () => {
       .mockResolvedValue(undefined);
 
     const now = Date.now();
-    setState('sessions', [session('active', now - 1_000)]);
-    setState('activeSessionId', 'active');
-    setState('recycleBinEntries', [
-      {
-        rootID: 'deleted-session',
-        deletedAt: now - 10_000,
-        expiresAt: now + 10_000,
-        root: {
-          id: 'deleted-session',
-          projectID: 'project-1',
-          directory: '/repo',
-          title: 'Deleted session',
-          version: '1',
-          time: { created: now - 20_000, updated: now - 10_000 },
-        },
-        sessions: [
-          {
+    setState(storePath('sessions', [session('active', now - 1_000)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(
+      storePath('recycleBinEntries', [
+        {
+          rootID: 'deleted-session',
+          deletedAt: now - 10_000,
+          expiresAt: now + 10_000,
+          root: {
             id: 'deleted-session',
             projectID: 'project-1',
             directory: '/repo',
@@ -4028,12 +5015,25 @@ describe('header status badges', () => {
             version: '1',
             time: { created: now - 20_000, updated: now - 10_000 },
           },
-        ],
-      },
-    ]);
+          sessions: [
+            {
+              id: 'deleted-session',
+              projectID: 'project-1',
+              directory: '/repo',
+              title: 'Deleted session',
+              version: '1',
+              time: { created: now - 20_000, updated: now - 10_000 },
+            },
+          ],
+        },
+      ])
+    );
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = Array.from(
@@ -4041,7 +5041,9 @@ describe('header status badges', () => {
     ).find((item) => item.textContent?.includes('Recycle Bin')) as HTMLButtonElement | undefined;
 
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const restoreButton = container?.querySelector(
@@ -4053,8 +5055,11 @@ describe('header status badges', () => {
     ) as HTMLButtonElement | null;
 
     restoreButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(restoreSpy).toHaveBeenCalledWith('deleted-session');
     expect(deleteSpy).not.toHaveBeenCalled();
@@ -4064,34 +5069,46 @@ describe('header status badges', () => {
       (item) => item.textContent === 'Confirm'
     ) as HTMLButtonElement | undefined;
     confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(deleteSpy).toHaveBeenCalledWith('deleted-session');
   });
 
   it('does not render the embedded session sidebar when the session picker is open', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-session-sidebar')).toBeNull();
     expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
   });
 
   it('shows the desktop workspace with a blank chat when the session picker expands to large screens', async () => {
-    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
-    setState('activeSessionId', null);
+    setState(storePath('sessions', [session('session-1', 500), session('session-2', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', null));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-session-sidebar')).toBeNull();
     expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
 
     dispatchDesktopMediaQueryChange(true);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-workspace')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.chat-session-sidebar')).toBeInstanceOf(HTMLElement);
@@ -4103,12 +5120,17 @@ describe('header status badges', () => {
   });
 
   it('shows loading dots before rendering Models on desktop from the session picker', async () => {
-    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 500), session('session-2', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
     setShowModels(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const loading = container?.querySelector('[role="status"][aria-label="Loading models"]');
     expect(loading?.parentElement?.classList.contains('models-panel')).toBe(true);
@@ -4116,17 +5138,22 @@ describe('header status badges', () => {
     expect(container?.querySelector('.models-header')).toBeNull();
 
     dispatchDesktopMediaQueryChange(true);
+    flushSolid();
     await vi.waitFor(() =>
       expect(container?.querySelector('.models-header')).toBeInstanceOf(HTMLDivElement)
     );
+    flushSolid();
     expect(container?.querySelector('[aria-label="Loading models"]')).toBeNull();
 
     setShowModels(false);
+    flushSolid();
     expect(container?.querySelector('.models-panel')).toBeNull();
     setShowModels(true);
+    flushSolid();
     await vi.waitFor(() =>
       expect(container?.querySelector('.models-header')).toBeInstanceOf(HTMLDivElement)
     );
+    flushSolid();
     expect(container?.querySelector('[aria-label="Loading models"]')).toBeNull();
   });
 
@@ -4139,17 +5166,21 @@ describe('header status badges', () => {
     const originalSend = bridgeWindow.__sendToExtension;
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
     const model = { providerID: 'openai', modelID: 'test-model' };
-    setState('selectedModel', model);
+    setState(storePath('selectedModel', model));
+    flushSolid();
     try {
       cleanup = render(() => Chat(), container!);
+      flushSolid();
       expect(sent.findLast((message) => message.type === 'commands/state')).toMatchObject({
         payload: { model, modelVisible: true },
       });
       setShowModels(true);
+      flushSolid();
       expect(sent.findLast((message) => message.type === 'commands/state')).toMatchObject({
         payload: { model, modelVisible: false },
       });
       setShowModels(false);
+      flushSolid();
       expect(sent.findLast((message) => message.type === 'commands/state')).toMatchObject({
         payload: { model, modelVisible: true },
       });
@@ -4162,20 +5193,36 @@ describe('header status badges', () => {
   it.each(['session', 'directory', 'server'] as const)(
     'closes a side-question dialog when its %s changes',
     async (change) => {
-      setState('sessions', [session('session-1', 500), session('session-2', 400)]);
-      setState('activeSessionId', 'session-1');
-      setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+      setState(storePath('sessions', [session('session-1', 500), session('session-2', 400)]));
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState(
+        storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
+      );
+      flushSolid();
       cleanup = render(() => Chat(), container!);
+      flushSolid();
       expect(openSideQuestion()).toBe(true);
+      flushSolid();
       await vi.waitFor(() =>
         expect(document.querySelector('.side-question-dialog')).not.toBeNull()
       );
-      if (change === 'session') setState('activeSessionId', 'session-2');
+      flushSolid();
+      if (change === 'session') setState(storePath('activeSessionId', 'session-2'));
       else if (change === 'directory')
-        setState('sessions', (entry) => entry.id === 'session-1', 'directory', '/moved');
+        setState(storePath('sessions', (entry) => entry.id === 'session-1', 'directory', '/moved'));
       else
-        setState('serverStatus', { state: 'running', url: 'http://localhost:5000', apiVersion: 2 });
+        setState(
+          storePath('serverStatus', {
+            state: 'running',
+            url: 'http://localhost:5000',
+            apiVersion: 2,
+          })
+        );
+      flushSolid();
       await vi.waitFor(() => expect(document.querySelector('.side-question-dialog')).toBeNull());
+      flushSolid();
       expect(sideQuestionView()).toBeNull();
     }
   );
@@ -4189,22 +5236,31 @@ describe('header status badges', () => {
       default: {},
       connected: ['github-copilot'],
     });
-    setState('providerAuthMethods', {
-      'github-copilot': [{ type: 'oauth', label: 'Login with GitHub Copilot' }],
-    });
-    setState('sessions', [session('session-1', 500)]);
-    setState('activeSessionId', 'session-1');
+    setState(
+      storePath('providerAuthMethods', {
+        'github-copilot': [{ type: 'oauth', label: 'Login with GitHub Copilot' }],
+      })
+    );
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     requestProviderConnection('github-copilot');
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     await vi.waitFor(() =>
       expect(document.body.querySelector<HTMLElement>('[role="dialog"]')).toBeInstanceOf(
         HTMLElement
       )
     );
+    flushSolid();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
     expect(container?.querySelector('.models-panel')).toBeNull();
     expect(dialog?.textContent).toContain('Re-authenticate provider');
@@ -4221,17 +5277,24 @@ describe('header status badges', () => {
       connected: ['openai'],
     });
     const authorize = vi.spyOn(client.config, 'authorizeProvider');
-    setState('providerAuthMethods', {
-      openai: [
-        { id: 'chatgpt-token-sharing', type: 'oauth', label: 'Sign in with ChatGPT' },
-        { id: 'chatgpt-browser', type: 'oauth', label: 'Codex browser (legacy)' },
-      ],
-    });
-    setState('sessions', [session('session-1', 500)]);
-    setState('activeSessionId', 'session-1');
+    setState(
+      storePath('providerAuthMethods', {
+        openai: [
+          { id: 'chatgpt-token-sharing', type: 'oauth', label: 'Sign in with ChatGPT' },
+          { id: 'chatgpt-browser', type: 'oauth', label: 'Codex browser (legacy)' },
+        ],
+      })
+    );
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     requestProviderConnection('openai', 'chatgpt-browser');
     await vi.waitFor(() => expect(document.querySelector('.provider-connect-form')).not.toBeNull());
+    flushSolid();
     expect(document.querySelector('.provider-connect-oauth-handoff')).not.toBeNull();
     expect(document.querySelector('.provider-connect-methods')).toBeNull();
     expect(authorize).not.toHaveBeenCalled();
@@ -4246,19 +5309,25 @@ describe('header status badges', () => {
       default: {},
       connected: [],
     });
-    setState('sessions', [session('session-1', 500)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     requestProviderConnection();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     await vi.waitFor(() =>
       expect(document.body.querySelector<HTMLElement>('[role="dialog"]')).toBeInstanceOf(
         HTMLElement
       )
     );
+    flushSolid();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog?.textContent).toContain('Connect provider');
     expect(dialog?.textContent).toContain('Anthropic');
@@ -4269,28 +5338,40 @@ describe('header status badges', () => {
   });
 
   it('renders Models from the session picker on narrow screens', async () => {
-    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 500), session('session-2', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
     setShowModels(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-workspace')).toBeNull();
     expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
     await vi.waitFor(() =>
       expect(container?.querySelector('.models-header')).toBeInstanceOf(HTMLDivElement)
     );
+    flushSolid();
   });
 
   it('renders the desktop session pane on the right when configured', async () => {
-    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 500), session('session-2', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setDesktopSessionPaneSide('right');
+    flushSolid();
     dispatchDesktopMediaQueryChange(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const workspace = container?.querySelector('.chat-workspace');
     const sidebar = container?.querySelector('.chat-session-sidebar');
@@ -4305,71 +5386,99 @@ describe('header status badges', () => {
   });
 
   it('keeps the edit composer visible when its message row disappears', async () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('activeSessionId', 'session-1');
-    setState('messages', [
-      {
-        info: {
-          id: 'user-1',
-          sessionID: 'session-1',
-          role: 'user',
-          time: { created: 1 },
-          agent: 'build',
-          model: { providerID: 'openai', modelID: 'gpt-4o' },
-        },
-        parts: [
-          {
-            id: 'text-1',
-            messageID: 'user-1',
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('messages', [
+        {
+          info: {
+            id: 'user-1',
             sessionID: 'session-1',
-            type: 'text',
-            text: 'Original prompt',
+            role: 'user',
+            time: { created: 1 },
+            agent: 'build',
+            model: { providerID: 'openai', modelID: 'gpt-4o' },
           },
-        ],
-      },
-    ]);
+          parts: [
+            {
+              id: 'text-1',
+              messageID: 'user-1',
+              sessionID: 'session-1',
+              type: 'text',
+              text: 'Original prompt',
+            },
+          ],
+        },
+      ])
+    );
+    flushSolid();
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     startEditingMessage('user-1', 'session-1', 'Revised prompt');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const composer = container?.querySelector('.rich-composer');
     expect(composer).not.toBeNull();
     expect(composer?.closest('.interactive-list')).not.toBeNull();
-    setState('messages', []);
+    flushSolid();
+    setState(storePath('messages', []));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.rich-composer')).toBe(composer);
     expect(composer?.closest('[hidden]')).toBeNull();
+    flushSolid();
     expect(composer?.closest('.composer-bottom-slot')).not.toBeNull();
+    flushSolid();
     expect(composer?.textContent).toContain('Revised prompt');
     const cancel = container?.querySelector<HTMLButtonElement>('[title="Cancel editing (Esc)"]');
     expect(cancel).not.toBeNull();
     cancel?.click();
+    flushSolid();
     expect(composer?.closest('.composer-bottom-slot')).not.toBeNull();
+    flushSolid();
   });
 
   it('preserves the live chat DOM and transient state when the desktop pane changes sides', async () => {
-    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 500), session('session-2', 400)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setState(
-      'messages',
-      Array.from({ length: 60 }, (_, index) => assistantMessageEntry(`assistant-${index + 1}`))
+      storePath(
+        'messages',
+        Array.from({ length: 60 }, (_, index) => assistantMessageEntry(`assistant-${index + 1}`))
+      )
     );
+    flushSolid();
     setDesktopSessionPaneSide('right');
+    flushSolid();
     dispatchDesktopMediaQueryChange(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const messageList = container?.querySelector<HTMLDivElement>('.interactive-list[role="log"]');
     const composer = container?.querySelector<HTMLDivElement>('.rich-composer');
     if (!messageList || !composer) throw new Error('Expected the live message list and composer');
     messageList.scrollTop = 173;
     composer.focus();
+    flushSolid();
 
     setDesktopSessionPaneSide('left');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.chat-workspace-pane-right')).toBeNull();
     expect(container?.querySelector('.interactive-list[role="log"]')).toBe(messageList);
@@ -4443,7 +5552,8 @@ describe('getHeaderFailedCount', () => {
   it('counts usage-limit sessions as failed', () => {
     const sessions = [session('limited', 500), session('other', 400)];
 
-    setState('sessions', sessions);
+    setState(storePath('sessions', sessions));
+    flushSolid();
     setSessionUsageLimit('limited', {
       source: 'status',
       statusCode: 429,
@@ -4453,6 +5563,7 @@ describe('getHeaderFailedCount', () => {
       attempt: 2,
       sessionID: 'limited',
     });
+    flushSolid();
 
     expect(
       getHeaderFailedCount(sessions, (sessionId) => isFailedSession(sessionId), null, true)
@@ -4465,19 +5576,23 @@ describe('getHeaderFailedCount', () => {
       session('child-1', 400, { parentID: 'session-1' }),
     ];
 
-    setState('sessions', sessions);
-    setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'bash',
-        sessionID: 'child-1',
-        messageID: 'message-1',
-        callID: 'call-1',
-        title: 'Allow bash',
-        metadata: {},
-        time: { created: 1 },
-      },
-    ]);
+    setState(storePath('sessions', sessions));
+    flushSolid();
+    setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'bash',
+          sessionID: 'child-1',
+          messageID: 'message-1',
+          callID: 'call-1',
+          title: 'Allow bash',
+          metadata: {},
+          time: { created: 1 },
+        },
+      ])
+    );
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
 
@@ -4492,7 +5607,8 @@ describe('getHeaderFailedCount', () => {
       session('grandchild-1', 300, { parentID: 'child-1' }),
     ];
 
-    setState('sessions', sessions);
+    setState(storePath('sessions', sessions));
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
 
@@ -4532,10 +5648,14 @@ describe('getHeaderRunningCount', () => {
 
 describe('usage-limit session status precedence', () => {
   it('treats a retrying 429 session as failed instead of running', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('sessionStatus', {
-      'session-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 8 },
-    });
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'session-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 8 },
+      })
+    );
+    flushSolid();
     setSessionUsageLimit('session-1', {
       source: 'status',
       statusCode: 429,
@@ -4545,6 +5665,7 @@ describe('usage-limit session status precedence', () => {
       attempt: 2,
       sessionID: 'session-1',
     });
+    flushSolid();
 
     expect(hasActiveUsageLimit('session-1')).toBe(true);
     expect(isFailedSession('session-1')).toBe(true);
@@ -4552,47 +5673,68 @@ describe('usage-limit session status precedence', () => {
   });
 
   it('renders a failed indicator when a session is both retrying and failed', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('sessionStatus', {
-      'session-1': { type: 'retry', attempt: 2, message: 'Retrying request', next: 8 },
-    });
-    setState('failedSessionIds', ['session-1']);
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'session-1': { type: 'retry', attempt: 2, message: 'Retrying request', next: 8 },
+      })
+    );
+    flushSolid();
+    setState(storePath('failedSessionIds', ['session-1']));
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const indicator = container?.querySelector('.session-item .session-item-indicator');
 
     expect(indicator?.classList.contains('is-failed')).toBe(true);
     expect(indicator?.getAttribute('aria-label')).toBe('Failed');
 
-    setState('lastSeenSessions', 'session-1', 500);
+    setState(storePath('lastSeenSessions', 'session-1', 500));
+    flushSolid();
 
     expect(container?.querySelector('.session-item .session-item-indicator.is-failed')).toBeNull();
     expect(state.failedSessionIds).toEqual(['session-1']);
   });
 
   it('renders a failure that arrives after the session was already seen', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('lastSeenSessions', 'session-1', 500);
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('lastSeenSessions', 'session-1', 500));
+    flushSolid();
     setSessionFailed('session-1', true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(
       container?.querySelector('.session-item .session-item-indicator.is-failed')
     ).not.toBeNull();
 
-    setState('lastSeenSessions', 'session-1', state.failedSessionUpdatedAt['session-1']!);
+    setState(
+      storePath('lastSeenSessions', 'session-1', state.failedSessionUpdatedAt['session-1']!)
+    );
+    flushSolid();
 
     expect(container?.querySelector('.session-item .session-item-indicator.is-failed')).toBeNull();
   });
 
   it('keeps a parent running when a previously failed sub-agent resumes work', () => {
-    setState('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })]);
-    setState('sessionStatus', {
-      child: { type: 'busy' },
-    });
-    setState('failedSessionIds', ['child']);
+    setState(
+      storePath('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })])
+    );
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        child: { type: 'busy' },
+      })
+    );
+    flushSolid();
+    setState(storePath('failedSessionIds', ['child']));
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
 
@@ -4604,26 +5746,30 @@ describe('usage-limit session status precedence', () => {
   });
 
   it('does not render a failed indicator for aborted sessions', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('messages', [
-      {
-        info: {
-          id: 'message-1',
-          sessionID: 'session-1',
-          role: 'assistant',
-          time: { created: 0 },
-          parentID: 'user-1',
-          modelID: 'model-1',
-          providerID: 'provider-1',
-          mode: 'default',
-          path: { cwd: '/repo', root: '/repo' },
-          cost: 0,
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-          error: { name: 'aborted', data: { message: 'Aborted' } },
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(
+      storePath('messages', [
+        {
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            role: 'assistant',
+            time: { created: 0 },
+            parentID: 'user-1',
+            modelID: 'model-1',
+            providerID: 'provider-1',
+            mode: 'default',
+            path: { cwd: '/repo', root: '/repo' },
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            error: { name: 'aborted', data: { message: 'Aborted' } },
+          },
+          parts: [],
         },
-        parts: [],
-      },
-    ]);
+      ])
+    );
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
 
@@ -4631,13 +5777,19 @@ describe('usage-limit session status precedence', () => {
   });
 
   it('renders a plan-ready indicator for unread plan sessions', () => {
-    setState('sessions', [session('active', 600), session('plan-1', 500)]);
-    setState('activeSessionId', 'active');
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
-    setState('lastSeenSessions', { active: 600, 'plan-1': 0 });
+    setState(storePath('sessions', [session('active', 600), session('plan-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { active: 600, 'plan-1': 0 }));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const planRow = Array.from(container?.querySelectorAll('.session-item') ?? []).find(
       (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'plan-1'
@@ -4652,13 +5804,19 @@ describe('usage-limit session status precedence', () => {
   });
 
   it('restores the plan-ready indicator when a seen plan receives a newer update', () => {
-    setState('sessions', [session('active', 600), session('plan-1', 500)]);
-    setState('activeSessionId', 'active');
-    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
-    setState('lastSeenSessions', { active: 600, 'plan-1': 500 });
+    setState(storePath('sessions', [session('active', 600), session('plan-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'active'));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'plan-1': 'plan' }));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { active: 600, 'plan-1': 500 }));
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     const getPlanRow = () =>
       Array.from(container?.querySelectorAll('.session-item') ?? []).find(
@@ -4667,7 +5825,8 @@ describe('usage-limit session status precedence', () => {
 
     expect(getPlanRow()?.querySelector('.session-item-indicator')).toBeNull();
 
-    setState('sessions', [session('active', 600), session('plan-1', 501)]);
+    setState(storePath('sessions', [session('active', 600), session('plan-1', 501)]));
+    flushSolid();
 
     const indicator = getPlanRow()?.querySelector('.session-item-indicator');
     expect(indicator?.classList.contains('is-plan-completed')).toBe(true);
@@ -4677,10 +5836,14 @@ describe('usage-limit session status precedence', () => {
   });
 
   it('returns to running once the 429 notice is cleared', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('sessionStatus', {
-      'session-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 8 },
-    });
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'session-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 8 },
+      })
+    );
+    flushSolid();
     setSessionUsageLimit('session-1', {
       source: 'status',
       statusCode: 429,
@@ -4690,9 +5853,12 @@ describe('usage-limit session status precedence', () => {
       attempt: 2,
       sessionID: 'session-1',
     });
+    flushSolid();
 
     setSessionUsageLimit('session-1', null);
+    flushSolid();
     setSessionFailed('session-1', false);
+    flushSolid();
 
     expect(hasActiveUsageLimit('session-1')).toBe(false);
     expect(isFailedSession('session-1')).toBe(false);
@@ -4701,16 +5867,24 @@ describe('usage-limit session status precedence', () => {
 
   it('shows completed indicators only after synced active sessions remain idle', async () => {
     try {
-      setState('sessions', [session('session-1', 500)]);
-      setState('activeSessionId', 'session-1');
-      setState('sessionStatus', {
-        'session-1': { type: 'busy' },
-      });
+      setState(storePath('sessions', [session('session-1', 500)]));
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState(
+        storePath('sessionStatus', {
+          'session-1': { type: 'busy' },
+        })
+      );
+      flushSolid();
       setShowSessionPicker(true);
+      flushSolid();
 
       setMessagesIncremental([assistantMessageEntry('assistant-1')]);
+      flushSolid();
 
       cleanup = render(() => Chat(), container!);
+      flushSolid();
 
       const row = container?.querySelector('.session-item');
       expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
@@ -4719,7 +5893,8 @@ describe('usage-limit session status precedence', () => {
         true
       );
 
-      setState('sessionStatus', 'session-1', { type: 'idle' });
+      setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+      flushSolid();
 
       expect(isRunningSession('session-1')).toBe(false);
       expect(row?.querySelector('.session-item-indicator')?.classList.contains('is-running')).toBe(
@@ -4727,30 +5902,40 @@ describe('usage-limit session status precedence', () => {
       );
 
       await vi.advanceTimersByTimeAsync(1200);
+      flushSolid();
       expect(
         row?.querySelector('.session-item-indicator')?.classList.contains('is-completed')
       ).toBe(true);
     } finally {
       cleanup?.();
+      flushSolid();
       cleanup = undefined;
     }
   });
 
   it('does not render the active session status next to the chat header title', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setMessagesIncremental([assistantMessageEntry('assistant-1')]);
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-header-status-indicator')).toBeNull();
   });
 
   it('does not treat an incomplete Ralph manager session as running', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('sessionStatus', {
-      'session-1': { type: 'busy' },
-    });
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'session-1': { type: 'busy' },
+      })
+    );
+    flushSolid();
     ralphStore.startRun({
       managerSessionId: 'session-1',
       workspaceDirectory: '/workspace',
@@ -4762,7 +5947,9 @@ describe('usage-limit session status precedence', () => {
       agent: null,
       createdAt: 1,
     });
+    flushSolid();
     ralphStore.setStatus('session-1', 'incomplete', 'iteration_limit_with_gap');
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
 
@@ -4771,13 +5958,19 @@ describe('usage-limit session status precedence', () => {
   });
 
   it('does not bubble stale child running status to a done Ralph manager session', () => {
-    setState('sessions', [
-      session('session-1', 500),
-      session('child-1', 400, { parentID: 'session-1' }),
-    ]);
-    setState('sessionStatus', {
-      'child-1': { type: 'busy' },
-    });
+    setState(
+      storePath('sessions', [
+        session('session-1', 500),
+        session('child-1', 400, { parentID: 'session-1' }),
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'child-1': { type: 'busy' },
+      })
+    );
+    flushSolid();
     ralphStore.startRun({
       managerSessionId: 'session-1',
       workspaceDirectory: '/workspace',
@@ -4789,7 +5982,9 @@ describe('usage-limit session status precedence', () => {
       agent: null,
       createdAt: 1,
     });
+    flushSolid();
     ralphStore.setStatus('session-1', 'done', 'done_marker');
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
 
@@ -4799,15 +5994,23 @@ describe('usage-limit session status precedence', () => {
   });
 
   it('does not render stale Ralph child running status in the sub-agent list', async () => {
-    setState('sessions', [
-      session('manager', 500),
-      session('child-1', 400, { parentID: 'manager' }),
-    ]);
-    setState('activeSessionId', 'manager');
-    setState('lastSeenSessions', { manager: 500, 'child-1': 400 });
-    setState('sessionStatus', {
-      'child-1': { type: 'busy' },
-    });
+    setState(
+      storePath('sessions', [
+        session('manager', 500),
+        session('child-1', 400, { parentID: 'manager' }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'manager'));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { manager: 500, 'child-1': 400 }));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        'child-1': { type: 'busy' },
+      })
+    );
+    flushSolid();
     ralphStore.startRun({
       managerSessionId: 'manager',
       workspaceDirectory: '/workspace',
@@ -4819,9 +6022,12 @@ describe('usage-limit session status precedence', () => {
       agent: null,
       createdAt: 1,
     });
+    flushSolid();
     ralphStore.setStatus('manager', 'done', 'done_marker');
+    flushSolid();
 
     cleanup = render(() => Chat(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const subagentsButton = container?.querySelector(
@@ -4830,7 +6036,9 @@ describe('usage-limit session status precedence', () => {
     expect(subagentsButton).toBeInstanceOf(HTMLButtonElement);
 
     subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const childRow = Array.from(container?.querySelectorAll('.session-item') ?? []).find(
       (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'child-1'
@@ -4841,10 +6049,13 @@ describe('usage-limit session status precedence', () => {
   });
 
   it('bubbles Ralph child usage-limit failures to the manager session indicator', () => {
-    setState('sessions', [
-      session('manager', 500),
-      session('child-1', 400, { parentID: 'manager' }),
-    ]);
+    setState(
+      storePath('sessions', [
+        session('manager', 500),
+        session('child-1', 400, { parentID: 'manager' }),
+      ])
+    );
+    flushSolid();
     ralphStore.startRun({
       managerSessionId: 'manager',
       workspaceDirectory: '/workspace',
@@ -4856,6 +6067,7 @@ describe('usage-limit session status precedence', () => {
       agent: null,
       createdAt: 1,
     });
+    flushSolid();
     ralphStore.upsertIteration('manager', {
       index: 1,
       childSessionId: 'child-1',
@@ -4865,6 +6077,7 @@ describe('usage-limit session status precedence', () => {
       filesChanged: [],
       verification: {},
     });
+    flushSolid();
     setSessionUsageLimit('child-1', {
       source: 'status',
       statusCode: 429,
@@ -4874,6 +6087,7 @@ describe('usage-limit session status precedence', () => {
       attempt: 2,
       sessionID: 'child-1',
     });
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
 
@@ -4882,10 +6096,13 @@ describe('usage-limit session status precedence', () => {
   });
 
   it('does not bubble Ralph child failures to a manually stopped manager session', () => {
-    setState('sessions', [
-      session('manager', 500),
-      session('child-1', 400, { parentID: 'manager' }),
-    ]);
+    setState(
+      storePath('sessions', [
+        session('manager', 500),
+        session('child-1', 400, { parentID: 'manager' }),
+      ])
+    );
+    flushSolid();
     ralphStore.startRun({
       managerSessionId: 'manager',
       workspaceDirectory: '/workspace',
@@ -4897,6 +6114,7 @@ describe('usage-limit session status precedence', () => {
       agent: null,
       createdAt: 1,
     });
+    flushSolid();
     ralphStore.upsertIteration('manager', {
       index: 1,
       childSessionId: 'child-1',
@@ -4906,6 +6124,7 @@ describe('usage-limit session status precedence', () => {
       filesChanged: [],
       verification: {},
     });
+    flushSolid();
     setSessionUsageLimit('child-1', {
       source: 'status',
       statusCode: 429,
@@ -4915,7 +6134,9 @@ describe('usage-limit session status precedence', () => {
       attempt: 2,
       sessionID: 'child-1',
     });
+    flushSolid();
     ralphStore.setStatus('manager', 'stopped', 'manual_stop');
+    flushSolid();
 
     const indicators = deriveSessionIndicators(state.sessions);
 

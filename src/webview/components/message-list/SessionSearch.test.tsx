@@ -1,6 +1,6 @@
+import { flush as flushSolid, createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import type { MessageEntry } from '../../types';
 import type { SessionMessagePage } from '../../lib/client';
 import { client } from '../../lib/client';
@@ -20,14 +20,19 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   resetMessageWindowState();
+  flushSolid();
 });
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container.remove();
+  flushSolid();
   resetMessageWindowState();
+  flushSolid();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  flushSolid();
 });
 
 const entries: MessageEntry[] = [
@@ -46,6 +51,7 @@ function key(value: string, options: KeyboardEventInit = {}, target: EventTarget
     ...options,
   });
   target.dispatchEvent(event);
+  flushSolid();
   return event;
 }
 async function search(value: string) {
@@ -82,17 +88,21 @@ describe('SessionSearch', () => {
         parts: [textPart('new-text', 'A different question')],
       },
     ]);
+    flushSolid();
     key('f', { metaKey: true });
     const input = await search('needle');
+    flushSolid();
     const toggle = container.querySelector<HTMLButtonElement>('.session-search-prompts-toggle')!;
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     toggle.click();
+    flushSolid();
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
     expect(input.value).toBe('needle');
     expect(document.activeElement).toBe(input);
     expect(container.querySelectorAll('[role="option"]')).toHaveLength(1);
     expect(container.querySelector('[role="status"]')?.textContent).toBe('1 matching prompt');
     container.querySelector<HTMLButtonElement>('[aria-label="Clear search"]')!.click();
+    flushSolid();
     expect(
       [...container.querySelectorAll('[role="option"]')].map((item) =>
         item.getAttribute('aria-label')
@@ -108,6 +118,7 @@ describe('SessionSearch', () => {
     key('Escape');
     key('f', { metaKey: true });
     await Promise.resolve();
+    flushSolid();
     expect(container.querySelector('[aria-pressed="true"]')?.textContent).toContain('All prompts');
     expect(container.querySelector('.session-search-results')?.scrollTop).toBe(45);
     expect(container.querySelectorAll('[role="option"]')[1]?.getAttribute('aria-selected')).toBe(
@@ -115,17 +126,22 @@ describe('SessionSearch', () => {
     );
     const reopenedInput = container.querySelector<HTMLInputElement>('input')!;
     key('Enter', {}, reopenedInput);
+    await Promise.resolve();
     expect(onNavigate).toHaveBeenCalledWith('prompt');
     key('f', { metaKey: true });
     await Promise.resolve();
+    flushSolid();
     container.querySelector<HTMLButtonElement>('.session-search-prompts-toggle')!.click();
+    flushSolid();
     expect(container.querySelectorAll('[role="option"]')).toHaveLength(0);
     await search('needle');
+    flushSolid();
     expect(container.querySelectorAll('[role="option"]')).toHaveLength(2);
   });
 
   it('loads all historical prompts without changing transcript pagination', async () => {
     setSessionHistoryCursor('session-1', 'older');
+    flushSolid();
     const read = vi.spyOn(client.session, 'messages').mockResolvedValue([
       { info: userMessage('old-prompt'), parts: [textPart('old-text', 'An older question')] },
       {
@@ -134,10 +150,13 @@ describe('SessionSearch', () => {
       },
     ]);
     const { onNavigate } = mount();
+    flushSolid();
     key('f', { ctrlKey: true });
     expect(read).not.toHaveBeenCalled();
     container.querySelector<HTMLButtonElement>('.session-search-prompts-toggle')!.click();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(read).toHaveBeenCalledOnce();
     expect(getSessionHistoryCursor('session-1')).toBe('older');
     expect(container.querySelectorAll('[role="option"]')).toHaveLength(2);
@@ -146,14 +165,18 @@ describe('SessionSearch', () => {
       (item) => item.textContent?.includes('An older question')
     )!;
     oldPrompt.click();
+    flushSolid();
+    await Promise.resolve();
     expect(onNavigate).toHaveBeenCalledWith('old-prompt');
     key('f', { ctrlKey: true });
     await Promise.resolve();
+    flushSolid();
     expect(read).toHaveBeenCalledOnce();
   });
 
   it('cancels prompt browsing on close and resets the mode when switching sessions', async () => {
     setSessionHistoryCursor('session-1', 'older');
+    flushSolid();
     const read = vi.spyOn(client.session, 'messages').mockImplementation(
       (_id, options) =>
         new Promise((_resolve, reject) => {
@@ -173,14 +196,17 @@ describe('SessionSearch', () => {
       ),
       container
     );
+    flushSolid();
     key('f', { metaKey: true });
     container.querySelector<HTMLButtonElement>('.session-search-prompts-toggle')!.click();
+    flushSolid();
     expect(container.querySelector('[role="status"]')?.textContent).toContain('Loading history');
     key('Escape');
     expect(read.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
     key('f', { metaKey: true });
     expect(read).toHaveBeenCalledTimes(2);
     setSessionId('session-2');
+    flushSolid();
     expect(read.mock.calls[1]?.[1]?.signal?.aborted).toBe(true);
     key('f', { metaKey: true });
     expect(
@@ -188,6 +214,7 @@ describe('SessionSearch', () => {
     ).toBe('false');
     expect(container.querySelectorAll('[role="option"]')).toHaveLength(0);
     await Promise.resolve();
+    flushSolid();
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 
@@ -195,12 +222,16 @@ describe('SessionSearch', () => {
     'opens with find, selects results, and restores focus on Escape with %o',
     async (modifier) => {
       const { onNavigate, onClose } = mount();
+      flushSolid();
       const composer = document.createElement('textarea');
       document.body.insertBefore(composer, container);
       composer.focus();
+      flushSolid();
       expect(key('f', modifier).defaultPrevented).toBe(true);
       await Promise.resolve();
+      flushSolid();
       const input = await search('needle');
+      flushSolid();
       expect(document.activeElement).toBe(input);
       const results = container.querySelectorAll<HTMLButtonElement>('.session-search-result');
       expect(results).toHaveLength(2);
@@ -224,12 +255,15 @@ describe('SessionSearch', () => {
         [...container.querySelectorAll('.session-search-group')].map((group) => group.textContent)
       ).toEqual(['Your prompts1', 'Assistant responses1']);
       results[0]!.click();
+      flushSolid();
+      await Promise.resolve();
       expect(onNavigate).toHaveBeenLastCalledWith('prompt');
       expect(container.querySelector('.session-search')).toBeNull();
       expect(onClose).toHaveBeenCalledOnce();
       expect(document.activeElement).toBe(composer);
       key('f', modifier);
       await Promise.resolve();
+      flushSolid();
       const reopened = container.querySelector<HTMLInputElement>('input')!;
       expect(reopened.value).toBe('needle');
       const reopenedResults =
@@ -238,20 +272,24 @@ describe('SessionSearch', () => {
       reopenedResults[1]!.scrollIntoView = vi.fn();
       key('ArrowDown', {}, reopened);
       key('Enter', {}, reopened);
+      await Promise.resolve();
       expect(onNavigate).toHaveBeenLastCalledWith('response');
       expect(container.querySelector('.session-search')).toBeNull();
       key('f', modifier);
       await Promise.resolve();
+      flushSolid();
       expect(key('Escape').defaultPrevented).toBe(true);
       expect(container.querySelector('.session-search')).toBeNull();
       expect(onClose).toHaveBeenCalledTimes(3);
       expect(document.activeElement).toBe(composer);
       composer.remove();
+      flushSolid();
     }
   );
 
   it('reads older pages without changing transcript history state and reuses text for another query', async () => {
     setSessionHistoryCursor('session-1', 'page-1');
+    flushSolid();
     const first: SessionMessagePage = [
       { info: userMessage('old-prompt'), parts: [textPart('old-text', 'Older needle')] },
     ];
@@ -266,14 +304,17 @@ describe('SessionSearch', () => {
         },
       ]);
     mount();
+    flushSolid();
     key('f', { metaKey: true });
     expect(read).not.toHaveBeenCalled();
     await search('needle');
+    flushSolid();
     expect(read).toHaveBeenCalledTimes(2);
     expect(read.mock.calls[0]?.[1]).toMatchObject({ before: 'page-1', limit: 200 });
     expect(container.querySelectorAll('.session-search-result')).toHaveLength(3);
     expect(getSessionHistoryCursor('session-1')).toBe('page-1');
     await search('ancient');
+    flushSolid();
     expect(read).toHaveBeenCalledTimes(2);
     expect(container.querySelector('.session-search-result')?.textContent).toContain(
       'Ancient answer'
@@ -281,6 +322,7 @@ describe('SessionSearch', () => {
     key('Escape');
     key('f', { metaKey: true });
     await Promise.resolve();
+    flushSolid();
     expect(container.querySelector<HTMLInputElement>('input')?.value).toBe('ancient');
     expect(container.querySelector('.session-search-result')?.textContent).toContain(
       'Ancient answer'
@@ -290,6 +332,7 @@ describe('SessionSearch', () => {
 
   it('aborts and discards stale history when the session changes', async () => {
     setSessionHistoryCursor('session-1', 'older');
+    flushSolid();
     let complete: (page: SessionMessagePage) => void = () => {};
     const read = vi.spyOn(client.session, 'messages').mockImplementation(
       () =>
@@ -310,22 +353,28 @@ describe('SessionSearch', () => {
       ),
       container
     );
+    flushSolid();
     key('f', { ctrlKey: true });
     await search('needle');
+    flushSolid();
     const signal = read.mock.calls[0]?.[1]?.signal;
     setSessionId('session-2');
+    flushSolid();
     expect(signal?.aborted).toBe(true);
     complete([{ info: userMessage('stale'), parts: [textPart('stale-text', 'stale needle')] }]);
     await Promise.resolve();
+    flushSolid();
     expect(container.querySelector('.session-search')).toBeNull();
     key('f', { ctrlKey: true });
     expect(container.querySelector<HTMLInputElement>('input')?.value).toBe('');
     await search('needle');
+    flushSolid();
     expect(container.querySelectorAll('.session-search-result')).toHaveLength(0);
   });
 
   it('cancels reads on close and leaves no global shortcut handler after disposal', async () => {
     setSessionHistoryCursor('session-1', 'older');
+    flushSolid();
     const read = vi.spyOn(client.session, 'messages').mockImplementation(
       (_id, options) =>
         new Promise((_resolve, reject) => {
@@ -333,19 +382,24 @@ describe('SessionSearch', () => {
         })
     );
     mount();
+    flushSolid();
     key('f', { ctrlKey: true });
     await search('needle');
+    flushSolid();
     key('Escape');
     expect(read.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
     await Promise.resolve();
+    flushSolid();
     expect(container.querySelector('[role="alert"]')).toBeNull();
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     expect(key('f', { ctrlKey: true }).defaultPrevented).toBe(false);
   });
 
   it('retains partial history and resumes the unread page when reopened', async () => {
     setSessionHistoryCursor('session-1', 'page-1');
+    flushSolid();
     const first: SessionMessagePage = [
       { info: userMessage('old-prompt'), parts: [textPart('old-text', 'Older needle')] },
     ];
@@ -366,12 +420,15 @@ describe('SessionSearch', () => {
         },
       ]);
     mount();
+    flushSolid();
     key('f', { metaKey: true });
     await search('needle');
+    flushSolid();
     expect(container.querySelectorAll('.session-search-result')).toHaveLength(3);
     key('Escape');
     key('f', { metaKey: true });
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(read.mock.calls.map(([, options]) => options?.before)).toEqual([
       'page-1',
       'page-2',
@@ -383,12 +440,15 @@ describe('SessionSearch', () => {
 
   it('keeps loaded matches visible when history fails and detects repeated cursors', async () => {
     setSessionHistoryCursor('session-1', 'repeat');
+    flushSolid();
     const page: SessionMessagePage = [];
     page.nextCursor = 'repeat';
     const read = vi.spyOn(client.session, 'messages').mockResolvedValue(page);
     mount();
+    flushSolid();
     key('f', { ctrlKey: true });
     await search('needle');
+    flushSolid();
     expect(read).toHaveBeenCalledOnce();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'History search incomplete'
@@ -413,29 +473,37 @@ describe('SessionSearch', () => {
       ),
       container
     );
+    flushSolid();
     key('f', { ctrlKey: true });
     await search('needle');
+    flushSolid();
     setMessages([
       { info: assistantMessage('response'), parts: [textPart('changed-text', 'Changed answer')] },
     ]);
+    flushSolid();
     expect(container.querySelectorAll('.session-search-result')).toHaveLength(0);
     setMessages([
       { info: assistantMessage('response'), parts: [textPart('changed-text', 'Streaming needle')] },
     ]);
+    flushSolid();
     expect(container.querySelectorAll('.session-search-result')).toHaveLength(1);
   });
 
   it('reports read failures as partial results and clears errors with the query', async () => {
     setSessionHistoryCursor('session-1', 'older');
+    flushSolid();
     vi.spyOn(client.session, 'messages').mockRejectedValue(new Error('History is unavailable'));
     mount();
+    flushSolid();
     key('f', { metaKey: true });
     await search('needle');
+    flushSolid();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'History is unavailable'
     );
     expect(container.querySelectorAll('.session-search-result')).toHaveLength(2);
     await search('');
+    flushSolid();
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 
@@ -453,8 +521,10 @@ describe('SessionSearch', () => {
       ),
       container
     );
+    flushSolid();
     expect(key('f', { metaKey: true }).defaultPrevented).toBe(false);
     setSessionId('session-1');
+    flushSolid();
     expect(key('f', { metaKey: true, shiftKey: true }).defaultPrevented).toBe(false);
     expect(key('f', { metaKey: true, isComposing: true }).defaultPrevented).toBe(false);
     expect(container.querySelector('.session-search')).toBeNull();
@@ -469,37 +539,47 @@ describe('SessionSearch', () => {
           parts: [textPart(`text-${index}`, `needle ${index}`)],
         }))
       );
+      flushSolid();
       key('f', { metaKey: true });
       if (mode === 'search') await search('needle');
       else container.querySelector<HTMLButtonElement>('.session-search-prompts-toggle')!.click();
+      flushSolid();
       expect(container.querySelectorAll('.session-search-result')).toHaveLength(200);
       const more = [...container.querySelectorAll('button')].find(
         (button) => button.textContent === 'Show more results'
       );
       more!.click();
+      flushSolid();
       expect(container.querySelectorAll('.session-search-result')).toHaveLength(205);
     }
   );
 
   it('dismisses on outside pointer input without stealing focus and retains the search', async () => {
     const { onClose, onNavigate } = mount();
+    flushSolid();
     key('f', { metaKey: true });
     const input = await search('needle');
+    flushSolid();
     input.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    flushSolid();
     expect(container.querySelector('.session-search')).not.toBeNull();
     const outside = document.createElement('button');
     document.body.appendChild(outside);
     outside.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    flushSolid();
     outside.focus();
+    flushSolid();
     expect(container.querySelector('.session-search')).toBeNull();
     expect(document.activeElement).toBe(outside);
     expect(onClose).toHaveBeenCalledOnce();
     expect(onNavigate).not.toHaveBeenCalled();
     key('f', { metaKey: true });
     await Promise.resolve();
+    flushSolid();
     expect(container.querySelector<HTMLInputElement>('input')?.value).toBe('needle');
     expect(container.querySelectorAll('.session-search-result')).toHaveLength(2);
     outside.remove();
+    flushSolid();
   });
 
   it('ranks all prompts before newer responses and keeps newest prompts first', async () => {
@@ -510,8 +590,10 @@ describe('SessionSearch', () => {
         parts: [textPart('newer-text', 'Another needle')],
       },
     ]);
+    flushSolid();
     key('f', { metaKey: true });
     await search('needle');
+    flushSolid();
     expect(
       [...container.querySelectorAll('.session-search-snippet')].map(
         (snippet) => snippet.textContent
@@ -526,11 +608,14 @@ describe('SessionSearch', () => {
         parts: [textPart(`text-${index}`, `needle ${index}`)],
       }))
     );
+    flushSolid();
     key('f', { metaKey: true });
     const input = await search('needle');
+    flushSolid();
     [...container.querySelectorAll('button')]
       .find((button) => button.textContent === 'Show more results')!
       .click();
+    flushSolid();
     const options = container.querySelectorAll<HTMLButtonElement>('.session-search-result');
     options[1]!.scrollIntoView = vi.fn();
     key('ArrowDown', {}, input);
@@ -538,6 +623,7 @@ describe('SessionSearch', () => {
     key('Escape');
     key('f', { metaKey: true });
     await Promise.resolve();
+    flushSolid();
     expect(container.querySelectorAll('.session-search-result')).toHaveLength(205);
     expect(container.querySelector('.session-search-results')?.scrollTop).toBe(240);
     expect(
@@ -547,14 +633,19 @@ describe('SessionSearch', () => {
 
   it('closes before navigation starts and reopens with an actionable error on failure', async () => {
     const { onNavigate } = mount();
+    flushSolid();
     onNavigate.mockImplementation(async () => {
       expect(container.querySelector('.session-search')).toBeNull();
       throw new Error('Could not load this message. Try again.');
     });
     key('f', { metaKey: true });
     await search('needle');
+    flushSolid();
     container.querySelector<HTMLButtonElement>('.session-search-result')!.click();
+    flushSolid();
     await Promise.resolve();
+    await Promise.resolve();
+    flushSolid();
     expect(container.querySelector('.session-search')).not.toBeNull();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'Could not load this message'
@@ -564,14 +655,17 @@ describe('SessionSearch', () => {
 
   it('uses the sessions-search clear control without closing the panel', async () => {
     const { onClose } = mount();
+    flushSolid();
     key('f', { metaKey: true });
     const input = await search('needle');
+    flushSolid();
     expect(input.type).toBe('text');
     expect(container.querySelector('[aria-label="Close session search"]')).toBeNull();
     const clear = container.querySelector<HTMLButtonElement>('[aria-label="Clear search"]')!;
     expect(clear.classList.contains('session-list-search-clear')).toBe(true);
     expect(clear.querySelector('.session-list-search-clear-icon')).not.toBeNull();
     clear.click();
+    flushSolid();
     expect(input.value).toBe('');
     expect(document.activeElement).toBe(input);
     expect(container.querySelectorAll('.session-search-result')).toHaveLength(0);
@@ -590,14 +684,17 @@ describe('SessionSearch', () => {
         parts: [textPart('new-response-text', 'Another needle')],
       },
     ]);
+    flushSolid();
     key('f', { metaKey: true });
     const input = await search('needle');
+    flushSolid();
     const options = container.querySelectorAll<HTMLButtonElement>('.session-search-result');
     const move = (x: number) =>
       options[2]!.dispatchEvent(
         new MouseEvent('pointermove', { bubbles: true, clientX: x, clientY: 100 })
       );
     move(40);
+    flushSolid();
     expect(options[2]?.getAttribute('aria-selected')).toBe('true');
     expect(input.getAttribute('aria-activedescendant')).toBe(options[2]?.id);
     options[1]!.scrollIntoView = vi.fn();
@@ -605,11 +702,14 @@ describe('SessionSearch', () => {
     expect(options[1]?.getAttribute('aria-selected')).toBe('true');
     expect(options[2]?.getAttribute('aria-selected')).toBe('false');
     move(40);
+    flushSolid();
     expect(options[1]?.getAttribute('aria-selected')).toBe('true');
     move(41);
+    flushSolid();
     expect(options[2]?.getAttribute('aria-selected')).toBe('true');
     expect(container.querySelectorAll('[role="option"][aria-selected="true"]')).toHaveLength(1);
     key('Enter', {}, input);
+    await Promise.resolve();
     expect(onNavigate).toHaveBeenCalledWith('response');
   });
 });

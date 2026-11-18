@@ -3,6 +3,7 @@ import type { QueuedAttachmentSnapshot } from './session-send';
 import type { SessionWorkspaceTarget } from '../../../shared/protocol';
 
 type PlanImplementationSendOptions = {
+  agent: string;
   queuedAttachments: QueuedAttachmentSnapshot;
   preserveComposer: true;
 };
@@ -50,6 +51,7 @@ export async function implementPlanWithDependencies(
   deps.clearSkippedPlanSession(sessionId);
   deps.applySelectedAgent(buildAgent, sessionId);
   await deps.sendMessage(prompt, {
+    agent: buildAgent,
     queuedAttachments: {
       droppedFiles: [],
       clipboardImages: [],

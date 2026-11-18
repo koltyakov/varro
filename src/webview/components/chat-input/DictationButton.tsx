@@ -1,4 +1,5 @@
-import { Show, createSignal, onCleanup, onMount } from 'solid-js';
+import { ariaBoolean } from '../../lib/aria';
+import { Show, createSignal, onCleanup, onSettled } from 'solid-js';
 import type { DictationAction, DictationProvider, WebviewMessage } from '../../../shared/protocol';
 import { onMessage, postMessage } from '../../lib/bridge';
 import { microphoneIcon, microphoneSpeakingSolidIcon } from '../../lib/ui-icons';
@@ -127,7 +128,7 @@ export function DictationButton(props: {
     if (document.visibilityState !== 'hidden') request('status');
   };
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
-  onMount(() => {
+  onSettled(() => {
     if (props.remote) return;
     refresh();
     window.addEventListener('focus', refresh);
@@ -148,11 +149,11 @@ export function DictationButton(props: {
       <Tooltip content={tooltip()}>
         <button
           type="button"
-          class="toolbar-dictation-button"
-          classList={{ 'activation-requested': activationRequested() }}
+
+          class={['toolbar-dictation-button', { 'activation-requested': activationRequested() }]}
           aria-label={label()}
-          aria-pressed={activationRequested()}
-          aria-busy={busy()}
+          aria-pressed={ariaBoolean(activationRequested())}
+          aria-busy={ariaBoolean(busy())}
           disabled={!running() || busy()}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => request(activationRequested() ? 'stop' : 'start')}

@@ -1,3 +1,4 @@
+import { flush as flushSolid } from 'solid-js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RalphConfig, RalphIteration, RalphRun } from '../../../shared/ralph';
 
@@ -58,22 +59,28 @@ async function loadRalphStore() {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  flushSolid();
   vi.resetModules();
+  flushSolid();
   window.localStorage.clear();
+  flushSolid();
   postMessage.mockReset();
 });
 
 describe('ralph store host-state mirror', () => {
   it('replaces the mirror with the host snapshot and tracks active runner ids', async () => {
     const { ralphStore } = await loadRalphStore();
+    flushSolid();
     const config = createConfig();
     const staleConfig = createConfig({ managerSessionId: 'manager-stale' });
 
     ralphStore.startRun(staleConfig);
+    flushSolid();
     ralphStore.applyHostState(
       { [config.managerSessionId]: createRun(config, { status: 'paused' }) },
       [config.managerSessionId]
     );
+    flushSolid();
 
     expect(ralphStore.isRalphSession(config.managerSessionId)).toBe(true);
     expect(ralphStore.isRalphSession(staleConfig.managerSessionId)).toBe(false);
@@ -84,11 +91,15 @@ describe('ralph store host-state mirror', () => {
 
   it('does not persist mutations to localStorage', async () => {
     const { ralphStore } = await loadRalphStore();
+    flushSolid();
     const config = createConfig();
 
     ralphStore.startRun(config);
+    flushSolid();
     ralphStore.upsertIteration(config.managerSessionId, createIteration(1));
+    flushSolid();
     ralphStore.setStatus(config.managerSessionId, 'paused');
+    flushSolid();
 
     expect(window.localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
   });
@@ -99,8 +110,10 @@ describe('ralph store host-state mirror', () => {
       LEGACY_STORAGE_KEY,
       JSON.stringify({ [config.managerSessionId]: createRun(config) })
     );
+    flushSolid();
 
     const { ralphStore } = await loadRalphStore();
+    flushSolid();
     const legacy = ralphStore.consumeLegacyRuns();
 
     expect(legacy?.[config.managerSessionId]?.config.managerSessionId).toBe('manager-legacy');
@@ -116,6 +129,7 @@ describe('ralph store host-state mirror', () => {
       },
       []
     );
+    flushSolid();
 
     expect(window.localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
     expect(ralphStore.consumeLegacyRuns()).toBeUndefined();
@@ -131,8 +145,10 @@ describe('ralph store host-state mirror', () => {
         [rejectedConfig.managerSessionId]: createRun(rejectedConfig),
       })
     );
+    flushSolid();
 
     const { ralphStore } = await loadRalphStore();
+    flushSolid();
     ralphStore.applyHostState(
       {
         [acceptedConfig.managerSessionId]: {
@@ -142,6 +158,7 @@ describe('ralph store host-state mirror', () => {
       },
       []
     );
+    flushSolid();
 
     expect(ralphStore.consumeLegacyRuns()).toEqual({
       [rejectedConfig.managerSessionId]: createRun(rejectedConfig),
@@ -153,6 +170,7 @@ describe('ralph store host-state mirror', () => {
     now.mockReturnValue(1_000);
 
     const { ralphStore } = await loadRalphStore();
+    flushSolid();
     const config = createConfig({ managerSessionId: 'manager-2' });
     const secondIteration = createIteration(2, {
       status: 'failed',
@@ -166,15 +184,19 @@ describe('ralph store host-state mirror', () => {
     const firstIteration = createIteration(1);
 
     ralphStore.startRun(config);
+    flushSolid();
 
     now.mockReturnValue(2_000);
     ralphStore.upsertIteration(config.managerSessionId, secondIteration);
+    flushSolid();
 
     now.mockReturnValue(3_000);
     ralphStore.upsertIteration(config.managerSessionId, firstIteration);
+    flushSolid();
 
     now.mockReturnValue(4_000);
     ralphStore.setStatus(config.managerSessionId, 'paused');
+    flushSolid();
 
     expect(ralphStore.getRun(config.managerSessionId)).toEqual({
       config,
@@ -185,17 +207,21 @@ describe('ralph store host-state mirror', () => {
     });
 
     ralphStore.removeRun(config.managerSessionId);
+    flushSolid();
     expect(ralphStore.isRalphSession(config.managerSessionId)).toBe(false);
     expect(ralphStore.getAllRuns()).toEqual([]);
   });
 
   it('updates the run model locally and notifies the host', async () => {
     const { ralphStore } = await loadRalphStore();
+    flushSolid();
     const config = createConfig({ managerSessionId: 'manager-3' });
     const model = { providerID: 'openai', modelID: 'gpt-5' };
 
     ralphStore.startRun(config);
+    flushSolid();
     ralphStore.updateRunModel(config.managerSessionId, model);
+    flushSolid();
 
     expect(ralphStore.getRun(config.managerSessionId)?.config.model).toEqual(model);
     expect(postMessage).toHaveBeenCalledWith({
@@ -209,12 +235,15 @@ describe('ralph store host-state mirror', () => {
     now.mockReturnValue(1_000);
 
     const { ralphStore } = await loadRalphStore();
+    flushSolid();
     const config = createConfig({ managerSessionId: 'manager-4', iterations: 5 });
 
     ralphStore.startRun(config);
+    flushSolid();
 
     now.mockReturnValue(2_000);
     ralphStore.addIterations(config.managerSessionId, 5);
+    flushSolid();
 
     expect(ralphStore.getRun(config.managerSessionId)).toEqual({
       config: { ...config, iterations: 10 },
@@ -225,6 +254,7 @@ describe('ralph store host-state mirror', () => {
     });
 
     ralphStore.addIterations(config.managerSessionId, 5_000);
+    flushSolid();
     expect(ralphStore.getRun(config.managerSessionId)?.config.iterations).toBe(1_000);
   });
 });
@@ -232,31 +262,41 @@ describe('ralph store host-state mirror', () => {
 describe('ralph store findManagerSessionIdForChild', () => {
   it('returns the manager session id for a known iteration child session', async () => {
     const { ralphStore } = await loadRalphStore();
+    flushSolid();
     const config = createConfig({ managerSessionId: 'manager-child-1' });
     ralphStore.startRun(config);
+    flushSolid();
     ralphStore.upsertIteration(config.managerSessionId, createIteration(1));
+    flushSolid();
     ralphStore.upsertIteration(config.managerSessionId, createIteration(2));
+    flushSolid();
 
     expect(ralphStore.findManagerSessionIdForChild('child-2')).toBe('manager-child-1');
   });
 
   it('returns the manager session id for a known repair session', async () => {
     const { ralphStore } = await loadRalphStore();
+    flushSolid();
     const config = createConfig({ managerSessionId: 'manager-repair-1' });
     ralphStore.startRun(config);
+    flushSolid();
     ralphStore.upsertIteration(
       config.managerSessionId,
       createIteration(1, { repairSessionIds: ['repair-1'] })
     );
+    flushSolid();
 
     expect(ralphStore.findManagerSessionIdForChild('repair-1')).toBe('manager-repair-1');
   });
 
   it('returns null when the child id is unknown or falsy', async () => {
     const { ralphStore } = await loadRalphStore();
+    flushSolid();
     const config = createConfig({ managerSessionId: 'manager-child-2' });
     ralphStore.startRun(config);
+    flushSolid();
     ralphStore.upsertIteration(config.managerSessionId, createIteration(1));
+    flushSolid();
 
     expect(ralphStore.findManagerSessionIdForChild('not-a-child')).toBeNull();
     expect(ralphStore.findManagerSessionIdForChild(null)).toBeNull();

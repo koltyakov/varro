@@ -1,6 +1,6 @@
+import { flush as flushSolid, createEffect, createRoot, reconcile } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createComputed, createRoot } from 'solid-js';
-import { reconcile } from 'solid-js/store';
 import type { WebviewMessage } from '../../shared/protocol';
 import type { AssistantMessage, Part, Permission, ToolPart } from '../types';
 import {
@@ -123,37 +123,49 @@ function nextFrame() {
 describe('state streaming deltas', () => {
   it('updates usage without structural invalidation, but preserves completion invalidation', () => {
     clearMessages();
+    flushSolid();
     const info = assistantMessage();
     upsertMessage({ info, parts: [] });
+    flushSolid();
     let roleReads = 0;
     const dispose = createRoot((cleanupRoot) => {
-      createComputed(() => {
-        void state.messages[0]?.info.role;
-        roleReads += 1;
-      });
+      createEffect(
+        () => state.messages[0]?.info.role,
+        () => {
+          roleReads += 1;
+        }
+      );
       return cleanupRoot;
     });
     const version = messageStructureVersion();
     const updated = { ...info, cost: 1, tokens: { ...info.tokens, output: 100 } };
     upsertMessageInfo(updated);
+    flushSolid();
     expect(messageStructureVersion()).toBe(version);
     expect(roleReads).toBe(1);
     expect(getMessageById(info.id)?.info).toMatchObject({ cost: 1, tokens: { output: 100 } });
     upsertMessageInfo({ ...updated, time: { ...updated.time, completed: 100 } });
+    flushSolid();
     expect(messageStructureVersion()).toBeGreaterThan(version);
     dispose();
+    flushSolid();
   });
 
   beforeEach(() => {
     clearMessages();
+    flushSolid();
     clearStreamingState();
+    flushSolid();
   });
 
   it('preserves reasoning type when appending a missing streaming part', async () => {
     upsertMessage({ info: assistantMessage(), parts: [] });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'reason-1', 'Planning', 'session-1', 'text', 'reasoning');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'reason-1',
@@ -168,10 +180,14 @@ describe('state streaming deltas', () => {
   it('preserves an unrelated active stream when removing a message', () => {
     const activePart = textPart('active-part', '');
     upsertMessage({ info: assistantMessage('message-1'), parts: [activePart] });
+    flushSolid();
     upsertMessage({ info: assistantMessage('message-2'), parts: [] });
+    flushSolid();
     applyMessagePartDelta('message-1', activePart.id, 'Streaming', 'session-1');
+    flushSolid();
 
     removeMessage('session-1', 'message-2');
+    flushSolid();
 
     expect(state.messages).toHaveLength(1);
     expect(state.streamingPartId).toBe(activePart.id);
@@ -183,10 +199,14 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [reasoningPart('Planning'), textPart('text-1', '')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'reason-1', ' more', 'session-1');
+    flushSolid();
     applyMessagePartDelta('message-1', 'text-1', 'Answer', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'reason-1',
@@ -207,9 +227,12 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [textPart('text-1', 'Existing answer')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'text-1', ' extended', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     expect(state.streamingPartId).toBe('text-1');
     expect(state.streamingText).toBe('Existing answer extended');
@@ -225,11 +248,15 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [textPart('text-1', '')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'text-1', 'Visible response', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     upsertPart(textPart('text-1', ''));
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'text-1',
@@ -245,13 +272,19 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [textPart('text-1', ''), textPart('text-2', '')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'text-1', 'First final response part', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
     applyMessagePartDelta('message-1', 'text-2', 'Second final response part', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     upsertPart(textPart('text-1', ''));
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'text-1',
@@ -267,6 +300,7 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [reasoningPart('**Examining text replacement**')],
     });
+    flushSolid();
 
     setMessagesIncremental(
       [
@@ -277,6 +311,7 @@ describe('state streaming deltas', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'reason-1',
@@ -292,6 +327,7 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [running],
     });
+    flushSolid();
 
     setMessagesIncremental(
       [
@@ -302,6 +338,7 @@ describe('state streaming deltas', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
 
     const part = state.messages[0]?.parts[0];
     if (!part || part.type !== 'tool') throw new Error('Expected a tool part');
@@ -314,9 +351,11 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [{ ...toolPart('tool-1'), tool: '' }],
     });
+    flushSolid();
     const version = messageStructureVersion();
 
     upsertPart({ ...pendingToolPart('tool-1'), tool: 'functions.apply_patch' });
+    flushSolid();
 
     const part = state.messages[0]?.parts[0];
     if (!part || part.type !== 'tool') throw new Error('Expected a tool part');
@@ -330,8 +369,10 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [{ ...pendingToolPart('tool-1'), tool: 'functions.apply_patch' }],
     });
+    flushSolid();
 
     upsertPart({ ...toolPart('tool-1'), tool: '' });
+    flushSolid();
 
     const part = state.messages[0]?.parts[0];
     if (!part || part.type !== 'tool') throw new Error('Expected a tool part');
@@ -344,9 +385,12 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [reasoningPart('Thinking'), textPart('text-1', 'Done')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'reason-1', ' carefully', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     expect(state.streamingPartId).toBe('reason-1');
     expect(state.streamingText).toBe('Thinking carefully');
@@ -357,7 +401,9 @@ describe('state streaming deltas', () => {
     });
 
     applyMessagePartDelta('message-1', 'text-1', ' already', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'reason-1',
@@ -373,11 +419,16 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [reasoningPart('Thinking'), textPart('text-1', 'Done')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'reason-1', ' carefully', 'session-1');
+    flushSolid();
     applyMessagePartDelta('message-1', 'text-1', ' already', 'session-1');
+    flushSolid();
     applyMessagePartDelta('message-1', 'reason-1', ' now', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'reason-1',
@@ -393,10 +444,14 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [textPart('text-1', ''), reasoningPart('')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'text-1', 'Visible response', 'session-1');
+    flushSolid();
     applyMessagePartDelta('message-1', 'reason-1', 'Thinking now', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'text-1',
@@ -412,9 +467,12 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [textPart('text-1', '')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'text-1', 'Received.', 'session-1');
+    flushSolid();
     finishMessageStreaming('message-1');
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'text-1',
@@ -430,10 +488,14 @@ describe('state streaming deltas', () => {
       info: assistantMessage('message-1'),
       parts: [textPart('text-1', '')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'text-1', 'Received.', 'session-1');
+    flushSolid();
     finishMessageStreaming('message-2');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     expect(state.streamingPartId).toBe('text-1');
     expect(state.streamingText).toBe('Received.');
@@ -442,13 +504,16 @@ describe('state streaming deltas', () => {
   it('preserves time.completed when an incremental sync lacks it', () => {
     const completed = assistantMessage();
     completed.time.completed = 5000;
+    flushSolid();
     upsertMessage({
       info: completed,
       parts: [textPart('text-1', 'Done')],
     });
+    flushSolid();
 
     const withoutCompletion = assistantMessage();
     setMessagesIncremental([{ info: withoutCompletion, parts: [textPart('text-1', 'Done')] }]);
+    flushSolid();
 
     const synced = state.messages[0]?.info;
     if (synced?.role !== 'assistant') throw new Error('Expected an assistant message');
@@ -458,12 +523,15 @@ describe('state streaming deltas', () => {
   it('preserves error state when an incremental sync lacks it', () => {
     const errored = assistantMessage();
     errored.error = { name: 'rate_limit' };
+    flushSolid();
     upsertMessage({
       info: errored,
       parts: [textPart('text-1', 'Partial')],
     });
+    flushSolid();
 
     setMessagesIncremental([{ info: assistantMessage(), parts: [textPart('text-1', 'Partial')] }]);
+    flushSolid();
 
     const synced = state.messages[0]?.info;
     if (synced?.role !== 'assistant') throw new Error('Expected an assistant message');
@@ -475,9 +543,12 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [textPart('text-1', '')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'text-1', 'Partial answer', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     setMessagesIncremental(
       [
@@ -488,6 +559,7 @@ describe('state streaming deltas', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'text-1',
@@ -504,8 +576,10 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [textPart('text-1', '')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'text-1', 'Queued answer', 'session-1');
+    flushSolid();
     setMessagesIncremental(
       [
         {
@@ -515,6 +589,7 @@ describe('state streaming deltas', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'text-1',
@@ -527,10 +602,14 @@ describe('state streaming deltas', () => {
 
   it('materializes streaming text even when a refresh retains the store entry', async () => {
     upsertMessage({ info: assistantMessage(), parts: [textPart('text-1', '')] });
+    flushSolid();
     applyMessagePartDelta('message-1', 'text-1', 'Retained answer', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     setMessagesIncremental([...state.messages]);
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({ text: 'Retained answer' });
     expect(state.streamingPartId).toBeNull();
@@ -542,9 +621,12 @@ describe('state streaming deltas', () => {
       info: assistantMessage(),
       parts: [textPart('text-1', 'Partial')],
     });
+    flushSolid();
 
     applyMessagePartDelta('message-1', 'text-1', ' answer', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     setMessagesIncremental([
       {
@@ -552,6 +634,7 @@ describe('state streaming deltas', () => {
         parts: [textPart('text-1', 'Partial answer complete')],
       },
     ]);
+    flushSolid();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'text-1',
@@ -579,6 +662,7 @@ describe('state streaming deltas', () => {
         },
       ],
     });
+    flushSolid();
 
     setMessagesIncremental([
       {
@@ -598,6 +682,7 @@ describe('state streaming deltas', () => {
         ],
       },
     ]);
+    flushSolid();
 
     const updatedPart = state.messages[0]?.parts[0];
     if (!updatedPart || updatedPart.type !== 'tool') throw new Error('Expected a tool part');
@@ -610,7 +695,8 @@ describe('state streaming deltas', () => {
 
 describe('permission deduping', () => {
   beforeEach(() => {
-    setState('permissions', []);
+    setState(storePath('permissions', []));
+    flushSolid();
   });
 
   it('groups identical permissions into one visible prompt', () => {
@@ -761,6 +847,7 @@ describe('permission deduping', () => {
       metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
       time: { created: 2 },
     });
+    flushSolid();
     addPermission({
       id: 'perm-2',
       type: 'external_directory',
@@ -772,6 +859,7 @@ describe('permission deduping', () => {
       metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
       time: { created: 1 },
     });
+    flushSolid();
 
     expect(state.permissions).toEqual([
       expect.objectContaining({
@@ -782,26 +870,30 @@ describe('permission deduping', () => {
   });
 
   it('keeps remaining duplicates visible when one permission id is removed', () => {
-    setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'external_directory',
-        pattern: '/tmp/*',
-        sessionID: 'session-1',
-        messageID: 'message-1',
-        callID: 'call-1',
-        title: 'external_directory /tmp/*',
-        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
-        time: { created: 1 },
-        duplicateIDs: ['perm-1', 'perm-2'],
-        groupMembers: [
-          { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
-          { id: 'perm-2', sessionID: 'session-1', messageID: 'message-2', callID: 'call-2' },
-        ],
-      },
-    ]);
+    setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'external_directory',
+          pattern: '/tmp/*',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          callID: 'call-1',
+          title: 'external_directory /tmp/*',
+          metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+          time: { created: 1 },
+          duplicateIDs: ['perm-1', 'perm-2'],
+          groupMembers: [
+            { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+            { id: 'perm-2', sessionID: 'session-1', messageID: 'message-2', callID: 'call-2' },
+          ],
+        },
+      ])
+    );
+    flushSolid();
 
     removePermission('perm-1');
+    flushSolid();
 
     expect(state.permissions).toHaveLength(1);
     expect(state.permissions[0]?.id).toBe('perm-2');
@@ -811,26 +903,30 @@ describe('permission deduping', () => {
   });
 
   it('removes grouped duplicates together when requested', () => {
-    setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'external_directory',
-        pattern: '/tmp/*',
-        sessionID: 'session-1',
-        messageID: 'message-1',
-        callID: 'call-1',
-        title: 'external_directory /tmp/*',
-        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
-        time: { created: 1 },
-        duplicateIDs: ['perm-1', 'perm-2'],
-        groupMembers: [
-          { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
-          { id: 'perm-2', sessionID: 'session-1', messageID: 'message-2', callID: 'call-2' },
-        ],
-      },
-    ]);
+    setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'external_directory',
+          pattern: '/tmp/*',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          callID: 'call-1',
+          title: 'external_directory /tmp/*',
+          metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+          time: { created: 1 },
+          duplicateIDs: ['perm-1', 'perm-2'],
+          groupMembers: [
+            { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+            { id: 'perm-2', sessionID: 'session-1', messageID: 'message-2', callID: 'call-2' },
+          ],
+        },
+      ])
+    );
+    flushSolid();
 
     removePermission('perm-1', { removeGroup: true });
+    flushSolid();
 
     expect(state.permissions).toHaveLength(0);
   });
@@ -839,29 +935,44 @@ describe('permission deduping', () => {
 describe('failed session tracking', () => {
   beforeEach(() => {
     clearMessages();
+    flushSolid();
     setSessionFailed('session-1', false);
+    flushSolid();
     setSessionFailed('session-2', false);
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'session-2',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 2',
-        version: '1',
-        time: { created: 0, updated: 20 },
-      },
-    ]);
-    setState('activeSessionId', null);
-    setState('lastSeenSessions', { 'session-1': 0, 'session-2': 0 });
-    setState('interruptedSessionResponses', reconcile({}));
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Session 1',
+          version: '1',
+          time: { created: 0, updated: 10 },
+        },
+        {
+          id: 'session-2',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Session 2',
+          version: '1',
+          time: { created: 0, updated: 20 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', null));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'session-1': 0, 'session-2': 0 }));
+    flushSolid();
+    setState((draft) => {
+      const current = draft['interruptedSessionResponses'];
+      const incoming = {} satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['interruptedSessionResponses'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    flushSolid();
   });
 
   it('derives failed sessions from latest assistant message errors', () => {
@@ -878,6 +989,7 @@ describe('failed session tracking', () => {
         parts: [],
       },
     ]);
+    flushSolid();
 
     expect(state.failedSessionIds).toEqual(['session-1']);
   });
@@ -896,12 +1008,14 @@ describe('failed session tracking', () => {
         parts: [],
       },
     ]);
+    flushSolid();
 
     expect(state.failedSessionIds).toEqual([]);
   });
 
   it('keeps a session failed when the errored latest message has already been seen', () => {
-    setState('lastSeenSessions', { 'session-1': 100 });
+    setState(storePath('lastSeenSessions', { 'session-1': 100 }));
+    flushSolid();
 
     syncFailedSessionsFromMessages([
       {
@@ -912,6 +1026,7 @@ describe('failed session tracking', () => {
         parts: [],
       },
     ]);
+    flushSolid();
 
     expect(state.failedSessionIds).toEqual(['session-1']);
   });
@@ -927,6 +1042,7 @@ describe('failed session tracking', () => {
         parts: [],
       },
     ]);
+    flushSolid();
 
     expect(state.failedSessionIds).toEqual([]);
     expect(state.interruptedSessionResponses['session-1']).toBe(500);
@@ -934,6 +1050,7 @@ describe('failed session tracking', () => {
 
   it('preserves failed flags for sessions outside the synced message set', () => {
     setSessionFailed('session-2', true);
+    flushSolid();
 
     syncFailedSessionsFromMessages([
       {
@@ -941,14 +1058,18 @@ describe('failed session tracking', () => {
         parts: [],
       },
     ]);
+    flushSolid();
 
     expect(state.failedSessionIds).toEqual(['session-2']);
   });
 
   it('allows clearing an individual failed session flag', () => {
     setSessionFailed('session-1', true);
+    flushSolid();
     setSessionFailed('session-2', true);
+    flushSolid();
     setSessionFailed('session-1', false);
+    flushSolid();
 
     expect(state.failedSessionIds).toEqual(['session-2']);
   });
@@ -956,8 +1077,10 @@ describe('failed session tracking', () => {
 
 describe('clipboard image placeholders', () => {
   beforeEach(() => {
-    setState('clipboardImages', []);
+    setState(storePath('clipboardImages', []));
+    flushSolid();
     setInputText('');
+    flushSolid();
   });
 
   it('replaces every placeholder match when removing a clipboard image', () => {
@@ -968,9 +1091,12 @@ describe('clipboard image placeholders', () => {
       filename: 'image.png',
       size: 1,
     });
+    flushSolid();
     setInputText('Before [image.png] middle [image.png] after');
+    flushSolid();
 
     removeClipboardImage('img-1');
+    flushSolid();
 
     expect(inputText()).toBe('Before _____ middle _____ after');
   });
@@ -979,6 +1105,7 @@ describe('clipboard image placeholders', () => {
     const send = vi.fn<(message: WebviewMessage) => void>();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     (window as { __sendToExtension?: typeof send }).__sendToExtension = send;
+    flushSolid();
 
     addClipboardImage({
       id: 'img-persisted',
@@ -987,7 +1114,9 @@ describe('clipboard image placeholders', () => {
       filename: 'image.png',
       size: 1,
     });
+    flushSolid();
     removeClipboardImage('img-persisted');
+    flushSolid();
 
     expect(send).toHaveBeenNthCalledWith(1, {
       type: 'composer/images-update',
@@ -1011,12 +1140,14 @@ describe('clipboard image placeholders', () => {
 
     // SAFETY: The fixture provides the unknown fields read by this statement.
     delete (window as { __sendToExtension?: unknown }).__sendToExtension;
+    flushSolid();
   });
 
   it('does not resend base64 images when the host supplies a temporary file path', () => {
     const send = vi.fn<(message: WebviewMessage) => void>();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     (window as { __sendToExtension?: typeof send }).__sendToExtension = send;
+    flushSolid();
     addClipboardImage({
       id: 'img-stored',
       url: 'data:image/png;base64,AA==',
@@ -1024,7 +1155,9 @@ describe('clipboard image placeholders', () => {
       filename: 'image.png',
       size: 1,
     });
+    flushSolid();
     send.mockClear();
+    flushSolid();
 
     expect(
       setClipboardImageContextFile('img-stored', {
@@ -1034,16 +1167,19 @@ describe('clipboard image placeholders', () => {
       })
     ).toBe(true);
 
+    flushSolid();
     expect(state.clipboardImages[0]?.contextFile?.path).toBe('/tmp/image.png');
     expect(send).not.toHaveBeenCalled();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     delete (window as { __sendToExtension?: unknown }).__sendToExtension;
+    flushSolid();
   });
 
   it('applies host image snapshots without posting them back', () => {
     const send = vi.fn<(message: WebviewMessage) => void>();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     (window as { __sendToExtension?: typeof send }).__sendToExtension = send;
+    flushSolid();
 
     syncClipboardImages([
       {
@@ -1054,11 +1190,13 @@ describe('clipboard image placeholders', () => {
         size: 1,
       },
     ]);
+    flushSolid();
 
     expect(state.clipboardImages.map((image) => image.id)).toEqual(['img-restored']);
     expect(send).not.toHaveBeenCalled();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     delete (window as { __sendToExtension?: unknown }).__sendToExtension;
+    flushSolid();
   });
 
   it('replaces placeholders for all clipboard images when clearing them', () => {
@@ -1069,6 +1207,7 @@ describe('clipboard image placeholders', () => {
       filename: 'image-1.png',
       size: 1,
     });
+    flushSolid();
     addClipboardImage({
       id: 'img-2',
       url: 'blob:two',
@@ -1076,9 +1215,12 @@ describe('clipboard image placeholders', () => {
       filename: 'image-2.png',
       size: 1,
     });
+    flushSolid();
     setInputText('[image-1.png] [image-2.png] [image-1.png]');
+    flushSolid();
 
     clearClipboardImages();
+    flushSolid();
 
     expect(inputText()).toBe('_____ _____ _____');
     expect(state.clipboardImages).toEqual([]);
@@ -1092,6 +1234,7 @@ describe('clipboard image placeholders', () => {
       filename: 'image-1.png',
       size: 1,
     });
+    flushSolid();
     addClipboardImage({
       id: 'img-2',
       url: 'data:image/png;base64,two',
@@ -1099,6 +1242,7 @@ describe('clipboard image placeholders', () => {
       filename: 'image-2.png',
       size: 1,
     });
+    flushSolid();
     addClipboardImage({
       id: 'img-3',
       url: 'data:image/png;base64,three',
@@ -1106,6 +1250,7 @@ describe('clipboard image placeholders', () => {
       filename: 'image-3.png',
       size: 1,
     });
+    flushSolid();
     addClipboardImage({
       id: 'img-4',
       url: 'data:image/png;base64,four',
@@ -1113,6 +1258,7 @@ describe('clipboard image placeholders', () => {
       filename: 'image-4.png',
       size: 1,
     });
+    flushSolid();
     addClipboardImage({
       id: 'img-5',
       url: 'data:image/png;base64,five',
@@ -1120,6 +1266,7 @@ describe('clipboard image placeholders', () => {
       filename: 'image-5.png',
       size: 1,
     });
+    flushSolid();
 
     const didAddDuplicate = addClipboardImage({
       id: 'img-duplicate',
@@ -1143,10 +1290,12 @@ describe('clipboard image placeholders', () => {
 describe('message lookup helpers', () => {
   beforeEach(() => {
     clearMessages();
+    flushSolid();
   });
 
   it('returns messages by id using the shared message index', () => {
     upsertMessage({ info: assistantMessage('message-1'), parts: [] });
+    flushSolid();
 
     expect(getMessageById('message-1')?.info.id).toBe('message-1');
     expect(getMessageById('missing')).toBeNull();
@@ -1155,34 +1304,37 @@ describe('message lookup helpers', () => {
 
 describe('getSessionTreeIds', () => {
   it('returns the root session and all descendants', () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 1',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 20 },
-      },
-      {
-        id: 'child-2',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 2',
-        version: '1',
-        parentID: 'child-1',
-        time: { created: 0, updated: 30 },
-      },
-    ]);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Session 1',
+          version: '1',
+          time: { created: 0, updated: 10 },
+        },
+        {
+          id: 'child-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Child 1',
+          version: '1',
+          parentID: 'session-1',
+          time: { created: 0, updated: 20 },
+        },
+        {
+          id: 'child-2',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Child 2',
+          version: '1',
+          parentID: 'child-1',
+          time: { created: 0, updated: 30 },
+        },
+      ])
+    );
+    flushSolid();
 
     expect(getSessionTreeIds('session-1')).toEqual(['session-1', 'child-1', 'child-2']);
     expect(getSessionTreeIds('child-1')).toEqual(['child-1', 'child-2']);
@@ -1190,79 +1342,88 @@ describe('getSessionTreeIds', () => {
   });
 
   it('does not include sibling branches when reading a descendant subtree', () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 1',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 20 },
-      },
-      {
-        id: 'grandchild-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Grandchild 1',
-        version: '1',
-        parentID: 'child-1',
-        time: { created: 0, updated: 30 },
-      },
-      {
-        id: 'child-2',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 2',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 40 },
-      },
-    ]);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Session 1',
+          version: '1',
+          time: { created: 0, updated: 10 },
+        },
+        {
+          id: 'child-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Child 1',
+          version: '1',
+          parentID: 'session-1',
+          time: { created: 0, updated: 20 },
+        },
+        {
+          id: 'grandchild-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Grandchild 1',
+          version: '1',
+          parentID: 'child-1',
+          time: { created: 0, updated: 30 },
+        },
+        {
+          id: 'child-2',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Child 2',
+          version: '1',
+          parentID: 'session-1',
+          time: { created: 0, updated: 40 },
+        },
+      ])
+    );
+    flushSolid();
 
     expect(getSessionTreeIds('child-1')).toEqual(['child-1', 'grandchild-1']);
     expect(getSessionTreeIds('child-2')).toEqual(['child-2']);
   });
 
   it('reuses active usage-limit lookups across a session tree', () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 1',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 20 },
-      },
-    ]);
-    setState('sessionUsageLimits', {
-      'child-1': {
-        source: 'status',
-        statusCode: 429,
-        message: '429 usage limit reached',
-        unit: 'messages',
-        retryAt: 4_000,
-        attempt: 2,
-        sessionID: 'child-1',
-      },
-    });
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Session 1',
+          version: '1',
+          time: { created: 0, updated: 10 },
+        },
+        {
+          id: 'child-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Child 1',
+          version: '1',
+          parentID: 'session-1',
+          time: { created: 0, updated: 20 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('sessionUsageLimits', {
+        'child-1': {
+          source: 'status',
+          statusCode: 429,
+          message: '429 usage limit reached',
+          unit: 'messages',
+          retryAt: 4_000,
+          attempt: 2,
+          sessionID: 'child-1',
+        },
+      })
+    );
+    flushSolid();
 
     expect(getActiveUsageLimitNotice('session-1')).toMatchObject({ sessionID: 'child-1' });
     expect(getActiveUsageLimitNotice('child-1')).toMatchObject({ sessionID: 'child-1' });
@@ -1271,25 +1432,28 @@ describe('getSessionTreeIds', () => {
   });
 
   it('clears an active usage-limit lookup after removing the notice', () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 1',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 20 },
-      },
-    ]);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Session 1',
+          version: '1',
+          time: { created: 0, updated: 10 },
+        },
+        {
+          id: 'child-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Child 1',
+          version: '1',
+          parentID: 'session-1',
+          time: { created: 0, updated: 20 },
+        },
+      ])
+    );
+    flushSolid();
     setSessionUsageLimit('child-1', {
       source: 'status',
       statusCode: 429,
@@ -1299,12 +1463,14 @@ describe('getSessionTreeIds', () => {
       attempt: 2,
       sessionID: 'child-1',
     });
+    flushSolid();
 
     expect(getSessionTreeRootId('child-1')).toBe('session-1');
     expect(hasActiveUsageLimit('session-1')).toBe(true);
     expect(hasActiveUsageLimit('child-1')).toBe(true);
 
     setSessionUsageLimit('child-1', null);
+    flushSolid();
 
     expect(getActiveUsageLimitNotice('session-1')).toBeNull();
     expect(getActiveUsageLimitNotice('child-1')).toBeNull();
@@ -1313,90 +1479,110 @@ describe('getSessionTreeIds', () => {
   });
 
   it('treats child-session prompts as active on the root session', () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 1',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 20 },
-      },
-    ]);
-    setState('activeSessionId', 'session-1');
-    setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'bash',
-        sessionID: 'child-1',
-        messageID: 'message-1',
-        callID: 'call-1',
-        title: 'Allow bash',
-        metadata: {},
-        time: { created: 1 },
-      },
-    ]);
-    setState('questions', [
-      {
-        id: 'question-1',
-        sessionID: 'child-1',
-        questions: [{ question: 'Choose one', header: 'Question', options: [] }],
-      },
-    ]);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Session 1',
+          version: '1',
+          time: { created: 0, updated: 10 },
+        },
+        {
+          id: 'child-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Child 1',
+          version: '1',
+          parentID: 'session-1',
+          time: { created: 0, updated: 20 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'bash',
+          sessionID: 'child-1',
+          messageID: 'message-1',
+          callID: 'call-1',
+          title: 'Allow bash',
+          metadata: {},
+          time: { created: 1 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('questions', [
+        {
+          id: 'question-1',
+          sessionID: 'child-1',
+          questions: [{ question: 'Choose one', header: 'Question', options: [] }],
+        },
+      ])
+    );
+    flushSolid();
 
     expect(hasActivePermission()).toBe(true);
     expect(hasActiveQuestion()).toBe(true);
   });
 
   it('treats root-session prompts as active on a child session', () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 1',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 20 },
-      },
-    ]);
-    setState('activeSessionId', 'child-1');
-    setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'bash',
-        sessionID: 'session-1',
-        messageID: 'message-1',
-        callID: 'call-1',
-        title: 'Allow bash',
-        metadata: {},
-        time: { created: 1 },
-      },
-    ]);
-    setState('questions', [
-      {
-        id: 'question-1',
-        sessionID: 'session-1',
-        questions: [{ question: 'Choose one', header: 'Question', options: [] }],
-      },
-    ]);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Session 1',
+          version: '1',
+          time: { created: 0, updated: 10 },
+        },
+        {
+          id: 'child-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Child 1',
+          version: '1',
+          parentID: 'session-1',
+          time: { created: 0, updated: 20 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'child-1'));
+    flushSolid();
+    setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'bash',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          callID: 'call-1',
+          title: 'Allow bash',
+          metadata: {},
+          time: { created: 1 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('questions', [
+        {
+          id: 'question-1',
+          sessionID: 'session-1',
+          questions: [{ question: 'Choose one', header: 'Question', options: [] }],
+        },
+      ])
+    );
+    flushSolid();
 
     expect(hasActivePermission()).toBe(true);
     expect(hasActiveQuestion()).toBe(true);

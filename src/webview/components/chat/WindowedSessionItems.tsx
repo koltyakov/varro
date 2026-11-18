@@ -1,5 +1,15 @@
-import { For, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from 'solid-js';
-import type { Accessor, JSX } from 'solid-js';
+import {
+  createEffect,
+  For,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onSettled,
+  untrack,
+  type Accessor,
+} from 'solid-js';
+
+import { type JSX } from '@solidjs/web';
 import { calculateVirtualRangeFromMetrics } from '../message-list/virtualization';
 import { isString } from '../../lib/runtime-values';
 
@@ -25,7 +35,7 @@ export function WindowedSessionItems(props: {
   const [revision, setRevision] = createSignal(0);
   const [viewport, setViewport] = createSignal({ top: 0, height: 640 });
   const [nativeFocus, setNativeFocus] = createSignal<string | null>(null);
-  const ids = createMemo(() => props.ids, [], {
+  const ids = createMemo(() => props.ids, {
     equals: (previous, next) =>
       previous.length === next.length && previous.every((id, index) => id === next[index]),
   });
@@ -61,22 +71,30 @@ export function WindowedSessionItems(props: {
     if (changed) {
       setRevision((value) => value + 1);
       // Keep the same visible row when measurements above it replace estimates.
-      scroll.scrollTop += (metrics().prefix[anchor] ?? 0) - (previous.prefix[anchor] ?? 0);
+      let nextAnchorTop = 0;
+      const orderedIds = ids();
+      for (let index = 0; index < anchor; index += 1)
+        nextAnchorTop += heights.get(orderedIds[index]!) ?? ESTIMATED_ROW_HEIGHT;
+      scroll.scrollTop += nextAnchorTop - (previous.prefix[anchor] ?? 0);
     }
     updateViewport();
   };
   const scheduleMeasure = () => {
-    if (ids().length < WINDOW_THRESHOLD) return;
+    if (untrack(ids).length < WINDOW_THRESHOLD) return;
     if (!frame) frame = requestAnimationFrame(measure);
   };
-  const observe = (id: string, element: HTMLElement) => {
-    mounted.set(id, element);
-    observer?.observe(element);
-    scheduleMeasure();
+  const observe = (id: string) => {
+    let element: HTMLElement | undefined;
     onCleanup(() => {
-      observer?.unobserve(element);
+      if (element) observer?.unobserve(element);
       mounted.delete(id);
     });
+    return (target: HTMLElement) => {
+      element = target;
+      mounted.set(id, element);
+      observer?.observe(element);
+      scheduleMeasure();
+    };
   };
   const onFocus = () => {
     const element = document.activeElement;
@@ -86,7 +104,7 @@ export function WindowedSessionItems(props: {
         : null
     );
   };
-  onMount(() => {
+  onSettled(() => {
     scroll = marker?.closest<HTMLElement>('.session-list-scroll') ?? null;
     if (!scroll) return;
     observer =
@@ -106,8 +124,7 @@ export function WindowedSessionItems(props: {
     scroll?.removeEventListener('focusin', onFocus);
     scroll?.removeEventListener('focusout', onFocus);
   });
-  createEffect(() => {
-    const positions = indexes();
+  createEffect(indexes, (positions) => {
     for (const id of heights.keys()) if (!positions.has(id)) heights.delete(id);
     untrack(scheduleMeasure);
   });
@@ -161,11 +178,7 @@ export function WindowedSessionItems(props: {
                 }}
               />
             );
-          return props.children(
-            item,
-            () => indexes().get(item) ?? 0,
-            (element) => observe(item, element)
-          );
+          return props.children(item, () => indexes().get(item) ?? 0, observe(item));
         }}
       </For>
     </>

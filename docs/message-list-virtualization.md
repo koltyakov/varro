@@ -204,8 +204,11 @@ the shared invariants below remain true.
   invalidated prefix. Keep intervening rows as bounded placeholders and suppress competing generic
   measurement anchors until settling ends. Release the pin on direct input, owner replacement, or
   session change; an already-unmounted anchor cannot provide exact DOM restoration.
-- Capture a diff-toggle anchor before DOM replacement can clamp the scroll range. Detached readers
-  may need a temporary bottom deficit reserve; its target must follow the retained marker when the
+- Capture a diff-toggle anchor before DOM replacement can clamp the scroll range. Capture through the
+  app instance's before-change subscription in `setShowFileDiffs`, not a reactive effect whose
+  scheduling could run after removal. Remove the subscription when the message list is disposed.
+  Detached readers may need a temporary bottom deficit reserve; its target must follow the retained
+  marker when the
   trailing summary slot changes, even if the reserve's size is already sufficient. Native scroll
   detachment must cancel stale go-to-latest requests so they cannot block this anchor owner.
   Prefer a fully painted prose block over the first row's virtual top. If that row exposes only the

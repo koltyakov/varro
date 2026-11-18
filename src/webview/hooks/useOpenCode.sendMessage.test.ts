@@ -1,4 +1,5 @@
-import { createRoot } from 'solid-js';
+import { flush as flushSolid, createRoot } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PermissionRule } from '../../shared/opencode-types';
 import type { onMessage } from '../lib/bridge';
@@ -40,23 +41,30 @@ describe('sendMessage', () => {
   // otherwise overlap the next test's module reset and mix separate store instances.
   beforeEach(async () => {
     await loadModules();
+    flushSolid();
   }, 15_000);
 
   it.each([undefined, 'queued'] as const)(
     'blocks sends to an unavailable transferred session including %s targets',
     async (target) => {
       const { stateModule, hookModule } = await loadModules();
-      stateModule.setState('activeSessionId', target ? 'other-session' : 'session-1');
-      stateModule.setState('transferredSessions', { 'session-1': '/outside' });
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', target ? 'other-session' : 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('transferredSessions', { 'session-1': '/outside' }));
+      flushSolid();
       stateModule.setInputText('Unsent draft');
+      flushSolid();
       const messages = [{ info: userMessage('user-1'), parts: [] }];
       stateModule.replaceMessages(messages);
+      flushSolid();
       expect(
         await hookModule.sendMessage(
           'Do not dispatch',
           target ? { targetSessionId: 'session-1' } : undefined
         )
       ).toBe(false);
+      flushSolid();
       expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
       expect(clientMocks.sessionCreate).not.toHaveBeenCalled();
       expect(stateModule.inputText()).toBe('Unsent draft');
@@ -67,16 +75,21 @@ describe('sendMessage', () => {
 
   it('clears the old read-only marker after reloading a verified worktree and sends there', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const directory = '/worktrees/feature';
     const moved = {
       ...session(),
       directory,
       transfer: { originDirectory: '/repo', available: false },
     };
-    stateModule.setState('activeSessionId', moved.id);
-    stateModule.setState('sessions', [moved]);
-    stateModule.setState('transferredSessions', { [moved.id]: directory });
+    stateModule.setState(storePath('activeSessionId', moved.id));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [moved]));
+    flushSolid();
+    stateModule.setState(storePath('transferredSessions', { [moved.id]: directory }));
+    flushSolid();
     stateModule.setInputText('Continue from here');
+    flushSolid();
     clientMocks.sessionGet.mockResolvedValue({
       ...moved,
       transfer: { ...moved.transfer, available: true },
@@ -86,6 +99,7 @@ describe('sendMessage', () => {
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
 
     await hookModule.selectSession(moved.id, { directory, preserveTranscript: true });
+    flushSolid();
 
     expect(stateModule.state.transferredSessions[moved.id]).toBeUndefined();
     expect(
@@ -93,6 +107,7 @@ describe('sendMessage', () => {
     ).toBe(true);
     expect(stateModule.inputText()).toBe('Continue from here');
     expect(await hookModule.sendMessage('Continue from here')).toBe(true);
+    flushSolid();
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(moved.id, expect.anything(), {
       directory,
     });
@@ -101,17 +116,23 @@ describe('sendMessage', () => {
 
   it('keeps the latest Build selection when older Ask confirmations arrive before send', async () => {
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session()]);
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
     for (const agent of ['ask', 'build', 'ask', 'build']) {
       stateModule.setSelectedAgent(agent, { sessionId: 'session-1' });
+      flushSolid();
     }
     stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
+    flushSolid();
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Implement the change');
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -122,29 +143,38 @@ describe('sendMessage', () => {
 
   it('updates permissions in the new workspace session directory before sending', async () => {
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('editorContext', {
-      workspacePath: '/repo-a',
-      workspaceDirectory: '/workspace',
-      workspaceFolders: [
-        { name: 'Repo A', path: '/repo-a' },
-        { name: 'Repo B', path: '/repo-b' },
-      ],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    flushSolid();
+    stateModule.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo-a',
+        workspaceDirectory: '/workspace',
+        workspaceFolders: [
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     stateModule.setPermissionModeForSession(null, 'full');
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    flushSolid();
     const created = { ...session('session-workspace'), directory: '/workspace' };
     clientMocks.sessionCreate.mockImplementation(
       async (body?: { permission?: PermissionRule[] }) => ({
@@ -174,6 +204,7 @@ describe('sendMessage', () => {
         newSessionWorkspace: { scope: 'workspace', directory: '/workspace' },
       })
     ).toBe(true);
+    flushSolid();
     expect(clientMocks.varroSessionUpdatePermissionMode).toHaveBeenCalledWith(created.id, 'full', {
       directory: '/workspace',
       preconfigured: true,
@@ -201,7 +232,9 @@ describe('sendMessage', () => {
     { providerID: '', modelID: '' },
   ])('preserves edited history when its model is unavailable: %j', async (model) => {
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('activeSessionId', 'session-1');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const original = userMessage('user-1');
     if (original.role !== 'user') throw new Error('Expected a user message');
     original.model = model;
@@ -210,6 +243,7 @@ describe('sendMessage', () => {
       { info: assistantMessage('assistant-1', 'user-1'), parts: [] },
     ];
     stateModule.replaceMessages(messages);
+    flushSolid();
     clientMocks.sessionDeleteMessage.mockResolvedValue(undefined);
     clientMocks.sessionMessages.mockResolvedValue([]);
     const onOptimisticPublish = vi.fn();
@@ -217,6 +251,7 @@ describe('sendMessage', () => {
     expect(await hookModule.editMessage('user-1', 'Revised prompt', { onOptimisticPublish })).toBe(
       false
     );
+    flushSolid();
 
     expect(stateModule.error()).toContain('is unavailable');
     expect(clientMocks.sessionDeleteMessage).not.toHaveBeenCalled();
@@ -230,18 +265,24 @@ describe('sendMessage', () => {
 
   it('requests bottom follow when an edited replacement is published before send completes', async () => {
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
     stateModule.replaceMessages([{ info: userMessage('user-1'), parts: [] }]);
+    flushSolid();
     clientMocks.sessionDeleteMessage.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
@@ -251,6 +292,7 @@ describe('sendMessage', () => {
 
     const sent = hookModule.editMessage('user-1', 'Revised prompt', { onOptimisticPublish });
     await vi.waitFor(() => expect(clientMocks.sessionSendAsync).toHaveBeenCalledTimes(1));
+    flushSolid();
 
     expect(onOptimisticPublish).toHaveBeenCalledOnce();
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
@@ -258,13 +300,17 @@ describe('sendMessage', () => {
       stateModule.state.messages.at(-1)?.info.id
     );
     pendingSend.resolve();
+    flushSolid();
     expect(await sent).toBe(true);
+    flushSolid();
   });
 
   it('requests scrolling to the latest message when sending', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
@@ -272,21 +318,27 @@ describe('sendMessage', () => {
     expect(stateModule.messageListScrollRequestKey()).toBe(0);
 
     await hookModule.sendMessage('Review this');
+    flushSolid();
 
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
   });
 
   it('uses an explicitly captured agent instead of the current selection', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session()]);
-    stateModule.setState('selectedAgent', 'plan');
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
+    stateModule.setState(storePath('selectedAgent', 'plan'));
+    flushSolid();
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Implement the plan', { agent: 'build' });
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -297,40 +349,48 @@ describe('sendMessage', () => {
 
   it('does not promote temporary session routing to global defaults when sending', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-          variants: { high: {} },
-        },
-        'gpt-5': {
-          id: 'gpt-5',
-          name: 'GPT-5',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-          variants: { medium: {} },
-        },
-      }),
-    ]);
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            variants: { high: {} },
+          },
+          'gpt-5': {
+            id: 'gpt-5',
+            name: 'GPT-5',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            variants: { medium: {} },
+          },
+        }),
+      ])
+    );
+    flushSolid();
     stateModule.setSelectedModel({
       providerID: 'openai',
       modelID: 'gpt-5',
       variant: 'medium',
     });
+    flushSolid();
     stateModule.setSelectedModel(
       { providerID: 'openai', modelID: 'gpt-4o', variant: 'high' },
       { sessionId: 'session-1', persistGlobal: false }
     );
+    flushSolid();
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Review this');
+    flushSolid();
 
     expect(stateModule.getPersistedSelectedModel()).toEqual({
       providerID: 'openai',
@@ -342,15 +402,19 @@ describe('sendMessage', () => {
 
   it('starts title fallback as soon as OpenCode accepts the prompt', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [{ ...session(), title: 'New Chat' }]);
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [{ ...session(), title: 'New Chat' }]));
+    flushSolid();
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionUpdate.mockResolvedValue({ ...session(), title: 'New Chat' });
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Fix the delayed session title');
+    flushSolid();
 
     expect(clientMocks.varroSessionRenameIfUntitled).toHaveBeenCalledWith('session-1', {
       directory: '/repo',
@@ -359,27 +423,36 @@ describe('sendMessage', () => {
 
   it('sends a valid OpenCode ID for exact optimistic reconciliation', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session()]);
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' }));
+    flushSolid();
     const sent = deferred<void>();
     clientMocks.sessionSendAsync.mockReturnValue(sent.promise);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     const sending = hookModule.sendMessage('Use the server clock');
+    flushSolid();
     await vi.waitFor(() => expect(clientMocks.sessionSendAsync).toHaveBeenCalled());
+    flushSolid();
 
     const optimisticText = stateModule.state.messages
       .flatMap((message) => message.parts)
@@ -388,7 +461,9 @@ describe('sendMessage', () => {
     expect(optimisticText?.type === 'text' && optimisticText.synthetic).not.toBe(true);
 
     sent.resolve();
+    flushSolid();
     await sending;
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -403,21 +478,29 @@ describe('sendMessage', () => {
 
   it('omits pasted images and placeholder tags for non-vision models', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session()]);
-    stateModule.setState('providers', [
-      provider('openrouter', {
-        'qwen3-coder-30b': {
-          id: 'qwen3-coder-30b',
-          name: 'Qwen3 Coder 30B',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openrouter: 'qwen3-coder-30b' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openrouter', {
+          'qwen3-coder-30b': {
+            id: 'qwen3-coder-30b',
+            name: 'Qwen3 Coder 30B',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openrouter: 'qwen3-coder-30b' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openrouter', modelID: 'qwen3-coder-30b' });
+    flushSolid();
     stateModule.addClipboardImage({
       id: 'img-1',
       url: 'blob:1',
@@ -425,12 +508,14 @@ describe('sendMessage', () => {
       filename: 'img-1.png',
       size: 10,
     });
+    flushSolid();
 
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('See [img-1.png] later');
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -445,21 +530,29 @@ describe('sendMessage', () => {
 
   it('keeps pasted images for vision-capable models', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session()]);
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true, vision: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    flushSolid();
     stateModule.addClipboardImage({
       id: 'img-1',
       url: 'blob:1',
@@ -467,12 +560,14 @@ describe('sendMessage', () => {
       filename: 'img-1.png',
       size: 10,
     });
+    flushSolid();
 
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Review this [img-1.png]');
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -490,31 +585,46 @@ describe('sendMessage', () => {
 
   it('clears sent attachments while keeping current document context', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true, vision: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    stateModule.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: { path: '/repo/src/app.ts', relativePath: 'src/app.ts', language: 'typescript' },
-      selection: { startLine: 1, endLine: 2 },
-      diagnostics: [],
-    });
+    flushSolid();
+    stateModule.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: {
+          path: '/repo/src/app.ts',
+          relativePath: 'src/app.ts',
+          language: 'typescript',
+        },
+        selection: { startLine: 1, endLine: 2 },
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/src/extra.ts',
       relativePath: 'src/extra.ts',
       type: 'file',
     });
+    flushSolid();
     stateModule.addClipboardImage({
       id: 'img-1',
       url: 'blob:1',
@@ -522,13 +632,16 @@ describe('sendMessage', () => {
       filename: 'img-1.png',
       size: 10,
     });
-    stateModule.setState('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
+    flushSolid();
+    stateModule.setState(storePath('terminalSelection', { text: 'npm test', terminalName: 'zsh' }));
+    flushSolid();
 
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Send context');
+    flushSolid();
 
     expect(stateModule.state.droppedFiles).toEqual([]);
     expect(stateModule.state.clipboardImages).toEqual([]);
@@ -538,20 +651,27 @@ describe('sendMessage', () => {
 
   it('keeps completed todos visible when sending a new turn', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true, vision: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    flushSolid();
 
     const oldTurnMessages = [
       { info: userMessage('user-1'), parts: [] },
@@ -561,10 +681,14 @@ describe('sendMessage', () => {
       },
     ];
 
-    stateModule.setState('messages', oldTurnMessages);
-    stateModule.setState('todos', [
-      { id: 'old-todo', content: 'Old completed task', status: 'completed', priority: 'medium' },
-    ]);
+    stateModule.setState(storePath('messages', oldTurnMessages));
+    flushSolid();
+    stateModule.setState(
+      storePath('todos', [
+        { id: 'old-todo', content: 'Old completed task', status: 'completed', priority: 'medium' },
+      ])
+    );
+    flushSolid();
 
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
@@ -574,6 +698,7 @@ describe('sendMessage', () => {
     ]);
 
     await hookModule.sendMessage('Start something new');
+    flushSolid();
 
     expect(stateModule.state.todos).toEqual([
       { id: 'old-todo', content: 'Old completed task', status: 'completed', priority: 'medium' },
@@ -582,45 +707,59 @@ describe('sendMessage', () => {
 
   it('sends merged explicit selections as a single document attachment', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session()]);
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true, vision: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    stateModule.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    flushSolid();
+    stateModule.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/src/a.ts',
       relativePath: 'src/a.ts',
       type: 'file',
       lineRanges: [{ startLine: 3, endLine: 4 }],
     });
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/src/a.ts',
       relativePath: 'src/a.ts',
       type: 'file',
       lineRanges: [{ startLine: 8, endLine: 10 }],
     });
+    flushSolid();
 
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Review this');
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -638,45 +777,59 @@ describe('sendMessage', () => {
 
   it('includes only unique live-selection lines alongside explicit same-file context', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session()]);
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true, vision: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    stateModule.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
-      selection: { startLine: 20, endLine: 24 },
-      diagnostics: [],
-    });
+    flushSolid();
+    stateModule.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+        selection: { startLine: 20, endLine: 24 },
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/src/a.ts',
       relativePath: 'src/a.ts',
       type: 'file',
       lineRanges: [{ startLine: 3, endLine: 4 }],
     });
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/src/a.ts',
       relativePath: 'src/a.ts',
       type: 'file',
       lineRanges: [{ startLine: 8, endLine: 10 }],
     });
+    flushSolid();
 
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Review active file');
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -695,51 +848,66 @@ describe('sendMessage', () => {
 
   it('subtracts overlapping explicit ranges from the live same-file selection payload', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session()]);
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true, vision: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    stateModule.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
-      selection: { startLine: 2, endLine: 12 },
-      diagnostics: [],
-    });
+    flushSolid();
+    stateModule.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+        selection: { startLine: 2, endLine: 12 },
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/src/a.ts',
       relativePath: 'src/a.ts',
       type: 'file',
       lineRanges: [{ startLine: 1, endLine: 4 }],
     });
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/src/a.ts',
       relativePath: 'src/a.ts',
       type: 'file',
       lineRanges: [{ startLine: 8, endLine: 10 }],
     });
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/src/a.ts',
       relativePath: 'src/a.ts',
       type: 'file',
       lineRanges: [{ startLine: 12, endLine: 20 }],
     });
+    flushSolid();
 
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Review overlap');
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -758,38 +926,51 @@ describe('sendMessage', () => {
 
   it('hides the duplicate active file payload when the file is explicitly added without a live selection', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session()]);
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true, vision: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    stateModule.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
-      selection: null,
-      diagnostics: [],
-    });
+    flushSolid();
+    stateModule.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/src/a.ts',
       relativePath: 'src/a.ts',
       type: 'file',
     });
+    flushSolid();
 
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Review active file');
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -807,27 +988,38 @@ describe('sendMessage', () => {
 
   it('omits a disabled current document while keeping other context attachments', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session()]);
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true, vision: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    stateModule.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
-      selection: { startLine: 4, endLine: 8 },
-      diagnostics: [],
-    });
+    flushSolid();
+    stateModule.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+        selection: { startLine: 4, endLine: 8 },
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     stateModule.addClipboardImage({
       id: 'img-1',
       url: 'blob:1',
@@ -835,18 +1027,22 @@ describe('sendMessage', () => {
       filename: 'img-1.png',
       size: 10,
     });
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/src/extra.ts',
       relativePath: 'src/extra.ts',
       type: 'file',
     });
+    flushSolid();
     stateModule.setCurrentDocumentEnabled(false, 'session-1');
+    flushSolid();
 
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Review this image');
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -865,33 +1061,41 @@ describe('sendMessage', () => {
 
   it('uses global defaults instead of temporary session routing for a new session', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true, vision: true },
-          cost: { input: 0, output: 0 },
-        },
-        'gpt-5': {
-          id: 'gpt-5',
-          name: 'GPT-5',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+          'gpt-5': {
+            id: 'gpt-5',
+            name: 'GPT-5',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-5' });
+    flushSolid();
     stateModule.setSelectedModel(
       { providerID: 'openai', modelID: 'gpt-4o' },
       { sessionId: 'session-1', persistGlobal: false }
     );
+    flushSolid();
 
     clientMocks.sessionCreate.mockResolvedValue(session('session-2'));
 
     await hookModule.createSession();
+    flushSolid();
 
     expect(stateModule.state.activeSessionId).toBe('session-2');
     expect(stateModule.state.selectedModel).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
@@ -903,19 +1107,25 @@ describe('sendMessage', () => {
 
   it('publishes the draft model when the first send creates a session', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const draftModel = { providerID: 'openai', modelID: 'draft-model' };
-    stateModule.setState('providers', [
-      provider('openai', {
-        'draft-model': {
-          id: 'draft-model',
-          name: 'Draft model',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'draft-model': {
+            id: 'draft-model',
+            name: 'Draft model',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'saved-default' });
+    flushSolid();
     stateModule.setSelectedModel(draftModel, { persistGlobal: false });
+    flushSolid();
     clientMocks.sessionCreate.mockResolvedValue(session('session-2'));
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session('session-2'));
@@ -923,6 +1133,7 @@ describe('sendMessage', () => {
     clientMocks.sessionStatus.mockResolvedValue({});
 
     await hookModule.sendMessage('Keep this model');
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-2',
@@ -941,28 +1152,34 @@ describe('sendMessage', () => {
     ['missing', 'build'],
   ])('creates new sessions using persisted %s as %s', async (savedAgent, expectedAgent) => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('agents', [
-      {
-        name: 'build',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-      {
-        name: 'plan',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-    ]);
+    stateModule.setState(
+      storePath('agents', [
+        {
+          name: 'build',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
+        },
+        {
+          name: 'plan',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
+        },
+      ])
+    );
+    flushSolid();
     stateModule.setSelectedAgent(savedAgent);
+    flushSolid();
 
     clientMocks.sessionCreate.mockResolvedValue(session('session-2'));
 
     await hookModule.createSession();
+    flushSolid();
 
     expect(stateModule.state.activeSessionId).toBe('session-2');
     expect(stateModule.state.selectedAgent).toBe(expectedAgent);
@@ -972,24 +1189,29 @@ describe('sendMessage', () => {
 
   it('sends the first message of a new chat with the selected agent', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('agents', [
-      {
-        name: 'build',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-      {
-        name: 'plan',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-    ]);
+    stateModule.setState(
+      storePath('agents', [
+        {
+          name: 'build',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
+        },
+        {
+          name: 'plan',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
+        },
+      ])
+    );
+    flushSolid();
     stateModule.setSelectedAgent('plan');
+    flushSolid();
 
     clientMocks.sessionCreate.mockResolvedValue(session('session-2'));
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
@@ -997,6 +1219,7 @@ describe('sendMessage', () => {
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.sendMessage('Make a plan');
+    flushSolid();
 
     expect(stateModule.state.activeSessionId).toBe('session-2');
     expect(stateModule.state.selectedAgent).toBe('plan');
@@ -1010,6 +1233,7 @@ describe('sendMessage', () => {
 
   it('creates the first session in the manually selected workspace folder', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     let publishedState:
       | {
           activeSessionId: string | null;
@@ -1017,30 +1241,39 @@ describe('sendMessage', () => {
         }
       | undefined;
 
-    stateModule.setState('editorContext', {
-      workspacePath: '/repo-b',
-      workspaceDirectory: '/workspace',
-      workspaceFolders: [
-        { name: 'Repo A', path: '/repo-a' },
-        { name: 'Repo B', path: '/repo-b' },
-      ],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo-b',
+        workspaceDirectory: '/workspace',
+        workspaceFolders: [
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    flushSolid();
     stateModule.setManualWorkspaceSelection(false);
+    flushSolid();
     clientMocks.sessionCreate.mockResolvedValue({
       ...session('session-2'),
       directory: '/repo-b',
@@ -1061,6 +1294,7 @@ describe('sendMessage', () => {
         };
       },
     });
+    flushSolid();
 
     expect(clientMocks.sessionCreate).toHaveBeenCalledWith(
       {
@@ -1089,43 +1323,53 @@ describe('sendMessage', () => {
 
   it('keeps a newer selection while sending the captured draft to a delayed new session', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const created = deferred<ReturnType<typeof session>>();
 
-    stateModule.setState('agents', [
-      {
-        name: 'build',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-      {
-        name: 'plan',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-    ]);
-    stateModule.setState('providers', [
-      provider('openai', {
-        'draft-model': {
-          id: 'draft-model',
-          name: 'Draft model',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
+    stateModule.setState(
+      storePath('agents', [
+        {
+          name: 'build',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
         },
-        'selected-model': {
-          id: 'selected-model',
-          name: 'Selected model',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
+        {
+          name: 'plan',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
         },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'draft-model' });
+      ])
+    );
+    flushSolid();
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'draft-model': {
+            id: 'draft-model',
+            name: 'Draft model',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+          'selected-model': {
+            id: 'selected-model',
+            name: 'Selected model',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'draft-model' }));
+    flushSolid();
     stateModule.setSelectedAgent('plan');
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'draft-model' });
+    flushSolid();
     clientMocks.sessionCreate.mockReturnValue(created.promise);
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     // SAFETY: The fixture provides the complete domain shape read by this statement.
@@ -1137,24 +1381,33 @@ describe('sendMessage', () => {
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockResolvedValue([]);
     clientMocks.sessionStatus.mockResolvedValue({});
-    stateModule.setState('sessionMessageCounts', { 'session-created': 1 });
+    stateModule.setState(storePath('sessionMessageCounts', { 'session-created': 1 }));
+    flushSolid();
 
     const pendingSend = hookModule.sendMessage('Captured draft');
+    flushSolid();
     await vi.waitFor(() => expect(clientMocks.sessionCreate).toHaveBeenCalledTimes(1));
+    flushSolid();
 
-    stateModule.setState('sessions', [session('session-selected')]);
-    stateModule.setState('activeSessionId', 'session-selected');
+    stateModule.setState(storePath('sessions', [session('session-selected')]));
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-selected'));
+    flushSolid();
     stateModule.setSelectedAgent('build', {
       sessionId: 'session-selected',
       persistGlobal: false,
     });
+    flushSolid();
     stateModule.setSelectedModel(
       { providerID: 'openai', modelID: 'selected-model' },
       { sessionId: 'session-selected', persistGlobal: false }
     );
+    flushSolid();
     created.resolve(session('session-created'));
+    flushSolid();
 
     await expect(pendingSend).resolves.toBe(true);
+    flushSolid();
     expect(stateModule.state.activeSessionId).toBe('session-selected');
     expect(stateModule.state.selectedAgent).toBe('build');
     expect(stateModule.state.selectedModel).toEqual({
@@ -1206,6 +1459,7 @@ describe('sendMessage', () => {
     clientMocks.sessionStatus.mockResolvedValue({});
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const providers = [
       provider('openai', {
         'gpt-4o': {
@@ -1217,14 +1471,15 @@ describe('sendMessage', () => {
       }),
     ];
     const applyDraftRouting = () => {
-      stateModule.setState('providers', providers);
-      stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+      stateModule.setState(storePath('providers', providers));
+      stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
       stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
     };
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
@@ -1237,10 +1492,14 @@ describe('sendMessage', () => {
           diagnostics: [],
         },
       });
+      flushSolid();
       applyDraftRouting();
+      flushSolid();
 
       const oldSend = hookModule.sendMessage('old workspace draft');
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.sessionCreate).toHaveBeenCalledTimes(1));
+      flushSolid();
 
       bridgeHandler({
         type: 'context/update',
@@ -1251,12 +1510,18 @@ describe('sendMessage', () => {
           diagnostics: [],
         },
       });
+      flushSolid();
       applyDraftRouting();
+      flushSolid();
       const newSend = hookModule.sendMessage('new workspace draft');
+      flushSolid();
 
       oldCreation.resolve(sessionInWorkspace('session-old'));
+      flushSolid();
       newCreation.resolve(sessionInWorkspace('session-new'));
+      flushSolid();
       const results = await Promise.all([oldSend, newSend]);
+      flushSolid();
 
       expect(clientMocks.sessionCreate).toHaveBeenCalledTimes(2);
       expect(results).toEqual([false, true]);
@@ -1264,30 +1529,37 @@ describe('sendMessage', () => {
       expect(clientMocks.sessionSendAsync.mock.calls.map(([id]) => id)).toEqual(['session-new']);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('restores the previously used model when switching back to an existing session', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true, vision: true },
-          cost: { input: 0, output: 0 },
-        },
-        'gpt-5': {
-          id: 'gpt-5',
-          name: 'GPT-5',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+          'gpt-5': {
+            id: 'gpt-5',
+            name: 'GPT-5',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-5' });
+    flushSolid();
 
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
     clientMocks.sessionMessages.mockResolvedValue([
@@ -1305,6 +1577,7 @@ describe('sendMessage', () => {
     ]);
 
     await hookModule.selectSession('session-1');
+    flushSolid();
 
     expect(stateModule.state.selectedModel).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
     expect(stateModule.getSelectedModelForSession('session-1')).toEqual({
@@ -1319,29 +1592,36 @@ describe('sendMessage', () => {
 
   it('falls back to the persisted global model for blank sessions', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('providers', [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true, vision: true },
-          cost: { input: 0, output: 0 },
-        },
-        'gpt-5': {
-          id: 'gpt-5',
-          name: 'GPT-5',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ]);
-    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setState(
+      storePath('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+          'gpt-5': {
+            id: 'gpt-5',
+            name: 'GPT-5',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
+    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-5' });
+    flushSolid();
     stateModule.setSelectedModel(
       { providerID: 'openai', modelID: 'gpt-4o' },
       { sessionId: 'session-1', persistGlobal: false }
     );
+    flushSolid();
 
     clientMocks.sessionGet.mockResolvedValue(session('session-2'));
     clientMocks.sessionMessages.mockResolvedValue([]);
@@ -1349,6 +1629,7 @@ describe('sendMessage', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     await hookModule.selectSession('session-2');
+    flushSolid();
 
     expect(stateModule.state.selectedModel).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
     expect(stateModule.getSelectedModelForSession('session-2')).toBeNull();
@@ -1361,29 +1642,35 @@ describe('sendMessage', () => {
     'reconciles the $selection agent choice when switching back to a busy session',
     async ({ publishHost, expectedAgent }) => {
       const { stateModule, hookModule } = await loadModules();
+      flushSolid();
 
-      stateModule.setState('agents', [
-        {
-          name: 'build',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-        {
-          name: 'plan',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-      ]);
+      stateModule.setState(
+        storePath('agents', [
+          {
+            name: 'build',
+            mode: 'primary',
+            builtIn: true,
+            permission: { edit: 'ask', bash: {} },
+            tools: {},
+          },
+          {
+            name: 'plan',
+            mode: 'primary',
+            builtIn: true,
+            permission: { edit: 'ask', bash: {} },
+            tools: {},
+          },
+        ])
+      );
+      flushSolid();
       stateModule.setSelectedAgent('build');
+      flushSolid();
       stateModule.setSelectedAgent('plan', {
         sessionId: 'session-1',
         persistGlobal: false,
         publishHost,
       });
+      flushSolid();
 
       clientMocks.sessionGet.mockResolvedValue(session('session-1'));
       clientMocks.sessionMessages.mockResolvedValue([
@@ -1402,6 +1689,7 @@ describe('sendMessage', () => {
       clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'busy' } });
 
       await hookModule.selectSession('session-1');
+      flushSolid();
 
       expect(stateModule.state.selectedAgent).toBe(expectedAgent);
       expect(stateModule.getSelectedAgentForSession('session-1')).toBe(expectedAgent);
@@ -1411,25 +1699,31 @@ describe('sendMessage', () => {
 
   it('preserves the next-turn agent after the previous turn has settled', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('agents', [
-      {
-        name: 'build',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-      {
-        name: 'plan',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-    ]);
+    stateModule.setState(
+      storePath('agents', [
+        {
+          name: 'build',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
+        },
+        {
+          name: 'plan',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
+        },
+      ])
+    );
+    flushSolid();
     stateModule.setSelectedAgent('build');
+    flushSolid();
     stateModule.setSelectedAgent('plan', { sessionId: 'session-1', persistGlobal: false });
+    flushSolid();
 
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
     clientMocks.sessionMessages.mockResolvedValue([
@@ -1445,6 +1739,7 @@ describe('sendMessage', () => {
     clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'idle' } });
 
     await hookModule.selectSession('session-1');
+    flushSolid();
 
     expect(stateModule.state.selectedAgent).toBe('plan');
     expect(stateModule.getSelectedAgentForSession('session-1')).toBe('plan');
@@ -1453,10 +1748,13 @@ describe('sendMessage', () => {
 
   it('clears remembered tool expansion state when switching sessions', async () => {
     const expansionStateModule = await import('../lib/tool-call-expansion-state');
+    flushSolid();
     const { hookModule } = await loadModules();
+    flushSolid();
 
     const expansionKey = 'session-1\u0000message-1\u0000call-1';
     expansionStateModule.setToolCallExpanded(expansionKey, true);
+    flushSolid();
 
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
     clientMocks.sessionMessages.mockResolvedValue([]);
@@ -1464,12 +1762,14 @@ describe('sendMessage', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     await hookModule.selectSession('session-1');
+    flushSolid();
 
     expect(expansionStateModule.getToolCallExpanded(expansionKey)).toBe(false);
   });
 
   it('restores todos from parallel tool calls when selecting a session', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
     clientMocks.sessionMessages.mockResolvedValue([
@@ -1483,6 +1783,7 @@ describe('sendMessage', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     await hookModule.selectSession('session-1');
+    flushSolid();
 
     expect(stateModule.state.todos).toBeDefined();
   });
@@ -1504,50 +1805,65 @@ describe('sendMessage', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
 
       expect(stateModule.openAttentionSessionsKey()).toBe(0);
+      flushSolid();
 
       bridgeHandler({ type: 'command/open-attention-sessions' });
+      flushSolid();
 
       expect(stateModule.openAttentionSessionsKey()).toBe(1);
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
   it('switches the active session to build and sends the implementation prompt', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessions', [session()]);
-    stateModule.setState('agents', [
-      {
-        name: 'build',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-      {
-        name: 'plan',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-    ]);
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
+    stateModule.setState(
+      storePath('agents', [
+        {
+          name: 'build',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
+        },
+        {
+          name: 'plan',
+          mode: 'primary',
+          builtIn: true,
+          permission: { edit: 'ask', bash: {} },
+          tools: {},
+        },
+      ])
+    );
+    flushSolid();
     stateModule.setSelectedAgent('plan');
+    flushSolid();
     stateModule.setSelectedAgent('plan', { sessionId: 'session-1', persistGlobal: false });
+    flushSolid();
     stateModule.replaceContextFiles([
       { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
     ]);
+    flushSolid();
     stateModule.replaceClipboardImages([
       {
         id: 'draft-image',
@@ -1557,12 +1873,14 @@ describe('sendMessage', () => {
         size: 5,
       },
     ]);
+    flushSolid();
 
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.implementPlan('Implement the approved plan.');
+    flushSolid();
 
     expect(stateModule.state.selectedAgent).toBe('build');
     expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
@@ -1592,20 +1910,26 @@ describe('sendMessage', () => {
 
   it('opens the saved plan document for the active session', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     await hookModule.openPlan('# Plan\n\n1. Ship it');
+    flushSolid();
 
     expect(clientMocks.varroOpenPlan).toHaveBeenCalledWith('# Plan\n\n1. Ship it');
   });
 
   it('does not try to open an empty plan', async () => {
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     await hookModule.openPlan('   ');
+    flushSolid();
 
     expect(clientMocks.varroOpenPlan).not.toHaveBeenCalled();
     expect(stateModule.error()).toBe('Plan content is empty');
@@ -1615,6 +1939,7 @@ describe('sendMessage', () => {
     'retries the original request and attachments with attribution %s after an authentication failure',
     async (followupTitle) => {
       const { stateModule, hookModule } = await loadModules();
+      flushSolid();
       const failedAssistant = assistantMessage('assistant-1', 'user-1');
       const originalUser = userMessage('user-1');
       if (originalUser.role !== 'user') throw new Error('Expected a user message fixture');
@@ -1622,40 +1947,44 @@ describe('sendMessage', () => {
         throw new Error('Expected an assistant message fixture');
       }
 
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [
-        {
-          info: { ...originalUser, followupTitle },
-          parts: [
-            {
-              id: 'text-1',
-              sessionID: 'session-1',
-              messageID: 'user-1',
-              type: 'text',
-              text: 'Describe what to build',
-            },
-            {
-              id: 'file-1',
-              sessionID: 'session-1',
-              messageID: 'user-1',
-              type: 'file',
-              mime: 'image/png',
-              filename: 'image.png',
-              url: 'blob:1',
-            },
-          ],
-        },
-        {
-          info: {
-            ...failedAssistant,
-            error: {
-              name: 'ProviderAuthError',
-              data: { providerID: 'openai', message: 'Unauthorized' },
-            },
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [
+          {
+            info: { ...originalUser, followupTitle },
+            parts: [
+              {
+                id: 'text-1',
+                sessionID: 'session-1',
+                messageID: 'user-1',
+                type: 'text',
+                text: 'Describe what to build',
+              },
+              {
+                id: 'file-1',
+                sessionID: 'session-1',
+                messageID: 'user-1',
+                type: 'file',
+                mime: 'image/png',
+                filename: 'image.png',
+                url: 'blob:1',
+              },
+            ],
           },
-          parts: [],
-        },
-      ]);
+          {
+            info: {
+              ...failedAssistant,
+              error: {
+                name: 'ProviderAuthError',
+                data: { providerID: 'openai', message: 'Unauthorized' },
+              },
+            },
+            parts: [],
+          },
+        ])
+      );
+      flushSolid();
 
       clientMocks.sessionSendAsync.mockResolvedValue(undefined);
       clientMocks.sessionGet.mockResolvedValue(session());
@@ -1663,6 +1992,7 @@ describe('sendMessage', () => {
       clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'busy' } });
 
       await hookModule.retryMessage('assistant-1');
+      flushSolid();
 
       expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
         parts: [
@@ -1687,12 +2017,16 @@ describe('sendMessage', () => {
 
   it('reports a missing original request instead of sending a recovery prompt', async () => {
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('messages', [
-      { info: assistantMessage('assistant-1', 'unloaded-user'), parts: [] },
-    ]);
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(
+      storePath('messages', [{ info: assistantMessage('assistant-1', 'unloaded-user'), parts: [] }])
+    );
+    flushSolid();
 
     await hookModule.retryMessage('assistant-1');
+    flushSolid();
 
     expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
     expect(stateModule.error()).toBe(

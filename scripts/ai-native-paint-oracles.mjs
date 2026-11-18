@@ -3,6 +3,36 @@ export function verdict(failures, complete) {
   return failures.length ? 'FAIL' : complete ? 'PASS' : 'BLOCKED';
 }
 
+export function markerPaintEligibility(marker, sample, tolerance = 2) {
+  if (!Array.isArray(sample.stickyOccluders)) return 'unknown-sticky-coverage';
+  const r = marker.rect;
+  const viewport = sample.viewport;
+  if (
+    r.x - tolerance < viewport.x ||
+    r.y - tolerance < viewport.y ||
+    r.x + r.width + tolerance > viewport.x + viewport.width ||
+    r.y + r.height + tolerance > viewport.y + viewport.height
+  )
+    return 'clipped';
+  if (
+    sample.stickyOccluders.some(
+      (cover) =>
+        r.x - tolerance < cover.x + cover.width &&
+        r.x + r.width + tolerance > cover.x &&
+        r.y - tolerance < cover.y + cover.height &&
+        r.y + r.height + tolerance > cover.y
+    )
+  )
+    return 'sticky-occluded';
+  if (
+    marker.styles.some(
+      (style) => style.opacity !== '1' || style.visibility !== 'visible' || style.display === 'none'
+    )
+  )
+    return 'hidden';
+  return null;
+}
+
 export function brightPixels(image, rect, threshold = 75) {
   const { x, y, width, height } = rect;
   if (

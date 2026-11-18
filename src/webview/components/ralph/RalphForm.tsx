@@ -1,6 +1,6 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
-import type { JSX } from 'solid-js';
-import { Dynamic, Portal } from 'solid-js/web';
+import { type JSX, dynamic, Portal } from '@solidjs/web';
+
 import { client } from '../../lib/client';
 import { logError } from '../../lib/log';
 import {
@@ -196,8 +196,7 @@ export function RalphForm() {
     return null;
   });
 
-  createEffect<boolean>((wasVisible = false) => {
-    const visible = ralphStore.showRalphForm();
+  createEffect(ralphStore.showRalphForm, (visible, wasVisible = false) => {
     if (visible && !wasVisible) {
       const activeFilePath = state.editorContext.activeFile?.relativePath;
       setPlanPath(activeFilePath ?? '');
@@ -212,11 +211,15 @@ export function RalphForm() {
       );
       setErrorMessage(null);
     }
-    return visible;
   });
 
-  createEffect(() => {
-    if (!ralphStore.showRalphForm()) return;
+  createEffect(ralphStore.showRalphForm, (open) => {
+    const cleanups: Array<() => void> = [];
+
+    if (!open)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
 
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -238,7 +241,11 @@ export function RalphForm() {
     };
 
     document.addEventListener('keydown', handleKeydown, true);
-    onCleanup(() => document.removeEventListener('keydown', handleKeydown, true));
+    cleanups.push(() => document.removeEventListener('keydown', handleKeydown, true));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   async function pickPlanPath() {
@@ -399,16 +406,20 @@ export function RalphForm() {
       <Portal>
         <div class={`ralph-form-overlay ralph-form-overlay-pane-${desktopSessionPaneSide()}`}>
           <div
-            ref={(element) => {
-              const background = document.querySelector<HTMLElement>('.interactive-session');
-              const backgroundWasInert = background?.hasAttribute('inert') ?? false;
-              const releaseFocusTrap = trapModalFocus(element);
-              background?.setAttribute('inert', '');
-              onCleanup(() => {
-                if (background && !backgroundWasInert) background.removeAttribute('inert');
-                releaseFocusTrap();
-              });
-            }}
+            ref={(() => {
+              let release: (() => void) | undefined;
+              onCleanup(() => release?.());
+              return (element: HTMLDivElement) => {
+                const background = document.querySelector<HTMLElement>('.interactive-session');
+                const backgroundWasInert = background?.hasAttribute('inert') ?? false;
+                const releaseFocusTrap = trapModalFocus(element);
+                background?.setAttribute('inert', '');
+                release = () => {
+                  if (background && !backgroundWasInert) background.removeAttribute('inert');
+                  releaseFocusTrap();
+                };
+              };
+            })()}
             class="ralph-form-card"
             role="dialog"
             aria-modal="true"
@@ -442,7 +453,7 @@ export function RalphForm() {
                     class="ralph-form-input ralph-form-input-grow"
                     placeholder="No file selected"
                     value={planPath()}
-                    readOnly
+                    readonly
                     onClick={() => void pickPlanPath()}
                     title={planPath() || 'Click to pick a file from the workspace'}
                   />
@@ -626,10 +637,12 @@ export function RalphForm() {
 }
 
 function Field(props: { label: string; children: JSX.Element; as?: 'label' | 'div' }) {
+  const FieldElement = dynamic(() => props.as ?? 'label');
   return (
-    <Dynamic component={props.as ?? 'label'} class="ralph-form-field">
+    // oxlint-disable-next-line react/static-components -- Solid runs setup once; dynamic tracks the native tag.
+    <FieldElement class="ralph-form-field">
       <span class="ralph-form-label">{props.label}</span>
       {props.children}
-    </Dynamic>
+    </FieldElement>
   );
 }

@@ -1,4 +1,4 @@
-import { createRoot, createSignal } from 'solid-js';
+import { flush as flushSolid, createRoot, createSignal } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
 import type { AssistantMessage, MessageEntry, TextPart, ToolPart, UserMessage } from '../types';
 import {
@@ -83,6 +83,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     });
     const timers = new Map<string, number>();
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    flushSolid();
     expect(deps.loadSessionStatuses).not.toHaveBeenCalled();
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
   });
@@ -96,15 +97,18 @@ describe('reconcileStuckSessionsWithDependencies', () => {
 
     // First observation: server idle but UI busy -> start grace timer, no action.
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(timers.get('s1')).toBe(1000);
 
     // Still within grace.
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS - 1);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
 
     // Grace elapsed -> reconcile and clear the timer.
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
     expect(timers.has('s1')).toBe(false);
   });
@@ -116,6 +120,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     });
     const timers = new Map<string, number>([['s1', 1]]);
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(timers.has('s1')).toBe(false);
   });
@@ -132,6 +137,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
       ['s2', 1],
     ]);
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(timers.size).toBe(0);
   });
@@ -145,6 +151,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     });
     const timers = new Map<string, number>([['s1', 1]]);
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
   });
 
@@ -157,6 +164,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     });
     const timers = new Map<string, number>([['s1', 1]]);
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(deps.logError).toHaveBeenCalledWith('stuckSessionWatchdog', expect.any(Error));
     expect(timers.get('s1')).toBe(1);
@@ -174,10 +182,12 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     const timers = new Map<string, number>();
 
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(timers.get('s1')).toBe(1000);
 
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
   });
 
@@ -191,6 +201,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     });
     const timers = new Map<string, number>([['s1', 1]]);
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
+    flushSolid();
     expect(loadSessionStatuses).not.toHaveBeenCalled();
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(timers.size).toBe(0);
@@ -207,6 +218,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     const timers = new Map<string, number>();
     // First poll: server idle + streamed evidence -> reconcile at once, no grace wait.
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
     expect(timers.has('s1')).toBe(false);
   });
@@ -226,12 +238,14 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     const timers = new Map<string, number>();
 
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(timers.has('s1')).toBe(false);
 
     // A snapshot requested after the local busy event still recovers a missed finish at once.
     stale = false;
     await reconcileStuckSessionsWithDependencies(deps, timers, 1100);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
   });
 
@@ -243,9 +257,11 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     });
     const timers = new Map<string, number>();
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(timers.get('s1')).toBe(1000);
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
   });
 
@@ -259,6 +275,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     });
     const timers = new Map<string, number>();
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(timers.get('s1')).toBe(1000);
   });
@@ -277,6 +294,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     });
     const timers = new Map<string, number>();
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
     expect(timers.has('s1')).toBe(false);
   });
@@ -296,6 +314,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     });
     const timers = new Map<string, number>();
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    flushSolid();
     expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
     expect(timers.has('s1')).toBe(false);
   });
@@ -342,6 +361,7 @@ describe('forceReconcileIdleSessionWithDependencies', () => {
   it('flips to idle, resyncs, settles, and stops loading', async () => {
     const deps = baseForceDeps();
     await forceReconcileIdleSessionWithDependencies(deps, 's1');
+    flushSolid();
     expect(deps.clearPendingAbort).toHaveBeenCalledWith('s1');
     expect(deps.setSessionStatusEntry).toHaveBeenCalledWith('s1', { type: 'idle' });
     expect(deps.syncSessionMessages).toHaveBeenCalledWith('s1');
@@ -356,6 +376,7 @@ describe('forceReconcileIdleSessionWithDependencies', () => {
       },
     });
     await forceReconcileIdleSessionWithDependencies(deps, 's1');
+    flushSolid();
     expect(deps.setSessionStatusEntry).toHaveBeenCalledWith('s1', { type: 'idle' });
     expect(deps.settleLatestAssistantMessage).toHaveBeenCalledWith('s1');
     expect(deps.logError).toHaveBeenCalledWith('forceReconcileIdleSync', expect.any(Error));
@@ -365,12 +386,14 @@ describe('forceReconcileIdleSessionWithDependencies', () => {
   it('does not stop loading when another tree member is still working', async () => {
     const deps = baseForceDeps({ isTreeWorking: () => true });
     await forceReconcileIdleSessionWithDependencies(deps, 's1');
+    flushSolid();
     expect(deps.stopLoading).not.toHaveBeenCalled();
   });
 
   it('does not stop loading for a non-active session', async () => {
     const deps = baseForceDeps({ isActiveSession: () => false });
     await forceReconcileIdleSessionWithDependencies(deps, 's1');
+    flushSolid();
     expect(deps.stopLoading).not.toHaveBeenCalled();
   });
 });
@@ -497,26 +520,36 @@ describe('registerStuckSessionWatchdogEffect', () => {
       });
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
       vi.advanceTimersByTime(STUCK_SESSION_WATCHDOG_INTERVAL_MS);
+      flushSolid();
       expect(runReconcile).not.toHaveBeenCalled();
 
       setBusy(true);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(runReconcile).toHaveBeenCalledTimes(1);
 
       vi.advanceTimersByTime(STUCK_SESSION_WATCHDOG_INTERVAL_MS);
+      flushSolid();
       expect(runReconcile).toHaveBeenCalledTimes(2);
 
       setBusy(false);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       runReconcile.mockClear();
       vi.advanceTimersByTime(STUCK_SESSION_WATCHDOG_INTERVAL_MS * 3);
+      flushSolid();
       expect(runReconcile).not.toHaveBeenCalled();
     } finally {
       dispose();
+      flushSolid();
       vi.useRealTimers();
     }
   });

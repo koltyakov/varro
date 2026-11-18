@@ -22,6 +22,26 @@ export function installNativePaintProbe() {
   const stamp = () => ({ epoch: performance.timeOrigin + performance.now(), label: probe.label });
   const snapshot = () => {
     const viewport = rect(list);
+    // Hit testing does not see the sticky prompt's pointer-events:none solid gap.
+    // Keep its actual paint geometry, including when a wrapped prompt is taller.
+    const stickyOccluders = [
+      ...list.querySelectorAll(
+        '.latest-user-message-sticky-top, .latest-user-message-sticky-shell, .latest-user-message-sticky-bottom-solid'
+      ),
+    ].flatMap((element) => {
+      const bounds = rect(element);
+      if (bounds.width <= 0 || bounds.height <= 0) return [];
+      for (let parent = element; parent && parent !== list; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (
+          style.display === 'none' ||
+          style.visibility !== 'visible' ||
+          Number(style.opacity) === 0
+        )
+          return [];
+      }
+      return [{ ...bounds, class: element.className }];
+    });
     const rows = [...list.querySelectorAll('[data-msg-id]')].map((row) => ({
       id: row.dataset.msgId,
       node: identity(row),
@@ -31,7 +51,7 @@ export function installNativePaintProbe() {
     const markers = [...list.querySelectorAll('.rendered-markdown p')].flatMap((p) => {
       const r = rect(p);
       if (
-        r.y < viewport.y + 65 ||
+        r.y < viewport.y + 8 ||
         r.y + r.height > viewport.y + viewport.height - 15 ||
         r.height > 30 ||
         r.width < 100
@@ -77,6 +97,7 @@ export function installNativePaintProbe() {
       top: list.scrollTop,
       height: list.scrollHeight,
       viewport,
+      stickyOccluders,
       rows,
       markers,
       held: list.hasAttribute('data-pointer-scroll-owned'),
