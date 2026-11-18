@@ -272,7 +272,12 @@ export class OpenCodeV2BackgroundWork {
             command: summarizeCommand(
               job.kind === 'shell'
                 ? job.command
-                : (job.title ?? (job.kind === 'subagent' ? job.description : job.path))
+                : (job.title ??
+                    (job.kind === 'subagent'
+                      ? job.description
+                      : job.kind === 'image'
+                        ? job.path
+                        : 'Code Mode script'))
             ),
           },
         ];

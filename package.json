@@ -90,8 +90,8 @@
   },
   "dependencies": {
     "@imagemagick/magick-wasm": "0.0.46",
-    "@opencode-ai/sdk": "^1.19.5",
-    "@opencode/client": "^2.3.0",
+    "@opencode-ai/sdk": "^1.19.6",
+    "@opencode/client": "^2.3.2",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.18",
     "highlight.js": "11.12.0",

@@ -46,6 +46,13 @@ const imageJob: JobInfo = {
   status: 'running',
   time: { started: 30 },
 };
+const codeModeJob: JobInfo = {
+  kind: 'codemode',
+  id: 'job_codemode',
+  sessionID: 'ses_root',
+  status: 'running',
+  time: { started: 40 },
+};
 
 type FixtureSession = { id: string; parentID?: string; location: { directory: string } };
 type FixtureResponse = { data: unknown };
@@ -104,7 +111,7 @@ afterEach(async () => {
 });
 
 describe('native v2 background jobs', () => {
-  it.each([shellJob, subagentJob, { ...imageJob, sessionID: 'ses_root' }])(
+  it.each([shellJob, subagentJob, { ...imageJob, sessionID: 'ses_root' }, codeModeJob])(
     'restores a $kind job without a live shell',
     async (job) => {
       const { state, wire, adapter, status } = fixture([job]);
@@ -113,7 +120,13 @@ describe('native v2 background jobs', () => {
         ses_root: { type: 'busy', background: true, backgroundStartedAt: job.time.started },
       });
       expect(adapter.eventContext('ses_root')?.backgroundCommand).toBe(
-        job.kind === 'shell' ? job.command : job.kind === 'subagent' ? job.description : job.path
+        job.kind === 'shell'
+          ? job.command
+          : job.kind === 'subagent'
+            ? job.description
+            : job.kind === 'image'
+              ? job.path
+              : 'Code Mode script'
       );
       expect(wire).toHaveBeenCalledWith(
         'GET',
@@ -165,7 +178,7 @@ describe('native v2 background jobs', () => {
     expect(await status()).toEqual({});
   });
 
-  it.each([shellJob, subagentJob, imageJob])(
+  it.each([shellJob, subagentJob, imageJob, codeModeJob])(
     'keeps ancestors waiting for a descendant $kind job after the parent task settles',
     async (job) => {
       const { state, status } = fixture([{ ...job, sessionID: 'ses_grandchild' }]);
@@ -174,6 +187,33 @@ describe('native v2 background jobs', () => {
         ses_root: { background: true, backgroundStartedAt: job.time.started },
         ses_child: { background: true, backgroundStartedAt: job.time.started },
       });
+    }
+  );
+
+  it('uses the native Code Mode title when available', async () => {
+    const { status } = fixture([{ ...codeModeJob, title: 'Check the build' }]);
+    expect(await status()).toMatchObject({
+      ses_root: { background: true, backgroundCommand: 'Check the build' },
+    });
+  });
+
+  it.each(['completed', 'error', 'cancelled'] as const)(
+    'reconciles a %s Code Mode job and its notification handoff',
+    async (outcome) => {
+      vi.useFakeTimers();
+      const { state, status } = fixture([{ ...codeModeJob, status: outcome }]);
+      state.shells = [];
+      if (outcome === 'cancelled') {
+        expect(await status()).toEqual({});
+        return;
+      }
+      expect(await status()).toMatchObject({ ses_root: { background: true } });
+      vi.advanceTimersByTime(60_000);
+      expect(await status()).toMatchObject({ ses_root: { background: true } });
+      state.jobs = [];
+      expect(await status()).toMatchObject({ ses_root: { background: true } });
+      vi.advanceTimersByTime(2_000);
+      expect(await status()).toEqual({});
     }
   );
 

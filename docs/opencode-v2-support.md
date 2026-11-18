@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.5` and v2 `2.3.0`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.6` and v2 `2.3.2`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -192,6 +192,68 @@ published-server check does not rerun or clear the startup failures recorded bel
 The full `npm run test` run passed 12,181 Vitest tests with 58 skipped, plus 284
 script tests with three skipped. There were no failures. Evidence is
 `artifacts/auxiliary-usage-all-tests.log`.
+
+### 2.3.2 and 1.19.6 compatibility review
+
+Reviewed v2.3.0 to v2.3.2, `a554d70499` through `c0ad18b402`, and v1.19.5
+to v1.19.6, `810c0eba1a` through `f4e363c829`. Complete upstream diffs are
+retained in `artifacts/opencode-2.3.2-upstream.diff` and
+`artifacts/opencode-1.19.6-upstream.diff`. Both support floors remain unchanged.
+
+V2 replaces four experimental schedule paths with automation paths and adds
+video-generation and blob endpoints. Varro consumes none of those routes.
+The remaining 135 paths retain their operations; only the experimental job
+route changes its schema, adding the `codemode` job kind. Varro now validates
+that kind and uses its native title or "Code Mode script" in waiting status.
+Six regression cases failed before the fix. They cover reopening, descendant
+ownership, titles, completion/error handoff, and cancellation.
+
+Consumed SSE names and payloads, session/message/inbox records, permission/form
+schemas, and managed serve/upgrade arguments remain compatible. Nested Code Mode
+permission sources now point to their parent tool row on the server, and denial
+only settles sibling requests for the same source message. No Varro permission
+change is needed.
+
+Other v2 changes are server-owned: default background compaction with a
+`compaction.background` opt-out, CLAUDE.md instruction fallback, GPT-6.2 prompt
+caching and model metadata, UTF-8-safe shell output, and full Code Mode behind
+explicit opt-in. Read, webfetch, and websearch structured outputs are simpler;
+Varro projects their retained text content, not those structured fields.
+V1 bounds inline image bytes in model requests without removing transcript
+attachments and recognizes more context-overflow errors. Its generated SDK
+contract is unchanged apart from the version.
+
+All 615 focused adapter, transport, event, protocol, and development-compatibility
+tests pass, along with five native-form script tests. `npm run lint`,
+`npm run fmt`, `npm run fmt:check`, `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` pass. Suggestion diagnostics
+are zero. Lint reports 12 warnings in unrelated E2E and AI-runner tests.
+
+`npm run test:compatibility` passed all 519 required checks across 14 v1
+releases, including 43/43 on v1.19.6 and 37/37 on the v1.16.0 floor. Advisory
+checks passed 76/78 cases. The floor and below-floor v1.15.13 probe retain the
+known incomplete MCP pagination marker. No support-floor change is indicated.
+The runner regenerated `scripts/opencode-compatibility/verified.json`; all five
+compatibility-summary tests passed afterward. Evidence is
+`artifacts/opencode-1.19.6-compatibility.log`.
+
+`npm run test:compatibility:adapters` passed all 162 applicable checks, with 66
+family/platform skips and no leaked or recovered processes. Evidence is
+`artifacts/opencode-2.3.2-adapters.log` and
+`artifacts/opencode-adapters/run-BHqJHl/`.
+
+| Published server | Passed | Skipped | Issues found | All cases complete |
+| --- | ---: | ---: | --- | --- |
+| v1.16.0 | 30 | 27 | None in tested cases | Yes, applicable automated cases |
+| v1.19.6 | 31 | 26 | None in tested cases | Yes, applicable automated cases |
+| v2.0.5 | 47 | 10 | None in tested cases | Yes, applicable automated cases |
+| v2.3.2 | 54 | 3 | None after Code Mode job fix | Yes, applicable automated cases |
+
+No further adapter fixes are indicated. Keep the Code Mode job regression cases
+when changing background status reconciliation. Real-editor visuals, live-account
+action parity, and native Windows checks are outside this bump's verification.
+npm audit reports seven high-severity findings in unchanged development
+dependencies; dependency-security remediation is separate from this bump.
 
 ### 2.3.0 compatibility review
 

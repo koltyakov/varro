@@ -287,7 +287,9 @@ function parseBackgroundJobs(value: unknown): JobInfo[] {
         ? isString(job.shellID) && isString(job.command)
         : job.kind === 'subagent'
           ? isString(job.childSessionID) && isString(job.agent) && isString(job.description)
-          : job.kind === 'image' && isString(job.path) && isString(job.model))
+          : job.kind === 'image'
+            ? isString(job.path) && isString(job.model)
+            : job.kind === 'codemode')
     )
       throw new Error('Invalid OpenCode v2 background job');
   }
